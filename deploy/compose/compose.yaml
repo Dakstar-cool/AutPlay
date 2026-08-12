@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:691673308c99d2161ba298736f3147f1f22d79de2fb7ec93ae9b4afcab870b62
+    environment:
+      POSTGRES_DB: autplay
+      POSTGRES_PASSWORD: autplay_dev_only
+      POSTGRES_USER: autplay
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autplay -d autplay"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: "no"
+    stop_grace_period: 10s
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+volumes:
+  postgres-data:
+    labels:
+      app.autplay.purpose: disposable-development

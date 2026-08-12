@@ -1,0 +1,19 @@
+[versions]
+activityCompose = "1.13.0"
+agp = "9.1.1"
+composeBom = "2026.06.01"
+junit4 = "4.13.2"
+kotlin = "2.4.10"
+
+[libraries]
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

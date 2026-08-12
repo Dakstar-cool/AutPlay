@@ -3,9 +3,22 @@
 Status meanings:
 
 - `BASELINED`: normative requirement/decision is present and routed, but product behavior is not implemented.
-- `PASS`: the stated P00 repository criterion has direct evidence.
+- `PASS`: the stated phase criterion has direct evidence.
 - `NOT_STARTED`: the owning future phase has not begun.
 - `CHANGE_PROPOSED`: a documented discrepancy needs an ADR/change set before its owning implementation.
+
+## P01 monorepo foundation
+
+| Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |
+| --- | --- | --- | --- | --- |
+| One-command clean bootstrap and check sequence | P01 acceptance; A-001 | Root `README.md`; `scripts/bootstrap.*`; `scripts/check.*` | Canonical Windows server-only and full checks; clean-index export check recorded in `HANDOFF_P01.md` | PASS |
+| Exact frozen CPU server environment | P01 scope/checks; F-005/F-006 | `.python-version`; `server/pyproject.toml`; `server/uv.lock`; typed package boundaries | CPython 3.14.7; frozen sync/lock; import; Ruff; strict mypy; 13 pytest tests; structural JSON dependency audit | PASS |
+| Minimal standalone Android Compose shell | P01 scope/acceptance; local-first baseline | Gradle wrapper/catalog; `apps/android`; ADR-013/014 | Exact JDK/SDK/Gradle gates; `lintDebug`, `testDebugUnitTest`, `assembleDebug` | PASS |
+| Disposable PostgreSQL 18 + pgvector local service | P01 scope/checks | `deploy/compose/compose.yaml` exact digest; no host port; project-scoped volume | Healthy; runtime PostgreSQL 18.4/vector 0.8.6; post-cleanup 0 containers/volumes/networks | PASS |
+| Future contracts, tests and migrations are placeholders only | P01 scope/non-goals | `contracts/*`, `tests/*`, `server/migrations/README.md` | File/dependency/scope audit; no schema, endpoint, contract payload or feature code | PASS |
+| Hosting-neutral CI matrix when hosting is unknown | P01 scope | `docs/implementation/CI_PLAN.md` | Windows/Linux/macOS CPU jobs plus Linux Android/Compose job and cold-cache policy | PASS |
+| Exact toolchain/dependency decisions recorded | P01 acceptance; P00-D007/D008/D009 | ADR-013, ADR-014, `VERSIONS.md` | Official-source compatibility review plus executable gates | PASS |
+| P02 not started and identity-schema blocker remains visible | P01 stop rule; P00-D003 | `PROGRESS.md` P02 BLOCKED; PLAN/R-014; this handoff | No Alembic config/revision, table model or executable schema exists | PASS |
 
 ## P00 repository intake
 
@@ -49,7 +62,7 @@ The authoritative requirements and statuses remain in [`MVP_ACCEPTANCE_MATRIX.md
 
 | Requirement | Design source | Planned implementation | Required tests / evidence | Status |
 | --- | --- | --- | --- | --- |
-| A-001 Clean repository bootstrap | MVP matrix; P01 prompt | P01 monorepo/toolchain skeleton | Documented one-command setup and CI/local smoke | NOT_STARTED |
+| A-001 Clean repository bootstrap | MVP matrix; P01 prompt | P01 monorepo/toolchain skeleton | Root scripts, platform-neutral CI plan and clean-index export evidence in `HANDOFF_P01.md` | PASS |
 | A-002 CPU-only server starts without CUDA | MVP matrix; F-005/F-006 | P03 API/worker runtime | CPU-only import/start integration test | NOT_STARTED |
 | A-003 PostgreSQL clean upgrade/downgrade/upgrade | MVP matrix; PostgreSQL schema | P02 Alembic chain | Real pinned PostgreSQL 18 lifecycle logs/tests | NOT_STARTED |
 | A-004 DB invariants match reference DDL | MVP matrix; reference SQL | P02 mappings/migrations | Constraint/object inventory and drift tests | NOT_STARTED |

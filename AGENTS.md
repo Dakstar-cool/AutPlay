@@ -2,7 +2,7 @@
 
 ## Project
 
-AutPlay is an Android-first, local-first music platform with an optional personal server. The repository currently contains the P00 engineering contract and design/build-pack documents only. No product code, manifests, migrations, deployment files, or canonical build commands exist until P01.
+AutPlay is an Android-first, local-first music platform with an optional personal server. P01 established the reproducible monorepo foundation and canonical bootstrap/check commands. Product features, executable persistence, API endpoints, sync contracts, and media behavior remain owned by later phases.
 
 ## Read first
 
@@ -74,7 +74,7 @@ The current phase prompt may narrow delivery scope; it does not override higher-
 - Do not swallow exceptions broadly or claim placeholder success.
 - Do not leave critical `TODO`, `pass`, skipped/disabled critical tests, or fake responses at phase exit.
 - Use the cheapest test that actually proves the behavior; critical persistence and migration claims require real integration evidence.
-- Canonical build/lint/test commands are established in P01. Until then, do not claim that server or Android build commands exist.
+- Use the root `README.md` as the single source of truth for canonical build/lint/test command sequences; do not duplicate or silently diverge from those scripts.
 
 ## Git and external actions
 

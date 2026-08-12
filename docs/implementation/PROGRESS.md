@@ -2,9 +2,9 @@
 
 | Phase | Status | Commit | Evidence | Blocker |
 | --- | --- | --- | --- | --- |
-| P00 | PASS | P00 phase commit at `HEAD` | `docs/implementation/HANDOFF_P00.md` | None |
-| P01 | NOT_STARTED | | `docs/build-pack/prompts/P01_monorepo_foundation.md` | P00 green handoff |
-| P02 | NOT_STARTED | | `docs/build-pack/prompts/P02_postgresql_persistence.md` | P01; P00-D003 resolution |
+| P00 | PASS | Parent of P01 phase commit | `docs/implementation/HANDOFF_P00.md` | None |
+| P01 | PASS | P01 phase commit at `HEAD` | `docs/implementation/HANDOFF_P01.md` | None |
+| P02 | BLOCKED | | `docs/build-pack/prompts/P02_postgresql_persistence.md` | P00-D003 user-approved schema/change-set resolution |
 | P03 | NOT_STARTED | | `docs/build-pack/prompts/P03_server_runtime.md` | P02 |
 | P04 | NOT_STARTED | | `docs/build-pack/prompts/P04_sync_contract.md` | P03; P00-D006 resolution |
 | P05 | NOT_STARTED | | `docs/build-pack/prompts/P05_android_foundation.md` | P04 and Room compatibility gate |

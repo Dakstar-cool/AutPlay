@@ -1,79 +1,90 @@
 # AutPlay Versions and Reproducibility Baseline
 
-**Recorded:** 2026-08-12
+**Recorded:** 2026-08-13
 
-**State:** P00 design baselines only; exact project pins are owned by P01 or first-use validation
+**State:** P01 executable baseline; later-phase libraries remain deferred until first validated use
 
-## Design baselines (not yet executable pins)
+## Executable P01 pins
 
-| Component | Design baseline | P00 state |
+### Server and quality tooling
+
+| Component | Exact pin | File of record | Validation |
+| --- | --- | --- | --- |
+| CPython | `3.14.7` | `.python-version`, `server/pyproject.toml` | explicit sync selector plus runtime assertion; import and 13 tests pass |
+| uv / uv_build | `0.12.3` / `0.12.3` | `server/pyproject.toml`, `server/uv.lock` | required-version gate; frozen sync and lock check pass |
+| FastAPI | `0.141.1` | `server/pyproject.toml`, `server/uv.lock` | import smoke passes |
+| Pydantic / settings | `2.13.4` / `2.15.0` | same | import compatibility passes |
+| SQLAlchemy / Alembic | `2.0.52` / `1.19.1` | same | import compatibility passes; real schema use belongs to P02 |
+| Psycopg binary | `3.3.4` | same | import compatibility passes |
+| Ruff / mypy / pytest | `0.16.2` / `2.3.0` / `9.1.1` | same | lint/format, strict type check, 13 tests pass |
+
+All direct requirements are exact. `server/uv.lock` resolves 33 packages on CPython 3.14 and contains no torch, TensorFlow, JAX, CuPy, CUDA or NVIDIA runtime package.
+
+### Android bootstrap
+
+| Component | Exact pin | File of record | Validation |
+| --- | --- | --- | --- |
+| JDK | Microsoft OpenJDK `17.0.20+8-LTS` | ADR-013 / bootstrap gates | exact `java -version`; Gradle launcher assertion; daemon forced by CLI property |
+| Gradle | `9.3.1` | wrapper properties | distribution SHA-256 verified; wrapper launch passes |
+| Gradle distribution SHA-256 | `b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06` | wrapper properties | downloaded archive matched |
+| Wrapper JAR SHA-256 | `b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13` | generated wrapper | matched official wrapper checksum |
+| Android Gradle Plugin | `9.1.1` | `gradle/libs.versions.toml` | official matrix requires Gradle 9.3.1/JDK 17; full gate passes |
+| Kotlin / Compose compiler | `2.4.10` / `2.4.10` | root build + version catalog | built-in Kotlin override; compile/unit/lint pass |
+| Compose BOM | `2026.06.01` | version catalog | minimal UI compile/lint pass |
+| Activity Compose / JUnit | `1.13.0` / `4.13.2` | version catalog | host unit test and APK build pass |
+| Android SDK | compile `36.1`; target `36`; min `26`; Build Tools `36.1.0` | app build script | lint/unit/assemble pass |
+
+AGP/Gradle/dependency “new version available” lint detectors are deliberately disabled; exact upgrades are an ADR/compatibility operation. All other Android lint warnings are errors. `android.overridePathCheck=true` permits the verified Windows workspace path containing Cyrillic; forcing Gradle `file.encoding=UTF-8` is intentionally avoided because it corrupts worker classpath arguments on Windows code page 1251.
+
+The published Kotlin 2.4.10 table names AGP 9.1.0 as its fully supported upper bound, while the current stable patch is AGP 9.1.1. This is a one-patch documentation gap, not claimed matrix coverage: AGP officially permits a higher KGP through the root classpath override, and P01 mitigates the gap with actual Kotlin/Compose compilation, host tests, lint and APK evidence. Revert to 9.1.0 or revalidate before feature work if that executable gate regresses.
+
+### Disposable database
+
+| Component | Exact pin | File of record | Runtime evidence |
+| --- | --- | --- | --- |
+| PostgreSQL | `18.4` (`Debian 18.4-1.pgdg12+1`) | image digest + runtime query | `SHOW server_version` |
+| pgvector | `0.8.6` | image digest + extension query | `pg_extension.extversion` |
+| OCI image | `pgvector/pgvector:0.8.6-pg18-bookworm@sha256:691673308c99d2161ba298736f3147f1f22d79de2fb7ec93ae9b4afcab870b62` | `deploy/compose/compose.yaml` | healthy service; exact config image; scoped cleanup |
+
+The image publishes no host port. Its project-scoped volume is disposable and was confirmed absent after `down --volumes`.
+
+## Official source record
+
+Sources were reviewed on 2026-08-12/13; exact package metadata pages are the compatibility record, not an instruction to auto-upgrade.
+
+- [Python 3.14.7 release](https://www.python.org/downloads/release/python-3147/)
+- [uv 0.12.3 release](https://github.com/astral-sh/uv/releases/tag/0.12.3) and [uv build backend](https://docs.astral.sh/uv/configuration/build-backend/)
+- Exact PyPI metadata: [FastAPI 0.141.1](https://pypi.org/project/fastapi/0.141.1/), [Pydantic 2.13.4](https://pypi.org/project/pydantic/2.13.4/), [pydantic-settings 2.15.0](https://pypi.org/project/pydantic-settings/2.15.0/), [SQLAlchemy 2.0.52](https://pypi.org/project/SQLAlchemy/2.0.52/), [Alembic 1.19.1](https://pypi.org/project/alembic/1.19.1/), [Psycopg 3.3.4](https://pypi.org/project/psycopg/3.3.4/), [Ruff 0.16.2](https://pypi.org/project/ruff/0.16.2/), [mypy 2.3.0](https://pypi.org/project/mypy/2.3.0/), [pytest 9.1.1](https://pypi.org/project/pytest/9.1.1/)
+- [Microsoft OpenJDK downloads](https://learn.microsoft.com/en-us/java/openjdk/download) and [major-version URLs/checksums](https://learn.microsoft.com/en-us/java/openjdk/download-major-urls)
+- [AGP 9.1.1 compatibility](https://developer.android.com/build/releases/agp-9-1-0-release-notes), [built-in Kotlin migration](https://developer.android.com/build/migrate-to-built-in-kotlin), [Kotlin Gradle compatibility](https://kotlinlang.org/docs/gradle-configure-project.html), and [Compose setup](https://developer.android.com/develop/ui/compose/setup-compose-dependencies-and-compiler)
+- [Gradle 9.3.1 release](https://docs.gradle.org/9.3.1/release-notes.html), [wrapper checksums](https://gradle.org/release-checksums/), and [wrapper verification](https://docs.gradle.org/current/userguide/wrapper.html)
+- [PostgreSQL 18.4 release](https://www.postgresql.org/docs/release/18.4/), [pgvector v0.8.6](https://github.com/pgvector/pgvector/tree/v0.8.6), and [official image tag metadata](https://hub.docker.com/v2/repositories/pgvector/pgvector/tags/0.8.6-pg18-bookworm/)
+
+## Observed P01 validation environment
+
+| Area | Observed evidence | Interpretation |
 | --- | --- | --- |
-| Production server | Linux x86_64; CPU core cross-platform where practical | Architecture baseline; exact support matrix unresolved (P00-D009) |
-| Server language/workflow | Python through `uv` with committed `uv.lock` | Accepted direction; Python and dependency versions unresolved |
-| API | FastAPI | Accepted direction; exact version unresolved |
-| Persistence | SQLAlchemy 2 typed + Alembic 1.x | Accepted direction; exact versions unresolved |
-| Database | PostgreSQL 18.x | Major fixed; patch, image tag and immutable digest unresolved |
-| Vector extension | pgvector 0.8-compatible range; exact search first | Exact patch/image digest unresolved; no ANN index before benchmark |
-| PostgreSQL driver | Psycopg 3 preferred | Requires P01/P02 async/sync/migration evidence |
-| Android | Kotlin + Jetpack Compose | Exact Kotlin/Compose/JDK/AGP/Gradle set unresolved |
-| Local database | Room 3.0.1 preferred + BundledSQLiteDriver, KSP, FTS5, WAL | Requires compatibility gate; Room 2.8.4 fallback only before user schema v1 |
-| Android SDK | Preliminary minSdk 26; target/compile current compatible stable at bootstrap | Exact compile/target SDK and device matrix unresolved |
-| Playback/downloads | AndroidX Media3; DownloadIndex owns durable progress | Exact version unresolved |
-| Deferred work | AndroidX WorkManager | Exact version unresolved |
-| Android HTTP/JSON/DI | Retrofit + OkHttp, Kotlinx serialization, Hilt preferred | Choices and exact versions require P01 ADR/first real use |
-| Vault | Local/NAS filesystem adapter | Filesystem/backup target intentionally deferred |
-| Media tools | FFmpeg/ffprobe and Chromaprint/fpcalc | Exact packages/build hashes and codec build unresolved |
-| GPU | Optional isolated NVIDIA RTX 3060 12 GB worker | CUDA/runtime/model set unresolved until P12 benchmark |
-| Containers | Exact version tags for development; immutable digests for release | No project image selected in P00; `latest` forbidden |
+| Host | Windows NT `10.0.26200`, x86_64; PowerShell 5.1 | Development evidence, not production OS |
+| uv/Python | uv `0.12.3`; uv-managed CPython `3.14.7` | Exact P01 server baseline |
+| Android | Microsoft OpenJDK `17.0.20+8-LTS`; SDK platform `36.1`; Build Tools `36.1.0` | Exact local lint/unit/APK evidence |
+| Docker | Engine `29.6.1` Linux; Compose `5.2.0` | Host tool observation; runtime image is digest-pinned |
+| Device | No AVD or connected device | `connectedCheck` NOT RUN; not a P01 acceptance requirement |
+| SDK metadata | Local tools warn they understand XML through v3 while one installed package uses v4 | Non-blocking; CI/P05 should provision a coherent current SDK tool set |
 
-## Observed P00 workstation tools (evidence, not project requirements)
+Machine-specific install/cache paths are intentionally omitted from the project baseline.
 
-| Tool | Observed value | Interpretation |
+## Researched but deferred first-use candidates
+
+These are not installed, locked, or accepted P01 runtime dependencies:
+
+| Owning phase | Candidate direction | Required gate |
 | --- | --- | --- |
-| OS | Windows NT 10.0.26200.0 | Development host only; not production baseline |
-| PowerShell | 5.1.26100.8875 | Used for P00 read-only checks |
-| Git | 2.51.0.windows.1 | Repository operations available |
-| Python | 3.12.10 | Installed locally; not approved/pinned for AutPlay |
-| uv | 0.11.6 | Installed locally; not approved/pinned for AutPlay |
-| Java | Java 8 runtime; `javac` not on PATH | Insufficient evidence for Android build baseline |
-| Docker CLI | 29.6.1 | CLI available; project Compose/runtime health not validated |
-| Node/npm/Gradle/Podman | Not found on PATH | Not a P00 blocker; P01 resolves required tooling |
-| Android environment | `ANDROID_HOME` is set; `adb`, `sdkmanager`, and `avdmanager` not on PATH | SDK/device build evidence unavailable at P00 |
+| P05 | Room `3.0.1`, SQLite `2.7.0`, KSP2 `2.3.9`, minSdk 26 | Room/KSP/FTS5/R8/fresh-open-restart/device compatibility before schema v1 |
+| P05/P08 | WorkManager `2.11.2`, Media3 `1.10.1` | First real ownership/process-death tests |
+| P04/P05 | Hilt; Retrofit + OkHttp; kotlinx.serialization | Exact pins with first real DI graph/typed contract consumer |
+| P06 | FFmpeg/ffprobe and Chromaprint/fpcalc | Package/build hashes, codecs, crash/timeout evidence |
+| P12 | CUDA/runtime/model registry | Isolated optional profile, licenses, hashes and RTX 3060 benchmark |
 
-Machine-specific installation paths are intentionally not recorded.
+## Upgrade rule
 
-## Exact resolutions required in P01
-
-| Area | Required pin/evidence |
-| --- | --- |
-| Python | Exact supported Python version, `.python-version`, `requires-python`, uv version strategy and clean `uv sync --frozen` |
-| Server dependencies | FastAPI, Pydantic/settings, SQLAlchemy, Alembic, Psycopg, Ruff, mypy, pytest and logging versions in `uv.lock` |
-| Android toolchain | JDK, Gradle wrapper, AGP, Kotlin, KSP, Compose compiler/BOM, Android compile/target/min SDK and clean debug/release smoke |
-| Android libraries | Room, Bundled SQLite, Media3, WorkManager and selected DI/HTTP/JSON versions with compatibility evidence |
-| PostgreSQL | Exact PostgreSQL 18 patch image and digest; disposable health smoke |
-| pgvector | Exact compatible 0.8 release/image digest and extension availability |
-| CI | Hosting-aware CI runtime images/actions or platform-neutral local plan; immutable major pinning policy |
-
-## Later first-use resolutions
-
-- P02: Alembic/driver/database integration compatibility and schema head.
-- P05: physical/minSdk Room 3, FTS5, R8 and process-restart gate.
-- P06: FFmpeg/ffprobe and Chromaprint/fpcalc package/build versions and hashes.
-- P12: GPU driver/runtime, model revision/license/SHA-256/preprocessing/dimension.
-- P14: release container digests, SBOM, generated contracts/schemas and full version manifest.
-
-## Files of record
-
-When their owning phase creates them, reproducibility is recorded in:
-
-- `.python-version`;
-- `server/pyproject.toml` and `server/uv.lock`;
-- `gradle/libs.versions.toml` and `gradle/wrapper/gradle-wrapper.properties`;
-- `deploy/compose/*.yaml`;
-- committed Room exported schemas;
-- generated OpenAPI/event schemas;
-- Alembic head and schema inventory;
-- model registry rows/manifests with source, license, SHA-256 and runtime;
-- this file and phase handoffs.
-
-Do not treat a locally installed version or the word “current/latest” as a reproducibility pin. A pin becomes approved only with the owning clean build/test evidence.
+An exact pin changes only after official compatibility/security review, clean frozen/bootstrap checks, updated lock/checksum/digest evidence, and an ADR/version/handoff update. The words `current` or `latest` never constitute a pin.

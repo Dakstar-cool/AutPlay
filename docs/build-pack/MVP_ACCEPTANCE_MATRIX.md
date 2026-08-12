@@ -4,7 +4,7 @@ Status values: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `DEFERRED_WITH_APPROVAL`, `
 
 | ID | Requirement | Phase | Required evidence | Status |
 | --- | --- | --- | --- | --- |
-| A-001 | Clean repository bootstrap | P01 | Documented one-command setup and CI smoke | NOT_STARTED |
+| A-001 | Clean repository bootstrap | P01 | [`HANDOFF_P01.md`](../implementation/HANDOFF_P01.md) canonical and clean-index export smoke | PASS |
 | A-002 | CPU-only server starts without CUDA | P03 | Import/start integration test | NOT_STARTED |
 | A-003 | PostgreSQL clean upgrade/downgrade/upgrade | P02 | Real PG18 migration logs/tests | NOT_STARTED |
 | A-004 | DB invariants match reference DDL | P02 | Constraint/object inventory tests | NOT_STARTED |
