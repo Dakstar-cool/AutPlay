@@ -1,0 +1,29 @@
+# AutPlay Risk Register
+
+P00 records risks; it does not close implementation risks without executable evidence.
+
+| ID | Risk | Likelihood | Impact | Mitigation / gate | Evidence / owner | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| R-001 | Data loss from destructive or incompatible PostgreSQL/Room migration, including IDs, playlist order, Journal events or tombstones | Medium | Critical | No destructive fallback; named migrations; supported-version fixtures; upgrade/downgrade/restore drills | P02/P05/P14 migration suites; A-003-A-007, A-034 | OPEN |
+| R-002 | False identity merge combines live/remix/edit/remaster or different recordings | High without gates | Critical | Unresolved-first model; hard conflicts; immutable evidence/history; benchmark-gated auto-match; reversible change set | P00-D003/P00-D004; P10 hard-negative report; A-024/A-025 | OPEN |
+| R-003 | Sync duplicate/reorder/conflict/tombstone handling loses offline intent or advances cursor partially | Medium | Critical | P04 language-neutral contract and vectors; transactional Journal; idempotent inbox; cursor only after full apply; visible conflicts | P04/P05/P09 vectors and fault tests; A-007, A-018-A-022 | OPEN |
+| R-004 | Vault crash, corrupt bytes, path escape, duplicate commit or unsafe GC makes partial/corrupt audio visible or deletes the last copy | Medium | Critical | Same-filesystem staging, bounded validation, SHA-256, atomic move/fsync, immutable CAS, quarantine, grace/reference recheck and reconciliation | P06 fault-injection/integrity evidence; A-011-A-013 | OPEN |
+| R-005 | Revoked/missing Android MediaStore/SAF URI is treated as deletion and destroys user intent | High over device lifetime | High | Store URI separately; validate permission/readability; retain `UserTrackRef`; fallback to Vault; rescan/reconcile | P05/P07/P08 URI tests; A-015 | OPEN |
+| R-006 | External provider/API/legal change breaks recovery or encourages unauthorized acquisition | Medium | High | Capability-declaring adapters; user-owned/official export first; bounded contract fixtures; no DRM/secret scraping; provider not source of truth | P10 adapter policy/fixtures; P14 review | OPEN |
+| R-007 | GPU OOM, driver/runtime failure, malicious/unlicensed model or supply-chain drift affects core readiness | Medium | High | Isolated optional GPU process; approved model registry/hash/license; one heavy job; bounded batch reduction; CPU baseline remains available | P12/P14 GPU and SBOM evidence; A-029-A-031/A-040 | OPEN |
+| R-008 | Backup archive exists but cannot restore a consistent PostgreSQL/Vault generation | Medium | Critical | Generation manifest, checksums, isolated restore and reconciliation; quarterly target drill; RPO/RTO evidence | P14 restore report; A-034 | OPEN |
+| R-009 | Token, private URL, user path, raw payload or credential leaks through logs/export/diagnostics | Medium | Critical | Typed secret handling, redaction tests, bounded structured logs, secret scanning, safe diagnostic bundle | P03/P06/P10/P14 tests; A-035 | OPEN |
+| R-010 | Broken object authorization exposes another user’s library, playlist, job, recommendation or Vault bytes | Medium | Critical | Principal-scoped application queries, negative cross-user tests, stream authorization independent of hash/URL | P03-P14 negative suites; A-027/A-036 | OPEN |
+| R-011 | Android or personal-server performance misses interactive/streaming SLOs at target scale | Medium | High | Named datasets/hardware, bounded queries, pagination, resource priorities, p50/p95/p99 reports; Samsung A55 and minimum-tier checks | P05/P07/P11/P14 benchmarks; A-037/A-038 | OPEN |
+| R-012 | Room 3/JDK/Kotlin/KSP/AGP/Gradle/Media3/WorkManager combination is incompatible on minSdk/Samsung A55 or R8 | Medium | High | Resolve exact stable set in P01; run Room compatibility spike before schema adoption; fallback only before user schema v1 | P00-D007; P01/P05 clean build/device evidence | OPEN |
+| R-013 | Sync semantics remain underspecified until Sync Protocol v1 is created | Certain until P04 | Critical for sync implementation | Treat missing protocol as intentional P04 deliverable; do not implement sync transport before golden vectors and ID mapping decision | P00-D006; P04 contract validation | OPEN |
+| R-014 | Physical identity DDL cannot retain all versioned decision evidence/states required by the narrower Track Identity specification | Certain in current reference design | High | Resolve P00-D003 through ADR/change set before implementing P02 migrations; synchronize DDL/schema/spec tests | P00 design audit; P02 prerequisite | OPEN |
+| R-015 | Phase graph ambiguity allows P14 to imply unimplemented P12/P13 capabilities | Medium | High | Require explicit approved deferral and visible release labeling; formalize P00-D005 before P14 | P12/P13 progress rows and P14 matrix/release notes | OPEN |
+| R-016 | Development environment lacks a validated JDK/compiler/Gradle/Android CLI toolchain and may differ from Linux production | High at P00 | Medium | P01 resolves/pins toolchains using clean smoke; document local/CI support matrix; never treat observed tools as approved pins | `VERSIONS.md`; P01 evidence | OPEN |
+| R-017 | Cloud-synced workspace semantics interfere with file locks, Gradle caches or filesystem atomicity experiments | Medium | Medium | Keep generated caches ignored; run Vault atomicity tests on a named local filesystem matching intended deployment and record environment | P01/P06 test environment reports | OPEN |
+
+## Review rule
+
+- Critical/high data-loss or object-authorization risk blocks P14 release candidacy.
+- A risk moves to mitigated only with a linked executable test/report, not a prose claim.
+- Accepted residual risk or deferral requires explicit approval and remains visible in the release handoff.
