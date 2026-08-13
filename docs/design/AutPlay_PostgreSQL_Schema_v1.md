@@ -3,7 +3,7 @@
 **Статус:** Draft for executable migration implementation  
 **Версия:** 1.0  
 **Reference DDL:** [AutPlay_PostgreSQL_Schema_v1.sql](<AutPlay_PostgreSQL_Schema_v1.sql>)  
-**Основание:** `AutPlay ER Model v1`, `AutPlay System Architecture v1`, `AutPlay Track Identity v1`  
+**Основание:** `AutPlay ER Model v1`, `AutPlay System Architecture v1`, `AutPlay Track Identity v1`, accepted `ADR-015`
 
 ---
 
@@ -22,9 +22,13 @@
 - PostgreSQL durable job queue;
 - exact pgvector baseline без initial HNSW;
 - database triggers только для критичных cross-table invariants;
+- immutable Identity Catalog registries, policy activation history, match decisions and candidate evidence;
+- validated current-decision projections для `importing.import_entry` и `library.user_track_ref`;
 - application transactions для domain commands и event emission.
 
-Reference DDL содержит 52 таблицы, 48 indexes, 10 helper/constraint functions и 32 triggers.
+Reference DDL содержит ровно 57 tables, 53 explicit `CREATE INDEX` objects, 13 helper/constraint functions и 40 non-internal triggers. PK/UNIQUE backing indexes в число 53 не входят.
+
+Identity-history synchronization фиксирует только безопасное append-only хранение P00-D003. Frozen F-016 и отдельное решение P00-D004 не изменены: initial schema не содержит policy activation event и не разрешает pre-benchmark applied auto-match.
 
 ---
 
@@ -110,11 +114,19 @@ Application limits:
 | --- | ---: |
 | Sync event payload | 256 KiB |
 | Job payload/checkpoint | 256 KiB каждый |
-| Match feature evidence | 128 KiB |
+| Match query/decision JSON document | 128 KiB каждый |
+| Match candidate evidence JSON document | 128 KiB каждый; суммарно не более 128 KiB на candidate row |
+| Canonical candidate-evidence aggregate одного decision | 4 MiB |
 | Source observation raw metadata | 1 MiB |
 | Audit metadata | 64 KiB |
 
 Крупные файлы и import inputs хранятся вне JSONB, по bounded reference.
+
+For identity evidence, the database enforces JSON type/cardinality and bounds the
+stored `jsonb::text` representation. The application sanitizer separately enforces
+the per-field 128 KiB limits on exact RFC 8785 canonical bytes, records each
+candidate document byte size, and supplies the canonical hashes; P02 must prove
+N-1/N/N+1 and sensitive-field fixtures through that command boundary.
 
 ## 3.6. Вектор
 
@@ -131,6 +143,34 @@ Initial queries:
 
 HNSW создается отдельной migration после выбора модели. Index должен быть dimension-specific и model-specific. Старый и новый indexes сосуществуют на rollback window.
 
+## 3.7. Immutable identity decision history
+
+P00-D003 заменяет draft `importing.match_candidate` шестью Identity Catalog tables:
+
+1. `identity.matcher_release`;
+2. `identity.calibrator_release`;
+3. `identity.threshold_set`;
+4. `identity.match_policy_activation`;
+5. `identity.match_decision`;
+6. `identity.match_candidate_evidence`.
+
+Release/threshold rows, activation events, decisions и candidate evidence являются append-only. Matcher, calibrator и threshold references используют `ON DELETE RESTRICT`; re-score, review, conflict discovery и rollback добавляют successor row. Backward `supersedes_decision_id`/`supersedes_activation_id` сохраняет predecessor immutable, а unique predecessor reference запрещает concurrent branch.
+
+`match_decision` хранит typed query identity, sanitized query snapshot/hash/version, `SHADOW|APPLIED`, все пять resolver states, actor/idempotency/lineage, matcher/calibrator/threshold snapshot, top-one/top-two scores и provider-independent explanation. `match_candidate_evidence` хранит ranks 1..100, exact feature/origin/extractor evidence и RFC 8785 hash. Deferred validation sealed snapshot требует contiguous ranks, exact candidate count/aggregate hash, selected/rank-1 equality и bidirectional rank-2/margin consistency.
+
+`importing.import_entry` и `library.user_track_ref` получают nullable `current_match_decision_id`. Deferred projection validation допускает только matching typed query/owner, `APPLIED` mode и согласованные state/action/Recording fields. `SHADOW`, `INTEGRITY_CONFLICT` и `DEFERRED_EVIDENCE` не могут создавать resolution projection. Import payload cleanup очищает bounded raw payload, но не удаляет referenced query envelope/history.
+
+Шесть новых explicit indexes:
+
+- `ix_threshold_set_scope`;
+- `ix_match_policy_activation_threshold_time`;
+- `ix_match_decision_query_time`;
+- `ix_match_decision_candidate_time`;
+- `ix_match_decision_matcher_time`;
+- `ix_match_candidate_evidence_recording`.
+
+Три новые functions — `app_private.reject_identity_history_mutation()`, `app_private.validate_match_policy_activation()` и `app_private.validate_match_decision()`. Eight new triggers состоят из трех immutable-registry triggers, activation validator, двух deferred decision/evidence aggregate validators и двух deferred import/UserTrackRef projection validators. Таким образом delta `-1 + 6` tables, `-1 + 6` explicit indexes, `+3` functions и `+8` triggers дает exact inventory 57/53/13/40.
+
 ---
 
 # 4. Database schemas и ownership
@@ -139,11 +179,11 @@ HNSW создается отдельной migration после выбора м�
 | --- | --- |
 | `account` | Identity/Auth |
 | `catalog` | Music Catalog |
-| `identity` | Identity Resolution |
+| `identity` | Identity Resolution: providers, immutable matcher/calibrator/threshold registries, activation history, decisions and candidate evidence |
 | `library` | User Library/History |
 | `playlist` | Playlist Engine |
 | `vault` | Vault/Ingest |
-| `importing` | Library Migration |
+| `importing` | Library Migration workflow and validated current-decision projection |
 | `sync` | Sync Engine |
 | `jobs` | Job Scheduler |
 | `ml` | Recommendation/ML |
@@ -172,7 +212,13 @@ Module boundaries являются code-level rule. Общий SQLAlchemy sessio
 - idempotency scope/key unique;
 - job dependency и recording redirect не должны образовывать cycle;
 - embedding dimension совпадает с Model Registry;
-- embedding source variant принадлежит той же Recording.
+- embedding source variant принадлежит той же Recording;
+- matcher, calibrator, threshold, policy activation, match decision и candidate evidence rows append-only;
+- matcher/calibrator/threshold references и version snapshots согласованы;
+- decision candidate set sealed точным count, contiguous ranks и aggregate evidence SHA-256;
+- decision и activation supersession образуют единственную append-only chain без branch/cycle;
+- applied `AUTO_MATCH` требует latest benchmark-backed active policy exact mode/tier scope, sufficient threshold/tier/margin и отсутствие hard conflict;
+- import/UserTrackRef current pointers ссылаются только на owner/query/target-consistent `APPLIED` decisions.
 
 ## 5.2. Enforced by command transaction plus tests
 
@@ -186,6 +232,10 @@ Module boundaries являются code-level rule. Общий SQLAlchemy sessio
 | Job graph cycle under concurrent writers | Trigger дополняется transaction advisory lock/application serialization |
 | Recording redirect under concurrent merge | Требуется lock ordered by UUID и повторная проверка target |
 | Embedding active alias switch | Требует index readiness и rollback policy |
+| Query snapshot allowlist и RFC 8785 hashes | Canonicalization и sensitive-field rejection выполняются application adapter; DB проверяет shape, bounds, declared versions и 32-byte hashes |
+| Identity decision command authorization | USER/ADMIN ownership и access к shared query object проверяются до insert; deferred DB validator повторно проверяет relational ownership |
+| Atomic match projection | Decision, sealed candidate snapshot, audit и owner projection создаются одной transaction; deferred triggers отклоняют partial/divergent commit |
+| Identity policy race | Activation/deactivation и applied SYSTEM decision используют один transaction-scoped advisory lock exact mode/tier scope |
 
 Cross-table trigger не заменяет application authorization.
 
@@ -266,6 +316,23 @@ append audit and sync events
 commit
 ```
 
+## 7.4. Identity decision and projection
+
+Одна command transaction:
+
+```text
+authorize actor and query object
+take policy-scope advisory lock when activation or applied AUTO_MATCH is involved
+insert immutable decision and complete candidate-evidence snapshot
+append review/activation successor instead of updating history
+update import/UserTrackRef current projection when execution_mode = APPLIED
+append audit/sync effects owned by the command
+run deferred decision/evidence/projection constraints
+commit
+```
+
+`SHADOW` decision не меняет catalog/user/import projection. Re-score и manual review всегда создают новую row с backward `supersedes_decision_id`; conceptual `superseded_by` читается как inverse relation. Initial clean install содержит zero activation events.
+
 ---
 
 # 8. Job queue protocol
@@ -316,14 +383,14 @@ Reference DDL не переносится одной гигантской migrat
 | --- | --- |
 | `0001_extensions_schemas` | `pg_trgm`, `vector`, module schemas |
 | `0002_account_catalog` | Users/devices, artists, recordings, releases |
-| `0003_audit_identity` | Audit base, providers, external refs, redirects |
+| `0003_audit_identity` | Audit base; providers/external refs/redirects; immutable matcher, calibrator and threshold registries plus empty activation history |
 | `0004_sync_jobs` | Inbox/outbox, cursors, idempotency, job queue |
 | `0005_library_playlists` | UserTrackRef, library, preferences, playlists |
 | `0006_vault` | CAS metadata, replicas, variants, fingerprints |
-| `0007_importing` | Import jobs, entries, candidates |
+| `0007_importing_identity_history` | Import jobs/entries first; general immutable match decisions and candidate evidence; typed query/current-projection FKs added after both sides exist; no legacy `importing.match_candidate` |
 | `0008_ml_history` | Model registry, vectors, recommendations, listening events |
-| `0009_constraints_triggers` | Cross-table constraints and private functions |
-| `0010_indexes_privileges` | Search/queue indexes and role grants |
+| `0009_constraints_triggers` | Cross-table constraints, exactly 13 private helper/constraint functions and 40 non-internal triggers, including deferred identity aggregate/projection validation |
+| `0010_indexes_privileges` | Exactly 53 explicit search/history/queue indexes and role grants; PK/UNIQUE backing indexes excluded from this inventory |
 
 Каждая revision:
 
@@ -371,8 +438,10 @@ Alembic autogenerate не является полной проверкой вс�
 | Alembic head | Единственная ожидаемая head |
 | Drift | SQLAlchemy metadata не порождает неожиданный migration diff |
 | Constraint names | PK/FK/UQ/CK имеют deterministic names |
+| Exact inventory | 57 tables, 53 explicit indexes, 13 `app_private` helper/constraint functions и 40 non-internal triggers; exact names совпадают с reference contract |
 | Extensions | Required compatible `pg_trgm` и `vector` доступны |
 | Privileges | Runtime roles не имеют лишних DDL/read rights |
+| Identity initial state | Шесть identity-history tables существуют, legacy `importing.match_candidate` отсутствует, policy activation row count равен zero |
 
 ## 11.2. Integrity tests
 
@@ -392,7 +461,39 @@ Alembic autogenerate не является полной проверкой вс�
 - tombstone event другого user отклоняется;
 - recommendation/listening cross-user reference отклоняется.
 
-## 11.3. Job concurrency tests
+## 11.3. Identity history, policy and projection tests
+
+Round-trip fixtures сохраняют без потери все normative decision fields, все пять resolver states, import/local-audio/external-reference query types, multiple candidate origins/ranks и неизвестные feature keys.
+
+Обязательные negative/edge tests:
+
+- `UPDATE` и `DELETE` отклоняются для каждой из шести history/registry tables;
+- unknown release FK, matcher/calibrator/threshold cross-version mismatch, invalid actor/user pair, invalid resolver state, score range и margin mismatch отклоняются;
+- typed query key отсутствует/не соответствует `query_type`, orphan, cross-user/device и cross-import query отклоняются;
+- JSON shape/cardinality, sensitive-field allowlist и N-1/N/N+1 byte fixtures проверяются; RFC 8785 hashes воспроизводимы;
+- candidate sets 0/1/2/100 round-trip; candidate 101, rank gap/duplicate, wrong count/hash, late/post-commit insert и selected/top-one/top-two mismatch отклоняются;
+- `SHADOW + AUTO_MATCH` отклоняется; shadow counterfactual сохраняется только при resolver state `REVIEW_REQUIRED` и не меняет projection;
+- applied auto-match отклоняется при inactive/mismatched policy, insufficient evidence tier/score/margin, nullable calibrator или любом hard conflict;
+- pre-benchmark applied T4 отклоняется; это сохраняет frozen F-016 и не решает P00-D004;
+- `INTEGRITY_CONFLICT` требует non-empty conflict reason и не меняет resolution projection; `DEFERRED_EVIDENCE` допускает nullable scores и также не меняет resolution projection;
+- ACCEPT/REJECT target обязан принадлежать candidate evidence immediate predecessor; KEEP_UNRESOLVED и CREATE_RECORDING соблюдают утверждённые state/target/projection rules;
+- CREATE_RECORDING требует newly-created Recording и atomic projection, но не создает global merge;
+- self/cycle/cross-query/earlier-time/branch supersession отклоняется; re-score/review добавляет rows, не меняя old explanation;
+- import cleanup сохраняет identity history, а удаление referenced query envelope отклоняется;
+- import и UserTrackRef pointers отклоняют wrong type/owner, shadow decision и state/target-divergent projection;
+- application command catches the unique scope/key collision, compares the stored request hash and returns the existing row only when hashes match; a different hash yields a stable conflict (raw direct SQL INSERT is expected to raise the named unique violation);
+- provider-independent explanation читается при недоступном provider.
+
+Policy lifecycle/concurrency tests:
+
+- activation/rollback требует 32-byte benchmark hash, non-null calibrator, active OWNER/ADMIN и exact matcher/calibrator/mode/tier scope;
+- activation sequence не допускает gap/branch, rollback не указывает на never-active set, а deactivate/rollback append events не переписывают registry rows;
+- две concurrent decision successor transactions и две activation successor transactions оставляют ровно одного successor;
+- deactivate-vs-applied-auto race сериализуется одним advisory lock и не допускает decision по stale active policy.
+
+Deferred constraint failures проверяются через `SET CONSTRAINTS ALL IMMEDIATE` или реальный `COMMIT`, а не только внутри незавершенной transaction.
+
+## 11.4. Job concurrency tests
 
 - 2/4/8 workers не claim одну job дважды;
 - expired lease возвращается в queue один раз;
@@ -402,7 +503,7 @@ Alembic autogenerate не является полной проверкой вс�
 - priority fairness не допускает вечного starvation P3/P4;
 - repeated completion command idempotent.
 
-## 11.4. Migration tests
+## 11.5. Migration tests
 
 - upgrade от каждой поддерживаемой release;
 - failure до backfill, во время backfill и после schema switch;
@@ -411,10 +512,11 @@ Alembic autogenerate не является полной проверкой вс�
 - playlist order and duplicate preservation;
 - UUID/redirect preservation;
 - import checkpoint preservation;
+- clean `upgrade -> downgrade -> upgrade` сохраняет exact identity object inventory, names и metadata drift contract;
 - rollback of active embedding alias/index;
 - backup restore после migration.
 
-## 11.5. Performance tests
+## 11.6. Performance tests
 
 Reference dataset:
 
@@ -480,7 +582,9 @@ psql -v ON_ERROR_STOP=1 "$AUTPLAY_TEST_DATABASE_URL" \
 - lyrics storage;
 - PostgreSQL RLS policy;
 - database roles/passwords, зависящие от deployment environment;
-- generated search normalization: normalization остается versioned application logic.
+- generated search normalization: normalization остается versioned application logic;
+- benchmark dataset/payload и active identity policy event: initial schema содержит только immutable registries/history и zero activations;
+- identity matcher behavior и P00-D004 semantic decision; frozen F-016 остается неизменным.
 
 ---
 
@@ -489,12 +593,13 @@ psql -v ON_ERROR_STOP=1 "$AUTPLAY_TEST_DATABASE_URL" \
 Schema v1 готова к initial Alembic implementation, когда:
 
 1. Reference DDL выполняется на pinned PostgreSQL 18 + pgvector image.
-2. Все 52 tables создаются в clean database.
-3. FK/CK/UQ и triggers проходят negative tests.
+2. Все 57 tables, 53 explicit indexes, 13 helper/constraint functions и 40 non-internal triggers создаются в clean database с exact names; legacy `importing.match_candidate` отсутствует.
+3. FK/CK/UQ, append-only/deferred validators и projection triggers проходят negative tests.
 4. Device/user и playlist/library boundaries не обходятся прямым DML test role.
 5. Job claim concurrency test не дает duplicate active leases.
 6. Vault serving query не возвращает uncommitted/quarantined bytes.
-7. Track Identity evidence fields сохраняются без потери version metadata.
+7. Track Identity decision/history round-trip сохраняет все пять states, version metadata, origins, unknown features, actor, lineage и provider-independent explanation; sealed candidate aggregate и policy/projection races проходят tests.
 8. Exact vector baseline измерен до создания ANN index.
 9. Alembic schema snapshots и drift check добавлены в CI.
 10. Backup/restore drill проходит после upgrade head.
+11. Initial identity activation history пуст; applied auto-match до benchmark отклоняется без изменения F-016 или P00-D004.

@@ -5,6 +5,8 @@
 **Основание:** `ТЗ AutPlay Draft 0.3`, `AutPlay System Architecture v1`, `AutPlay ER Model v1`  
 **ADR:** ADR-004 - Recording identity is distinct from release position and encoded audio  
 **Связанные сущности:** `Recording`, `ReleaseTrack`, `AudioVariant`, `VaultObject`, `UserTrackRef`  
+**Persistence amendment:** ADR-015 Accepted, proposal revision `c108c109d8eb1ab71631ea79e831a20e6cc6811bff5264cb6d1bb38f7433ac71`
+**Open semantic boundary:** P00-D004/F-016 remains unresolved; this amendment does not authorize pre-benchmark T4 application
 
 ---
 
@@ -16,10 +18,10 @@
 - отделяет совпадение bytes, audio encoding и Recording;
 - объединяет metadata, external IDs, duration и audio fingerprint;
 - ранжирует кандидатов и объясняет решение;
-- выбирает `AUTO_MATCH`, `REVIEW_REQUIRED` или `NO_MATCH`;
+- выбирает одно из `AUTO_MATCH`, `REVIEW_REQUIRED`, `NO_MATCH`, `INTEGRITY_CONFLICT`, `DEFERRED_EVIDENCE`;
 - защищается от ошибочного объединения studio, live, remix, edit и remaster;
 - версионирует fingerprint и matcher;
-- проверяет качество matching до включения автоматического merge.
+- проверяет качество matching до включения applied auto-match.
 
 Главный принцип:
 
@@ -63,6 +65,11 @@
 | Review margin | Разница между первым и вторым кандидатом |
 | Resolution | Привязка `UserTrackRef` или импортируемого объекта к Recording |
 | Merge | Объединение уже существующих global Recording через change set и redirect |
+| Resolver state | Результат evaluator; не import status, UserTrackRef status или manual action |
+| Execution mode | `SHADOW` не меняет owner projection; `APPLIED` может менять ее только через проверенную command transaction |
+| Decision kind | `EVALUATION` или `REVIEW_ACTION` |
+| Review action | `ACCEPT`, `REJECT`, `KEEP_UNRESOLVED` или `CREATE_RECORDING`; никогда не `AUTO_MATCH` |
+| Owner projection | Валидированная current-decision ссылка ImportEntry/UserTrackRef; история остается в Identity Catalog |
 
 Resolution и Merge являются разными командами. Привязка одного `UserTrackRef` не должна автоматически запускать глобальное объединение двух Recording.
 
@@ -356,7 +363,7 @@ Baseline evaluation сравнивает:
 7. Сильный fingerprint mismatch при достаточном coverage.
 8. Один SHA-256 оказался связан с несколькими несовместимыми Recording.
 9. Кандидат находится в незавершенном merge/split change set.
-10. Top-2 candidates не разделены минимальным review margin.
+10. Top-2 candidates не разделены минимальным review margin. Это отдельный auto-match gate, а не feature conflict.
 
 ## 9.2. Review-only conflicts
 
@@ -454,7 +461,7 @@ Auto-match требует одновременно:
 - `margin >= margin_threshold`;
 - отсутствие hard conflict;
 - достаточный evidence tier;
-- matcher/threshold set имеет статус `ACTIVE`.
+- latest append-only activation event for the exact `(evidence_mode, evidence_tier)` scope points to the immutable matcher/calibrator/threshold set and is not a deactivation.
 
 ---
 
@@ -466,7 +473,7 @@ Auto-match требует одновременно:
 | T1 | Strong title + artist + duration/version | Auto только после отдельного high-precision benchmark |
 | T2 | T1 + verified provider/MBID/ISRC context | Auto при отсутствии conflict и достаточном margin |
 | T3 | Good fingerprint coverage + compatible metadata | Auto при calibrated gate |
-| T4 | Exact SHA linked to one valid AudioVariant/Recording | Deterministic reuse; catalog conflict -> incident |
+| T4 | Exact SHA linked to one valid AudioVariant/Recording | Deterministic evidence; до решения P00-D004 только `SHADOW + REVIEW_REQUIRED`, catalog conflict -> incident |
 
 Наличие T3 не означает merge remaster/edit без проверки version markers.
 
@@ -484,12 +491,21 @@ INTEGRITY_CONFLICT
 DEFERRED_EVIDENCE
 ```
 
+Эти resolver states не являются candidate dispositions, review actions, ImportEntry workflow states или `UserTrackRef.resolution_status`.
+
+## 12.1.1. Kind и execution mode
+
+- `SHADOW` никогда не меняет ImportEntry, UserTrackRef или catalog.
+- Неутвержденный matcher не может сохранять shadow `AUTO_MATCH` или `NO_MATCH`: ordinary ranked result использует `REVIEW_REQUIRED`; genuine hard integrity conflict и unavailable evidence сохраняют `INTEGRITY_CONFLICT`/`DEFERRED_EVIDENCE`, оставаясь без projection.
+- `AUTO_MATCH` разрешен только как `APPLIED + EVALUATION + SYSTEM` при latest active policy exact scope, benchmark hash, calibrator, достаточном tier/score/margin и пустом hard-conflict set.
+- Manual review всегда `APPLIED + REVIEW_ACTION`, сохраняет predecessor resolver state и никогда не кодируется как `AUTO_MATCH`.
+
 ## 12.2. Bootstrap thresholds
 
-До benchmark:
+До benchmark и отдельного решения P00-D004:
 
 - `AUTO_MATCH` полностью отключен для T0/T1;
-- direct reuse разрешен только для T4;
+- T4 сохраняется только как shadow deterministic evidence и `REVIEW_REQUIRED`;
 - T2/T3 допускаются максимум в shadow mode;
 - пользователь видит кандидатов и explanation.
 
@@ -510,7 +526,7 @@ margin_threshold = 0.080
 ```text
 resolve(query):
     if exact_sha_reuse(query) is consistent:
-        return AUTO_MATCH(T4)
+        return REVIEW_REQUIRED(T4, shadow_counterfactual="DETERMINISTIC_REUSE")
 
     candidates = generate_candidates(query)
     if candidates is empty:
@@ -545,33 +561,28 @@ resolve(query):
 
 Каждое автоматическое или ручное решение хранит:
 
-```text
-decision_id
-query_type
-query_id
-candidate_recording_id
-decision_state
-candidate_generation_version
-normalization_version
-feature_extractor_versions
-matcher_version
-calibrator_version
-threshold_set_version
-raw_score
-confidence
-top2_confidence
-margin
-evidence_tier
-feature_scores
-hard_conflicts
-candidate_origins
-actor_type
-actor_user_id nullable
-decided_at
-superseded_by_decision_id nullable
-```
+The logical record includes the typed query identity and snapshot, decision kind/mode,
+candidate/result state, complete release/version snapshot, scores/explanation, actor,
+idempotency identity, and the immutable backward `supersedes_decision_id`. The exact
+physical fields and constraints are enumerated below and in ADR-015; there is no
+mutable forward `superseded_by_decision_id` column.
 
 Stored explanation не должна зависеть от повторного запроса к provider.
+
+ADR-015 уточняет физический record без потери перечисленных полей:
+
+- typed query key: `IMPORT_ENTRY`, `USER_TRACK_REF`, `LOCAL_AUDIO`, `EXTERNAL_REFERENCE`, `VAULT_OBJECT` или `AUDIO_VARIANT`; owner/device обязательны для owner-scoped query;
+- sanitized `query_snapshot`, schema/canonicalization version и SHA-256;
+- `decision_kind`, `execution_mode`, manual `review_action` и reviewed predecessor evidence;
+- resolver state, selected/action Recording, exact candidate count, aggregate evidence SHA-256 и byte size;
+- `evidence_mode`, candidate-generation/normalization/extractor/matcher/calibrator/threshold versions;
+- scores, top-two, margin, tier, rank-one feature/conflict/origin explanation;
+- actor, scoped idempotency key/request hash;
+- immutable backward `supersedes_decision_id`, reason и time. Forward `superseded_by` получается inverse query и не требует UPDATE прошлого решения.
+
+Каждая decision содержит sealed snapshot 0..100 ranked candidates. Candidate evidence сохраняет Recording, rank, nullable scores, tier, schema-versioned feature/conflict/origin/extractor JSON и canonical SHA-256. Ranks непрерывны; selected/rank-one и top-two/margin согласованы двусторонне. Candidate document имеет максимум 128 KiB, decision aggregate - максимум 4 MiB. Late INSERT, UPDATE или DELETE отклоняется.
+
+`matcher_release`, `calibrator_release` и `threshold_set` immutable с момента INSERT. `match_policy_activation` хранит append-only `ACTIVATE`/`DEACTIVATE`/`ROLLBACK` chain по exact `(evidence_mode, evidence_tier)` scope. Initial schema содержит zero activation events.
 
 ---
 
@@ -590,6 +601,16 @@ Review UI показывает:
 - отдельное admin-действие `Merge global Recordings`.
 
 Обычный пользовательский Accept разрешает `UserTrackRef`, но не обязан выполнять глобальный merge.
+
+Manual review matrix:
+
+- `ACCEPT` ссылается на candidate evidence непосредственного predecessor и атомарно создает resolved owner projection;
+- `REJECT` ссылается на candidate predecessor и оставляет query reviewable, не отвергая автоматически все candidates;
+- `KEEP_UNRESOLVED` не имеет target и создает явную unresolved/deferred projection;
+- `CREATE_RECORDING` не ссылается на старый candidate, но атомарно сохраняет новую Recording как action target;
+- `INTEGRITY_CONFLICT` до новой conflict-cleared evaluation допускает только `KEEP_UNRESOLVED`.
+
+Review decision, audit и owner projection фиксируются одной transaction; partial commit отклоняется deferred invariant. Global `MERGE` остается отдельной admin command.
 
 ---
 
@@ -753,7 +774,7 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 - External ID namespace валидируется adapter manifest.
 - User input не становится SQL/regex без safe binding/limits.
 - Global merge/split требует authorization и audit.
-- Повторная decision command использует idempotency key.
+- Повторная decision command использует idempotency key: application command возвращает stored row только при совпадающем request hash; другой hash — stable conflict, direct duplicate INSERT — named unique violation.
 - Malicious file не попадает в serving до ingest validation.
 
 ---
@@ -761,11 +782,12 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 # 21. Compatibility rules
 
 - Matcher version immutable.
-- Threshold set immutable после активации.
+- Matcher/calibrator/threshold releases, activation events, decisions и candidate evidence append-only; threshold set immutable уже с INSERT.
 - Feature extractor version сохраняется для каждого evidence record.
 - Unknown feature игнорируется старым reader без удаления record.
 - Старое решение остается объяснимым после смены модели.
 - Re-score не меняет прошлое решение без новой decision row.
+- Shadow re-score не supersede текущую applied projection lineage; он начинает отдельную shadow lineage.
 - Android может показывать simplified explanation, не реализуя server matcher.
 
 ---
@@ -774,7 +796,7 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 
 | Сценарий | Ожидаемое решение |
 | --- | --- |
-| Повторный импорт того же файла | T4 deterministic reuse |
+| Повторный импорт того же файла до P00-D004 | T4 shadow evidence; applied semantics не утверждены |
 | FLAC и MP3 одной studio Recording | T3 candidate; auto только после benchmark |
 | Один Track в album и single | Одна Recording, разные ReleaseTrack |
 | Live и studio с одинаковым title | Hard conflict, не auto-merge |
@@ -801,6 +823,8 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 8. Resolution UserTrackRef не равен global merge.
 9. Все решения объяснимы и воспроизводимы по versioned evidence.
 10. Precision имеет приоритет над coverage.
+11. Полная identity history и release/policy registries append-only; owner projections не являются историей.
+12. Initial schema не активирует ни один auto-match scope.
 
 ---
 
@@ -830,6 +854,7 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 8. Включить shadow decisions.
 9. Активировать только прошедшие gate evidence tiers.
 10. Реализовать merge/split proposal отдельно от resolver.
+11. До runtime matcher проверить ADR-015 persistence invariants; P00-D004 требуется отдельно до applied T4 semantics.
 
 ---
 
@@ -863,3 +888,7 @@ Specification v1 считается готовой к реализации, ко
 - auto-match остается выключенным до прохождения gate;
 - manual review не запускает скрытый global merge;
 - matcher rollback сохраняет прошлые decision records.
+- все пять resolver states и оба execution modes имеют round-trip/negative fixtures;
+- candidate sets 0/1/2/100 sealed, а late INSERT/UPDATE/DELETE rejected;
+- manual review, supersession, activation/deactivation/rollback и owner projections покрыты transaction tests;
+- initial policy activation history empty, поэтому F-016 остаётся enforced до отдельного P00-D004 approval.

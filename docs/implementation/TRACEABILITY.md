@@ -18,7 +18,7 @@ Status meanings:
 | Future contracts, tests and migrations are placeholders only | P01 scope/non-goals | `contracts/*`, `tests/*`, `server/migrations/README.md` | File/dependency/scope audit; no schema, endpoint, contract payload or feature code | PASS |
 | Hosting-neutral CI matrix when hosting is unknown | P01 scope | `docs/implementation/CI_PLAN.md` | Windows/Linux/macOS CPU jobs plus Linux Android/Compose job and cold-cache policy | PASS |
 | Exact toolchain/dependency decisions recorded | P01 acceptance; P00-D007/D008/D009 | ADR-013, ADR-014, `VERSIONS.md` | Official-source compatibility review plus executable gates | PASS |
-| P02 not started and identity-schema blocker remains visible | P01 stop rule; P00-D003 | `PROGRESS.md` P02 BLOCKED; PLAN/R-014; this handoff | No Alembic config/revision, table model or executable schema exists | PASS |
+| P02 not started and identity-schema prerequisite is resolved | P01 stop rule; accepted P00-D003 | `PROGRESS.md` P02 `NOT_STARTED`; accepted ADR-015; PLAN/R-014 | Normative contract synchronized; no Alembic config/revision, table model or executable schema exists | PASS |
 
 ## P00 repository intake
 
@@ -50,7 +50,7 @@ Status meanings:
 | No destructive migration fallback | F-021; Room/PostgreSQL policies | `AGENTS.md`; R-001 | Future A-003/A-006/A-034 evidence | BASELINED |
 | Direct/local playback before Vault/transcode fallback | F-022; Architecture streaming | Phase plan P06/P08 | Future A-013-A-017 evidence | BASELINED |
 | Authorized adapters only; no DRM/secret scraping | F-023/F-024; product security | `AGENTS.md`; R-006/R-009 | Future P10/P14 security evidence | BASELINED |
-| Identity decision history/state must retain all narrower-spec evidence | Track Identity sections 12-13; PostgreSQL acceptance | P00-D003 in `PLAN.md`; R-014 | Design audit shows current DDL subset under `importing.*` | CHANGE_PROPOSED |
+| Identity decision history/state must retain all narrower-spec evidence | Track Identity sections 12-13; PostgreSQL acceptance | Accepted ADR-015 and `P00-D003_CHANGESET.md`; synchronized ER/PostgreSQL reference contract; P00-D003 in `PLAN.md`; R-014 | Normative fields, states, immutable history, version registries and P02 test requirements are aligned; executable persistence remains unimplemented | BASELINED |
 | Benchmark-gated auto-match vs deterministic T4 reuse terminology | F-016; Track Identity sections 12.2-12.3 | P00-D004 in `PLAN.md`; R-002 | Exact source conflict recorded; no semantic change made | CHANGE_PROPOSED |
 | Current phase authority vs legacy schema goal | Current P00-P14 build pack; legacy Codex goal | P00-D001 and `AGENTS.md` execution rule | Package/phase audit | CHANGE_PROPOSED |
 | P12/P13 prerequisite or explicit deferral before P14 | `PHASE_INDEX.md` dependency graph and deferral note | P00-D005; `PLAN.md`; R-015 | Both statements retained and conditional rule made explicit | CHANGE_PROPOSED |

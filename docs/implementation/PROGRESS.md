@@ -3,8 +3,8 @@
 | Phase | Status | Commit | Evidence | Blocker |
 | --- | --- | --- | --- | --- |
 | P00 | PASS | Parent of P01 phase commit | `docs/implementation/HANDOFF_P00.md` | None |
-| P01 | PASS | P01 phase commit at `HEAD` | `docs/implementation/HANDOFF_P01.md` | None |
-| P02 | BLOCKED | | `docs/build-pack/prompts/P02_postgresql_persistence.md` | P00-D003 user-approved schema/change-set resolution |
+| P01 | PASS | `48f8198738c6d50988e903cff7a8b4911c4d4615` | `docs/implementation/HANDOFF_P01.md` | None |
+| P02 | NOT_STARTED | | `docs/build-pack/prompts/P02_postgresql_persistence.md`; accepted ADR-015 and applied P00-D003 change set | None |
 | P03 | NOT_STARTED | | `docs/build-pack/prompts/P03_server_runtime.md` | P02 |
 | P04 | NOT_STARTED | | `docs/build-pack/prompts/P04_sync_contract.md` | P03; P00-D006 resolution |
 | P05 | NOT_STARTED | | `docs/build-pack/prompts/P05_android_foundation.md` | P04 and Room compatibility gate |

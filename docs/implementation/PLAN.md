@@ -11,7 +11,7 @@
 - The 40 original build-pack files remain at stable root and `docs/` paths; P00 governance remains authoritative.
 - P01 added a minimal typed Python package, standalone Compose shell, placeholders, exact lock/wrapper/catalog pins, one disposable PostgreSQL+pgvector service, canonical scripts and platform-neutral CI plan.
 - The server has no endpoint or product/domain behavior; Android has no Room/Media3/network/DI behavior; no executable persistence, contract or feature work exists.
-- P02 owns executable PostgreSQL persistence but is blocked on user-approved resolution of P00-D003.
+- P02 owns executable PostgreSQL persistence. P00-D003 is accepted and applied to the normative reference contract; P02 remains `NOT_STARTED` until a separate explicit phase request.
 - The current dependency graph is sequential P00-P11, with P12 and P13 optional only through explicit approved deferral before P14.
 
 ## Phase deliverables and gates
@@ -19,7 +19,7 @@
 | Phase | Dependencies | Repository deliverables | Required exit evidence | MVP acceptance |
 | --- | --- | --- | --- | --- |
 | [P01](../build-pack/prompts/P01_monorepo_foundation.md) | P00 handoff | Minimal `apps/android`, `server`, `contracts`, `deploy/compose`, test, ADR, wrapper/lock, README, and CI-smoke skeleton; exact validated toolchain pins | Frozen Python checks, Android build/unit smoke where environment supports it, Compose config/health, CPU dependency audit | A-001 |
-| [P02](../build-pack/prompts/P02_postgresql_persistence.md) | Green P01; identity-schema discrepancy P00-D003 resolved | Alembic revisions, typed SQLAlchemy mappings, PostgreSQL fixtures and object/invariant tests matching reference DDL | Real PostgreSQL 18 upgrade/downgrade/upgrade; 52 tables, 48 indexes, functions/triggers/constraints and drift evidence | A-003, A-004 |
+| [P02](../build-pack/prompts/P02_postgresql_persistence.md) | Green P01; accepted P00-D003 applied | Alembic revisions, typed SQLAlchemy mappings, PostgreSQL fixtures and object/invariant tests matching reference DDL | Real PostgreSQL 18 upgrade/downgrade/upgrade; 57 tables, 53 explicit indexes, 13 functions, 40 triggers, named constraints and drift evidence | A-003, A-004 |
 | [P03](../build-pack/prompts/P03_server_runtime.md) | Green P02 | Typed config, FastAPI/worker entrypoints, health, redacted structured logs, owner/device sessions, PostgreSQL lease worker | CPU-only API/worker start; auth, config, health, lease/retry/cancel and CUDA-import tests | A-002 |
 | [P04](../build-pack/prompts/P04_sync_contract.md) | Green P03; aggregate-ID mapping P00-D006 resolved | Sync Protocol v1, event JSON Schemas, OpenAPI operations, valid/invalid golden vectors and compatibility policy | Schema/OpenAPI validation and language-neutral expected outcomes for all vectors | Contract prerequisite for A-018-A-022 |
 | [P05](../build-pack/prompts/P05_android_foundation.md) | Green P04; Android compatibility decision recorded | Offline-launching Compose shell, Room v1 entities/DAOs/exported schema, FTS, transaction runner, Journal/cursor/tombstone/conflict storage | Room 3 compatibility gate; fresh/open/restart, R8/FTS, transaction failure, unknown-value and lease tests | A-005-A-007 |
@@ -43,13 +43,13 @@
 
 ## Discrepancies and proposed ADR/change items
 
-These items preserve source documents unchanged. An accepted ADR/change set must cite exact sources and update all affected specifications together.
+Proposed items preserve source documents unchanged. An accepted ADR/change set cites exact sources and updates all affected specifications together.
 
 | ID | Finding / proposed decision | Required before | State |
 | --- | --- | --- | --- |
 | P00-D001 | Establish execution authority: P00-P14 prompts and latest handoff govern phase order; `AutPlay_Codex_Goal_Schema_Foundation_v1.md` is retained as persistence-design history, not a runnable first phase. | P01 | Operationally accepted in P00/P01 repository contract; source document retained unchanged |
 | P00-D002 | Materialize/reconcile Architecture ADR-001-ADR-012 files and statuses. Architecture marks ADR-012 proposed, while ER/physical schemas and later decision baseline already depend on unresolved `UserTrackRef`. | Before broad feature work | Proposed documentation change; no semantic rollback |
-| P00-D003 | Add an immutable, general identity decision/evidence/history model and matcher/calibrator/threshold registry. Track Identity sections 12-13 require states, versions, margins, origins, actor and supersession that `importing.import_entry`/`match_candidate` do not fully preserve. | P02 migration implementation | Critical proposed schema/change set |
+| P00-D003 | Add an immutable, general identity decision/evidence/history model and matcher/calibrator/threshold registry. Track Identity sections 12-13 require states, versions, margins, origins, actor and supersession that `importing.import_entry`/`match_candidate` do not fully preserve. | P02 migration implementation | Accepted and applied through ADR-015 and `P00-D003_CHANGESET.md` revision `c108c109d8eb1ab71631ea79e831a20e6cc6811bff5264cb6d1bb38f7433ac71`; P02 remains `NOT_STARTED` |
 | P00-D004 | Clarify frozen F-016 terminology: deterministic reuse of one valid known SHA/T4 is not the same as probabilistic identity auto-match, or else keep both disabled until benchmark. Frozen wording cannot be reinterpreted without user approval. | P06 deterministic dedup and P10 matcher | User-approved ADR/change required |
 | P00-D005 | Define conditional phase reachability: P14 may follow P11 only when P12/P13 have explicit approved deferrals; otherwise both are prerequisites as shown by the dependency graph. | Before any P12/P13 deferral or P14 | Proposed build-governance ADR |
 | P00-D006 | Define local/server aggregate ID mapping in sync envelopes and ACKs. Room preserves local IDs plus nullable server IDs, while the reference server inbox exposes one `aggregate_id`. | P04 contract | Proposed sync-contract decision |

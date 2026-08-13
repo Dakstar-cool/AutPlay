@@ -2,10 +2,11 @@
 
 **Статус:** Draft for schema design  
 **Версия:** 1.0  
-**Основание:** `ТЗ AutPlay Draft 0.3` и `AutPlay System Architecture v1`  
+**Основание:** `ТЗ AutPlay Draft 0.3`, `AutPlay System Architecture v1` и `AutPlay Track Identity and Fingerprint Specification v1`
 **Целевая СУБД сервера:** PostgreSQL + pgvector  
 **Целевая локальная БД:** Android Room  
-**Связанный документ:** [AutPlay System Architecture v1](<AutPlay System Architecture v1.md>)  
+**Связанные документы:** [AutPlay System Architecture v1](<AutPlay System Architecture v1.md>), [AutPlay Track Identity and Fingerprint Specification v1](AutPlay_Track_Identity_v1.md), [ADR-015](../adr/ADR-015-immutable-identity-decision-history.md)
+**Нормативная поправка:** P00-D003, утвержденная ревизия `c108c109d8eb1ab71631ea79e831a20e6cc6811bff5264cb6d1bb38f7433ac71`
 
 ---
 
@@ -26,7 +27,7 @@ ER Model v1 определяет логическую модель данных 
 
 - PostgreSQL Schema v1;
 - Android Room Schema v1;
-- Track Identity Specification;
+- согласования с Track Identity Specification;
 - Import/Matching Protocol;
 - Sync Protocol;
 - merge/split operations;
@@ -95,10 +96,13 @@ JSONB разрешен для:
 - versioned raw provider payload;
 - versioned event payload;
 - adapter-specific bounded metadata;
+- schema-versioned sanitized identity query snapshots;
+- schema-versioned bounded candidate feature/conflict/origin evidence;
 - audit before/after snapshot;
 - ML metrics.
 
 JSONB не заменяет нормализованные FK, статусы и поля, участвующие в основных запросах.
+Identity JSONB сохраняет неизвестные допустимые feature/origin keys без потери, имеет явную schema/canonicalization version и фиксированные границы размера. Relational IDs, resolver state, execution mode, versions, actor и lineage не скрываются внутри JSONB.
 
 ## 3.5. Common columns
 
@@ -113,6 +117,8 @@ deleted_at nullable
 
 `row_version` увеличивается при конфликтных edits и используется вместе с ETag/`If-Match`.
 
+Шесть identity history/registry entities из раздела 14 являются append-only и не используют mutable-entity semantics `updated_at`, `row_version` или `deleted_at`: `matcher_release`, `calibrator_release`, `threshold_set`, `match_policy_activation`, `match_decision`, `match_candidate_evidence`. Любое изменение версии, policy lifecycle, re-score или review создает новую строку.
+
 ---
 
 # 4. PostgreSQL module schemas
@@ -120,12 +126,12 @@ deleted_at nullable
 | Schema | Владелец | Основные таблицы |
 | --- | --- | --- |
 | `catalog` | Identity Catalog | artist, recording, release_group, release, medium, release_track |
-| `identity` | Identity Resolution | identifiers, external refs, candidates, redirects, change sets |
+| `identity` | Identity Resolution | identifiers, external refs, matcher/calibrator/threshold registries, policy activations, immutable decisions/candidate evidence, redirects |
 | `vault` | Music Vault | vault_object, replica, audio_variant, fingerprint, canonical variant |
 | `account` | Users and Devices | user_account, device, session |
 | `library` | User Library | user_track_ref, user_track_ref_external_reference, library_entry, preference, listening_event |
 | `playlist` | Playlist Engine | playlist, playlist_entry |
-| `importing` | Library Migration | import_job, import_entry, match_candidate |
+| `importing` | Library Migration | import_job, import_entry workflow/current projections |
 | `sync` | Sync Engine | device_event_inbox, sync_event, cursor, tombstone, idempotency |
 | `jobs` | Job Scheduler | job, attempt, dependency |
 | `ml` | Recommendation Engine | model, embedding, taste cluster, recommendation request/item, offline pack |
@@ -505,6 +511,7 @@ erDiagram
     USER_TRACK_REF ||--o{ PLAYLIST_ENTRY : appears_in
     EXTERNAL_REFERENCE ||--o{ USER_TRACK_REF_EXTERNAL_REFERENCE : identifies
     USER_TRACK_REF ||--o{ USER_TRACK_REF_EXTERNAL_REFERENCE : aliases
+    MATCH_DECISION o|--o| USER_TRACK_REF : current_applied_decision
 ```
 
 ## 10.2. `account.user_account`
@@ -543,12 +550,17 @@ erDiagram
 | `raw_duration_ms` | bigint | Nullable |
 | `resolved_at` | timestamptz | Nullable |
 | `resolution_confidence` | numeric | Nullable, 0..1 |
+| `current_match_decision_id` | UUID | Nullable FK `identity.match_decision`, `ON DELETE RESTRICT` |
 
 Constraint:
 
 - `RESOLVED` требует `recording_id`;
 - unresolved row требует raw title/artist или хотя бы одну external reference association;
-- привязка Recording не уничтожает raw fields.
+- привязка Recording не уничтожает raw fields;
+- `current_match_decision_id`, если задан, указывает только на unique lineage leaf с `query_type = USER_TRACK_REF`, typed query FK этого UserTrackRef, тем же `user_id` и `execution_mode = APPLIED`;
+- deferred projection trigger проверяет согласованность resolver/manual outcome с `resolution_status`, `recording_id` и, когда она определена, `resolution_confidence`; `SHADOW`, `INTEGRITY_CONFLICT` и `DEFERRED_EVIDENCE` не могут разрешить UserTrackRef.
+
+Новая decision/review row и изменение этой projection фиксируются одной application transaction. Историческая decision row не изменяется при последующей смене текущего указателя.
 
 Unique active: `(user_id, recording_id)` для non-null canonical Recording. Resolve и catalog merge обязаны coalesce уже существующие UserTrackRef до изменения FK, сохраняя PlaylistEntry и history.
 
@@ -672,8 +684,10 @@ Server MAY хранить compact availability inventory, но не Android `con
 erDiagram
     JOB ||--o| IMPORT_JOB : specializes
     IMPORT_JOB ||--|{ IMPORT_ENTRY : parses
-    IMPORT_ENTRY ||--o{ MATCH_CANDIDATE : scores
-    RECORDING ||--o{ MATCH_CANDIDATE : candidate
+    IMPORT_ENTRY o|--o{ MATCH_DECISION : query_history
+    MATCH_DECISION ||--o{ MATCH_CANDIDATE_EVIDENCE : seals
+    RECORDING ||--o{ MATCH_CANDIDATE_EVIDENCE : candidate
+    MATCH_DECISION o|--o| IMPORT_ENTRY : current_applied_decision
     IMPORT_ENTRY ||--o| USER_TRACK_REF : materializes_as
 ```
 
@@ -705,75 +719,221 @@ erDiagram
 | `raw_duration_ms` | bigint | Nullable |
 | `raw_external_id` | text | Nullable |
 | `raw_payload` | jsonb | Size-limited |
-| `match_status` | enum | PENDING, AUTO_MATCH, REVIEW_REQUIRED, NO_MATCH, REJECTED |
+| `match_status` | enum | PENDING, AUTO_MATCH, REVIEW_REQUIRED, NO_MATCH, MANUAL_MATCH, MANUAL_UNRESOLVED, INTEGRITY_CONFLICT, DEFERRED_EVIDENCE, REJECTED |
 | `selected_recording_id` | UUID | Nullable FK |
 | `user_track_ref_id` | UUID | Nullable FK after materialization |
+| `current_match_decision_id` | UUID | Nullable FK `identity.match_decision`, `ON DELETE RESTRICT` |
 
 Unique: `(import_job_id, source_row_key)`.
 
-## 13.3. `importing.match_candidate`
+`match_status`, `selected_recording_id` и `current_match_decision_id` являются изменяемой workflow/current projection, а не historical source of truth. Deferred projection trigger проверяет, что current decision:
 
-| Поле | Тип | Ограничение |
-| --- | --- | --- |
-| `match_candidate_id` | UUID | PK |
-| `import_entry_id` | UUID | FK |
-| `recording_id` | UUID | FK |
-| `rank` | integer | >= 1 |
-| `confidence` | numeric | 0..1 |
-| `feature_scores` | jsonb | Versioned explanation |
-| `matcher_version` | text | NOT NULL |
-| `decision` | enum | NONE, ACCEPTED, REJECTED |
-| `decided_by_user_id` | UUID | Nullable |
+- имеет `query_type = IMPORT_ENTRY` и typed FK этого `import_entry_id`;
+- принадлежит тому же пользователю через `import_job.user_id`;
+- имеет `execution_mode = APPLIED` и является unique lineage leaf;
+- согласуется по resolver/manual outcome, `match_status` и `selected_recording_id`;
+- не является shadow prediction, integrity/deferred outcome или decision другого import row.
 
-Unique: `(import_entry_id, recording_id, matcher_version)`.
+`AUTO_MATCH` projection допускается только для валидной applied SYSTEM evaluation после активации exact-scope policy. На момент принятия P00-D003 в initial schema нет activation events, поэтому этот статус не может быть получен до отдельного прохождения frozen F-016 gate. `REJECTED` остается состоянием import workflow/validation, а не candidate disposition: manual `REJECT` одного кандидата оставляет query reviewable; terminal unresolved choice выражается `MANUAL_UNRESOLVED`.
+
+Создание applied decision/review row и обновление import projection выполняются атомарно. Если identity history ссылается на import envelope, entry не удаляется каскадно. Configured retention очищает/обнуляет ограниченный `raw_payload`, но сохраняет typed query identity и immutable decision/evidence history.
+
+## 13.3. Identity-owned candidate and decision history
+
+`importing.match_candidate` не существует в согласованной модели. Import является только одним из типов query. Общая history для import, UserTrackRef, local audio, ExternalReference, VaultObject и AudioVariant принадлежит Identity Resolution и хранится в `identity.match_decision`/`identity.match_candidate_evidence`, описанных в разделе 14.
+
+Это разделение гарантирует, что удаление/retention import payload не уничтожает candidate evidence, matcher/calibrator/threshold provenance, manual review или supersession history.
 
 ---
 
 # 14. Match Decision Model
 
-Candidate generation выполняется отдельно от decision.
+Identity Resolution владеет общей immutable decision/evidence history. Candidate generation выполняется отдельно от resolver decision, а resolution конкретного owner object выполняется отдельно от глобального merge/split Recording.
 
-## 14.1. Candidate sources
+## 14.1. Query identity and candidate sources
 
-1. Exact provider external ID.
-2. ISRC/MBID lookup.
-3. Normalized artist + title + version markers.
-4. Artist + title + duration window.
-5. Album/release context.
-6. Fuzzy/transliteration search.
-7. После получения audio - fingerprint similarity.
+Candidate generators включают exact provider reference, ISRC/MBID, normalized metadata/version markers, duration/release context, fuzzy/transliteration search, SHA-256 и versioned fingerprint evidence. Каждый generator сохраняет origin и исходный rank; union содержит не более 100 unique canonical Recording candidates.
 
-## 14.2. Decision states
+`identity.match_decision.query_type` имеет закрытый v1-набор и один соответствующий typed query key:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Unresolved
-    Unresolved --> Candidates: candidate generation
-    Candidates --> Resolved: confidence above auto threshold
-    Candidates --> Ambiguous: review band
-    Candidates --> NotFound: no acceptable candidate
-    Ambiguous --> Resolved: user accepts
-    Ambiguous --> NotFound: user rejects all
-    Resolved --> Ambiguous: later conflict detected
-```
+| `query_type` | Typed key | Owner/scope rule |
+| --- | --- | --- |
+| `IMPORT_ENTRY` | `import_entry_id` FK | `owner_user_id` обязателен и совпадает с import job owner |
+| `USER_TRACK_REF` | `user_track_ref_id` FK | `owner_user_id` обязателен и совпадает с UserTrackRef owner |
+| `LOCAL_AUDIO` | `local_audio_id` opaque client UUID | `owner_user_id` и `device_id` обязательны; identity включает все три значения |
+| `EXTERNAL_REFERENCE` | `external_reference_id` FK | SYSTEM query может не иметь initiating user; user command проверяет authorization до insert |
+| `VAULT_OBJECT` | `vault_object_id` FK | То же правило для shared server object |
+| `AUDIO_VARIANT` | `audio_variant_id` FK | То же правило для shared server object |
 
-## 14.3. Required decision evidence
+CHECK/validator требует ровно один key, соответствующий `query_type`; generic непроверенный polymorphic `query_id` запрещен. `LOCAL_AUDIO` является явно типизированной device-scoped identity, а не ссылкой на произвольный server UUID.
+
+Каждая decision row также хранит allowlisted sanitized `query_snapshot`, его schema version, `snapshot_canonicalization_version` и SHA-256 canonical bytes. Для v1 canonicalization используется RFC 8785. Snapshot содержит только normalized identity attributes и opaque evidence IDs, не содержит tokens, private URLs, raw user paths или full provider payload, не требует повторного provider call для explanation и ограничен 128 KiB. База проверяет JSON type, version presence и UTF-8 serialized size; application sanitizer/allowlist и canonical hash покрываются negative integration fixtures.
+
+## 14.2. Immutable matcher and policy registries
+
+Все registry rows неизменяемы с момента insert. Изменение generator, normalizer, extractor manifest, matcher, calibrator или thresholds создает новую version row. Все version identifiers имеют длину 1..200 UTF-8 characters.
+
+### 14.2.1. `identity.matcher_release`
+
+| Поле | Тип | Ограничение |
+| --- | --- | --- |
+| `matcher_version` | text | PK; 1..200 UTF-8 characters |
+| `candidate_generation_version` | text | NOT NULL, non-empty |
+| `normalization_version` | text | NOT NULL, non-empty |
+| `feature_extractor_versions` | jsonb | Object schema v1, exact feature-to-extractor manifest, max 128 KiB |
+| `manifest_sha256` | bytea | Exactly 32 bytes; canonical release manifest hash |
+| `created_at` | timestamptz | Server timestamp |
+
+### 14.2.2. `identity.calibrator_release`
+
+| Поле | Тип | Ограничение |
+| --- | --- | --- |
+| `calibrator_version` | text | PK; 1..200 UTF-8 characters |
+| `matcher_version` | text | FK matcher release, `ON DELETE RESTRICT` |
+| `evidence_mode` | enum | METADATA_ONLY, AUDIO_AVAILABLE |
+| `artifact_sha256` | bytea | Exactly 32 bytes |
+| `input_schema_version` | text | NOT NULL, non-empty |
+| `created_at` | timestamptz | Server timestamp |
+
+Детерминированная или shadow evaluation без calibrator хранит null calibrator FK; placeholder release не создается.
+
+### 14.2.3. `identity.threshold_set`
+
+| Поле | Тип | Ограничение |
+| --- | --- | --- |
+| `threshold_set_version` | text | PK; 1..200 UTF-8 characters |
+| `matcher_version` | text | FK matcher release, `ON DELETE RESTRICT` |
+| `calibrator_version` | text | Nullable FK; null только для non-activatable shadow evidence |
+| `evidence_mode` | enum | METADATA_ONLY, AUDIO_AVAILABLE, DETERMINISTIC_BYTES |
+| `minimum_evidence_tier` | enum | T0, T1, T2, T3, T4 |
+| `auto_threshold` | numeric | 0..1 |
+| `review_threshold` | numeric | 0..1; `auto_threshold >= review_threshold` |
+| `margin_threshold` | numeric | 0..1 |
+| `benchmark_report_sha256` | bytea | Nullable для shadow-only set; exactly 32 bytes и required при activation |
+| `gate_metadata` | jsonb | Allowlisted schema-versioned object, max 128 KiB |
+| `created_at` | timestamptz | Server timestamp |
+
+`gate_metadata` не содержит benchmark payload, secrets, raw paths или private URLs. Benchmark report остается внешним immutable artifact и идентифицируется только hash/provenance.
+
+## 14.3. `identity.match_policy_activation`
+
+Policy lifecycle хранится как append-only event log, а не mutable `ACTIVE` flag.
+
+| Поле | Тип | Ограничение |
+| --- | --- | --- |
+| `activation_id` | UUID | PK |
+| `evidence_mode` | enum | Exact activation scope part |
+| `evidence_tier` | enum | T0..T4, exact activation scope part |
+| `sequence_no` | bigint | Positive; UNIQUE within scope |
+| `action` | enum | ACTIVATE, DEACTIVATE, ROLLBACK |
+| `threshold_set_version` | text | FK immutable threshold set, `ON DELETE RESTRICT` |
+| `supersedes_activation_id` | UUID | Nullable backward self-FK |
+| `actor_type` | enum | ADMIN |
+| `actor_user_id` | UUID | Required active OWNER/ADMIN account FK |
+| `reason` | text | Required audited reason |
+| `created_at` | timestamptz | Server timestamp |
+
+Первое событие имеет sequence 1. Каждое следующее same-scope событие supersedes latest event и использует `predecessor.sequence_no + 1`; UNIQUE constraints на scope/sequence и non-null predecessor не допускают branch. ACTIVATE/ROLLBACK требуют non-null calibrator, 32-byte benchmark report hash и совпадение matcher/calibrator/evidence mode/tier. ROLLBACK может выбрать только threshold set, ранее активированный в том же scope. Current policy определяется latest event.
+
+Activation/deactivation/rollback и applied SYSTEM auto decision сериализуются одним transaction-scoped advisory lock по `(evidence_mode, evidence_tier)`, чтобы policy нельзя было деактивировать между validation и commit.
+
+## 14.4. `identity.match_decision`
+
+Каждая automatic evaluation и manual review action создает отдельную immutable row.
+
+| Группа | Поля и ограничения |
+| --- | --- |
+| Identity | `decision_id` UUID PK; `query_type`; ровно один typed query key; conditionally required `owner_user_id`/`device_id`; sanitized query snapshot, schema/canonicalization versions и 32-byte hash |
+| Kind/mode | `decision_kind = EVALUATION or REVIEW_ACTION`; `execution_mode = SHADOW or APPLIED`; nullable `review_action` только для review row |
+| Result | Nullable selected/action `candidate_recording_id` FK; один из пяти resolver states; `candidate_count` 0..100; 32-byte aggregate candidate-evidence hash |
+| Version snapshot | `evidence_mode`; candidate-generation, normalization и feature-extractor versions; matcher/calibrator/threshold-set FKs |
+| Scores | Nullable `raw_score`, `confidence`, `top2_confidence`, `margin`; nullable `evidence_tier` |
+| Explanation | Schema-versioned rank-one `feature_scores`, `hard_conflicts`, `candidate_origins`; optional explicitly labeled shadow counterfactual classification; unknown allowed keys round-trip unchanged |
+| Actor | `actor_type = SYSTEM, USER or ADMIN`; user FK required для USER/ADMIN и null для SYSTEM |
+| Idempotency | `idempotency_scope` 1..100 chars, key 1..200 chars, 32-byte request hash; scope/key UNIQUE |
+| Review link | Nullable `reviewed_candidate_evidence_id`; validator-backed reference только к immediate predecessor evidence |
+| Lineage | Nullable backward `supersedes_decision_id`; required supersession reason; `decided_at` server timestamp |
+
+Version snapshot обязан совпадать с referenced immutable release manifests. Threshold FK обязателен для `AUTO_MATCH`; в остальных states он может быть null. Rank-one summary в decision byte-equal соответствующему candidate evidence и не является заменой полного candidate set. Каждый decision JSON object/array имеет explicit schema version или versioned enclosing schema и собственный limit 128 KiB.
+
+## 14.5. `identity.match_candidate_evidence`
+
+| Поле | Тип | Ограничение |
+| --- | --- | --- |
+| `match_candidate_evidence_id` | UUID | PK |
+| `decision_id` | UUID | FK decision, `ON DELETE RESTRICT` |
+| `recording_id` | UUID | FK Recording, `ON DELETE RESTRICT` |
+| `rank` | integer | 1..100 |
+| `raw_score` | numeric | Nullable только для deferred evidence; иначе 0..1 |
+| `confidence` | numeric | Nullable только для deferred evidence; иначе 0..1 |
+| `evidence_tier` | enum | T0..T4 |
+| `feature_scores` | jsonb | Schema-versioned array, max 128 KiB |
+| `hard_conflicts` | jsonb | Schema-versioned array, max 128 KiB |
+| `candidate_origins` | jsonb | Schema-versioned array с каждым generator/rank, max 128 KiB |
+| `extractor_versions` | jsonb | Schema-versioned object, max 128 KiB |
+| `evidence_sha256` | bytea | Exactly 32 bytes over RFC 8785 canonical evidence document |
+| `created_at` | timestamptz | Server timestamp |
+
+UNIQUE: `(decision_id, rank)` и `(decision_id, recording_id)`. Candidate ranks contiguous. Feature/origin arrays содержат максимум 256 elements, hard-conflict array максимум 64; сумма четырех JSON columns одной candidate row не превышает 128 KiB, а total canonical candidate evidence одной decision не превышает 4 MiB.
+
+`feature_scores` losslessly сохраняет как минимум `feature`, `value`, `present`, `extractor_version` и `evidence_refs`; missing `present` evidence не подменяется value 0. Каждый JSON object/array имеет explicit schema version или versioned enclosing schema. `candidate_origins` сохраняет каждый generator и его исходный rank, даже если несколько generators привели к одному Recording.
+
+Decision aggregate hash вычисляется по `int4send(rank) || evidence_sha256` в ascending rank order; для zero candidates хешируется empty byte stream. Deferred constraint validator требует точного совпадения row count/hash, selected Recording и complete rank-one summary, а также bidirectional agreement rank 2 с `top2_confidence`/`margin`. Любая поздняя candidate insertion нарушает sealed count/hash и отклоняется. Таким образом decision и 0/1/2/100 candidates коммитятся как один sealed snapshot.
+
+## 14.6. Resolver states, modes and nullability
+
+Resolver state имеет ровно пять значений:
 
 ```text
-matcher_version
-candidate_generation_version
-feature_scores
-duration_delta_ms
-fingerprint_similarity nullable
-external_id_match flags
-version_marker conflicts
-confidence
-threshold_set_version
-actor: SYSTEM | USER | ADMIN
-decided_at
+AUTO_MATCH
+REVIEW_REQUIRED
+NO_MATCH
+INTEGRITY_CONFLICT
+DEFERRED_EVIDENCE
 ```
 
-Пороговые значения не задаются в ER document. Они выпускаются после validation benchmark.
+Resolver state не является candidate disposition, manual review action, import workflow state или UserTrackRef resolution state.
+
+Обязательные правила:
+
+- Scores либо null, либо в `[0,1]`; missing evidence не превращается в zero.
+- `top2_confidence` требует top-one `confidence` и `margin`; `margin = confidence - top2_confidence` с согласованной numeric precision и неотрицателен. При отсутствии rank 2 оба поля null.
+- `AUTO_MATCH` допустим только для `APPLIED + EVALUATION`, SYSTEM actor, selected rank-one candidate, active exact-scope benchmark-approved policy, matching releases, calibrator, достаточных tier/score/margin и пустого hard-conflict set.
+- `SHADOW` никогда не меняет catalog, import или user projection. Shadow/unapproved evaluation сохраняет resolver state `REVIEW_REQUIRED`; counterfactual result хранится только как явно маркированное explanation metadata, не как `AUTO_MATCH`.
+- `REVIEW_REQUIRED` evaluation имеет хотя бы одного candidate. Если evidence acquisition не дала scored candidate, используется `DEFERRED_EVIDENCE`.
+- `NO_MATCH` не имеет selected candidate, но может сохранять ranked candidates ниже review threshold.
+- `INTEGRITY_CONFLICT` требует non-empty integrity/hard-conflict reason set и не меняет resolution projection.
+- `DEFERRED_EVIDENCE` может иметь candidates с null scores и не меняет resolution projection.
+- Hard conflict и недостаточный top-two margin различаются: conflict хранится как blocker evidence, а margin является отдельным gate, приводящим к review.
+
+## 14.7. Manual review contract
+
+`review_action` имеет значения `ACCEPT`, `REJECT`, `KEEP_UNRESOLVED`, `CREATE_RECORDING`. Review row всегда `APPLIED`, имеет USER/ADMIN actor с owner/admin authorization, supersedes evaluation/предыдущий review той же query lineage, копирует predecessor resolver state и никогда не кодируется как `AUTO_MATCH`.
+
+- `ACCEPT` разрешен из `REVIEW_REQUIRED`, требует `reviewed_candidate_evidence_id` immediate predecessor и атомарно проецирует этот Recording как manual match/resolved target.
+- `REJECT` разрешен из `REVIEW_REQUIRED`, требует immediate predecessor candidate evidence и оставляет query reviewable; он не означает rejection всех candidates/query.
+- `KEEP_UNRESOLVED` разрешен из любого non-auto resolver state, не имеет selected target и проецирует manual-unresolved state.
+- `CREATE_RECORDING` разрешен из `REVIEW_REQUIRED`, `NO_MATCH` или `DEFERRED_EVIDENCE`, не имеет reviewed-candidate FK, требует newly created Recording как action target и атомарно проецирует manual match/resolved target.
+- `INTEGRITY_CONFLICT` допускает только `KEEP_UNRESOLVED`, пока новая evaluation не докажет устранение conflict.
+- Global `MERGE` отсутствует в review-action vocabulary и остается отдельной authorized/audited command.
+
+Review row сохраняет predecessor aggregate hash и target evidence, чтобы manual outcome объяснялся без current provider/model state. Decision/review row, owner projection, audit и создаваемый при необходимости UserTrackRef/Recording коммитятся одной application transaction; deferred triggers отклоняют partial/divergent commit.
+
+## 14.8. Append-only lineage and idempotency
+
+Все шесть таблиц разделов 14.2-14.5 отклоняют ordinary UPDATE/DELETE. Physical lineage использует backward `supersedes_decision_id` на новой row; conceptual `superseded_by` получается inverse query, поэтому predecessor никогда не обновляется.
+
+Validator/UNIQUE constraints запрещают self-supersession, different typed query identity, equal/earlier `decided_at`, больше одного direct successor, branch и cycle. Для `LOCAL_AUDIO` query equality включает owner и device. Owner projections указывают только на unique lineage leaf.
+
+Re-score, manual review, conflict discovery и rollback append new decision rows, сохраняя старые scores, features, origins, actors и version FKs byte-for-byte explainable. Application command обрабатывает named unique collision по scope/key: при том же request hash возвращает существующую row, а при другом hash отклоняет stable conflict error; raw direct INSERT сам по себе возвращает unique violation.
+
+## 14.9. Frozen F-016 and P00-D004 boundary
+
+Initial reference schema содержит zero `match_policy_activation` events. Поэтому она не разрешает applied `AUTO_MATCH` ни для одного evidence tier, включая T4. Consistent T4 exact-byte knowledge может быть сохранено как evidence и shadow counterfactual, но до отдельного решения P00-D004 физически представляется как `SHADOW + REVIEW_REQUIRED` при nullable calibrator/top-two/margin; несовместимая T4 evidence остается `SHADOW + INTEGRITY_CONFLICT`, а недоступная evidence — `SHADOW + DEFERRED_EVIDENCE`. Ни один из этих shadow outcomes не меняет projection.
+
+Этот ER change не решает, является ли deterministic T4 reuse семантически отдельным от frozen F-016 probabilistic auto-match, и не ослабляет F-016. Threshold values и activation появляются только после labeled benchmark/calibration gate и отдельного policy event; P00-D004 требует самостоятельного user-approved change.
+
+В P00-D003 `calibrator_release.evidence_mode` ограничен `METADATA_ONLY`/`AUDIO_AVAILABLE`, а activation требует matching non-null calibrator. Поэтому `DETERMINISTIC_BYTES` намеренно не activatable этой ревизией; любое добавление отдельного deterministic activation path или нового calibrator mode относится только к будущему утвержденному P00-D004.
 
 ---
 
@@ -1203,12 +1363,15 @@ Audit не содержит access token, password, raw credentials или по�
 | VaultObject | QUARANTINED | После grace period, replica/ref recheck и audit |
 | ListeningEvent | По user retention/privacy policy | Partition/retention job |
 | JobAttempt | Retention window | Operational cleanup |
-| Raw import payload | User/configured retention | Secure cleanup |
+| Raw import payload | User/configured retention; referenced query envelope остается | Secure payload cleanup без удаления identity history |
+| Matcher/calibrator/threshold registry | Нет ordinary update/delete | Reference DDL не удаляет; новый manifest получает новую version |
+| Match policy activation | Только новый ACTIVATE/DEACTIVATE/ROLLBACK event | Reference DDL не удаляет |
+| Match decision/candidate evidence | Только новая superseding decision | Reference DDL не удаляет; будущая privacy/legal migration требует отдельного утверждения |
 | Embedding/index | RETIRED/derived | Safe rebuildable cleanup |
 
 `ON DELETE CASCADE` разрешен только для чистых association/derived children, когда parent deletion уже прошел domain policy.
 
-Для catalog, Vault и user content default - `RESTRICT` плюс явная application command.
+Для catalog, Vault, user content и identity history default - `RESTRICT` плюс явная application command. Ни import retention, ни удаление projection pointer не каскадируют в immutable decision/evidence rows.
 
 ---
 
@@ -1233,6 +1396,15 @@ Audit не содержит access token, password, raw credentials или по�
 17. Job dependency graph не образует cycles.
 18. Embedding dimension соответствует Model Registry.
 19. User-owned entity access проверяет user/principal, а не только UUID.
+20. Match decision имеет ровно один typed query key, соответствующий `query_type`; owner/device scope проверяется relational FK/CHECK/trigger rules.
+21. Шесть identity registry/history tables отклоняют UPDATE/DELETE; release manifests и policy history меняются только append.
+22. Candidate rows имеют unique contiguous ranks 1..100 и sealed count/aggregate hash; late insert и divergent rank-one/top-two summary отклоняются.
+23. `supersedes_decision_id` сохраняет same-query single-successor acyclic lineage с возрастающим `decided_at`; predecessor никогда не обновляется.
+24. Resolver state, execution mode, decision kind, actor и manual action подчиняются правилам разделов 14.6-14.7; nullable score/evidence не заменяется нулем.
+25. Applied SYSTEM `AUTO_MATCH` требует active exact-scope benchmark-approved matcher/calibrator/threshold policy, все tier/score/margin gates и отсутствие hard conflict.
+26. Policy activation sequence не имеет gap/branch; rollback ссылается только на ранее activated same-scope threshold set; activation/deactivation и applied auto decision сериализуются.
+27. `SHADOW` и integrity/deferred outcomes не могут изменять owner projection; current import/UserTrackRef pointer совпадает по query, owner, lineage leaf, target и state/action.
+28. Identity decision idempotency scope/key unique: application command возвращает existing row при same request hash и отклоняет different hash; direct duplicate INSERT получает named unique violation.
 
 Часть cross-table constraints потребует deferred trigger или application invariant с integration tests. Они должны быть перечислены в PostgreSQL Schema v1 явно.
 
@@ -1249,6 +1421,12 @@ Audit не содержит access token, password, raw credentials или по�
 | `external_reference` | provider, type, external_id, market | Exact provider resolution |
 | `vault_object` | unique sha256 | CAS dedup |
 | `audio_fingerprint` | algorithm/version/hash representation | Fingerprint candidates |
+| `identity.threshold_set` | `ix_threshold_set_scope` | Matcher/calibrator/evidence scope lookup |
+| `identity.match_policy_activation` | `ix_match_policy_activation_threshold_time` | Policy history by threshold/time and current-scope resolution |
+| `identity.match_decision` | `ix_match_decision_query_time` | Query lineage/history |
+| `identity.match_decision` | `ix_match_decision_candidate_time` | Reverse selected/action Recording history |
+| `identity.match_decision` | `ix_match_decision_matcher_time` | Version audit/replay |
+| `identity.match_candidate_evidence` | `ix_match_candidate_evidence_recording` | Reverse candidate evidence lookup |
 | `user_track_ref` | partial unique user_id, recording_id for active resolved rows | User resolution lookup and coalesce invariant |
 | `user_track_ref_external_reference` | external_reference_id, user_track_ref_id | Reverse provider lookup |
 | `library_entry` | user_id, removed_at, added_at | Library pages |
@@ -1280,6 +1458,20 @@ Index types и parameters фиксируются после `EXPLAIN ANALYZE` н
 | Один Track дважды в playlist | Без изменения | Без изменения | Без изменения | Без изменения | 1 ref, 2 PlaylistEntry |
 | Повторный импорт того же файла | Без дубликатов | Без дубликатов | Без дубликатов | Без дубликатов | Existing refs reused/mapped |
 
+Дополнительная identity-history validation:
+
+| Сценарий | Ожидаемая history/projection |
+| --- | --- |
+| Candidate set содержит 0, 1, 2 или 100 rows | One sealed decision snapshot; count/hash и rank/top-two rules выполняются |
+| Попытка candidate 101, rank gap или late insert | Transaction rejected; committed history не меняется |
+| Provider недоступен после решения | Query snapshot, origins, features и version FKs полностью объясняют старое решение |
+| Unknown versioned feature/origin key | Старый reader безопасно игнорирует, persistence round-trip не удаляет key |
+| Shadow evaluation | `REVIEW_REQUIRED` плюс labeled counterfactual; import/UserTrackRef/catalog projection не меняется |
+| Manual Accept/Reject/Keep unresolved/Create Recording | Новая applied review row supersedes predecessor; projection меняется только по action contract; global merge не выполняется |
+| Re-score или обнаружение conflict | Новая decision row; predecessor и candidate evidence byte-for-byte неизменны |
+| Очистка retained import payload | Raw payload удален, import envelope и identity decision/evidence history доступны |
+| Две concurrent superseding decisions/activations | UNIQUE/lock оставляет только одну valid successor branch |
+
 ## 24.1. Acceptance fixtures
 
 Минимальный fixture dataset должен содержать:
@@ -1298,7 +1490,15 @@ Index types и parameters фиксируются после `EXPLAIN ANALYZE` н
 - похожие названия с разной длительностью;
 - Cyrillic/Latin transliteration;
 - одинаковый audio в разных codec;
-- corrupted and truncated file.
+- corrupted and truncated file;
+- все пять resolver states и оба execution modes;
+- 0/1/2/100 candidate ranks, multiple generator origins и unknown feature key;
+- selected/rank-one equality и bidirectional rank-two/margin cases;
+- manual review для всех четырех actions и invalid predecessor/target cases;
+- self/cycle/cross-query/earlier-time/branch supersession attempts;
+- inactive/mismatched policy, missing benchmark/calibrator и hard-conflict auto-match rejection;
+- provider-unavailable historical explanation и import-payload cleanup retention;
+- RFC 8785/hash, JSON shape/cardinality/size boundary и sensitive-field rejection fixtures.
 
 ---
 
@@ -1345,15 +1545,19 @@ RecommendationPack
 2. `account` users/devices.
 3. `catalog` artist credits, recordings, releases.
 4. `audit` base events and catalog change sets.
-5. `identity` providers, external refs, identifiers, redirects.
-6. `library` UserTrackRef, external reference associations and entries.
+5. `identity` providers, external refs, identifiers, redirects и immutable matcher/calibrator/threshold registries.
+6. `library` UserTrackRef, external reference associations and entries без reverse current-decision FK.
 7. `playlist` playlists and entries.
 8. `vault` objects, replicas, variants, fingerprints.
 9. `jobs` generic queue.
-10. `importing` job extensions and candidates.
-11. `sync` inbox, event log, cursors, tombstones.
-12. `ml` model registry and embeddings.
-13. deferred cross-module FK, indexes and constraints requiring populated tables.
+10. `importing` job extensions и import entries без candidate table/current-decision FK.
+11. `identity` match decisions, candidate evidence и append-only policy activation после появления всех typed query owners.
+12. Nullable `current_match_decision_id` FK для UserTrackRef/import entry и deferred validation/projection triggers.
+13. `sync` inbox, event log, cursors, tombstones.
+14. `ml` model registry and embeddings.
+15. Deferred cross-module FK, explicit indexes и constraints requiring populated tables.
+
+Такой порядок разрывает обязательный create-time cycle: owner rows создаются до immutable decisions, а reverse projection pointers добавляются после decision tables. Initial migration вставляет zero policy activation events.
 
 Migration tests должны проверять:
 
@@ -1363,7 +1567,9 @@ Migration tests должны проверять:
 - preservation of UUID and playlist order;
 - redirect resolution;
 - idempotent migration rerun where tooling permits;
-- failure before and after data backfill boundary.
+- failure before and after data backfill boundary;
+- clean decision/evidence seal and all append-only/typed-query/projection constraints;
+- upgrade/downgrade/upgrade с точным inventory identity tables, indexes, functions и triggers без destructive fallback.
 
 ---
 
@@ -1384,6 +1590,14 @@ Migration tests должны проверять:
 13. Embeddings coexist by model/preprocessing version.
 14. Generic operational events use versioned JSON payload, while core relations remain normalized.
 15. Provider ExternalReference может быть targetless до resolution и переиспользуется между user-owned associations.
+16. Match decision/evidence history принадлежит Identity Resolution и не ограничена import workflow.
+17. Matcher, calibrator и threshold definitions immutable from insertion; activation/deactivation/rollback являются append-only events.
+18. Resolver state, execution mode, review action, import workflow state и UserTrackRef resolution state являются разными concepts.
+19. Decision/candidate set является sealed snapshot; unknown versioned evidence сохраняется losslessly.
+20. Supersession хранится backward link на новой row; forward `superseded_by` является derived inverse relation.
+21. ImportEntry и UserTrackRef хранят только validated nullable pointer на текущую applied lineage leaf; historical source of truth не мутируется.
+22. Shadow evaluation не меняет domain projections, а manual resolution не является global Recording merge.
+23. Initial schema имеет zero policy activation events. P00-D003 не меняет frozen F-016 и не решает P00-D004/T4 terminology.
 
 ---
 
@@ -1402,6 +1616,8 @@ Migration tests должны проверять:
 | Full-text engine | PostgreSQL FTS + pg_trgm или external | PostgreSQL first |
 | Cross-schema FK | Direct FK или published IDs only | Direct FK inside one DB, module writes still restricted |
 
+Отдельное product-level решение P00-D004 остается открытым: является ли deterministic reuse одного проверенного T4/SHA отдельной операцией от probabilistic auto-match или также остается выключенным до benchmark. Этот ER contract не выбирает трактовку и до ее утверждения допускает для consistent T4 только immutable evidence и shadow `REVIEW_REQUIRED`, а incompatible/unavailable evidence — shadow `INTEGRITY_CONFLICT`/`DEFERRED_EVIDENCE`; ни один outcome не меняет projection, сохраняя F-016 без изменений.
+
 ---
 
 # 29. ER v1 Acceptance Checklist
@@ -1418,19 +1634,28 @@ ER v1 готова к DDL design, когда:
 8. Server sync может дедуплицировать event и command retry.
 9. ML model change не требует destructive update embeddings.
 10. Room projection поддерживает local-first IDs до server connection.
-11. Все полиморфные связи имеют DB constraint или явно документированный application invariant.
+11. Identity query не использует generic unverified polymorphic UUID: ровно один typed key и owner/device scope проверяются.
 12. PostgreSQL Schema v1 сможет быть создана без циклической обязательной migration dependency.
+13. Все пять resolver states, SHADOW/APPLIED modes и manual actions имеют непротиворечивые nullable/state/actor rules.
+14. 0/1/2/100-candidate decision sets sealed count/hash constraints; late insert и rank/summary divergence отклоняются.
+15. Историческая explanation остается provider-independent и воспроизводимой по immutable release/evidence snapshot.
+16. Re-score/review/conflict/rollback append new rows; update/delete, branch и cycle history отклоняются.
+17. Import/UserTrackRef current pointers согласуются по typed query, owner, applied mode, lineage leaf, state/action и Recording target.
+18. Initial schema содержит zero activation events и не разрешает applied auto-match до frozen F-016 benchmark/calibration gate.
+19. P00-D004/T4 semantic choice остается явно открытым и не скрывается physical schema default.
 
 ---
 
 # 30. Следующий шаг
 
-На основе ER v1 необходимо подготовить:
+Утвержденная поправка P00-D003 требует синхронизировать reference PostgreSQL design/DDL с шестью identity registry/history tables, sealed candidate evidence и validated owner projections. Эта нормативная синхронизация сама по себе не начинает P02 и не создает executable migration.
 
-1. PostgreSQL DDL v1 с точными типами, CHECK, FK и indexes.
-2. Alembic initial migration и migration test matrix.
-3. SQLAlchemy typed models без смешения domain и persistence entities.
+После завершения coordinated design/DDL update и отдельного явного старта P02 необходимо подготовить:
+
+1. Alembic initial migration, которая точно реализует 57-table/53-explicit-index reference inventory и identity constraints без destructive fallback.
+2. Migration/integration test matrix для immutable history, sealed evidence, policy activation и projection pointers.
+3. SQLAlchemy typed models без смешения domain, workflow projection и immutable identity persistence entities.
 4. Android Room Schema v1.
-5. Match confidence benchmark specification.
-6. Merge/Split command contract.
+5. Match confidence benchmark specification и activation report format без активации до прохождения gate.
+6. Merge/Split command contract, отдельный от resolution/review action.
 7. Sync Event Envelope v1.
