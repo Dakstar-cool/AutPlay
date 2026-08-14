@@ -6,8 +6,8 @@ Status values: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `DEFERRED_WITH_APPROVAL`, `
 | --- | --- | --- | --- | --- |
 | A-001 | Clean repository bootstrap | P01 | [`HANDOFF_P01.md`](../implementation/HANDOFF_P01.md) canonical and clean-index export smoke | PASS |
 | A-002 | CPU-only server starts without CUDA | P03 | Import/start integration test | NOT_STARTED |
-| A-003 | PostgreSQL clean upgrade/downgrade/upgrade | P02 | Real PG18 migration logs/tests | NOT_STARTED |
-| A-004 | DB invariants match reference DDL | P02 | Constraint/object inventory tests | NOT_STARTED |
+| A-003 | PostgreSQL clean upgrade/downgrade/upgrade | P02 | [`HANDOFF_P02.md`](../implementation/HANDOFF_P02.md) real PG18 lifecycle and equal head snapshots | PASS |
+| A-004 | DB invariants match reference DDL | P02 | [`HANDOFF_P02.md`](../implementation/HANDOFF_P02.md) 57/53/13/40 inventory, zero drift and invariant suite | PASS |
 | A-005 | Android DB fresh create/open/restart | P05 | Instrumentation test | NOT_STARTED |
 | A-006 | No destructive Room fallback | P05 | Configuration/static check | NOT_STARTED |
 | A-007 | Local mutation + Journal atomic | P05/P07 | Failure-injection transaction test | NOT_STARTED |

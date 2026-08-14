@@ -1,17 +1,19 @@
 # AutPlay Implementation Plan
 
-**Baseline:** P01 monorepo foundation
+**Baseline:** P02 PostgreSQL persistence foundation
 
 **Planning horizon:** P01-P14
 
 **Execution rule:** one explicit phase at a time; no future-phase implementation
 
-## Repository state after P01
+## Repository state after P02
 
 - The 40 original build-pack files remain at stable root and `docs/` paths; P00 governance remains authoritative.
-- P01 added a minimal typed Python package, standalone Compose shell, placeholders, exact lock/wrapper/catalog pins, one disposable PostgreSQL+pgvector service, canonical scripts and platform-neutral CI plan.
-- The server has no endpoint or product/domain behavior; Android has no Room/Media3/network/DI behavior; no executable persistence, contract or feature work exists.
-- P02 owns executable PostgreSQL persistence. P00-D003 is accepted and applied to the normative reference contract; P02 remains `NOT_STARTED` until a separate explicit phase request.
+- P01 added the typed package/Android skeleton, exact lock/wrapper/catalog pins, disposable PostgreSQL+pgvector service, canonical scripts and platform-neutral CI plan.
+- P02 added a linear Alembic `0001`-`0010` schema, 57 typed SQLAlchemy row mappings, canonical identity-evidence validation, bounded persistence commands, a loopback-only disposable database fixture, and 225 tests against the pinned real database.
+- The executable schema matches 57 tables, 53 explicit indexes, 13 functions and 40 non-internal triggers; metadata/catalog drift is zero and legacy `importing.match_candidate` is absent.
+- The server still has no HTTP endpoint, runtime worker, matcher/product/domain behavior or sync contract; Android still has no Room/Media3/network/DI behavior. P03 remains `NOT_STARTED` until separately requested.
+- P00-D003 is accepted, applied and executable. Frozen F-016 remains unchanged; P00-D004 remains unresolved for P06/P10 semantics.
 - The current dependency graph is sequential P00-P11, with P12 and P13 optional only through explicit approved deferral before P14.
 
 ## Phase deliverables and gates
@@ -49,12 +51,12 @@ Proposed items preserve source documents unchanged. An accepted ADR/change set c
 | --- | --- | --- | --- |
 | P00-D001 | Establish execution authority: P00-P14 prompts and latest handoff govern phase order; `AutPlay_Codex_Goal_Schema_Foundation_v1.md` is retained as persistence-design history, not a runnable first phase. | P01 | Operationally accepted in P00/P01 repository contract; source document retained unchanged |
 | P00-D002 | Materialize/reconcile Architecture ADR-001-ADR-012 files and statuses. Architecture marks ADR-012 proposed, while ER/physical schemas and later decision baseline already depend on unresolved `UserTrackRef`. | Before broad feature work | Proposed documentation change; no semantic rollback |
-| P00-D003 | Add an immutable, general identity decision/evidence/history model and matcher/calibrator/threshold registry. Track Identity sections 12-13 require states, versions, margins, origins, actor and supersession that `importing.import_entry`/`match_candidate` do not fully preserve. | P02 migration implementation | Accepted and applied through ADR-015 and `P00-D003_CHANGESET.md` revision `c108c109d8eb1ab71631ea79e831a20e6cc6811bff5264cb6d1bb38f7433ac71`; P02 remains `NOT_STARTED` |
+| P00-D003 | Add an immutable, general identity decision/evidence/history model and matcher/calibrator/threshold registry. Track Identity sections 12-13 require states, versions, margins, origins, actor and supersession that `importing.import_entry`/`match_candidate` do not fully preserve. | P02 migration implementation | Accepted through ADR-015 and `P00-D003_CHANGESET.md` revision `c108c109d8eb1ab71631ea79e831a20e6cc6811bff5264cb6d1bb38f7433ac71`; applied to normative sources in the preceding commit and implemented/verified by P02 |
 | P00-D004 | Clarify frozen F-016 terminology: deterministic reuse of one valid known SHA/T4 is not the same as probabilistic identity auto-match, or else keep both disabled until benchmark. Frozen wording cannot be reinterpreted without user approval. | P06 deterministic dedup and P10 matcher | User-approved ADR/change required |
 | P00-D005 | Define conditional phase reachability: P14 may follow P11 only when P12/P13 have explicit approved deferrals; otherwise both are prerequisites as shown by the dependency graph. | Before any P12/P13 deferral or P14 | Proposed build-governance ADR |
 | P00-D006 | Define local/server aggregate ID mapping in sync envelopes and ACKs. Room preserves local IDs plus nullable server IDs, while the reference server inbox exposes one `aggregate_id`. | P04 contract | Proposed sync-contract decision |
 | P00-D007 | Pin/validate Android baseline: Room 3.0.1 preferred, preliminary minSdk 26, JDK/Kotlin/KSP/AGP/Gradle/Compose/Media3/WorkManager compatibility and fallback boundary. | P01/P05 | P01 toolchain accepted in ADR-013; Room/KSP/Media3/WorkManager activation remains a P05 compatibility gate |
-| P00-D008 | Pin/validate server baseline: Python, uv, PostgreSQL 18 patch/image digest, pgvector 0.8 patch/digest, Psycopg, SQLAlchemy/Alembic and test tooling. | P01/P02 | P01 exact baseline accepted and smoke-tested in ADR-013; real driver/migration compatibility remains P02 evidence |
+| P00-D008 | Pin/validate server baseline: Python, uv, PostgreSQL 18 patch/image digest, pgvector 0.8 patch/digest, Psycopg, SQLAlchemy/Alembic and test tooling. | P01/P02 | P01 exact baseline accepted in ADR-013; P02 real driver, migration, mapping, concurrency and cross-shell compatibility evidence is complete |
 | P00-D009 | Define the enforceable CPU-core support matrix. Architecture says Linux/Windows/macOS integration tests; F-005 says cross-platform where practical and Linux x86_64 production. | P01 CI plan/P14 release | Platform-neutral Windows/Linux/macOS CPU job plan recorded; hosted execution and release support policy remain future evidence |
 
 ## Recorded document drift

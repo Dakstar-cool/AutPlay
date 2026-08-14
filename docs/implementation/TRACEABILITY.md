@@ -7,6 +7,18 @@ Status meanings:
 - `NOT_STARTED`: the owning future phase has not begun.
 - `CHANGE_PROPOSED`: a documented discrepancy needs an ADR/change set before its owning implementation.
 
+## P02 PostgreSQL persistence foundation
+
+| Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |
+| --- | --- | --- | --- | --- |
+| Deterministic executable schema and reversible development lifecycle | P02 scope/acceptance; PostgreSQL Schema v1 | `server/alembic.ini`; migrations `0001`-`0010`; frozen reviewed SQL asset | Clean upgrade → base → upgrade; every adjacent revision pair; one head; `alembic check`; `HANDOFF_P02.md` | PASS |
+| Exact reference inventory with no legacy candidate table | Reference SQL; accepted ADR-015 | 57 tables, 53 explicit indexes, 13 `app_private` functions, 40 non-internal triggers; zero activation rows | Migrated/reference catalog snapshots equal; exact names/counts; no `importing.match_candidate`; no ANN indexes | PASS |
+| Typed persistence mappings without domain behavior | P02 scope; Architecture dependency rules | 57 SQLAlchemy 2 row mappers / 616 columns under `adapters/postgresql`; no relationships or domain/application imports | Mapper configuration, type/default/index/constraint fingerprint, live metadata comparison with zero drift | PASS |
+| Immutable identity decision/evidence/policy history | ADR-015; Track Identity; P00-D003 | Six append-only registry/history tables, sealed snapshots, typed queries, projections and bounded persistence commands | Five states, six query types, all decision/evidence fields, 0/1/2/100 candidates, lineage/review/policy/projection negative matrices | PASS |
+| Frozen F-016 and unresolved P00-D004 remain unchanged | F-016; ADR-015 boundary | Initial activation history empty; T4 deterministic evaluation remains SHADOW; no matcher/benchmark behavior | Policy gates, pre-benchmark T4 rejection, concurrent activation and deactivate-vs-auto serialization | PASS |
+| Canonical/privacy-safe explanation evidence | Accepted P00-D003 JSON rules | RFC 8785 schema-v1 helpers; conservative empty gate metadata; command-level hash/size/privacy validation | N-1/N/N+1 bounds, nested sensitive fields, provider-disabled explanation, raw-payload cleanup, same/different-hash replay | PASS |
+| Canonical cross-platform CPU check path | P02 acceptance; F-005/F-006 | Root PowerShell/Bash scripts own dynamic-loopback Compose lifecycle | PowerShell and Git Bash each passed 225 tests on PostgreSQL 18.4/pgvector 0.8.6; CPU dependency audit; zero resources after cleanup | PASS |
+
 ## P01 monorepo foundation
 
 | Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |
@@ -15,10 +27,10 @@ Status meanings:
 | Exact frozen CPU server environment | P01 scope/checks; F-005/F-006 | `.python-version`; `server/pyproject.toml`; `server/uv.lock`; typed package boundaries | CPython 3.14.7; frozen sync/lock; import; Ruff; strict mypy; 13 pytest tests; structural JSON dependency audit | PASS |
 | Minimal standalone Android Compose shell | P01 scope/acceptance; local-first baseline | Gradle wrapper/catalog; `apps/android`; ADR-013/014 | Exact JDK/SDK/Gradle gates; `lintDebug`, `testDebugUnitTest`, `assembleDebug` | PASS |
 | Disposable PostgreSQL 18 + pgvector local service | P01 scope/checks | `deploy/compose/compose.yaml` exact digest; no host port; project-scoped volume | Healthy; runtime PostgreSQL 18.4/vector 0.8.6; post-cleanup 0 containers/volumes/networks | PASS |
-| Future contracts, tests and migrations are placeholders only | P01 scope/non-goals | `contracts/*`, `tests/*`, `server/migrations/README.md` | File/dependency/scope audit; no schema, endpoint, contract payload or feature code | PASS |
+| Future contracts, tests and migrations were placeholders at P01 exit | P01 scope/non-goals | P01 commit `48f8198738c6d50988e903cff7a8b4911c4d4615` | Historical P01 file/dependency/scope audit; P02 later populated persistence-owned paths | PASS |
 | Hosting-neutral CI matrix when hosting is unknown | P01 scope | `docs/implementation/CI_PLAN.md` | Windows/Linux/macOS CPU jobs plus Linux Android/Compose job and cold-cache policy | PASS |
 | Exact toolchain/dependency decisions recorded | P01 acceptance; P00-D007/D008/D009 | ADR-013, ADR-014, `VERSIONS.md` | Official-source compatibility review plus executable gates | PASS |
-| P02 not started and identity-schema prerequisite is resolved | P01 stop rule; accepted P00-D003 | `PROGRESS.md` P02 `NOT_STARTED`; accepted ADR-015; PLAN/R-014 | Normative contract synchronized; no Alembic config/revision, table model or executable schema exists | PASS |
+| P02 was not started and identity-schema prerequisite was resolved at P01 exit | P01 stop rule; accepted P00-D003 | P01 handoff and commit; accepted ADR-015; PLAN/R-014 | Historical P01 evidence; P02 was subsequently executed in its own phase | PASS |
 
 ## P00 repository intake
 
@@ -47,10 +59,10 @@ Status meanings:
 | CPU core independent of GPU | F-005/F-006; Architecture GPU boundary | Phase plan P03/P11/P12; R-007 | Future A-002/A-029/A-030 evidence | BASELINED |
 | Immutable Vault and distinct identity entities | F-012-F-016; ER/Track Identity/Vault schemas | Phase plan P02/P06/P10; R-002/R-004 | Future A-011/A-024/A-025 evidence | BASELINED |
 | Offline Journal transaction and durable sync ownership | F-017-F-020; Room/Architecture | Phase plan P04/P05/P09; R-003 | Future A-007/A-018-A-022 evidence | BASELINED |
-| No destructive migration fallback | F-021; Room/PostgreSQL policies | `AGENTS.md`; R-001 | Future A-003/A-006/A-034 evidence | BASELINED |
+| No destructive migration fallback | F-021; Room/PostgreSQL policies | `AGENTS.md`; P02 reversible Alembic chain; R-001 | A-003 PASS for PostgreSQL; Room A-006 and restore A-034 remain future evidence | BASELINED |
 | Direct/local playback before Vault/transcode fallback | F-022; Architecture streaming | Phase plan P06/P08 | Future A-013-A-017 evidence | BASELINED |
 | Authorized adapters only; no DRM/secret scraping | F-023/F-024; product security | `AGENTS.md`; R-006/R-009 | Future P10/P14 security evidence | BASELINED |
-| Identity decision history/state must retain all narrower-spec evidence | Track Identity sections 12-13; PostgreSQL acceptance | Accepted ADR-015 and `P00-D003_CHANGESET.md`; synchronized ER/PostgreSQL reference contract; P00-D003 in `PLAN.md`; R-014 | Normative fields, states, immutable history, version registries and P02 test requirements are aligned; executable persistence remains unimplemented | BASELINED |
+| Identity decision history/state must retain all narrower-spec evidence | Track Identity sections 12-13; PostgreSQL acceptance | Accepted ADR-015/P00-D003; executable migrations, typed mappings and persistence commands | Full-field round-trip, sealed evidence, append-only lineage, policy/projection/concurrency suites in `HANDOFF_P02.md` | PASS |
 | Benchmark-gated auto-match vs deterministic T4 reuse terminology | F-016; Track Identity sections 12.2-12.3 | P00-D004 in `PLAN.md`; R-002 | Exact source conflict recorded; no semantic change made | CHANGE_PROPOSED |
 | Current phase authority vs legacy schema goal | Current P00-P14 build pack; legacy Codex goal | P00-D001 and `AGENTS.md` execution rule | Package/phase audit | CHANGE_PROPOSED |
 | P12/P13 prerequisite or explicit deferral before P14 | `PHASE_INDEX.md` dependency graph and deferral note | P00-D005; `PLAN.md`; R-015 | Both statements retained and conditional rule made explicit | CHANGE_PROPOSED |
@@ -58,14 +70,14 @@ Status meanings:
 
 ## MVP acceptance ownership
 
-The authoritative requirements and statuses remain in [`MVP_ACCEPTANCE_MATRIX.md`](../build-pack/MVP_ACCEPTANCE_MATRIX.md). P00 assigns ownership and expected evidence without claiming product completion.
+The authoritative requirements and statuses remain in [`MVP_ACCEPTANCE_MATRIX.md`](../build-pack/MVP_ACCEPTANCE_MATRIX.md). Each completed phase adds direct evidence without claiming future product behavior.
 
 | Requirement | Design source | Planned implementation | Required tests / evidence | Status |
 | --- | --- | --- | --- | --- |
 | A-001 Clean repository bootstrap | MVP matrix; P01 prompt | P01 monorepo/toolchain skeleton | Root scripts, platform-neutral CI plan and clean-index export evidence in `HANDOFF_P01.md` | PASS |
 | A-002 CPU-only server starts without CUDA | MVP matrix; F-005/F-006 | P03 API/worker runtime | CPU-only import/start integration test | NOT_STARTED |
-| A-003 PostgreSQL clean upgrade/downgrade/upgrade | MVP matrix; PostgreSQL schema | P02 Alembic chain | Real pinned PostgreSQL 18 lifecycle logs/tests | NOT_STARTED |
-| A-004 DB invariants match reference DDL | MVP matrix; reference SQL | P02 mappings/migrations | Constraint/object inventory and drift tests | NOT_STARTED |
+| A-003 PostgreSQL clean upgrade/downgrade/upgrade | MVP matrix; PostgreSQL schema | P02 Alembic chain | Real pinned PostgreSQL 18 lifecycle and equal first/second head snapshots in `HANDOFF_P02.md` | PASS |
+| A-004 DB invariants match reference DDL | MVP matrix; reference SQL | P02 mappings/migrations | 57/53/13/40 catalog equality, zero metadata drift and 225-test evidence in `HANDOFF_P02.md` | PASS |
 | A-005 Android DB fresh create/open/restart | MVP matrix; Room schema | P05 Room v1 | Instrumentation/process-restart test | NOT_STARTED |
 | A-006 No destructive Room fallback | MVP matrix; F-021 | P05 database configuration | Static/configuration test | NOT_STARTED |
 | A-007 Local mutation + Journal atomic | MVP matrix; F-018 | P05/P07 transactions | Failure-injection rollback/commit test | NOT_STARTED |

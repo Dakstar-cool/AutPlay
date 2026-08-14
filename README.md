@@ -1,6 +1,6 @@
 # AutPlay
 
-AutPlay is an Android-first, local-first music platform with an optional personal server. P01 establishes only a reproducible monorepo foundation: an empty typed server package, a minimal standalone Compose shell, contract and test placeholders, and one disposable PostgreSQL service. No schema, endpoint, sync contract, media feature, or product domain logic exists yet.
+AutPlay is an Android-first, local-first music platform with an optional personal server. P01 established the reproducible monorepo foundation. P02 adds the executable PostgreSQL schema v1 through Alembic, complete typed SQLAlchemy persistence mappings, and real-database invariant tests. No HTTP endpoint, sync engine, matcher/product behavior, media feature, or production deployment is present yet.
 
 ## Pinned prerequisites
 
@@ -31,20 +31,20 @@ bash scripts/check.sh
 bash scripts/check.sh --server-only
 ```
 
-`bootstrap` installs the pinned Python with uv, performs a frozen dependency sync, resolves the Gradle wrapper, and validates Compose configuration. `check` repeats the frozen bootstrap, then runs Python import/Ruff/format/mypy/pytest checks, audits the CPU dependency graph, runs Android lint/unit/assemble smoke, starts the exact PostgreSQL/pgvector image until healthy, verifies runtime versions, and removes the project-scoped test container/network/volume. `ServerOnly`/`--server-only` is for the cross-platform CPU server matrix.
+`bootstrap` installs the pinned Python with uv, performs a frozen dependency sync, resolves the Gradle wrapper, and validates Compose configuration. `check` repeats the frozen bootstrap, runs Python import/Ruff/format/mypy checks, audits the CPU dependency graph, optionally runs Android lint/unit/assemble smoke, then owns a uniquely named disposable PostgreSQL project. It publishes PostgreSQL only on a random loopback port, verifies PostgreSQL/pgvector versions, runs the complete migration/invariant suite, and removes the test container, network, and volume. `ServerOnly`/`--server-only` skips Android but still requires Docker because P02 persistence tests use the real database.
 
-See [`docs/implementation/CI_PLAN.md`](docs/implementation/CI_PLAN.md) for the hosting-neutral job matrix and [`docs/implementation/HANDOFF_P01.md`](docs/implementation/HANDOFF_P01.md) for phase evidence once P01 closes.
+See [`docs/implementation/CI_PLAN.md`](docs/implementation/CI_PLAN.md) for the hosting-neutral job matrix and [`docs/implementation/HANDOFF_P02.md`](docs/implementation/HANDOFF_P02.md) for P02 evidence.
 
 ## Repository boundaries
 
-| Path | P01 content |
+| Path | Current content |
 | --- | --- |
 | `apps/android` | Minimal standalone Compose application and host unit test |
-| `server/src/autplay` | Empty domain/application/ports/adapters/entrypoints package boundaries |
-| `server/migrations` | P02 ownership placeholder only |
+| `server/src/autplay` | Framework-independent boundaries, canonical identity-evidence validation, and typed PostgreSQL adapter mappings |
+| `server/migrations` | Linear Alembic revisions `0001` through `0010` for PostgreSQL schema v1 |
 | `contracts/openapi`, `contracts/events` | P04 ownership placeholders only |
-| `deploy/compose` | One disposable PostgreSQL 18 + pgvector development service |
+| `deploy/compose` | One digest-pinned PostgreSQL 18 + pgvector service and loopback-only test override |
 | `tests/e2e`, `tests/fixtures` | Future owning-phase placeholders |
-| `docs/adr` | Accepted P01 toolchain and dependency-boundary decisions |
+| `docs/adr` | Accepted toolchain, dependency-boundary, and immutable identity-history decisions |
 
-Development Compose data is disposable and must never contain real/user data. Production deployment, secrets, signing, public networking, and external providers are outside P01.
+Development Compose data is disposable and must never contain real/user data. Production roles/deployment, secrets, signing, public networking, API behavior, and external providers are outside P02.

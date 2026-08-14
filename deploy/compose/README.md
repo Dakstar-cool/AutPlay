@@ -1,5 +1,5 @@
 # Disposable PostgreSQL development service
 
-This Compose file runs exactly one PostgreSQL 18 service with pgvector. Its named volume is scoped by the Compose project and is intentionally disposable. The canonical smoke command in the root [`README.md`](../../README.md) verifies versions and removes the container, network, and volume.
+The base Compose file runs exactly one PostgreSQL 18 service with pgvector and publishes no host port. Its named volume is scoped by the Compose project and is intentionally disposable. `compose.test.yaml` is used only by the canonical check scripts: it assigns a random loopback-only host port so real migration/invariant tests can connect, then the scripts remove the exact project container, network, and volume and verify that none remain.
 
-`autplay_dev_only` is a fixed local-test credential, not a deployable secret. The service publishes no host port and is not a production manifest.
+`autplay_dev_only` is a fixed local-test credential, not a deployable secret. Neither file is a production manifest, and neither may be pointed at real/user data.
