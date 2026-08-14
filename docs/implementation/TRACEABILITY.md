@@ -3,9 +3,22 @@
 Status meanings:
 
 - `BASELINED`: normative requirement/decision is present and routed, but product behavior is not implemented.
+- `IN_PROGRESS`: implementation/evidence exists, but the owning phase gate is not yet complete.
 - `PASS`: the stated phase criterion has direct evidence.
 - `NOT_STARTED`: the owning future phase has not begun.
 - `CHANGE_PROPOSED`: a documented discrepancy needs an ADR/change set before its owning implementation.
+
+## P03 server runtime, identity and job foundation
+
+| Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |
+| --- | --- | --- | --- | --- |
+| Explicit validated configuration precedence and secret isolation | P03 scope/required tests; Decision Register server configuration | `server/src/autplay/runtime/settings.py`; separate API/worker settings; explicit TOML/profile/secret-file/env/override precedence | `server/tests/runtime/test_settings.py`; both 298-test canonical gates | PASS |
+| Operational API surface, stable errors and request correlation | P03 scope; Architecture API/observability boundaries | `server/src/autplay/entrypoints/api.py` and `auth_http.py`; operational endpoints plus real refresh/logout/device-revoke routes under `/api/v1` | Runtime/API and real-PostgreSQL auth API tests; runtime Compose liveness/readiness smoke | PASS |
+| Redacted structured logs and bounded, low-cardinality metrics | P03 scope; product privacy/security requirements | `server/src/autplay/runtime/logging.py` and `metrics.py` | Logging/API metric-route tests; bearer-value negative assertions; both canonical gates | PASS |
+| Local-only first-owner bootstrap and session-bound authentication | P03 scope; no-public-registration constraint | `server/src/autplay/application/auth.py`; PostgreSQL auth repository; composed `autplay-admin bootstrap-owner`; HTTP access/refresh/revoke routes | Unit, HTTP, and real-PostgreSQL auth suites including bootstrap/rotation races | PASS |
+| Password path fails closed without credential persistence | P03 password constraint; ADR-016 | Explicit Argon2id primitive is tested, while `password_login_enabled=true` returns a sanitized startup error | `server/tests/test_auth_security.py`; settings negative test; both canonical gates | PASS |
+| PostgreSQL job lease, fence, recovery, retry and cancellation | F-008-F-010; P03 job scope | `domain/jobs.py`; job/transaction ports; PostgreSQL repository/UoW; application worker | Eight unit plus thirteen real-PostgreSQL P03 job tests included in both 298-test canonical gates | PASS |
+| CPU-only API/worker composition without feature handlers | F-005/F-006; P03 acceptance; A-002 | Separate API and CPU-worker entrypoints; non-root image built from a digest-pinned base; runtime Compose profile; no handler registered by default | Locked process/import tests, prohibited-package audit, UID 999 API/worker runtime smoke, zero scoped residue | PASS |
 
 ## P02 PostgreSQL persistence foundation
 
@@ -56,7 +69,7 @@ Status meanings:
 | Frozen decisions F-001-F-024 remain unchanged | `docs/build-pack/DECISION_REGISTER.md` | Routed through `AGENTS.md`, `PLAN.md`, and risk controls | Source files remain byte-identical to build pack | BASELINED |
 | Security/privacy/destructive-data constraints outrank other sources | `ТЗ AutPlay.md`; `PROMPT_PROTOCOL.md` | `AGENTS.md` precedence and stop rules | Manual rule comparison | BASELINED |
 | Local-first Android and optional server | F-002/F-003; Architecture invariants | Phase plan P05/P07/P08/P09; R-003/R-005 | Future Android/e2e evidence | BASELINED |
-| CPU core independent of GPU | F-005/F-006; Architecture GPU boundary | Phase plan P03/P11/P12; R-007 | Future A-002/A-029/A-030 evidence | BASELINED |
+| CPU core independent of GPU | F-005/F-006; Architecture GPU boundary | Phase plan P03/P11/P12; R-007 | A-002 PASS in P03; future A-029/A-030 evidence | BASELINED |
 | Immutable Vault and distinct identity entities | F-012-F-016; ER/Track Identity/Vault schemas | Phase plan P02/P06/P10; R-002/R-004 | Future A-011/A-024/A-025 evidence | BASELINED |
 | Offline Journal transaction and durable sync ownership | F-017-F-020; Room/Architecture | Phase plan P04/P05/P09; R-003 | Future A-007/A-018-A-022 evidence | BASELINED |
 | No destructive migration fallback | F-021; Room/PostgreSQL policies | `AGENTS.md`; P02 reversible Alembic chain; R-001 | A-003 PASS for PostgreSQL; Room A-006 and restore A-034 remain future evidence | BASELINED |
@@ -75,7 +88,7 @@ The authoritative requirements and statuses remain in [`MVP_ACCEPTANCE_MATRIX.md
 | Requirement | Design source | Planned implementation | Required tests / evidence | Status |
 | --- | --- | --- | --- | --- |
 | A-001 Clean repository bootstrap | MVP matrix; P01 prompt | P01 monorepo/toolchain skeleton | Root scripts, platform-neutral CI plan and clean-index export evidence in `HANDOFF_P01.md` | PASS |
-| A-002 CPU-only server starts without CUDA | MVP matrix; F-005/F-006 | P03 API/worker runtime | CPU-only import/start integration test | NOT_STARTED |
+| A-002 CPU-only server starts without CUDA | MVP matrix; F-005/F-006 | P03 API/worker runtime and runtime Compose profile | `HANDOFF_P03.md`; locked API/worker process tests, dependency/import audit, non-root Compose smoke | PASS |
 | A-003 PostgreSQL clean upgrade/downgrade/upgrade | MVP matrix; PostgreSQL schema | P02 Alembic chain | Real pinned PostgreSQL 18 lifecycle and equal first/second head snapshots in `HANDOFF_P02.md` | PASS |
 | A-004 DB invariants match reference DDL | MVP matrix; reference SQL | P02 mappings/migrations | 57/53/13/40 catalog equality, zero metadata drift and 225-test evidence in `HANDOFF_P02.md` | PASS |
 | A-005 Android DB fresh create/open/restart | MVP matrix; Room schema | P05 Room v1 | Instrumentation/process-restart test | NOT_STARTED |

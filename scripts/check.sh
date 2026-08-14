@@ -12,12 +12,18 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="deploy/compose/compose.yaml"
 compose_test_file="deploy/compose/compose.test.yaml"
-compose_project="autplay-p02-$$"
+compose_runtime_file="deploy/compose/compose.runtime.yaml"
+compose_project="autplay-p03-$$"
 compose_touched=0
 previous_test_database_url="${AUTPLAY_TEST_DATABASE_URL-}"
+previous_runtime_secret_file="${AUTPLAY_RUNTIME_AUTH_SECRET_FILE-}"
 had_test_database_url=0
+had_runtime_secret_file=0
 if [[ -v AUTPLAY_TEST_DATABASE_URL ]]; then
   had_test_database_url=1
+fi
+if [[ -v AUTPLAY_RUNTIME_AUTH_SECRET_FILE ]]; then
+  had_runtime_secret_file=1
 fi
 
 cleanup_compose() {
@@ -26,6 +32,11 @@ cleanup_compose() {
     export AUTPLAY_TEST_DATABASE_URL="$previous_test_database_url"
   else
     unset AUTPLAY_TEST_DATABASE_URL
+  fi
+  if [[ $had_runtime_secret_file -eq 1 ]]; then
+    export AUTPLAY_RUNTIME_AUTH_SECRET_FILE="$previous_runtime_secret_file"
+  else
+    unset AUTPLAY_RUNTIME_AUTH_SECRET_FILE
   fi
   if [[ $compose_touched -eq 1 ]]; then
     docker compose -p "$compose_project" -f "$compose_file" -f "$compose_test_file" \
@@ -80,6 +91,10 @@ if [[ -n "$prohibited_packages" ]]; then
   echo "CPU dependency graph contains prohibited GPU or ML packages: $prohibited_packages" >&2
   exit 1
 fi
+
+export AUTPLAY_RUNTIME_AUTH_SECRET_FILE="$repo_root/server/pyproject.toml"
+docker compose -p "$compose_project" -f "$compose_file" -f "$compose_runtime_file" \
+  --profile runtime config --quiet
 
 if [[ $server_only -eq 0 ]]; then
   ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug

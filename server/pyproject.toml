@@ -6,17 +6,27 @@ readme = "README.md"
 requires-python = ">=3.14.7,<3.15"
 dependencies = [
     "alembic==1.19.1",
+    "argon2-cffi==25.1.0",
     "fastapi==0.141.1",
     "pgvector==0.5.0",
+    "prometheus-client==0.25.0",
     "psycopg[binary]==3.3.4",
     "pydantic==2.13.4",
     "pydantic-settings==2.15.0",
+    "PyJWT==2.13.0",
     "rfc8785==0.1.4",
     "sqlalchemy==2.0.52",
+    "uvicorn==0.51.0",
 ]
+
+[project.scripts]
+autplay-admin = "autplay.entrypoints.admin:main"
+autplay-api = "autplay.entrypoints.api:main"
+autplay-worker-cpu = "autplay.entrypoints.worker_cpu:main"
 
 [dependency-groups]
 dev = [
+    "httpx2==2.9.0",
     "mypy==2.3.0",
     "pytest==9.1.1",
     "ruff==0.16.2",

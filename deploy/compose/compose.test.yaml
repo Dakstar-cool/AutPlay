@@ -6,4 +6,4 @@ services:
         host_ip: 127.0.0.1
         protocol: tcp
     labels:
-      app.autplay.purpose: disposable-p02-test
+      app.autplay.purpose: disposable-p03-test

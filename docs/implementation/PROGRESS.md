@@ -4,9 +4,9 @@
 | --- | --- | --- | --- | --- |
 | P00 | PASS | Parent of P01 phase commit | `docs/implementation/HANDOFF_P00.md` | None |
 | P01 | PASS | `48f8198738c6d50988e903cff7a8b4911c4d4615` | `docs/implementation/HANDOFF_P01.md` | None |
-| P02 | PASS | P02 phase commit (this commit) | `docs/implementation/HANDOFF_P02.md`; A-003/A-004 | None |
-| P03 | NOT_STARTED | | `docs/build-pack/prompts/P03_server_runtime.md` | Explicit P03 request |
-| P04 | NOT_STARTED | | `docs/build-pack/prompts/P04_sync_contract.md` | P03; P00-D006 resolution |
+| P02 | PASS | `9547bc2636ccfdaf9b960357d54be9fd541c76a1` | `docs/implementation/HANDOFF_P02.md`; A-003/A-004 | None |
+| P03 | PASS | P03 phase commit (this commit) | `docs/implementation/HANDOFF_P03.md`; A-002 | None |
+| P04 | NOT_STARTED | | `docs/build-pack/prompts/P04_sync_contract.md` | P00-D006 resolution before contract work |
 | P05 | NOT_STARTED | | `docs/build-pack/prompts/P05_android_foundation.md` | P04 and Room compatibility gate |
 | P06 | NOT_STARTED | | `docs/build-pack/prompts/P06_vault_streaming.md` | P05; P00-D004 before identity reuse semantics |
 | P07 | NOT_STARTED | | `docs/build-pack/prompts/P07_library_vertical_slice.md` | P06 |

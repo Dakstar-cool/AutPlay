@@ -8,9 +8,11 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = "deploy/compose/compose.yaml"
 $composeTestFile = "deploy/compose/compose.test.yaml"
-$composeProject = "autplay-p02-$PID"
+$composeRuntimeFile = "deploy/compose/compose.runtime.yaml"
+$composeProject = "autplay-p03-$PID"
 $composeTouched = $false
 $previousTestDatabaseUrl = [Environment]::GetEnvironmentVariable("AUTPLAY_TEST_DATABASE_URL")
+$previousRuntimeSecretFile = [Environment]::GetEnvironmentVariable("AUTPLAY_RUNTIME_AUTH_SECRET_FILE")
 
 Push-Location $repoRoot
 
@@ -45,6 +47,13 @@ try {
     if ($prohibitedPackages.Count -gt 0) {
         throw "CPU dependency graph contains prohibited GPU or ML packages: $($prohibitedPackages -join ', ')"
     }
+
+    [Environment]::SetEnvironmentVariable(
+        "AUTPLAY_RUNTIME_AUTH_SECRET_FILE",
+        (Join-Path $repoRoot "server\pyproject.toml")
+    )
+    & docker compose -p $composeProject -f $composeFile -f $composeRuntimeFile --profile runtime config --quiet
+    if ($LASTEXITCODE -ne 0) { throw "Runtime Docker Compose configuration validation failed" }
 
     if (-not $ServerOnly) {
         $gradleJavaHomeArgument = "-Dorg.gradle.java.home=$env:JAVA_HOME"
@@ -110,6 +119,7 @@ try {
 }
 finally {
     [Environment]::SetEnvironmentVariable("AUTPLAY_TEST_DATABASE_URL", $previousTestDatabaseUrl)
+    [Environment]::SetEnvironmentVariable("AUTPLAY_RUNTIME_AUTH_SECRET_FILE", $previousRuntimeSecretFile)
     if ($composeTouched) {
         & docker compose -p $composeProject -f $composeFile -f $composeTestFile down --volumes --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Disposable Compose cleanup failed" }

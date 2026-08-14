@@ -1,0 +1,94 @@
+x-autplay-runtime: &autplay-runtime
+  image: autplay-server:p03-local
+  build:
+    context: ../..
+    dockerfile: server/Dockerfile
+  profiles: [runtime]
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  stop_grace_period: 15s
+
+x-autplay-database-environment: &autplay-database-environment
+  AUTPLAY_DATABASE_URL: postgresql+psycopg://autplay:autplay_dev_only@postgres:5432/autplay
+  AUTPLAY_DATABASE_CONNECT_TIMEOUT_SECONDS: "2"
+  AUTPLAY_DATABASE_STATEMENT_TIMEOUT_MS: "5000"
+  AUTPLAY_PROFILE: development
+
+services:
+  migrate:
+    <<: *autplay-runtime
+    command: [alembic, -c, /opt/autplay/alembic.ini, upgrade, head]
+    environment: *autplay-database-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 512m
+    cpus: 1.0
+
+  api:
+    <<: *autplay-runtime
+    command: [autplay-api]
+    environment:
+      <<: *autplay-database-environment
+      AUTPLAY_API_HOST: 0.0.0.0
+      AUTPLAY_API_PORT: "8787"
+      AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+    secrets:
+      - source: autplay-auth-signing-secret
+        target: autplay-auth-signing-secret
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - name: api-local
+        target: 8787
+        host_ip: 127.0.0.1
+        published: "${AUTPLAY_API_PORT:-8787}"
+        protocol: tcp
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8787/health/ready', timeout=2).read()
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+
+  worker-cpu:
+    <<: *autplay-runtime
+    command: [autplay-worker-cpu]
+    environment:
+      <<: *autplay-database-environment
+      AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
+      AUTPLAY_WORKER_LEASE_SECONDS: "120"
+      AUTPLAY_WORKER_MAX_ATTEMPTS: "5"
+      AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, autplay-worker-cpu, --check-readiness]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+
+secrets:
+  autplay-auth-signing-secret:
+    file: "${AUTPLAY_RUNTIME_AUTH_SECRET_FILE:?set AUTPLAY_RUNTIME_AUTH_SECRET_FILE to a local secret file}"

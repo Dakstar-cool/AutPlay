@@ -1,19 +1,22 @@
 # AutPlay Implementation Plan
 
-**Baseline:** P02 PostgreSQL persistence foundation
+**Baseline:** P03 server-runtime foundation verified; P04 not started
 
 **Planning horizon:** P01-P14
 
 **Execution rule:** one explicit phase at a time; no future-phase implementation
 
-## Repository state after P02
+## Repository state after P03
 
 - The 40 original build-pack files remain at stable root and `docs/` paths; P00 governance remains authoritative.
 - P01 added the typed package/Android skeleton, exact lock/wrapper/catalog pins, disposable PostgreSQL+pgvector service, canonical scripts and platform-neutral CI plan.
 - P02 added a linear Alembic `0001`-`0010` schema, 57 typed SQLAlchemy row mappings, canonical identity-evidence validation, bounded persistence commands, a loopback-only disposable database fixture, and 225 tests against the pinned real database.
 - The executable schema matches 57 tables, 53 explicit indexes, 13 functions and 40 non-internal triggers; metadata/catalog drift is zero and legacy `importing.match_candidate` is absent.
-- The server still has no HTTP endpoint, runtime worker, matcher/product/domain behavior or sync contract; Android still has no Room/Media3/network/DI behavior. P03 remains `NOT_STARTED` until separately requested.
+- P03 adds typed settings, operational and device-session FastAPI endpoints, structured redacted logging/API metrics, owner/device session primitives, explicit transaction/clock/ID ports, a PostgreSQL lease worker, and a disposable CPU runtime profile. Both canonical server gates pass 298 tests, and the non-root runtime image/API/worker smoke passes with zero scoped resource residue.
+- P03 adds no non-auth product feature endpoint and no schema migration; the Alembic head remains `0010_indexes_privileges`. Password login stays disabled because PostgreSQL schema v1 has no approved credential-persistence contract.
+- The server still has no sync, matcher, Vault/media, recommendation or other product behavior; Android still has no Room/Media3/network/DI behavior. P04 has not started.
 - P00-D003 is accepted, applied and executable. Frozen F-016 remains unchanged; P00-D004 remains unresolved for P06/P10 semantics.
+- P00-D006 remains unresolved and, together with a green P03 handoff, is a hard prerequisite for P04.
 - The current dependency graph is sequential P00-P11, with P12 and P13 optional only through explicit approved deferral before P14.
 
 ## Phase deliverables and gates
@@ -61,7 +64,7 @@ Proposed items preserve source documents unchanged. An accepted ADR/change set c
 
 ## Recorded document drift
 
-- Architecture section 26 still calls the PostgreSQL major version open; narrower PostgreSQL schema and the decision register fix 18.x. Only the exact patch/image digest remains unresolved.
+- Architecture section 26 still calls the PostgreSQL major version open; the executable baseline resolves it to PostgreSQL 18.4 and the recorded pgvector image digest. The broader normative wording remains document drift.
 - Architecture/ER retain several preliminary/open labels already narrowed by PostgreSQL/Room specifications, including database UUID generation and local entity naming.
 - `docs/design/AutPlay_PostgreSQL_Schema_v1.md` shows a smoke path under `docs/schema/`; the stable repository path is `docs/design/AutPlay_PostgreSQL_Schema_v1.sql`.
 - Sync Protocol v1, OpenAPI skeleton, merge/split contract and physical ADR files are planned future deliverables, not missing P00 package members.

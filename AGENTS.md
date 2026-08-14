@@ -2,7 +2,7 @@
 
 ## Project
 
-AutPlay is an Android-first, local-first music platform with an optional personal server. P01 established the reproducible monorepo foundation and canonical bootstrap/check commands. P02 established executable PostgreSQL migrations, typed persistence mappings, and real-database invariant evidence without adding product behavior. API endpoints, sync contracts, workers, matcher behavior, and media features remain owned by later phases.
+AutPlay is an Android-first, local-first music platform with an optional personal server. P01 established the reproducible monorepo foundation and canonical bootstrap/check commands. P02 established executable PostgreSQL migrations, typed persistence mappings, and real-database invariant evidence. P03 adds the CPU-only FastAPI and PostgreSQL worker runtime foundation, typed configuration, health/observability, and real owner/device session endpoints without adding non-auth product resource endpoints. Sync contracts, matcher behavior, Vault/media features, and Android product behavior remain owned by later phases.
 
 ## Read first
 
