@@ -6,6 +6,12 @@ P03 is `PASS`. The phase delivers a production-shaped, CPU-only FastAPI/API and 
 
 Both canonical server-only gates passed from the committed frozen lock against disposable PostgreSQL 18.4/pgvector 0.8.6: 298 tests passed in PowerShell and Git Bash. The Linux runtime image built from a digest-pinned base then passed migration, API and worker readiness, loopback binding, non-root/read-only execution, CPU-only import, graceful worker shutdown, and exact resource cleanup evidence. MVP acceptance A-002 is `PASS`.
 
+## Post-handoff prerequisite update
+
+On 2026-08-15 the user explicitly approved P00-D006 Variant A and, after independent review exposed the merge collision case, P00-D006-R1. The complete accepted mapping is recorded in `P00-D006_AGGREGATE_ID_MAPPING.md`. The historical P03 implementation and verification evidence below is unchanged. P04 is now eligible but remains `NOT_STARTED`; no P04 contract or sync implementation was added by this update.
+
+Subsequent state: P04 completed on 2026-08-16; its current evidence is in `HANDOFF_P04.md`. The sentence above records the post-P03/P00-D006 checkpoint, not current phase status.
+
 ## Delivered scope
 
 - Separate typed API and CPU-worker settings with explicit precedence: safe defaults, explicitly selected base TOML, named profile TOML, explicit secret files, environment, then caller overrides. Implicit dotenv and ambient secret-directory loading are disabled.
@@ -106,11 +112,11 @@ The canonical 298-test suite includes 30 runtime tests, 22 auth/security/API tes
 - Lease fencing prevents stale workers from mutating job state but cannot make external side effects exactly once. Every future handler must define idempotency/checkpoint behavior and add crash/failure-injection evidence.
 - The CPU worker deliberately has no feature handlers. Job queue-depth/age and handler outcome/duration metrics are deferred until real handlers and an operational exporter exist.
 - Production database roles/grants, TLS/domain topology, secret delivery, backups/restores, resource sizing, and hosted cross-platform CI remain later operational work.
-- P00-D006 local/server aggregate-ID mapping remains unresolved and blocks P04. P00-D004 remains unresolved for P06/P10 and was not touched.
+- P00-D006 was unresolved at P03 exit and was fully accepted post-handoff through Variant A plus reviewed P00-D006-R1; it no longer blocks P04. P00-D004 remains unresolved for P06/P10 and was not touched.
 
 ## Preconditions for next phase
 
-P03 is green, A-002 is `PASS`, and P04 has not started. Before creating any P04 contract, P00-D006 must be resolved through an explicit approved aggregate-ID mapping that preserves F-017; P04 must not infer the mapping from the current server inbox column.
+P03 is green, A-002 is `PASS`, P00-D006 Variant A and P00-D006-R1 are accepted, and P04 has not started. P04 must encode `P00-D006_AGGREGATE_ID_MAPPING.md` rather than infer semantics from the current server inbox column.
 
 The complete next prompt was read from `docs/build-pack/prompts/P04_sync_contract.md`. Exact next phase prompt:
 
@@ -129,4 +135,4 @@ P04 owns Sync Protocol v1, versioned JSON Schemas, OpenAPI operations, valid/inv
 
 ## Blocking user decisions
 
-None remain for P03. P00-D006 is a mandatory approved decision before P04 contract creation, so execution stops at this handoff rather than guessing that mapping.
+None remain for P03 or P04 eligibility. P04 still requires an explicit execution request.

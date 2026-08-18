@@ -22,7 +22,8 @@ from .request_context import (
 )
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
-MAX_REQUEST_BODY_BYTES: Final = 1_048_576
+# P09 sync push is a separately validated protocol body with an 8 MiB contract cap.
+MAX_REQUEST_BODY_BYTES: Final = 8_388_608
 MAX_REQUEST_BODY_FRAMES: Final = 1_024
 _REQUEST_ID_HEADER_BYTES: Final = b"x-request-id"
 _CONTENT_LENGTH_HEADER_BYTES: Final = b"content-length"
@@ -45,6 +46,7 @@ class ApiError(Exception):
     status_code: int
     retryable: bool = False
     headers: dict[str, str] | None = None
+    details: dict[str, object] | None = None
 
 
 def error_response(
@@ -55,6 +57,7 @@ def error_response(
     status_code: int,
     retryable: bool,
     headers: dict[str, str] | None = None,
+    details: dict[str, object] | None = None,
 ) -> JSONResponse:
     """Build the uniform, user-safe error envelope."""
 
@@ -70,6 +73,7 @@ def error_response(
                 "retryable": retryable,
                 "request_id": request_id,
             }
+            | (details or {})
         },
         headers=response_headers,
     )
@@ -187,6 +191,7 @@ def install_error_handlers(app: FastAPI) -> None:
             status_code=error.status_code,
             retryable=error.retryable,
             headers=error.headers,
+            details=error.details,
         )
 
     @app.exception_handler(RequestValidationError)

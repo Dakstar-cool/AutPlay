@@ -7,10 +7,16 @@ from typing import Any
 import pytest
 from alembic import command
 from psycopg import Connection
+from sqlalchemy.exc import DBAPIError
 
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0015_wave_runtime", "0014_gpu_enrichment"),
+    ("0014_gpu_enrichment", "0013_recommendation_runtime"),
+    ("0013_recommendation_runtime", "0012_sync_runtime"),
+    ("0012_sync_runtime", "0011_vault_runtime"),
+    ("0011_vault_runtime", "0010_indexes_privileges"),
     ("0010_indexes_privileges", "0009_constraints_triggers"),
     ("0009_constraints_triggers", "0008_ml_history"),
     ("0008_ml_history", "0007_importing_identity_history"),
@@ -111,6 +117,76 @@ def test_public_has_no_reference_object_access(
         "module_tables": 0,
         "sync_sequences": 0,
     }
+
+
+def test_p12_downgrade_refuses_to_destroy_registered_model(
+    database_harness: DatabaseHarness,
+    database_name: str,
+) -> None:
+    """A downgrade is executable only while every P12-owned data surface is empty."""
+
+    with database_harness.connect(database_name) as connection:
+        connection.execute(
+            """
+            INSERT INTO ml.embedding_model (
+                model_key, version, task, source, source_revision, artifact_filename,
+                artifact_format, artifact_byte_size, artifact_manifest, manifest_sha256,
+                weights_sha256, license_id, runtime, runtime_revision, inference_precision,
+                input_sample_rate_hz, segment_duration_ms, preprocessing_version,
+                preprocessing_manifest, preprocessing_sha256, license_review_reference,
+                pooling_strategy, dimension, status
+            ) VALUES (
+                'downgrade-guard', '1', 'AUDIO_EMBEDDING', 'fixture://reviewed', '1',
+                'model.bin', 'fixture', 1, '{}'::jsonb, %s, %s, 'fixture', 'fixture', '1',
+                'fp32', 16000, 10000, '1', '{}'::jsonb, %s, 'review://fixture', 'mean', 3,
+                'BENCHMARK'
+            )
+            """,
+            (b"m" * 32, b"w" * 32, b"p" * 32),
+        )
+        connection.commit()
+
+    with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
+        database_harness.downgrade(database_name, "0013_recommendation_runtime")
+    assert _current_revision(database_harness, database_name) == "0015_wave_runtime"
+
+
+def test_p12_downgrade_refuses_after_blocking_legacy_active_model(
+    database_harness: DatabaseHarness,
+) -> None:
+    """A legacy lifecycle change cannot be silently retained by downgrade."""
+
+    database_name = database_harness.create_database()
+    try:
+        database_harness.upgrade(database_name, "0013_recommendation_runtime")
+        with database_harness.connect(database_name) as connection:
+            connection.execute(
+                """
+                INSERT INTO ml.embedding_model (
+                    model_key, version, task, weights_sha256, license_id, runtime,
+                    inference_precision, input_sample_rate_hz, segment_duration_ms,
+                    preprocessing_version, pooling_strategy, dimension, status
+                ) VALUES (
+                    'legacy-active', '1', 'AUDIO_EMBEDDING', %s, 'legacy', 'legacy',
+                    'fp32', 16000, 10000, '1', 'mean', 3, 'ACTIVE'
+                )
+                """,
+                (b"w" * 32,),
+            )
+            connection.commit()
+
+        database_harness.upgrade(database_name, "0014_gpu_enrichment")
+        with database_harness.connect(database_name) as connection:
+            status = connection.execute(
+                "SELECT status FROM ml.embedding_model WHERE model_key = 'legacy-active'"
+            ).fetchone()
+        assert status == ("BLOCKED",)
+
+        with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
+            database_harness.downgrade(database_name, "0013_recommendation_runtime")
+        assert _current_revision(database_harness, database_name) == "0014_gpu_enrichment"
+    finally:
+        database_harness.drop_database(database_name)
 
 
 def _current_revision(database_harness: DatabaseHarness, database_name: str) -> str | None:

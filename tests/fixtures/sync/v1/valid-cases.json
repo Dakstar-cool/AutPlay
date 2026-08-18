@@ -1,0 +1,575 @@
+{
+  "contract_version": "v1",
+  "cases": [
+    {
+      "case_id": "duplicate-same-payload",
+      "kind": "push",
+      "input": {
+        "prior_outcome": "APPLIED",
+        "same_event_id": true,
+        "same_request_hash": true,
+        "stored_last_acked_device_sequence": 2,
+        "received_device_sequence": 2
+      },
+      "expected": {
+        "ack_outcome": "DUPLICATE",
+        "original_outcome": "APPLIED",
+        "domain_mutation_count": 0,
+        "retryable": false,
+        "acknowledged_through_device_sequence": 2,
+        "duplicate_lookup_precedes_new_sequence_admission": true
+      },
+      "event": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "21111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 2,
+        "event_type": "USER_TRACK_REF_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "USER_TRACK_REF",
+        "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:00:00Z",
+        "payload": {"rating": 5},
+        "request_hash": "1da6337721df4f004be28716a86211fd99f39d3c72486aad0ff3198d6f8d1770"
+      }
+    },
+    {
+      "case_id": "lost-ack-duplicate-prefix-with-new-event",
+      "kind": "push-batch",
+      "input": {
+        "stored_last_acked_device_sequence": 2,
+        "expected_next_sequence": 3,
+        "device_sequences": [2, 3],
+        "first_event_already_terminal": true
+      },
+      "expected": {
+        "ack_outcomes": ["DUPLICATE", "APPLIED"],
+        "original_outcomes": ["APPLIED", null],
+        "acknowledged_through_device_sequence": 3,
+        "new_domain_mutation_count": 1,
+        "batch_shape_valid": true
+      },
+      "events": [
+        {
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "idempotency_key": "21111111-1111-4111-8111-111111111111",
+          "user_id": "31111111-1111-4111-8111-111111111111",
+          "device_id": "41111111-1111-4111-8111-111111111111",
+          "server_profile_id": "51111111-1111-4111-8111-111111111111",
+          "device_sequence": 2,
+          "event_type": "USER_TRACK_REF_CREATED",
+          "schema_version": 1,
+          "aggregate_type": "USER_TRACK_REF",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": null,
+          "base_server_row_version": null,
+          "occurred_at": "2026-08-15T00:00:00Z",
+          "payload": {"rating": 5},
+          "request_hash": "1da6337721df4f004be28716a86211fd99f39d3c72486aad0ff3198d6f8d1770"
+        },
+        {
+          "event_id": "14111111-1111-4111-8111-111111111111",
+          "idempotency_key": "24111111-1111-4111-8111-111111111111",
+          "user_id": "31111111-1111-4111-8111-111111111111",
+          "device_id": "41111111-1111-4111-8111-111111111111",
+          "server_profile_id": "51111111-1111-4111-8111-111111111111",
+          "device_sequence": 3,
+          "event_type": "USER_TRACK_PREFERENCE_SET",
+          "schema_version": 1,
+          "aggregate_type": "USER_TRACK_REF",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+          "base_server_row_version": 1,
+          "occurred_at": "2026-08-15T00:00:01Z",
+          "payload": {"preference": "LIKE"},
+          "request_hash": "18d9e9fddb48f1e2836dbe7a797763e13cf8207d92d5ee39218fdd26b33b30e2"
+        }
+      ]
+    },
+    {
+      "case_id": "idempotency-key-reuse-different-identity",
+      "kind": "push",
+      "input": {
+        "derived_scope": "sync-event:31111111-1111-4111-8111-111111111111:41111111-1111-4111-8111-111111111111:81111111-1111-4111-8111-111111111111",
+        "same_idempotency_key": true,
+        "same_event_id": false,
+        "same_device_sequence": false,
+        "same_request_hash": false
+      },
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "IDEMPOTENCY_KEY_REUSE",
+        "stored_event_unchanged": true,
+        "domain_mutation_count": 0,
+        "database_unique_error_exposed": false
+      }
+    },
+    {
+      "case_id": "same-id-different-payload",
+      "kind": "push",
+      "input": {"prior_payload": {"rating": 5}, "received_payload": {"rating": 1}},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "EVENT_HASH_MISMATCH",
+        "stored_event_unchanged": true,
+        "retryable": false
+      },
+      "event": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "21111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 2,
+        "event_type": "USER_TRACK_REF_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "USER_TRACK_REF",
+        "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:00:00Z",
+        "payload": {"rating": 1},
+        "request_hash": "b765c98f7efced3f862110d810873be13b09556a3e3288d54b4a6a3e52e20fb6"
+      }
+    },
+    {
+      "case_id": "reordered-batch",
+      "kind": "push-batch",
+      "input": {"expected_next_sequence": 3, "device_sequences": [4, 3]},
+      "expected": {
+        "ack_outcomes": ["REJECTED", "REJECTED"],
+        "error_code": "BATCH_SEQUENCE_NOT_ASCENDING",
+        "acknowledged_through_device_sequence": 2,
+        "domain_mutation_count": 0,
+        "retryable": true
+      },
+      "event": {
+        "event_id": "12111111-1111-4111-8111-111111111111",
+        "idempotency_key": "22111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 4,
+        "event_type": "PLAYLIST_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "62111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:01:00Z",
+        "payload": {"name": "Road"},
+        "request_hash": "8bf9d8bf7e99cea16a97f2ce89a042b21098157b73d492467ec05ab7d9f65af1"
+      }
+    },
+    {
+      "case_id": "sequence-gap",
+      "kind": "push-batch",
+      "input": {"expected_next_sequence": 3, "device_sequences": [3, 5]},
+      "expected": {
+        "ack_outcomes": ["REJECTED", "REJECTED"],
+        "error_code": "DEVICE_SEQUENCE_GAP",
+        "acknowledged_through_device_sequence": 2,
+        "domain_mutation_count": 0,
+        "retryable": true
+      },
+      "event": {
+        "event_id": "13111111-1111-4111-8111-111111111111",
+        "idempotency_key": "23111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 5,
+        "event_type": "PLAYLIST_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "63111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:02:00Z",
+        "payload": {"name": "Road"},
+        "request_hash": "1d1fc16ed89cf8a3c741e7ab82d9b2ef832cd7922ef2cd84578ab3e7da747707"
+      }
+    },
+    {
+      "case_id": "partial-rejection",
+      "kind": "push-batch",
+      "input": {"expected_next_sequence": 8, "device_sequences": [8, 9]},
+      "expected": {
+        "ack_outcomes": ["APPLIED", "REJECTED"],
+        "second_error_code": "UNSUPPORTED_EVENT_TYPE",
+        "acknowledged_through_device_sequence": 9,
+        "atomicity": "PER_EVENT"
+      }
+    },
+    {
+      "case_id": "offline-delete",
+      "kind": "push-pull",
+      "input": {"delete_created_offline": true, "base_server_row_version": 4},
+      "expected": {
+        "ack_outcome": "APPLIED",
+        "server_event_operation": "DELETE",
+        "tombstone_retained": true,
+        "cursor_advance_after_atomic_apply": true
+      }
+    },
+    {
+      "case_id": "edit-vs-delete",
+      "kind": "push",
+      "input": {"local_operation": "EDIT", "server_state": "TOMBSTONED"},
+      "expected": {
+        "ack_outcome": "CONFLICT",
+        "conflict_kind": "EDIT_VS_DELETE",
+        "resolution_state": "REVIEW_REQUIRED",
+        "destructive_last_write_wins": false
+      }
+    },
+    {
+      "case_id": "expired-cursor",
+      "kind": "pull",
+      "input": {"cursor": "opaque-expired-cursor-token"},
+      "expected": {
+        "http_status": 410,
+        "error_code": "CURSOR_INVALID",
+        "bootstrap_required": true,
+        "cursor_advance": false
+      }
+    },
+    {
+      "case_id": "forged-cursor",
+      "kind": "pull",
+      "input": {"cursor": "opaque-forged-cursor-token"},
+      "expected": {
+        "http_status": 410,
+        "error_code": "CURSOR_INVALID",
+        "bootstrap_required": true,
+        "database_offset_disclosed": false
+      }
+    },
+    {
+      "case_id": "cursor-replay-after-failed-page-apply",
+      "kind": "pull",
+      "input": {"local_page_transaction": "ROLLED_BACK", "presented_cursor": "opaque-old-cursor-token"},
+      "expected": {
+        "same_page_replayed": true,
+        "old_cursor_retained": true,
+        "duplicate_projection": false
+      }
+    },
+    {
+      "case_id": "bootstrap-pending-edits",
+      "kind": "bootstrap",
+      "input": {"pending_local_event_count": 3, "dirty_rows": 2},
+      "expected": {
+        "pending_event_directive": "PRESERVE_REBASE_RETRY",
+        "pending_event_hashes_unchanged": true,
+        "dirty_rows_overwritten": false
+      }
+    },
+    {
+      "case_id": "bootstrap-cutover-pending-edits",
+      "kind": "bootstrap",
+      "input": {"snapshot_pages": 3, "pending_local_event_count": 2},
+      "expected": {
+        "snapshot_high_water_stable": true,
+        "cursor_committed_only_after_final_page": true,
+        "pending_events_preserved": true
+      }
+    },
+    {
+      "case_id": "unknown-enum-event",
+      "kind": "push",
+      "input": {"event_type": "FUTURE_CLIENT_EVENT", "schema_version": 1},
+      "expected": {
+        "schema_valid": true,
+        "ack_outcome": "REJECTED",
+        "error_code": "UNSUPPORTED_EVENT_TYPE",
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "unknown-payload-enum",
+      "kind": "push",
+      "input": {
+        "event_type": "USER_TRACK_PREFERENCE_SET",
+        "payload": {"preference": "FUTURE_PREFERENCE"}
+      },
+      "expected": {
+        "schema_valid": true,
+        "ack_outcome": "REJECTED",
+        "error_code": "UNSUPPORTED_ENUM_VALUE",
+        "raw_value_preserved_for_diagnostics": true,
+        "retryable": false
+      }
+    },
+    {
+      "case_id": "unsupported-pulled-server-event",
+      "kind": "pull",
+      "input": {"event_type": "FUTURE_SERVER_EVENT", "schema_version": 2},
+      "expected": {
+        "wire_parse_valid": true,
+        "apply_outcome": "UPGRADE_REQUIRED",
+        "deferred_event_persisted": true,
+        "cursor_advance": false
+      }
+    },
+    {
+      "case_id": "oversized-payload",
+      "kind": "push",
+      "input": {"canonical_payload_bytes": 262145},
+      "expected": {
+        "schema_valid": true,
+        "ack_outcome": "REJECTED",
+        "error_code": "PAYLOAD_TOO_LARGE",
+        "max_canonical_payload_bytes": 262144
+      }
+    },
+    {
+      "case_id": "p00-d006-adopt-local-id",
+      "kind": "push",
+      "input": {
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "71111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null
+      },
+      "expected": {
+        "ack_outcome": "APPLIED",
+        "aggregate_server_id": "71111111-1111-4111-8111-111111111111",
+        "canonicalization": "ADOPT_CLIENT_LOCAL_UUID",
+        "local_id_rekeyed": false
+      }
+    },
+    {
+      "case_id": "p00-d006-ordered-pre-ack-follow-up",
+      "kind": "push-batch",
+      "input": {
+        "stored_last_acked_device_sequence": 9,
+        "device_sequences": [10, 11],
+        "same_user": true,
+        "same_device": true,
+        "same_aggregate_type": true,
+        "same_aggregate_local_id": true,
+        "aggregate_server_ids": [null, null],
+        "durable_create_lineage_required": true
+      },
+      "expected": {
+        "ack_outcomes": ["APPLIED", "APPLIED"],
+        "canonical_server_ids": [
+          "71111111-1111-4111-8111-111111111111",
+          "71111111-1111-4111-8111-111111111111"
+        ],
+        "acknowledged_through_device_sequence": 11,
+        "availability_collision": false
+      },
+      "events": [
+        {
+          "event_id": "a2111111-1111-4111-8111-111111111111",
+          "idempotency_key": "a3111111-1111-4111-8111-111111111111",
+          "user_id": "31111111-1111-4111-8111-111111111111",
+          "device_id": "41111111-1111-4111-8111-111111111111",
+          "server_profile_id": "51111111-1111-4111-8111-111111111111",
+          "device_sequence": 10,
+          "event_type": "PLAYLIST_CREATED",
+          "schema_version": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_local_id": "71111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": null,
+          "base_server_row_version": null,
+          "occurred_at": "2026-08-15T00:10:00Z",
+          "payload": {"name": "Road"},
+          "request_hash": "28fb95884affbcb29e10bcadf0136feb2f77bd9ded0064683ba0d970a727ed3c"
+        },
+        {
+          "event_id": "a4111111-1111-4111-8111-111111111111",
+          "idempotency_key": "a5111111-1111-4111-8111-111111111111",
+          "user_id": "31111111-1111-4111-8111-111111111111",
+          "device_id": "41111111-1111-4111-8111-111111111111",
+          "server_profile_id": "51111111-1111-4111-8111-111111111111",
+          "device_sequence": 11,
+          "event_type": "PLAYLIST_METADATA_PATCHED",
+          "schema_version": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_local_id": "71111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": null,
+          "base_server_row_version": null,
+          "occurred_at": "2026-08-15T00:10:01Z",
+          "payload": {"name": "Road Trip"},
+          "request_hash": "d461b0339e65c5300b46044a384f2ffaf9c20fc7585d488e4b0df92cd1503c03"
+        }
+      ]
+    },
+    {
+      "case_id": "p00-d006-lost-ack-bootstrap-reuse",
+      "kind": "bootstrap",
+      "input": {
+        "incoming_server_id": "71111111-1111-4111-8111-111111111111",
+        "matching_unbound_local_id": "71111111-1111-4111-8111-111111111111",
+        "durable_create_lineage_proven": true
+      },
+      "expected": {
+        "reuse_unbound_local_row": true,
+        "new_local_row_created": false,
+        "pending_event_hashes_unchanged": true,
+        "binding_snapshot_cursor_atomic": true
+      }
+    },
+    {
+      "case_id": "p00-d006-other-device-local-id",
+      "kind": "bootstrap",
+      "input": {
+        "incoming_server_id": "71111111-1111-4111-8111-111111111111",
+        "same_local_id_present": false
+      },
+      "expected": {
+        "new_stable_local_id_created": true,
+        "new_local_id_may_differ_from_server_id": true,
+        "server_id_bound_unique": true
+      }
+    },
+    {
+      "case_id": "p00-d006-server-bound-mutation",
+      "kind": "push",
+      "input": {
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "72111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": "71111111-1111-4111-8111-111111111111",
+        "base_server_row_version": 4
+      },
+      "expected": {
+        "ack_outcome": "APPLIED",
+        "postgresql_aggregate_id": "71111111-1111-4111-8111-111111111111",
+        "aggregate_local_id_echoed": "72111111-1111-4111-8111-111111111111",
+        "local_id_rekeyed": false
+      }
+    },
+    {
+      "case_id": "p00-d006-server-authoritative-null-id",
+      "kind": "push",
+      "input": {"aggregate_type": "RECORDING", "aggregate_server_id": null},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "SERVER_ID_REQUIRED",
+        "domain_mutation_count": 0
+      }
+    },
+    {
+      "case_id": "p00-d006-redirect-alias-only",
+      "kind": "pull",
+      "input": {"alias_row_present": true, "canonical_row_present": false},
+      "expected": {
+        "alias_local_id_preserved": true,
+        "canonical_server_id_resolved": true,
+        "cursor_advance_after_atomic_apply": true
+      }
+    },
+    {
+      "case_id": "p00-d006-redirect-alias-and-canonical",
+      "kind": "pull",
+      "input": {"alias_row_present": true, "canonical_row_present": true},
+      "expected": {
+        "redirect_record_created": true,
+        "both_local_ids_preserved": true,
+        "server_id_unique_constraint_preserved": true,
+        "existing_foreign_keys_rewritten": false
+      }
+    },
+    {
+      "case_id": "p00-d006-invalid-redirect-cycle",
+      "kind": "pull",
+      "input": {
+        "redirects": [
+          {"alias": "S1", "canonical": "S2"},
+          {"alias": "S2", "canonical": "S1"}
+        ]
+      },
+      "expected": {
+        "apply_outcome": "REVIEW_REQUIRED",
+        "conflict_kind": "REDIRECT_COLLISION",
+        "cursor_advance": false,
+        "redirect_cycle_persisted": false
+      }
+    },
+    {
+      "case_id": "p00-d006-tombstone-before-binding",
+      "kind": "push-batch",
+      "input": {"create_pending": true, "delete_pending": true, "aggregate_server_id": null},
+      "expected": {
+        "event_hashes_rewritten": false,
+        "canonical_id_adopted": true,
+        "tombstone_uses_canonical_id": true
+      }
+    },
+    {
+      "case_id": "p00-d006-tombstone-after-binding",
+      "kind": "push",
+      "input": {"aggregate_server_id_known": true, "operation": "DELETE"},
+      "expected": {
+        "tombstone_uses_canonical_id": true,
+        "local_tombstone_keeps_local_id": true
+      }
+    },
+    {
+      "case_id": "p00-d006-unavailable-id",
+      "kind": "push",
+      "input": {"client_creatable": true, "proposed_id_available": false},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "AGGREGATE_ID_UNAVAILABLE",
+        "authorization_granted_by_uuid": false
+      }
+    },
+    {
+      "case_id": "p00-d006-cross-owner",
+      "kind": "push",
+      "input": {"target_owned_by_authenticated_user": false},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "AGGREGATE_NOT_FOUND",
+        "other_owner_disclosed": false
+      }
+    },
+    {
+      "case_id": "ambiguous-single-id-envelope",
+      "kind": "schema",
+      "input": {"aggregate_id": "71111111-1111-4111-8111-111111111111"},
+      "expected": {
+        "schema_valid": false,
+        "missing_fields": ["aggregate_local_id", "aggregate_server_id"]
+      }
+    },
+    {
+      "case_id": "device-sequence-reuse-different-event",
+      "kind": "push",
+      "input": {"same_device_sequence": true, "same_event_id": false, "same_request_hash": false},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "DEVICE_SEQUENCE_REUSE",
+        "stored_event_unchanged": true
+      }
+    },
+    {
+      "case_id": "journal-epoch-mismatch-device-reset",
+      "kind": "push",
+      "input": {"stored_journal_epoch_matches": false},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "DEVICE_RESET_REQUIRED",
+        "bootstrap_required": true,
+        "acknowledged_through_unchanged": true
+      }
+    },
+    {
+      "case_id": "clock-skew-metadata-only",
+      "kind": "push",
+      "input": {"client_clock_offset_seconds": 86400, "device_sequences": [20, 21]},
+      "expected": {
+        "ordering_key": "device_sequence",
+        "occurred_at_used_as_ordering_key": false,
+        "clock_skew_observed": true
+      }
+    }
+  ]
+}

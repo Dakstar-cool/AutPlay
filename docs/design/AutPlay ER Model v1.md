@@ -927,13 +927,13 @@ Validator/UNIQUE constraints запрещают self-supersession, different typ
 
 Re-score, manual review, conflict discovery и rollback append new decision rows, сохраняя старые scores, features, origins, actors и version FKs byte-for-byte explainable. Application command обрабатывает named unique collision по scope/key: при том же request hash возвращает существующую row, а при другом hash отклоняет stable conflict error; raw direct INSERT сам по себе возвращает unique violation.
 
-## 14.9. Frozen F-016 and P00-D004 boundary
+## 14.9. Frozen F-016 and accepted P00-D004 boundary
 
-Initial reference schema содержит zero `match_policy_activation` events. Поэтому она не разрешает applied `AUTO_MATCH` ни для одного evidence tier, включая T4. Consistent T4 exact-byte knowledge может быть сохранено как evidence и shadow counterfactual, но до отдельного решения P00-D004 физически представляется как `SHADOW + REVIEW_REQUIRED` при nullable calibrator/top-two/margin; несовместимая T4 evidence остается `SHADOW + INTEGRITY_CONFLICT`, а недоступная evidence — `SHADOW + DEFERRED_EVIDENCE`. Ни один из этих shadow outcomes не меняет projection.
+Initial reference schema содержит zero `match_policy_activation` events. Поэтому она не разрешает applied `AUTO_MATCH` ни для одного evidence tier, включая T4. Accepted ADR-019/P00-D004 Variant A разрешает server-verified exact-byte reuse только как отдельную strict technical Vault operation, не как identity decision. Consistent T4 knowledge по-прежнему может сохраняться в identity ledger как `SHADOW + REVIEW_REQUIRED` при nullable calibrator/top-two/margin; несовместимая T4 evidence остается `SHADOW + INTEGRITY_CONFLICT`, а недоступная evidence — `SHADOW + DEFERRED_EVIDENCE`. Ни один из этих shadow outcomes не меняет projection.
 
-Этот ER change не решает, является ли deterministic T4 reuse семантически отдельным от frozen F-016 probabilistic auto-match, и не ослабляет F-016. Threshold values и activation появляются только после labeled benchmark/calibration gate и отдельного policy event; P00-D004 требует самостоятельного user-approved change.
+ADR-019 определяет deterministic T4 reuse как отдельную операцию от frozen F-016 probabilistic auto-match и не ослабляет F-016. Threshold values и activation появляются только после labeled benchmark/calibration gate и отдельного policy event. Technical reuse не создает/merge/reassign Recording и не изменяет ImportEntry/UserTrackRef projection; P10 владеет будущим auditable deterministic owner-resolution representation.
 
-В P00-D003 `calibrator_release.evidence_mode` ограничен `METADATA_ONLY`/`AUDIO_AVAILABLE`, а activation требует matching non-null calibrator. Поэтому `DETERMINISTIC_BYTES` намеренно не activatable этой ревизией; любое добавление отдельного deterministic activation path или нового calibrator mode относится только к будущему утвержденному P00-D004.
+В P00-D003 `calibrator_release.evidence_mode` ограничен `METADATA_ONLY`/`AUDIO_AVAILABLE`, а activation требует matching non-null calibrator. Поэтому `DETERMINISTIC_BYTES` намеренно не activatable этой ревизией. ADR-019 не меняет этот physical gate; P06 использует отдельный Vault path, а возможная P10 identity-history representation требует non-destructive migration без fake calibrator/threshold.
 
 ---
 
@@ -1597,7 +1597,8 @@ Migration tests должны проверять:
 20. Supersession хранится backward link на новой row; forward `superseded_by` является derived inverse relation.
 21. ImportEntry и UserTrackRef хранят только validated nullable pointer на текущую applied lineage leaf; historical source of truth не мутируется.
 22. Shadow evaluation не меняет domain projections, а manual resolution не является global Recording merge.
-23. Initial schema имеет zero policy activation events. P00-D003 не меняет frozen F-016 и не решает P00-D004/T4 terminology.
+23. Initial schema имеет zero policy activation events. ADR-019 разрешает только separate technical
+    exact-byte reuse и не меняет frozen F-016 или identity projections.
 
 ---
 
@@ -1616,7 +1617,7 @@ Migration tests должны проверять:
 | Full-text engine | PostgreSQL FTS + pg_trgm или external | PostgreSQL first |
 | Cross-schema FK | Direct FK или published IDs only | Direct FK inside one DB, module writes still restricted |
 
-Отдельное product-level решение P00-D004 остается открытым: является ли deterministic reuse одного проверенного T4/SHA отдельной операцией от probabilistic auto-match или также остается выключенным до benchmark. Этот ER contract не выбирает трактовку и до ее утверждения допускает для consistent T4 только immutable evidence и shadow `REVIEW_REQUIRED`, а incompatible/unavailable evidence — shadow `INTEGRITY_CONFLICT`/`DEFERRED_EVIDENCE`; ни один outcome не меняет projection, сохраняя F-016 без изменений.
+P00-D004 закрыт accepted ADR-019 Variant A: deterministic reuse одного server-verified T4/SHA является separate technical Vault operation, а не probabilistic auto-match. Identity contract сохраняет consistent T4 как immutable shadow `REVIEW_REQUIRED`, а incompatible/unavailable evidence — shadow `INTEGRITY_CONFLICT`/`DEFERRED_EVIDENCE`; ни один identity outcome не меняет projection. Future P10 owner-resolution representation требует отдельной non-destructive migration.
 
 ---
 
@@ -1642,7 +1643,8 @@ ER v1 готова к DDL design, когда:
 16. Re-score/review/conflict/rollback append new rows; update/delete, branch и cycle history отклоняются.
 17. Import/UserTrackRef current pointers согласуются по typed query, owner, applied mode, lineage leaf, state/action и Recording target.
 18. Initial schema содержит zero activation events и не разрешает applied auto-match до frozen F-016 benchmark/calibration gate.
-19. P00-D004/T4 semantic choice остается явно открытым и не скрывается physical schema default.
+19. ADR-019/P00-D004 Variant A отделяет strict technical T4 reuse от F-016 и не обходит
+    существующий physical matcher/projection gate.
 
 ---
 

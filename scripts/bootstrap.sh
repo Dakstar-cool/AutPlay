@@ -19,6 +19,13 @@ if [[ ! "$uv_version" =~ ^uv\ 0\.12\.3([[:space:]]|$) ]]; then
 fi
 
 uv python install 3.14.7
+uv sync --frozen --python 3.14.7
+harness_python_version="$(uv run --frozen python -c 'import platform; print(platform.python_version())')"
+if [[ "$harness_python_version" != "3.14.7" ]]; then
+  echo "AutPlay harness requires CPython 3.14.7; observed: $harness_python_version" >&2
+  exit 1
+fi
+uv run --frozen autplay-codex --version
 uv sync --project server --frozen --python 3.14.7
 python_version="$(uv run --project server --frozen python -c 'import platform; print(platform.python_version())')"
 if [[ "$python_version" != "3.14.7" ]]; then

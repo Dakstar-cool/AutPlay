@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/push-request.schema.json",
+  "title": "AutPlay Sync Push Request v1",
+  "x-autplay-max-request-bytes": 8388608,
+  "x-autplay-sequence-policy": "strictly-ascending-contiguous-from-next-expected",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "protocol_version",
+    "device_id",
+    "server_profile_id",
+    "journal_epoch",
+    "events"
+  ],
+  "properties": {
+    "protocol_version": {"type": "integer", "const": 1},
+    "device_id": {"type": "string", "format": "uuid"},
+    "server_profile_id": {"type": "string", "format": "uuid"},
+    "journal_epoch": {"type": "string", "format": "uuid"},
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {"$ref": "client-event.schema.json"}
+    }
+  }
+}

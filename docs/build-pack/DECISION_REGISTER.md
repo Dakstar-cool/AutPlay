@@ -23,13 +23,25 @@
 | F-015 | False Recording merge is worse than unresolved match |
 | F-016 | Auto-match disabled until labeled benchmark/calibration gate passes |
 | F-017 | Android local aggregate ID never changes after server ACK/merge |
-| F-018 | Domain change + Offline Journal event commit in one Room transaction |
+| F-018 | A bound domain change + immutable Offline Journal event, or a standalone domain change + local mutation outbox, commits in one Room transaction; explicit materialization creates a new immutable event atomically per accepted ADR-018 |
 | F-019 | Media3 owns playback and download execution/progress |
 | F-020 | WorkManager owns durable deferred sync/metadata jobs |
 | F-021 | No destructive migration fallback |
 | F-022 | Direct/local play preferred; Vault stream fallback; transcode only when needed |
 | F-023 | External providers are adapters, never trusted source of truth |
 | F-024 | Only authorized/user-provided imports; no DRM bypass or secret scraping |
+
+### P00-D004 companion clarification
+
+ADR-019 was explicitly accepted by the user on 2026-08-16 as P00-D004 Variant A.
+Server-verified exact SHA-256 plus byte size may deterministically re-reference one existing
+`COMMITTED` VaultObject, one non-deleted `VALID` AudioVariant and one active canonical Recording
+when the complete integrity and authorization-independent eligibility predicate passes. This is
+byte-level CAS idempotency, not probabilistic `AUTO_MATCH`, merge or catalog mutation. Any
+ambiguity, corruption, quarantine, unavailable replica or conflicting Recording fails closed.
+P06 does not mutate owner/import projections. P10 records T4 as shadow evidence and permits only an
+explicit reviewed owner projection through separate typed ImportEntry/UserTrackRef lineages. F-016
+remains unchanged for every probabilistic path.
 
 ## 2. Accepted technical baselines
 
@@ -45,6 +57,13 @@
 | Deferred work | WorkManager | Do not duplicate Media3 downloads |
 | Vault v1 | Local/NAS filesystem adapter | S3/WebDAV later behind port |
 | Media tools | Pinned FFmpeg + Chromaprint/fpcalc | Invoke without shell interpolation |
+| Android P07 JSON/toolchain | AGP 9.1.0 + RFC 8785 Java canonicalizer 1.1 | ADR-020; exact-pin compatibility and full-gate change only |
+| Android P08 playback/downloads | Media3 1.10.1 + Room v2 captured-session ownership + separate caches | ADR-021; Media3 owns execution/progress, exact-pin/full-gate changes only |
+| P09 sync runtime | Per-event PostgreSQL commits, opaque owner/device/epoch cursors, durable materialized bootstrap, Room v7 profile ownership, bounded WorkManager drain, OkHttp 5.4.0 | ADR-022; immutable retry identity, no blind LWW, no destructive migration or payload-bearing work input |
+| P10 import/identity review | Existing PostgreSQL import/identity/audit schema, all T0-T4 evaluations shadow-only, explicit typed manual projection, Room v8 offline review and provider-neutral adapters | ADR-023; F-016 stays disabled, no live-provider selection, no destructive migration or frozen-sync overload |
+| P11 CPU recommendation/replay | Replaceable deterministic CPU baseline, immutable retained input/pipeline evidence, model-independent API, exact RAW_JSON offline packs and Room v9 presentation mapping | ADR-024; mandatory filters fail closed, expired personal snapshots purge boundedly, feedback stays on P04/P09, embeddings/GPU/final model remain P12-owned |
+| P12 isolated GPU enrichment | Separate `gpu/` uv/image, deterministic NVIDIA auto/UUID/PCI/index selection, immutable approved-model/benchmark provenance, exact owner-safe pgvector and rollback-gated activation | ADR-025; CPU path never imports/installs GPU code, names are not selectors, HNSW is absent without measured need, no model becomes ACTIVE without a real approved RTX report |
+| P13 Hybrid Wave | CPU modular-monolith `wave` schema, REST/PostgreSQL durable truth, disposable header-auth WebSocket hints, device-bound membership/preflight, Room v10 projection and Media3 monotonic execution | ADR-026; room code is only an invite-scoped locator, every device opens its own authorized source, no P2P/broker/GPU dependency, trusted-local single-API evidence only |
 
 ## 3. Decisions owned by P00/P01
 
@@ -86,3 +105,14 @@ Implement ports/config seams only when current phase requires them.
 3. propose smallest compatible resolution;
 4. do not change frozen decision silently;
 5. record accepted resolution in ADR and traceability.
+
+## 6. Standing technical-decision authorization
+
+On 2026-08-16 the user authorized Codex to decide future analogous in-scope architecture,
+persistence and frozen-contract conflicts autonomously. Codex must still record each resolution in
+an ADR/change entry, follow the source-of-truth precedence, choose the smallest coherent resolution,
+obtain independent review for critical/high-risk changes and preserve phase boundaries.
+
+This standing authorization does not authorize destructive or irreversible operations on real/user
+data, use of secrets/accounts/paid resources, external writes/publication/deployment, or selection
+of an external provider/legal policy. Those actions still require explicit case-specific approval.

@@ -13,6 +13,7 @@
 - ER sync entities
 - PostgreSQL sync tables
 - Android Room Offline Journal/sync entities
+- `docs/design/AutPlay_Recommendation_Subsystem_v1.md` interaction and phase-ownership contract
 
 ## Deliverables
 
@@ -22,6 +23,8 @@
 4. Golden valid/invalid vectors under `tests/fixtures/sync/v1/`.
 5. Contract validation tests runnable without Android device.
 6. Compatibility/change policy and next-version procedure.
+7. Specialized v1 schemas and golden vectors for canonical logical listening,
+   recommendation-impression and direct recommendation-feedback events.
 
 ## Protocol must define
 
@@ -40,10 +43,28 @@
 - payload schema version, unknown additive fields and unsupported version error;
 - retryability, limits, stable error codes and redaction;
 - clock skew: client time is metadata, never sole ordering authority.
+- two-stage event validation: generic forward-compatible envelope first, then the specialized schema
+  for a known event type;
+- actual presentation, not candidate generation or API delivery, as the definition of an impression;
+- recommendation request/rank/recording attribution, optional causal impression linkage and
+  non-disclosing same-owner validation;
+- append-only interaction identity and exactly-once projection semantics without duplicate generic
+  events for preference, playlist or playback actions;
+- explicit privacy bounds excluding tokens, private URLs, raw paths, raw search queries and raw
+  model features from interaction payloads.
 
 ## Golden vectors
 
 Include duplicate event same payload, same ID different payload, reordered batch, sequence gap, partial rejection, offline delete, edit-vs-delete, expired cursor, bootstrap with pending local edits, unknown enum/event and oversized payload.
+
+Also include organic and recommended listening, online/offline/local-reranked impressions, direct
+selection/dismissal, same-presentation idempotency, causal pre-ACK impression linkage, cross-user
+attribution rejection, rank/recording mismatch, explicit-null hash coverage and interaction payload
+boundary vectors.
+
+Include top-level sensitive extension rejection, `event_id`/aggregate-ID mismatch, canonical
+listening origin/context mapping, recommended-listen attribution requirement, and a different-event-ID
+same-presentation semantic duplicate that creates no second impression.
 
 ## Constraints
 
@@ -52,6 +73,9 @@ Include duplicate event same payload, same ID different payload, reordered batch
 - Do not make cursor guessable database offset contract.
 - No silent last-write-wins for destructive conflicts.
 - Do not expose private URLs/tokens in payload or conflict snapshot.
+- Do not count generated/delivered recommendations as impressions.
+- Do not add a second transport envelope or a parallel feedback endpoint.
+- Do not implement recommendation serving, persistence projections or either sync engine in P04.
 
 ## Acceptance
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Final
 from uuid import UUID
 
@@ -39,20 +40,7 @@ def create_auth_router(service: AuthService) -> APIRouter:
 
     router = APIRouter()
 
-    def authenticate_request(request: Request) -> None:
-        authorizations = request.headers.getlist("authorization")
-        if len(authorizations) != 1:
-            raise _access_error()
-        authorization = authorizations[0]
-        scheme, separator, credential = authorization.partition(" ")
-        if separator != " " or scheme.lower() != "bearer" or not credential:
-            raise _access_error()
-        try:
-            request.state.principal = service.authenticate_access(credential)
-        except InvalidAccessTokenError as error:
-            raise _access_error() from error
-
-    authenticated = [Depends(authenticate_request)]
+    authenticated = [Depends(bearer_authentication(service))]
 
     @router.post("/auth/refresh", response_model=None)
     def rotate_refresh(body: RefreshRequest, request: Request) -> JSONResponse:
@@ -116,6 +104,25 @@ def create_auth_router(service: AuthService) -> APIRouter:
     return router
 
 
+def bearer_authentication(service: AuthService) -> Callable[[Request], None]:
+    """Return the shared fail-closed Bearer dependency for protected routers."""
+
+    def authenticate_request(request: Request) -> None:
+        authorizations = request.headers.getlist("authorization")
+        if len(authorizations) != 1:
+            raise _access_error()
+        authorization = authorizations[0]
+        scheme, separator, credential = authorization.partition(" ")
+        if separator != " " or scheme.lower() != "bearer" or not credential:
+            raise _access_error()
+        try:
+            request.state.principal = service.authenticate_access(credential)
+        except InvalidAccessTokenError as error:
+            raise _access_error() from error
+
+    return authenticate_request
+
+
 def _access_error() -> ApiError:
     return ApiError(
         code="authentication_required",
@@ -152,4 +159,4 @@ def _token_response(pair: TokenPair) -> JSONResponse:
     )
 
 
-__all__ = ("RefreshRequest", "create_auth_router")
+__all__ = ("RefreshRequest", "bearer_authentication", "create_auth_router")

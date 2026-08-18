@@ -1,0 +1,37 @@
+﻿{
+    "schema_version":  1,
+    "generated_at":  "2026-08-18T05:51:33.3172664+00:00",
+    "status":  "PASS",
+    "android":  {
+                    "unsigned_release_sha256":  "ae5665db91180f43bae676b14316d593625eac42a51a87c0e4ddc20f3141036c",
+                    "dev_signed_rc_sha256":  "f76b96eb4f3b8e5eda9e609a86aeb8b7ddfffe8c01de24f9236f37074962acfc",
+                    "signature":  "Android debug development key; not a production key",
+                    "lint_unit_r8_release":  "PASS"
+                },
+    "cpu_container":  {
+                          "tag":  "autplay-server:rc1-local",
+                          "image_id":  "sha256:8d259f377f6911adfe5716a0b414747f3e1521efe5080650a6cf4e2ec665c840",
+                          "pushed":  false
+                      },
+    "device":  {
+                   "status":  "PASS",
+                   "serial_sha256":  "37aa14db887ecb331b723f0661e22dc12df22b5c663adce8351ae612304ce0a4",
+                   "manufacturer":  "samsung",
+                   "model":  "SM-A556E",
+                   "sdk":  "36",
+                   "emulator":  false,
+                   "install":  "PASS",
+                   "process_restart":  "PASS",
+                   "background_transition":  "PASS",
+                   "battery_optimization_bypass_requested":  false,
+                   "process_death_observed":  "PASS",
+                   "physical_samsung_a55":  true,
+                   "disposable_emulator_package_reinstalled":  false
+               },
+    "external_actions":  {
+                             "push":  false,
+                             "publication":  false,
+                             "deployment":  false,
+                             "production_signing":  false
+                         }
+}

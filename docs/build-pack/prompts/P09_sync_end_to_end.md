@@ -12,6 +12,7 @@
 - event JSON Schemas/OpenAPI/golden vectors
 - PostgreSQL sync tables and Room sync entities
 - P07 domain commands and P05 transaction/journal code
+- P04 specialized user-interaction schemas and golden vectors
 
 ## Scope
 
@@ -26,6 +27,14 @@
 9. Bootstrap snapshot and invalid cursor reset with pending local event preservation.
 10. Sync Status UI: pending, last success, conflict, dead letter and retry.
 11. Metrics/log correlation without payload leakage.
+12. Two-stage known-event schema dispatch and an idempotent canonical interaction projection. Inbox,
+    domain fact/mutation, interaction projection, canonical sync event and terminal ACK commit in one
+    PostgreSQL transaction.
+13. Same-owner request/rank/recording/impression validation, including ordered same-device causal
+    references to an impression that has not yet received an ACK.
+14. Owner-scoped semantic presentation uniqueness. A different event ID for the same
+    `(presentation_id, recommendation_request_id, source_rank)` is rejected without a second
+    interaction projection or replacement of the original.
 
 ## Constraints
 
@@ -35,6 +44,9 @@
 - No blind timestamp last-write-wins for playlist/library destructive operations.
 - Retry uses same event ID/hash.
 - No large payload in WorkManager input.
+- Duplicate retry never creates a second interaction row; unknown strings remain parseable but are
+  not applied.
+- Cross-user and nonexistent recommendation attribution use the same non-disclosing error.
 
 ## Required tests
 
@@ -50,6 +62,10 @@ Run the same P04 golden vectors against server and Android implementations, plus
 - unknown event/version compatibility;
 - two users/devices object isolation;
 - large backlog batching and cursor lag metrics.
+- organic/recommended attribution, impression/feedback causal joins, same-ID replay and
+  rank/recording/cross-owner negative vectors from P04.
+- event/aggregate-ID mismatch, canonical listening origin/context mapping and
+  different-ID/same-presentation dedupe vectors.
 
 ## Acceptance
 

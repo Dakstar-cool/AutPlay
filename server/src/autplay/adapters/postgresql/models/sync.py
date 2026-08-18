@@ -62,6 +62,9 @@ class DeviceEventInboxRow(Base):
         PG_UUID(as_uuid=True),
         nullable=False,
     )
+    aggregate_local_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    base_server_row_version: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
     payload: Mapped[JsonValue] = mapped_column(
         JSONB(),
         nullable=False,
@@ -89,6 +92,7 @@ class DeviceEventInboxRow(Base):
         BYTEA(),
         nullable=False,
     )
+    terminal_ack: Mapped[JsonValue | None] = mapped_column(JSONB(), nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint("event_id", name="device_event_inbox_pkey"),
@@ -183,6 +187,8 @@ class SyncEventRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    operation: Mapped[str] = mapped_column(Text(), nullable=False, server_default=text("'UPSERT'"))
+    server_row_version: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -255,6 +261,8 @@ class DeviceSyncCursorRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
+    journal_epoch: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    last_successful_sync_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     __table_args__ = (
         PrimaryKeyConstraint("device_id", name="device_sync_cursor_pkey"),
@@ -431,6 +439,57 @@ Index(
     postgresql_where=text("apply_status = 'RECEIVED'"),
 )
 
+
+class BootstrapSessionRow(Base):
+    """A materialized, bounded bootstrap snapshot cursor."""
+
+    __tablename__ = "bootstrap_session"
+
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    journal_epoch: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    high_water_server_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    __table_args__ = ({"schema": "sync"},)
+
+
+class BootstrapSnapshotItemRow(Base):
+    """Immutable materialized item in one bootstrap session."""
+
+    __tablename__ = "bootstrap_snapshot_item"
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(BigInteger(), primary_key=True)
+    aggregate_type: Mapped[str] = mapped_column(Text(), nullable=False)
+    aggregate_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    server_row_version: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    payload: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
+    __table_args__ = ({"schema": "sync"},)
+
+
+class UserInteractionEventRow(Base):
+    """Idempotent projection of P04 specialized interaction envelopes."""
+
+    __tablename__ = "user_interaction_event"
+
+    interaction_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(Text(), nullable=False)
+    recommendation_request_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    recording_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    source_rank: Mapped[int | None] = mapped_column(Integer())
+    presentation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    impression_interaction_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    payload: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    __table_args__ = ({"schema": "library"},)
+
+
+Index("ix_bootstrap_session_expiry", BootstrapSessionRow.expires_at)
+
+
 Index(
     "ix_sync_event_user_sequence",
     SyncEventRow.user_id,
@@ -455,9 +514,12 @@ Index(
 
 
 __all__ = (
+    "BootstrapSessionRow",
+    "BootstrapSnapshotItemRow",
     "DeviceEventInboxRow",
     "DeviceSyncCursorRow",
     "IdempotencyRecordRow",
     "SyncEventRow",
     "TombstoneRow",
+    "UserInteractionEventRow",
 )

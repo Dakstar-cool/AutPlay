@@ -13,6 +13,7 @@
 - PostgreSQL embedding/model/job schema
 - P11 evaluation baseline
 - `REFERENCE_PROJECTS.md` pgvector section
+- `docs/design/AutPlay_Recommendation_Subsystem_v1.md` embedding read/write and model-boundary rules
 
 ## Scope
 
@@ -26,6 +27,9 @@
 8. HNSW only if recorded data proves exact search misses latency target; include recall comparison and rollback.
 9. Shadow comparison against P11: relevance/diversity/novelty/repeat/latency/throughput/VRAM.
 10. Active model switch, rollback window and derived-data retirement.
+11. P11 consumes only `TrackEmbeddingReader`; the isolated worker owns `TrackEmbedder` and
+    `TrackEmbeddingWriter`. Embedding/model changes leave the public recommendation and interaction
+    contracts unchanged.
 
 ## Constraints
 
@@ -36,6 +40,11 @@
 - One heavy GPU job concurrently until benchmark proves safe.
 - OOM: bounded batch reduction, then deferred/terminal outcome; never API outage.
 - Core ingest completes before ML enrichment.
+- Shadow models read the same versioned interaction dataset and never emit duplicate impressions.
+- Interaction capture and CPU recommendation request logging remain available during every GPU/model
+  failure.
+- Evaluation datasets record interaction-schema version and snapshot watermark; tensors, semantic
+  IDs and raw model features never enter the interaction wire schema.
 
 ## Required tests/evidence
 

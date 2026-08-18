@@ -9,9 +9,13 @@ from collections.abc import Callable, Sequence
 from typing import TextIO
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
+from autplay.adapters.postgresql.vault_uow import SqlAlchemyVaultUnitOfWorkFactory
 from autplay.application.auth import AuthService, BootstrapOwnerCommand
+from autplay.application.vault_reconciliation import ReconcileMode, VaultReconciliationService
 from autplay.domain.auth import (
     AuthenticationError,
     DeviceDescription,
@@ -19,7 +23,7 @@ from autplay.domain.auth import (
     TokenPair,
 )
 from autplay.entrypoints.composition import build_auth_service
-from autplay.runtime.settings import SettingsLoadError, load_api_settings
+from autplay.runtime.settings import SettingsLoadError, load_api_settings, load_worker_settings
 
 SERVICE_NAME = "autplay-admin"
 
@@ -41,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=DevicePlatform.OTHER.value,
     )
     bootstrap.add_argument("--app-version", required=True)
+    reconcile = subcommands.add_parser(
+        "vault-reconcile", help="run bounded Vault reconciliation without revealing storage keys"
+    )
+    reconcile.add_argument("--apply", action="store_true", help="apply safe metadata repairs")
+    reconcile.add_argument("--limit", type=int, default=100)
     return parser
 
 
@@ -80,6 +89,42 @@ def run_bootstrap(
     return 0
 
 
+def run_vault_reconcile(
+    service: VaultReconciliationService,
+    arguments: Sequence[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    """Execute the bounded P06 local reconciliation command with aggregate output."""
+
+    namespace = build_parser().parse_args(list(arguments))
+    if namespace.command != "vault-reconcile":
+        _write_error(stderr, "unknown_admin_command")
+        return 2
+    try:
+        report = service.run(
+            mode=ReconcileMode.APPLY if namespace.apply else ReconcileMode.DRY_RUN,
+            limit=int(namespace.limit),
+        )
+    except ValueError:
+        _write_error(stderr, "invalid_admin_input")
+        return 4
+    json.dump(
+        {
+            "inspected": report.inspected,
+            "repaired": report.repaired,
+            "quarantined": report.quarantined,
+            "remaining": report.remaining,
+        },
+        stdout,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    stdout.write("\n")
+    return 0
+
+
 def main(
     arguments: Sequence[str] | None = None,
     *,
@@ -88,6 +133,7 @@ def main(
     """Load API auth settings and execute the trusted local command."""
 
     command_arguments = sys.argv[1:] if arguments is None else arguments
+    command = command_arguments[0] if command_arguments else None
     if service_factory is not None:
         return run_bootstrap(
             service_factory(),
@@ -95,16 +141,43 @@ def main(
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
+    if command == "vault-reconcile":
+        try:
+            settings = load_worker_settings()
+        except SettingsLoadError as error:
+            _write_error(sys.stderr, error.code)
+            return 2
+        engine = create_runtime_engine(settings)
+        try:
+            sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+            with SqlAlchemyVaultUnitOfWorkFactory(sessions)() as unit:
+                result = run_vault_reconcile(
+                    VaultReconciliationService(
+                        repository=unit.vault,
+                        storage=FilesystemVaultStorage(settings.vault_root),
+                    ),
+                    command_arguments,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                )
+                if result == 0:
+                    unit.commit()
+                return result
+        except SQLAlchemyError:
+            _write_error(sys.stderr, "database_unavailable")
+            return 3
+        finally:
+            engine.dispose()
+
     try:
-        settings = load_api_settings()
+        api_settings = load_api_settings()
     except SettingsLoadError as error:
         _write_error(sys.stderr, error.code)
         return 2
-
-    engine = create_runtime_engine(settings)
+    engine = create_runtime_engine(api_settings)
     try:
         return run_bootstrap(
-            build_auth_service(settings, engine),
+            build_auth_service(api_settings, engine),
             command_arguments,
             stdout=sys.stdout,
             stderr=sys.stderr,
@@ -140,4 +213,10 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ("SERVICE_NAME", "build_parser", "main", "run_bootstrap")
+__all__ = (
+    "SERVICE_NAME",
+    "build_parser",
+    "main",
+    "run_bootstrap",
+    "run_vault_reconcile",
+)

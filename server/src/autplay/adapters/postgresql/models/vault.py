@@ -553,6 +553,174 @@ class AcquisitionRecordRow(Base):
     )
 
 
+class UploadSessionRow(Base):
+    """Durable, owner-bound P06 resumable upload state."""
+
+    __tablename__ = "upload_session"
+
+    upload_session_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, server_default=text("uuidv7()")
+    )
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    target_recording_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text(), nullable=False)
+    request_hash: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    declared_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    computed_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    expected_size: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    received_size: Mapped[int] = mapped_column(
+        BigInteger(), nullable=False, server_default=text("0")
+    )
+    chunk_size: Mapped[int] = mapped_column(Integer(), nullable=False)
+    max_chunks: Mapped[int] = mapped_column(Integer(), nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer(), nullable=False, server_default=text("0"))
+    staging_key: Mapped[str] = mapped_column(Text(), nullable=False)
+    state: Mapped[str] = mapped_column(Text(), nullable=False, server_default=text("'OPEN'"))
+    job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    vault_object_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    audio_variant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    sealed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    row_version: Mapped[int] = mapped_column(BigInteger(), nullable=False, server_default=text("1"))
+
+    __table_args__ = (
+        PrimaryKeyConstraint("upload_session_id", name="upload_session_pkey"),
+        ForeignKeyConstraint(
+            ["user_id"],
+            ["account.user_account.user_id"],
+            name="upload_session_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["device_id"],
+            ["account.device.device_id"],
+            name="upload_session_device_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_recording_id"],
+            ["catalog.recording.recording_id"],
+            name="upload_session_target_recording_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"],
+            ["jobs.job.job_id"],
+            name="upload_session_job_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["vault_object_id"],
+            ["vault.vault_object.vault_object_id"],
+            name="upload_session_vault_object_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["audio_variant_id"],
+            ["vault.audio_variant.audio_variant_id"],
+            name="upload_session_audio_variant_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "device_id"],
+            ["account.device.user_id", "account.device.device_id"],
+            name="fk_upload_session_device_owner",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_upload_session_user_idempotency"),
+        UniqueConstraint("upload_session_id", "user_id", name="uq_upload_session_owner_lookup"),
+        UniqueConstraint("staging_key", name="uq_upload_session_staging_key"),
+        CheckConstraint(
+            "length(idempotency_key) BETWEEN 1 AND 200", name="upload_session_idempotency_key_check"
+        ),
+        CheckConstraint(
+            "octet_length(request_hash) = 32", name="ck_upload_session_request_hash_len"
+        ),
+        CheckConstraint(
+            "declared_sha256 IS NULL OR octet_length(declared_sha256) = 32",
+            name="ck_upload_session_declared_sha256_len",
+        ),
+        CheckConstraint(
+            "computed_sha256 IS NULL OR octet_length(computed_sha256) = 32",
+            name="ck_upload_session_computed_sha256_len",
+        ),
+        CheckConstraint(
+            "expected_size BETWEEN 1 AND 4294967296", name="upload_session_expected_size_check"
+        ),
+        CheckConstraint("chunk_size BETWEEN 1 AND 1048576", name="upload_session_chunk_size_check"),
+        CheckConstraint("max_chunks BETWEEN 1 AND 4096", name="upload_session_max_chunks_check"),
+        CheckConstraint(
+            "expected_size <= chunk_size::bigint * max_chunks::bigint",
+            name="ck_upload_session_capacity",
+        ),
+        CheckConstraint(
+            "received_size BETWEEN 0 AND expected_size", name="ck_upload_session_received_size"
+        ),
+        CheckConstraint(
+            "chunk_count BETWEEN 0 AND max_chunks", name="ck_upload_session_chunk_count"
+        ),
+        CheckConstraint(
+            "staging_key ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'",
+            name="ck_upload_session_staging_key",
+        ),
+        CheckConstraint(
+            "state IN ('OPEN', 'SEALED', 'PROCESSING', 'COMMIT_PREPARED', 'COMMITTED', 'REUSED', 'QUARANTINED', 'FAILED', 'CANCELLED', 'EXPIRED')",
+            name="ck_upload_session_state",
+        ),
+        CheckConstraint(
+            "error_code IS NULL OR length(error_code) BETWEEN 1 AND 100",
+            name="ck_upload_session_error_code",
+        ),
+        CheckConstraint("expires_at > created_at", name="ck_upload_session_expiry"),
+        CheckConstraint("row_version >= 1", name="upload_session_row_version_check"),
+        CheckConstraint(
+            "(state = 'OPEN' AND job_id IS NULL AND vault_object_id IS NULL AND audio_variant_id IS NULL AND computed_sha256 IS NULL AND sealed_at IS NULL AND completed_at IS NULL AND error_code IS NULL) OR (state = 'SEALED' AND vault_object_id IS NULL AND audio_variant_id IS NULL AND computed_sha256 IS NULL AND sealed_at IS NOT NULL AND completed_at IS NULL AND error_code IS NULL) OR (state = 'PROCESSING' AND job_id IS NOT NULL AND vault_object_id IS NULL AND audio_variant_id IS NULL AND sealed_at IS NOT NULL AND completed_at IS NULL AND error_code IS NULL) OR (state = 'COMMIT_PREPARED' AND job_id IS NOT NULL AND vault_object_id IS NOT NULL AND audio_variant_id IS NULL AND computed_sha256 IS NOT NULL AND sealed_at IS NOT NULL AND completed_at IS NULL AND error_code IS NULL) OR (state IN ('COMMITTED', 'REUSED') AND job_id IS NOT NULL AND vault_object_id IS NOT NULL AND audio_variant_id IS NOT NULL AND computed_sha256 IS NOT NULL AND sealed_at IS NOT NULL AND completed_at IS NOT NULL AND error_code IS NULL) OR (state IN ('QUARANTINED', 'FAILED') AND job_id IS NOT NULL AND vault_object_id IS NULL AND audio_variant_id IS NULL AND sealed_at IS NOT NULL AND completed_at IS NOT NULL AND error_code IS NOT NULL) OR (state IN ('CANCELLED', 'EXPIRED') AND vault_object_id IS NULL AND audio_variant_id IS NULL AND computed_sha256 IS NULL AND completed_at IS NOT NULL AND error_code IS NOT NULL)",
+            name="ck_upload_session_state_links",
+        ),
+        {"schema": "vault"},
+    )
+
+
+class UploadChunkRow(Base):
+    """One durable receipt; primary-key conflicts make retries explicit."""
+
+    __tablename__ = "upload_chunk"
+
+    upload_session_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer(), nullable=False)
+    start_offset: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer(), nullable=False)
+    sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("upload_session_id", "chunk_index", name="upload_chunk_pkey"),
+        ForeignKeyConstraint(
+            ["upload_session_id"],
+            ["vault.upload_session.upload_session_id"],
+            name="upload_chunk_upload_session_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("upload_session_id", "start_offset", name="uq_upload_chunk_start_offset"),
+        CheckConstraint("chunk_index >= 0", name="ck_upload_chunk_index"),
+        CheckConstraint("start_offset >= 0", name="ck_upload_chunk_start_offset"),
+        CheckConstraint("byte_size BETWEEN 1 AND 1048576", name="upload_chunk_byte_size_check"),
+        CheckConstraint("octet_length(sha256) = 32", name="ck_upload_chunk_sha256_len"),
+        {"schema": "vault"},
+    )
+
+
 Index(
     "ix_vault_object_status",
     VaultObjectRow.commit_status,
@@ -586,12 +754,40 @@ Index(
     AcquisitionRecordRow.acquired_at.desc(),
 )
 
+Index(
+    "ix_upload_session_owner_state_time",
+    UploadSessionRow.user_id,
+    UploadSessionRow.device_id,
+    UploadSessionRow.state,
+    UploadSessionRow.updated_at.desc(),
+)
+
+Index(
+    "ix_upload_session_state_expiry",
+    UploadSessionRow.state,
+    UploadSessionRow.expires_at,
+)
+
+Index(
+    "ix_upload_session_computed_sha256",
+    UploadSessionRow.computed_sha256,
+    postgresql_where=text("computed_sha256 IS NOT NULL"),
+)
+
+Index(
+    "ix_upload_session_job",
+    UploadSessionRow.job_id,
+    postgresql_where=text("job_id IS NOT NULL"),
+)
+
 
 __all__ = (
     "AcquisitionRecordRow",
     "AudioFingerprintRow",
     "AudioVariantRow",
     "RecordingCanonicalVariantRow",
+    "UploadChunkRow",
+    "UploadSessionRow",
     "VaultObjectRow",
     "VaultReplicaRow",
 )

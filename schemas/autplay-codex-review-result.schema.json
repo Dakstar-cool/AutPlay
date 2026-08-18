@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutPlay Codex Review Result",
+  "type": "object",
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {"type": "string"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "title", "evidence", "affected_files"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "major", "minor", "informational"]
+          },
+          "title": {"type": "string"},
+          "evidence": {"type": "string"},
+          "affected_files": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "failure_scenario": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

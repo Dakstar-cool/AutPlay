@@ -9,7 +9,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = "deploy/compose/compose.yaml"
 $composeTestFile = "deploy/compose/compose.test.yaml"
 $composeRuntimeFile = "deploy/compose/compose.runtime.yaml"
-$composeProject = "autplay-p03-$PID"
+$composeProject = "autplay-p06-$PID"
 $composeTouched = $false
 $previousTestDatabaseUrl = [Environment]::GetEnvironmentVariable("AUTPLAY_TEST_DATABASE_URL")
 $previousRuntimeSecretFile = [Environment]::GetEnvironmentVariable("AUTPLAY_RUNTIME_AUTH_SECRET_FILE")
@@ -18,6 +18,27 @@ Push-Location $repoRoot
 
 try {
     & "$PSScriptRoot\bootstrap.ps1" -ServerOnly:$ServerOnly
+
+    & uv lock --check
+    if ($LASTEXITCODE -ne 0) { throw "AutPlay Codex harness uv lock freshness check failed" }
+
+    & uv run --frozen python -c "import autplay_codex"
+    if ($LASTEXITCODE -ne 0) { throw "AutPlay Codex harness package import failed" }
+
+    & uv run --frozen ruff check tools/autplay_codex tests/contract
+    if ($LASTEXITCODE -ne 0) { throw "Root tooling/contract Ruff lint failed" }
+
+    & uv run --frozen ruff format --check tools/autplay_codex tests/contract
+    if ($LASTEXITCODE -ne 0) { throw "Root tooling/contract Ruff format check failed" }
+
+    & uv run --frozen mypy tools/autplay_codex/src tools/autplay_codex/tests tests/contract
+    if ($LASTEXITCODE -ne 0) { throw "Root tooling/contract mypy failed" }
+
+    & uv run --frozen pytest tools/autplay_codex/tests
+    if ($LASTEXITCODE -ne 0) { throw "AutPlay Codex harness pytest failed" }
+
+    & uv run --frozen pytest tests/contract
+    if ($LASTEXITCODE -ne 0) { throw "Sync contract validation failed" }
 
     & uv lock --project server --check
     if ($LASTEXITCODE -ne 0) { throw "uv lock freshness check failed" }
@@ -57,8 +78,8 @@ try {
 
     if (-not $ServerOnly) {
         $gradleJavaHomeArgument = "-Dorg.gradle.java.home=$env:JAVA_HOME"
-        & .\gradlew.bat $gradleJavaHomeArgument --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug
-        if ($LASTEXITCODE -ne 0) { throw "Android lint/unit/build smoke failed" }
+        & .\gradlew.bat $gradleJavaHomeArgument --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug assembleRelease
+        if ($LASTEXITCODE -ne 0) { throw "Android lint/unit/debug/release-R8 gate failed" }
     }
 
     $existingContainers = (& docker ps -a --filter "label=com.docker.compose.project=$composeProject" --format "{{.ID}}" | Out-String).Trim()

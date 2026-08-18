@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutPlay Codex Task Result",
+  "type": "object",
+  "required": ["status", "summary", "checks", "risks"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "blocked", "failed"]
+    },
+    "summary": {"type": "string"},
+    "changed_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string"},
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "skipped"]
+          },
+          "details": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "blocker": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

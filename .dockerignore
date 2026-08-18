@@ -10,7 +10,16 @@
 !server/migrations/
 !server/migrations/**
 
+!gpu/
+!gpu/pyproject.toml
+!gpu/uv.lock
+!gpu/README.md
+!gpu/src/
+!gpu/src/**
+
 server/src/**/__pycache__/
 server/src/**/*.py[cod]
 server/migrations/**/__pycache__/
 server/migrations/**/*.py[cod]
+gpu/src/**/__pycache__/
+gpu/src/**/*.py[cod]

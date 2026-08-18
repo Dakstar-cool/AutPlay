@@ -29,6 +29,15 @@ _COMMON_ENV_FIELDS: Final = {
     "database_connect_timeout_seconds": "DATABASE_CONNECT_TIMEOUT_SECONDS",
     "database_statement_timeout_ms": "DATABASE_STATEMENT_TIMEOUT_MS",
     "log_level": "LOG_LEVEL",
+    "vault_root": "VAULT_ROOT",
+    "vault_max_object_bytes": "VAULT_MAX_OBJECT_BYTES",
+    "vault_max_chunk_bytes": "VAULT_MAX_CHUNK_BYTES",
+    "vault_session_ttl_seconds": "VAULT_SESSION_TTL_SECONDS",
+    "vault_tool_timeout_seconds": "VAULT_TOOL_TIMEOUT_SECONDS",
+    "vault_tool_max_output_bytes": "VAULT_TOOL_MAX_OUTPUT_BYTES",
+    "vault_stream_block_bytes": "VAULT_STREAM_BLOCK_BYTES",
+    "vault_reconcile_batch_size": "VAULT_RECONCILE_BATCH_SIZE",
+    "vault_low_disk_bytes": "VAULT_LOW_DISK_BYTES",
 }
 _API_ENV_FIELDS: Final = {
     "host": "API_HOST",
@@ -39,6 +48,13 @@ _API_ENV_FIELDS: Final = {
     "access_token_ttl_seconds": "ACCESS_TOKEN_TTL_SECONDS",
     "refresh_token_ttl_seconds": "REFRESH_TOKEN_TTL_SECONDS",
     "password_login_enabled": "PASSWORD_LOGIN_ENABLED",
+}
+_STREAM_ENV_FIELDS: Final = {
+    "host": "STREAM_HOST",
+    "port": "STREAM_PORT",
+    "auth_signing_secret": "AUTH_SIGNING_SECRET",
+    "auth_issuer": "AUTH_ISSUER",
+    "auth_audience": "AUTH_AUDIENCE",
 }
 _WORKER_ENV_FIELDS: Final = {
     "worker_id": "WORKER_ID",
@@ -86,6 +102,17 @@ class _ExplicitSettings(BaseSettings):
     database_connect_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30.0)
     database_statement_timeout_ms: int = Field(default=5_000, ge=100, le=120_000)
     log_level: str = "INFO"
+    vault_root: Path = Field(default_factory=lambda: Path.cwd() / "var" / "vault")
+    vault_max_object_bytes: int = Field(
+        default=2 * 1024 * 1024 * 1024, ge=1, le=2 * 1024 * 1024 * 1024
+    )
+    vault_max_chunk_bytes: int = Field(default=1024 * 1024, ge=1, le=1024 * 1024)
+    vault_session_ttl_seconds: int = Field(default=86_400, ge=60, le=604_800)
+    vault_tool_timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
+    vault_tool_max_output_bytes: int = Field(default=1_048_576, ge=1_024, le=16_777_216)
+    vault_stream_block_bytes: int = Field(default=131_072, ge=4_096, le=1_048_576)
+    vault_reconcile_batch_size: int = Field(default=100, ge=1, le=10_000)
+    vault_low_disk_bytes: int = Field(default=1_073_741_824, ge=0, le=1_099_511_627_776)
 
     @classmethod
     def settings_customise_sources(
@@ -121,6 +148,19 @@ class _ExplicitSettings(BaseSettings):
         if normalized not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("unsupported log level")
         return normalized
+
+    @field_validator("vault_root")
+    @classmethod
+    def _validate_vault_root(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("vault root must be an absolute path")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_vault_bounds(self) -> Self:
+        if self.vault_max_chunk_bytes > self.vault_max_object_bytes:
+            raise ValueError("vault chunk limit cannot exceed object limit")
+        return self
 
 
 class ApiSettings(_ExplicitSettings):
@@ -171,6 +211,23 @@ class WorkerSettings(_ExplicitSettings):
         return self
 
 
+class StreamSettings(_ExplicitSettings):
+    """Validated settings for the isolated authorized streaming process."""
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8788, ge=1, le=65_535)
+    auth_signing_secret: SecretStr = Field(repr=False, min_length=32, max_length=4_096)
+    auth_issuer: str = Field(default="autplay", min_length=1, max_length=200)
+    auth_audience: str = Field(default="autplay-android", min_length=1, max_length=200)
+
+    @field_validator("host")
+    @classmethod
+    def _validate_host(cls, value: str) -> str:
+        if not value or any(character.isspace() for character in value):
+            raise ValueError("stream host must be a non-empty host literal")
+        return value
+
+
 def load_api_settings(
     *,
     overrides: Mapping[str, object] | None = None,
@@ -201,6 +258,24 @@ def load_worker_settings(
         WorkerSettings,
         component="worker",
         component_env_fields=_WORKER_ENV_FIELDS,
+        overrides=overrides,
+        environ=environ,
+        config_file=config_file,
+    )
+
+
+def load_stream_settings(
+    *,
+    overrides: Mapping[str, object] | None = None,
+    environ: Mapping[str, str] | None = None,
+    config_file: Path | None = None,
+) -> StreamSettings:
+    """Load stream settings without CPU worker-specific tool configuration."""
+
+    return _load_settings(
+        StreamSettings,
+        component="stream",
+        component_env_fields=_STREAM_ENV_FIELDS,
         overrides=overrides,
         environ=environ,
         config_file=config_file,
@@ -271,7 +346,7 @@ def _config_values(
     component: str,
     profile: RuntimeProfile,
 ) -> dict[str, object]:
-    allowed_top_level = {"profile", "common", "api", "worker", "profiles"}
+    allowed_top_level = {"profile", "common", "api", "stream", "worker", "profiles"}
     if set(document) - allowed_top_level:
         raise ValueError("configuration contains unknown top-level keys")
     merged: dict[str, object] = {}
@@ -360,7 +435,9 @@ __all__ = (
     "ApiSettings",
     "RuntimeProfile",
     "SettingsLoadError",
+    "StreamSettings",
     "WorkerSettings",
     "load_api_settings",
+    "load_stream_settings",
     "load_worker_settings",
 )

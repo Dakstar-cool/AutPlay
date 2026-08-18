@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine
 
-from autplay.runtime.settings import ApiSettings, WorkerSettings
+from autplay.runtime.settings import ApiSettings, StreamSettings, WorkerSettings
 
-RuntimeSettings = ApiSettings | WorkerSettings
+RuntimeSettings = ApiSettings | StreamSettings | WorkerSettings
 
 
 def create_runtime_engine(settings: RuntimeSettings) -> Engine:

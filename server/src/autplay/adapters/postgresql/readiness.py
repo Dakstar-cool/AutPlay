@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0010_indexes_privileges"
+EXPECTED_MIGRATION_HEAD: Final = "0015_wave_runtime"
 
 
 @dataclass(frozen=True, slots=True)

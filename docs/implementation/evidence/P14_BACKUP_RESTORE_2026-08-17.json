@@ -1,0 +1,106 @@
+{
+  "cleanup": "verified after report generation by process finalizers",
+  "database_restored": {
+    "alembic_head": "0015_wave_runtime",
+    "pgvector_version": "0.8.6",
+    "postgresql_version": "18.4 (Debian 18.4-1.pgdg12+1)",
+    "recording_count": 100000,
+    "vault_object_count": 1,
+    "vault_replica_count": 1,
+    "wal_lsn": "0/32237E0"
+  },
+  "database_source": {
+    "alembic_head": "0015_wave_runtime",
+    "pgvector_version": "0.8.6",
+    "postgresql_version": "18.4 (Debian 18.4-1.pgdg12+1)",
+    "recording_count": 100000,
+    "vault_object_count": 1,
+    "vault_replica_count": 1,
+    "wal_lsn": "0/6FCB788"
+  },
+  "dump": {
+    "format": "PostgreSQL custom",
+    "sha256": "7667b047aaebe265a6f38eaefdabc804f3b96ffb960cc9ad04584a8e63be4e1b"
+  },
+  "duration_seconds": 36.925,
+  "finished_at": "2026-08-17T17:30:21.398130+00:00",
+  "generation_id": "14d160e4-5dd8-4a04-a218-145f3346950a",
+  "host": {
+    "cpu": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "docker_engine": "29.6.1",
+    "machine": "AMD64",
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.7",
+    "storage": "Docker Desktop Linux volume plus host temporary NTFS workspace"
+  },
+  "manifest": {
+    "backup_mode": "quiesced_disposable_generation",
+    "created_at": "2026-08-17T17:30:05.202416+00:00",
+    "database": {
+      "alembic_head": "0015_wave_runtime",
+      "pgvector_version": "0.8.6",
+      "postgresql_version": "18.4 (Debian 18.4-1.pgdg12+1)",
+      "recording_count": 100000,
+      "vault_object_count": 1,
+      "vault_replica_count": 1,
+      "wal_lsn": "0/6FCB788"
+    },
+    "derived_data_policy": "included for drill; production may rebuild declared derived data",
+    "generation_id": "14d160e4-5dd8-4a04-a218-145f3346950a",
+    "schema_version": 1,
+    "secrets_included": false,
+    "sha256": "dbe3ed91a46660f26d425c24f48ab2c64fd978157ab70e790aeb3e39b1a16576",
+    "vault_objects": [
+      {
+        "byte_size": 176131,
+        "sha256": "0f452599bf4c8d19b88eb05803376bfd5a63997358042474755761dbcf262052",
+        "storage_backend": "LOCAL_FILESYSTEM",
+        "storage_key": "0f452599bf4c8d19b88eb05803376bfd5a63997358042474755761dbcf262052",
+        "vault_object_id": "01a010c5-ec7f-74a6-8ba3-42c973eefdce"
+      }
+    ]
+  },
+  "performance": {
+    "dataset_rows": 100000,
+    "iterations": 120,
+    "mean_ms": 5.59,
+    "name": "postgresql_catalog_trigram_search",
+    "p50_ms": 5.525,
+    "p95_ms": 6.403,
+    "p99_ms": 6.665,
+    "query_limit": 50,
+    "status": "PASS",
+    "target_p95_ms": 300.0,
+    "warmup": "first measured query retained conservatively"
+  },
+  "restore_project": "independent unique disposable Compose project (identifier redacted)",
+  "rpo_seconds_for_quiesced_fixture": 0,
+  "rto_target_met": true,
+  "rto_target_seconds": 14400,
+  "schema_version": 1,
+  "source_project": "unique disposable Compose project (identifier redacted)",
+  "started_at": "2026-08-17T17:29:44.472820+00:00",
+  "status": "PASS",
+  "vault_restore": {
+    "corruption_injection_detected": true,
+    "corruption_reconciliation": {
+      "inspected": 1,
+      "quarantined": 1,
+      "remaining": 0,
+      "repaired": 1
+    },
+    "corruption_state": {
+      "object": "QUARANTINED",
+      "replica": "QUARANTINED"
+    },
+    "database_manifest_consistent": true,
+    "healthy_reconciliation": {
+      "inspected": 1,
+      "quarantined": 0,
+      "remaining": 0,
+      "repaired": 0
+    },
+    "object_count": 1,
+    "restored_sha256": "0f452599bf4c8d19b88eb05803376bfd5a63997358042474755761dbcf262052"
+  }
+}

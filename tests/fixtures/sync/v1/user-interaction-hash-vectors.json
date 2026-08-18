@@ -1,0 +1,10 @@
+{"cases":[
+{"fixture_case_id":"recommendation-impression-model-independent","expected_sha256":"01b3513499883500647e83f028a5e0ec5c240b6a1d96fde4432790aaa66b1a53"},
+{"fixture_case_id":"same-presentation-idempotency","expected_sha256":"01b3513499883500647e83f028a5e0ec5c240b6a1d96fde4432790aaa66b1a53"},
+{"fixture_case_id":"listening-event-with-attribution","expected_sha256":"73bf7d4acbff628668182a86715e7af54e05d1b89444444d846b8aafd17b0d66"},
+{"fixture_case_id":"organic-listening-explicit-null-attribution","expected_sha256":"111ae4fd6070ee6e2799a63a8a67c82dd8b2033144d8c1c024b0026b56f8a6a1"},
+{"fixture_case_id":"offline-pack-impression","expected_sha256":"55c3db250bb25764edb822fa00c4d61886a11c908561a8f90d60282c171d9c67"},
+{"fixture_case_id":"local-reranked-impression","expected_sha256":"b7beab3aad49c3d499b508247cc66bbad83a2c5f9b3a053824170367d028f119"},
+{"fixture_case_id":"direct-selection-pre-ack-impression","expected_sha256":"424bbffe5cfc3d142e1b20aa022857ead586046d9ba08c71db02e4754465432f"},
+{"fixture_case_id":"direct-dismissal-acknowledged-impression","expected_sha256":"339d0a27bb37159475256c20caf5414397925afd36eb9aa10c47fc6a5d773ace"}
+]}

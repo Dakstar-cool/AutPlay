@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/bootstrap-request.schema.json",
+  "title": "AutPlay Sync Bootstrap Request v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "protocol_version",
+    "device_id",
+    "server_profile_id",
+    "journal_epoch",
+    "reason",
+    "snapshot_id",
+    "page_token",
+    "pending_local_event_count"
+  ],
+  "properties": {
+    "protocol_version": {"type": "integer", "const": 1},
+    "device_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "journal_epoch": {"$ref": "#/$defs/uuid"},
+    "reason": {"enum": ["FIRST_SYNC", "CURSOR_INVALID", "DEVICE_RESET", "USER_REQUEST"]},
+    "snapshot_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+    "page_token": {"anyOf": [{"$ref": "#/$defs/token"}, {"type": "null"}]},
+    "pending_local_event_count": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "token": {"type": "string", "minLength": 16, "maxLength": 2048}
+  }
+}

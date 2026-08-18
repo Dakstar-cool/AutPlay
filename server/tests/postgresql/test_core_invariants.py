@@ -571,15 +571,19 @@ def test_embedding_dimension_and_recording_integrity(
         database_connection.execute(
             """
         INSERT INTO ml.embedding_model (
-            model_key, version, task, weights_sha256, license_id, runtime,
+            model_key, version, task, source, source_revision, artifact_filename,
+            artifact_format, artifact_byte_size, artifact_manifest, manifest_sha256,
+            weights_sha256, license_id, runtime, runtime_revision,
             inference_precision, input_sample_rate_hz, segment_duration_ms,
-            preprocessing_version, pooling_strategy, dimension
+            preprocessing_version, preprocessing_manifest, preprocessing_sha256,
+            pooling_strategy, dimension, license_review_reference
         ) VALUES (
-            'test', '1', 'EMBEDDING', %s, 'test', 'cpu', 'fp32',
-            48000, 1000, '1', 'mean', 3
+            'test', '1', 'EMBEDDING', 'fixture://model', 'fixture-revision',
+            'model.bin', 'fixture', 1, '{}'::jsonb, %s, %s, 'test', 'cpu', 'fixture-runtime',
+            'fp32', 48000, 1000, '1', '{}'::jsonb, %s, 'mean', 3, 'fixture-review'
         ) RETURNING embedding_model_id
         """,
-            (b"m" * 32,),
+            (b"a" * 32, b"m" * 32, b"p" * 32),
         )
     )
 

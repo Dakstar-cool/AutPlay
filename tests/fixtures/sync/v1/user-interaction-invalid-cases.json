@@ -1,0 +1,180 @@
+{
+  "contract_version": "v1",
+  "cases": [
+    {
+      "case_id": "duplicate-impression-presentation",
+      "validation_kind": "semantic",
+      "input": {"different_event_id": true, "same_owner": true, "same_presentation_id": true, "same_recommendation_request_id": true, "same_source_rank": true},
+      "expected": {"ack_outcome": "REJECTED", "error_code": "IMPRESSION_ALREADY_RECORDED", "second_projection_count": 0}
+    },
+    {
+      "case_id": "event-aggregate-id-mismatch",
+      "validation_kind": "semantic",
+      "input": {"event_id": "11111111-1111-4111-8111-111111111111", "aggregate_local_id": "22222222-2222-4222-8222-222222222222"},
+      "expected": {"ack_outcome": "REJECTED", "error_code": "EVENT_AGGREGATE_ID_MISMATCH", "domain_mutation_count": 0}
+    },
+    {
+      "case_id": "impression-requires-actual-presentation",
+      "validation_kind": "schema",
+      "schema": "user-interaction-event.schema.json",
+      "instance": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "invalid-impression",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 44,
+        "event_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "11111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:03:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+          "recommendation": {
+            "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+            "recording_id": "81111111-1111-4111-8111-111111111111",
+            "source_rank": 1,
+            "source": "content_embedding",
+            "surface": "home_for_you"
+          }
+        },
+        "request_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "attribution-source-rank-must-be-positive",
+      "validation_kind": "schema",
+      "schema": "recommendation-attribution.schema.json",
+      "instance": {
+        "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+        "recording_id": "81111111-1111-4111-8111-111111111111",
+        "source_rank": 0,
+        "source": "hybrid_composer",
+        "surface": "home_for_you"
+      },
+      "expected_error": "minimum"
+    },
+    {
+      "case_id": "known-event-must-use-user-interaction-aggregate",
+      "validation_kind": "schema",
+      "schema": "user-interaction-event.schema.json",
+      "instance": {
+        "event_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "idempotency_key": "invalid-aggregate",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 45,
+        "event_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "RECORDING",
+        "aggregate_local_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:04:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+          "feedback_type": "LIKED",
+          "recommendation": null
+        },
+        "request_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_error": "oneOf"
+    },
+    {
+      "case_id": "direct-feedback-requires-causal-impression",
+      "validation_kind": "schema",
+      "schema": "recommendation-feedback-recorded-payload.schema.json",
+      "instance": {
+        "interaction_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+        "feedback_type": "SELECTED",
+        "recommendation": {
+          "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+          "recording_id": "81111111-1111-4111-8111-111111111111",
+          "source_rank": 1,
+          "source": "content_embedding",
+          "surface": "home_for_you"
+        }
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "interaction-payload-rejects-raw-search-query",
+      "validation_kind": "schema",
+      "schema": "client-event.schema.json",
+      "instance": {
+        "event_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "idempotency_key": "invalid-private-payload",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 46,
+        "event_type": "LISTENING_EVENT_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "LISTENING_EVENT",
+        "aggregate_local_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:05:00Z",
+        "payload": {"raw_search_query": "private terms"},
+        "request_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_error": "propertyNames"
+    },
+    {
+      "case_id": "cross-user-attribution-is-non-disclosing",
+      "validation_kind": "semantic",
+      "input": {"authenticated_owner_matches_request_owner": false},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "ATTRIBUTION_NOT_FOUND",
+        "other_owner_disclosed": false,
+        "domain_mutation_count": 0
+      }
+    },
+    {
+      "case_id": "attribution-rank-item-mismatch",
+      "validation_kind": "semantic",
+      "input": {"request_item_rank_matches": false, "request_recording_matches": true},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "ATTRIBUTION_ITEM_MISMATCH",
+        "domain_mutation_count": 0
+      }
+    },
+    {
+      "case_id": "attribution-recording-mismatch",
+      "validation_kind": "semantic",
+      "input": {"request_item_rank_matches": true, "request_recording_matches": false},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "ATTRIBUTION_RECORDING_MISMATCH",
+        "domain_mutation_count": 0
+      }
+    },
+    {
+      "case_id": "generated-item-is-not-an-impression",
+      "validation_kind": "semantic",
+      "input": {"candidate_generated": true, "delivered": true, "actually_presented": false},
+      "expected": {
+        "impression_event_created": false,
+        "interaction_projection_count": 0
+      }
+    },
+    {
+      "case_id": "unknown-direct-feedback-is-preserved-but-not-applied",
+      "validation_kind": "semantic",
+      "input": {"feedback_type": "FUTURE_DIRECT_ACTION", "schema_valid": true},
+      "expected": {
+        "ack_outcome": "REJECTED",
+        "error_code": "UNSUPPORTED_ENUM_VALUE",
+        "raw_value_preserved": true,
+        "interaction_projection_count": 0
+      }
+    }
+  ]
+}

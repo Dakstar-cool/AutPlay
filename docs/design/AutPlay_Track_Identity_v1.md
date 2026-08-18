@@ -6,7 +6,7 @@
 **ADR:** ADR-004 - Recording identity is distinct from release position and encoded audio  
 **Связанные сущности:** `Recording`, `ReleaseTrack`, `AudioVariant`, `VaultObject`, `UserTrackRef`  
 **Persistence amendment:** ADR-015 Accepted, proposal revision `c108c109d8eb1ab71631ea79e831a20e6cc6811bff5264cb6d1bb38f7433ac71`
-**Open semantic boundary:** P00-D004/F-016 remains unresolved; this amendment does not authorize pre-benchmark T4 application
+**Deterministic-byte amendment:** ADR-019 Accepted; P00-D004 Variant A permits only the separate strict technical reuse described below
 
 ---
 
@@ -473,7 +473,7 @@ Auto-match требует одновременно:
 | T1 | Strong title + artist + duration/version | Auto только после отдельного high-precision benchmark |
 | T2 | T1 + verified provider/MBID/ISRC context | Auto при отсутствии conflict и достаточном margin |
 | T3 | Good fingerprint coverage + compatible metadata | Auto при calibrated gate |
-| T4 | Exact SHA linked to one valid AudioVariant/Recording | Deterministic evidence; до решения P00-D004 только `SHADOW + REVIEW_REQUIRED`, catalog conflict -> incident |
+| T4 | Exact server-verified SHA/size linked to one valid AudioVariant/Recording | ADR-019 permits strict technical Vault re-reference outside probabilistic `AUTO_MATCH`; owner projection remains P10-owned, catalog conflict -> incident |
 
 Наличие T3 не означает merge remaster/edit без проверки version markers.
 
@@ -502,10 +502,11 @@ DEFERRED_EVIDENCE
 
 ## 12.2. Bootstrap thresholds
 
-До benchmark и отдельного решения P00-D004:
+До benchmark, с учетом принятого ADR-019:
 
 - `AUTO_MATCH` полностью отключен для T0/T1;
-- T4 сохраняется только как shadow deterministic evidence и `REVIEW_REQUIRED`;
+- T4 может дать только strict technical Vault re-reference по ADR-019; identity evaluation остается
+  shadow `REVIEW_REQUIRED`, пока P10 не добавит отдельное auditable deterministic representation;
 - T2/T3 допускаются максимум в shadow mode;
 - пользователь видит кандидатов и explanation.
 
@@ -526,7 +527,9 @@ margin_threshold = 0.080
 ```text
 resolve(query):
     if exact_sha_reuse(query) is consistent:
-        return REVIEW_REQUIRED(T4, shadow_counterfactual="DETERMINISTIC_REUSE")
+        technical_result = DETERMINISTIC_VAULT_REUSE  # ADR-019, outside match projection
+        record_shadow(REVIEW_REQUIRED, T4, counterfactual=technical_result)
+        return technical_result
 
     candidates = generate_candidates(query)
     if candidates is empty:
@@ -796,7 +799,7 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 
 | Сценарий | Ожидаемое решение |
 | --- | --- |
-| Повторный импорт того же файла до P00-D004 | T4 shadow evidence; applied semantics не утверждены |
+| Повторный ingest exact bytes после ADR-019 | Strict technical object/variant/Recording re-reference; no `AUTO_MATCH`, merge or owner projection |
 | FLAC и MP3 одной studio Recording | T3 candidate; auto только после benchmark |
 | Один Track в album и single | Одна Recording, разные ReleaseTrack |
 | Live и studio с одинаковым title | Hard conflict, не auto-merge |
@@ -854,7 +857,8 @@ Logs содержат IDs и reason codes, но не полные private URLs, 
 8. Включить shadow decisions.
 9. Активировать только прошедшие gate evidence tiers.
 10. Реализовать merge/split proposal отдельно от resolver.
-11. До runtime matcher проверить ADR-015 persistence invariants; P00-D004 требуется отдельно до applied T4 semantics.
+11. До runtime matcher проверить ADR-015 persistence invariants; ADR-019 применяется только как
+    отдельный technical Vault path, а P10 должен отдельно определить immutable owner-resolution record.
 
 ---
 
@@ -891,4 +895,5 @@ Specification v1 считается готовой к реализации, ко
 - все пять resolver states и оба execution modes имеют round-trip/negative fixtures;
 - candidate sets 0/1/2/100 sealed, а late INSERT/UPDATE/DELETE rejected;
 - manual review, supersession, activation/deactivation/rollback и owner projections покрыты transaction tests;
-- initial policy activation history empty, поэтому F-016 остаётся enforced до отдельного P00-D004 approval.
+- initial policy activation history empty, поэтому F-016 остается enforced для probabilistic
+  matching; ADR-019 не создает matcher activation и не меняет owner projection.

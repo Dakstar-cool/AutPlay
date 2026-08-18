@@ -1,0 +1,20 @@
+{
+  "abi": "arm64-v8a",
+  "background_transition": "PASS",
+  "battery_optimization_bypass_requested": false,
+  "device": "a55x",
+  "disposable_emulator_package_reinstalled": false,
+  "hardware": "s5e8845",
+  "install_result": "Performing Incremental Install\nPerforming Streamed Install\nSuccess",
+  "is_emulator": false,
+  "launch_restart_smoke": "PASS",
+  "manufacturer": "samsung",
+  "model": "SM-A556E",
+  "physical_samsung_a55": true,
+  "process_death_observed": "PASS",
+  "sdk": "36",
+  "serial_hash": "37aa14db887ecb331b723f0661e22dc12df22b5c663adce8351ae612304ce0a4",
+  "status": "PASS",
+  "tested_apk_path": "docs/release/artifacts/autplay-rc1-dev-signed.apk",
+  "tested_apk_sha256": "f76b96eb4f3b8e5eda9e609a86aeb8b7ddfffe8c01de24f9236f37074962acfc"
+}

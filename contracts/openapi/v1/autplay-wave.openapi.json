@@ -1,0 +1,37 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "AutPlay Wave API", "version": "1.0.0"},
+  "servers": [{"url": "/api/v1"}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/wave/rooms": {
+      "post": {"operationId": "createWaveRoom", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateRoom"}}}}, "responses": {"200": {"description": "Created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Snapshot"}}}}}}
+    },
+    "/wave/rooms/join": {
+      "post": {"operationId": "joinWaveRoom", "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["room_code"], "properties": {"room_code": {"type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{10}$"}}, "additionalProperties": false}}}}, "responses": {"200": {"description": "Joined", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Snapshot"}}}}, "403": {"description": "Not invited"}, "404": {"description": "Masked absent room"}}}
+    },
+    "/wave/rooms/{room_id}/snapshot": {"get": {"operationId": "getWaveSnapshot", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "responses": {"200": {"description": "Authoritative snapshot", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Snapshot"}}}}, "404": {"description": "Masked absent room"}}}},
+    "/wave/rooms/{room_id}/commands": {"post": {"operationId": "postWaveCommand", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Command"}}}}, "responses": {"200": {"description": "Durable ordered command"}, "409": {"description": "Sequence/version conflict"}}}},
+    "/wave/rooms/{room_id}/start": {"post": {"operationId": "startWavePlayback", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Start"}}}}, "responses": {"200": {"description": "PLAY or START_ABORTED"}, "409": {"description": "Sequence/version conflict"}}}},
+    "/wave/rooms/{room_id}/availability": {"post": {"operationId": "reportWavePreflight", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Preflight"}}}}, "responses": {"204": {"description": "Accepted"}}}},
+    "/wave/rooms/{room_id}/timing": {"post": {"operationId": "reportWaveTiming", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "responses": {"204": {"description": "Accepted"}}}},
+    "/wave/rooms/{room_id}/leave": {"post": {"operationId": "leaveWaveRoom", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "responses": {"204": {"description": "Left"}}}},
+    "/wave/rooms/{room_id}/close": {"post": {"operationId": "closeWaveRoom", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "responses": {"204": {"description": "Closed"}}}},
+    "/wave/rooms/{room_id}/host-transfer": {"post": {"operationId": "transferWaveHost", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "responses": {"204": {"description": "Transferred"}}}},
+    "/wave/rooms/{room_id}/source": {"post": {"operationId": "checkWaveSource", "parameters": [{"$ref": "#/components/parameters/RoomId"}], "responses": {"200": {"description": "Owner-filtered availability only"}}}},
+    "/wave/clock": {"post": {"operationId": "sampleWaveClock", "responses": {"200": {"description": "Server receive/send epoch milliseconds"}}}}
+  },
+  "components": {
+    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}},
+    "parameters": {"RoomId": {"name": "room_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}},
+    "schemas": {
+      "CreateRoom": {"type": "object", "properties": {"allow_user_ids": {"type": "array", "maxItems": 7, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}}}, "additionalProperties": false},
+      "QueueEntry": {"type": "object", "required": ["queue_entry_id", "recording_id", "position"], "properties": {"queue_entry_id": {"type": "string", "format": "uuid"}, "recording_id": {"type": "string", "format": "uuid"}, "position": {"type": "integer", "minimum": 0, "maximum": 99}}, "additionalProperties": false},
+      "Snapshot": {"type": "object", "required": ["protocol_version", "room_id", "room_epoch", "state", "playback_state", "role", "queue_version", "latest_sequence", "queue", "preflight"], "properties": {"protocol_version": {"const": 1}, "room_id": {"type": "string", "format": "uuid"}, "room_code": {"type": "string"}, "room_epoch": {"type": "string"}, "state": {"enum": ["OPEN", "ORPHANED", "CLOSED", "EXPIRED"]}, "playback_state": {"enum": ["IDLE", "PREPARING", "PLAYING", "PAUSED"]}, "role": {"enum": ["HOST", "MEMBER"]}, "queue_version": {"type": "integer", "minimum": 1}, "latest_sequence": {"type": "integer", "minimum": 0}, "queue": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/QueueEntry"}}, "preflight": {"type": "object", "additionalProperties": {"enum": ["LOCAL", "DOWNLOADED", "VAULT_STREAMABLE", "UNAVAILABLE"]}}}},
+      "Command": {"type": "object", "required": ["kind", "idempotency_key", "base_version", "expected_sequence"], "properties": {"kind": {"enum": ["PAUSE", "SEEK", "SKIP", "QUEUE", "TRANSFER"]}, "idempotency_key": {"type": "string", "maxLength": 128}, "base_version": {"type": "integer", "minimum": 1}, "expected_sequence": {"type": "integer", "minimum": 0}, "recording_id": {"type": ["string", "null"], "format": "uuid"}}, "additionalProperties": false},
+      "Start": {"type": "object", "required": ["queue_entry_id", "recording_id", "queue_version", "expected_sequence"], "properties": {"queue_entry_id": {"type": "string", "format": "uuid"}, "recording_id": {"type": "string", "format": "uuid"}, "queue_version": {"type": "integer", "minimum": 1}, "expected_sequence": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+      "Preflight": {"type": "object", "required": ["queue_entry_id", "recording_id", "queue_version", "availability", "final_ready"], "properties": {"queue_entry_id": {"type": "string", "format": "uuid"}, "recording_id": {"type": "string", "format": "uuid"}, "queue_version": {"type": "integer", "minimum": 1}, "availability": {"enum": ["LOCAL", "DOWNLOADED", "VAULT_STREAMABLE", "UNAVAILABLE"]}, "final_ready": {"type": "boolean"}}, "additionalProperties": false}
+    }
+  },
+  "x-websocket": {"path": "/api/v1/wave/rooms/{room_id}/events", "clientHello": {"type": "hello", "after_sequence": 0, "room_epoch": "1"}, "envelopeSchema": "../../events/v1/wave-envelope.schema.json"}
+}

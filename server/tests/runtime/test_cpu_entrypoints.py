@@ -61,7 +61,9 @@ for name in (
 
 prohibited = sorted(
     name for name in sys.modules
-    if name.split(".", 1)[0] in {"cupy", "cuda", "jax", "tensorflow", "torch"}
+    if name.split(".", 1)[0] in {
+        "cupy", "cuda", "jax", "nvidia", "onnxruntime", "tensorflow", "torch", "transformers"
+    }
 )
 if prohibited:
     raise SystemExit(f"accelerator imports: {prohibited}")

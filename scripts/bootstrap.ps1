@@ -19,6 +19,21 @@ try {
         throw "uv python install failed"
     }
 
+    & uv sync --frozen --python 3.14.7
+    if ($LASTEXITCODE -ne 0) {
+        throw "AutPlay Codex harness uv sync failed"
+    }
+
+    $harnessPythonVersion = (& uv run --frozen python -c "import platform; print(platform.python_version())").Trim()
+    if ($LASTEXITCODE -ne 0 -or $harnessPythonVersion -ne "3.14.7") {
+        throw "AutPlay harness requires CPython 3.14.7; observed: $harnessPythonVersion"
+    }
+
+    & uv run --frozen autplay-codex --version
+    if ($LASTEXITCODE -ne 0) {
+        throw "AutPlay Codex harness entry point failed"
+    }
+
     & uv sync --project server --frozen --python 3.14.7
     if ($LASTEXITCODE -ne 0) {
         throw "uv sync failed"

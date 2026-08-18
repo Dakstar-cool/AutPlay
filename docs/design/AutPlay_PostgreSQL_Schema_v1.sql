@@ -1203,6 +1203,124 @@ CREATE TABLE vault.acquisition_record (
 CREATE INDEX ix_acquisition_record_variant
     ON vault.acquisition_record (audio_variant_id, acquired_at DESC);
 
+-- P06 resumable upload state. Staging keys are generated opaque identifiers;
+-- no user path or filename is persisted here.
+CREATE TABLE vault.upload_session (
+    upload_session_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL REFERENCES account.device(device_id) ON DELETE RESTRICT,
+    target_recording_id uuid NOT NULL REFERENCES catalog.recording(recording_id) ON DELETE RESTRICT,
+    idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 200),
+    request_hash bytea NOT NULL,
+    declared_sha256 bytea,
+    computed_sha256 bytea,
+    expected_size bigint NOT NULL CHECK (expected_size BETWEEN 1 AND 4294967296),
+    received_size bigint NOT NULL DEFAULT 0,
+    chunk_size integer NOT NULL CHECK (chunk_size BETWEEN 1 AND 1048576),
+    max_chunks integer NOT NULL CHECK (max_chunks BETWEEN 1 AND 4096),
+    chunk_count integer NOT NULL DEFAULT 0,
+    staging_key text NOT NULL,
+    state text NOT NULL DEFAULT 'OPEN',
+    job_id uuid REFERENCES jobs.job(job_id) ON DELETE RESTRICT,
+    vault_object_id uuid REFERENCES vault.vault_object(vault_object_id) ON DELETE RESTRICT,
+    audio_variant_id uuid REFERENCES vault.audio_variant(audio_variant_id) ON DELETE RESTRICT,
+    error_code text,
+    expires_at timestamptz NOT NULL,
+    sealed_at timestamptz,
+    completed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    row_version bigint NOT NULL DEFAULT 1 CHECK (row_version >= 1),
+    CONSTRAINT uq_upload_session_user_idempotency UNIQUE (user_id, idempotency_key),
+    CONSTRAINT uq_upload_session_owner_lookup UNIQUE (upload_session_id, user_id),
+    CONSTRAINT fk_upload_session_device_owner
+        FOREIGN KEY (user_id, device_id)
+        REFERENCES account.device(user_id, device_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_upload_session_request_hash_len CHECK (octet_length(request_hash) = 32),
+    CONSTRAINT ck_upload_session_declared_sha256_len
+        CHECK (declared_sha256 IS NULL OR octet_length(declared_sha256) = 32),
+    CONSTRAINT ck_upload_session_computed_sha256_len
+        CHECK (computed_sha256 IS NULL OR octet_length(computed_sha256) = 32),
+    CONSTRAINT ck_upload_session_capacity
+        CHECK (expected_size <= chunk_size::bigint * max_chunks::bigint),
+    CONSTRAINT ck_upload_session_received_size
+        CHECK (received_size BETWEEN 0 AND expected_size),
+    CONSTRAINT ck_upload_session_chunk_count
+        CHECK (chunk_count BETWEEN 0 AND max_chunks),
+    CONSTRAINT ck_upload_session_staging_key
+        CHECK (staging_key ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'),
+    CONSTRAINT uq_upload_session_staging_key UNIQUE (staging_key),
+    CONSTRAINT ck_upload_session_state CHECK (
+        state IN (
+            'OPEN', 'SEALED', 'PROCESSING', 'COMMIT_PREPARED', 'COMMITTED',
+            'REUSED', 'QUARANTINED', 'FAILED', 'CANCELLED', 'EXPIRED'
+        )
+    ),
+    CONSTRAINT ck_upload_session_error_code
+        CHECK (error_code IS NULL OR length(error_code) BETWEEN 1 AND 100),
+    CONSTRAINT ck_upload_session_expiry CHECK (expires_at > created_at),
+    CONSTRAINT ck_upload_session_state_links CHECK (
+        (state = 'OPEN'
+            AND job_id IS NULL AND vault_object_id IS NULL AND audio_variant_id IS NULL
+            AND computed_sha256 IS NULL AND sealed_at IS NULL AND completed_at IS NULL
+            AND error_code IS NULL)
+        OR (state = 'SEALED'
+            AND vault_object_id IS NULL AND audio_variant_id IS NULL
+            AND computed_sha256 IS NULL AND sealed_at IS NOT NULL AND completed_at IS NULL
+            AND error_code IS NULL)
+        OR (state = 'PROCESSING'
+            AND job_id IS NOT NULL AND vault_object_id IS NULL AND audio_variant_id IS NULL
+            AND sealed_at IS NOT NULL AND completed_at IS NULL AND error_code IS NULL)
+        OR (state = 'COMMIT_PREPARED'
+            AND job_id IS NOT NULL AND vault_object_id IS NOT NULL AND audio_variant_id IS NULL
+            AND computed_sha256 IS NOT NULL AND sealed_at IS NOT NULL AND completed_at IS NULL
+            AND error_code IS NULL)
+        OR (state = 'COMMITTED'
+            AND job_id IS NOT NULL AND vault_object_id IS NOT NULL AND audio_variant_id IS NOT NULL
+            AND computed_sha256 IS NOT NULL AND sealed_at IS NOT NULL AND completed_at IS NOT NULL
+            AND error_code IS NULL)
+        OR (state = 'REUSED'
+            AND job_id IS NOT NULL AND vault_object_id IS NOT NULL AND audio_variant_id IS NOT NULL
+            AND computed_sha256 IS NOT NULL AND sealed_at IS NOT NULL AND completed_at IS NOT NULL
+            AND error_code IS NULL)
+        OR (state IN ('QUARANTINED', 'FAILED')
+            AND job_id IS NOT NULL AND vault_object_id IS NULL AND audio_variant_id IS NULL
+            AND sealed_at IS NOT NULL AND completed_at IS NOT NULL AND error_code IS NOT NULL)
+        OR (state IN ('CANCELLED', 'EXPIRED')
+            AND vault_object_id IS NULL AND audio_variant_id IS NULL
+            AND computed_sha256 IS NULL AND completed_at IS NOT NULL AND error_code IS NOT NULL)
+    )
+);
+
+CREATE INDEX ix_upload_session_owner_state_time
+    ON vault.upload_session (user_id, device_id, state, updated_at DESC);
+
+CREATE INDEX ix_upload_session_state_expiry
+    ON vault.upload_session (state, expires_at);
+
+CREATE INDEX ix_upload_session_computed_sha256
+    ON vault.upload_session (computed_sha256)
+    WHERE computed_sha256 IS NOT NULL;
+
+CREATE INDEX ix_upload_session_job
+    ON vault.upload_session (job_id)
+    WHERE job_id IS NOT NULL;
+
+CREATE TABLE vault.upload_chunk (
+    upload_session_id uuid NOT NULL
+        REFERENCES vault.upload_session(upload_session_id) ON DELETE RESTRICT,
+    chunk_index integer NOT NULL,
+    start_offset bigint NOT NULL,
+    byte_size integer NOT NULL CHECK (byte_size BETWEEN 1 AND 1048576),
+    sha256 bytea NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT upload_chunk_pkey PRIMARY KEY (upload_session_id, chunk_index),
+    CONSTRAINT uq_upload_chunk_start_offset UNIQUE (upload_session_id, start_offset),
+    CONSTRAINT ck_upload_chunk_index CHECK (chunk_index >= 0),
+    CONSTRAINT ck_upload_chunk_start_offset CHECK (start_offset >= 0),
+    CONSTRAINT ck_upload_chunk_sha256_len CHECK (octet_length(sha256) = 32)
+);
+
 -- -----------------------------------------------------------------------------
 -- library migration
 -- -----------------------------------------------------------------------------
@@ -2557,6 +2675,10 @@ CREATE TRIGGER tr_audio_variant_row_version
 BEFORE UPDATE ON vault.audio_variant
 FOR EACH ROW EXECUTE FUNCTION app_private.bump_row_version();
 
+CREATE TRIGGER tr_upload_session_row_version
+BEFORE UPDATE ON vault.upload_session
+FOR EACH ROW EXECUTE FUNCTION app_private.bump_row_version();
+
 CREATE TRIGGER tr_import_job_row_version
 BEFORE UPDATE ON importing.import_job
 FOR EACH ROW EXECUTE FUNCTION app_private.bump_row_version();
@@ -2572,6 +2694,544 @@ FOR EACH ROW EXECUTE FUNCTION app_private.bump_row_version();
 CREATE TRIGGER tr_embedding_model_row_version
 BEFORE UPDATE ON ml.embedding_model
 FOR EACH ROW EXECUTE FUNCTION app_private.bump_row_version();
+
+-- -----------------------------------------------------------------------------
+-- P09 sync runtime additions
+-- -----------------------------------------------------------------------------
+
+ALTER TABLE sync.device_sync_cursor ADD COLUMN journal_epoch uuid;
+ALTER TABLE sync.device_sync_cursor ADD COLUMN last_successful_sync_at timestamptz;
+ALTER TABLE sync.device_event_inbox ADD COLUMN aggregate_local_id uuid;
+ALTER TABLE sync.device_event_inbox ADD COLUMN idempotency_key text;
+ALTER TABLE sync.device_event_inbox ADD COLUMN base_server_row_version bigint;
+ALTER TABLE sync.device_event_inbox ADD COLUMN terminal_ack jsonb;
+ALTER TABLE sync.sync_event ADD COLUMN operation text NOT NULL DEFAULT 'UPSERT';
+ALTER TABLE sync.sync_event ADD COLUMN server_row_version bigint;
+ALTER TABLE sync.sync_event ADD CONSTRAINT ck_sync_event_operation
+    CHECK (operation IN ('UPSERT', 'DELETE', 'REDIRECT'));
+
+CREATE TABLE sync.bootstrap_session (
+    snapshot_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL REFERENCES account.device(device_id) ON DELETE RESTRICT,
+    journal_epoch uuid NOT NULL,
+    high_water_server_sequence bigint NOT NULL CHECK (high_water_server_sequence >= 0),
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_bootstrap_expiry CHECK (expires_at > created_at),
+    CONSTRAINT fk_bootstrap_owner FOREIGN KEY (user_id, device_id)
+        REFERENCES account.device(user_id, device_id) ON DELETE RESTRICT
+);
+
+CREATE INDEX ix_bootstrap_session_expiry ON sync.bootstrap_session (expires_at);
+
+CREATE TABLE sync.bootstrap_snapshot_item (
+    snapshot_id uuid NOT NULL REFERENCES sync.bootstrap_session(snapshot_id) ON DELETE CASCADE,
+    ordinal bigint NOT NULL CHECK (ordinal >= 1),
+    aggregate_type text NOT NULL,
+    aggregate_id uuid NOT NULL,
+    server_row_version bigint NOT NULL CHECK (server_row_version >= 1),
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    PRIMARY KEY (snapshot_id, ordinal)
+);
+
+CREATE TABLE library.user_interaction_event (
+    interaction_id uuid PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL REFERENCES account.device(device_id) ON DELETE RESTRICT,
+    event_type text NOT NULL,
+    recommendation_request_id uuid,
+    recording_id uuid,
+    source_rank integer,
+    presentation_id uuid,
+    impression_interaction_id uuid,
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_interaction_type CHECK (event_type IN (
+        'LISTENING_EVENT_RECORDED', 'RECOMMENDATION_IMPRESSION_RECORDED',
+        'RECOMMENDATION_FEEDBACK_RECORDED')),
+    CONSTRAINT fk_interaction_owner FOREIGN KEY (user_id, device_id)
+        REFERENCES account.device(user_id, device_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_interaction_presentation CHECK (
+        presentation_id IS NOT NULL OR event_type <> 'RECOMMENDATION_IMPRESSION_RECORDED')
+);
+
+CREATE UNIQUE INDEX uq_interaction_presentation
+ON library.user_interaction_event
+    (user_id, presentation_id, recommendation_request_id, source_rank)
+WHERE event_type = 'RECOMMENDATION_IMPRESSION_RECORDED';
+
+-- -----------------------------------------------------------------------------
+-- P11 recommendation runtime additions
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE ml.recommendation_pipeline_version (
+    pipeline_key text NOT NULL,
+    version text NOT NULL,
+    implementation_revision text NOT NULL,
+    request_schema_version integer NOT NULL CHECK (request_schema_version >= 1),
+    canonicalization_version integer NOT NULL CHECK (canonicalization_version >= 1),
+    manifest jsonb NOT NULL,
+    manifest_sha256 bytea NOT NULL CHECK (octet_length(manifest_sha256) = 32),
+    lifecycle_status text NOT NULL DEFAULT 'ACTIVE',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT recommendation_pipeline_version_pkey PRIMARY KEY (pipeline_key, version),
+    CONSTRAINT ck_recommendation_pipeline_key CHECK (length(pipeline_key) BETWEEN 1 AND 100),
+    CONSTRAINT ck_recommendation_pipeline_version CHECK (length(version) BETWEEN 1 AND 100),
+    CONSTRAINT ck_recommendation_pipeline_revision
+        CHECK (length(implementation_revision) BETWEEN 1 AND 200),
+    CONSTRAINT ck_recommendation_pipeline_status
+        CHECK (lifecycle_status IN ('ACTIVE', 'SHADOW', 'RETIRED'))
+);
+
+CREATE FUNCTION app_private.protect_recommendation_pipeline_manifest()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'recommendation pipeline manifests are immutable';
+    END IF;
+    IF ROW(
+        NEW.pipeline_key, NEW.version, NEW.implementation_revision,
+        NEW.request_schema_version, NEW.canonicalization_version,
+        NEW.manifest, NEW.manifest_sha256, NEW.created_at
+    ) IS DISTINCT FROM ROW(
+        OLD.pipeline_key, OLD.version, OLD.implementation_revision,
+        OLD.request_schema_version, OLD.canonicalization_version,
+        OLD.manifest, OLD.manifest_sha256, OLD.created_at
+    ) THEN
+        RAISE EXCEPTION 'recommendation pipeline manifest identity is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tr_recommendation_pipeline_manifest_immutable
+BEFORE UPDATE OR DELETE ON ml.recommendation_pipeline_version
+FOR EACH ROW EXECUTE FUNCTION app_private.protect_recommendation_pipeline_manifest();
+
+CREATE TABLE ml.recommendation_input_snapshot (
+    recommendation_input_snapshot_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    input_snapshot_sha256 bytea NOT NULL CHECK (octet_length(input_snapshot_sha256) = 32),
+    interaction_watermark bigint NOT NULL CHECK (interaction_watermark >= 0),
+    catalog_snapshot bigint NOT NULL CHECK (catalog_snapshot >= 0),
+    availability_snapshot text NOT NULL,
+    policy_snapshot_sha256 bytea NOT NULL CHECK (octet_length(policy_snapshot_sha256) = 32),
+    snapshot_document jsonb NOT NULL,
+    retained_until timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_recommendation_input_snapshot_owner
+        UNIQUE (user_id, recommendation_input_snapshot_id),
+    CONSTRAINT ck_recommendation_input_snapshot_retention CHECK (retained_until > created_at)
+);
+
+CREATE INDEX ix_recommendation_snapshot_user_retention
+ON ml.recommendation_input_snapshot (user_id, retained_until DESC);
+
+CREATE FUNCTION app_private.protect_recommendation_input_snapshot()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        RAISE EXCEPTION 'recommendation input snapshots are immutable';
+    END IF;
+    IF OLD.retained_until > now() THEN
+        RAISE EXCEPTION 'recommendation input snapshot retention is active';
+    END IF;
+    RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER tr_recommendation_input_snapshot_immutable
+BEFORE UPDATE OR DELETE ON ml.recommendation_input_snapshot
+FOR EACH ROW EXECUTE FUNCTION app_private.protect_recommendation_input_snapshot();
+
+ALTER TABLE ml.recommendation_request ADD COLUMN surface text;
+ALTER TABLE ml.recommendation_request ADD COLUMN pipeline_key text;
+ALTER TABLE ml.recommendation_request ADD COLUMN pipeline_version text;
+ALTER TABLE ml.recommendation_request ADD COLUMN pipeline_manifest_sha256 bytea;
+ALTER TABLE ml.recommendation_request ADD COLUMN request_schema_version integer;
+ALTER TABLE ml.recommendation_request ADD COLUMN request_canonicalization_version integer;
+ALTER TABLE ml.recommendation_request ADD COLUMN request_sha256 bytea;
+ALTER TABLE ml.recommendation_request ADD COLUMN recommendation_input_snapshot_id uuid;
+ALTER TABLE ml.recommendation_request ADD COLUMN input_snapshot_sha256 bytea;
+ALTER TABLE ml.recommendation_request ADD COLUMN interaction_watermark bigint;
+ALTER TABLE ml.recommendation_request ADD COLUMN catalog_snapshot bigint;
+ALTER TABLE ml.recommendation_request ADD COLUMN availability_snapshot_ref text;
+ALTER TABLE ml.recommendation_request ADD COLUMN policy_snapshot_sha256 bytea;
+ALTER TABLE ml.recommendation_request ADD COLUMN request_document jsonb;
+ALTER TABLE ml.recommendation_request ADD COLUMN shadow boolean NOT NULL DEFAULT false;
+ALTER TABLE ml.recommendation_request
+    ADD CONSTRAINT fk_recommendation_request_pipeline
+    FOREIGN KEY (pipeline_key, pipeline_version)
+    REFERENCES ml.recommendation_pipeline_version(pipeline_key, version) ON DELETE RESTRICT;
+ALTER TABLE ml.recommendation_request
+    ADD CONSTRAINT fk_recommendation_request_input_owner
+    FOREIGN KEY (user_id, recommendation_input_snapshot_id)
+    REFERENCES ml.recommendation_input_snapshot(user_id, recommendation_input_snapshot_id)
+    ON DELETE SET NULL (recommendation_input_snapshot_id);
+ALTER TABLE ml.recommendation_request
+    ADD CONSTRAINT uq_recommendation_request_owner
+    UNIQUE (user_id, recommendation_request_id);
+ALTER TABLE ml.recommendation_request
+    ADD CONSTRAINT ck_recommendation_request_surface
+    CHECK (surface IS NULL OR surface IN ('recommendations', 'home', 'offline_pack'));
+ALTER TABLE ml.recommendation_request
+    ADD CONSTRAINT ck_recommendation_request_replay_hashes CHECK (
+        (pipeline_manifest_sha256 IS NULL OR octet_length(pipeline_manifest_sha256) = 32)
+        AND (request_sha256 IS NULL OR octet_length(request_sha256) = 32)
+        AND (input_snapshot_sha256 IS NULL OR octet_length(input_snapshot_sha256) = 32)
+        AND (policy_snapshot_sha256 IS NULL OR octet_length(policy_snapshot_sha256) = 32)
+    );
+ALTER TABLE ml.recommendation_request
+    ADD CONSTRAINT ck_recommendation_request_replay_versions CHECK (
+        (request_schema_version IS NULL OR request_schema_version >= 1)
+        AND (request_canonicalization_version IS NULL OR request_canonicalization_version >= 1)
+        AND (interaction_watermark IS NULL OR interaction_watermark >= 0)
+        AND (catalog_snapshot IS NULL OR catalog_snapshot >= 0)
+    );
+
+ALTER TABLE ml.recommendation_item
+    ADD COLUMN contributions jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE ml.recommendation_item
+    ADD COLUMN reason_codes text[] NOT NULL DEFAULT ARRAY[]::text[];
+ALTER TABLE ml.recommendation_item
+    ADD COLUMN item_provenance jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE ml.offline_recommendation_pack DROP CONSTRAINT ck_offline_pack_encoding;
+ALTER TABLE ml.offline_recommendation_pack
+    ADD CONSTRAINT ck_offline_pack_encoding
+    CHECK (payload_encoding IN ('RAW_JSON', 'JSON_ZSTD', 'PROTOBUF_ZSTD'));
+ALTER TABLE ml.offline_recommendation_pack ADD COLUMN recommendation_request_id uuid;
+ALTER TABLE ml.offline_recommendation_pack ADD COLUMN pipeline_key text;
+ALTER TABLE ml.offline_recommendation_pack ADD COLUMN pipeline_version text;
+ALTER TABLE ml.offline_recommendation_pack ADD COLUMN input_snapshot_sha256 bytea;
+ALTER TABLE ml.offline_recommendation_pack
+    ADD CONSTRAINT fk_offline_pack_request_owner
+    FOREIGN KEY (user_id, recommendation_request_id)
+    REFERENCES ml.recommendation_request(user_id, recommendation_request_id) ON DELETE RESTRICT;
+ALTER TABLE ml.offline_recommendation_pack
+    ADD CONSTRAINT fk_offline_pack_pipeline
+    FOREIGN KEY (pipeline_key, pipeline_version)
+    REFERENCES ml.recommendation_pipeline_version(pipeline_key, version) ON DELETE RESTRICT;
+ALTER TABLE ml.offline_recommendation_pack
+    ADD CONSTRAINT ck_offline_pack_snapshot_hash
+    CHECK (input_snapshot_sha256 IS NULL OR octet_length(input_snapshot_sha256) = 32);
+
+-- -----------------------------------------------------------------------------
+-- P12 isolated GPU enrichment additions
+-- -----------------------------------------------------------------------------
+
+ALTER TABLE ml.embedding_model
+    ADD COLUMN source text NOT NULL,
+    ADD COLUMN source_revision text NOT NULL,
+    ADD COLUMN artifact_filename text NOT NULL,
+    ADD COLUMN artifact_format text NOT NULL,
+    ADD COLUMN artifact_byte_size bigint NOT NULL,
+    ADD COLUMN artifact_manifest jsonb NOT NULL,
+    ADD COLUMN manifest_sha256 bytea NOT NULL,
+    ADD COLUMN runtime_revision text NOT NULL,
+    ADD COLUMN preprocessing_manifest jsonb NOT NULL,
+    ADD COLUMN preprocessing_sha256 bytea NOT NULL,
+    ADD COLUMN license_review_reference text,
+    ADD CONSTRAINT ck_embedding_model_source CHECK (length(source) BETWEEN 1 AND 500),
+    ADD CONSTRAINT ck_embedding_model_source_revision
+        CHECK (length(source_revision) BETWEEN 1 AND 300),
+    ADD CONSTRAINT ck_embedding_model_artifact_filename
+        CHECK (length(artifact_filename) BETWEEN 1 AND 300),
+    ADD CONSTRAINT ck_embedding_model_artifact_format
+        CHECK (length(artifact_format) BETWEEN 1 AND 100),
+    ADD CONSTRAINT ck_embedding_model_artifact_byte_size CHECK (artifact_byte_size > 0),
+    ADD CONSTRAINT ck_embedding_model_manifest_hash_len
+        CHECK (octet_length(manifest_sha256) = 32),
+    ADD CONSTRAINT ck_embedding_model_preprocessing_hash_len
+        CHECK (octet_length(preprocessing_sha256) = 32),
+    ADD CONSTRAINT ck_embedding_model_runtime_revision
+        CHECK (length(runtime_revision) BETWEEN 1 AND 200),
+    ADD CONSTRAINT ck_embedding_model_license_review_reference CHECK (
+        license_review_reference IS NULL
+        OR length(license_review_reference) BETWEEN 1 AND 500
+    ),
+    ADD CONSTRAINT ck_embedding_model_review_required CHECK (
+        status = 'BLOCKED' OR license_review_reference IS NOT NULL
+    );
+
+CREATE FUNCTION app_private.protect_embedding_model_provenance()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'embedding model registry rows are immutable';
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.status = 'ACTIVE' THEN
+            RAISE EXCEPTION 'embedding model must be benchmarked before activation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.status = 'ACTIVE' AND OLD.status <> 'ACTIVE' AND NOT EXISTS (
+        SELECT 1
+        FROM ml.embedding_model_activation activation
+        JOIN ml.embedding_benchmark_report report
+          ON report.report_sha256 = activation.benchmark_report_sha256
+        WHERE activation.target_embedding_model_id = NEW.embedding_model_id
+          AND activation.task = NEW.task
+          AND activation.created_at = transaction_timestamp()
+          AND report.embedding_model_id = NEW.embedding_model_id
+          AND report.decision = 'APPROVED'
+    ) THEN
+        RAISE EXCEPTION 'embedding model activation requires current activation history';
+    END IF;
+    IF OLD.status = 'ACTIVE' AND NEW.status <> 'ACTIVE' AND NOT EXISTS (
+        SELECT 1
+        FROM ml.embedding_model_activation activation
+        WHERE activation.previous_embedding_model_id = OLD.embedding_model_id
+          AND activation.task = OLD.task
+          AND activation.created_at = transaction_timestamp()
+    ) THEN
+        RAISE EXCEPTION 'embedding model deactivation requires current activation history';
+    END IF;
+    IF ROW(
+        NEW.embedding_model_id, NEW.model_key, NEW.version, NEW.task,
+        NEW.source, NEW.source_revision, NEW.artifact_filename,
+        NEW.artifact_format, NEW.artifact_byte_size, NEW.artifact_manifest,
+        NEW.manifest_sha256, NEW.weights_sha256, NEW.license_id,
+        NEW.runtime, NEW.runtime_revision, NEW.inference_precision,
+        NEW.input_sample_rate_hz, NEW.segment_duration_ms,
+        NEW.preprocessing_version, NEW.preprocessing_manifest,
+        NEW.preprocessing_sha256, NEW.pooling_strategy, NEW.dimension,
+        NEW.license_review_reference, NEW.created_at
+    ) IS DISTINCT FROM ROW(
+        OLD.embedding_model_id, OLD.model_key, OLD.version, OLD.task,
+        OLD.source, OLD.source_revision, OLD.artifact_filename,
+        OLD.artifact_format, OLD.artifact_byte_size, OLD.artifact_manifest,
+        OLD.manifest_sha256, OLD.weights_sha256, OLD.license_id,
+        OLD.runtime, OLD.runtime_revision, OLD.inference_precision,
+        OLD.input_sample_rate_hz, OLD.segment_duration_ms,
+        OLD.preprocessing_version, OLD.preprocessing_manifest,
+        OLD.preprocessing_sha256, OLD.pooling_strategy, OLD.dimension,
+        OLD.license_review_reference, OLD.created_at
+    ) THEN
+        RAISE EXCEPTION 'embedding model provenance is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tr_embedding_model_provenance_immutable
+BEFORE INSERT OR UPDATE OR DELETE ON ml.embedding_model
+FOR EACH ROW EXECUTE FUNCTION app_private.protect_embedding_model_provenance();
+
+ALTER TABLE ml.recording_embedding
+    ADD COLUMN preprocessing_input_sha256 bytea,
+    ADD COLUMN vector_sha256 bytea,
+    ADD COLUMN producing_job_id uuid REFERENCES jobs.job(job_id) ON DELETE RESTRICT,
+    ADD COLUMN producing_attempt_no integer,
+    ADD COLUMN retired_at timestamptz,
+    ADD CONSTRAINT ck_recording_embedding_input_hash CHECK (
+        preprocessing_input_sha256 IS NULL
+        OR octet_length(preprocessing_input_sha256) = 32
+    ),
+    ADD CONSTRAINT ck_recording_embedding_vector_hash CHECK (
+        vector_sha256 IS NULL OR octet_length(vector_sha256) = 32
+    ),
+    ADD CONSTRAINT ck_recording_embedding_attempt CHECK (
+        producing_attempt_no IS NULL OR producing_attempt_no >= 1
+    );
+
+CREATE TABLE ml.embedding_benchmark_report (
+    report_sha256 bytea PRIMARY KEY,
+    embedding_model_id uuid NOT NULL
+        REFERENCES ml.embedding_model(embedding_model_id) ON DELETE RESTRICT,
+    dataset_id text NOT NULL,
+    dataset_version text NOT NULL,
+    dataset_snapshot_sha256 bytea NOT NULL,
+    interaction_schema_version integer NOT NULL,
+    interaction_watermark bigint NOT NULL,
+    decision text NOT NULL,
+    report_document jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_embedding_benchmark_report_hash
+        CHECK (octet_length(report_sha256) = 32),
+    CONSTRAINT ck_embedding_benchmark_dataset_hash
+        CHECK (octet_length(dataset_snapshot_sha256) = 32),
+    CONSTRAINT ck_embedding_benchmark_interaction_identity
+        CHECK (interaction_schema_version >= 1 AND interaction_watermark >= 0),
+    CONSTRAINT ck_embedding_benchmark_decision
+        CHECK (decision IN ('EXPERIMENTAL', 'APPROVED', 'REJECTED', 'UNAVAILABLE'))
+);
+
+CREATE INDEX ix_embedding_benchmark_model_time
+    ON ml.embedding_benchmark_report (embedding_model_id, created_at DESC);
+
+CREATE TABLE ml.embedding_model_activation (
+    embedding_model_activation_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    task text NOT NULL CHECK (length(task) BETWEEN 1 AND 100),
+    activation_sequence bigint NOT NULL CHECK (activation_sequence >= 1),
+    target_embedding_model_id uuid
+        REFERENCES ml.embedding_model(embedding_model_id) ON DELETE RESTRICT,
+    previous_embedding_model_id uuid
+        REFERENCES ml.embedding_model(embedding_model_id) ON DELETE RESTRICT,
+    action text NOT NULL CHECK (action IN ('ACTIVATE', 'ROLLBACK', 'DEACTIVATE')),
+    benchmark_report_sha256 bytea NOT NULL
+        REFERENCES ml.embedding_benchmark_report(report_sha256) ON DELETE RESTRICT,
+    rollback_until timestamptz,
+    actor_user_id uuid REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_embedding_activation_sequence UNIQUE (task, activation_sequence),
+    CONSTRAINT ck_embedding_activation_benchmark_hash
+        CHECK (octet_length(benchmark_report_sha256) = 32)
+);
+
+CREATE INDEX ix_embedding_activation_task_time
+    ON ml.embedding_model_activation (task, activation_sequence DESC);
+
+CREATE TABLE ml.enrichment_job (
+    enrichment_job_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    job_id uuid NOT NULL UNIQUE REFERENCES jobs.job(job_id) ON DELETE RESTRICT,
+    job_kind text NOT NULL CHECK (job_kind = 'AUDIO_EMBEDDING'),
+    recording_id uuid NOT NULL REFERENCES catalog.recording(recording_id) ON DELETE RESTRICT,
+    audio_variant_id uuid NOT NULL
+        REFERENCES vault.audio_variant(audio_variant_id) ON DELETE RESTRICT,
+    embedding_model_id uuid NOT NULL
+        REFERENCES ml.embedding_model(embedding_model_id) ON DELETE RESTRICT,
+    expected_weights_sha256 bytea NOT NULL,
+    expected_preprocessing_sha256 bytea NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_enrichment_job_weights_hash
+        CHECK (octet_length(expected_weights_sha256) = 32),
+    CONSTRAINT ck_enrichment_job_preprocessing_hash
+        CHECK (octet_length(expected_preprocessing_sha256) = 32)
+);
+
+CREATE INDEX ix_enrichment_job_model_recording
+    ON ml.enrichment_job (embedding_model_id, recording_id);
+
+CREATE TABLE ml.recording_tag_set (
+    recording_tag_set_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    recording_id uuid NOT NULL REFERENCES catalog.recording(recording_id) ON DELETE RESTRICT,
+    embedding_model_id uuid NOT NULL
+        REFERENCES ml.embedding_model(embedding_model_id) ON DELETE RESTRICT,
+    audio_variant_id uuid NOT NULL
+        REFERENCES vault.audio_variant(audio_variant_id) ON DELETE RESTRICT,
+    output_schema_version integer NOT NULL CHECK (output_schema_version >= 1),
+    tag_document jsonb NOT NULL,
+    result_sha256 bytea NOT NULL,
+    preprocessing_input_sha256 bytea NOT NULL,
+    producing_job_id uuid NOT NULL REFERENCES jobs.job(job_id) ON DELETE RESTRICT,
+    producing_attempt_no integer NOT NULL CHECK (producing_attempt_no >= 1),
+    retired_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_recording_tag_set_source UNIQUE (
+        recording_id, embedding_model_id, audio_variant_id, output_schema_version
+    ),
+    CONSTRAINT ck_recording_tag_set_hashes CHECK (
+        octet_length(result_sha256) = 32
+        AND octet_length(preprocessing_input_sha256) = 32
+    )
+);
+
+CREATE INDEX ix_recording_tag_set_model_recording
+    ON ml.recording_tag_set (embedding_model_id, recording_id);
+
+CREATE FUNCTION app_private.enforce_enrichment_target_integrity()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    variant_recording_id uuid;
+    model_weights bytea;
+    model_preprocessing bytea;
+    model_status text;
+    model_task text;
+    durable_job_type text;
+    durable_job_schema_version integer;
+BEGIN
+    SELECT av.recording_id INTO variant_recording_id
+    FROM vault.audio_variant av
+    JOIN vault.vault_object object ON object.vault_object_id = av.vault_object_id
+    WHERE av.audio_variant_id = NEW.audio_variant_id
+      AND av.validation_status = 'VALID' AND av.deleted_at IS NULL
+      AND object.commit_status = 'COMMITTED';
+    SELECT weights_sha256, preprocessing_sha256, status, task
+    INTO model_weights, model_preprocessing, model_status, model_task
+    FROM ml.embedding_model
+    WHERE embedding_model_id = NEW.embedding_model_id;
+    SELECT job_type, schema_version
+    INTO durable_job_type, durable_job_schema_version
+    FROM jobs.job
+    WHERE job_id = NEW.job_id;
+    IF variant_recording_id IS DISTINCT FROM NEW.recording_id THEN
+        RAISE EXCEPTION 'enrichment source variant Recording mismatch';
+    END IF;
+    IF model_task IS DISTINCT FROM NEW.job_kind
+       OR durable_job_schema_version IS DISTINCT FROM 1
+       OR durable_job_type IS DISTINCT FROM 'ml.audio-embedding' THEN
+        RAISE EXCEPTION 'enrichment job kind mismatch';
+    END IF;
+    IF model_status NOT IN ('BENCHMARK', 'ACTIVE')
+       OR model_weights IS DISTINCT FROM NEW.expected_weights_sha256
+       OR model_preprocessing IS DISTINCT FROM NEW.expected_preprocessing_sha256 THEN
+        RAISE EXCEPTION 'enrichment model provenance mismatch';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tr_enrichment_job_integrity
+BEFORE INSERT OR UPDATE ON ml.enrichment_job
+FOR EACH ROW EXECUTE FUNCTION app_private.enforce_enrichment_target_integrity();
+
+CREATE FUNCTION app_private.enforce_recording_tag_integrity()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    variant_recording_id uuid;
+BEGIN
+    SELECT recording_id INTO variant_recording_id
+    FROM vault.audio_variant WHERE audio_variant_id = NEW.audio_variant_id;
+    IF variant_recording_id IS DISTINCT FROM NEW.recording_id THEN
+        RAISE EXCEPTION 'tag source variant Recording mismatch';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tr_recording_tag_integrity
+BEFORE INSERT OR UPDATE ON ml.recording_tag_set
+FOR EACH ROW EXECUTE FUNCTION app_private.enforce_recording_tag_integrity();
+
+CREATE FUNCTION app_private.protect_ml_evidence()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE'
+       AND TG_TABLE_NAME = 'recording_tag_set'
+       AND current_setting('autplay.allow_derived_retirement', true) = 'on' THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'ML evidence rows are immutable';
+END;
+$$;
+
+CREATE TRIGGER tr_embedding_benchmark_immutable
+BEFORE UPDATE OR DELETE ON ml.embedding_benchmark_report
+FOR EACH ROW EXECUTE FUNCTION app_private.protect_ml_evidence();
+
+CREATE TRIGGER tr_embedding_activation_immutable
+BEFORE UPDATE OR DELETE ON ml.embedding_model_activation
+FOR EACH ROW EXECUTE FUNCTION app_private.protect_ml_evidence();
+
+CREATE TRIGGER tr_recording_tag_set_immutable
+BEFORE UPDATE OR DELETE ON ml.recording_tag_set
+FOR EACH ROW EXECUTE FUNCTION app_private.protect_ml_evidence();
+
 
 -- -----------------------------------------------------------------------------
 -- privileges

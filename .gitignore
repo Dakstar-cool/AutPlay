@@ -51,6 +51,7 @@ captures/
 # Test, coverage, and runtime output
 coverage/
 test-results/
+.autplay-codex/
 *.log
 *.tmp
 tmp/

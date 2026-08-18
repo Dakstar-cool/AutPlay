@@ -1,0 +1,6 @@
+title,artist,album,duration_ms,available,playlist,custom_note
+Song,Artist,Album,180000,true,One,keep-me
+Song,Artist,Album,180000,true,One,duplicate-intent
+Gray Song,Artist,,181000,false,Two,
+Broken,columns
+Missing Artist,,,120000,true,Three,partial

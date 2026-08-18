@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 
 import pytest
@@ -25,7 +26,16 @@ RUNTIME_MODULES = (
     "sqlalchemy",
 )
 
-ACCELERATOR_PREFIXES = ("cupy", "cuda", "jax", "tensorflow", "torch")
+ACCELERATOR_PREFIXES = (
+    "cupy",
+    "cuda",
+    "jax",
+    "nvidia",
+    "onnxruntime",
+    "tensorflow",
+    "torch",
+    "transformers",
+)
 
 
 @pytest.mark.parametrize("module_name", PACKAGE_MODULES)
@@ -52,3 +62,9 @@ def test_autplay_import_has_no_accelerator_side_effects() -> None:
         if module_name.split(".", maxsplit=1)[0] in ACCELERATOR_PREFIXES
     )
     assert loaded_accelerators == []
+
+
+def test_isolated_gpu_project_is_not_installed_in_cpu_environment() -> None:
+    """The server lock cannot accidentally compose or import the optional GPU project."""
+
+    assert importlib.util.find_spec("autplay_gpu") is None

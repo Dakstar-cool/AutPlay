@@ -1,0 +1,334 @@
+{
+  "contract_version": "v1",
+  "cases": [
+    {
+      "case_id": "missing-request-hash",
+      "schema": "client-event.schema.json",
+      "instance": {"event_id": "11111111-1111-4111-8111-111111111111"},
+      "expected_error": "required"
+    },
+    {
+      "case_id": "ambiguous-single-id-envelope",
+      "schema": "client-event.schema.json",
+      "instance": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "21111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 1,
+        "event_type": "PLAYLIST_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "PLAYLIST",
+        "aggregate_id": "61111111-1111-4111-8111-111111111111",
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:00:00Z",
+        "payload": {},
+        "request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "invalid-ack-outcome",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "server_time": "2026-08-15T00:00:00Z",
+        "acks": [
+          {
+            "event_id": "11111111-1111-4111-8111-111111111111",
+            "device_sequence": 1,
+            "aggregate_type": "PLAYLIST",
+            "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+            "aggregate_server_id": null,
+            "outcome": "SUCCESS"
+          }
+        ]
+      },
+      "expected_error": "enum"
+    },
+    {
+      "case_id": "empty-push-batch",
+      "schema": "push-request.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "events": []
+      },
+      "expected_error": "minItems"
+    },
+    {
+      "case_id": "unsupported-client-schema-version",
+      "schema": "client-event.schema.json",
+      "instance": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "21111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 1,
+        "event_type": "PLAYLIST_CREATED",
+        "schema_version": 2,
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:00:00Z",
+        "payload": {},
+        "request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected_error": "const"
+    },
+    {
+      "case_id": "rejected-ack-without-error",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "acks": [{
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "device_sequence": 1,
+          "aggregate_type": "RECORDING",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": null,
+          "outcome": "REJECTED"
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "conflict-ack-without-conflict",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "acks": [{
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "device_sequence": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+          "outcome": "CONFLICT"
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "applied-ack-with-null-canonical-id",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "acks": [{
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "device_sequence": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": null,
+          "outcome": "APPLIED",
+          "server_row_version": 1
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "type"
+    },
+    {
+      "case_id": "duplicate-ack-without-original-outcome",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "acks": [{
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "device_sequence": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+          "outcome": "DUPLICATE",
+          "server_row_version": 1
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "ack-error-without-request-id",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "acks": [{
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "device_sequence": 1,
+          "aggregate_type": "RECORDING",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": null,
+          "outcome": "REJECTED",
+          "error": {"code": "SERVER_ID_REQUIRED", "message": "A server ID is required.", "retryable": false}
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "required"
+    },
+    {
+      "case_id": "client-event-top-level-access-token",
+      "schema": "client-event.schema.json",
+      "instance": {
+        "event_id": "14111111-1111-4111-8111-111111111111",
+        "idempotency_key": "24111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 1,
+        "event_type": "PLAYLIST_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "64111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:00:00Z",
+        "payload": {"name": "Road"},
+        "request_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "access_token": "secret"
+      },
+      "expected_error": "propertyNames"
+    },
+    {
+      "case_id": "client-event-private-url",
+      "schema": "client-event.schema.json",
+      "instance": {
+        "event_id": "15111111-1111-4111-8111-111111111111",
+        "idempotency_key": "25111111-1111-4111-8111-111111111111",
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "device_sequence": 1,
+        "event_type": "PLAYLIST_CREATED",
+        "schema_version": 1,
+        "aggregate_type": "PLAYLIST",
+        "aggregate_local_id": "65111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-15T00:00:00Z",
+        "payload": {"private_url": "https://private.invalid/item"},
+        "request_hash": "677c8aeaf3968d83e4a3a15c474f13e86f5448d7362b41b5646f0f50ea871bcd"
+      },
+      "expected_error": "propertyNames"
+    },
+    {
+      "case_id": "pull-event-access-token",
+      "schema": "pull-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "from_cursor": null,
+        "next_cursor": "opaque-pull-cursor-token-v1",
+        "has_more": false,
+        "events": [{
+          "server_sequence": 1,
+          "event_id": "91111111-1111-4111-8111-111111111111",
+          "origin_device_id": null,
+          "event_type": "PLAYLIST_UPSERTED",
+          "schema_version": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+          "server_row_version": 1,
+          "operation": "UPSERT",
+          "payload": {"access_token": "secret"},
+          "created_at": "2026-08-15T00:00:01Z"
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "propertyNames"
+    },
+    {
+      "case_id": "bootstrap-aggregate-refresh-token",
+      "schema": "bootstrap-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "snapshot_id": "a1111111-1111-4111-8111-111111111111",
+        "snapshot_high_water_server_sequence": 10,
+        "aggregates": [{
+          "aggregate_type": "PLAYLIST",
+          "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+          "server_row_version": 1,
+          "payload": {"refresh_token": "secret"}
+        }],
+        "tombstones": [],
+        "redirects": [],
+        "next_page_token": null,
+        "has_more": false,
+        "snapshot_cursor": "opaque-snapshot-cursor-token-v1",
+        "pending_event_directive": "PRESERVE_REBASE_RETRY",
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "propertyNames"
+    },
+    {
+      "case_id": "conflict-snapshot-private-url",
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 1,
+        "acks": [{
+          "event_id": "11111111-1111-4111-8111-111111111111",
+          "device_sequence": 1,
+          "aggregate_type": "PLAYLIST",
+          "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+          "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+          "outcome": "CONFLICT",
+          "conflict": {
+            "conflict_kind": "STALE_VERSION",
+            "resolution_state": "REVIEW_REQUIRED",
+            "server_snapshot": {"private_url": "https://private.invalid/item"}
+          }
+        }],
+        "server_time": "2026-08-15T00:00:01Z"
+      },
+      "expected_error": "propertyNames"
+    },
+    {
+      "case_id": "error-details-credential",
+      "schema": "error.schema.json",
+      "instance": {
+        "code": "INTERNAL_ERROR",
+        "message": "The request failed.",
+        "retryable": true,
+        "request_id": "b1111111-1111-4111-8111-111111111111",
+        "details": {"credential": "secret"}
+      },
+      "expected_error": "propertyNames"
+    }
+  ]
+}

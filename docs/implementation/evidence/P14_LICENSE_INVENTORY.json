@@ -1,0 +1,2469 @@
+{
+  "environment_counts": {
+    "android_release_runtime": 159,
+    "gpu": 56,
+    "root": 37,
+    "server": 47
+  },
+  "environments": {
+    "android_release_runtime": [
+      {
+        "coordinate": "androidx.activity:activity:1.13.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.activity:activity-compose:1.13.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.activity:activity-ktx:1.13.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.annotation:annotation:1.10.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.annotation:annotation-experimental:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.annotation:annotation-jvm:1.10.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.arch.core:core-common:2.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.arch.core:core-runtime:2.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.autofill:autofill:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.collection:collection:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.collection:collection-jvm:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.collection:collection-ktx:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose:compose-bom:2026.06.01",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.animation:animation:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.animation:animation-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.animation:animation-core:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.animation:animation-core-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.foundation:foundation:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.foundation:foundation-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.foundation:foundation-layout:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.foundation:foundation-layout-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.material:material-ripple:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.material:material-ripple-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.material3:material3:1.4.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.material3:material3-android:1.4.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-annotation:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-annotation-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-retain:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-retain-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-saveable:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.runtime:runtime-saveable-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-geometry:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-geometry-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-graphics:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-graphics-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-text:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-text-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-tooling-preview:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-tooling-preview-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-unit:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-unit-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-util:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.compose.ui:ui-util-android:1.11.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.concurrent:concurrent-futures:1.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.concurrent:concurrent-futures-ktx:1.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.core:core:1.18.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.core:core-ktx:1.18.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.core:core-viewtree:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.customview:customview-poolingcontainer:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-android:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-core:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-core-android:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-core-okio:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-core-okio-jvm:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-preferences:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-preferences-android:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-preferences-core:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-preferences-core-android:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-preferences-external-protobuf:1.2.1",
+        "license_evidence": [
+          "BSD-3-Clause | https://opensource.org/licenses/BSD-3-Clause"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.datastore:datastore-preferences-proto:1.2.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.documentfile:documentfile:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.dynamicanimation:dynamicanimation:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.emoji2:emoji2:1.4.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.exifinterface:exifinterface:1.3.6",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.graphics:graphics-path:1.0.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.interpolator:interpolator:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.legacy:legacy-support-core-utils:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-common:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-common-java8:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-common-jvm:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-livedata:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-livedata-core:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-livedata-core-ktx:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-process:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-runtime:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-runtime-android:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-runtime-compose:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-runtime-ktx:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-runtime-ktx-android:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-service:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-viewmodel:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-viewmodel-android:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-viewmodel-savedstate:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:2.9.4",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.loader:loader:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.localbroadcastmanager:localbroadcastmanager:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media:media:1.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-common:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-container:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-database:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-datasource:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-decoder:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-exoplayer:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-extractor:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.media3:media3-session:1.10.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.navigationevent:navigationevent:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.navigationevent:navigationevent-android:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.navigationevent:navigationevent-compose:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.navigationevent:navigationevent-compose-android:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.print:print:1.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.profileinstaller:profileinstaller:1.4.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room:room-common:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room:room-common-jvm:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room:room-runtime:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room:room-runtime-android:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room3:room3-common:3.0.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room3:room3-common-jvm:3.0.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room3:room3-runtime:3.0.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.room3:room3-runtime-android:3.0.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.savedstate:savedstate:1.3.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.savedstate:savedstate-android:1.3.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.savedstate:savedstate-compose:1.3.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.savedstate:savedstate-compose-android:1.3.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.savedstate:savedstate-ktx:1.3.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-android:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-async:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-async-android:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-bundled:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-bundled-android:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-framework:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.sqlite:sqlite-framework-android:2.7.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.startup:startup-runtime:1.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.tracing:tracing:1.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.tracing:tracing-ktx:1.2.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.transition:transition:1.6.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.versionedparcelable:versionedparcelable:1.1.1",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.window:window:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.window:window-core:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.window:window-core-android:1.5.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "androidx.work:work-runtime:2.11.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.google.guava:failureaccess:1.0.2",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "parent-pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.google.guava:guava:33.3.1-android",
+        "license_evidence": [
+          "Apache License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "parent-pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "parent-pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.squareup.okhttp3:okhttp:5.4.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.squareup.okhttp3:okhttp-android:5.4.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.squareup.okio:okio:3.17.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "com.squareup.okio:okio-jvm:3.17.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "io.github.erdtman:java-json-canonicalization:1.1",
+        "license_evidence": [
+          "Apache License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains:annotations:23.0.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlin:kotlin-bom:1.8.0",
+        "license_evidence": [
+          "The Apache Software License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.4.10",
+        "license_evidence": [
+          "Apache-2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-serialization-bom:1.11.0",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-serialization-core:1.11.0",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.11.0",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.11.0",
+        "license_evidence": [
+          "Apache-2.0 | https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      },
+      {
+        "coordinate": "org.jspecify:jspecify:1.0.0",
+        "license_evidence": [
+          "The Apache License, Version 2.0 | http://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "metadata_source": "pom",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE"
+      }
+    ],
+    "gpu": [
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "alembic",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.19.1"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "annotated-doc",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.0.5"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "annotated-types",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.8.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "anyio",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.14.2"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "argon2-cffi",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "25.1.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "argon2-cffi-bindings",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "25.1.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "ast_serialize",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.8.0"
+      },
+      {
+        "license_evidence": [
+          "PROJECT-INTERNAL-NOT-PUBLISHED"
+        ],
+        "name": "autplay-gpu-worker",
+        "review": "INTERNAL_NOT_PUBLISHED",
+        "version": "0.0.0"
+      },
+      {
+        "license_evidence": [
+          "PROJECT-INTERNAL-NOT-PUBLISHED"
+        ],
+        "name": "autplay-server",
+        "review": "INTERNAL_NOT_PUBLISHED",
+        "version": "0.0.0"
+      },
+      {
+        "license_evidence": [
+          "MIT-0"
+        ],
+        "name": "cffi",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.1.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "click",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "8.4.2"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "name": "colorama",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.4.6"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "fastapi",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.141.1"
+      },
+      {
+        "license_evidence": [
+          "Apache 2.0",
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "flatbuffers",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "25.12.19"
+      },
+      {
+        "license_evidence": [
+          "MIT AND PSF-2.0"
+        ],
+        "name": "greenlet",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.5.5"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "h11",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.16.0"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "idna",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.18"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "iniconfig",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "librt",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.15.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "Mako",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.4.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "MarkupSafe",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.0.3"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "mypy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "mypy_extensions",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.1.0"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+        ],
+        "name": "numpy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.5.2"
+      },
+      {
+        "license_evidence": [
+          "LicenseRef-NVIDIA-Proprietary"
+        ],
+        "name": "nvidia-cublas-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "12.9.2.10"
+      },
+      {
+        "license_evidence": [
+          "License :: Other/Proprietary License",
+          "LicenseRef-NVIDIA-Proprietary"
+        ],
+        "name": "nvidia-cuda-nvrtc-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "12.9.86"
+      },
+      {
+        "license_evidence": [
+          "License :: Other/Proprietary License",
+          "LicenseRef-NVIDIA-Proprietary"
+        ],
+        "name": "nvidia-cuda-runtime-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "12.9.79"
+      },
+      {
+        "license_evidence": [
+          "LicenseRef-NVIDIA-Proprietary"
+        ],
+        "name": "nvidia-cudnn-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "9.24.0.43"
+      },
+      {
+        "license_evidence": [
+          "License :: Other/Proprietary License",
+          "LicenseRef-NVIDIA-Proprietary"
+        ],
+        "name": "nvidia-cufft-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "11.4.1.4"
+      },
+      {
+        "license_evidence": [
+          "License :: Other/Proprietary License",
+          "NVIDIA Proprietary Software"
+        ],
+        "name": "nvidia-curand-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "10.3.10.19"
+      },
+      {
+        "license_evidence": [
+          "License :: Other/Proprietary License",
+          "LicenseRef-NVIDIA-Proprietary"
+        ],
+        "name": "nvidia-nvjitlink-cu12",
+        "review": "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED",
+        "version": "12.9.86"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT License"
+        ],
+        "name": "onnxruntime-gpu",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.26.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0 OR BSD-2-Clause"
+        ],
+        "name": "packaging",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "26.3"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+        ],
+        "name": "pathspec",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "1.1.1"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pgvector",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.5.0"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "pluggy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.6.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0 AND BSD-2-Clause"
+        ],
+        "name": "prometheus_client",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.25.0"
+      },
+      {
+        "license_evidence": [
+          "3-Clause BSD License"
+        ],
+        "name": "protobuf",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "7.35.1"
+      },
+      {
+        "license_evidence": [
+          "LGPL-3.0-only"
+        ],
+        "name": "psycopg",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "3.3.4"
+      },
+      {
+        "license_evidence": [
+          "LGPL-3.0-only"
+        ],
+        "name": "psycopg-binary",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "3.3.4"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "pycparser",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pydantic",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.13.4"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "pydantic-settings",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.15.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pydantic_core",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.46.4"
+      },
+      {
+        "license_evidence": [
+          "BSD-2-Clause"
+        ],
+        "name": "Pygments",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.20.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "PyJWT",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.13.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pytest",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "9.1.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "python-dotenv",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.2.3"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "rfc8785",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.1.4"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "ruff",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.16.2"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "SQLAlchemy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.0.52"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "starlette",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.6.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "typing-inspection",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.4.4"
+      },
+      {
+        "license_evidence": [
+          "PSF-2.0"
+        ],
+        "name": "typing_extensions",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.16.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0"
+        ],
+        "name": "tzdata",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2026.3"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "uvicorn",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.51.0"
+      }
+    ],
+    "root": [
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "annotated-types",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.8.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "ast_serialize",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.8.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "attrs",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "26.1.0"
+      },
+      {
+        "license_evidence": [
+          "PROJECT-INTERNAL-NOT-PUBLISHED"
+        ],
+        "name": "autplay-codex-harness",
+        "review": "INTERNAL_NOT_PUBLISHED",
+        "version": "0.1.0"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "name": "colorama",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.4.6"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "iniconfig",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "jsonschema",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.26.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0",
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "jsonschema-path",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.5.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "jsonschema-specifications",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2025.9.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-2-Clause"
+        ],
+        "name": "lazy-object-proxy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.12.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "librt",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.15.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "mypy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "mypy_extensions",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.1.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0"
+        ],
+        "name": "openai-codex",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.144.4"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0",
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "openai-codex-cli-bin",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.144.4"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause",
+          "License :: OSI Approved :: BSD License"
+        ],
+        "name": "openapi-schema-validator",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.9.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0"
+        ],
+        "name": "openapi-spec-validator",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.9.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0 OR BSD-2-Clause"
+        ],
+        "name": "packaging",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "26.3"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0",
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "pathable",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.6.0"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+        ],
+        "name": "pathspec",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "1.1.1"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "pluggy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.6.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pydantic",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.13.4"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "pydantic-settings",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.15.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pydantic_core",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.46.4"
+      },
+      {
+        "license_evidence": [
+          "BSD-2-Clause"
+        ],
+        "name": "Pygments",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.20.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pytest",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "9.1.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "python-dotenv",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.2.2"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "PyYAML",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "6.0.3"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "referencing",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.37.0"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT license"
+        ],
+        "name": "rfc3339-validator",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.1.4"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "rfc8785",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.1.4"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "rpds-py",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2026.6.3"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "ruff",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.16.2"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "six",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.17.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0"
+        ],
+        "name": "types-jsonschema",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.26.0.20260518"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "typing-inspection",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.4.4"
+      },
+      {
+        "license_evidence": [
+          "PSF-2.0"
+        ],
+        "name": "typing_extensions",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.16.0"
+      }
+    ],
+    "server": [
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "alembic",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.19.1"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "annotated-doc",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.0.5"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "annotated-types",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.8.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "anyio",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.14.2"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "argon2-cffi",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "25.1.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "argon2-cffi-bindings",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "25.1.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "ast_serialize",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.8.0"
+      },
+      {
+        "license_evidence": [
+          "PROJECT-INTERNAL-NOT-PUBLISHED"
+        ],
+        "name": "autplay-server",
+        "review": "INTERNAL_NOT_PUBLISHED",
+        "version": "0.0.0"
+      },
+      {
+        "license_evidence": [
+          "MIT-0"
+        ],
+        "name": "cffi",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.1.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "click",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "8.4.2"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: BSD License"
+        ],
+        "name": "colorama",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.4.6"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "fastapi",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.141.1"
+      },
+      {
+        "license_evidence": [
+          "MIT AND PSF-2.0"
+        ],
+        "name": "greenlet",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.5.5"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "h11",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.16.0"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause",
+          "License :: OSI Approved :: BSD License"
+        ],
+        "name": "httpcore2",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.9.0"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause",
+          "License :: OSI Approved :: BSD License"
+        ],
+        "name": "httpx2",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.9.0"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "idna",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.18"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "iniconfig",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "librt",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.15.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "Mako",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.4.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "MarkupSafe",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.0.3"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "mypy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "mypy_extensions",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.1.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0 OR BSD-2-Clause"
+        ],
+        "name": "packaging",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "26.3"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+        ],
+        "name": "pathspec",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "1.1.1"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pgvector",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.5.0"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "pluggy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.6.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0 AND BSD-2-Clause"
+        ],
+        "name": "prometheus_client",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.25.0"
+      },
+      {
+        "license_evidence": [
+          "LGPL-3.0-only"
+        ],
+        "name": "psycopg",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "3.3.4"
+      },
+      {
+        "license_evidence": [
+          "LGPL-3.0-only"
+        ],
+        "name": "psycopg-binary",
+        "review": "NOTICE_AND_LINKING_REVIEW_REQUIRED",
+        "version": "3.3.4"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "pycparser",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "3.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pydantic",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.13.4"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: MIT License",
+          "MIT"
+        ],
+        "name": "pydantic-settings",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.15.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pydantic_core",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.46.4"
+      },
+      {
+        "license_evidence": [
+          "BSD-2-Clause"
+        ],
+        "name": "Pygments",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.20.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "PyJWT",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.13.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "pytest",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "9.1.1"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "python-dotenv",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.2.2"
+      },
+      {
+        "license_evidence": [
+          "License :: OSI Approved :: Apache Software License"
+        ],
+        "name": "rfc8785",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.1.4"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "ruff",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.16.2"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "SQLAlchemy",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2.0.52"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "starlette",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "1.6.0"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "truststore",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.10.4"
+      },
+      {
+        "license_evidence": [
+          "MIT"
+        ],
+        "name": "typing-inspection",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.4.4"
+      },
+      {
+        "license_evidence": [
+          "PSF-2.0"
+        ],
+        "name": "typing_extensions",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "4.16.0"
+      },
+      {
+        "license_evidence": [
+          "Apache-2.0"
+        ],
+        "name": "tzdata",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "2026.3"
+      },
+      {
+        "license_evidence": [
+          "BSD-3-Clause"
+        ],
+        "name": "uvicorn",
+        "review": "PERMISSIVE_OR_STANDARD_NOTICE",
+        "version": "0.51.0"
+      }
+    ]
+  },
+  "generated_at": "2026-08-18T06:17:25.523583+00:00",
+  "obligations": {
+    "INTERNAL_NOT_PUBLISHED": [
+      "gpu:autplay-gpu-worker==0.0.0",
+      "gpu:autplay-server==0.0.0",
+      "root:autplay-codex-harness==0.1.0",
+      "server:autplay-server==0.0.0"
+    ],
+    "NOTICE_AND_LINKING_REVIEW_REQUIRED": [
+      "gpu:pathspec==1.1.1",
+      "gpu:psycopg-binary==3.3.4",
+      "gpu:psycopg==3.3.4",
+      "root:pathspec==1.1.1",
+      "server:pathspec==1.1.1",
+      "server:psycopg-binary==3.3.4",
+      "server:psycopg==3.3.4"
+    ],
+    "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED": [
+      "gpu:nvidia-cublas-cu12==12.9.2.10",
+      "gpu:nvidia-cuda-nvrtc-cu12==12.9.86",
+      "gpu:nvidia-cuda-runtime-cu12==12.9.79",
+      "gpu:nvidia-cudnn-cu12==9.24.0.43",
+      "gpu:nvidia-cufft-cu12==11.4.1.4",
+      "gpu:nvidia-curand-cu12==10.3.10.19",
+      "gpu:nvidia-nvjitlink-cu12==12.9.86"
+    ]
+  },
+  "publication_boundary": "This is a metadata inventory, not legal advice. Complete notice/source/relinking and NVIDIA redistribution review before any publication; P14 publishes nothing.",
+  "schema_version": 1,
+  "scope": "resolved root/server/GPU Python environments plus Android releaseRuntimeClasspath",
+  "status": "PASS_WITH_DECLARED_PUBLICATION_REVIEW",
+  "unresolved_license_count": 0
+}

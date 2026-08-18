@@ -26,7 +26,7 @@
 - validated current-decision projections для `importing.import_entry` и `library.user_track_ref`;
 - application transactions для domain commands и event emission.
 
-Reference DDL содержит ровно 57 tables, 53 explicit `CREATE INDEX` objects, 13 helper/constraint functions и 40 non-internal triggers. PK/UNIQUE backing indexes в число 53 не входят.
+Reference DDL содержит ровно 64 tables, 60 explicit `CREATE INDEX` objects, 15 helper/constraint functions и 43 non-internal trigger. PK/UNIQUE backing indexes в число 60 не входят.
 
 Identity-history synchronization фиксирует только безопасное append-only хранение P00-D003. Frozen F-016 и отдельное решение P00-D004 не изменены: initial schema не содержит policy activation event и не разрешает pre-benchmark applied auto-match.
 
@@ -169,7 +169,7 @@ Release/threshold rows, activation events, decisions и candidate evidence яв�
 - `ix_match_decision_matcher_time`;
 - `ix_match_candidate_evidence_recording`.
 
-Три новые functions — `app_private.reject_identity_history_mutation()`, `app_private.validate_match_policy_activation()` и `app_private.validate_match_decision()`. Eight new triggers состоят из трех immutable-registry triggers, activation validator, двух deferred decision/evidence aggregate validators и двух deferred import/UserTrackRef projection validators. Таким образом delta `-1 + 6` tables, `-1 + 6` explicit indexes, `+3` functions и `+8` triggers дает exact inventory 57/53/13/40.
+Три новые functions — `app_private.reject_identity_history_mutation()`, `app_private.validate_match_policy_activation()` и `app_private.validate_match_decision()`. Eight new triggers состоят из трех immutable-registry triggers, activation validator, двух deferred decision/evidence aggregate validators и двух deferred import/UserTrackRef projection validators. Эта P04 delta `-1 + 6` tables, `-1 + 6` explicit indexes, `+3` functions и `+8` triggers дала inventory 57/53/13/40; P06 `0011_vault_runtime` добавляет 2 tables, 4 indexes и 1 trigger, P09 `0012_sync_runtime` — 3 tables и 2 explicit indexes, P11 `0013_recommendation_runtime` — 2 tables, 1 explicit index, 2 immutable-row functions и 2 triggers, P12 `0014_gpu_enrichment` — 4 tables, 4 explicit indexes, 4 integrity/immutability functions и 6 triggers, а P13 `0015_wave_runtime` — 7 tables и 3 explicit indexes. Текущий exact physical inventory — 75/67/19/49.
 
 ---
 
@@ -391,6 +391,11 @@ Reference DDL не переносится одной гигантской migrat
 | `0008_ml_history` | Model registry, vectors, recommendations, listening events |
 | `0009_constraints_triggers` | Cross-table constraints, exactly 13 private helper/constraint functions and 40 non-internal triggers, including deferred identity aggregate/projection validation |
 | `0010_indexes_privileges` | Exactly 53 explicit search/history/queue indexes and role grants; PK/UNIQUE backing indexes excluded from this inventory |
+| `0011_vault_runtime` | P06 owner/device-bound resumable upload sessions, durable chunk receipts, commit/reuse/quarantine state links, and four operational indexes |
+| `0012_sync_runtime` | P09 durable Journal lineage/terminal ACK state, materialized bootstrap snapshot rows, canonical interaction facts and two operational/semantic indexes |
+| `0013_recommendation_runtime` | P11 immutable pipeline manifests and retained input snapshots; replay/provenance/owner-safe pack extensions; bounded retention and immutable-row triggers |
+| `0014_gpu_enrichment` | P12 immutable model/benchmark/activation history and versioned embedding enrichment state; CPU runtime remains independent |
+| `0015_wave_runtime` | P13 digest-only invite-scoped rooms, device membership, canonical queue, ordered commands, expiring preflight/timing and guarded non-destructive downgrade |
 
 Каждая revision:
 
@@ -438,7 +443,7 @@ Alembic autogenerate не является полной проверкой вс�
 | Alembic head | Единственная ожидаемая head |
 | Drift | SQLAlchemy metadata не порождает неожиданный migration diff |
 | Constraint names | PK/FK/UQ/CK имеют deterministic names |
-| Exact inventory | 57 tables, 53 explicit indexes, 13 `app_private` helper/constraint functions и 40 non-internal triggers; exact names совпадают с reference contract |
+| Exact inventory | 64 tables, 60 explicit indexes, 15 `app_private` helper/constraint functions и 43 non-internal trigger; exact names совпадают с reference contract |
 | Extensions | Required compatible `pg_trgm` и `vector` доступны |
 | Privileges | Runtime roles не имеют лишних DDL/read rights |
 | Identity initial state | Шесть identity-history tables существуют, legacy `importing.match_candidate` отсутствует, policy activation row count равен zero |
@@ -578,7 +583,7 @@ psql -v ON_ERROR_STOP=1 "$AUTPLAY_TEST_DATABASE_URL" \
 - collaborative playlist membership;
 - public SaaS tenant hierarchy;
 - OpenSubsonic compatibility projections;
-- Wave room state;
+- Wave public-Internet/TLS topology and cross-instance live fanout (P13 durable room state is in `0015_wave_runtime`);
 - lyrics storage;
 - PostgreSQL RLS policy;
 - database roles/passwords, зависящие от deployment environment;
@@ -593,7 +598,7 @@ psql -v ON_ERROR_STOP=1 "$AUTPLAY_TEST_DATABASE_URL" \
 Schema v1 готова к initial Alembic implementation, когда:
 
 1. Reference DDL выполняется на pinned PostgreSQL 18 + pgvector image.
-2. Все 57 tables, 53 explicit indexes, 13 helper/constraint functions и 40 non-internal triggers создаются в clean database с exact names; legacy `importing.match_candidate` отсутствует.
+2. Все 64 tables, 60 explicit indexes, 15 helper/constraint functions и 43 non-internal trigger создаются в clean database с exact names; legacy `importing.match_candidate` отсутствует.
 3. FK/CK/UQ, append-only/deferred validators и projection triggers проходят negative tests.
 4. Device/user и playlist/library boundaries не обходятся прямым DML test role.
 5. Job claim concurrency test не дает duplicate active leases.

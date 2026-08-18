@@ -13,6 +13,7 @@
 - Room schema and P05 repositories
 - PostgreSQL schema and P03 application boundaries
 - Sync contract event types
+- `AutPlay_Recommendation_Subsystem_v1.md` canonical interaction and attribution rules
 
 ## Scope
 
@@ -26,6 +27,9 @@
 8. Server application/repository commands needed for later sync, with object authorization, but no duplicate REST write path that bypasses sync rules.
 9. Minimal OpenAPI/query endpoints for server projections where required.
 10. Import provenance and availability projection.
+11. Optional recommendation attribution on preference and playlist intents; the domain mutation and
+    its single Offline Journal event remain atomic and become one canonical interaction projection
+    in P09.
 
 ## Constraints
 
@@ -35,6 +39,9 @@
 - History events are append-only logical play events, not every seek.
 - Unknown/ambiguous item remains visible and repairable.
 - No matching auto-merge, external service adapter or playback engine yet.
+- Do not emit duplicate generic LIKE/DISLIKE/PLAYLIST feedback events when the owning domain event
+  already carries recommendation attribution.
+- Preserve unknown additive attribution values without treating them as authorized semantics.
 
 ## Required tests
 
@@ -46,6 +53,8 @@
 - preference/history exclusion rules;
 - cross-user server authorization;
 - local command and Journal atomicity for each aggregate;
+- attributed and organic preference/playlist events remain distinguishable after restart without a
+  duplicate interaction fact;
 - large library/playlist query baseline.
 
 ## Acceptance

@@ -1,11 +1,11 @@
 # AutPlay Android Room Schema v1
 
-**Статус:** Draft for Android implementation review  
+**Статус:** Approved Room v1 contract for P05 implementation
 **Версия:** 1.0  
 **Database:** `autplay.db`, schema version 1  
 **Preferred runtime:** Room 3.0.1, `androidx.room3`, KSP, Kotlin codegen  
 **SQLite:** `BundledSQLiteDriver`, WAL  
-**Основание:** `AutPlay System Architecture v1`, `AutPlay ER Model v1`, `AutPlay Track Identity v1`  
+**Основание:** `AutPlay System Architecture v1`, `AutPlay ER Model v1`, `AutPlay Track Identity v1`, `AutPlay Sync Protocol v1`, accepted `ADR-018`
 
 ---
 
@@ -22,6 +22,7 @@ Room хранит:
 - playback queue snapshot;
 - listening history;
 - Offline Journal;
+- local-only mutation outbox for pre-binding work;
 - sync cursors, tombstones и conflicts;
 - recommendation pack;
 - производный полнотекстовый индекс.
@@ -540,7 +541,12 @@ Playback создаёт событие один раз на logical play session
 | Column | Type | Constraint/meaning |
 | --- | --- | --- |
 | `event_id` | TEXT | PK, stable retry ID |
-| `device_sequence` | INTEGER | Unique, monotonically increasing |
+| `journal_lineage_id` | TEXT | NOT NULL; composite FK with copied user/device to `journal_lineage`, RESTRICT |
+| `idempotency_key` | TEXT | NOT NULL, stable retry key inside lineage |
+| `user_id` | TEXT | NOT NULL, copied from immutable lineage |
+| `device_id` | TEXT | NOT NULL, copied from immutable lineage |
+| `server_profile_id` | TEXT | NOT NULL, immutable wrong-profile guard |
+| `device_sequence` | INTEGER | Monotonically increasing inside lineage |
 | `event_type` | TEXT | NOT NULL |
 | `schema_version` | INTEGER | >= 1 |
 | `aggregate_type` | TEXT | NOT NULL |
@@ -560,24 +566,78 @@ Playback создаёт событие один раз на logical play session
 
 Indexes:
 
-- unique `device_sequence`;
-- `(state, next_attempt_at_ms, device_sequence)`;
-- `(aggregate_type, aggregate_local_id, device_sequence)`.
+- unique `(journal_lineage_id, device_sequence)`;
+- unique `(journal_lineage_id, idempotency_key)`;
+- `(journal_lineage_id, state, next_attempt_at_ms, device_sequence)`;
+- `(journal_lineage_id, aggregate_type, aggregate_local_id, device_sequence)`.
 
-## 13.2. Sequence allocation
+`event_id`, binding, aggregate identity, payload, hash and sequence are immutable after insert. Queries,
+leases, recovery and terminal state transitions are lineage-scoped and state/token guarded.
+SQLite enforces `(journal_lineage_id, user_id, device_id)` against the referenced lineage, so a DAO
+caller cannot persist a wire binding that contradicts its sequence owner.
+
+## 13.2. `journal_lineage` and sequence allocation
 
 Device sequence выделяется в той же Room write transaction, что domain change и journal insert.
 
-`device_sequence_counter` singleton:
+| Column | Type | Constraint/meaning |
+| --- | --- | --- |
+| `lineage_id` | TEXT | PK, local UUID |
+| `user_id` | TEXT | NOT NULL |
+| `device_id` | TEXT | NOT NULL, UNIQUE under the current server sequence contract |
+| `journal_epoch` | TEXT | NOT NULL, UNIQUE |
+| `next_device_sequence` | INTEGER | NOT NULL, next unallocated value, initially 1 |
+| `created_at_ms` | INTEGER | NOT NULL |
 
-```text
-counter_key TEXT PRIMARY KEY = 'offline_journal'
-next_sequence INTEGER NOT NULL
-```
+Lineage tuple `(user_id, device_id, journal_epoch)` is immutable. Recreated local profiles resolving
+to the same authenticated tuple reuse one lineage, counter and pending-event set. `server_profile_id`
+is not a counter key. Under the current server uniqueness rule, the same `device_id` cannot restart
+at sequence 1 with a new epoch; reset requires a new device identity until P09 owns an explicit
+server cursor/constraint migration.
 
-Repository сначала атомарно increment/read sequence, затем пишет domain row и event.
+Repository increments and reads `next_device_sequence`, then writes domain state and the immutable
+event inside one Room transaction. A failed transaction rolls back the counter increment and cannot
+create a gap.
 
-## 13.3. Event state recovery
+## 13.3. `local_mutation_outbox`
+
+This table stores a local intent created before any authenticated server binding. It is not a P04
+client event and therefore has no wire event ID, device sequence or request hash.
+
+| Column | Type | Constraint/meaning |
+| --- | --- | --- |
+| `local_change_id` | TEXT | PK, stable local retry ID |
+| `event_type` | TEXT | NOT NULL |
+| `schema_version` | INTEGER | NOT NULL, >= 1 |
+| `aggregate_type` | TEXT | NOT NULL |
+| `aggregate_local_id` | TEXT | NOT NULL |
+| `payload_json` | TEXT | NOT NULL, canonical and <= 262,144 UTF-8 bytes |
+| `occurred_at_ms` | INTEGER | NOT NULL |
+| `materialization_state` | TEXT | `UNMATERIALIZED` or `MATERIALIZED`; unknown values preserved |
+| `materialized_event_id` | TEXT | NULL, UNIQUE FK `offline_journal_event.event_id`, RESTRICT |
+| `materialized_at_ms` | INTEGER | NULL |
+
+Indexes:
+
+- `(materialization_state, occurred_at_ms)`;
+- `(aggregate_type, aggregate_local_id, occurred_at_ms)`;
+- unique `materialized_event_id`.
+
+P05 accepts only the versioned allowlist `(USER_TRACK_REF_CREATED, 1, USER_TRACK_REF)` with exact
+payload fields `artist`, `library_entry_local_id`, and `title`. Insertion and materialization both
+enforce canonical JSON, bounded depth, safe recursive property names, forbidden sensitive segments,
+no raw audio/path/credential material and the P04 payload byte limit. Unknown rows remain readable
+and byte-preserved but fail closed for materialization.
+
+Standalone domain/search/outbox insertion is one Room transaction. Explicit materialization is a
+separate one-way transaction that allocates a lineage sequence, inserts a new immutable P04 event,
+updates the domain correlation sequence and links the outbox row. It uses the stored payload rather
+than mutable domain fields. A committed-result-loss retry returns the already linked event without a
+second allocation; any pre-commit failure rolls back the link, event, domain correlation and counter.
+P09 owns consent, authenticated binding revalidation, transport and reset; it never rewrites a P05
+event in place.
+
+## 13.4. Event state recovery
 
 - `SENDING` с истекшим lease возвращается в `PENDING`;
 - network timeout не меняет event ID/hash;
@@ -594,7 +654,10 @@ Repository сначала атомарно increment/read sequence, затем �
 | Column | Type |
 | --- | --- |
 | `server_profile_id` | TEXT PK |
+| `journal_lineage_id` | TEXT NOT NULL; composite FK with device/epoch to `journal_lineage`, RESTRICT |
 | `device_id` | TEXT NOT NULL |
+| `journal_epoch` | TEXT NOT NULL |
+| `opaque_cursor` | TEXT NULL |
 | `last_pulled_server_sequence` | INTEGER NOT NULL |
 | `last_acked_device_sequence` | INTEGER NOT NULL |
 | `bootstrap_snapshot_id` | TEXT NULL |
@@ -602,7 +665,12 @@ Repository сначала атомарно increment/read sequence, затем �
 | `last_sync_at_ms` | INTEGER NULL |
 | `updated_at_ms` | INTEGER NOT NULL |
 
-Credentials и base URL хранятся не здесь: token/private material находится в Android Keystore-backed storage; non-secret server settings - в DataStore.
+Only the repository writes binding columns and requires `device_id`/`journal_epoch` equality with
+the referenced lineage; SQLite enforces the same equality through the composite FK. Multiple
+recreated local profiles may point to the same lineage while
+cursor/bootstrap state remains profile-local. Credentials и base URL хранятся не здесь:
+token/private material находится в Android Keystore-backed storage; non-secret server settings - в
+DataStore.
 
 ## 14.2. `tombstone`
 
@@ -648,6 +716,7 @@ Raw secrets/source URLs не попадают в snapshots.
 | --- | --- |
 | `offline_pack_id` | TEXT PK |
 | `server_profile_id` | TEXT NOT NULL |
+| `owner_user_id` | TEXT NULL only for legacy pre-v9 rows; such rows fail closed |
 | `catalog_snapshot` | INTEGER NOT NULL |
 | `model_bundle_version` | TEXT NOT NULL |
 | `payload_version` | INTEGER NOT NULL |
@@ -657,7 +726,34 @@ Raw secrets/source URLs не попадают в snapshots.
 | `created_at_ms` | INTEGER NOT NULL |
 | `expires_at_ms` | INTEGER NOT NULL |
 
-Pack является candidate data, а не authorization на stream. Expired pack MAY использоваться только для offline local recommendations по explicit fallback policy.
+Pack является candidate data, а не authorization на stream. P11 принимает только exact
+profile/user/device-bound canonical `RAW_JSON` v1 с совпадающим SHA-256, известной encoding/version
+и допустимым сроком. Expired pack MAY использоваться только для bounded offline local
+recommendations по explicit labeled stale-fallback policy.
+
+## 15.2. `recommendation_presentation`
+
+| Column | Type |
+| --- | --- |
+| `server_profile_id` | TEXT NOT NULL |
+| `owner_user_id` | TEXT NOT NULL |
+| `presentation_id` | TEXT NOT NULL |
+| `recommendation_request_id` | TEXT NOT NULL |
+| `source_rank` | INTEGER NOT NULL |
+| `impression_event_id` | TEXT NOT NULL UNIQUE |
+| `recording_id` | TEXT NOT NULL |
+| `offline_pack_id` | TEXT NULL |
+| `source` | TEXT NOT NULL |
+| `surface` | TEXT NOT NULL |
+| `section_key` | TEXT NULL |
+| `display_position` | INTEGER NOT NULL |
+| `created_at_ms` | INTEGER NOT NULL |
+
+Composite primary key is `(server_profile_id, owner_user_id, presentation_id,
+recommendation_request_id, source_rank)`. Repository first finds or creates this mapping, then
+allocates the existing Journal lineage and inserts the canonical P04 impression in one Room
+transaction. Recomposition/restart therefore reuses `impression_event_id`; local reranking may
+change only `display_position`, never server `source_rank` or request identity.
 
 ---
 
@@ -1062,19 +1158,21 @@ SQLCipher не является обязательным v1. Его добавл
 Room Schema v1 готова к Kotlin entities, когда:
 
 1. Room 3 compatibility gate пройден на physical и minSdk devices.
-2. Every local command меняет domain state и Journal одной transaction.
-3. Local ID не меняется после server sync.
-4. Server projection не затирает pending local edit.
-5. Playlist duplicate entries и order сохраняются.
-6. Media3 остается owner download execution/progress.
-7. Content URI не используется как server storage key.
-8. FTS5 derived index полностью rebuildable.
-9. Unknown enum/event payload не уничтожает row.
-10. Destructive migration fallback отсутствует.
-11. Exported schemas и MigrationTestHelper включены в CI.
-12. Large fixture выполняет performance targets без ANR.
-13. Restore не доверяет старым content URI/device credentials.
-14. Room/SQLite failure не может повредить уже существующий audio file.
+2. Bound local command меняет domain state и Journal одной transaction; standalone command меняет
+   domain state и local mutation outbox одной transaction.
+3. Explicit outbox materialization создаёт новый immutable Journal event атомарно и идемпотентно.
+4. Local ID не меняется после server sync.
+5. Server projection не затирает pending local edit.
+6. Playlist duplicate entries и order сохраняются.
+7. Media3 остается owner download execution/progress.
+8. Content URI не используется как server storage key.
+9. FTS5 derived index полностью rebuildable.
+10. Unknown enum/event/outbox payload не уничтожает row.
+11. Destructive migration fallback отсутствует.
+12. Exported schemas и MigrationTestHelper включены в CI.
+13. Large fixture выполняет performance targets без ANR.
+14. Restore не доверяет старым content URI/device credentials.
+15. Room/SQLite failure не может повредить уже существующий audio file.
 
 ---
 
@@ -1092,3 +1190,72 @@ Room Schema v1 готова к Kotlin entities, когда:
 8. FTS safe query builder and rebuild command.
 9. Media3 DownloadIndex reconciliation adapter.
 10. Sync Protocol v1, использующий эти local entities.
+
+---
+
+# 32. P08 executable Room v2 and Media3 ownership addendum
+
+P08 keeps the 26-table Room model and applies the named additive `MIGRATION_1_2`; destructive fallback remains forbidden. Queue snapshots now persist bounded listening context, logical-session checkpoint state, and the user/device/server-profile binding captured when the session starts. Queue entries persist canonical attribution and stable queue-entry identity, so duplicate tracks remain distinct. Listening events persist start/end positions and canonical attribution. Download intents add profile/access context, but never duplicate byte progress.
+
+The executable ownership boundary is:
+
+- Room stores user intent, coarse download state, queue order, repeat/shuffle state and durable logical-listening checkpoints;
+- Media3 `DownloadService`/`DownloadManager`/`DownloadIndex` own execution, byte progress and cached media representations;
+- a completed Media3 download is resolved through its cache/index representation, never materialized as a fake `content://` URI;
+- the bounded download cache and LRU stream cache are separate; automatic eviction may remove stream/proactive cache only, never pinned or user-requested downloads;
+- local readability is checked first, then an authorized Vault reference is obtained and credentials are attached only when the data source opens;
+- queue/session replacement and recovery finalize stale logical sessions against their captured owner and attribution exactly once.
+
+The normalized exported Room schema v2 hash and v1→v2 migration/device evidence are recorded in `docs/implementation/HANDOFF_P08.md` and `docs/implementation/VERSIONS.md`.
+
+---
+
+# 33. P09 executable Room v7 sync and profile-ownership addendum
+
+P09 advances the executable database through named, non-destructive migrations `MIGRATION_2_3`
+through `MIGRATION_6_7`; v1 and v2 remain supported upgrade sources. The v7 export has 29 entities.
+The migrations add sync runtime status, independent bootstrap progress, profile-scoped
+conflict/tombstone state, append-only recommendation interaction facts and explicit profile
+ownership for every synchronized domain projection. Existing rows and immutable pending Journal
+events are preserved; no destructive fallback exists.
+
+The executable sync boundary is:
+
+- `sync_cursor` retains the installed opaque cursor, while `sync_bootstrap_state` owns snapshot/page
+  progress until an atomic final cutover;
+- WorkManager input contains only stable device/profile IDs; event bytes, credentials, cursors and
+  URLs remain in Room or protected runtime storage;
+- ACK and page preflight completes before mutation, then one Room transaction applies all supported
+  projections and advances the applicable checkpoint exactly once;
+- unknown, malformed, reordered or incomplete pages do not advance the cursor;
+- dirty local rows are never overwritten; deterministic profile-scoped conflict evidence retains
+  both sides;
+- tombstones may exist without a live local aggregate, and recording redirects update a mapping
+  rather than adopting a live Recording projection;
+- `server_profile_id` scopes server-ID lookup, synchronized list/search queries, conflicts,
+  tombstones, interaction facts and status. Standalone rows use the explicit `legacy-unscoped`
+  owner until an authenticated materialization transaction claims them;
+- a coordinator attempt drains at most ten pages and requests WorkManager retry when more pages
+  remain.
+
+The normalized exported Room schema v7 hash, every intermediate v3-v6 hash, v2→v7 migration
+preservation and API 26 coordinator/profile/reset evidence are recorded in
+`docs/implementation/HANDOFF_P09.md` and `docs/implementation/VERSIONS.md`.
+
+---
+
+# 34. P13 executable Room v10 Wave recovery addendum
+
+P13 applies named additive `MIGRATION_9_10`. It adds `wave_room`, `wave_preflight` and
+`wave_queue_projection` as profile/user/device-bound recovery projections. They cache room epoch,
+contiguous command sequence, canonical Recording queue and the current device's availability only.
+They never store bearer tokens, room codes, URLs, raw paths, clock samples or Media3 byte progress.
+
+REST snapshot replacement and contiguous WebSocket event application are single Room transactions;
+the stored sequence advances only with the complete projection. A gap, epoch mismatch, malformed
+event, auth failure or process restart stops Wave execution until a fresh authenticated snapshot and
+clock calibration. P08 Media3 remains the sole playback/download owner, and Wave failures never
+rewrite ordinary library rows. The v10 Room identity hash is
+`eff029c0b73e3189b9ab8e31b0261541` and the exported-file SHA-256 is
+`9f42becf68b2bd5a92a1bf788dbc3cda361894db3690d1fa9a77f6cd34aa7c90`; API 26 v9→v10 preservation evidence is recorded in
+`docs/implementation/HANDOFF_P13.md`.

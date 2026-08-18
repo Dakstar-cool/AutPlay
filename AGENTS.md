@@ -66,6 +66,16 @@ The current phase prompt may narrow delivery scope; it does not override higher-
 - Record exact pins and validation evidence in `docs/implementation/VERSIONS.md`.
 - Do not upgrade broadly inside an unrelated feature phase.
 
+## Codex development harness
+
+- Use the repo-level `autplay-development` skill for substantial implementation, milestone, review/fix, and resume work.
+- Run the harness from the repository root with `uv run autplay-codex ...`; its tooling environment and lock are intentionally separate from the CPU server runtime under `server/`.
+- Treat the current P00-P14 phase graph and latest `HANDOFF_Pxx.md` as authoritative. Harness milestones do not start or complete a product phase implicitly.
+- Use `autplay_explorer` for bounded read-heavy discovery, `autplay_architect` for difficult cross-module decisions, and `autplay_reviewer` for independent read-only review.
+- Delegate only independent work with a concrete output. Do not run parallel writers against overlapping paths.
+- Harness state under `.autplay-codex/` is local runtime state, not a normative product artifact or a substitute for phase handoffs.
+- Never let the harness auto-merge a protected branch, force-push, deploy, run destructive migrations, or delete user/Vault data.
+
 ## Code and testing quality
 
 - Keep code identifiers, scripts, configs, and comments in English/ASCII.

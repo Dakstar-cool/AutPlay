@@ -1,0 +1,324 @@
+{
+  "contract_version": "v1",
+  "cases": [
+    {
+      "case_id": "recommendation-impression-model-independent",
+      "kind": "actual-impression",
+      "expected": {
+        "actual_presentation_required": true,
+        "generated_or_delivered_only_is_impression": false,
+        "generator_contract_exposed": false
+      },
+      "event": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "interaction-11111111-1111-4111-8111-111111111111",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 40,
+        "event_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "11111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:00:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+          "recommendation": {
+            "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+            "recording_id": "81111111-1111-4111-8111-111111111111",
+            "source_rank": 3,
+            "source": "hybrid_composer",
+            "surface": "home_for_you",
+            "presentation_id": "91111111-1111-4111-8111-111111111111",
+            "display_position": 2,
+            "section_key": "for_you"
+          }
+        },
+        "request_hash": "01b3513499883500647e83f028a5e0ec5c240b6a1d96fde4432790aaa66b1a53"
+      }
+    },
+    {
+      "case_id": "same-presentation-idempotency",
+      "kind": "actual-impression-replay",
+      "expected": {
+        "same_event_id_and_hash": true,
+        "ack_outcome": "DUPLICATE",
+        "second_projection_count": 0
+      },
+      "event": {
+        "event_id": "11111111-1111-4111-8111-111111111111",
+        "idempotency_key": "interaction-11111111-1111-4111-8111-111111111111",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 40,
+        "event_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "11111111-1111-4111-8111-111111111111",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:00:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+          "recommendation": {
+            "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+            "recording_id": "81111111-1111-4111-8111-111111111111",
+            "source_rank": 3,
+            "source": "hybrid_composer",
+            "surface": "home_for_you",
+            "presentation_id": "91111111-1111-4111-8111-111111111111",
+            "display_position": 2,
+            "section_key": "for_you"
+          }
+        },
+        "request_hash": "01b3513499883500647e83f028a5e0ec5c240b6a1d96fde4432790aaa66b1a53"
+      }
+    },
+    {
+      "case_id": "listening-event-with-attribution",
+      "kind": "recommended-listening",
+      "expected": {
+        "logical_listening_event_count": 1,
+        "duplicate_generic_feedback_event": false,
+        "causality_inferred_from_clock": false
+      },
+      "event": {
+        "event_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "idempotency_key": "interaction-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 41,
+        "event_type": "LISTENING_EVENT_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "LISTENING_EVENT",
+        "aggregate_local_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:01:00Z",
+        "payload": {
+          "interaction_type": "LISTENING_EVENT_RECORDED",
+          "local_user_track_ref_id": "a1111111-1111-4111-8111-111111111111",
+          "server_user_track_ref_id": "a2111111-1111-4111-8111-111111111111",
+          "recording_id": "81111111-1111-4111-8111-111111111111",
+          "played_ms": 185000,
+          "track_duration_ms": 200000,
+          "completion_ratio": 0.925,
+          "event_origin": "RECOMMENDED",
+          "context": "GENERAL",
+          "explicit_feedback": "NONE",
+          "excluded_from_taste": false,
+          "recommendation": {
+            "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+            "recording_id": "81111111-1111-4111-8111-111111111111",
+            "source_rank": 3,
+            "source": "hybrid_composer",
+            "surface": "home_for_you",
+            "presentation_id": "91111111-1111-4111-8111-111111111111",
+            "display_position": 2,
+            "impression_event_local_id": "11111111-1111-4111-8111-111111111111",
+            "impression_event_server_id": null
+          }
+        },
+        "request_hash": "73bf7d4acbff628668182a86715e7af54e05d1b89444444d846b8aafd17b0d66"
+      }
+    },
+    {
+      "case_id": "organic-listening-explicit-null-attribution",
+      "kind": "organic-listening",
+      "expected": {
+        "recommendation_attribution": null,
+        "explicit_null_hash_covered": true,
+        "classified_as_organic": true
+      },
+      "event": {
+        "event_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "idempotency_key": "interaction-cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 42,
+        "event_type": "LISTENING_EVENT_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "LISTENING_EVENT",
+        "aggregate_local_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:02:00Z",
+        "payload": {
+          "interaction_type": "LISTENING_EVENT_RECORDED",
+          "local_user_track_ref_id": "a3111111-1111-4111-8111-111111111111",
+          "server_user_track_ref_id": null,
+          "recording_id": null,
+          "played_ms": 32000,
+          "track_duration_ms": null,
+          "completion_ratio": null,
+          "event_origin": "ORGANIC",
+          "context": "GENERAL",
+          "explicit_feedback": "NONE",
+          "excluded_from_taste": false,
+          "recommendation": null
+        },
+        "request_hash": "111ae4fd6070ee6e2799a63a8a67c82dd8b2033144d8c1c024b0026b56f8a6a1"
+      }
+    },
+    {
+      "case_id": "offline-pack-impression",
+      "kind": "actual-impression",
+      "expected": {
+        "delivery_mode": "OFFLINE_PACK",
+        "download_alone_is_impression": false,
+        "actual_presentation_required": true
+      },
+      "event": {
+        "event_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "idempotency_key": "interaction-dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 43,
+        "event_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:03:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+          "recommendation": {
+            "recommendation_request_id": "a4111111-1111-4111-8111-111111111111",
+            "recording_id": "a5111111-1111-4111-8111-111111111111",
+            "source_rank": 1,
+            "source": "offline_pack",
+            "surface": "offline_for_you",
+            "presentation_id": "a6111111-1111-4111-8111-111111111111",
+            "display_position": 1,
+            "offline_pack_id": "a7111111-1111-4111-8111-111111111111"
+          }
+        },
+        "request_hash": "55c3db250bb25764edb822fa00c4d61886a11c908561a8f90d60282c171d9c67"
+      }
+    },
+    {
+      "case_id": "local-reranked-impression",
+      "kind": "actual-impression",
+      "expected": {
+        "source": "local_rerank",
+        "server_model_dependency": false,
+        "actual_presentation_required": true
+      },
+      "event": {
+        "event_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "idempotency_key": "interaction-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 44,
+        "event_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:04:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_IMPRESSION_RECORDED",
+          "recommendation": {
+            "recommendation_request_id": "a8111111-1111-4111-8111-111111111111",
+            "recording_id": "a9111111-1111-4111-8111-111111111111",
+            "source_rank": 5,
+            "source": "local_rerank",
+            "surface": "home_for_you",
+            "presentation_id": "aa111111-1111-4111-8111-111111111111",
+            "display_position": 1
+          }
+        },
+        "request_hash": "b7beab3aad49c3d499b508247cc66bbad83a2c5f9b3a053824170367d028f119"
+      }
+    },
+    {
+      "case_id": "direct-selection-pre-ack-impression",
+      "kind": "direct-feedback",
+      "expected": {
+        "feedback_type": "SELECTED",
+        "pre_ack_impression_link_allowed": true,
+        "server_classifies_impression_first": true
+      },
+      "event": {
+        "event_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "idempotency_key": "interaction-ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 45,
+        "event_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:05:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+          "feedback_type": "SELECTED",
+          "recommendation": {
+            "recommendation_request_id": "71111111-1111-4111-8111-111111111111",
+            "recording_id": "81111111-1111-4111-8111-111111111111",
+            "source_rank": 3,
+            "source": "hybrid_composer",
+            "surface": "home_for_you",
+            "presentation_id": "91111111-1111-4111-8111-111111111111",
+            "display_position": 2,
+            "impression_event_local_id": "11111111-1111-4111-8111-111111111111",
+            "impression_event_server_id": null
+          }
+        },
+        "request_hash": "424bbffe5cfc3d142e1b20aa022857ead586046d9ba08c71db02e4754465432f"
+      }
+    },
+    {
+      "case_id": "direct-dismissal-acknowledged-impression",
+      "kind": "direct-feedback",
+      "expected": {
+        "feedback_type": "DISMISSED",
+        "impression_server_id_known": true,
+        "duplicate_domain_feedback_event": false
+      },
+      "event": {
+        "event_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "idempotency_key": "interaction-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "server_profile_id": "44444444-4444-4444-8444-444444444444",
+        "device_sequence": 46,
+        "event_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+        "schema_version": 1,
+        "aggregate_type": "USER_INTERACTION_EVENT",
+        "aggregate_local_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "aggregate_server_id": null,
+        "base_server_row_version": null,
+        "occurred_at": "2026-08-16T10:06:00Z",
+        "payload": {
+          "interaction_type": "RECOMMENDATION_FEEDBACK_RECORDED",
+          "feedback_type": "DISMISSED",
+          "recommendation": {
+            "recommendation_request_id": "a8111111-1111-4111-8111-111111111111",
+            "recording_id": "a9111111-1111-4111-8111-111111111111",
+            "source_rank": 5,
+            "source": "local_rerank",
+            "surface": "home_for_you",
+            "presentation_id": "aa111111-1111-4111-8111-111111111111",
+            "display_position": 1,
+            "impression_event_local_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            "impression_event_server_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+          }
+        },
+        "request_hash": "339d0a27bb37159475256c20caf5414397925afd36eb9aa10c47fc6a5d773ace"
+      }
+    }
+  ]
+}

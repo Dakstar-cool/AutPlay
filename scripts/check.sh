@@ -13,7 +13,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="deploy/compose/compose.yaml"
 compose_test_file="deploy/compose/compose.test.yaml"
 compose_runtime_file="deploy/compose/compose.runtime.yaml"
-compose_project="autplay-p03-$$"
+compose_project="autplay-p06-$$"
 compose_touched=0
 previous_test_database_url="${AUTPLAY_TEST_DATABASE_URL-}"
 previous_runtime_secret_file="${AUTPLAY_RUNTIME_AUTH_SECRET_FILE-}"
@@ -71,6 +71,14 @@ else
   bash scripts/bootstrap.sh
 fi
 
+uv lock --check
+uv run --frozen python -c "import autplay_codex"
+uv run --frozen ruff check tools/autplay_codex tests/contract
+uv run --frozen ruff format --check tools/autplay_codex tests/contract
+uv run --frozen mypy tools/autplay_codex/src tools/autplay_codex/tests tests/contract
+uv run --frozen pytest tools/autplay_codex/tests
+uv run --frozen pytest tests/contract
+
 uv lock --project server --check
 uv run --project server --frozen python -c "import autplay"
 uv run --project server --frozen ruff check --config server/pyproject.toml server
@@ -97,7 +105,7 @@ docker compose -p "$compose_project" -f "$compose_file" -f "$compose_runtime_fil
   --profile runtime config --quiet
 
 if [[ $server_only -eq 0 ]]; then
-  ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug
+  ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug assembleRelease
 fi
 
 if [[ -n "$(docker ps -a --filter "label=com.docker.compose.project=$compose_project" --format '{{.ID}}')" ]] || \

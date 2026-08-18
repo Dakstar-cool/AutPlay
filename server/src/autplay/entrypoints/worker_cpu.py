@@ -14,17 +14,31 @@ from datetime import timedelta
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.filesystem.vault import FilesystemVaultStorage
+from autplay.adapters.media.tools import (
+    ChromaprintTool,
+    FfmpegDecodeValidator,
+    FfprobeInspector,
+    ValidatedMediaInspector,
+)
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
+from autplay.adapters.postgresql.vault_uow import (
+    SqlAlchemyVaultUnitOfWorkFactory,
+    TransactionalIngestRepository,
+)
 from autplay.adapters.system import Uuid7Generator
+from autplay.application.imports import ImportJobHandler
 from autplay.application.job_worker import (
     JobHandler,
     JobHandlerRegistry,
     JobWorker,
     JobWorkerSettings,
 )
+from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
+from autplay.domain.vault import VaultLimits
 from autplay.ports.ids import IdGenerator
 from autplay.ports.transactions import JobUnitOfWorkFactory
 from autplay.runtime.logging import configure_json_logging
@@ -51,6 +65,22 @@ def build_cpu_worker(
         registry=JobHandlerRegistry(handlers),
         settings=settings,
     )
+
+
+def vault_ingest_handlers(handler: VaultIngestHandler) -> Mapping[JobKey, JobHandler]:
+    """Return the single P06 CPU-only worker registration at priority three.
+
+    Priority is persisted when the upload completion enqueues ``vault.ingest``;
+    this registry deliberately contains no GPU or external-acquisition handler.
+    """
+
+    return {JobKey("vault.ingest", 1): handler}
+
+
+def import_handlers(handler: ImportJobHandler) -> Mapping[JobKey, JobHandler]:
+    """Return the P10 CPU-only resumable import registration."""
+
+    return {JobKey("library.import", 1): handler}
 
 
 def run_cpu_worker(worker: JobWorker, stop_event: threading.Event | None = None) -> None:
@@ -124,9 +154,42 @@ def main(arguments: Sequence[str] | None = None) -> int:
             return 0
 
         sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+        vault_limits = VaultLimits(
+            max_object_bytes=runtime_settings.vault_max_object_bytes,
+            max_chunk_bytes=runtime_settings.vault_max_chunk_bytes,
+            io_block_bytes=runtime_settings.vault_stream_block_bytes,
+        )
+        vault_storage = FilesystemVaultStorage(runtime_settings.vault_root, limits=vault_limits)
+        inspector = ValidatedMediaInspector(
+            FfmpegDecodeValidator(
+                "ffmpeg",
+                timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
+                max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
+            ),
+            FfprobeInspector(
+                "ffprobe",
+                timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
+                max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
+            ),
+        )
+        ingest = VaultIngestHandler(
+            repository=TransactionalIngestRepository(SqlAlchemyVaultUnitOfWorkFactory(sessions)),
+            storage=vault_storage,
+            media=inspector,
+            fingerprints=ChromaprintTool(
+                "fpcalc",
+                algorithm_version="1.6.1",
+                timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
+                max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
+            ),
+            minimum_free_bytes=runtime_settings.vault_low_disk_bytes,
+        )
+        handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest))
+        handlers.update(import_handlers(ImportJobHandler(sessions)))
         worker = build_cpu_worker(
             uow_factory=SqlAlchemyJobUnitOfWorkFactory(sessions),
             ids=Uuid7Generator(),
+            handlers=handlers,
             worker_id=runtime_settings.worker_id,
             settings=JobWorkerSettings(
                 lease_interval=timedelta(seconds=runtime_settings.lease_seconds),
@@ -167,4 +230,11 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ("SERVICE_NAME", "build_cpu_worker", "main", "run_cpu_worker")
+__all__ = (
+    "SERVICE_NAME",
+    "build_cpu_worker",
+    "import_handlers",
+    "main",
+    "run_cpu_worker",
+    "vault_ingest_handlers",
+)

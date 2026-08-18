@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission
+        android:name="app.autplay.test.REVOKED_CONTENT"
+        android:protectionLevel="signature" />
+
+    <application>
+        <provider
+            android:name="app.autplay.testing.RevokedContentProvider"
+            android:authorities="app.autplay.test.revoked"
+            android:exported="true"
+            android:readPermission="app.autplay.test.REVOKED_CONTENT" />
+        <provider
+            android:name="app.autplay.testing.ReadableAudioProvider"
+            android:authorities="app.autplay.test.readable"
+            android:exported="true" />
+    </application>
+</manifest>

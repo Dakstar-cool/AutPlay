@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "tracks": [
+    {
+      "title": "JSON Song",
+      "artist": "JSON Artist",
+      "duration_ms": 201000,
+      "status": "available",
+      "playlist_id": "liked",
+      "unknown_nested": {"source_note": "preserve", "values": [1, 2, 3]}
+    },
+    {
+      "title": "Unavailable JSON Song",
+      "artist": "JSON Artist",
+      "status": "gray",
+      "external_id": "public-row-id"
+    },
+    "malformed-row"
+  ]
+}

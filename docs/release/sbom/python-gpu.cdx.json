@@ -1,0 +1,737 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "serialNumber": "urn:uuid:81418e80-8feb-4434-b9c6-d5b2e82bfc37",
+  "metadata": {
+    "timestamp": "2026-08-18T06:17:11.508952500Z",
+    "tools": [
+      {
+        "vendor": "Astral Software Inc.",
+        "name": "uv",
+        "version": "0.12.3"
+      }
+    ],
+    "component": {
+      "type": "library",
+      "bom-ref": "autplay-gpu-worker-1@0.0.0",
+      "name": "autplay-gpu-worker",
+      "version": "0.0.0",
+      "properties": [
+        {
+          "name": "uv:package:is_project_root",
+          "value": "true"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "alembic-2@1.19.1",
+      "name": "alembic",
+      "version": "1.19.1",
+      "purl": "pkg:pypi/alembic@1.19.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "annotated-doc-3@0.0.5",
+      "name": "annotated-doc",
+      "version": "0.0.5",
+      "purl": "pkg:pypi/annotated-doc@0.0.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "annotated-types-4@0.8.0",
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "purl": "pkg:pypi/annotated-types@0.8.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "anyio-5@4.14.2",
+      "name": "anyio",
+      "version": "4.14.2",
+      "purl": "pkg:pypi/anyio@4.14.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "argon2-cffi-6@25.1.0",
+      "name": "argon2-cffi",
+      "version": "25.1.0",
+      "purl": "pkg:pypi/argon2-cffi@25.1.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "argon2-cffi-bindings-7@25.1.0",
+      "name": "argon2-cffi-bindings",
+      "version": "25.1.0",
+      "purl": "pkg:pypi/argon2-cffi-bindings@25.1.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "ast-serialize-8@0.8.0",
+      "name": "ast-serialize",
+      "version": "0.8.0",
+      "purl": "pkg:pypi/ast-serialize@0.8.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "autplay-server-9@0.0.0",
+      "name": "autplay-server",
+      "version": "0.0.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "cffi-10@2.1.1",
+      "name": "cffi",
+      "version": "2.1.1",
+      "purl": "pkg:pypi/cffi@2.1.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "click-11@8.4.2",
+      "name": "click",
+      "version": "8.4.2",
+      "purl": "pkg:pypi/click@8.4.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "colorama-12@0.4.6",
+      "name": "colorama",
+      "version": "0.4.6",
+      "purl": "pkg:pypi/colorama@0.4.6",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "fastapi-13@0.141.1",
+      "name": "fastapi",
+      "version": "0.141.1",
+      "purl": "pkg:pypi/fastapi@0.141.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "flatbuffers-14@25.12.19",
+      "name": "flatbuffers",
+      "version": "25.12.19",
+      "purl": "pkg:pypi/flatbuffers@25.12.19"
+    },
+    {
+      "type": "library",
+      "bom-ref": "greenlet-15@3.5.5",
+      "name": "greenlet",
+      "version": "3.5.5",
+      "purl": "pkg:pypi/greenlet@3.5.5",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "h11-16@0.16.0",
+      "name": "h11",
+      "version": "0.16.0",
+      "purl": "pkg:pypi/h11@0.16.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "idna-17@3.18",
+      "name": "idna",
+      "version": "3.18",
+      "purl": "pkg:pypi/idna@3.18"
+    },
+    {
+      "type": "library",
+      "bom-ref": "iniconfig-18@2.3.0",
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "purl": "pkg:pypi/iniconfig@2.3.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "librt-19@0.15.0",
+      "name": "librt",
+      "version": "0.15.0",
+      "purl": "pkg:pypi/librt@0.15.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_python_implementation != 'PyPy'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mako-20@1.4.1",
+      "name": "mako",
+      "version": "1.4.1",
+      "purl": "pkg:pypi/mako@1.4.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "markupsafe-21@3.0.3",
+      "name": "markupsafe",
+      "version": "3.0.3",
+      "purl": "pkg:pypi/markupsafe@3.0.3"
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-22@2.3.0",
+      "name": "mypy",
+      "version": "2.3.0",
+      "purl": "pkg:pypi/mypy@2.3.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-extensions-23@1.1.0",
+      "name": "mypy-extensions",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/mypy-extensions@1.1.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "numpy-24@2.5.2",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cublas-cu12-25@12.9.2.10",
+      "name": "nvidia-cublas-cu12",
+      "version": "12.9.2.10",
+      "purl": "pkg:pypi/nvidia-cublas-cu12@12.9.2.10"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-nvrtc-cu12-26@12.9.86",
+      "name": "nvidia-cuda-nvrtc-cu12",
+      "version": "12.9.86",
+      "purl": "pkg:pypi/nvidia-cuda-nvrtc-cu12@12.9.86"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-runtime-cu12-27@12.9.79",
+      "name": "nvidia-cuda-runtime-cu12",
+      "version": "12.9.79",
+      "purl": "pkg:pypi/nvidia-cuda-runtime-cu12@12.9.79"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cudnn-cu12-28@9.24.0.43",
+      "name": "nvidia-cudnn-cu12",
+      "version": "9.24.0.43",
+      "purl": "pkg:pypi/nvidia-cudnn-cu12@9.24.0.43"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cufft-cu12-29@11.4.1.4",
+      "name": "nvidia-cufft-cu12",
+      "version": "11.4.1.4",
+      "purl": "pkg:pypi/nvidia-cufft-cu12@11.4.1.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-curand-cu12-30@10.3.10.19",
+      "name": "nvidia-curand-cu12",
+      "version": "10.3.10.19",
+      "purl": "pkg:pypi/nvidia-curand-cu12@10.3.10.19"
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-nvjitlink-cu12-31@12.9.86",
+      "name": "nvidia-nvjitlink-cu12",
+      "version": "12.9.86",
+      "purl": "pkg:pypi/nvidia-nvjitlink-cu12@12.9.86"
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnxruntime-gpu-32@1.26.0",
+      "name": "onnxruntime-gpu",
+      "version": "1.26.0",
+      "purl": "pkg:pypi/onnxruntime-gpu@1.26.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "packaging-33@26.3",
+      "name": "packaging",
+      "version": "26.3",
+      "purl": "pkg:pypi/packaging@26.3"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pathspec-34@1.1.1",
+      "name": "pathspec",
+      "version": "1.1.1",
+      "purl": "pkg:pypi/pathspec@1.1.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pgvector-35@0.5.0",
+      "name": "pgvector",
+      "version": "0.5.0",
+      "purl": "pkg:pypi/pgvector@0.5.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pluggy-36@1.6.0",
+      "name": "pluggy",
+      "version": "1.6.0",
+      "purl": "pkg:pypi/pluggy@1.6.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "prometheus-client-37@0.25.0",
+      "name": "prometheus-client",
+      "version": "0.25.0",
+      "purl": "pkg:pypi/prometheus-client@0.25.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "protobuf-38@7.35.1",
+      "name": "protobuf",
+      "version": "7.35.1",
+      "purl": "pkg:pypi/protobuf@7.35.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "psycopg-39@3.3.4",
+      "name": "psycopg",
+      "version": "3.3.4",
+      "purl": "pkg:pypi/psycopg@3.3.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "psycopg-binary-40@3.3.4",
+      "name": "psycopg-binary",
+      "version": "3.3.4",
+      "purl": "pkg:pypi/psycopg-binary@3.3.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "implementation_name != 'pypy'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pycparser-41@3.0",
+      "name": "pycparser",
+      "version": "3.0",
+      "purl": "pkg:pypi/pycparser@3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "implementation_name != 'PyPy'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pydantic-42@2.13.4",
+      "name": "pydantic",
+      "version": "2.13.4",
+      "purl": "pkg:pypi/pydantic@2.13.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pydantic-core-43@2.46.4",
+      "name": "pydantic-core",
+      "version": "2.46.4",
+      "purl": "pkg:pypi/pydantic-core@2.46.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pydantic-settings-44@2.15.0",
+      "name": "pydantic-settings",
+      "version": "2.15.0",
+      "purl": "pkg:pypi/pydantic-settings@2.15.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pygments-45@2.20.0",
+      "name": "pygments",
+      "version": "2.20.0",
+      "purl": "pkg:pypi/pygments@2.20.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pyjwt-46@2.13.0",
+      "name": "pyjwt",
+      "version": "2.13.0",
+      "purl": "pkg:pypi/pyjwt@2.13.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pytest-47@9.1.1",
+      "name": "pytest",
+      "version": "9.1.1",
+      "purl": "pkg:pypi/pytest@9.1.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "python-dotenv-48@1.2.3",
+      "name": "python-dotenv",
+      "version": "1.2.3",
+      "purl": "pkg:pypi/python-dotenv@1.2.3"
+    },
+    {
+      "type": "library",
+      "bom-ref": "rfc8785-49@0.1.4",
+      "name": "rfc8785",
+      "version": "0.1.4",
+      "purl": "pkg:pypi/rfc8785@0.1.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "ruff-50@0.16.2",
+      "name": "ruff",
+      "version": "0.16.2",
+      "purl": "pkg:pypi/ruff@0.16.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "sqlalchemy-51@2.0.52",
+      "name": "sqlalchemy",
+      "version": "2.0.52",
+      "purl": "pkg:pypi/sqlalchemy@2.0.52"
+    },
+    {
+      "type": "library",
+      "bom-ref": "starlette-52@1.6.0",
+      "name": "starlette",
+      "version": "1.6.0",
+      "purl": "pkg:pypi/starlette@1.6.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "typing-extensions-53@4.16.0",
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "purl": "pkg:pypi/typing-extensions@4.16.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "typing-inspection-54@0.4.4",
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "purl": "pkg:pypi/typing-inspection@0.4.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "tzdata-55@2026.3",
+      "name": "tzdata",
+      "version": "2026.3",
+      "purl": "pkg:pypi/tzdata@2026.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "uvicorn-56@0.51.0",
+      "name": "uvicorn",
+      "version": "0.51.0",
+      "purl": "pkg:pypi/uvicorn@0.51.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "alembic-2@1.19.1",
+      "dependsOn": [
+        "mako-20@1.4.1",
+        "sqlalchemy-51@2.0.52",
+        "typing-extensions-53@4.16.0"
+      ]
+    },
+    {
+      "ref": "annotated-doc-3@0.0.5"
+    },
+    {
+      "ref": "annotated-types-4@0.8.0"
+    },
+    {
+      "ref": "anyio-5@4.14.2",
+      "dependsOn": [
+        "idna-17@3.18"
+      ]
+    },
+    {
+      "ref": "argon2-cffi-6@25.1.0",
+      "dependsOn": [
+        "argon2-cffi-bindings-7@25.1.0"
+      ]
+    },
+    {
+      "ref": "argon2-cffi-bindings-7@25.1.0",
+      "dependsOn": [
+        "cffi-10@2.1.1"
+      ]
+    },
+    {
+      "ref": "ast-serialize-8@0.8.0"
+    },
+    {
+      "ref": "autplay-gpu-worker-1@0.0.0",
+      "dependsOn": [
+        "autplay-server-9@0.0.0",
+        "mypy-22@2.3.0",
+        "onnxruntime-gpu-32@1.26.0",
+        "pytest-47@9.1.1",
+        "ruff-50@0.16.2"
+      ]
+    },
+    {
+      "ref": "autplay-server-9@0.0.0",
+      "dependsOn": [
+        "alembic-2@1.19.1",
+        "argon2-cffi-6@25.1.0",
+        "fastapi-13@0.141.1",
+        "pgvector-35@0.5.0",
+        "prometheus-client-37@0.25.0",
+        "psycopg-39@3.3.4",
+        "pydantic-42@2.13.4",
+        "pydantic-settings-44@2.15.0",
+        "pyjwt-46@2.13.0",
+        "rfc8785-49@0.1.4",
+        "sqlalchemy-51@2.0.52",
+        "uvicorn-56@0.51.0"
+      ]
+    },
+    {
+      "ref": "cffi-10@2.1.1",
+      "dependsOn": [
+        "pycparser-41@3.0"
+      ]
+    },
+    {
+      "ref": "click-11@8.4.2",
+      "dependsOn": [
+        "colorama-12@0.4.6"
+      ]
+    },
+    {
+      "ref": "colorama-12@0.4.6"
+    },
+    {
+      "ref": "fastapi-13@0.141.1",
+      "dependsOn": [
+        "annotated-doc-3@0.0.5",
+        "pydantic-42@2.13.4",
+        "starlette-52@1.6.0",
+        "typing-extensions-53@4.16.0",
+        "typing-inspection-54@0.4.4"
+      ]
+    },
+    {
+      "ref": "flatbuffers-14@25.12.19"
+    },
+    {
+      "ref": "greenlet-15@3.5.5"
+    },
+    {
+      "ref": "h11-16@0.16.0"
+    },
+    {
+      "ref": "idna-17@3.18"
+    },
+    {
+      "ref": "iniconfig-18@2.3.0"
+    },
+    {
+      "ref": "librt-19@0.15.0"
+    },
+    {
+      "ref": "mako-20@1.4.1",
+      "dependsOn": [
+        "markupsafe-21@3.0.3"
+      ]
+    },
+    {
+      "ref": "markupsafe-21@3.0.3"
+    },
+    {
+      "ref": "mypy-22@2.3.0",
+      "dependsOn": [
+        "ast-serialize-8@0.8.0",
+        "librt-19@0.15.0",
+        "mypy-extensions-23@1.1.0",
+        "pathspec-34@1.1.1",
+        "typing-extensions-53@4.16.0"
+      ]
+    },
+    {
+      "ref": "mypy-extensions-23@1.1.0"
+    },
+    {
+      "ref": "numpy-24@2.5.2"
+    },
+    {
+      "ref": "nvidia-cublas-cu12-25@12.9.2.10",
+      "dependsOn": [
+        "nvidia-cuda-nvrtc-cu12-26@12.9.86"
+      ]
+    },
+    {
+      "ref": "nvidia-cuda-nvrtc-cu12-26@12.9.86"
+    },
+    {
+      "ref": "nvidia-cuda-runtime-cu12-27@12.9.79"
+    },
+    {
+      "ref": "nvidia-cudnn-cu12-28@9.24.0.43",
+      "dependsOn": [
+        "nvidia-cublas-cu12-25@12.9.2.10"
+      ]
+    },
+    {
+      "ref": "nvidia-cufft-cu12-29@11.4.1.4",
+      "dependsOn": [
+        "nvidia-nvjitlink-cu12-31@12.9.86"
+      ]
+    },
+    {
+      "ref": "nvidia-curand-cu12-30@10.3.10.19"
+    },
+    {
+      "ref": "nvidia-nvjitlink-cu12-31@12.9.86"
+    },
+    {
+      "ref": "onnxruntime-gpu-32@1.26.0",
+      "dependsOn": [
+        "flatbuffers-14@25.12.19",
+        "numpy-24@2.5.2",
+        "nvidia-cuda-nvrtc-cu12-26@12.9.86",
+        "nvidia-cuda-runtime-cu12-27@12.9.79",
+        "nvidia-cudnn-cu12-28@9.24.0.43",
+        "nvidia-cufft-cu12-29@11.4.1.4",
+        "nvidia-curand-cu12-30@10.3.10.19",
+        "packaging-33@26.3",
+        "protobuf-38@7.35.1"
+      ]
+    },
+    {
+      "ref": "packaging-33@26.3"
+    },
+    {
+      "ref": "pathspec-34@1.1.1"
+    },
+    {
+      "ref": "pgvector-35@0.5.0"
+    },
+    {
+      "ref": "pluggy-36@1.6.0"
+    },
+    {
+      "ref": "prometheus-client-37@0.25.0"
+    },
+    {
+      "ref": "protobuf-38@7.35.1"
+    },
+    {
+      "ref": "psycopg-39@3.3.4",
+      "dependsOn": [
+        "psycopg-binary-40@3.3.4",
+        "tzdata-55@2026.3"
+      ]
+    },
+    {
+      "ref": "psycopg-binary-40@3.3.4"
+    },
+    {
+      "ref": "pycparser-41@3.0"
+    },
+    {
+      "ref": "pydantic-42@2.13.4",
+      "dependsOn": [
+        "annotated-types-4@0.8.0",
+        "pydantic-core-43@2.46.4",
+        "typing-extensions-53@4.16.0",
+        "typing-inspection-54@0.4.4"
+      ]
+    },
+    {
+      "ref": "pydantic-core-43@2.46.4",
+      "dependsOn": [
+        "typing-extensions-53@4.16.0"
+      ]
+    },
+    {
+      "ref": "pydantic-settings-44@2.15.0",
+      "dependsOn": [
+        "pydantic-42@2.13.4",
+        "python-dotenv-48@1.2.3",
+        "typing-inspection-54@0.4.4"
+      ]
+    },
+    {
+      "ref": "pygments-45@2.20.0"
+    },
+    {
+      "ref": "pyjwt-46@2.13.0"
+    },
+    {
+      "ref": "pytest-47@9.1.1",
+      "dependsOn": [
+        "colorama-12@0.4.6",
+        "iniconfig-18@2.3.0",
+        "packaging-33@26.3",
+        "pluggy-36@1.6.0",
+        "pygments-45@2.20.0"
+      ]
+    },
+    {
+      "ref": "python-dotenv-48@1.2.3"
+    },
+    {
+      "ref": "rfc8785-49@0.1.4"
+    },
+    {
+      "ref": "ruff-50@0.16.2"
+    },
+    {
+      "ref": "sqlalchemy-51@2.0.52",
+      "dependsOn": [
+        "greenlet-15@3.5.5",
+        "typing-extensions-53@4.16.0"
+      ]
+    },
+    {
+      "ref": "starlette-52@1.6.0",
+      "dependsOn": [
+        "anyio-5@4.14.2"
+      ]
+    },
+    {
+      "ref": "typing-extensions-53@4.16.0"
+    },
+    {
+      "ref": "typing-inspection-54@0.4.4",
+      "dependsOn": [
+        "typing-extensions-53@4.16.0"
+      ]
+    },
+    {
+      "ref": "tzdata-55@2026.3"
+    },
+    {
+      "ref": "uvicorn-56@0.51.0",
+      "dependsOn": [
+        "click-11@8.4.2",
+        "h11-16@0.16.0"
+      ]
+    }
+  ]
+}

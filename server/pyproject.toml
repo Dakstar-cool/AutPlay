@@ -22,6 +22,7 @@ dependencies = [
 [project.scripts]
 autplay-admin = "autplay.entrypoints.admin:main"
 autplay-api = "autplay.entrypoints.api:main"
+autplay-stream = "autplay.entrypoints.stream:main"
 autplay-worker-cpu = "autplay.entrypoints.worker_cpu:main"
 
 [dependency-groups]

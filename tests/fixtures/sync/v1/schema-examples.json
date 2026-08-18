@@ -1,0 +1,165 @@
+{
+  "contract_version": "v1",
+  "examples": [
+    {
+      "schema": "device-binding.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "user_id": "31111111-1111-4111-8111-111111111111",
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "device_name": "Android test device",
+        "platform": "ANDROID",
+        "app_version": "1.0.0",
+        "supported_event_schema_versions": [1]
+      }
+    },
+    {
+      "schema": "push-request.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "events": [
+          {
+            "event_id": "11111111-1111-4111-8111-111111111111",
+            "idempotency_key": "21111111-1111-4111-8111-111111111111",
+            "user_id": "31111111-1111-4111-8111-111111111111",
+            "device_id": "41111111-1111-4111-8111-111111111111",
+            "server_profile_id": "51111111-1111-4111-8111-111111111111",
+            "device_sequence": 2,
+            "event_type": "USER_TRACK_REF_CREATED",
+            "schema_version": 1,
+            "aggregate_type": "USER_TRACK_REF",
+            "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+            "aggregate_server_id": null,
+            "base_server_row_version": null,
+            "occurred_at": "2026-08-15T00:00:00Z",
+            "payload": {"rating": 5},
+            "request_hash": "1da6337721df4f004be28716a86211fd99f39d3c72486aad0ff3198d6f8d1770"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "push-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "acknowledged_through_device_sequence": 2,
+        "acks": [
+          {
+            "event_id": "11111111-1111-4111-8111-111111111111",
+            "device_sequence": 2,
+            "aggregate_type": "USER_TRACK_REF",
+            "aggregate_local_id": "61111111-1111-4111-8111-111111111111",
+            "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+            "outcome": "DUPLICATE",
+            "original_outcome": "APPLIED",
+            "server_row_version": 1
+          }
+        ],
+        "server_time": "2026-08-15T00:00:01Z"
+      }
+    },
+    {
+      "schema": "pull-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "from_cursor": null,
+        "next_cursor": "opaque-pull-cursor-token-v1",
+        "has_more": false,
+        "events": [
+          {
+            "server_sequence": 1,
+            "event_id": "91111111-1111-4111-8111-111111111111",
+            "origin_device_id": "41111111-1111-4111-8111-111111111111",
+            "event_type": "USER_TRACK_REF_UPSERTED",
+            "schema_version": 1,
+            "aggregate_type": "USER_TRACK_REF",
+            "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+            "server_row_version": 1,
+            "operation": "UPSERT",
+            "payload": {"rating": 5},
+            "created_at": "2026-08-15T00:00:01Z"
+          }
+        ],
+        "server_time": "2026-08-15T00:00:01Z"
+      }
+    },
+    {
+      "schema": "bootstrap-request.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "reason": "CURSOR_INVALID",
+        "snapshot_id": null,
+        "page_token": null,
+        "pending_local_event_count": 3
+      }
+    },
+    {
+      "schema": "bootstrap-response.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "snapshot_id": "a1111111-1111-4111-8111-111111111111",
+        "snapshot_high_water_server_sequence": 10,
+        "aggregates": [
+          {
+            "aggregate_type": "PLAYLIST",
+            "aggregate_server_id": "61111111-1111-4111-8111-111111111111",
+            "server_row_version": 1,
+            "payload": {"name": "Road"}
+          }
+        ],
+        "tombstones": [],
+        "redirects": [],
+        "next_page_token": null,
+        "has_more": false,
+        "snapshot_cursor": "opaque-snapshot-cursor-token-v1",
+        "pending_event_directive": "PRESERVE_REBASE_RETRY",
+        "server_time": "2026-08-15T00:00:01Z"
+      }
+    },
+    {
+      "schema": "sync-status.schema.json",
+      "instance": {
+        "protocol_version": 1,
+        "device_id": "41111111-1111-4111-8111-111111111111",
+        "server_profile_id": "51111111-1111-4111-8111-111111111111",
+        "journal_epoch": "81111111-1111-4111-8111-111111111111",
+        "state": "PENDING",
+        "last_acked_device_sequence": 2,
+        "last_pulled_server_sequence": 10,
+        "pending_event_count": 3,
+        "dead_letter_count": 0,
+        "conflict_count": 0,
+        "bootstrap_required": false,
+        "last_successful_sync_at": "2026-08-15T00:00:01Z"
+      }
+    },
+    {
+      "schema": "error.schema.json",
+      "instance": {
+        "code": "CURSOR_INVALID",
+        "message": "The cursor cannot be used.",
+        "retryable": false,
+        "request_id": "b1111111-1111-4111-8111-111111111111",
+        "bootstrap_required": true,
+        "details": {"reason": "EXPIRED"}
+      }
+    }
+  ]
+}

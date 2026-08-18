@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/recommendation-attribution.schema.json",
+  "title": "AutPlay Recommendation Attribution v1",
+  "description": "Model-independent pointer to an immutable recommendation request and its presented recording. Candidate provenance and model versions belong to the immutable request/item record.",
+  "type": "object",
+  "additionalProperties": {"$ref": "client-event.schema.json#/$defs/safeValue"},
+  "propertyNames": {
+    "allOf": [
+      {"pattern": "^[a-z][a-z0-9_]{0,99}$"},
+      {
+        "not": {
+          "pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"
+        }
+      }
+    ]
+  },
+  "required": [
+    "recommendation_request_id",
+    "recording_id",
+    "source_rank",
+    "source",
+    "surface"
+  ],
+  "properties": {
+    "recommendation_request_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "recording_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "source_rank": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "source": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_]{0,99}$"},
+    "surface": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_]{0,99}$"},
+    "presentation_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "display_position": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "section_key": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_]{0,99}$"},
+    "offline_pack_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "impression_event_local_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "impression_event_server_id": {"anyOf": [{"$ref": "client-event.schema.json#/$defs/uuid"}, {"type": "null"}]}
+  }
+}

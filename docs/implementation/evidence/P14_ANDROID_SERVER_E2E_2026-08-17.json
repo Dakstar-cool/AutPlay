@@ -1,0 +1,23 @@
+{
+  "android_database": "two independent file-backed Room databases",
+  "compose_cleanup": "verified by scoped finalizer",
+  "credentials_persisted": false,
+  "device_serial": "emulator-5560",
+  "duration_seconds": 54.755,
+  "finished_at": "2026-08-17T18:32:49.933375+00:00",
+  "process_recovery": [
+    "close/reopen after offline transaction",
+    "server commit followed by simulated ACK loss",
+    "same immutable event ID/hash retried as duplicate APPLIED"
+  ],
+  "schema_version": 1,
+  "server_counts": {
+    "device_event_inbox": 1,
+    "device_sync_cursor": 2,
+    "sync_event": 1,
+    "user_track_ref": 1
+  },
+  "started_at": "2026-08-17T18:31:55.178661+00:00",
+  "status": "PASS",
+  "transport": "Android OkHttpSyncTransport -> FastAPI HTTP -> PostgreSQL 18.4"
+}

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/client-event.schema.json",
+  "title": "AutPlay Sync Client Event v1",
+  "description": "Unknown additive members are accepted and covered by request_hash.",
+  "x-autplay-max-canonical-payload-bytes": 262144,
+  "x-autplay-known-event-dispatch": {
+    "LISTENING_EVENT_RECORDED": "https://autplay.local/contracts/events/v1/user-interaction-event.schema.json",
+    "RECOMMENDATION_IMPRESSION_RECORDED": "https://autplay.local/contracts/events/v1/user-interaction-event.schema.json",
+    "RECOMMENDATION_FEEDBACK_RECORDED": "https://autplay.local/contracts/events/v1/user-interaction-event.schema.json"
+  },
+  "type": "object",
+  "propertyNames": {"allOf": [{"pattern": "^[a-z][a-z0-9_]{0,99}$"}, {"not": {"pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"}}]},
+  "additionalProperties": true,
+  "required": [
+    "event_id",
+    "idempotency_key",
+    "user_id",
+    "device_id",
+    "server_profile_id",
+    "device_sequence",
+    "event_type",
+    "schema_version",
+    "aggregate_type",
+    "aggregate_local_id",
+    "aggregate_server_id",
+    "base_server_row_version",
+    "occurred_at",
+    "payload",
+    "request_hash"
+  ],
+  "properties": {
+    "event_id": {"$ref": "#/$defs/uuid"},
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 200},
+    "user_id": {"$ref": "#/$defs/uuid"},
+    "device_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "device_sequence": {"type": "integer", "minimum": 1},
+    "event_type": {"type": "string", "minLength": 1, "maxLength": 200},
+    "schema_version": {"type": "integer", "const": 1},
+    "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+    "aggregate_local_id": {"$ref": "#/$defs/uuid"},
+    "aggregate_server_id": {
+      "anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]
+    },
+    "base_server_row_version": {
+      "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+    },
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "payload": {"$ref": "#/$defs/safeObject"},
+    "request_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "safeObject": {
+      "type": "object",
+      "description": "Recursive lowercase/snake-case payload without secret, private-URL, or raw-path property names; canonical UTF-8 bytes must be at most 262144.",
+      "propertyNames": {
+        "allOf": [
+          {"pattern": "^[a-z][a-z0-9_]{0,99}$"},
+          {
+            "not": {
+              "pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"
+            }
+          }
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/safeValue"}
+    },
+    "safeValue": {
+      "oneOf": [
+        {"$ref": "#/$defs/safeObject"},
+        {"type": "array", "items": {"$ref": "#/$defs/safeValue"}},
+        {"type": ["string", "number", "boolean", "null"]}
+      ]
+    }
+  }
+}

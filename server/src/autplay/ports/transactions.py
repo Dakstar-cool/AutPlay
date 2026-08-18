@@ -8,6 +8,32 @@ from typing import Protocol, Self
 from .jobs import JobRepository
 
 
+class VaultUnitOfWork(Protocol):
+    """Transaction boundary for P06 Vault persistence operations."""
+
+    @property
+    def vault(self) -> object:
+        """Return the transaction-bound Vault runtime repository."""
+
+        ...
+
+    def __enter__(self) -> Self: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None: ...
+    def commit(self) -> None: ...
+    def rollback(self) -> None: ...
+
+
+class VaultUnitOfWorkFactory(Protocol):
+    """Create one isolated Vault application transaction."""
+
+    def __call__(self) -> VaultUnitOfWork: ...
+
+
 class JobUnitOfWork(Protocol):
     """One caller-owned transaction exposing the jobs repository."""
 
@@ -52,4 +78,4 @@ class JobUnitOfWorkFactory(Protocol):
         ...
 
 
-__all__ = ("JobUnitOfWork", "JobUnitOfWorkFactory")
+__all__ = ("JobUnitOfWork", "JobUnitOfWorkFactory", "VaultUnitOfWork", "VaultUnitOfWorkFactory")

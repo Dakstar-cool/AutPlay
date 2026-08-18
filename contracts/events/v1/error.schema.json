@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/error.schema.json",
+  "title": "AutPlay Sync Error v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["code", "message", "retryable", "request_id"],
+  "properties": {
+    "code": {"type": "string", "minLength": 1, "maxLength": 100},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "retryable": {"type": "boolean"},
+    "request_id": {"type": "string", "format": "uuid"},
+    "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000},
+    "bootstrap_required": {"type": "boolean"},
+    "details": {"$ref": "#/$defs/safeObject"}
+  },
+  "$defs": {
+    "safeObject": {
+      "type": "object",
+      "description": "Bounded allowlisted metadata only; no credentials, private URLs, paths, or raw payload.",
+      "propertyNames": {
+        "allOf": [
+          {"pattern": "^[a-z][a-z0-9_]{0,99}$"},
+          {
+            "not": {
+              "pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"
+            }
+          }
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/safeValue"}
+    },
+    "safeValue": {
+      "anyOf": [
+        {"type": ["string", "number", "integer", "boolean", "null"]},
+        {"type": "array", "items": {"$ref": "#/$defs/safeValue"}},
+        {"$ref": "#/$defs/safeObject"}
+      ]
+    }
+  }
+}

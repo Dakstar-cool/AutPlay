@@ -13,6 +13,7 @@
 - Room queue/local audio/download intent schema
 - P06 stream contract
 - `REFERENCE_PROJECTS.md` sections AndroidX Media3 and Jellyfin
+- `AutPlay_Recommendation_Subsystem_v1.md` listening/impression attribution contract
 
 ## Scope
 
@@ -30,6 +31,8 @@
 8. PINNED/USER_DOWNLOAD/PROACTIVE_CACHE eviction policy.
 9. ListeningEvent finalization with recommendation/context IDs where present.
 10. Compose mini/full player and download state UI sufficient for behavior verification.
+11. Queue-entry recommendation attribution that survives persistence/restart and finalizes one
+    `LISTENING_EVENT_RECORDED` event per logical session, including a local impression ID before ACK.
 
 ## Constraints
 
@@ -39,6 +42,10 @@
 - Proactive cache never evicts pinned/user download.
 - Playback must continue locally when API/GPU/provider is down.
 - No Wave synchronization yet.
+- Do not emit progress-tick or seek-event floods; start/end positions are bounded observations on the
+  one logical listening event.
+- Recommended playback retains immutable request ID, source rank, recording ID and impression
+  local/server IDs; causality is never inferred from track/time proximity.
 
 ## Required tests
 
@@ -52,6 +59,8 @@
 - auth expiry refresh path without leaking URL/token;
 - repeated track in queue/playlist;
 - listening event emitted once per logical session.
+- stable event ID/hash and attribution across process death/retry, including playback before the
+  impression ACK.
 
 ## Acceptance
 

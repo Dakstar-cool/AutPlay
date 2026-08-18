@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/push-response.schema.json",
+  "title": "AutPlay Sync Push Response v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "protocol_version",
+    "device_id",
+    "server_profile_id",
+    "journal_epoch",
+    "acknowledged_through_device_sequence",
+    "acks",
+    "server_time"
+  ],
+  "properties": {
+    "protocol_version": {"type": "integer", "const": 1},
+    "device_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "journal_epoch": {"$ref": "#/$defs/uuid"},
+    "acknowledged_through_device_sequence": {"type": "integer", "minimum": 0},
+    "acks": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/ack"}},
+    "server_time": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "ack": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "event_id",
+        "device_sequence",
+        "aggregate_type",
+        "aggregate_local_id",
+        "aggregate_server_id",
+        "outcome"
+      ],
+      "allOf": [
+        {
+          "if": {"properties": {"outcome": {"const": "APPLIED"}}, "required": ["outcome"]},
+          "then": {
+            "required": ["server_row_version"],
+            "properties": {
+              "aggregate_server_id": {"$ref": "#/$defs/uuid"},
+              "server_row_version": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "CONFLICT"}}, "required": ["outcome"]},
+          "then": {
+            "required": ["conflict"],
+            "properties": {"aggregate_server_id": {"$ref": "#/$defs/uuid"}}
+          }
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "REJECTED"}}, "required": ["outcome"]},
+          "then": {"required": ["error"]}
+        },
+        {
+          "if": {"properties": {"outcome": {"const": "DUPLICATE"}}, "required": ["outcome"]},
+          "then": {
+            "required": ["original_outcome"],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {"original_outcome": {"const": "APPLIED"}},
+                  "required": ["original_outcome"]
+                },
+                "then": {
+                  "required": ["server_row_version"],
+                  "properties": {
+                    "aggregate_server_id": {"$ref": "#/$defs/uuid"},
+                    "server_row_version": {"type": "integer", "minimum": 1}
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {"original_outcome": {"const": "CONFLICT"}},
+                  "required": ["original_outcome"]
+                },
+                "then": {
+                  "required": ["conflict"],
+                  "properties": {"aggregate_server_id": {"$ref": "#/$defs/uuid"}}
+                }
+              },
+              {
+                "if": {
+                  "properties": {"original_outcome": {"const": "REJECTED"}},
+                  "required": ["original_outcome"]
+                },
+                "then": {"required": ["error"]}
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "device_sequence": {"type": "integer", "minimum": 1},
+        "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+        "aggregate_local_id": {"$ref": "#/$defs/uuid"},
+        "aggregate_server_id": {
+          "anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]
+        },
+        "outcome": {"enum": ["APPLIED", "DUPLICATE", "CONFLICT", "REJECTED"]},
+        "original_outcome": {"enum": ["APPLIED", "CONFLICT", "REJECTED"]},
+        "server_row_version": {
+          "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+        },
+        "error": {"$ref": "#/$defs/error"},
+        "conflict": {"$ref": "#/$defs/conflict"},
+        "redirect": {"$ref": "#/$defs/redirect"}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["code", "message", "retryable", "request_id"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 100},
+        "message": {"type": "string", "minLength": 1, "maxLength": 500},
+        "retryable": {"type": "boolean"},
+        "request_id": {"$ref": "#/$defs/uuid"},
+        "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000}
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["conflict_kind", "resolution_state"],
+      "properties": {
+        "conflict_kind": {
+          "enum": [
+            "STALE_VERSION",
+            "EDIT_VS_DELETE",
+            "DELETE_VS_EDIT",
+            "ORDER_COLLISION",
+            "ID_COLLISION",
+            "REDIRECT_COLLISION",
+            "POLICY_REVIEW"
+          ]
+        },
+        "resolution_state": {
+          "enum": [
+            "AUTO_MERGED",
+            "LOCAL_WON_EXPLICIT",
+            "SERVER_WON_EXPLICIT",
+            "REVIEW_REQUIRED"
+          ]
+        },
+        "server_event_id": {"$ref": "#/$defs/uuid"},
+        "server_snapshot": {"$ref": "#/$defs/safeObject"}
+      }
+    },
+    "redirect": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["alias_server_id", "canonical_server_id"],
+      "properties": {
+        "alias_server_id": {"$ref": "#/$defs/uuid"},
+        "canonical_server_id": {"$ref": "#/$defs/uuid"}
+      }
+    },
+    "safeObject": {
+      "type": "object",
+      "propertyNames": {
+        "allOf": [
+          {"pattern": "^[a-z][a-z0-9_]{0,99}$"},
+          {
+            "not": {
+              "pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"
+            }
+          }
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/safeValue"}
+    },
+    "safeValue": {
+      "anyOf": [
+        {"type": ["string", "number", "integer", "boolean", "null"]},
+        {"type": "array", "items": {"$ref": "#/$defs/safeValue"}},
+        {"$ref": "#/$defs/safeObject"}
+      ]
+    }
+  }
+}

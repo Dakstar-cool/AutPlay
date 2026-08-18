@@ -1,5 +1,5 @@
 x-autplay-runtime: &autplay-runtime
-  image: autplay-server:p03-local
+  image: autplay-server:p06-local
   build:
     context: ../..
     dockerfile: server/Dockerfile
@@ -18,6 +18,12 @@ x-autplay-database-environment: &autplay-database-environment
   AUTPLAY_DATABASE_CONNECT_TIMEOUT_SECONDS: "2"
   AUTPLAY_DATABASE_STATEMENT_TIMEOUT_MS: "5000"
   AUTPLAY_PROFILE: development
+  AUTPLAY_VAULT_ROOT: /var/lib/autplay/vault
+  AUTPLAY_VAULT_MAX_OBJECT_BYTES: "2147483648"
+  AUTPLAY_VAULT_MAX_CHUNK_BYTES: "1048576"
+  AUTPLAY_VAULT_LOW_DISK_BYTES: "1073741824"
+  AUTPLAY_VAULT_TOOL_TIMEOUT_SECONDS: "120"
+  AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "1048576"
 
 services:
   migrate:
@@ -51,6 +57,8 @@ services:
         host_ip: 127.0.0.1
         published: "${AUTPLAY_API_PORT:-8787}"
         protocol: tcp
+    volumes:
+      - vault-data:/var/lib/autplay/vault
     healthcheck:
       test:
         - CMD
@@ -79,6 +87,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    volumes:
+      - vault-data:/var/lib/autplay/vault
     healthcheck:
       test: [CMD, autplay-worker-cpu, --check-readiness]
       interval: 10s
@@ -89,6 +99,99 @@ services:
     mem_limit: 768m
     cpus: 1.0
 
+  stream:
+    <<: *autplay-runtime
+    command: [autplay-stream]
+    environment:
+      <<: *autplay-database-environment
+      AUTPLAY_STREAM_HOST: 0.0.0.0
+      AUTPLAY_STREAM_PORT: "8788"
+      AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+    secrets:
+      - source: autplay-auth-signing-secret
+        target: autplay-auth-signing-secret
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - name: stream-local
+        target: 8788
+        host_ip: 127.0.0.1
+        published: "${AUTPLAY_STREAM_PORT:-8788}"
+        protocol: tcp
+    volumes:
+      - vault-data:/var/lib/autplay/vault:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8788/health/live', timeout=2).read()
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.75
+
+  ml-gpu:
+    image: autplay-gpu-worker:p12-local
+    build:
+      context: ../..
+      dockerfile: gpu/Dockerfile
+    profiles: [gpu]
+    command: [autplay-ml-gpu]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 30s
+    gpus: all
+    environment:
+      <<: *autplay-database-environment
+      AUTPLAY_GPU_DEVICE_SELECTOR: "${AUTPLAY_GPU_DEVICE_SELECTOR:-auto}"
+      AUTPLAY_GPU_MIN_MEMORY_MIB: "${AUTPLAY_GPU_MIN_MEMORY_MIB:-4096}"
+      AUTPLAY_GPU_MIN_COMPUTE_MAJOR: "${AUTPLAY_GPU_MIN_COMPUTE_MAJOR:-7}"
+      AUTPLAY_GPU_MIN_COMPUTE_MINOR: "${AUTPLAY_GPU_MIN_COMPUTE_MINOR:-0}"
+      AUTPLAY_GPU_INITIAL_BATCH_SIZE: "${AUTPLAY_GPU_INITIAL_BATCH_SIZE:-8}"
+      AUTPLAY_GPU_MAX_OOM_REDUCTIONS: "${AUTPLAY_GPU_MAX_OOM_REDUCTIONS:-3}"
+      AUTPLAY_GPU_MODEL_ID: "${AUTPLAY_GPU_MODEL_ID:-}"
+      AUTPLAY_GPU_MODEL_CACHE_ROOT: /var/lib/autplay/models
+      AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
+      AUTPLAY_WORKER_LEASE_SECONDS: "120"
+      AUTPLAY_WORKER_MAX_ATTEMPTS: "4"
+      AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - vault-data:/var/lib/autplay/vault:ro
+      - model-cache:/var/lib/autplay/models:ro
+    healthcheck:
+      test: [CMD, autplay-ml-gpu, --check-readiness]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 10s
+    # The opt-in GPU process gets bounded process-level recovery without affecting CPU services.
+    restart: "on-failure:3"
+    mem_limit: 4g
+    cpus: 2.0
+
 secrets:
   autplay-auth-signing-secret:
     file: "${AUTPLAY_RUNTIME_AUTH_SECRET_FILE:?set AUTPLAY_RUNTIME_AUTH_SECRET_FILE to a local secret file}"
+
+volumes:
+  vault-data:
+    labels:
+      app.autplay.purpose: disposable-development-vault
+  model-cache:
+    labels:
+      app.autplay.purpose: private-derived-model-cache

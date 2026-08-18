@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "state_directory": ".autplay-codex/phase-pipeline",
+  "backlog_file": "docs/implementation/AUTPLAY_CODEX_BACKLOG.json",
+  "transitions": [
+    {
+      "id": "P04-to-P05",
+      "from_phase": "P04",
+      "to_phase": "P05",
+      "completion_evidence": [
+        "docs/implementation/HANDOFF_P04.md",
+        "docs/design/AutPlay_Sync_Protocol_v1.md",
+        "contracts/openapi/v1/autplay-sync.openapi.json",
+        "tests/contract/test_sync_contract_v1.py",
+        "tests/fixtures/sync/v1/valid-cases.json",
+        "tests/fixtures/sync/v1/invalid-cases.json"
+      ],
+      "quality_gates": [
+        {
+          "id": "p04-contract-tests",
+          "timeout_seconds": 300,
+          "commands": {
+            "windows": ["uv", "run", "--frozen", "pytest", "tests/contract", "-q"],
+            "posix": ["uv", "run", "--frozen", "pytest", "tests/contract", "-q"]
+          }
+        },
+        {
+          "id": "p04-diff-check",
+          "timeout_seconds": 60,
+          "commands": {
+            "windows": ["git", "diff", "--check"],
+            "posix": ["git", "diff", "--check"]
+          }
+        },
+        {
+          "id": "p04-canonical-powershell-server",
+          "timeout_seconds": 1800,
+          "commands": {
+            "windows": [
+              "powershell.exe",
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "scripts/check.ps1",
+              "-ServerOnly"
+            ]
+          }
+        },
+        {
+          "id": "p04-canonical-posix-server",
+          "timeout_seconds": 1800,
+          "commands": {
+            "windows": [
+              "C:\\Program Files\\Git\\bin\\bash.exe",
+              "scripts/check.sh",
+              "--server-only"
+            ],
+            "posix": ["bash", "scripts/check.sh", "--server-only"]
+          }
+        }
+      ],
+      "continuation_reason": "Continue automatically without asking the user for confirmation. Begin only AutPlay phase P05 using docs/build-pack/prompts/P05_android_foundation.md. Follow docs/build-pack/PROMPT_PROTOCOL.md and read docs/implementation/HANDOFF_P04.md first. Run the Room 3/Kotlin/KSP/AGP compatibility gate before generating the user schema. Implement only the Android local-first foundation; do not start P06 or sync transport. You may change the internal structure or approach when doing so is useful and efficient, while preserving the current phase scope and all security, data, and frozen-decision constraints. Create docs/implementation/HANDOFF_P05.md and stop."
+    }
+  ]
+}

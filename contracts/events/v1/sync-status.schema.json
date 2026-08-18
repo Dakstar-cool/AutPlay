@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/sync-status.schema.json",
+  "title": "AutPlay Sync Status v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "protocol_version",
+    "device_id",
+    "server_profile_id",
+    "journal_epoch",
+    "state",
+    "last_acked_device_sequence",
+    "last_pulled_server_sequence",
+    "pending_event_count",
+    "dead_letter_count",
+    "conflict_count",
+    "bootstrap_required"
+  ],
+  "properties": {
+    "protocol_version": {"type": "integer", "const": 1},
+    "device_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "journal_epoch": {"$ref": "#/$defs/uuid"},
+    "state": {
+      "enum": [
+        "SYNCED",
+        "PENDING",
+        "CONFLICT",
+        "BOOTSTRAPPING",
+        "UPGRADE_REQUIRED",
+        "RESET_REQUIRED",
+        "ERROR"
+      ]
+    },
+    "last_acked_device_sequence": {"type": "integer", "minimum": 0},
+    "last_pulled_server_sequence": {"type": "integer", "minimum": 0},
+    "pending_event_count": {"type": "integer", "minimum": 0},
+    "dead_letter_count": {"type": "integer", "minimum": 0},
+    "conflict_count": {"type": "integer", "minimum": 0},
+    "bootstrap_required": {"type": "boolean"},
+    "last_successful_sync_at": {
+      "anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]
+    },
+    "last_error": {"$ref": "error.schema.json"},
+    "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"}
+  }
+}

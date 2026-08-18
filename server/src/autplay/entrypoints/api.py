@@ -7,7 +7,7 @@ import json
 import sys
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Final
+from typing import Any, Final
 
 import uvicorn
 from fastapi import APIRouter, FastAPI, Request
@@ -20,8 +20,26 @@ from autplay.adapters.postgresql.readiness import (
 )
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.auth import AuthService
-from autplay.entrypoints.auth_http import create_auth_router
-from autplay.entrypoints.composition import build_auth_service
+from autplay.entrypoints.auth_http import bearer_authentication, create_auth_router
+from autplay.entrypoints.composition import (
+    build_auth_service,
+    build_import_service,
+    build_library_service,
+    build_recommendation_service,
+    build_stream_lookup,
+    build_sync_service,
+    build_vault_http_service,
+    build_wave_service,
+)
+from autplay.entrypoints.import_http import ImportHttpService, create_import_router
+from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
+from autplay.entrypoints.recommendation_http import (
+    RecommendationHttpService,
+    create_recommendation_router,
+)
+from autplay.entrypoints.sync_http import create_sync_router
+from autplay.entrypoints.vault_http import UploadService, create_vault_router
+from autplay.entrypoints.wave_http import create_wave_router
 from autplay.runtime.http import (
     RequestRuntimeMiddleware,
     error_response,
@@ -41,6 +59,12 @@ def create_app(
     readiness_probe: ReadinessProbe | None = None,
     metrics: RuntimeMetrics | None = None,
     auth_service: AuthService | None = None,
+    upload_service: UploadService | None = None,
+    library_service: LibraryQueryService | None = None,
+    import_service: ImportHttpService | None = None,
+    recommendation_service: RecommendationHttpService | None = None,
+    sync_service: object | None = None,
+    wave_service: Any | None = None,
 ) -> FastAPI:
     """Create one API instance without connecting to PostgreSQL at import time."""
 
@@ -49,6 +73,12 @@ def create_app(
     engine = create_runtime_engine(resolved_settings)
     probe = readiness_probe or PostgreSQLReadinessProbe(engine)
     authentication = auth_service or build_auth_service(resolved_settings, engine)
+    uploads = upload_service or build_vault_http_service(resolved_settings, engine)
+    library = library_service or build_library_service(engine)
+    imports = import_service or build_import_service(engine)
+    recommendations = recommendation_service or build_recommendation_service(engine)
+    sync = sync_service or build_sync_service(resolved_settings, engine)
+    wave = wave_service or build_wave_service(engine)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -74,6 +104,32 @@ def create_app(
     app.add_middleware(RequestRuntimeMiddleware, metrics=runtime_metrics)
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
+    api_router.include_router(
+        create_vault_router(uploads, authenticated=bearer_authentication(authentication))
+    )
+    api_router.include_router(
+        create_library_router(library, authenticated=bearer_authentication(authentication))
+    )
+    api_router.include_router(
+        create_import_router(imports, authenticated=bearer_authentication(authentication))
+    )
+    api_router.include_router(
+        create_recommendation_router(
+            recommendations, authenticated=bearer_authentication(authentication)
+        )
+    )
+    api_router.include_router(
+        create_sync_router(sync, authenticated=bearer_authentication(authentication))  # type: ignore[arg-type]
+    )
+    api_router.include_router(
+        create_wave_router(
+            wave,
+            authenticated=bearer_authentication(authentication),
+            auth_service=authentication,
+            source_lookup=build_stream_lookup(engine),
+            metrics=runtime_metrics,
+        )
+    )
     app.include_router(api_router)
 
     @app.get("/health/live", include_in_schema=False)

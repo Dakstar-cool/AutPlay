@@ -1,0 +1,766 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay Sync API",
+    "version": "1.0.0",
+    "description": "P04 Sync contract plus implemented P06 owner-scoped Vault upload and direct-stream routes; runtime sync routes remain out of scope."
+  },
+  "servers": [
+    {
+      "url": "https://{host}/api/v1",
+      "variables": {"host": {"default": "sync.invalid"}}
+    }
+  ],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/devices/bind": {
+      "post": {
+        "operationId": "bindDevice",
+        "summary": "Bind an already authenticated device to one local server profile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {"schema": {"$ref": "#/components/schemas/DeviceBinding"}}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Existing or newly confirmed binding",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/DeviceBindingResult"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/vault/uploads": {
+      "post": {
+        "operationId": "createVaultUpload",
+        "summary": "Create or replay an owner-scoped resumable upload",
+        "parameters": [{"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 200}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateUpload"}}}},
+        "responses": {"201": {"$ref": "#/components/responses/Upload"}, "200": {"$ref": "#/components/responses/Upload"}, "401": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "422": {"$ref": "#/components/responses/Error"}, "507": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/vault/uploads/{upload_id}": {
+      "parameters": [{"name": "upload_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Uuid"}}],
+      "head": {"operationId": "headVaultUpload", "responses": {"204": {"description": "Current offset", "headers": {"Upload-Offset": {"required": true, "schema": {"type": "integer", "minimum": 0}}, "Upload-Length": {"required": true, "schema": {"type": "integer", "minimum": 1}}}}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}},
+      "patch": {"operationId": "appendVaultUpload", "parameters": [{"name": "Upload-Offset", "in": "header", "required": true, "schema": {"type": "integer", "minimum": 0}}, {"name": "Upload-Chunk-Index", "in": "header", "required": true, "schema": {"type": "integer", "minimum": 0}}, {"name": "X-Chunk-SHA256", "in": "header", "required": true, "schema": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}], "requestBody": {"required": true, "content": {"application/offset+octet-stream": {"schema": {"type": "string", "format": "binary", "maxLength": 1048576}}}}, "responses": {"204": {"description": "Chunk persisted", "headers": {"Upload-Offset": {"required": true, "schema": {"type": "integer", "minimum": 0}}}}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "422": {"$ref": "#/components/responses/Error"}}},
+      "get": {"operationId": "getVaultUpload", "responses": {"200": {"$ref": "#/components/responses/Upload"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}},
+      "delete": {"operationId": "cancelVaultUpload", "responses": {"204": {"description": "Upload cancelled"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/vault/uploads/{upload_id}/complete": {"parameters": [{"name": "upload_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Uuid"}}], "post": {"operationId": "completeVaultUpload", "responses": {"202": {"$ref": "#/components/responses/Upload"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}}},
+    "/stream/audio-variants/{audio_variant_id}": {
+      "parameters": [{"name": "audio_variant_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Uuid"}}],
+      "get": {"operationId": "streamAudioVariant", "parameters": [{"name": "Range", "in": "header", "required": false, "schema": {"type": "string"}}, {"name": "If-Range", "in": "header", "required": false, "schema": {"type": "string"}}], "responses": {"200": {"$ref": "#/components/responses/AudioStream"}, "206": {"$ref": "#/components/responses/AudioStream"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "416": {"$ref": "#/components/responses/Error"}}},
+      "head": {"operationId": "headAudioVariant", "responses": {"200": {"$ref": "#/components/responses/AudioStream"}, "206": {"$ref": "#/components/responses/AudioStream"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "416": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/sync/push": {
+      "post": {
+        "operationId": "pushEvents",
+        "summary": "Classify each event and return one durable ACK per event",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {"schema": {"$ref": "#/components/schemas/PushRequest"}}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-event outcomes; HTTP success does not mean every event applied",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/PushResponse"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error"},
+          "401": {"$ref": "#/components/responses/Error"},
+          "413": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/sync/pull": {
+      "get": {
+        "operationId": "pullEvents",
+        "summary": "Return one ordered page with an opaque next cursor",
+        "parameters": [
+          {"$ref": "#/components/parameters/ProtocolVersion"},
+          {"$ref": "#/components/parameters/DeviceId"},
+          {"$ref": "#/components/parameters/ServerProfileId"},
+          {"$ref": "#/components/parameters/JournalEpoch"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/Limit"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete atomic page",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/PullResponse"}}
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"},
+          "410": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/sync/bootstrap": {
+      "post": {
+        "operationId": "bootstrapSync",
+        "summary": "Read a stable snapshot while preserving pending local events",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {"schema": {"$ref": "#/components/schemas/BootstrapRequest"}}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One stable snapshot page and final cutover cursor when complete",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/BootstrapResponse"}}
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/sync/status": {
+      "get": {
+        "operationId": "getSyncStatus",
+        "summary": "Return bounded redacted sync status",
+        "parameters": [
+          {"$ref": "#/components/parameters/ProtocolVersion"},
+          {"$ref": "#/components/parameters/DeviceId"},
+          {"$ref": "#/components/parameters/ServerProfileId"},
+          {"$ref": "#/components/parameters/JournalEpoch"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Current status",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/SyncStatus"}}
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    },
+    "parameters": {
+      "ProtocolVersion": {
+        "name": "protocol_version",
+        "in": "query",
+        "required": true,
+        "schema": {"type": "integer", "const": 1}
+      },
+      "DeviceId": {
+        "name": "device_id",
+        "in": "query",
+        "required": true,
+        "schema": {"$ref": "#/components/schemas/Uuid"}
+      },
+      "ServerProfileId": {
+        "name": "server_profile_id",
+        "in": "query",
+        "required": true,
+        "schema": {"$ref": "#/components/schemas/Uuid"}
+      },
+      "JournalEpoch": {
+        "name": "journal_epoch",
+        "in": "query",
+        "required": true,
+        "schema": {"$ref": "#/components/schemas/Uuid"}
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque server-issued cursor; clients must not parse or construct it.",
+        "schema": {"type": "string", "minLength": 16, "maxLength": 2048}
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}
+      }
+    },
+    "responses": {
+      "Upload": {"description": "Bounded upload session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Upload"}}}},
+      "AudioStream": {"description": "Authorized immutable audio bytes", "headers": {"Accept-Ranges": {"schema": {"const": "bytes"}}, "Content-Length": {"schema": {"type": "integer", "minimum": 1}}, "ETag": {"schema": {"type": "string", "pattern": "^\\\"sha256-[a-f0-9]{64}\\\"$"}}, "Content-Range": {"schema": {"type": "string"}}}, "content": {"audio/*": {"schema": {"type": "string", "format": "binary"}}}},
+      "Error": {
+        "description": "Stable redacted error",
+        "content": {
+          "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+        }
+      }
+    },
+    "schemas": {
+      "CreateUpload": {"type": "object", "additionalProperties": false, "required": ["recording_id", "expected_size"], "properties": {"recording_id": {"$ref": "#/components/schemas/Uuid"}, "expected_size": {"type": "integer", "minimum": 1, "maximum": 2147483648}, "declared_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
+      "Upload": {"type": "object", "additionalProperties": false, "required": ["upload_id", "offset", "expected_size", "state"], "properties": {"upload_id": {"$ref": "#/components/schemas/Uuid"}, "offset": {"type": "integer", "minimum": 0}, "expected_size": {"type": "integer", "minimum": 1}, "state": {"type": "string", "maxLength": 100}}},
+      "Uuid": {"type": "string", "format": "uuid"},
+      "NullableUuid": {
+        "oneOf": [{"$ref": "#/components/schemas/Uuid"}, {"type": "null"}]
+      },
+      "OpaqueToken": {"type": "string", "minLength": 16, "maxLength": 2048},
+      "SafeObject": {
+        "type": "object",
+        "propertyNames": {
+          "allOf": [
+            {"pattern": "^[a-z][a-z0-9_]{0,99}$"},
+            {
+              "not": {
+                "pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"
+              }
+            }
+          ]
+        },
+        "additionalProperties": {"$ref": "#/components/schemas/SafeValue"}
+      },
+      "SafeValue": {
+        "anyOf": [
+          {"type": ["string", "number", "integer", "boolean", "null"]},
+          {"type": "array", "items": {"$ref": "#/components/schemas/SafeValue"}},
+          {"$ref": "#/components/schemas/SafeObject"}
+        ]
+      },
+      "BindingFields": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["protocol_version", "device_id", "server_profile_id", "journal_epoch"],
+        "properties": {
+          "protocol_version": {"type": "integer", "const": 1},
+          "device_id": {"$ref": "#/components/schemas/Uuid"},
+          "server_profile_id": {"$ref": "#/components/schemas/Uuid"},
+          "journal_epoch": {"$ref": "#/components/schemas/Uuid"}
+        }
+      },
+      "DeviceBinding": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["user_id", "device_name", "platform", "app_version"],
+            "properties": {
+              "user_id": {"$ref": "#/components/schemas/Uuid"},
+              "device_name": {"type": "string", "minLength": 1, "maxLength": 200},
+              "platform": {"enum": ["ANDROID", "WEB", "OTHER"]},
+              "app_version": {"type": "string", "minLength": 1, "maxLength": 100},
+              "supported_event_schema_versions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        ]
+      },
+      "DeviceBindingResult": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["user_id", "bound_at", "last_acked_device_sequence"],
+            "properties": {
+              "user_id": {"$ref": "#/components/schemas/Uuid"},
+              "bound_at": {"type": "string", "format": "date-time"},
+              "last_acked_device_sequence": {"type": "integer", "minimum": 0}
+            }
+          }
+        ]
+      },
+      "RecommendationAttribution": {
+        "type": "object", "additionalProperties": {"$ref": "#/components/schemas/SafeValue"},
+        "required": ["recommendation_request_id", "recording_id", "source_rank", "source", "surface"],
+        "properties": {"recommendation_request_id": {"$ref": "#/components/schemas/Uuid"}, "recording_id": {"$ref": "#/components/schemas/Uuid"}, "source_rank": {"type": "integer", "minimum": 1, "maximum": 1000}, "source": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_]{0,99}$"}, "surface": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_]{0,99}$"}, "presentation_id": {"$ref": "#/components/schemas/Uuid"}, "display_position": {"type": "integer", "minimum": 1, "maximum": 1000}, "section_key": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_]{0,99}$"}, "offline_pack_id": {"$ref": "#/components/schemas/Uuid"}, "impression_event_local_id": {"$ref": "#/components/schemas/Uuid"}, "impression_event_server_id": {"$ref": "#/components/schemas/NullableUuid"}}
+      },
+      "ListeningEventRecordedPayload": {
+        "type": "object", "additionalProperties": {"$ref": "#/components/schemas/SafeValue"},
+        "required": ["interaction_type", "local_user_track_ref_id", "server_user_track_ref_id", "recording_id", "played_ms", "track_duration_ms", "completion_ratio", "event_origin", "context", "explicit_feedback", "excluded_from_taste", "recommendation"],
+        "properties": {"interaction_type": {"const": "LISTENING_EVENT_RECORDED"}, "local_user_track_ref_id": {"$ref": "#/components/schemas/Uuid"}, "server_user_track_ref_id": {"$ref": "#/components/schemas/NullableUuid"}, "recording_id": {"$ref": "#/components/schemas/NullableUuid"}, "played_ms": {"type": "integer", "minimum": 0, "maximum": 604800000}, "track_duration_ms": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 604800000}, {"type": "null"}]}, "completion_ratio": {"oneOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}]}, "event_origin": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[A-Z][A-Z0-9_]{0,99}$"}, "context": {"type": "string", "minLength": 1, "maxLength": 50, "pattern": "^[A-Z][A-Z0-9_]{0,49}$"}, "explicit_feedback": {"type": "string", "minLength": 1, "maxLength": 50, "pattern": "^[A-Z][A-Z0-9_]{0,49}$"}, "excluded_from_taste": {"type": "boolean"}, "recommendation": {"oneOf": [{"$ref": "#/components/schemas/RecommendationAttribution"}, {"type": "null"}]}},
+        "allOf": [{"if": {"properties": {"event_origin": {"const": "RECOMMENDED"}}}, "then": {"properties": {"recommendation": {"$ref": "#/components/schemas/RecommendationAttribution"}}}}]
+      },
+      "RecommendationImpressionRecordedPayload": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/SafeValue"}, "required": ["interaction_type", "recommendation"], "properties": {"interaction_type": {"const": "RECOMMENDATION_IMPRESSION_RECORDED"}, "recommendation": {"allOf": [{"$ref": "#/components/schemas/RecommendationAttribution"}, {"required": ["presentation_id", "display_position"]}]}}},
+      "RecommendationFeedbackRecordedPayload": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/SafeValue"}, "required": ["interaction_type", "feedback_type", "recommendation"], "properties": {"interaction_type": {"const": "RECOMMENDATION_FEEDBACK_RECORDED"}, "feedback_type": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Z][A-Z0-9_]{0,63}$", "x-autplay-known-values": ["SELECTED", "DISMISSED"]}, "recommendation": {"allOf": [{"$ref": "#/components/schemas/RecommendationAttribution"}, {"required": ["impression_event_local_id"]}]}}},
+      "ClientEvent": {
+        "type": "object",
+        "propertyNames": {"allOf": [{"pattern": "^[a-z][a-z0-9_]{0,99}$"}, {"not": {"pattern": "(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|base_url|filesystem_path|absolute_path|raw_path|raw_search_query|search_query|raw_model_features|model_features|feature_vector|debug_text|personal_debug)(_|$)"}}]},
+        "additionalProperties": true,
+        "x-autplay-known-event-dispatch": {
+          "LISTENING_EVENT_RECORDED": "https://autplay.local/contracts/events/v1/user-interaction-event.schema.json",
+          "RECOMMENDATION_IMPRESSION_RECORDED": "https://autplay.local/contracts/events/v1/user-interaction-event.schema.json",
+          "RECOMMENDATION_FEEDBACK_RECORDED": "https://autplay.local/contracts/events/v1/user-interaction-event.schema.json"
+        },
+        "required": [
+          "event_id",
+          "idempotency_key",
+          "user_id",
+          "device_id",
+          "server_profile_id",
+          "device_sequence",
+          "event_type",
+          "schema_version",
+          "aggregate_type",
+          "aggregate_local_id",
+          "aggregate_server_id",
+          "base_server_row_version",
+          "occurred_at",
+          "payload",
+          "request_hash"
+        ],
+        "allOf": [
+          {"if": {"properties": {"event_type": {"const": "LISTENING_EVENT_RECORDED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "LISTENING_EVENT"}, "base_server_row_version": {"type": "null"}, "payload": {"$ref": "#/components/schemas/ListeningEventRecordedPayload"}}}},
+          {"if": {"properties": {"event_type": {"const": "RECOMMENDATION_IMPRESSION_RECORDED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "USER_INTERACTION_EVENT"}, "base_server_row_version": {"type": "null"}, "payload": {"$ref": "#/components/schemas/RecommendationImpressionRecordedPayload"}}}},
+          {"if": {"properties": {"event_type": {"const": "RECOMMENDATION_FEEDBACK_RECORDED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "USER_INTERACTION_EVENT"}, "base_server_row_version": {"type": "null"}, "payload": {"$ref": "#/components/schemas/RecommendationFeedbackRecordedPayload"}}}}
+        ],
+        "properties": {
+          "event_id": {"$ref": "#/components/schemas/Uuid"},
+          "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 200},
+          "user_id": {"$ref": "#/components/schemas/Uuid"},
+          "device_id": {"$ref": "#/components/schemas/Uuid"},
+          "server_profile_id": {"$ref": "#/components/schemas/Uuid"},
+          "device_sequence": {"type": "integer", "minimum": 1},
+          "event_type": {"type": "string", "minLength": 1, "maxLength": 200},
+          "schema_version": {"type": "integer", "const": 1},
+          "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+          "aggregate_local_id": {"$ref": "#/components/schemas/Uuid"},
+          "aggregate_server_id": {"$ref": "#/components/schemas/NullableUuid"},
+          "base_server_row_version": {
+            "oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+          },
+          "occurred_at": {"type": "string", "format": "date-time"},
+          "payload": {"$ref": "#/components/schemas/SafeObject"},
+          "request_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      },
+      "PushRequest": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["events"],
+            "properties": {
+              "events": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {"$ref": "#/components/schemas/ClientEvent"}
+              }
+            }
+          }
+        ]
+      },
+      "Ack": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "event_id",
+          "device_sequence",
+          "aggregate_type",
+          "aggregate_local_id",
+          "aggregate_server_id",
+          "outcome"
+        ],
+        "allOf": [
+          {
+            "if": {"properties": {"outcome": {"const": "APPLIED"}}, "required": ["outcome"]},
+            "then": {
+              "required": ["server_row_version"],
+              "properties": {
+                "aggregate_server_id": {"$ref": "#/components/schemas/Uuid"},
+                "server_row_version": {"type": "integer", "minimum": 1}
+              }
+            }
+          },
+          {
+            "if": {"properties": {"outcome": {"const": "CONFLICT"}}, "required": ["outcome"]},
+            "then": {
+              "required": ["conflict"],
+              "properties": {"aggregate_server_id": {"$ref": "#/components/schemas/Uuid"}}
+            }
+          },
+          {
+            "if": {"properties": {"outcome": {"const": "REJECTED"}}, "required": ["outcome"]},
+            "then": {"required": ["error"]}
+          },
+          {
+            "if": {"properties": {"outcome": {"const": "DUPLICATE"}}, "required": ["outcome"]},
+            "then": {
+              "required": ["original_outcome"],
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {"original_outcome": {"const": "APPLIED"}},
+                    "required": ["original_outcome"]
+                  },
+                  "then": {
+                    "required": ["server_row_version"],
+                    "properties": {
+                      "aggregate_server_id": {"$ref": "#/components/schemas/Uuid"},
+                      "server_row_version": {"type": "integer", "minimum": 1}
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {"original_outcome": {"const": "CONFLICT"}},
+                    "required": ["original_outcome"]
+                  },
+                  "then": {
+                    "required": ["conflict"],
+                    "properties": {"aggregate_server_id": {"$ref": "#/components/schemas/Uuid"}}
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {"original_outcome": {"const": "REJECTED"}},
+                    "required": ["original_outcome"]
+                  },
+                  "then": {"required": ["error"]}
+                }
+              ]
+            }
+          }
+        ],
+        "properties": {
+          "event_id": {"$ref": "#/components/schemas/Uuid"},
+          "device_sequence": {"type": "integer", "minimum": 1},
+          "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+          "aggregate_local_id": {"$ref": "#/components/schemas/Uuid"},
+          "aggregate_server_id": {"$ref": "#/components/schemas/NullableUuid"},
+          "outcome": {"enum": ["APPLIED", "DUPLICATE", "CONFLICT", "REJECTED"]},
+          "original_outcome": {"enum": ["APPLIED", "CONFLICT", "REJECTED"]},
+          "server_row_version": {
+            "oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+          },
+          "error": {"$ref": "#/components/schemas/AckError"},
+          "conflict": {"$ref": "#/components/schemas/Conflict"},
+          "redirect": {"$ref": "#/components/schemas/AckRedirect"}
+        }
+      },
+      "AckError": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["code", "message", "retryable", "request_id"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1, "maxLength": 100},
+          "message": {"type": "string", "minLength": 1, "maxLength": 500},
+          "retryable": {"type": "boolean"},
+          "request_id": {"$ref": "#/components/schemas/Uuid"},
+          "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000}
+        }
+      },
+      "Conflict": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["conflict_kind", "resolution_state"],
+        "properties": {
+          "conflict_kind": {
+            "enum": [
+              "STALE_VERSION",
+              "EDIT_VS_DELETE",
+              "DELETE_VS_EDIT",
+              "ORDER_COLLISION",
+              "ID_COLLISION",
+              "REDIRECT_COLLISION",
+              "POLICY_REVIEW"
+            ]
+          },
+          "resolution_state": {
+            "enum": [
+              "AUTO_MERGED",
+              "LOCAL_WON_EXPLICIT",
+              "SERVER_WON_EXPLICIT",
+              "REVIEW_REQUIRED"
+            ]
+          },
+          "server_event_id": {"$ref": "#/components/schemas/Uuid"},
+          "server_snapshot": {"$ref": "#/components/schemas/SafeObject"}
+        }
+      },
+      "AckRedirect": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["alias_server_id", "canonical_server_id"],
+        "properties": {
+          "alias_server_id": {"$ref": "#/components/schemas/Uuid"},
+          "canonical_server_id": {"$ref": "#/components/schemas/Uuid"}
+        }
+      },
+      "Tombstone": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["tombstone_id", "deleted_by_event_id", "deleted_at", "retain_until"],
+        "properties": {
+          "tombstone_id": {"$ref": "#/components/schemas/Uuid"},
+          "deleted_by_event_id": {"$ref": "#/components/schemas/Uuid"},
+          "deleted_at": {"type": "string", "format": "date-time"},
+          "retain_until": {"type": "string", "format": "date-time"}
+        }
+      },
+      "Redirect": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["alias_server_id", "canonical_server_id"],
+        "properties": {
+          "alias_server_id": {"$ref": "#/components/schemas/Uuid"},
+          "canonical_server_id": {"$ref": "#/components/schemas/Uuid"}
+        }
+      },
+      "BootstrapTombstone": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "tombstone_id",
+          "aggregate_type",
+          "aggregate_server_id",
+          "deleted_by_event_id",
+          "deleted_at",
+          "retain_until"
+        ],
+        "properties": {
+          "tombstone_id": {"$ref": "#/components/schemas/Uuid"},
+          "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+          "aggregate_server_id": {"$ref": "#/components/schemas/Uuid"},
+          "deleted_by_event_id": {"$ref": "#/components/schemas/Uuid"},
+          "deleted_at": {"type": "string", "format": "date-time"},
+          "retain_until": {"type": "string", "format": "date-time"}
+        }
+      },
+      "BootstrapRedirect": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["aggregate_type", "alias_server_id", "canonical_server_id"],
+        "properties": {
+          "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+          "alias_server_id": {"$ref": "#/components/schemas/Uuid"},
+          "canonical_server_id": {"$ref": "#/components/schemas/Uuid"}
+        }
+      },
+      "BootstrapAggregate": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["aggregate_type", "aggregate_server_id", "server_row_version", "payload"],
+        "properties": {
+          "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+          "aggregate_server_id": {"$ref": "#/components/schemas/Uuid"},
+          "server_row_version": {"type": "integer", "minimum": 1},
+          "payload": {"$ref": "#/components/schemas/SafeObject"}
+        }
+      },
+      "PushResponse": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["acknowledged_through_device_sequence", "acks", "server_time"],
+            "properties": {
+              "acknowledged_through_device_sequence": {"type": "integer", "minimum": 0},
+              "acks": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {"$ref": "#/components/schemas/Ack"}
+              },
+              "server_time": {"type": "string", "format": "date-time"}
+            }
+          }
+        ]
+      },
+      "ServerEvent": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "server_sequence",
+          "event_id",
+          "origin_device_id",
+          "event_type",
+          "schema_version",
+          "aggregate_type",
+          "aggregate_server_id",
+          "server_row_version",
+          "operation",
+          "payload",
+          "created_at"
+        ],
+        "properties": {
+          "server_sequence": {"type": "integer", "minimum": 1},
+          "event_id": {"$ref": "#/components/schemas/Uuid"},
+          "origin_device_id": {"$ref": "#/components/schemas/NullableUuid"},
+          "event_type": {"type": "string", "minLength": 1, "maxLength": 200},
+          "schema_version": {"type": "integer", "minimum": 1},
+          "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
+          "aggregate_server_id": {"$ref": "#/components/schemas/Uuid"},
+          "server_row_version": {
+            "oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+          },
+          "operation": {"enum": ["UPSERT", "DELETE", "REDIRECT"]},
+          "payload": {"$ref": "#/components/schemas/SafeObject"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "tombstone": {"$ref": "#/components/schemas/Tombstone"},
+          "redirect": {"$ref": "#/components/schemas/Redirect"}
+        }
+      },
+      "PullResponse": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["from_cursor", "next_cursor", "has_more", "events", "server_time"],
+            "properties": {
+              "from_cursor": {
+                "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
+              },
+              "next_cursor": {"$ref": "#/components/schemas/OpaqueToken"},
+              "has_more": {"type": "boolean"},
+              "events": {
+                "type": "array",
+                "maxItems": 500,
+                "items": {"$ref": "#/components/schemas/ServerEvent"}
+              },
+              "server_time": {"type": "string", "format": "date-time"}
+            }
+          }
+        ]
+      },
+      "BootstrapRequest": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["reason", "snapshot_id", "page_token", "pending_local_event_count"],
+            "properties": {
+              "reason": {"enum": ["FIRST_SYNC", "CURSOR_INVALID", "DEVICE_RESET", "USER_REQUEST"]},
+              "snapshot_id": {"$ref": "#/components/schemas/NullableUuid"},
+              "page_token": {
+                "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
+              },
+              "pending_local_event_count": {"type": "integer", "minimum": 0}
+            }
+          }
+        ]
+      },
+      "BootstrapResponse": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "snapshot_id",
+              "snapshot_high_water_server_sequence",
+              "aggregates",
+              "tombstones",
+              "redirects",
+              "next_page_token",
+              "has_more",
+              "snapshot_cursor",
+              "pending_event_directive",
+              "server_time"
+            ],
+            "properties": {
+              "snapshot_id": {"$ref": "#/components/schemas/Uuid"},
+              "snapshot_high_water_server_sequence": {"type": "integer", "minimum": 0},
+              "aggregates": {
+                "type": "array",
+                "maxItems": 500,
+                "items": {"$ref": "#/components/schemas/BootstrapAggregate"}
+              },
+              "tombstones": {
+                "type": "array",
+                "maxItems": 500,
+                "items": {"$ref": "#/components/schemas/BootstrapTombstone"}
+              },
+              "redirects": {
+                "type": "array",
+                "maxItems": 500,
+                "items": {"$ref": "#/components/schemas/BootstrapRedirect"}
+              },
+              "next_page_token": {
+                "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
+              },
+              "has_more": {"type": "boolean"},
+              "snapshot_cursor": {
+                "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
+              },
+              "pending_event_directive": {"const": "PRESERVE_REBASE_RETRY"},
+              "server_time": {"type": "string", "format": "date-time"}
+            }
+          }
+        ]
+      },
+      "SyncStatus": {
+        "allOf": [
+          {"$ref": "#/components/schemas/BindingFields"},
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "state",
+              "last_acked_device_sequence",
+              "last_pulled_server_sequence",
+              "pending_event_count",
+              "dead_letter_count",
+              "conflict_count",
+              "bootstrap_required"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "SYNCED",
+                  "PENDING",
+                  "CONFLICT",
+                  "BOOTSTRAPPING",
+                  "UPGRADE_REQUIRED",
+                  "RESET_REQUIRED",
+                  "ERROR"
+                ]
+              },
+              "last_acked_device_sequence": {"type": "integer", "minimum": 0},
+              "last_pulled_server_sequence": {"type": "integer", "minimum": 0},
+              "pending_event_count": {"type": "integer", "minimum": 0},
+              "dead_letter_count": {"type": "integer", "minimum": 0},
+              "conflict_count": {"type": "integer", "minimum": 0},
+              "bootstrap_required": {"type": "boolean"},
+              "last_successful_sync_at": {
+                "oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]
+              },
+              "last_error": {"$ref": "#/components/schemas/Error"},
+              "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000}
+            }
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["code", "message", "retryable", "request_id"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1, "maxLength": 100},
+          "message": {"type": "string", "minLength": 1, "maxLength": 500},
+          "retryable": {"type": "boolean"},
+          "request_id": {"$ref": "#/components/schemas/Uuid"},
+          "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000},
+          "bootstrap_required": {"type": "boolean"},
+          "details": {"$ref": "#/components/schemas/SafeObject"}
+        }
+      }
+    }
+  }
+}

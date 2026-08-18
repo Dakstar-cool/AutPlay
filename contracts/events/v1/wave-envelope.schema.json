@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/wave-envelope.schema.json",
+  "title": "AutPlay Wave live envelope v1",
+  "type": "object",
+  "required": ["protocol_version", "type"],
+  "properties": {
+    "protocol_version": {"const": 1},
+    "type": {"enum": ["hello", "event", "snapshot_required", "invalidate", "ping", "pong"]},
+    "room_id": {"type": "string", "format": "uuid"},
+    "room_epoch": {"type": "string", "minLength": 1, "maxLength": 64},
+    "epoch": {"type": "string", "minLength": 1, "maxLength": 64},
+    "sequence": {"type": "integer", "minimum": 1},
+    "latest_sequence": {"type": "integer", "minimum": 0},
+    "kind": {"type": "string", "pattern": "^[A-Z_]{1,48}$"},
+    "payload": {"type": ["object", "string", "null"]},
+    "effective_at": {"type": ["string", "null"], "format": "date-time"},
+    "server_time": {"type": "string", "format": "date-time"},
+    "server_time_ms": {"type": "integer", "minimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"const": "event"}}},
+      "then": {"required": ["epoch", "sequence", "kind"]}
+    },
+    {
+      "if": {"properties": {"type": {"const": "hello"}}},
+      "then": {"required": ["room_id", "room_epoch", "latest_sequence"]}
+    }
+  ],
+  "additionalProperties": false
+}

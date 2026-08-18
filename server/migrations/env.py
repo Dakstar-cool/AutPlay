@@ -27,10 +27,37 @@ REFERENCE_SCHEMAS = frozenset(
         "playlist",
         "sync",
         "vault",
+        "wave",
     }
 )
 
 target_metadata = metadata
+
+_P09_AUTOGENERATE_EXCLUDED = {
+    "bootstrap_session",
+    "bootstrap_snapshot_item",
+    "user_interaction_event",
+    "sync_event",
+    "room",
+    "member",
+    "invitation",
+    "queue_entry",
+    "command",
+    "preflight",
+    "timing_report",
+}
+
+
+def _include_object(
+    object_: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: object | None,
+) -> bool:
+    """P09 physical runtime DDL is additive and audited by dedicated integration tests."""
+    del object_, reflected, compare_to
+    return not (type_ == "table" and name in _P09_AUTOGENERATE_EXCLUDED)
 
 
 def _database_url() -> str:
@@ -50,7 +77,7 @@ def _include_name(
     type_: str,
     parent_names: dict[str, str | None],
 ) -> bool:
-    """Limit reflection to the eleven reference data schemas."""
+    """Limit reflection to the twelve reference data schemas."""
     if type_ == "schema":
         return name in REFERENCE_SCHEMAS
     schema_name = parent_names.get("schema_name")
@@ -70,6 +97,7 @@ def _configure(connection: object | None, *, url: str | None = None) -> None:
         "compare_type": True,
         "compare_server_default": True,
         "version_table_schema": None,
+        "include_object": _include_object,
     }
     if connection is not None:
         options["connection"] = connection

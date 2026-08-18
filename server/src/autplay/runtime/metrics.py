@@ -16,6 +16,8 @@ class RuntimeMetrics:
     _http_requests: Counter = field(init=False, repr=False)
     _http_duration: Histogram = field(init=False, repr=False)
     _readiness: Gauge = field(init=False, repr=False)
+    _wave_timing: Histogram = field(init=False, repr=False)
+    _wave_failures: Counter = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._http_requests = Counter(
@@ -36,6 +38,18 @@ class RuntimeMetrics:
             ("component",),
             registry=self.registry,
         )
+        self._wave_timing = Histogram(
+            "autplay_wave_timing_milliseconds",
+            "Wave timing observations without room, device, token, or URL labels.",
+            ("measurement",),
+            registry=self.registry,
+        )
+        self._wave_failures = Counter(
+            "autplay_wave_failures_total",
+            "Bounded Wave buffer and rejoin failures.",
+            ("kind",),
+            registry=self.registry,
+        )
 
     def observe_http(
         self,
@@ -54,6 +68,18 @@ class RuntimeMetrics:
         """Publish the last readiness state of one required component."""
 
         self._readiness.labels(component).set(1 if ready else 0)
+
+    def observe_wave_timing(self, measurement: str, milliseconds: float) -> None:
+        """Record only declared timing shapes: command_lag, start_skew, or drift."""
+        if measurement not in {"command_lag", "start_skew", "drift"}:
+            raise ValueError("unknown Wave timing measurement")
+        self._wave_timing.labels(measurement).observe(max(0.0, milliseconds))
+
+    def increment_wave_failure(self, kind: str) -> None:
+        """Record a bounded failure category without personal identifiers."""
+        if kind not in {"buffer", "rejoin"}:
+            raise ValueError("unknown Wave failure kind")
+        self._wave_failures.labels(kind).inc()
 
     def render(self) -> tuple[bytes, str]:
         """Return the registry in Prometheus' negotiated text format."""

@@ -12,7 +12,7 @@ from typing import Final
 import sqlalchemy as sa
 from alembic import op
 
-REFERENCE_SQL_SHA256: Final = "596ec53be759a9c6851b3280d2a8335c8bbd5d1424bf152b43f5d13407fe02f9"
+REFERENCE_SQL_SHA256: Final = "168a829d9d2c53e1f14d94f74514f198f89d07c761010b3eb996dd46038d21ab"
 REFERENCE_SQL_PATH: Final = Path(__file__).with_name("reference_v1.sql")
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
@@ -189,6 +189,17 @@ def _classify(statement: str) -> ReferenceStatement:
         return ReferenceStatement(
             statement, "alter_constraint", match.group(3), match.group(1), match.group(2)
         )
+    match = re.match(r"ALTER TABLE ([a-z0-9_]+)\.([a-z0-9_]+)\s+", core, re.I | re.S)
+    if match:
+        # Current reference mirrors also include additive phase ALTER statements.
+        # Historical migrations never select them; their owning later revision does.
+        return ReferenceStatement(
+            statement,
+            "post_reference_alter",
+            hashlib.sha256(core.encode()).hexdigest(),
+            match.group(1),
+            match.group(2),
+        )
     if re.match(r"REVOKE ALL ON SCHEMA app_private FROM PUBLIC", core, re.I):
         return ReferenceStatement(statement, "revoke", "app_private_schema_public")
     if re.match(r"REVOKE ALL ON ALL TABLES", core, re.I):
@@ -216,11 +227,12 @@ def reference_statements() -> tuple[ReferenceStatement, ...]:
     expected_counts = {
         "extension": 2,
         "schema": 12,
-        "table": 57,
-        "index": 53,
-        "function": 13,
-        "trigger": 40,
-        "alter_constraint": 3,
+        "table": 68,
+        "index": 64,
+        "function": 19,
+        "trigger": 49,
+        "alter_constraint": 14,
+        "post_reference_alter": 33,
         "revoke": 4,
         "transaction": 2,
     }
