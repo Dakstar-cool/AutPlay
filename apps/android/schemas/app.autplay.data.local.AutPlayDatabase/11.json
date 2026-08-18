@@ -1,0 +1,4480 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 11,
+    "identityHash": "75bc40117d2dba9e17c1216ea4492854",
+    "entities": [
+      {
+        "tableName": "recording_projection",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_recording_id` TEXT NOT NULL, `server_recording_id` TEXT, `redirect_server_recording_id` TEXT, `title` TEXT NOT NULL, `normalized_title` TEXT NOT NULL, `display_artist` TEXT NOT NULL, `normalized_artist` TEXT NOT NULL, `artist_credit_json` TEXT NOT NULL, `duration_ms` INTEGER, `recording_kind` TEXT NOT NULL, `version_text` TEXT, `explicit_state` INTEGER NOT NULL, `artwork_ref` TEXT, `catalog_version` INTEGER NOT NULL, `projection_updated_at_ms` INTEGER NOT NULL, `is_deleted` INTEGER NOT NULL, PRIMARY KEY(`local_recording_id`))",
+        "fields": [
+          {
+            "fieldPath": "localRecordingId",
+            "columnName": "local_recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRecordingId",
+            "columnName": "server_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "redirectServerRecordingId",
+            "columnName": "redirect_server_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedTitle",
+            "columnName": "normalized_title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayArtist",
+            "columnName": "display_artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedArtist",
+            "columnName": "normalized_artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artistCreditJson",
+            "columnName": "artist_credit_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "recordingKind",
+            "columnName": "recording_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "versionText",
+            "columnName": "version_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explicitState",
+            "columnName": "explicit_state",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artworkRef",
+            "columnName": "artwork_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "catalogVersion",
+            "columnName": "catalog_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectionUpdatedAtMs",
+            "columnName": "projection_updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_recording_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_recording_projection_server_recording_id",
+            "unique": true,
+            "columnNames": [
+              "server_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_recording_projection_server_recording_id` ON `${TABLE_NAME}` (`server_recording_id`)"
+          },
+          {
+            "name": "index_recording_projection_normalized_artist_normalized_title",
+            "unique": false,
+            "columnNames": [
+              "normalized_artist",
+              "normalized_title"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recording_projection_normalized_artist_normalized_title` ON `${TABLE_NAME}` (`normalized_artist`, `normalized_title`)"
+          },
+          {
+            "name": "index_recording_projection_projection_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "projection_updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recording_projection_projection_updated_at_ms` ON `${TABLE_NAME}` (`projection_updated_at_ms`)"
+          },
+          {
+            "name": "index_recording_projection_redirect_server_recording_id",
+            "unique": false,
+            "columnNames": [
+              "redirect_server_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recording_projection_redirect_server_recording_id` ON `${TABLE_NAME}` (`redirect_server_recording_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "release_projection",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_release_id` TEXT NOT NULL, `server_release_id` TEXT, `server_release_group_id` TEXT, `title` TEXT NOT NULL, `display_artist` TEXT NOT NULL, `release_date_text` TEXT, `release_type` TEXT, `artwork_ref` TEXT, `catalog_version` INTEGER NOT NULL, `projection_updated_at_ms` INTEGER NOT NULL, `is_deleted` INTEGER NOT NULL, PRIMARY KEY(`local_release_id`))",
+        "fields": [
+          {
+            "fieldPath": "localReleaseId",
+            "columnName": "local_release_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverReleaseId",
+            "columnName": "server_release_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverReleaseGroupId",
+            "columnName": "server_release_group_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayArtist",
+            "columnName": "display_artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "releaseDateText",
+            "columnName": "release_date_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "releaseType",
+            "columnName": "release_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "artworkRef",
+            "columnName": "artwork_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "catalogVersion",
+            "columnName": "catalog_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectionUpdatedAtMs",
+            "columnName": "projection_updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_release_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_release_projection_server_release_id",
+            "unique": true,
+            "columnNames": [
+              "server_release_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_release_projection_server_release_id` ON `${TABLE_NAME}` (`server_release_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "release_track_projection",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_release_track_id` TEXT NOT NULL, `server_release_track_id` TEXT, `local_release_id` TEXT NOT NULL, `local_recording_id` TEXT NOT NULL, `medium_position` INTEGER NOT NULL, `sequence_no` INTEGER NOT NULL, `number_text` TEXT, `credited_title` TEXT NOT NULL, `credited_artist` TEXT NOT NULL, `duration_ms` INTEGER, PRIMARY KEY(`local_release_track_id`), FOREIGN KEY(`local_release_id`) REFERENCES `release_projection`(`local_release_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`local_recording_id`) REFERENCES `recording_projection`(`local_recording_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localReleaseTrackId",
+            "columnName": "local_release_track_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverReleaseTrackId",
+            "columnName": "server_release_track_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localReleaseId",
+            "columnName": "local_release_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localRecordingId",
+            "columnName": "local_recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mediumPosition",
+            "columnName": "medium_position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequenceNo",
+            "columnName": "sequence_no",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numberText",
+            "columnName": "number_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "creditedTitle",
+            "columnName": "credited_title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "creditedArtist",
+            "columnName": "credited_artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_release_track_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_release_track_projection_server_release_track_id",
+            "unique": true,
+            "columnNames": [
+              "server_release_track_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_release_track_projection_server_release_track_id` ON `${TABLE_NAME}` (`server_release_track_id`)"
+          },
+          {
+            "name": "index_release_track_projection_local_release_id",
+            "unique": false,
+            "columnNames": [
+              "local_release_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_release_track_projection_local_release_id` ON `${TABLE_NAME}` (`local_release_id`)"
+          },
+          {
+            "name": "index_release_track_projection_local_recording_id",
+            "unique": false,
+            "columnNames": [
+              "local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_release_track_projection_local_recording_id` ON `${TABLE_NAME}` (`local_recording_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "release_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_release_id"
+            ],
+            "referencedColumns": [
+              "local_release_id"
+            ]
+          },
+          {
+            "table": "recording_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_recording_id"
+            ],
+            "referencedColumns": [
+              "local_recording_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "user_track_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_user_track_ref_id` TEXT NOT NULL, `server_user_track_ref_id` TEXT, `local_recording_id` TEXT, `server_recording_id` TEXT, `resolution_status` TEXT NOT NULL, `raw_title` TEXT, `raw_artist` TEXT, `raw_album` TEXT, `raw_duration_ms` INTEGER, `resolution_confidence` REAL, `sync_state` TEXT NOT NULL, `server_row_version` INTEGER, `last_local_sequence` INTEGER NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `deleted_at_ms` INTEGER, `server_profile_id` TEXT NOT NULL, PRIMARY KEY(`local_user_track_ref_id`), FOREIGN KEY(`local_recording_id`) REFERENCES `recording_projection`(`local_recording_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverUserTrackRefId",
+            "columnName": "server_user_track_ref_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localRecordingId",
+            "columnName": "local_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverRecordingId",
+            "columnName": "server_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resolutionStatus",
+            "columnName": "resolution_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawTitle",
+            "columnName": "raw_title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawArtist",
+            "columnName": "raw_artist",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawAlbum",
+            "columnName": "raw_album",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawDurationMs",
+            "columnName": "raw_duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "resolutionConfidence",
+            "columnName": "resolution_confidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRowVersion",
+            "columnName": "server_row_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastLocalSequence",
+            "columnName": "last_local_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtMs",
+            "columnName": "deleted_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_user_track_ref_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_user_track_ref_server_profile_id_server_user_track_ref_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_user_track_ref_server_profile_id_server_user_track_ref_id` ON `${TABLE_NAME}` (`server_profile_id`, `server_user_track_ref_id`)"
+          },
+          {
+            "name": "index_user_track_ref_server_recording_id",
+            "unique": false,
+            "columnNames": [
+              "server_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_ref_server_recording_id` ON `${TABLE_NAME}` (`server_recording_id`)"
+          },
+          {
+            "name": "index_user_track_ref_local_recording_id",
+            "unique": false,
+            "columnNames": [
+              "local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_ref_local_recording_id` ON `${TABLE_NAME}` (`local_recording_id`)"
+          },
+          {
+            "name": "index_user_track_ref_resolution_status_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "resolution_status",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_ref_resolution_status_updated_at_ms` ON `${TABLE_NAME}` (`resolution_status`, `updated_at_ms`)"
+          },
+          {
+            "name": "index_user_track_ref_sync_state_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "sync_state",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_ref_sync_state_updated_at_ms` ON `${TABLE_NAME}` (`sync_state`, `updated_at_ms`)"
+          },
+          {
+            "name": "index_user_track_ref_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_ref_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "recording_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_recording_id"
+            ],
+            "referencedColumns": [
+              "local_recording_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "user_track_external_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_user_track_ref_id` TEXT NOT NULL, `provider_key` TEXT NOT NULL, `external_entity_type` TEXT NOT NULL, `external_id` TEXT NOT NULL, `market_scope` TEXT NOT NULL, `relation_role` TEXT NOT NULL, `first_seen_at_ms` INTEGER NOT NULL, PRIMARY KEY(`local_user_track_ref_id`, `provider_key`, `external_entity_type`, `external_id`, `market_scope`), FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerKey",
+            "columnName": "provider_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "externalEntityType",
+            "columnName": "external_entity_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "externalId",
+            "columnName": "external_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "marketScope",
+            "columnName": "market_scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relationRole",
+            "columnName": "relation_role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeenAtMs",
+            "columnName": "first_seen_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_user_track_ref_id",
+            "provider_key",
+            "external_entity_type",
+            "external_id",
+            "market_scope"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_user_track_external_ref_local_user_track_ref_id",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_external_ref_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "user_track_ref",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "library_entry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_library_entry_id` TEXT NOT NULL, `server_library_entry_id` TEXT, `local_user_track_ref_id` TEXT NOT NULL, `added_at_ms` INTEGER NOT NULL, `source` TEXT NOT NULL, `availability_status` TEXT NOT NULL, `sync_state` TEXT NOT NULL, `server_row_version` INTEGER, `last_local_sequence` INTEGER NOT NULL, `removed_at_ms` INTEGER, `updated_at_ms` INTEGER NOT NULL, `server_profile_id` TEXT NOT NULL, PRIMARY KEY(`local_library_entry_id`), FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localLibraryEntryId",
+            "columnName": "local_library_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverLibraryEntryId",
+            "columnName": "server_library_entry_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAtMs",
+            "columnName": "added_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "availabilityStatus",
+            "columnName": "availability_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRowVersion",
+            "columnName": "server_row_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastLocalSequence",
+            "columnName": "last_local_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "removedAtMs",
+            "columnName": "removed_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_library_entry_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_library_entry_server_profile_id_server_library_entry_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_library_entry_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_library_entry_server_profile_id_server_library_entry_id` ON `${TABLE_NAME}` (`server_profile_id`, `server_library_entry_id`)"
+          },
+          {
+            "name": "index_library_entry_local_user_track_ref_id",
+            "unique": true,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_library_entry_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          },
+          {
+            "name": "index_library_entry_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_library_entry_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "user_track_preference",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_user_track_ref_id` TEXT NOT NULL, `preference` TEXT NOT NULL, `rating` INTEGER, `excluded_from_taste` INTEGER NOT NULL, `sync_state` TEXT NOT NULL, `last_local_sequence` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `server_profile_id` TEXT NOT NULL, PRIMARY KEY(`local_user_track_ref_id`), FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "preference",
+            "columnName": "preference",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rating",
+            "columnName": "rating",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "excludedFromTaste",
+            "columnName": "excluded_from_taste",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastLocalSequence",
+            "columnName": "last_local_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_user_track_ref_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_user_track_preference_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_track_preference_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "playlist",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_playlist_id` TEXT NOT NULL, `server_playlist_id` TEXT, `name` TEXT NOT NULL, `description` TEXT, `visibility` TEXT NOT NULL, `playlist_type` TEXT NOT NULL, `smart_rule_version` INTEGER, `smart_rule_json` TEXT, `sync_state` TEXT NOT NULL, `server_row_version` INTEGER, `last_local_sequence` INTEGER NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `deleted_at_ms` INTEGER, `server_profile_id` TEXT NOT NULL, PRIMARY KEY(`local_playlist_id`))",
+        "fields": [
+          {
+            "fieldPath": "localPlaylistId",
+            "columnName": "local_playlist_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverPlaylistId",
+            "columnName": "server_playlist_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "visibility",
+            "columnName": "visibility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playlistType",
+            "columnName": "playlist_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "smartRuleVersion",
+            "columnName": "smart_rule_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "smartRuleJson",
+            "columnName": "smart_rule_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRowVersion",
+            "columnName": "server_row_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastLocalSequence",
+            "columnName": "last_local_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtMs",
+            "columnName": "deleted_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_playlist_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_playlist_server_profile_id_server_playlist_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_playlist_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_playlist_server_profile_id_server_playlist_id` ON `${TABLE_NAME}` (`server_profile_id`, `server_playlist_id`)"
+          },
+          {
+            "name": "index_playlist_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlist_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "playlist_entry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_playlist_entry_id` TEXT NOT NULL, `server_playlist_entry_id` TEXT, `local_playlist_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT NOT NULL, `position_key` TEXT NOT NULL, `active_position_key` TEXT, `source_position` INTEGER, `added_at_ms` INTEGER NOT NULL, `sync_state` TEXT NOT NULL, `server_row_version` INTEGER, `last_local_sequence` INTEGER NOT NULL, `removed_at_ms` INTEGER, `server_profile_id` TEXT NOT NULL, PRIMARY KEY(`local_playlist_entry_id`), FOREIGN KEY(`local_playlist_id`) REFERENCES `playlist`(`local_playlist_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localPlaylistEntryId",
+            "columnName": "local_playlist_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverPlaylistEntryId",
+            "columnName": "server_playlist_entry_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localPlaylistId",
+            "columnName": "local_playlist_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positionKey",
+            "columnName": "position_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activePositionKey",
+            "columnName": "active_position_key",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourcePosition",
+            "columnName": "source_position",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "addedAtMs",
+            "columnName": "added_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRowVersion",
+            "columnName": "server_row_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastLocalSequence",
+            "columnName": "last_local_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "removedAtMs",
+            "columnName": "removed_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_playlist_entry_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_playlist_entry_server_profile_id_server_playlist_entry_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_playlist_entry_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_playlist_entry_server_profile_id_server_playlist_entry_id` ON `${TABLE_NAME}` (`server_profile_id`, `server_playlist_entry_id`)"
+          },
+          {
+            "name": "index_playlist_entry_local_playlist_id_active_position_key",
+            "unique": true,
+            "columnNames": [
+              "local_playlist_id",
+              "active_position_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_playlist_entry_local_playlist_id_active_position_key` ON `${TABLE_NAME}` (`local_playlist_id`, `active_position_key`)"
+          },
+          {
+            "name": "index_playlist_entry_local_user_track_ref_id",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlist_entry_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          },
+          {
+            "name": "index_playlist_entry_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlist_entry_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "playlist",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_playlist_id"
+            ],
+            "referencedColumns": [
+              "local_playlist_id"
+            ]
+          },
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "local_audio_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_audio_state_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT NOT NULL, `local_recording_id` TEXT, `server_audio_variant_id` TEXT, `content_uri` TEXT NOT NULL, `persisted_uri_permission` INTEGER NOT NULL, `local_sha256` BLOB, `fingerprint_algorithm` TEXT, `fingerprint_version` TEXT, `fingerprint_payload` BLOB, `codec` TEXT, `container` TEXT, `bitrate_bps` INTEGER, `sample_rate_hz` INTEGER, `channels` INTEGER, `duration_ms` INTEGER, `status` TEXT NOT NULL, `storage_class` TEXT NOT NULL, `byte_size` INTEGER, `last_accessed_at_ms` INTEGER, `last_verified_at_ms` INTEGER, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`local_audio_state_id`), FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`local_recording_id`) REFERENCES `recording_projection`(`local_recording_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localAudioStateId",
+            "columnName": "local_audio_state_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localRecordingId",
+            "columnName": "local_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverAudioVariantId",
+            "columnName": "server_audio_variant_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentUri",
+            "columnName": "content_uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "persistedUriPermission",
+            "columnName": "persisted_uri_permission",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localSha256",
+            "columnName": "local_sha256",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "fingerprintAlgorithm",
+            "columnName": "fingerprint_algorithm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fingerprintVersion",
+            "columnName": "fingerprint_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fingerprintPayload",
+            "columnName": "fingerprint_payload",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "codec",
+            "columnName": "codec",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "container",
+            "columnName": "container",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bitrateBps",
+            "columnName": "bitrate_bps",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sampleRateHz",
+            "columnName": "sample_rate_hz",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "channels",
+            "columnName": "channels",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "storageClass",
+            "columnName": "storage_class",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "byteSize",
+            "columnName": "byte_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastAccessedAtMs",
+            "columnName": "last_accessed_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastVerifiedAtMs",
+            "columnName": "last_verified_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_audio_state_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_local_audio_state_content_uri",
+            "unique": true,
+            "columnNames": [
+              "content_uri"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_local_audio_state_content_uri` ON `${TABLE_NAME}` (`content_uri`)"
+          },
+          {
+            "name": "index_local_audio_state_local_sha256",
+            "unique": false,
+            "columnNames": [
+              "local_sha256"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_audio_state_local_sha256` ON `${TABLE_NAME}` (`local_sha256`)"
+          },
+          {
+            "name": "index_local_audio_state_local_user_track_ref_id_status",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_audio_state_local_user_track_ref_id_status` ON `${TABLE_NAME}` (`local_user_track_ref_id`, `status`)"
+          },
+          {
+            "name": "index_local_audio_state_local_recording_id",
+            "unique": false,
+            "columnNames": [
+              "local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_audio_state_local_recording_id` ON `${TABLE_NAME}` (`local_recording_id`)"
+          },
+          {
+            "name": "index_local_audio_state_storage_class_last_accessed_at_ms",
+            "unique": false,
+            "columnNames": [
+              "storage_class",
+              "last_accessed_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_audio_state_storage_class_last_accessed_at_ms` ON `${TABLE_NAME}` (`storage_class`, `last_accessed_at_ms`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          },
+          {
+            "table": "recording_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_recording_id"
+            ],
+            "referencedColumns": [
+              "local_recording_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "download_intent",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`download_intent_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT NOT NULL, `server_audio_variant_id` TEXT, `media3_download_id` TEXT, `desired_storage_class` TEXT NOT NULL, `quality_policy` TEXT NOT NULL, `source_policy` TEXT NOT NULL, `state` TEXT NOT NULL, `failure_code` TEXT, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `completed_at_ms` INTEGER, `server_profile_id` TEXT, `last_accessed_at_ms` INTEGER, PRIMARY KEY(`download_intent_id`), FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "downloadIntentId",
+            "columnName": "download_intent_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverAudioVariantId",
+            "columnName": "server_audio_variant_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "media3DownloadId",
+            "columnName": "media3_download_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "desiredStorageClass",
+            "columnName": "desired_storage_class",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qualityPolicy",
+            "columnName": "quality_policy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourcePolicy",
+            "columnName": "source_policy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failureCode",
+            "columnName": "failure_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAtMs",
+            "columnName": "completed_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastAccessedAtMs",
+            "columnName": "last_accessed_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "download_intent_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_download_intent_media3_download_id",
+            "unique": true,
+            "columnNames": [
+              "media3_download_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_download_intent_media3_download_id` ON `${TABLE_NAME}` (`media3_download_id`)"
+          },
+          {
+            "name": "index_download_intent_local_user_track_ref_id",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_intent_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "queue_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`queue_snapshot_id` TEXT NOT NULL, `queue_type` TEXT NOT NULL, `source_context_id` TEXT, `current_entry_id` TEXT, `current_position_ms` INTEGER NOT NULL, `shuffle_mode` TEXT NOT NULL, `repeat_mode` TEXT NOT NULL, `seed` INTEGER, `generation_version` TEXT, `is_active` INTEGER NOT NULL, `active_slot` TEXT, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `server_profile_id` TEXT, `listening_context` TEXT NOT NULL DEFAULT 'GENERAL', `active_listening_event_id` TEXT, `active_session_started_at_ms` INTEGER, `active_session_start_position_ms` INTEGER, `active_session_observed_played_ms` INTEGER, `active_session_user_id` TEXT, `active_session_device_id` TEXT, `active_session_server_profile_id` TEXT, PRIMARY KEY(`queue_snapshot_id`))",
+        "fields": [
+          {
+            "fieldPath": "queueSnapshotId",
+            "columnName": "queue_snapshot_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queueType",
+            "columnName": "queue_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceContextId",
+            "columnName": "source_context_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "currentEntryId",
+            "columnName": "current_entry_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "currentPositionMs",
+            "columnName": "current_position_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shuffleMode",
+            "columnName": "shuffle_mode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "repeatMode",
+            "columnName": "repeat_mode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seed",
+            "columnName": "seed",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "generationVersion",
+            "columnName": "generation_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "is_active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeSlot",
+            "columnName": "active_slot",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "listeningContext",
+            "columnName": "listening_context",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'GENERAL'"
+          },
+          {
+            "fieldPath": "activeListeningEventId",
+            "columnName": "active_listening_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "activeSessionStartedAtMs",
+            "columnName": "active_session_started_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "activeSessionStartPositionMs",
+            "columnName": "active_session_start_position_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "activeSessionObservedPlayedMs",
+            "columnName": "active_session_observed_played_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "activeSessionUserId",
+            "columnName": "active_session_user_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "activeSessionDeviceId",
+            "columnName": "active_session_device_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "activeSessionServerProfileId",
+            "columnName": "active_session_server_profile_id",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "queue_snapshot_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_queue_snapshot_active_slot",
+            "unique": true,
+            "columnNames": [
+              "active_slot"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_queue_snapshot_active_slot` ON `${TABLE_NAME}` (`active_slot`)"
+          }
+        ]
+      },
+      {
+        "tableName": "queue_entry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`queue_entry_id` TEXT NOT NULL, `queue_snapshot_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `source_origin` TEXT NOT NULL, `recommendation_request_id` TEXT, `source_audio_policy` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `recommendation_attribution_json` TEXT, PRIMARY KEY(`queue_entry_id`), FOREIGN KEY(`queue_snapshot_id`) REFERENCES `queue_snapshot`(`queue_snapshot_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "queueEntryId",
+            "columnName": "queue_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queueSnapshotId",
+            "columnName": "queue_snapshot_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceOrigin",
+            "columnName": "source_origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendationRequestId",
+            "columnName": "recommendation_request_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceAudioPolicy",
+            "columnName": "source_audio_policy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendationAttributionJson",
+            "columnName": "recommendation_attribution_json",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "queue_entry_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_queue_entry_queue_snapshot_id_position",
+            "unique": true,
+            "columnNames": [
+              "queue_snapshot_id",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_queue_entry_queue_snapshot_id_position` ON `${TABLE_NAME}` (`queue_snapshot_id`, `position`)"
+          },
+          {
+            "name": "index_queue_entry_local_user_track_ref_id",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_queue_entry_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "queue_snapshot",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "queue_snapshot_id"
+            ],
+            "referencedColumns": [
+              "queue_snapshot_id"
+            ]
+          },
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "listening_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`listening_event_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT NOT NULL, `server_recording_id` TEXT, `started_at_ms` INTEGER NOT NULL, `played_ms` INTEGER NOT NULL, `track_duration_ms` INTEGER, `completion_ratio` REAL, `event_origin` TEXT NOT NULL, `context` TEXT NOT NULL, `recommendation_request_id` TEXT, `explicit_feedback` TEXT NOT NULL, `excluded_from_taste` INTEGER NOT NULL, `sync_state` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `recommendation_attribution_json` TEXT, `session_start_position_ms` INTEGER, `session_end_position_ms` INTEGER, `server_profile_id` TEXT NOT NULL, PRIMARY KEY(`listening_event_id`), FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "listeningEventId",
+            "columnName": "listening_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRecordingId",
+            "columnName": "server_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startedAtMs",
+            "columnName": "started_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playedMs",
+            "columnName": "played_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackDurationMs",
+            "columnName": "track_duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completionRatio",
+            "columnName": "completion_ratio",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "eventOrigin",
+            "columnName": "event_origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "context",
+            "columnName": "context",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendationRequestId",
+            "columnName": "recommendation_request_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explicitFeedback",
+            "columnName": "explicit_feedback",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "excludedFromTaste",
+            "columnName": "excluded_from_taste",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendationAttributionJson",
+            "columnName": "recommendation_attribution_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sessionStartPositionMs",
+            "columnName": "session_start_position_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sessionEndPositionMs",
+            "columnName": "session_end_position_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "listening_event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_listening_event_started_at_ms",
+            "unique": false,
+            "columnNames": [
+              "started_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_listening_event_started_at_ms` ON `${TABLE_NAME}` (`started_at_ms`)"
+          },
+          {
+            "name": "index_listening_event_sync_state_created_at_ms",
+            "unique": false,
+            "columnNames": [
+              "sync_state",
+              "created_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_listening_event_sync_state_created_at_ms` ON `${TABLE_NAME}` (`sync_state`, `created_at_ms`)"
+          },
+          {
+            "name": "index_listening_event_local_user_track_ref_id",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_listening_event_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          },
+          {
+            "name": "index_listening_event_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_listening_event_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "journal_lineage",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`lineage_id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `journal_epoch` TEXT NOT NULL, `next_device_sequence` INTEGER NOT NULL, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`lineage_id`))",
+        "fields": [
+          {
+            "fieldPath": "lineageId",
+            "columnName": "lineage_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "journalEpoch",
+            "columnName": "journal_epoch",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextDeviceSequence",
+            "columnName": "next_device_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "lineage_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_journal_lineage_device_id",
+            "unique": true,
+            "columnNames": [
+              "device_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_journal_lineage_device_id` ON `${TABLE_NAME}` (`device_id`)"
+          },
+          {
+            "name": "index_journal_lineage_journal_epoch",
+            "unique": true,
+            "columnNames": [
+              "journal_epoch"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_journal_lineage_journal_epoch` ON `${TABLE_NAME}` (`journal_epoch`)"
+          },
+          {
+            "name": "index_journal_lineage_user_id_device_id_journal_epoch",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "device_id",
+              "journal_epoch"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_journal_lineage_user_id_device_id_journal_epoch` ON `${TABLE_NAME}` (`user_id`, `device_id`, `journal_epoch`)"
+          },
+          {
+            "name": "index_journal_lineage_lineage_id_user_id_device_id",
+            "unique": true,
+            "columnNames": [
+              "lineage_id",
+              "user_id",
+              "device_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_journal_lineage_lineage_id_user_id_device_id` ON `${TABLE_NAME}` (`lineage_id`, `user_id`, `device_id`)"
+          },
+          {
+            "name": "index_journal_lineage_lineage_id_device_id_journal_epoch",
+            "unique": true,
+            "columnNames": [
+              "lineage_id",
+              "device_id",
+              "journal_epoch"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_journal_lineage_lineage_id_device_id_journal_epoch` ON `${TABLE_NAME}` (`lineage_id`, `device_id`, `journal_epoch`)"
+          }
+        ]
+      },
+      {
+        "tableName": "offline_journal_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`event_id` TEXT NOT NULL, `journal_lineage_id` TEXT NOT NULL, `idempotency_key` TEXT NOT NULL, `user_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `device_sequence` INTEGER NOT NULL, `event_type` TEXT NOT NULL, `schema_version` INTEGER NOT NULL, `aggregate_type` TEXT NOT NULL, `aggregate_local_id` TEXT NOT NULL, `aggregate_server_id` TEXT, `base_server_row_version` INTEGER, `payload_json` TEXT NOT NULL, `request_hash` BLOB NOT NULL, `occurred_at_ms` INTEGER NOT NULL, `state` TEXT NOT NULL, `attempt_count` INTEGER NOT NULL, `next_attempt_at_ms` INTEGER, `lease_token` TEXT, `lease_expires_at_ms` INTEGER, `last_error_code` TEXT, `acked_at_ms` INTEGER, PRIMARY KEY(`event_id`), FOREIGN KEY(`journal_lineage_id`, `user_id`, `device_id`) REFERENCES `journal_lineage`(`lineage_id`, `user_id`, `device_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "journalLineageId",
+            "columnName": "journal_lineage_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idempotencyKey",
+            "columnName": "idempotency_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceSequence",
+            "columnName": "device_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "event_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schema_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregate_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateLocalId",
+            "columnName": "aggregate_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateServerId",
+            "columnName": "aggregate_server_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "baseServerRowVersion",
+            "columnName": "base_server_row_version",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestHash",
+            "columnName": "request_hash",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "occurredAtMs",
+            "columnName": "occurred_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attempt_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAtMs",
+            "columnName": "next_attempt_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "leaseToken",
+            "columnName": "lease_token",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "leaseExpiresAtMs",
+            "columnName": "lease_expires_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "last_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ackedAtMs",
+            "columnName": "acked_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_offline_journal_event_journal_lineage_id_device_sequence",
+            "unique": true,
+            "columnNames": [
+              "journal_lineage_id",
+              "device_sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_offline_journal_event_journal_lineage_id_device_sequence` ON `${TABLE_NAME}` (`journal_lineage_id`, `device_sequence`)"
+          },
+          {
+            "name": "index_offline_journal_event_journal_lineage_id_idempotency_key",
+            "unique": true,
+            "columnNames": [
+              "journal_lineage_id",
+              "idempotency_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_offline_journal_event_journal_lineage_id_idempotency_key` ON `${TABLE_NAME}` (`journal_lineage_id`, `idempotency_key`)"
+          },
+          {
+            "name": "index_offline_journal_event_journal_lineage_id_user_id_device_id",
+            "unique": false,
+            "columnNames": [
+              "journal_lineage_id",
+              "user_id",
+              "device_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offline_journal_event_journal_lineage_id_user_id_device_id` ON `${TABLE_NAME}` (`journal_lineage_id`, `user_id`, `device_id`)"
+          },
+          {
+            "name": "index_offline_journal_event_journal_lineage_id_state_next_attempt_at_ms_device_sequence",
+            "unique": false,
+            "columnNames": [
+              "journal_lineage_id",
+              "state",
+              "next_attempt_at_ms",
+              "device_sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offline_journal_event_journal_lineage_id_state_next_attempt_at_ms_device_sequence` ON `${TABLE_NAME}` (`journal_lineage_id`, `state`, `next_attempt_at_ms`, `device_sequence`)"
+          },
+          {
+            "name": "index_offline_journal_event_journal_lineage_id_aggregate_type_aggregate_local_id_device_sequence",
+            "unique": false,
+            "columnNames": [
+              "journal_lineage_id",
+              "aggregate_type",
+              "aggregate_local_id",
+              "device_sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offline_journal_event_journal_lineage_id_aggregate_type_aggregate_local_id_device_sequence` ON `${TABLE_NAME}` (`journal_lineage_id`, `aggregate_type`, `aggregate_local_id`, `device_sequence`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "journal_lineage",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "journal_lineage_id",
+              "user_id",
+              "device_id"
+            ],
+            "referencedColumns": [
+              "lineage_id",
+              "user_id",
+              "device_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "local_mutation_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_change_id` TEXT NOT NULL, `event_type` TEXT NOT NULL, `schema_version` INTEGER NOT NULL, `aggregate_type` TEXT NOT NULL, `aggregate_local_id` TEXT NOT NULL, `payload_json` TEXT NOT NULL, `occurred_at_ms` INTEGER NOT NULL, `materialization_state` TEXT NOT NULL, `materialized_event_id` TEXT, `materialized_at_ms` INTEGER, PRIMARY KEY(`local_change_id`), FOREIGN KEY(`materialized_event_id`) REFERENCES `offline_journal_event`(`event_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "localChangeId",
+            "columnName": "local_change_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "event_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schema_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregate_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateLocalId",
+            "columnName": "aggregate_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "occurredAtMs",
+            "columnName": "occurred_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "materializationState",
+            "columnName": "materialization_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "materializedEventId",
+            "columnName": "materialized_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "materializedAtMs",
+            "columnName": "materialized_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_change_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_local_mutation_outbox_materialized_event_id",
+            "unique": true,
+            "columnNames": [
+              "materialized_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_local_mutation_outbox_materialized_event_id` ON `${TABLE_NAME}` (`materialized_event_id`)"
+          },
+          {
+            "name": "index_local_mutation_outbox_materialization_state_occurred_at_ms",
+            "unique": false,
+            "columnNames": [
+              "materialization_state",
+              "occurred_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_mutation_outbox_materialization_state_occurred_at_ms` ON `${TABLE_NAME}` (`materialization_state`, `occurred_at_ms`)"
+          },
+          {
+            "name": "index_local_mutation_outbox_aggregate_type_aggregate_local_id_occurred_at_ms",
+            "unique": false,
+            "columnNames": [
+              "aggregate_type",
+              "aggregate_local_id",
+              "occurred_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_mutation_outbox_aggregate_type_aggregate_local_id_occurred_at_ms` ON `${TABLE_NAME}` (`aggregate_type`, `aggregate_local_id`, `occurred_at_ms`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "offline_journal_event",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "materialized_event_id"
+            ],
+            "referencedColumns": [
+              "event_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_cursor",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `journal_lineage_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `journal_epoch` TEXT NOT NULL, `opaque_cursor` TEXT, `last_pulled_server_sequence` INTEGER NOT NULL, `last_acked_device_sequence` INTEGER NOT NULL, `bootstrap_snapshot_id` TEXT, `bootstrap_state` TEXT NOT NULL, `last_sync_at_ms` INTEGER, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`), FOREIGN KEY(`journal_lineage_id`, `device_id`, `journal_epoch`) REFERENCES `journal_lineage`(`lineage_id`, `device_id`, `journal_epoch`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "journalLineageId",
+            "columnName": "journal_lineage_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "journalEpoch",
+            "columnName": "journal_epoch",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "opaqueCursor",
+            "columnName": "opaque_cursor",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastPulledServerSequence",
+            "columnName": "last_pulled_server_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAckedDeviceSequence",
+            "columnName": "last_acked_device_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bootstrapSnapshotId",
+            "columnName": "bootstrap_snapshot_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bootstrapState",
+            "columnName": "bootstrap_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncAtMs",
+            "columnName": "last_sync_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_cursor_journal_lineage_id_device_id_journal_epoch",
+            "unique": false,
+            "columnNames": [
+              "journal_lineage_id",
+              "device_id",
+              "journal_epoch"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_cursor_journal_lineage_id_device_id_journal_epoch` ON `${TABLE_NAME}` (`journal_lineage_id`, `device_id`, `journal_epoch`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "journal_lineage",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "journal_lineage_id",
+              "device_id",
+              "journal_epoch"
+            ],
+            "referencedColumns": [
+              "lineage_id",
+              "device_id",
+              "journal_epoch"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_runtime_status",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `last_error_code` TEXT, `last_attempt_at_ms` INTEGER, `last_success_at_ms` INTEGER, PRIMARY KEY(`server_profile_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "last_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastAttemptAtMs",
+            "columnName": "last_attempt_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSuccessAtMs",
+            "columnName": "last_success_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id"
+          ]
+        }
+      },
+      {
+        "tableName": "sync_bootstrap_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `snapshot_id` TEXT, `page_token` TEXT, `final_cursor` TEXT, `state` TEXT NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snapshotId",
+            "columnName": "snapshot_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pageToken",
+            "columnName": "page_token",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "finalCursor",
+            "columnName": "final_cursor",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id"
+          ]
+        }
+      },
+      {
+        "tableName": "recommendation_interaction_fact",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `event_id` TEXT NOT NULL, `event_type` TEXT NOT NULL, `payload_json` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`, `event_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "event_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_recommendation_interaction_fact_server_profile_id_event_type_created_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "event_type",
+              "created_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recommendation_interaction_fact_server_profile_id_event_type_created_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `event_type`, `created_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "tombstone",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`tombstone_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `aggregate_type` TEXT NOT NULL, `aggregate_local_id` TEXT NOT NULL, `aggregate_server_id` TEXT, `deleted_by_event_id` TEXT NOT NULL, `deleted_at_ms` INTEGER NOT NULL, `retain_until_ms` INTEGER NOT NULL, `server_acked` INTEGER NOT NULL, PRIMARY KEY(`tombstone_id`))",
+        "fields": [
+          {
+            "fieldPath": "tombstoneId",
+            "columnName": "tombstone_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregate_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateLocalId",
+            "columnName": "aggregate_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateServerId",
+            "columnName": "aggregate_server_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deletedByEventId",
+            "columnName": "deleted_by_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtMs",
+            "columnName": "deleted_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retainUntilMs",
+            "columnName": "retain_until_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverAcked",
+            "columnName": "server_acked",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "tombstone_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tombstone_server_profile_id_aggregate_type_aggregate_local_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "aggregate_type",
+              "aggregate_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_tombstone_server_profile_id_aggregate_type_aggregate_local_id` ON `${TABLE_NAME}` (`server_profile_id`, `aggregate_type`, `aggregate_local_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_conflict",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sync_conflict_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `aggregate_type` TEXT NOT NULL, `aggregate_local_id` TEXT NOT NULL, `local_event_id` TEXT, `server_event_id` TEXT, `reason_code` TEXT NOT NULL, `local_snapshot_json` TEXT, `server_snapshot_json` TEXT, `status` TEXT NOT NULL, `resolution_json` TEXT, `created_at_ms` INTEGER NOT NULL, `resolved_at_ms` INTEGER, PRIMARY KEY(`sync_conflict_id`))",
+        "fields": [
+          {
+            "fieldPath": "syncConflictId",
+            "columnName": "sync_conflict_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregate_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateLocalId",
+            "columnName": "aggregate_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localEventId",
+            "columnName": "local_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverEventId",
+            "columnName": "server_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "reasonCode",
+            "columnName": "reason_code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localSnapshotJson",
+            "columnName": "local_snapshot_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverSnapshotJson",
+            "columnName": "server_snapshot_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolutionJson",
+            "columnName": "resolution_json",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolvedAtMs",
+            "columnName": "resolved_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sync_conflict_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_conflict_server_profile_id_aggregate_type_aggregate_local_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "aggregate_type",
+              "aggregate_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_conflict_server_profile_id_aggregate_type_aggregate_local_id` ON `${TABLE_NAME}` (`server_profile_id`, `aggregate_type`, `aggregate_local_id`)"
+          },
+          {
+            "name": "index_sync_conflict_server_profile_id_status_created_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "status",
+              "created_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_conflict_server_profile_id_status_created_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `status`, `created_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "recommendation_pack",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`offline_pack_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `owner_user_id` TEXT, `catalog_snapshot` INTEGER NOT NULL, `model_bundle_version` TEXT NOT NULL, `payload_version` INTEGER NOT NULL, `payload_encoding` TEXT NOT NULL, `payload` BLOB NOT NULL, `payload_sha256` BLOB NOT NULL, `created_at_ms` INTEGER NOT NULL, `expires_at_ms` INTEGER NOT NULL, PRIMARY KEY(`offline_pack_id`))",
+        "fields": [
+          {
+            "fieldPath": "offlinePackId",
+            "columnName": "offline_pack_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUserId",
+            "columnName": "owner_user_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "catalogSnapshot",
+            "columnName": "catalog_snapshot",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "modelBundleVersion",
+            "columnName": "model_bundle_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadVersion",
+            "columnName": "payload_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadEncoding",
+            "columnName": "payload_encoding",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadSha256",
+            "columnName": "payload_sha256",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expiresAtMs",
+            "columnName": "expires_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "offline_pack_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_recommendation_pack_server_profile_id_owner_user_id_expires_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "owner_user_id",
+              "expires_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recommendation_pack_server_profile_id_owner_user_id_expires_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `owner_user_id`, `expires_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "recommendation_presentation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `owner_user_id` TEXT NOT NULL, `presentation_id` TEXT NOT NULL, `recommendation_request_id` TEXT NOT NULL, `source_rank` INTEGER NOT NULL, `impression_event_id` TEXT NOT NULL, `recording_id` TEXT NOT NULL, `offline_pack_id` TEXT, `source` TEXT NOT NULL, `surface` TEXT NOT NULL, `section_key` TEXT, `display_position` INTEGER NOT NULL, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`, `owner_user_id`, `presentation_id`, `recommendation_request_id`, `source_rank`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUserId",
+            "columnName": "owner_user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "presentationId",
+            "columnName": "presentation_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendationRequestId",
+            "columnName": "recommendation_request_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRank",
+            "columnName": "source_rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "impressionEventId",
+            "columnName": "impression_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordingId",
+            "columnName": "recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "offlinePackId",
+            "columnName": "offline_pack_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surface",
+            "columnName": "surface",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionKey",
+            "columnName": "section_key",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayPosition",
+            "columnName": "display_position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "owner_user_id",
+            "presentation_id",
+            "recommendation_request_id",
+            "source_rank"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_recommendation_presentation_impression_event_id",
+            "unique": true,
+            "columnNames": [
+              "impression_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_recommendation_presentation_impression_event_id` ON `${TABLE_NAME}` (`impression_event_id`)"
+          },
+          {
+            "name": "index_recommendation_presentation_server_profile_id_owner_user_id_offline_pack_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "owner_user_id",
+              "offline_pack_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recommendation_presentation_server_profile_id_owner_user_id_offline_pack_id` ON `${TABLE_NAME}` (`server_profile_id`, `owner_user_id`, `offline_pack_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "track_search_content",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`rowid` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `local_user_track_ref_id` TEXT NOT NULL, `title` TEXT, `artist` TEXT, `album` TEXT, `aliases` TEXT, `transliterations` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "rowId",
+            "columnName": "rowid",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "artist",
+            "columnName": "artist",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "album",
+            "columnName": "album",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "aliases",
+            "columnName": "aliases",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "transliterations",
+            "columnName": "transliterations",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "rowid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_track_search_content_local_user_track_ref_id",
+            "unique": true,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_track_search_content_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "track_search_fts",
+        "createSql": "CREATE VIRTUAL TABLE IF NOT EXISTS `${TABLE_NAME}` USING FTS5(`title`, `artist`, `album`, `aliases`, `transliterations`, tokenize=`unicode61`, content=`track_search_content`)",
+        "fields": [
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artist",
+            "columnName": "artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "album",
+            "columnName": "album",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliases",
+            "columnName": "aliases",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transliterations",
+            "columnName": "transliterations",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "rowid"
+          ]
+        },
+        "ftsVersion": "FTS5",
+        "ftsOptions": {
+          "tokenizer": "unicode61",
+          "tokenizerArgs": [],
+          "contentTable": "track_search_content",
+          "languageIdColumnName": "",
+          "matchInfo": "FTS4",
+          "notIndexedColumns": [],
+          "prefixSizes": [],
+          "preferredOrder": "ASC",
+          "contentRowId": "",
+          "columnSize": true,
+          "detail": "FULL"
+        },
+        "contentSyncTriggers": [
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_track_search_fts_BEFORE_UPDATE BEFORE UPDATE ON `track_search_content` BEGIN DELETE FROM `track_search_fts` WHERE `rowid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_track_search_fts_BEFORE_DELETE BEFORE DELETE ON `track_search_content` BEGIN DELETE FROM `track_search_fts` WHERE `rowid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_track_search_fts_AFTER_UPDATE AFTER UPDATE ON `track_search_content` BEGIN INSERT INTO `track_search_fts`(`rowid`, `title`, `artist`, `album`, `aliases`, `transliterations`) VALUES (NEW.`rowid`, NEW.`title`, NEW.`artist`, NEW.`album`, NEW.`aliases`, NEW.`transliterations`); END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_track_search_fts_AFTER_INSERT AFTER INSERT ON `track_search_content` BEGIN INSERT INTO `track_search_fts`(`rowid`, `title`, `artist`, `album`, `aliases`, `transliterations`) VALUES (NEW.`rowid`, NEW.`title`, NEW.`artist`, NEW.`album`, NEW.`aliases`, NEW.`transliterations`); END"
+        ]
+      },
+      {
+        "tableName": "applied_server_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `server_event_id` TEXT NOT NULL, `server_sequence` INTEGER NOT NULL, `applied_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`, `server_event_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverEventId",
+            "columnName": "server_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverSequence",
+            "columnName": "server_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appliedAtMs",
+            "columnName": "applied_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "server_event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_applied_server_event_server_profile_id_server_sequence",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_applied_server_event_server_profile_id_server_sequence` ON `${TABLE_NAME}` (`server_profile_id`, `server_sequence`)"
+          }
+        ]
+      },
+      {
+        "tableName": "deferred_server_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `server_event_id` TEXT NOT NULL, `server_sequence` INTEGER NOT NULL, `event_type` TEXT NOT NULL, `schema_version` INTEGER NOT NULL, `payload_json` TEXT NOT NULL, `deferred_at_ms` INTEGER NOT NULL, `reason_code` TEXT NOT NULL, PRIMARY KEY(`server_profile_id`, `server_event_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverEventId",
+            "columnName": "server_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverSequence",
+            "columnName": "server_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "event_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schemaVersion",
+            "columnName": "schema_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deferredAtMs",
+            "columnName": "deferred_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reasonCode",
+            "columnName": "reason_code",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "server_event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_deferred_server_event_server_profile_id_server_sequence",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_deferred_server_event_server_profile_id_server_sequence` ON `${TABLE_NAME}` (`server_profile_id`, `server_sequence`)"
+          }
+        ]
+      },
+      {
+        "tableName": "aggregate_redirect",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `aggregate_type` TEXT NOT NULL, `alias_local_id` TEXT NOT NULL, `alias_server_id` TEXT, `canonical_local_id` TEXT NOT NULL, `canonical_server_id` TEXT, `created_by_server_sequence` INTEGER NOT NULL, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`, `aggregate_type`, `alias_local_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregate_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasLocalId",
+            "columnName": "alias_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasServerId",
+            "columnName": "alias_server_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "canonicalLocalId",
+            "columnName": "canonical_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalServerId",
+            "columnName": "canonical_server_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdByServerSequence",
+            "columnName": "created_by_server_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "aggregate_type",
+            "alias_local_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_aggregate_redirect_server_profile_id_aggregate_type_alias_server_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "aggregate_type",
+              "alias_server_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_aggregate_redirect_server_profile_id_aggregate_type_alias_server_id` ON `${TABLE_NAME}` (`server_profile_id`, `aggregate_type`, `alias_server_id`)"
+          },
+          {
+            "name": "index_aggregate_redirect_server_profile_id_aggregate_type_canonical_local_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "aggregate_type",
+              "canonical_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aggregate_redirect_server_profile_id_aggregate_type_canonical_local_id` ON `${TABLE_NAME}` (`server_profile_id`, `aggregate_type`, `canonical_local_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "local_import_job",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`import_job_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `adapter_id` TEXT NOT NULL, `adapter_version` TEXT NOT NULL, `envelope_version` INTEGER NOT NULL, `input_sha256` TEXT NOT NULL, `input_digest_verified` INTEGER NOT NULL, `source_uri` TEXT, `persisted_uri_permission` INTEGER NOT NULL, `source_availability` TEXT NOT NULL, `state` TEXT NOT NULL, `checkpoint_position` INTEGER NOT NULL, `total_entries` INTEGER NOT NULL, `review_required_count` INTEGER NOT NULL, `resolved_count` INTEGER NOT NULL, `no_match_count` INTEGER NOT NULL, `unresolved_count` INTEGER NOT NULL, `failed_count` INTEGER NOT NULL, `report_json` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `completed_at_ms` INTEGER, PRIMARY KEY(`import_job_id`))",
+        "fields": [
+          {
+            "fieldPath": "importJobId",
+            "columnName": "import_job_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "adapterId",
+            "columnName": "adapter_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "adapterVersion",
+            "columnName": "adapter_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "envelopeVersion",
+            "columnName": "envelope_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputSha256",
+            "columnName": "input_sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputDigestVerified",
+            "columnName": "input_digest_verified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceUri",
+            "columnName": "source_uri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "persistedUriPermission",
+            "columnName": "persisted_uri_permission",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAvailability",
+            "columnName": "source_availability",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkpointPosition",
+            "columnName": "checkpoint_position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalEntries",
+            "columnName": "total_entries",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reviewRequiredCount",
+            "columnName": "review_required_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolvedCount",
+            "columnName": "resolved_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noMatchCount",
+            "columnName": "no_match_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unresolvedCount",
+            "columnName": "unresolved_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failedCount",
+            "columnName": "failed_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reportJson",
+            "columnName": "report_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAtMs",
+            "columnName": "completed_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "import_job_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_local_import_job_server_profile_id_adapter_id_input_sha256_source_uri",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "adapter_id",
+              "input_sha256",
+              "source_uri"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_local_import_job_server_profile_id_adapter_id_input_sha256_source_uri` ON `${TABLE_NAME}` (`server_profile_id`, `adapter_id`, `input_sha256`, `source_uri`)"
+          },
+          {
+            "name": "index_local_import_job_server_profile_id_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_import_job_server_profile_id_updated_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `updated_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "local_import_entry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`import_entry_id` TEXT NOT NULL, `import_job_id` TEXT NOT NULL, `source_row_key` TEXT NOT NULL, `source_position` INTEGER NOT NULL, `row_sha256` TEXT NOT NULL, `raw_title` TEXT NOT NULL, `raw_artist` TEXT NOT NULL, `raw_album` TEXT, `raw_duration_ms` INTEGER, `raw_provenance_json` TEXT NOT NULL, `content_uri` TEXT, `persisted_uri_permission` INTEGER NOT NULL, `source_availability` TEXT NOT NULL, `fingerprint_algorithm` TEXT, `fingerprint_version` TEXT, `local_user_track_ref_id` TEXT NOT NULL, `workflow_state` TEXT NOT NULL, `selected_local_recording_id` TEXT, `latest_decision_id` TEXT, `last_error_code` TEXT, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`import_entry_id`), FOREIGN KEY(`import_job_id`) REFERENCES `local_import_job`(`import_job_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`local_user_track_ref_id`) REFERENCES `user_track_ref`(`local_user_track_ref_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`selected_local_recording_id`) REFERENCES `recording_projection`(`local_recording_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "importEntryId",
+            "columnName": "import_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importJobId",
+            "columnName": "import_job_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRowKey",
+            "columnName": "source_row_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourcePosition",
+            "columnName": "source_position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rowSha256",
+            "columnName": "row_sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawTitle",
+            "columnName": "raw_title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawArtist",
+            "columnName": "raw_artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawAlbum",
+            "columnName": "raw_album",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawDurationMs",
+            "columnName": "raw_duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rawProvenanceJson",
+            "columnName": "raw_provenance_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentUri",
+            "columnName": "content_uri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "persistedUriPermission",
+            "columnName": "persisted_uri_permission",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAvailability",
+            "columnName": "source_availability",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprintAlgorithm",
+            "columnName": "fingerprint_algorithm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fingerprintVersion",
+            "columnName": "fingerprint_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "workflowState",
+            "columnName": "workflow_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selectedLocalRecordingId",
+            "columnName": "selected_local_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "latestDecisionId",
+            "columnName": "latest_decision_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "last_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "import_entry_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_local_import_entry_import_job_id_source_row_key",
+            "unique": true,
+            "columnNames": [
+              "import_job_id",
+              "source_row_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_local_import_entry_import_job_id_source_row_key` ON `${TABLE_NAME}` (`import_job_id`, `source_row_key`)"
+          },
+          {
+            "name": "index_local_import_entry_import_job_id_source_position",
+            "unique": true,
+            "columnNames": [
+              "import_job_id",
+              "source_position"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_local_import_entry_import_job_id_source_position` ON `${TABLE_NAME}` (`import_job_id`, `source_position`)"
+          },
+          {
+            "name": "index_local_import_entry_import_job_id_workflow_state",
+            "unique": false,
+            "columnNames": [
+              "import_job_id",
+              "workflow_state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_import_entry_import_job_id_workflow_state` ON `${TABLE_NAME}` (`import_job_id`, `workflow_state`)"
+          },
+          {
+            "name": "index_local_import_entry_local_user_track_ref_id",
+            "unique": false,
+            "columnNames": [
+              "local_user_track_ref_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_import_entry_local_user_track_ref_id` ON `${TABLE_NAME}` (`local_user_track_ref_id`)"
+          },
+          {
+            "name": "index_local_import_entry_selected_local_recording_id",
+            "unique": false,
+            "columnNames": [
+              "selected_local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_import_entry_selected_local_recording_id` ON `${TABLE_NAME}` (`selected_local_recording_id`)"
+          },
+          {
+            "name": "index_local_import_entry_latest_decision_id",
+            "unique": false,
+            "columnNames": [
+              "latest_decision_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_import_entry_latest_decision_id` ON `${TABLE_NAME}` (`latest_decision_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "local_import_job",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "import_job_id"
+            ],
+            "referencedColumns": [
+              "import_job_id"
+            ]
+          },
+          {
+            "table": "user_track_ref",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_user_track_ref_id"
+            ],
+            "referencedColumns": [
+              "local_user_track_ref_id"
+            ]
+          },
+          {
+            "table": "recording_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "selected_local_recording_id"
+            ],
+            "referencedColumns": [
+              "local_recording_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "match_decision",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`decision_id` TEXT NOT NULL, `import_entry_id` TEXT NOT NULL, `decision_kind` TEXT NOT NULL, `execution_mode` TEXT NOT NULL, `resolver_state` TEXT NOT NULL, `review_action` TEXT, `selected_local_recording_id` TEXT, `reviewed_candidate_id` TEXT, `supersedes_decision_id` TEXT, `evidence_decision_id` TEXT NOT NULL, `candidate_count` INTEGER NOT NULL, `top_confidence` REAL, `top_two_margin` REAL, `evidence_mode` TEXT NOT NULL, `matcher_version` TEXT NOT NULL, `fingerprint_algorithm` TEXT, `fingerprint_version` TEXT, `explanation_json` TEXT NOT NULL, `idempotency_key` TEXT NOT NULL, `request_sha256` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`decision_id`), FOREIGN KEY(`import_entry_id`) REFERENCES `local_import_entry`(`import_entry_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`selected_local_recording_id`) REFERENCES `recording_projection`(`local_recording_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`supersedes_decision_id`) REFERENCES `match_decision`(`decision_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "decisionId",
+            "columnName": "decision_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importEntryId",
+            "columnName": "import_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decisionKind",
+            "columnName": "decision_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "executionMode",
+            "columnName": "execution_mode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolverState",
+            "columnName": "resolver_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reviewAction",
+            "columnName": "review_action",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "selectedLocalRecordingId",
+            "columnName": "selected_local_recording_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "reviewedCandidateId",
+            "columnName": "reviewed_candidate_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "supersedesDecisionId",
+            "columnName": "supersedes_decision_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "evidenceDecisionId",
+            "columnName": "evidence_decision_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "candidateCount",
+            "columnName": "candidate_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "topConfidence",
+            "columnName": "top_confidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "topTwoMargin",
+            "columnName": "top_two_margin",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "evidenceMode",
+            "columnName": "evidence_mode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "matcherVersion",
+            "columnName": "matcher_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprintAlgorithm",
+            "columnName": "fingerprint_algorithm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fingerprintVersion",
+            "columnName": "fingerprint_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explanationJson",
+            "columnName": "explanation_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idempotencyKey",
+            "columnName": "idempotency_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestSha256",
+            "columnName": "request_sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "decision_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_match_decision_import_entry_id_idempotency_key",
+            "unique": true,
+            "columnNames": [
+              "import_entry_id",
+              "idempotency_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_match_decision_import_entry_id_idempotency_key` ON `${TABLE_NAME}` (`import_entry_id`, `idempotency_key`)"
+          },
+          {
+            "name": "index_match_decision_supersedes_decision_id",
+            "unique": true,
+            "columnNames": [
+              "supersedes_decision_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_match_decision_supersedes_decision_id` ON `${TABLE_NAME}` (`supersedes_decision_id`)"
+          },
+          {
+            "name": "index_match_decision_selected_local_recording_id",
+            "unique": false,
+            "columnNames": [
+              "selected_local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_match_decision_selected_local_recording_id` ON `${TABLE_NAME}` (`selected_local_recording_id`)"
+          },
+          {
+            "name": "index_match_decision_evidence_decision_id",
+            "unique": false,
+            "columnNames": [
+              "evidence_decision_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_match_decision_evidence_decision_id` ON `${TABLE_NAME}` (`evidence_decision_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "local_import_entry",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "import_entry_id"
+            ],
+            "referencedColumns": [
+              "import_entry_id"
+            ]
+          },
+          {
+            "table": "recording_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "selected_local_recording_id"
+            ],
+            "referencedColumns": [
+              "local_recording_id"
+            ]
+          },
+          {
+            "table": "match_decision",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "supersedes_decision_id"
+            ],
+            "referencedColumns": [
+              "decision_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "match_candidate",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`candidate_id` TEXT NOT NULL, `decision_id` TEXT NOT NULL, `local_recording_id` TEXT NOT NULL, `rank` INTEGER NOT NULL, `raw_score` REAL, `confidence` REAL, `evidence_tier` TEXT NOT NULL, `title_snapshot` TEXT NOT NULL, `artist_snapshot` TEXT NOT NULL, `version_snapshot` TEXT, `duration_ms` INTEGER, `feature_evidence_json` TEXT NOT NULL, `hard_conflicts_json` TEXT NOT NULL, `candidate_origins_json` TEXT NOT NULL, `extractor_versions_json` TEXT NOT NULL, `fingerprint_algorithm` TEXT, `fingerprint_version` TEXT, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`candidate_id`), FOREIGN KEY(`decision_id`) REFERENCES `match_decision`(`decision_id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`local_recording_id`) REFERENCES `recording_projection`(`local_recording_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "candidateId",
+            "columnName": "candidate_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decisionId",
+            "columnName": "decision_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localRecordingId",
+            "columnName": "local_recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rank",
+            "columnName": "rank",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawScore",
+            "columnName": "raw_score",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "evidenceTier",
+            "columnName": "evidence_tier",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "titleSnapshot",
+            "columnName": "title_snapshot",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artistSnapshot",
+            "columnName": "artist_snapshot",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "versionSnapshot",
+            "columnName": "version_snapshot",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "featureEvidenceJson",
+            "columnName": "feature_evidence_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hardConflictsJson",
+            "columnName": "hard_conflicts_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "candidateOriginsJson",
+            "columnName": "candidate_origins_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "extractorVersionsJson",
+            "columnName": "extractor_versions_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprintAlgorithm",
+            "columnName": "fingerprint_algorithm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fingerprintVersion",
+            "columnName": "fingerprint_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "candidate_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_match_candidate_decision_id_rank",
+            "unique": true,
+            "columnNames": [
+              "decision_id",
+              "rank"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_match_candidate_decision_id_rank` ON `${TABLE_NAME}` (`decision_id`, `rank`)"
+          },
+          {
+            "name": "index_match_candidate_decision_id_local_recording_id",
+            "unique": true,
+            "columnNames": [
+              "decision_id",
+              "local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_match_candidate_decision_id_local_recording_id` ON `${TABLE_NAME}` (`decision_id`, `local_recording_id`)"
+          },
+          {
+            "name": "index_match_candidate_local_recording_id",
+            "unique": false,
+            "columnNames": [
+              "local_recording_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_match_candidate_local_recording_id` ON `${TABLE_NAME}` (`local_recording_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "match_decision",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "decision_id"
+            ],
+            "referencedColumns": [
+              "decision_id"
+            ]
+          },
+          {
+            "table": "recording_projection",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_recording_id"
+            ],
+            "referencedColumns": [
+              "local_recording_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "wave_room",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`room_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `room_epoch` TEXT NOT NULL, `queue_version` INTEGER NOT NULL, `role` TEXT NOT NULL, `state` TEXT NOT NULL, `last_sequence` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`room_id`))",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "room_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roomEpoch",
+            "columnName": "room_epoch",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queueVersion",
+            "columnName": "queue_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSequence",
+            "columnName": "last_sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "room_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_wave_room_server_profile_id",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_wave_room_server_profile_id` ON `${TABLE_NAME}` (`server_profile_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "wave_preflight",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`room_id` TEXT NOT NULL, `queue_entry_id` TEXT NOT NULL, `server_recording_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT, `queue_version` INTEGER NOT NULL, `availability` TEXT NOT NULL, `final_ready` INTEGER NOT NULL, `checked_at_ms` INTEGER NOT NULL, PRIMARY KEY(`room_id`, `queue_entry_id`))",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "room_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queueEntryId",
+            "columnName": "queue_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRecordingId",
+            "columnName": "server_recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "queueVersion",
+            "columnName": "queue_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "availability",
+            "columnName": "availability",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finalReady",
+            "columnName": "final_ready",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkedAtMs",
+            "columnName": "checked_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "room_id",
+            "queue_entry_id"
+          ]
+        }
+      },
+      {
+        "tableName": "wave_queue_projection",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`room_id` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `position` INTEGER NOT NULL, `queue_entry_id` TEXT NOT NULL, `server_recording_id` TEXT NOT NULL, `local_user_track_ref_id` TEXT, `ready` INTEGER NOT NULL, PRIMARY KEY(`room_id`, `sequence`, `position`))",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "room_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequence",
+            "columnName": "sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queueEntryId",
+            "columnName": "queue_entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRecordingId",
+            "columnName": "server_recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUserTrackRefId",
+            "columnName": "local_user_track_ref_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ready",
+            "columnName": "ready",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "room_id",
+            "sequence",
+            "position"
+          ]
+        }
+      },
+      {
+        "tableName": "remote_import_job_projection",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `import_job_id` TEXT NOT NULL, `delivery_job_id` TEXT, `state` TEXT NOT NULL, `progress_current` INTEGER NOT NULL, `progress_total` INTEGER NOT NULL, `review_required_count` INTEGER NOT NULL, `resolved_count` INTEGER NOT NULL, `no_match_count` INTEGER NOT NULL, `unresolved_count` INTEGER NOT NULL, `failed_count` INTEGER NOT NULL, `last_error_code` TEXT, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`, `import_job_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importJobId",
+            "columnName": "import_job_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deliveryJobId",
+            "columnName": "delivery_job_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progressCurrent",
+            "columnName": "progress_current",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progressTotal",
+            "columnName": "progress_total",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reviewRequiredCount",
+            "columnName": "review_required_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolvedCount",
+            "columnName": "resolved_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noMatchCount",
+            "columnName": "no_match_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unresolvedCount",
+            "columnName": "unresolved_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failedCount",
+            "columnName": "failed_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "last_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "import_job_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_remote_import_job_projection_server_profile_id_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_remote_import_job_projection_server_profile_id_updated_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `updated_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "vault_upload_intent",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`upload_intent_id` TEXT NOT NULL, `server_profile_id` TEXT NOT NULL, `local_audio_state_id` TEXT NOT NULL, `server_recording_id` TEXT NOT NULL, `declared_sha256` TEXT NOT NULL, `expected_size` INTEGER NOT NULL, `server_upload_id` TEXT, `remote_offset` INTEGER NOT NULL, `state` TEXT NOT NULL, `attempt_count` INTEGER NOT NULL, `last_error_code` TEXT, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`upload_intent_id`), FOREIGN KEY(`local_audio_state_id`) REFERENCES `local_audio_state`(`local_audio_state_id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "uploadIntentId",
+            "columnName": "upload_intent_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localAudioStateId",
+            "columnName": "local_audio_state_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRecordingId",
+            "columnName": "server_recording_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "declaredSha256",
+            "columnName": "declared_sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedSize",
+            "columnName": "expected_size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverUploadId",
+            "columnName": "server_upload_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteOffset",
+            "columnName": "remote_offset",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attempt_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "last_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "upload_intent_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_vault_upload_intent_server_profile_id_state_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "state",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vault_upload_intent_server_profile_id_state_updated_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `state`, `updated_at_ms`)"
+          },
+          {
+            "name": "index_vault_upload_intent_local_audio_state_id",
+            "unique": false,
+            "columnNames": [
+              "local_audio_state_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vault_upload_intent_local_audio_state_id` ON `${TABLE_NAME}` (`local_audio_state_id`)"
+          },
+          {
+            "name": "index_vault_upload_intent_server_profile_id_server_upload_id",
+            "unique": true,
+            "columnNames": [
+              "server_profile_id",
+              "server_upload_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_vault_upload_intent_server_profile_id_server_upload_id` ON `${TABLE_NAME}` (`server_profile_id`, `server_upload_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "local_audio_state",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "local_audio_state_id"
+            ],
+            "referencedColumns": [
+              "local_audio_state_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "recommendation_response_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_profile_id` TEXT NOT NULL, `recommendation_request_id` TEXT NOT NULL, `replay` TEXT NOT NULL, `item_count` INTEGER NOT NULL, `response_sha256` TEXT NOT NULL, `received_at_ms` INTEGER NOT NULL, PRIMARY KEY(`server_profile_id`, `recommendation_request_id`))",
+        "fields": [
+          {
+            "fieldPath": "serverProfileId",
+            "columnName": "server_profile_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendationRequestId",
+            "columnName": "recommendation_request_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replay",
+            "columnName": "replay",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemCount",
+            "columnName": "item_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "responseSha256",
+            "columnName": "response_sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAtMs",
+            "columnName": "received_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "server_profile_id",
+            "recommendation_request_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_recommendation_response_snapshot_server_profile_id_received_at_ms",
+            "unique": false,
+            "columnNames": [
+              "server_profile_id",
+              "received_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recommendation_response_snapshot_server_profile_id_received_at_ms` ON `${TABLE_NAME}` (`server_profile_id`, `received_at_ms`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '75bc40117d2dba9e17c1216ea4492854')"
+    ]
+  }
+}

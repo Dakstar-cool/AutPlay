@@ -62,6 +62,7 @@ class OfflineLibraryScreenTest {
     @Test
     fun offlineCommandRemainsVisibleAfterActivityRecreation() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
+        composeRule.onNodeWithText("Library").performClick()
         composeRule.onNodeWithText("0 local track(s)").assertIsDisplayed()
         composeRule.onNodeWithText("Add offline sample").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -70,6 +71,7 @@ class OfflineLibraryScreenTest {
 
         scenario?.recreate()
 
+        composeRule.onNodeWithText("Library").performClick()
         composeRule.onNodeWithText("1 local track(s)").assertIsDisplayed()
     }
 
@@ -78,13 +80,14 @@ class OfflineLibraryScreenTest {
         applicationNonSecretSettingsStore(context).update(NonSecretSettings())
         scenario = ActivityScenario.launch(MainActivity::class.java)
 
-        composeRule.onNodeWithText("AutPlay offline").assertIsDisplayed()
+        composeRule.onNodeWithText("Library").performClick()
         composeRule.onNodeWithText("Standalone changes stay local until you choose a server profile").assertIsDisplayed()
         composeRule.onNodeWithText("Add offline sample").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("1 local track(s)").fetchSemanticsNodes().isNotEmpty()
         }
         scenario?.recreate()
+        composeRule.onNodeWithText("Library").performClick()
         composeRule.onNodeWithText("1 local track(s)").assertIsDisplayed()
         Unit
     }
@@ -121,7 +124,8 @@ class OfflineLibraryScreenTest {
         database.close()
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onNodeWithText("Import").performScrollTo().performClick()
+        composeRule.onNodeWithText("More").performClick()
+        composeRule.onNodeWithText("Import review").performScrollTo().performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Import REVIEW_REQUIRED: 1 row(s)").fetchSemanticsNodes().isNotEmpty()
         }

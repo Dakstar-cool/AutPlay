@@ -140,6 +140,42 @@ interface ImportReviewDao {
 }
 
 @Dao
+interface ServerFeatureProjectionDao {
+    @Upsert
+    suspend fun upsertRemoteImportJob(row: RemoteImportJobProjectionEntity)
+
+    @Query("SELECT * FROM remote_import_job_projection WHERE server_profile_id = :profileId AND import_job_id = :importJobId")
+    suspend fun remoteImportJob(profileId: String, importJobId: String): RemoteImportJobProjectionEntity?
+
+    @Query("SELECT * FROM remote_import_job_projection WHERE import_job_id = :importJobId LIMIT 1")
+    suspend fun remoteImportJobById(importJobId: String): RemoteImportJobProjectionEntity?
+
+    @Query("SELECT * FROM remote_import_job_projection WHERE server_profile_id = :profileId ORDER BY updated_at_ms DESC LIMIT :limit")
+    fun observeRemoteImportJobs(profileId: String, limit: Int): Flow<List<RemoteImportJobProjectionEntity>>
+
+    @Upsert
+    suspend fun upsertVaultUploadIntent(row: VaultUploadIntentEntity)
+
+    @Query("SELECT * FROM vault_upload_intent WHERE upload_intent_id = :intentId")
+    suspend fun vaultUploadIntent(intentId: String): VaultUploadIntentEntity?
+
+    @Query("SELECT * FROM vault_upload_intent WHERE server_profile_id = :profileId AND state IN (:states) ORDER BY updated_at_ms ASC LIMIT :limit")
+    suspend fun pendingVaultUploadIntents(profileId: String, states: List<String>, limit: Int): List<VaultUploadIntentEntity>
+
+    @Query("SELECT * FROM vault_upload_intent WHERE server_profile_id = :profileId ORDER BY updated_at_ms DESC LIMIT :limit")
+    fun observeVaultUploadIntents(profileId: String, limit: Int): Flow<List<VaultUploadIntentEntity>>
+
+    @Upsert
+    suspend fun upsertRecommendationResponseSnapshot(row: RecommendationResponseSnapshotEntity)
+
+    @Query("SELECT * FROM recommendation_response_snapshot WHERE server_profile_id = :profileId AND recommendation_request_id = :requestId")
+    suspend fun recommendationResponseSnapshot(profileId: String, requestId: String): RecommendationResponseSnapshotEntity?
+
+    @Query("SELECT * FROM recommendation_response_snapshot WHERE server_profile_id = :profileId ORDER BY received_at_ms DESC LIMIT :limit")
+    fun observeRecommendationResponseSnapshots(profileId: String, limit: Int): Flow<List<RecommendationResponseSnapshotEntity>>
+}
+
+@Dao
 interface PlaylistDao {
     @Upsert suspend fun upsertPlaylist(row: PlaylistEntity)
     @Upsert suspend fun upsertEntry(row: PlaylistEntryEntity)
@@ -311,6 +347,9 @@ interface JournalDao {
 
     @Query("UPDATE offline_journal_event SET state = :state, next_attempt_at_ms = :nextAttemptAtMs, last_error_code = :errorCode, lease_token = NULL, lease_expires_at_ms = NULL WHERE journal_lineage_id = :lineageId AND event_id = :eventId AND state = 'SENDING' AND lease_token = :leaseToken")
     suspend fun finishAttempt(lineageId: String, eventId: String, leaseToken: String, state: String, nextAttemptAtMs: Long?, errorCode: String?): Int
+
+    @Query("UPDATE offline_journal_event SET state = 'PENDING', attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, next_attempt_at_ms = NULL, last_error_code = 'SESSION_REQUIRED', lease_token = NULL, lease_expires_at_ms = NULL WHERE journal_lineage_id = :lineageId AND event_id = :eventId AND state = 'SENDING' AND lease_token = :leaseToken")
+    suspend fun releaseForSession(lineageId: String, eventId: String, leaseToken: String): Int
 
     @Query("SELECT * FROM offline_journal_event WHERE journal_lineage_id = :lineageId AND device_sequence >= :fromSequence AND state IN ('ACKED', 'DEAD_LETTER') ORDER BY device_sequence ASC LIMIT :limit")
     suspend fun compactable(lineageId: String, fromSequence: Long, limit: Int): List<OfflineJournalEventEntity>

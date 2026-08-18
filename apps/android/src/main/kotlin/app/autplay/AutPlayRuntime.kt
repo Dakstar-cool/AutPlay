@@ -8,12 +8,14 @@ import app.autplay.application.sync.OkHttpSyncTransport
 import app.autplay.application.sync.SyncCoordinator
 import app.autplay.application.wave.OkHttpWaveTransport
 import app.autplay.application.wave.WaveCoordinator
+import app.autplay.domain.wave.WavePrefetchMode
 import app.autplay.playback.ServicePlaybackSessionOwner
 import app.autplay.playback.AndroidWaveSourceProbe
 import app.autplay.playback.Media3WavePrefetchExecutor
 import app.autplay.application.recommendation.DecodedOfflinePack
 import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.recommendation.OkHttpRecommendationPackTransport
+import app.autplay.application.server.ServerFeatureRepository
 import app.autplay.data.security.AndroidKeystoreCredentialStore
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.data.local.AutPlayDatabase
@@ -37,21 +39,30 @@ object AutPlayRuntime {
     suspend fun syncCoordinator(context: Context, binding: ClientEventBinding): SyncCoordinator {
         val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
         check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) { "SYNC_PROFILE_NOT_ACTIVE" }
-        return SyncCoordinator(database(context), OkHttpSyncTransport(settings.serverBaseUrl, AndroidKeystoreCredentialStore(context.applicationContext)))
+        return SyncCoordinator(database(context), OkHttpSyncTransport(apiV1BaseUrl(settings.serverBaseUrl), AndroidKeystoreCredentialStore(context.applicationContext)))
     }
 
     /** Wave is available only for the active authenticated profile; local playback remains independent. */
     @OptIn(UnstableApi::class)
     suspend fun waveCoordinator(context: Context, binding: ClientEventBinding): WaveCoordinator {
-        val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
+        val settingsStore = applicationNonSecretSettingsStore(context.applicationContext)
+        val settings = settingsStore.settings.first()
         check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) { "WAVE_PROFILE_NOT_ACTIVE" }
         val database = database(context)
         return WaveCoordinator(
             database,
-            OkHttpWaveTransport(settings.serverBaseUrl, binding.serverProfileId, AndroidKeystoreCredentialStore(context.applicationContext)),
+            OkHttpWaveTransport(
+                apiRootBaseUrl(settings.serverBaseUrl),
+                binding.serverProfileId,
+                AndroidKeystoreCredentialStore(context.applicationContext),
+                authBaseUrl = apiV1BaseUrl(settings.serverBaseUrl),
+            ),
             ServicePlaybackSessionOwner(context.applicationContext),
             AndroidWaveSourceProbe(context.applicationContext, database),
             Media3WavePrefetchExecutor(context.applicationContext, database),
+            prefetchMode = {
+                wavePrefetchMode(settingsStore.settings.first().wavePrefetchMode)
+            },
         )
     }
 
@@ -67,9 +78,31 @@ object AutPlayRuntime {
             "RECOMMENDATION_PROFILE_NOT_ACTIVE"
         }
         val transport = OkHttpRecommendationPackTransport(
-            settings.serverBaseUrl,
+            apiV1BaseUrl(settings.serverBaseUrl),
             AndroidKeystoreCredentialStore(context.applicationContext),
         )
         return repository.refreshPack(binding, transport, nowMs)
     }
+
+    /** Creates the bounded server-surface adapter for the active profile only. */
+    suspend fun serverFeatures(context: Context, binding: ClientEventBinding): ServerFeatureRepository {
+        val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
+        check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) {
+            "SERVER_PROFILE_NOT_ACTIVE"
+        }
+        return ServerFeatureRepository(
+            settings.serverBaseUrl,
+            settings.streamBaseUrl ?: settings.serverBaseUrl,
+            binding.serverProfileId,
+            AndroidKeystoreCredentialStore(context.applicationContext),
+        )
+    }
+
+    private fun apiV1BaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api/v1"
+
+    // Wave's P13 transport owns the `/v1/wave` suffix and therefore receives the `/api` root.
+    private fun apiRootBaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api"
+
+    internal fun wavePrefetchMode(value: String): WavePrefetchMode =
+        runCatching { WavePrefetchMode.valueOf(value) }.getOrDefault(WavePrefetchMode.NEXT)
 }

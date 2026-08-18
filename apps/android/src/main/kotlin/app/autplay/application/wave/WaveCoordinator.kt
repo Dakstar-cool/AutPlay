@@ -13,10 +13,12 @@ import app.autplay.domain.wave.WaveCommand
 import app.autplay.domain.wave.WavePrefetchMode
 import app.autplay.domain.wave.WaveSequenceRecovery
 import app.autplay.domain.wave.WaveRuntimeState
+import app.autplay.domain.wave.ServerClockEstimator
 import app.autplay.domain.LocalId
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -39,6 +41,14 @@ interface WaveTransport {
     suspend fun close(roomId: String) = Unit
     suspend fun transferHost(roomId: String, targetDeviceId: String) = Unit
     suspend fun hostCommand(roomId: String, command: WaveCommand, queueVersion: Long) = Unit
+    suspend fun clock(): WaveClockSample = throw UnsupportedOperationException("WAVE_CLOCK_UNAVAILABLE")
+    suspend fun start(
+        roomId: String,
+        queueEntryId: String,
+        recordingId: String,
+        queueVersion: Long,
+        expectedSequence: Long,
+    ): Boolean = throw UnsupportedOperationException("WAVE_START_UNAVAILABLE")
     suspend fun preflight(roomId: String, reports: List<WavePreflightReport>) = Unit
     suspend fun timing(roomId: String, report: WaveTimingReport) = Unit
 }
@@ -59,6 +69,13 @@ data class WaveTimingReport(
     val commandLagMs: Long? = null,
     val startSkewMs: Long? = null,
     val driftMs: Long? = null,
+)
+
+data class WaveClockSample(
+    val clientSentMs: Long,
+    val serverReceivedMs: Long,
+    val serverSentMs: Long,
+    val clientReceivedMs: Long,
 )
 
 data class WaveSnapshot(
@@ -89,7 +106,7 @@ class WaveCoordinator(
     private val playback: WavePlaybackExecutor? = null,
     private val sourceProbe: WaveSourceProbe? = null,
     private val prefetch: WavePrefetchExecutor? = null,
-    private val prefetchMode: WavePrefetchMode = WavePrefetchMode.NEXT,
+    private val prefetchMode: suspend () -> WavePrefetchMode = { WavePrefetchMode.NEXT },
     private val unmetered: () -> Boolean = { false },
     private val scope: kotlinx.coroutines.CoroutineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO),
     private val wait: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
@@ -99,6 +116,7 @@ class WaveCoordinator(
     private var connection: AutoCloseable? = null
     private var generation = 0L
     private var serverClockOffsetMs = 0L
+    private val clockEstimator = ServerClockEstimator()
     private val playbackPersistence = PlaybackPersistenceRepository(database)
 
     suspend fun join(roomId: String) {
@@ -106,35 +124,40 @@ class WaveCoordinator(
         recover(roomId)
         connection?.close()
         val cached = database.waveDao().room(roomId) ?: return
-        connection = transport.connect(
-            roomId,
-            cached.lastSequence,
-            cached.roomEpoch,
-            ::onEvent,
-        ) { reconnect(roomId, activeGeneration) }
+        connection = runWaveTransportCall {
+            transport.connect(
+                roomId,
+                cached.lastSequence,
+                cached.roomEpoch,
+                { event -> onEvent(roomId, activeGeneration, event) },
+            ) { reconnect(roomId, activeGeneration) }
+        }
     }
     suspend fun create(allowUserIds: List<String> = emptyList()): String? {
-        val snapshot = transport.create(allowUserIds)
+        val snapshot = runWaveTransportCall { transport.create(allowUserIds) }
         applySnapshot(snapshot)
         join(snapshot.roomId)
         return snapshot.roomCode
     }
-    suspend fun joinByCode(code: String) { applySnapshot(transport.joinByCode(code)); join(requireNotNull(uiState.value.roomId)) }
+    suspend fun joinByCode(code: String) {
+        applySnapshot(runWaveTransportCall { transport.joinByCode(code) })
+        join(requireNotNull(uiState.value.roomId))
+    }
     suspend fun leave() {
         val roomId = uiState.value.roomId ?: return
-        transport.leave(roomId)
+        runWaveTransportCall { transport.leave(roomId) }
         close()
     }
     suspend fun closeRoom() {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         val roomId = uiState.value.roomId ?: return
-        transport.close(roomId)
+        runWaveTransportCall { transport.close(roomId) }
         close()
     }
     suspend fun transferHost(targetDeviceId: String) {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         val roomId = uiState.value.roomId ?: return
-        transport.transferHost(roomId, targetDeviceId)
+        runWaveTransportCall { transport.transferHost(roomId, targetDeviceId) }
         recover(roomId)
     }
     suspend fun submitPreflight(availability: Map<String, WaveAvailability>, finalReady: Boolean) {
@@ -151,27 +174,63 @@ class WaveCoordinator(
                 finalReady,
             )
         }
-        transport.preflight(roomId, reports)
+        runWaveTransportCall { transport.preflight(roomId, reports) }
     }
     suspend fun hostCommand(command: WaveCommand) {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         val roomId = uiState.value.roomId ?: return
         val room = database.waveDao().room(roomId) ?: return
-        transport.hostCommand(roomId, command, room.queueVersion)
+        runWaveTransportCall { transport.hostCommand(roomId, command, room.queueVersion) }
+    }
+    /** UI-safe host pause; starting requires an authoritative queued recording. */
+    suspend fun pauseRoom() {
+        require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
+        val roomId = uiState.value.roomId ?: return
+        val room = database.waveDao().room(roomId) ?: return
+        hostCommand(WaveCommand(room.lastSequence + 1, "PAUSE"))
+    }
+    suspend fun enqueueRecording(recordingId: String) {
+        require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
+        java.util.UUID.fromString(recordingId)
+        val roomId = uiState.value.roomId ?: return
+        val room = database.waveDao().room(roomId) ?: return
+        hostCommand(WaveCommand(room.lastSequence + 1, "QUEUE", recordingId))
+        recover(roomId)
+    }
+    suspend fun startFirstQueued(): Boolean {
+        require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
+        val roomId = uiState.value.roomId ?: return false
+        val room = database.waveDao().room(roomId) ?: return false
+        refreshClock(roomId, room.lastSequence)
+        val current = database.waveDao().queue(roomId, room.lastSequence, 100)
+            .minByOrNull { it.position } ?: return false
+        val started = runWaveTransportCall {
+            transport.start(
+                roomId,
+                current.queueEntryId,
+                current.serverRecordingId,
+                room.queueVersion,
+                room.lastSequence,
+            )
+        }
+        recover(roomId)
+        return started
     }
     suspend fun submitTiming(report: WaveTimingReport) {
         val roomId = uiState.value.roomId ?: return
         serverClockOffsetMs = report.offsetMs
-        transport.timing(roomId, report)
+        runWaveTransportCall { transport.timing(roomId, report) }
     }
     suspend fun recover(roomId: String) {
-        try { applySnapshot(transport.snapshot(roomId)) }
+        try { applySnapshot(runWaveTransportCall { transport.snapshot(roomId) }) }
         catch (_: SecurityException) { mutableUiState.value = mutableUiState.value.copy(state = WaveRuntimeState.DEGRADED, message = "WAVE_AUTH_REQUIRED") }
         catch (_: Exception) { mutableUiState.value = mutableUiState.value.copy(state = WaveRuntimeState.DEGRADED, message = "WAVE_SERVER_UNAVAILABLE") }
     }
-    private fun onEvent(event: WaveEvent) {
-        val roomId = uiState.value.roomId ?: return
+    private fun onEvent(expectedRoomId: String, expectedGeneration: Long, event: WaveEvent) {
+        if (!isCurrentWaveCallback(uiState.value.roomId, generation, expectedRoomId, expectedGeneration)) return
         scope.launch {
+            if (!isCurrentWaveCallback(uiState.value.roomId, generation, expectedRoomId, expectedGeneration)) return@launch
+            val roomId = expectedRoomId
             val room = database.waveDao().room(roomId) ?: return@launch
             if (event.epoch != room.roomEpoch) {
                 recover(roomId)
@@ -314,8 +373,37 @@ class WaveCoordinator(
             },
         )
         runMediaPreflight(resolvedSnapshot)
-        prefetch?.prefetch(resolvedSnapshot, prefetchMode, unmetered(), nowMs)
+        prefetch?.prefetch(resolvedSnapshot, prefetchMode(), unmetered(), nowMs)
+        runCatching { refreshClock(snapshot.roomId, snapshot.sequence) }
         mutableUiState.value = WaveUiState(snapshot.roomId, if (snapshot.state == "CLOSED") WaveRuntimeState.CLOSED else WaveRuntimeState.PREFLIGHT, snapshot.role == "HOST", null)
+    }
+
+    private suspend fun refreshClock(roomId: String, commandSequence: Long) {
+        repeat(INITIAL_CLOCK_SAMPLES) {
+            val sample = runWaveTransportCall { transport.clock() }
+            require(
+                clockEstimator.addSample(
+                    sample.clientSentMs,
+                    sample.serverReceivedMs,
+                    sample.serverSentMs,
+                    sample.clientReceivedMs,
+                ),
+            ) { "WAVE_CLOCK_SAMPLE_INVALID" }
+        }
+        val nowMs = System.currentTimeMillis()
+        require(clockEstimator.isEligible(nowMs)) { "WAVE_CLOCK_UNSTABLE" }
+        serverClockOffsetMs = clockEstimator.serverNow(nowMs) - nowMs
+        runWaveTransportCall {
+            transport.timing(
+                roomId,
+                WaveTimingReport(
+                    commandSequence,
+                    clockEstimator.p95Rtt(),
+                    serverClockOffsetMs,
+                    clockEstimator.uncertaintyMs(),
+                ),
+            )
+        }
     }
 
     private suspend fun runMediaPreflight(snapshot: WaveSnapshot) {
@@ -342,18 +430,33 @@ class WaveCoordinator(
             currentReady = prepared.ready &&
                 (prepared.source != WaveAvailability.VAULT_STREAMABLE || prepared.bufferedMs >= 3_000)
         }
-        transport.preflight(
-            snapshot.roomId,
-            candidates.map { entry ->
-                WavePreflightReport(
-                    entry.queueEntryId,
-                    entry.serverRecordingId,
-                    snapshot.queueVersion,
-                    availability.getValue(entry.queueEntryId),
-                    finalReady = entry.queueEntryId == current.queueEntryId && currentReady,
-                )
-            },
-        )
+        runWaveTransportCall {
+            transport.preflight(
+                snapshot.roomId,
+                candidates.map { entry ->
+                    WavePreflightReport(
+                        entry.queueEntryId,
+                        entry.serverRecordingId,
+                        snapshot.queueVersion,
+                        availability.getValue(entry.queueEntryId),
+                        finalReady = entry.queueEntryId == current.queueEntryId && currentReady,
+                    )
+                },
+            )
+        }
     }
     fun close() { generation++; connection?.close(); connection = null; mutableUiState.value = WaveUiState(state = WaveRuntimeState.CLOSED, message = "WAVE_CLOSED") }
+
+    private companion object { const val INITIAL_CLOCK_SAMPLES = 7 }
 }
+
+internal fun isCurrentWaveCallback(
+    currentRoomId: String?,
+    currentGeneration: Long,
+    callbackRoomId: String,
+    callbackGeneration: Long,
+): Boolean = currentRoomId == callbackRoomId && currentGeneration == callbackGeneration
+
+/** Keeps synchronous transport implementations away from Compose's main-thread coroutine. */
+internal suspend fun <T> runWaveTransportCall(call: suspend () -> T): T =
+    withContext(kotlinx.coroutines.Dispatchers.IO) { call() }

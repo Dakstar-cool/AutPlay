@@ -49,7 +49,13 @@ class AndroidPlaybackSourceResolverTest {
     @Test fun revokedUriFallsBackToStableVaultReferenceWithoutDeletingTrack() = runBlocking {
         val profile = ServerProfileId(uuid(5))
         applicationNonSecretSettingsStore(context).update(
-            NonSecretSettings(profile, UserId(uuid(6)), DeviceId(uuid(7)), "https://vault.test"),
+            NonSecretSettings(
+                activeServerProfileId = profile,
+                activeUserId = UserId(uuid(6)),
+                deviceId = DeviceId(uuid(7)),
+                serverBaseUrl = "https://api.test",
+                streamBaseUrl = "https://vault.test",
+            ),
         )
         val track = track(2)
         database.libraryDao().upsertTrackRef(track)

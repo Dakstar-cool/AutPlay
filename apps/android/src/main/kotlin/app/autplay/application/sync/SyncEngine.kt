@@ -8,6 +8,7 @@ import app.autplay.data.local.entity.OfflineJournalEventEntity
 import app.autplay.data.local.entity.SyncConflictEntity
 import app.autplay.data.local.entity.SyncCursorEntity
 import app.autplay.data.local.entity.SyncRuntimeStatusEntity
+import app.autplay.data.security.SessionRequiredException
 import app.autplay.data.local.entity.SyncBootstrapStateEntity
 import app.autplay.data.local.entity.TombstoneEntity
 import app.autplay.data.local.entity.AggregateRedirectEntity
@@ -96,7 +97,12 @@ class SyncCoordinator(
             candidates.takeWhile { journal.lease(cursor.journalLineageId, it.eventId, lease, now + LEASE_MS) == 1 }
         }
         if (leased.isEmpty()) return
-        val response = try { transport.push(binding, leased) } catch (error: Exception) {
+        val response = try { transport.push(binding, leased) } catch (error: SessionRequiredException) {
+            database.withWriteTransaction {
+                leased.forEach { journal.releaseForSession(cursor.journalLineageId, it.eventId, lease) }
+            }
+            throw error
+        } catch (error: Exception) {
             database.withWriteTransaction { leased.forEach { retry(cursor, it, lease, "NETWORK_UNAVAILABLE", null) } }
             throw error
         }

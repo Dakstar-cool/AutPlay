@@ -1,6 +1,8 @@
 package app.autplay.application.wave
 
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.SessionAccess
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.wave.WaveAvailability
 import app.autplay.domain.wave.WaveCommand
@@ -34,7 +36,10 @@ class OkHttpWaveTransport(
     private val profileId: ServerProfileId,
     private val credentials: CredentialStore,
     private val client: OkHttpClient = OkHttpClient(),
+    private val authBaseUrl: String = baseUrl.trimEnd('/').removeSuffix("/api") + "/api/v1",
 ) : WaveTransport {
+    private val sessionCredentials = RefreshingSessionCredentials(authBaseUrl, credentials, client)
+
     override suspend fun create(allowUserIds: List<String>): WaveSnapshot {
         require(allowUserIds.size <= 7) { "WAVE_ALLOWLIST_TOO_LARGE" }
         return decodeSnapshot(
@@ -56,15 +61,12 @@ class OkHttpWaveTransport(
 
     override suspend fun snapshot(roomId: String): WaveSnapshot {
         val normalizedRoomId = UUID.fromString(roomId).toString()
-        val response = client.newCall(request("${baseUrl.trimEnd('/')}/v1/wave/rooms/$normalizedRoomId/snapshot")).execute()
-        response.use {
-            check(it.isSuccessful) {
-                if (it.code == 401 || it.code == 403) "WAVE_AUTH_REQUIRED" else "WAVE_SNAPSHOT_FAILED"
-            }
-            val payload = checkNotNull(it.body).string()
-            check(payload.length <= MAX_SNAPSHOT_CHARS) { "WAVE_SNAPSHOT_TOO_LARGE" }
-            return decodeSnapshot(Json.parseToJsonElement(payload).jsonObject)
+        val (status, payload) = executeAuthorized("${baseUrl.trimEnd('/')}/v1/wave/rooms/$normalizedRoomId/snapshot") { url, bearer ->
+            Request.Builder().url(url).header("Authorization", bearer).build()
         }
+        check(status in 200..299) { if (status == 401 || status == 403) "WAVE_AUTH_REQUIRED" else "WAVE_SNAPSHOT_FAILED" }
+        check(payload.length <= MAX_SNAPSHOT_CHARS) { "WAVE_SNAPSHOT_TOO_LARGE" }
+        return decodeSnapshot(Json.parseToJsonElement(payload).jsonObject)
     }
     override fun connect(
         roomId: String,
@@ -75,7 +77,7 @@ class OkHttpWaveTransport(
     ): AutoCloseable {
         val normalizedRoomId = UUID.fromString(roomId).toString()
         val websocketUrl = baseUrl.trimEnd('/').replaceFirst("http", "ws") + "/v1/wave/rooms/$normalizedRoomId/events"
-        val socket = client.newWebSocket(request(websocketUrl), object : WebSocketListener() {
+        val socket = client.newWebSocket(webSocketRequest(websocketUrl), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 webSocket.send(
                     buildJsonObject {
@@ -163,6 +165,34 @@ class OkHttpWaveTransport(
         )
     }
 
+    override suspend fun clock(): WaveClockSample {
+        val clientSendMs = System.currentTimeMillis()
+        val payload = postJson("/v1/wave/clock", buildJsonObject {})
+        val clientReceiveMs = System.currentTimeMillis()
+        val serverReceiveMs = payload.getValue("server_receive_epoch_ms").jsonPrimitive.long
+        val serverSendMs = payload.getValue("server_send_epoch_ms").jsonPrimitive.long
+        return WaveClockSample(clientSendMs, serverReceiveMs, serverSendMs, clientReceiveMs)
+    }
+
+    override suspend fun start(
+        roomId: String,
+        queueEntryId: String,
+        recordingId: String,
+        queueVersion: Long,
+        expectedSequence: Long,
+    ): Boolean {
+        val payload = postJson(
+            "/v1/wave/rooms/${UUID.fromString(roomId)}/start",
+            buildJsonObject {
+                put("queue_entry_id", UUID.fromString(queueEntryId).toString())
+                put("recording_id", UUID.fromString(recordingId).toString())
+                put("queue_version", queueVersion)
+                put("expected_sequence", expectedSequence)
+            },
+        )
+        return payload["started"]?.jsonPrimitive?.booleanOrNull == true
+    }
+
     override suspend fun preflight(roomId: String, reports: List<WavePreflightReport>) {
         val normalized = UUID.fromString(roomId)
         require(reports.size <= 4) { "WAVE_PREFLIGHT_TOO_LARGE" }
@@ -202,23 +232,50 @@ class OkHttpWaveTransport(
         )
     }
 
-    private fun postJson(path: String, value: JsonObject): JsonObject {
+    private suspend fun postJson(path: String, value: JsonObject): JsonObject {
         val body = value.toString().toRequestBody(JSON_MEDIA_TYPE)
-        val response = client.newCall(
-            request(baseUrl.trimEnd('/') + path).newBuilder().post(body).build(),
-        ).execute()
-        response.use {
-            if (it.code == 401 || it.code == 403) throw SecurityException("WAVE_AUTH_REQUIRED")
-            check(it.isSuccessful) { "WAVE_REQUEST_FAILED" }
-            val payload = it.body.string()
-            check(payload.length <= MAX_SNAPSHOT_CHARS) { "WAVE_RESPONSE_TOO_LARGE" }
-            return if (payload.isBlank()) buildJsonObject {} else Json.parseToJsonElement(payload).jsonObject
+        val (status, payload) = executeAuthorized(baseUrl.trimEnd('/') + path) { url, bearer ->
+            Request.Builder().url(url).header("Authorization", bearer).post(body).build()
+        }
+        if (status == 401 || status == 403) throw SecurityException("WAVE_AUTH_REQUIRED")
+        check(status in 200..299) { "WAVE_REQUEST_FAILED" }
+        check(payload.length <= MAX_SNAPSHOT_CHARS) { "WAVE_RESPONSE_TOO_LARGE" }
+        return if (payload.isBlank()) buildJsonObject {} else Json.parseToJsonElement(payload).jsonObject
+    }
+
+    private suspend fun executeAuthorized(
+        url: String,
+        request: (String, String) -> Request,
+    ): Pair<Int, String> {
+        var access = sessionCredentials.access(profileId)
+        try {
+            var result = executeOnce(request(url, access.bearer()))
+            if (result.first == 401) {
+                val rejectedGeneration = access.generation
+                access.close()
+                access = sessionCredentials.refreshAfterRejection(profileId, rejectedGeneration)
+                result = executeOnce(request(url, access.bearer()))
+            }
+            return result
+        } finally {
+            access.close()
         }
     }
-    private fun request(url: String): Request {
-        val token = runBlocking { credentials.read(profileId) } ?: throw SecurityException("WAVE_AUTH_REQUIRED")
-        return try { Request.Builder().url(url).header("Authorization", "Bearer " + token.toString(StandardCharsets.UTF_8)).build() } finally { token.fill(0) }
+
+    private fun executeOnce(request: Request): Pair<Int, String> =
+        client.newCall(request).execute().use { it.code to it.body.string() }
+
+    private fun webSocketRequest(url: String): Request {
+        val access = runBlocking { sessionCredentials.access(profileId) }
+        return try {
+            Request.Builder().url(url).header("Authorization", access.bearer()).build()
+        } finally {
+            access.close()
+        }
     }
+
+    private fun SessionAccess.bearer(): String =
+        "Bearer " + token.toString(StandardCharsets.UTF_8)
     private fun decodeSnapshot(value: JsonObject): WaveSnapshot {
         val entries = (value["entries"] ?: value["queue"])?.jsonArray?.map { element ->
             val entry = element.jsonObject

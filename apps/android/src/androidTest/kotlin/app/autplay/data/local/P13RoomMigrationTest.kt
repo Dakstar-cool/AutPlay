@@ -5,6 +5,8 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.autplay.data.local.entity.RecommendationResponseSnapshotEntity
+import app.autplay.data.local.entity.RemoteImportJobProjectionEntity
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -29,6 +31,49 @@ class P13RoomMigrationTest {
             listOf("wave_room", "wave_preflight", "wave_queue_projection").forEach { table ->
                 db.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='$table'").use { statement -> assertTrue(statement.step()); assertEquals(1L, statement.getLong(0)) }
             }
+        }
+    }
+
+    @Test fun v10ToV11PreservesWaveAndCreatesServerFeatureMetadataTables() = runBlocking {
+        val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), context.getDatabasePath(name), BundledSQLiteDriver(), AutPlayDatabase::class)
+        helper.createDatabase(10).use { db ->
+            db.execSQL("INSERT INTO wave_room(room_id,server_profile_id,room_epoch,queue_version,role,state,last_sequence,updated_at_ms) VALUES('room','profile','epoch',1,'HOST','ACTIVE',2,3)")
+        }
+        helper.runMigrationsAndValidate(11, listOf(AutPlayDatabase.MIGRATION_10_11)).use { db ->
+            db.prepare("SELECT count(*) FROM wave_room WHERE room_id='room'").use { statement -> assertTrue(statement.step()); assertEquals(1L, statement.getLong(0)) }
+            listOf("remote_import_job_projection", "vault_upload_intent", "recommendation_response_snapshot").forEach { table ->
+                db.prepare("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='$table'").use { statement -> assertTrue(statement.step()); assertEquals(1L, statement.getLong(0)) }
+            }
+        }
+    }
+
+    @Test fun v11ServerFeatureProjectionDaoRoundTripsMetadataOnlyRows() = runBlocking {
+        val database = AutPlayDatabase.open(context, name)
+        try {
+            val dao = database.serverFeatureProjectionDao()
+            val import = RemoteImportJobProjectionEntity(
+                serverProfileId = "profile",
+                importJobId = "import-job",
+                deliveryJobId = "delivery-job",
+                state = "RUNNING",
+                progressCurrent = 4,
+                progressTotal = 8,
+                reviewRequiredCount = 1,
+                resolvedCount = 2,
+                noMatchCount = 0,
+                unresolvedCount = 1,
+                failedCount = 0,
+                lastErrorCode = null,
+                updatedAtMs = 9,
+            )
+            val response = RecommendationResponseSnapshotEntity("profile", "request", "served", 3, "a".repeat(64), 10)
+            dao.upsertRemoteImportJob(import)
+            dao.upsertRecommendationResponseSnapshot(response)
+
+            assertEquals(import, dao.remoteImportJob("profile", "import-job"))
+            assertEquals(response, dao.recommendationResponseSnapshot("profile", "request"))
+        } finally {
+            database.close()
         }
     }
 }

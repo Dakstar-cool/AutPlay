@@ -2,6 +2,8 @@ package app.autplay.application.recommendation
 
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.SessionCredentialEnvelope
+import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
@@ -16,6 +18,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OkHttpRecommendationPackTransportTest {
+    @Test
+    fun rejectedAccessRefreshesOnceAndRetriesPackRequest() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(401))
+        server.enqueue(MockResponse().setBody("{\"access_token\":\"fresh-access\",\"refresh_token\":\"fresh-refresh\"}"))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"offline_pack_id":"$PACK","recommendation_request_id":"$REQUEST","payload_version":1,"payload_encoding":"RAW_JSON","payload_base64":"e30=","payload_sha256":"${"a".repeat(64)}","created_at_ms":1,"expires_at_ms":2}""",
+            ),
+        )
+        server.start()
+        val credentials = MutableCredentialStore(
+            SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope("stale-access", "valid-refresh", 0),
+            ),
+        )
+        try {
+            OkHttpRecommendationPackTransport(server.url("/api/v1").toString(), credentials)
+                .fetch(BINDING, RecommendationPackFetchRequest())
+            assertEquals("Bearer stale-access", server.takeRequest().getHeader("Authorization"))
+            assertEquals("/api/v1/auth/refresh", server.takeRequest().path)
+            assertEquals("Bearer fresh-access", server.takeRequest().getHeader("Authorization"))
+            assertEquals(1, credentials.decoded().generation)
+        } finally {
+            server.shutdown()
+        }
+    }
+
     @Test
     fun authenticatedPostUsesExactBoundedContractAndZerosCredential() = runBlocking {
         val material = "secret-device-token".toByteArray()
@@ -59,5 +89,13 @@ class OkHttpRecommendationPackTransportTest {
         const val PACK = "44444444-4444-4444-8444-444444444444"
         const val REQUEST = "55555555-5555-4555-8555-555555555555"
         val BINDING = ClientEventBinding(UserId(USER), DeviceId(DEVICE), ServerProfileId(PROFILE))
+    }
+
+    private class MutableCredentialStore(initial: ByteArray) : CredentialStore {
+        private var value = initial.copyOf()
+        override suspend fun read(profileId: ServerProfileId): ByteArray = value.copyOf()
+        override suspend fun write(profileId: ServerProfileId, material: ByteArray) { value = material.copyOf() }
+        override suspend fun clear(profileId: ServerProfileId) { value.fill(0) }
+        fun decoded(): SessionCredentialEnvelope = SessionCredentialEnvelopeCodec.decode(value.copyOf())
     }
 }

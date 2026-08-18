@@ -85,7 +85,7 @@ class AndroidPlaybackSourceResolver(
         val active = settings.settings.first()
         val profileId = active.activeServerProfileId?.value
             ?: return AndroidSourceResolution.Unavailable(PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)
-        if (active.serverBaseUrl == null) {
+        if (active.serverBaseUrl == null || active.streamBaseUrl == null) {
             return AndroidSourceResolution.Unavailable(PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)
         }
         val stableUri = Uri.Builder()

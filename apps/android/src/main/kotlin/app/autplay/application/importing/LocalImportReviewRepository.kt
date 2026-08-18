@@ -921,3 +921,58 @@ fun singleUriImportCommand(
         nowMs = nowMs,
     )
 }
+
+/** Creates one deterministic bounded envelope for audio documents discovered under a SAF tree. */
+fun treeUriImportCommand(
+    serverProfileId: String,
+    treeUri: String,
+    inspections: List<ContentUriInspection>,
+    persistedPermission: Boolean,
+    nowMs: Long,
+): CreateLocalImportCommand {
+    require(inspections.isNotEmpty() && inspections.size <= 2_000)
+    require(inspections.all { it.status == ContentUriStatus.AVAILABLE })
+    val ordered = inspections.sortedBy { it.uri }
+    val digestSource = ordered.joinToString("\u0000") { inspection ->
+        inspection.contentSha256 ?: MessageDigest.getInstance("SHA-256")
+            .digest(inspection.uri.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest(digestSource.toByteArray(StandardCharsets.UTF_8))
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    val rows = ordered.mapIndexed { index, inspection ->
+        val rowKey = MessageDigest.getInstance("SHA-256")
+            .digest(inspection.uri.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        ImportRowInput(
+            sourceRowKey = "document:$rowKey",
+            sourcePosition = index,
+            rawTitle = inspection.displayName ?: "Imported track",
+            rawArtist = "Unknown artist",
+            rawProvenanceJson = buildJsonObject {
+                put("schema_version", 1)
+                put("source_kind", "ANDROID_DOCUMENT_TREE")
+                put("display_name", inspection.displayName?.let(::JsonPrimitive) ?: JsonNull)
+                put("byte_size", inspection.byteSize?.let(::JsonPrimitive) ?: JsonNull)
+                put("input_digest_verified", inspection.contentSha256 != null)
+            }.toString(),
+            contentUri = inspection.uri,
+            persistedUriPermission = persistedPermission,
+            sourceAvailability = ImportSourceAvailability.AVAILABLE,
+        )
+    }
+    return CreateLocalImportCommand(
+        serverProfileId = serverProfileId,
+        adapterId = "android-document-tree",
+        adapterVersion = "1",
+        envelopeVersion = 1,
+        inputSha256 = digest,
+        inputDigestVerified = ordered.all { it.contentSha256 != null },
+        sourceUri = treeUri,
+        persistedUriPermission = persistedPermission,
+        sourceAvailability = ImportSourceAvailability.AVAILABLE,
+        rows = rows,
+        nowMs = nowMs,
+    )
+}

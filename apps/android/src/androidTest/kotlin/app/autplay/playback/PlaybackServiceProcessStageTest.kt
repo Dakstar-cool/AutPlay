@@ -2,6 +2,7 @@ package app.autplay.playback
 
 import android.content.ComponentName
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -57,6 +58,11 @@ class PlaybackServiceProcessStageTest {
         try {
             await("service queue") { onMain { controller.currentMediaItem?.mediaId } == entryId.value }
             await("periodic checkpoint", 25_000) {
+                onMain {
+                    if (controller.playbackState == Player.STATE_READY && !controller.isPlaying) {
+                        controller.play()
+                    }
+                }
                 runBlocking { database.queueDao().activeSnapshotOnce()?.currentPositionMs ?: 0 } >= 10_000
             }
             assertTrue(requireNotNull(database.queueDao().activeSnapshotOnce()).currentPositionMs >= 10_000)

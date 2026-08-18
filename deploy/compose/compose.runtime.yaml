@@ -54,7 +54,7 @@ services:
     ports:
       - name: api-local
         target: 8787
-        host_ip: 127.0.0.1
+        host_ip: "${AUTPLAY_RUNTIME_BIND_HOST:-127.0.0.1}"
         published: "${AUTPLAY_API_PORT:-8787}"
         protocol: tcp
     volumes:
@@ -116,7 +116,7 @@ services:
     ports:
       - name: stream-local
         target: 8788
-        host_ip: 127.0.0.1
+        host_ip: "${AUTPLAY_RUNTIME_BIND_HOST:-127.0.0.1}"
         published: "${AUTPLAY_STREAM_PORT:-8788}"
         protocol: tcp
     volumes:

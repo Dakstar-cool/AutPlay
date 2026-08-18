@@ -4,6 +4,10 @@
 
 **Planning horizon:** P01-P14
 
+**Post-RC milestones:** Android frontend M1 and frontend M2 server surfaces are tracked separately
+from the closed P00-P14 phase graph. They expose already delivered contracts, add device-local
+presentation/state, and must not imply a P15 backend contract or broaden the P14 RC claim.
+
 **Execution rule:** one phase at a time; a trusted manifest edge may continue to its successor only after verified exit gates and standing user authorization
 
 ## Repository state during P12 closeout

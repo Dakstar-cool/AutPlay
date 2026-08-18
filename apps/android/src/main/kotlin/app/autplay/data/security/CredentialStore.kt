@@ -11,6 +11,13 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Port for short secret material scoped to a server profile.
@@ -24,6 +31,59 @@ interface CredentialStore {
     suspend fun write(profileId: ServerProfileId, material: ByteArray)
 
     suspend fun clear(profileId: ServerProfileId)
+}
+
+/** Versioned access/refresh material encrypted as one profile-scoped Keystore value. */
+data class SessionCredentialEnvelope(
+    val accessToken: String,
+    val refreshToken: String?,
+    val generation: Long,
+    val refreshPending: Boolean = false,
+) {
+    init {
+        require(accessToken.isNotBlank() && accessToken.length <= MAX_TOKEN_CHARS)
+        require(refreshToken == null || (refreshToken.isNotBlank() && refreshToken.length <= MAX_TOKEN_CHARS))
+        require(generation >= 0)
+    }
+
+    private companion object { const val MAX_TOKEN_CHARS = 4_096 }
+}
+
+/** Keeps old raw access-token values readable while new profiles retain their refresh credential. */
+object SessionCredentialEnvelopeCodec {
+    fun decode(material: ByteArray): SessionCredentialEnvelope {
+        val raw = material.toString(StandardCharsets.UTF_8)
+        if (!raw.trimStart().startsWith("{")) return SessionCredentialEnvelope(raw, null, 0)
+        val value = Json.parseToJsonElement(raw).jsonObject
+        return SessionCredentialEnvelope(
+            accessToken = value.requiredString("access_token"),
+            refreshToken = value["refresh_token"]?.let { element ->
+                (element as? JsonPrimitive)?.takeUnless { it.content == "null" }?.content
+            },
+            generation = value["generation"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0,
+            refreshPending = value["refresh_pending"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+        )
+    }
+
+    fun encode(value: SessionCredentialEnvelope): ByteArray = buildJsonObject {
+        put("access_token", value.accessToken)
+        value.refreshToken?.let { put("refresh_token", it) }
+        put("generation", value.generation)
+        put("refresh_pending", value.refreshPending)
+    }.toString().toByteArray(StandardCharsets.UTF_8)
+
+    private fun JsonObject.requiredString(name: String): String =
+        requireNotNull(this[name]) { "CREDENTIAL_ENVELOPE_INVALID" }.jsonPrimitive.content
+}
+
+/** Returns only the bearer access token and wipes the decrypted envelope buffer immediately. */
+suspend fun CredentialStore.readAccessToken(profileId: ServerProfileId): ByteArray? {
+    val material = read(profileId) ?: return null
+    return try {
+        SessionCredentialEnvelopeCodec.decode(material).accessToken.toByteArray(StandardCharsets.UTF_8)
+    } finally {
+        material.fill(0)
+    }
 }
 
 /**

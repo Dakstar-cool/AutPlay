@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.room3)
 }
 
+val qaSideBySide = providers.gradleProperty("autplay.qaSideBySide").orNull == "true"
 
 android {
     namespace = "app.autplay"
@@ -16,7 +17,7 @@ android {
     buildToolsVersion = "36.1.0"
 
     defaultConfig {
-        applicationId = "app.autplay"
+        applicationId = if (qaSideBySide) "app.autplay.qa" else "app.autplay"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

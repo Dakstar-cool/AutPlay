@@ -8,6 +8,25 @@ Status meanings:
 - `NOT_STARTED`: the owning future phase has not begun.
 - `CHANGE_PROPOSED`: a documented discrepancy needs an ADR/change set before its owning implementation.
 
+## Post-P14 Android frontend M1
+
+| Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |
+| --- | --- | --- | --- | --- |
+| Android feature navigation and adaptive device classes | Product UI section 94; Android architecture section 7 | Typed destinations; compact bottom navigation and shared rail renderer under `app.autplay.ui`; width classes retained for later content policy | Android lint/debug APK and host unit suite; 89/89 connected tests on physical Samsung SM-A556E, including process restart | PASS for M1 foundation |
+| Real Wave frontend without broader media authorization | Wave Protocol v1; ADR-026 | Up to seven invites; create/join/share/leave/close; host queue/pause and clock-calibrated strict start through `WaveCoordinator`; room code remains ephemeral | Existing P13 Wave suites, `FrontendBindingTest`, frontend compile/lint | PASS for contract-backed controls |
+| Device-local appearance, scoped music folder and settings transfer | Product settings/import/privacy requirements; Android SAF boundary | Additive non-secret DataStore keys, bounded SAF tree scan into local import review, and bounded secret-free JSON transfer | `SettingsTransferCodecTest`; Android lint/debug APK | PASS for M1 foundation |
+| Password/profile/device administration | Product authentication/profile requirements | Contract-backed logout current/all and revoke-current-known-device plus separately named local disconnect; password change and device enumeration remain unavailable | Repository transport tests, physical-device smoke, M2 handoff | PASS for delivered server contracts; broader account management remains NOT_STARTED |
+
+## Post-P14 Android frontend M2 server surfaces
+
+| Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |
+| --- | --- | --- | --- | --- |
+| Optional API and stream service origins | P06/P08 streaming boundary; local-first architecture | Separate non-secret API/stream origins with legacy one-origin migration, fixed API paths, export exclusion and stream-without-API rejection | Settings/transport host tests; physical API and stream health smoke | PASS |
+| Server library and import visibility | Existing P07/P10 server contracts; F-015 unresolved-first rule | Ephemeral bounded library snapshot/search plus durable remote-import job projections and bounded polling; only evidence-safe review actions are exposed | Exact-path/nullable-report tests; import UI safety test; live fixture import, restart and report smoke | PASS |
+| Vault upload execution | P06 resumable Vault contracts; WorkManager ownership | Durable intent-only WorkManager input, SHA-256/size preflight, stable idempotency, offset reconciliation, 1 MiB chunks and cancellation; local item must have a server `recording_id` | Host worker/transport tests and physical UI gating | PASS for implementation; real byte E2E awaits an eligible local item |
+| Online recommendation serving and replay | P11 immutable recommendation provenance | Direct bounded serve/home/replay calls, persisted response hash/owner/presentation metadata and offline-pack-first Home | Exact route/hash tests; live serve smoke on physical device | PASS |
+| Session management | P03 auth contracts and Keystore boundary | Logout current/all, revoke current known device, and explicit local-only disconnect; remote success precedes local credential clearing | Transport ordering/401 tests and physical provisioning smoke | PASS for existing contracts |
+
 ## P04 Sync Protocol v1 contract
 
 | Requirement / decision | Design source | Repository implementation | Tests / evidence | Status |

@@ -15,6 +15,7 @@ import app.autplay.data.local.dao.PlaylistDao
 import app.autplay.data.local.dao.QueueDao
 import app.autplay.data.local.dao.RecommendationPackDao
 import app.autplay.data.local.dao.SearchDao
+import app.autplay.data.local.dao.ServerFeatureProjectionDao
 import app.autplay.data.local.dao.SyncDao
 import app.autplay.data.local.dao.WaveDao
 import app.autplay.data.local.entity.AggregateRedirectEntity
@@ -37,6 +38,8 @@ import app.autplay.data.local.entity.QueueEntryEntity
 import app.autplay.data.local.entity.QueueSnapshotEntity
 import app.autplay.data.local.entity.RecommendationPackEntity
 import app.autplay.data.local.entity.RecommendationPresentationEntity
+import app.autplay.data.local.entity.RecommendationResponseSnapshotEntity
+import app.autplay.data.local.entity.RemoteImportJobProjectionEntity
 import app.autplay.data.local.entity.RecordingProjectionEntity
 import app.autplay.data.local.entity.ReleaseProjectionEntity
 import app.autplay.data.local.entity.ReleaseTrackProjectionEntity
@@ -54,6 +57,7 @@ import app.autplay.data.local.entity.WavePreflightEntity
 import app.autplay.data.local.entity.WaveRoomEntity
 import app.autplay.data.local.entity.WaveQueueProjectionEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
+import app.autplay.data.local.entity.VaultUploadIntentEntity
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
@@ -98,8 +102,11 @@ import kotlinx.coroutines.Dispatchers
         WaveRoomEntity::class,
         WavePreflightEntity::class,
         WaveQueueProjectionEntity::class,
+        RemoteImportJobProjectionEntity::class,
+        VaultUploadIntentEntity::class,
+        RecommendationResponseSnapshotEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -125,6 +132,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
 
     abstract fun importReviewDao(): ImportReviewDao
     abstract fun waveDao(): WaveDao
+    abstract fun serverFeatureProjectionDao(): ServerFeatureProjectionDao
 
     companion object {
         const val DATABASE_NAME = "autplay.db"
@@ -137,7 +145,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
             ).setDriver(BundledSQLiteDriver())
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */
@@ -297,6 +305,20 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 connection.execSQL("CREATE INDEX index_wave_room_server_profile_id ON wave_room(server_profile_id)")
                 connection.execSQL("CREATE TABLE wave_preflight (room_id TEXT NOT NULL, queue_entry_id TEXT NOT NULL, server_recording_id TEXT NOT NULL, local_user_track_ref_id TEXT, queue_version INTEGER NOT NULL, availability TEXT NOT NULL, final_ready INTEGER NOT NULL, checked_at_ms INTEGER NOT NULL, PRIMARY KEY(room_id, queue_entry_id))")
                 connection.execSQL("CREATE TABLE wave_queue_projection (room_id TEXT NOT NULL, sequence INTEGER NOT NULL, position INTEGER NOT NULL, queue_entry_id TEXT NOT NULL, server_recording_id TEXT NOT NULL, local_user_track_ref_id TEXT, ready INTEGER NOT NULL, PRIMARY KEY(room_id, sequence, position))")
+            }
+        }
+
+        /** Post-P14 server-feature metadata only; credentials, URLs, paths and payloads stay out. */
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("CREATE TABLE remote_import_job_projection (server_profile_id TEXT NOT NULL, import_job_id TEXT NOT NULL, delivery_job_id TEXT, state TEXT NOT NULL, progress_current INTEGER NOT NULL, progress_total INTEGER NOT NULL, review_required_count INTEGER NOT NULL, resolved_count INTEGER NOT NULL, no_match_count INTEGER NOT NULL, unresolved_count INTEGER NOT NULL, failed_count INTEGER NOT NULL, last_error_code TEXT, updated_at_ms INTEGER NOT NULL, PRIMARY KEY(server_profile_id, import_job_id))")
+                connection.execSQL("CREATE INDEX index_remote_import_job_projection_server_profile_id_updated_at_ms ON remote_import_job_projection(server_profile_id, updated_at_ms)")
+                connection.execSQL("CREATE TABLE vault_upload_intent (upload_intent_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, local_audio_state_id TEXT NOT NULL, server_recording_id TEXT NOT NULL, declared_sha256 TEXT NOT NULL, expected_size INTEGER NOT NULL, server_upload_id TEXT, remote_offset INTEGER NOT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, last_error_code TEXT, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL, PRIMARY KEY(upload_intent_id), FOREIGN KEY(local_audio_state_id) REFERENCES local_audio_state(local_audio_state_id) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                connection.execSQL("CREATE INDEX index_vault_upload_intent_server_profile_id_state_updated_at_ms ON vault_upload_intent(server_profile_id, state, updated_at_ms)")
+                connection.execSQL("CREATE INDEX index_vault_upload_intent_local_audio_state_id ON vault_upload_intent(local_audio_state_id)")
+                connection.execSQL("CREATE UNIQUE INDEX index_vault_upload_intent_server_profile_id_server_upload_id ON vault_upload_intent(server_profile_id, server_upload_id)")
+                connection.execSQL("CREATE TABLE recommendation_response_snapshot (server_profile_id TEXT NOT NULL, recommendation_request_id TEXT NOT NULL, replay TEXT NOT NULL, item_count INTEGER NOT NULL, response_sha256 TEXT NOT NULL, received_at_ms INTEGER NOT NULL, PRIMARY KEY(server_profile_id, recommendation_request_id))")
+                connection.execSQL("CREATE INDEX index_recommendation_response_snapshot_server_profile_id_received_at_ms ON recommendation_response_snapshot(server_profile_id, received_at_ms)")
             }
         }
     }

@@ -26,3 +26,10 @@ Status values: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `PASS`, `DEFERRED_WITH_A
 | --- | --- | --- | --- |
 | Codex Development Harness v1 | PASS | `docs/implementation/HANDOFF_HARNESS_V1.md` | None; separate tooling milestone, unchanged by P04 product-contract completion |
 | Codex phase pipeline v1 | PASS | `docs/implementation/HANDOFF_HARNESS_PHASE_PIPELINE_V1.md`; consumed P04 -> P05 state and canonical gates | Started P05 exactly once; no P05 -> P06 edge is configured |
+
+## Post-RC product milestones
+
+| Milestone | Status | Evidence | Blocker |
+|---|---|---|---|
+| Android frontend M1 | PASS | `docs/implementation/HANDOFF_FRONTEND_M1.md`; adaptive shell, SAF tree import, strict Wave start, settings transfer; qualified by the M2 89/89 Samsung SM-A556E connected gate | None inside the bounded post-P14 frontend milestone; not P15 |
+| Android frontend M2 server surfaces | PASS | `docs/implementation/HANDOFF_FRONTEND_M2_SERVER_SURFACES.md`; Room v11; host unit/lint/APK gates; 89/89 physical-device tests; live API/stream/library/recommendation/import smoke | Real Vault byte upload/Range playback awaits a local audio item with a synced server `recording_id`; production signing/publication remain separate |

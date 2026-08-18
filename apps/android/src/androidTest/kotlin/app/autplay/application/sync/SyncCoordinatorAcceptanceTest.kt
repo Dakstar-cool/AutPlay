@@ -12,6 +12,7 @@ import app.autplay.data.local.entity.PlaylistEntity
 import app.autplay.data.local.entity.TrackSearchContentEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.SessionRequiredException
 import app.autplay.application.library.AddLocalTrackCommand
 import app.autplay.application.library.AddLocalTrackResult
 import app.autplay.application.library.LocalLibraryCommandRepository
@@ -87,6 +88,19 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals(100, transport.sent.size)
         assertEquals(101L, db.journalDao().event(pending(101).eventId)?.deviceSequence)
         assertEquals("PENDING", db.journalDao().event(pending(101).eventId)?.state)
+    }
+
+    @Test fun sessionRequiredReleasesJournalWithoutConsumingRetryBudget() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1)
+        db.journalDao().insert(event)
+
+        runCatching { SyncCoordinator(db, FakeTransport(throwSessionRequired = true)).run(binding) }
+
+        val preserved = db.journalDao().event(event.eventId)!!
+        assertEquals("PENDING", preserved.state)
+        assertEquals(0, preserved.attemptCount)
+        assertEquals("SESSION_REQUIRED", preserved.lastErrorCode)
     }
 
     @Test fun dirtyRemoteDeleteCreatesConflictWithoutOverwrite() = runBlocking {
@@ -469,9 +483,14 @@ class SyncCoordinatorAcceptanceTest {
         private val throwInvalidCursor: Boolean = false,
         private val acks: List<SyncAck> = emptyList(),
         private val bootstrapPages: List<BootstrapPage> = emptyList(),
+        private val throwSessionRequired: Boolean = false,
     ) : SyncTransport {
         val sent = mutableListOf<app.autplay.data.local.entity.OfflineJournalEventEntity>()
-        override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> { sent += events; return acks }
+        override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {
+            sent += events
+            if (throwSessionRequired) throw SessionRequiredException()
+            return acks
+        }
         override suspend fun pull(binding: ClientEventBinding, cursor: String?): PullPage { if (throwInvalidCursor) throw InvalidCursorException(); return pull }
         private var bootstrapIndex = 0
         override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage = bootstrapPages.getOrElse(bootstrapIndex++) { BootstrapPage("88888888-8888-4888-8888-888888888888", null, "next", false, emptyList()) }

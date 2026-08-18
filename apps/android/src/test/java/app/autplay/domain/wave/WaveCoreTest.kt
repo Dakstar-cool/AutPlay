@@ -14,9 +14,24 @@ class WaveCoreTest {
 
     @Test fun clockRequiresBoundedLowRttSamples() {
         val clock = ServerClockEstimator()
-        repeat(7) { clock.addSample(1_000L + it * 10, 1_060L + it * 10, 1_060L + it * 10, 1_120L + it * 10) }
+        repeat(6) { clock.addSample(1_000L + it * 10, 1_060L + it * 10, 1_060L + it * 10, 1_120L + it * 10) }
+        assertFalse(clock.isEligible(1_200))
+        clock.addSample(1_060, 1_120, 1_120, 1_180)
         assertTrue(clock.isEligible(1_200))
         assertFalse(clock.isEligible(62_000))
+    }
+
+    @Test fun clockUsesMedianOfFiveLowestRttSamplesDespiteOutliers() {
+        val clock = ServerClockEstimator()
+        repeat(5) { index ->
+            val sent = 1_000L + index * 10
+            clock.addSample(sent, sent + 100, sent + 100, sent + 100)
+        }
+        clock.addSample(1_100, 1_500, 1_500, 2_000)
+        clock.addSample(1_200, 900, 900, 2_100)
+
+        assertTrue(clock.isEligible(2_100))
+        assertEquals(2_150, clock.serverNow(2_100))
     }
 
     @Test fun driftHysteresisUsesSpeedThenSeek() {

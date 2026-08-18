@@ -1,6 +1,8 @@
 package app.autplay.application.sync
 
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.SessionAccess
 import app.autplay.domain.ServerProfileId
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +30,8 @@ class OkHttpSyncTransport(
     private val credentials: CredentialStore,
     private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(30)).build(),
 ) : SyncTransport {
+    private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client)
+
     override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {
         require(events.size in 1..100)
         val body = buildString {
@@ -78,17 +82,31 @@ class OkHttpSyncTransport(
     }
 
     private suspend fun execute(profileId: ServerProfileId, path: String, body: String?) = withContext(Dispatchers.IO) {
-        val credential = credentials.read(profileId) ?: throw IllegalStateException("SESSION_REQUIRED")
+        val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path
+        var access = sessionCredentials.access(profileId)
         try {
-            val builder = Request.Builder().url(if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path).header("Authorization", "Bearer ${credential.toString(StandardCharsets.UTF_8)}")
-            if (body != null) builder.post(body.toRequestBody("application/json".toMediaType())) else builder.get()
-            client.newCall(builder.build()).execute().use { response ->
-                val text = response.body.string()
-                if (response.code == 410 || (response.code == 409 && runCatching { Json.parseToJsonElement(text).jsonObject["code"]?.jsonPrimitive?.content }.getOrNull() in setOf("CURSOR_INVALID", "DEVICE_RESET_REQUIRED"))) throw InvalidCursorException()
-                if (!response.isSuccessful) throw IllegalStateException("SYNC_HTTP_${response.code}")
-                Json.parseToJsonElement(text)
+            var result = executeOnce(url, body, access)
+            if (result.first == 401) {
+                val rejectedGeneration = access.generation
+                access.close()
+                access = sessionCredentials.refreshAfterRejection(profileId, rejectedGeneration)
+                result = executeOnce(url, body, access)
             }
-        } finally { credential.fill(0) }
+            val (status, text) = result
+            if (status == 410 || (status == 409 && runCatching { Json.parseToJsonElement(text).jsonObject["code"]?.jsonPrimitive?.content }.getOrNull() in setOf("CURSOR_INVALID", "DEVICE_RESET_REQUIRED"))) throw InvalidCursorException()
+            if (status !in 200..299) throw IllegalStateException("SYNC_HTTP_$status")
+            Json.parseToJsonElement(text)
+        } finally {
+            access.close()
+        }
+    }
+
+    private fun executeOnce(url: String, body: String?, access: SessionAccess): Pair<Int, String> {
+        val builder = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${access.token.toString(StandardCharsets.UTF_8)}")
+        if (body != null) builder.post(body.toRequestBody("application/json".toMediaType())) else builder.get()
+        return client.newCall(builder.build()).execute().use { it.code to it.body.string() }
     }
 
     private fun events(items: JsonArray) = items.map { item -> item.jsonObject.let { value -> RemoteEvent(value["event_id"]!!.jsonPrimitive.content, value["server_sequence"]!!.jsonPrimitive.long, value["event_type"]!!.jsonPrimitive.content, value["schema_version"]!!.jsonPrimitive.int, value["payload"]!!.toString(), value["aggregate_type"]!!.jsonPrimitive.content, value["aggregate_server_id"]?.jsonPrimitive?.contentOrNull, value["server_row_version"]?.jsonPrimitive?.longOrNull, value["operation"]!!.jsonPrimitive.content, value["tombstone"]?.jsonObject?.get("tombstone_id")?.jsonPrimitive?.content, value["tombstone"]?.jsonObject?.get("retain_until")?.jsonPrimitive?.contentOrNull?.let(::instantMs), value["redirect"]?.jsonObject?.get("canonical_server_id")?.jsonPrimitive?.content) } }

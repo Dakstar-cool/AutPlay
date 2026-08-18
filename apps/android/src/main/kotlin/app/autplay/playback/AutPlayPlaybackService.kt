@@ -285,9 +285,15 @@ class AutPlayPlaybackService : MediaSessionService() {
         unavailableReason: String? = PlaybackRuntimeState.state.value.unavailableReason,
         title: String? = player.mediaMetadata.title?.toString() ?: PlaybackRuntimeState.state.value.title,
     ) {
+        val queueEntryId = player.currentMediaItem?.mediaId
+        val localTrackRefId = resolveCurrentTrackRefId(
+            queueEntryId,
+            restored?.entries?.map { entry -> entry.queueEntryId to entry.localUserTrackRefId }.orEmpty(),
+        )
         PlaybackRuntimeState.publish(
             PlaybackUiState(
-                queueEntryId = player.currentMediaItem?.mediaId,
+                queueEntryId = queueEntryId,
+                localUserTrackRefId = localTrackRefId,
                 title = title,
                 source = source,
                 unavailableReason = unavailableReason,
@@ -436,6 +442,11 @@ class AutPlayPlaybackService : MediaSessionService() {
         private const val MAX_CHECKPOINT_DELTA_MS = 300_000L
     }
 }
+
+internal fun resolveCurrentTrackRefId(
+    queueEntryId: String?,
+    entries: List<Pair<String, String>>,
+): String? = entries.firstOrNull { (entryId, _) -> entryId == queueEntryId }?.second
 
 @UnstableApi
 internal class AutPlaySessionCallback(private val applicationPackage: String) : MediaSession.Callback {

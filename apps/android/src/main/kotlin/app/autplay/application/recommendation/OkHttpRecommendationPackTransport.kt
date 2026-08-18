@@ -2,6 +2,8 @@ package app.autplay.application.recommendation
 
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.SessionAccess
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.time.Duration
@@ -26,11 +28,13 @@ class OkHttpRecommendationPackTransport(
     private val credentials: CredentialStore,
     private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(30)).build(),
 ) : RecommendationPackTransport {
+    private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client)
+
     override suspend fun fetch(
         binding: ClientEventBinding,
         request: RecommendationPackFetchRequest,
     ): DownloadedRecommendationPack = withContext(Dispatchers.IO) {
-        val credential = credentials.read(binding.serverProfileId) ?: error("SESSION_REQUIRED")
+        var access = sessionCredentials.access(binding.serverProfileId)
         try {
             val body = buildJsonObject {
                 put("context", request.context)
@@ -42,19 +46,29 @@ class OkHttpRecommendationPackTransport(
                 put("shadow", request.shadow)
                 put("ttl_days", request.ttlDays)
             }.toString()
-            val httpRequest = Request.Builder()
-                .url(baseUrl.trimEnd('/') + "/recommendation-packs")
-                .header("Authorization", "Bearer ${credential.toString(StandardCharsets.UTF_8)}")
-                .header("Cache-Control", "no-store")
-                .post(body.toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(httpRequest).execute().use { response ->
-                val responseText = response.body.readBoundedUtf8(MAX_RESPONSE_BYTES)
-                if (!response.isSuccessful) error("RECOMMENDATION_PACK_HTTP_${response.code}")
-                decodeResponse(responseText)
+            var result = executeOnce(body, access)
+            if (result.first == 401) {
+                val rejectedGeneration = access.generation
+                access.close()
+                access = sessionCredentials.refreshAfterRejection(binding.serverProfileId, rejectedGeneration)
+                result = executeOnce(body, access)
             }
+            if (result.first !in 200..299) error("RECOMMENDATION_PACK_HTTP_${result.first}")
+            decodeResponse(result.second)
         } finally {
-            credential.fill(0)
+            access.close()
+        }
+    }
+
+    private fun executeOnce(body: String, access: SessionAccess): Pair<Int, String> {
+        val request = Request.Builder()
+            .url(baseUrl.trimEnd('/') + "/recommendation-packs")
+            .header("Authorization", "Bearer ${access.token.toString(StandardCharsets.UTF_8)}")
+            .header("Cache-Control", "no-store")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        return client.newCall(request).execute().use { response ->
+            response.code to response.body.readBoundedUtf8(MAX_RESPONSE_BYTES)
         }
     }
 

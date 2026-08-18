@@ -557,6 +557,85 @@ data class RecommendationPresentationEntity(
     @ColumnInfo(name = "created_at_ms") val createdAtMs: Long,
 )
 
+/**
+ * Bounded, owner-scoped status projection for a server import.  The parsed import bytes and
+ * per-entry payload remain server-side; Android keeps only enough state to resume its UI.
+ */
+@Entity(
+    tableName = "remote_import_job_projection",
+    primaryKeys = ["server_profile_id", "import_job_id"],
+    indices = [Index(value = ["server_profile_id", "updated_at_ms"])],
+)
+data class RemoteImportJobProjectionEntity(
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "import_job_id") val importJobId: String,
+    @ColumnInfo(name = "delivery_job_id") val deliveryJobId: String?,
+    val state: String,
+    @ColumnInfo(name = "progress_current") val progressCurrent: Int,
+    @ColumnInfo(name = "progress_total") val progressTotal: Int,
+    @ColumnInfo(name = "review_required_count") val reviewRequiredCount: Int,
+    @ColumnInfo(name = "resolved_count") val resolvedCount: Int,
+    @ColumnInfo(name = "no_match_count") val noMatchCount: Int,
+    @ColumnInfo(name = "unresolved_count") val unresolvedCount: Int,
+    @ColumnInfo(name = "failed_count") val failedCount: Int,
+    @ColumnInfo(name = "last_error_code") val lastErrorCode: String?,
+    @ColumnInfo(name = "updated_at_ms") val updatedAtMs: Long,
+)
+
+/**
+ * Local resume intent for a Vault upload. It deliberately refers to an existing local-audio row
+ * instead of retaining a URI/path, upload URL, request body, or credentials.
+ */
+@Entity(
+    tableName = "vault_upload_intent",
+    foreignKeys = [
+        ForeignKey(
+            entity = LocalAudioStateEntity::class,
+            parentColumns = ["local_audio_state_id"],
+            childColumns = ["local_audio_state_id"],
+            onDelete = ForeignKey.RESTRICT,
+        ),
+    ],
+    indices = [
+        Index(value = ["server_profile_id", "state", "updated_at_ms"]),
+        Index(value = ["local_audio_state_id"]),
+        Index(value = ["server_profile_id", "server_upload_id"], unique = true),
+    ],
+)
+data class VaultUploadIntentEntity(
+    @PrimaryKey @ColumnInfo(name = "upload_intent_id") val uploadIntentId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "local_audio_state_id") val localAudioStateId: String,
+    @ColumnInfo(name = "server_recording_id") val serverRecordingId: String,
+    @ColumnInfo(name = "declared_sha256") val declaredSha256: String,
+    @ColumnInfo(name = "expected_size") val expectedSize: Long,
+    @ColumnInfo(name = "server_upload_id") val serverUploadId: String?,
+    @ColumnInfo(name = "remote_offset") val remoteOffset: Long,
+    val state: String,
+    @ColumnInfo(name = "attempt_count") val attemptCount: Int,
+    @ColumnInfo(name = "last_error_code") val lastErrorCode: String?,
+    @ColumnInfo(name = "created_at_ms") val createdAtMs: Long,
+    @ColumnInfo(name = "updated_at_ms") val updatedAtMs: Long,
+)
+
+/**
+ * Response metadata for a bounded server recommendation request. Recommendation items stay in
+ * the existing verified offline-pack boundary; this table never stores a response body.
+ */
+@Entity(
+    tableName = "recommendation_response_snapshot",
+    primaryKeys = ["server_profile_id", "recommendation_request_id"],
+    indices = [Index(value = ["server_profile_id", "received_at_ms"])],
+)
+data class RecommendationResponseSnapshotEntity(
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "recommendation_request_id") val recommendationRequestId: String,
+    val replay: String,
+    @ColumnInfo(name = "item_count") val itemCount: Int,
+    @ColumnInfo(name = "response_sha256") val responseSha256: String,
+    @ColumnInfo(name = "received_at_ms") val receivedAtMs: Long,
+)
+
 @Entity(tableName = "track_search_content", indices = [Index(value = ["local_user_track_ref_id"], unique = true)])
 data class TrackSearchContentEntity(@PrimaryKey(autoGenerate = true) @ColumnInfo(name = "rowid") val rowId: Long = 0, @ColumnInfo(name = "local_user_track_ref_id") val localUserTrackRefId: String, val title: String?, val artist: String?, val album: String?, val aliases: String?, val transliterations: String?)
 

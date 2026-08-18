@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">AutPlay — local-first music, extended by your own server</title>
+  <desc id="desc">AutPlay title beside an Android local library that keeps playing while an optional personal server adds sync and an immutable music Vault.</desc>
+
+  <defs>
+    <clipPath id="frame">
+      <rect width="1200" height="400" rx="28"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="400" fill="#141111"/>
+    <path d="M0 322H1200" stroke="#514341" stroke-width="1"/>
+    <path d="M710 0V400" stroke="#332B2A" stroke-width="1"/>
+
+    <g transform="translate(58 48)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+      <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="2.2" fill="#E4BDB7">
+        <text x="0" y="18">ANDROID-FIRST · LOCAL-FIRST MUSIC</text>
+      </g>
+
+      <g transform="translate(0 52)">
+        <rect x="0" y="0" width="72" height="72" rx="18" fill="#B42318"/>
+        <path d="M27 18L55 36L27 54Z" fill="#FFF8F7"/>
+        <text x="92" y="59" fill="#FFF8F7" font-size="78" font-weight="750" letter-spacing="-3">AutPlay</text>
+      </g>
+
+      <text x="0" y="190" fill="#FFF8F7" font-size="30" font-weight="600">Your library plays locally.</text>
+      <text x="0" y="228" fill="#E4BDB7" font-size="30">Your server extends it.</text>
+
+      <g transform="translate(0 262)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="650">
+        <rect width="138" height="42" rx="21" fill="#FFF8F7"/>
+        <text x="69" y="27" text-anchor="middle" fill="#410001">STANDALONE</text>
+        <rect x="150" width="194" height="42" rx="21" fill="#2A2423" stroke="#765653"/>
+        <text x="247" y="27" text-anchor="middle" fill="#FFDAD5">OPTIONAL SERVER</text>
+        <rect x="356" width="130" height="42" rx="21" fill="#2A2423" stroke="#00639B"/>
+        <text x="421" y="27" text-anchor="middle" fill="#A8D8FF">CPU CORE</text>
+      </g>
+    </g>
+
+    <g transform="translate(742 38)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+      <rect x="0" y="0" width="212" height="324" rx="30" fill="#1C1919" stroke="#765653" stroke-width="2"/>
+      <rect x="18" y="22" width="176" height="280" rx="20" fill="#FFF8F7"/>
+      <rect x="76" y="10" width="60" height="6" rx="3" fill="#765653"/>
+
+      <text x="36" y="62" fill="#765653" font-size="17" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">LOCAL LIBRARY</text>
+      <circle cx="106" cy="131" r="46" fill="#FFDAD5"/>
+      <path d="M94 105L132 131L94 157Z" fill="#B42318"/>
+      <path d="M38 211C55 211 55 181 72 181C89 181 89 236 106 236C123 236 123 194 140 194C157 194 157 211 174 211" fill="none" stroke="#B42318" stroke-width="6" stroke-linecap="round"/>
+      <text x="106" y="270" text-anchor="middle" fill="#410001" font-size="21" font-weight="700">Room + Media3</text>
+      <text x="106" y="292" text-anchor="middle" fill="#765653" font-size="16">keeps working offline</text>
+
+      <g transform="translate(246 44)">
+        <path d="M-18 92H28" fill="none" stroke="#A8D8FF" stroke-width="3" stroke-dasharray="8 8"/>
+        <path d="M20 84L32 92L20 100" fill="none" stroke="#A8D8FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="6" y="74" text-anchor="middle" fill="#A8D8FF" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">SYNC LATER</text>
+
+        <rect x="42" y="0" width="150" height="178" rx="24" fill="#172733" stroke="#00639B" stroke-width="2"/>
+        <path d="M72 46H162M72 72H162M72 98H142" stroke="#A8D8FF" stroke-width="5" stroke-linecap="round"/>
+        <rect x="66" y="126" width="102" height="30" rx="15" fill="#00639B"/>
+        <text x="117" y="147" text-anchor="middle" fill="#F4FAFF" font-size="16" font-weight="700">VAULT</text>
+        <text x="117" y="205" text-anchor="middle" fill="#A8D8FF" font-size="18" font-weight="700">PERSONAL SERVER</text>
+        <text x="117" y="228" text-anchor="middle" fill="#B6CCDB" font-size="16">optional by design</text>
+      </g>
+    </g>
+  </g>
+</svg>

@@ -127,6 +127,9 @@ class LocalLibraryCommandRepository(
             ?: database.libraryDao().legacyEntries(limit)
     }
 
+    suspend fun trackRef(localTrackRefId: String): UserTrackRefEntity? =
+        database.libraryDao().trackRef(localTrackRefId)
+
     suspend fun add(command: AddLocalTrackCommand): AddLocalTrackResult {
         validate(command)
         val payload = LocalIntentPayloadPolicy.canonicalize(

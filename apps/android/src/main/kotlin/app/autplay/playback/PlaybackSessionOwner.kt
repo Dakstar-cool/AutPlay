@@ -102,6 +102,7 @@ internal object PlaybackCommandAuthorization {
 
 data class PlaybackUiState(
     val queueEntryId: String? = null,
+    val localUserTrackRefId: String? = null,
     val title: String? = null,
     val source: String? = null,
     val unavailableReason: String? = null,
