@@ -12,7 +12,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$gradleJavaHomeArgument = "-Dorg.gradle.java.home=$JavaHome"
 $zipalign = Join-Path $AndroidHome "build-tools\36.1.0\zipalign.exe"
 $apksigner = Join-Path $AndroidHome "build-tools\36.1.0\apksigner.bat"
 $adb = Join-Path $AndroidHome "platform-tools\adb.exe"
@@ -34,11 +33,15 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $evidencePath) | O
 Push-Location $repoRoot
 try {
     $env:JAVA_HOME = $JavaHome
-    & .\gradlew.bat $gradleJavaHomeArgument --no-daemon --console=plain `
-        :apps:android:lintDebug `
-        :apps:android:testDebugUnitTest `
-        :apps:android:assembleDebug `
-        :apps:android:assembleRelease
+    $gradleArguments = @(
+        "--no-daemon",
+        "--console=plain",
+        ":apps:android:lintDebug",
+        ":apps:android:testDebugUnitTest",
+        ":apps:android:assembleDebug",
+        ":apps:android:assembleRelease"
+    )
+    & .\gradlew.bat @gradleArguments
     if ($LASTEXITCODE -ne 0) { throw "Android RC build gate failed" }
 
     & docker build --file server/Dockerfile --tag autplay-server:rc1-local .

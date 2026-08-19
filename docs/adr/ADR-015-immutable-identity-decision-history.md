@@ -14,7 +14,9 @@
 
 The narrower Track Identity specification requires every automatic and manual identity decision to remain reproducible from immutable versioned evidence. The current PostgreSQL reference model stores only an import-specific candidate subset in `importing.match_candidate`, uses a different decision vocabulary, and cannot retain a general supersession history.
 
-This mismatch was tracked as P00-D003. This accepted decision resolves its design prerequisite; executable P02 persistence remains separately `NOT_STARTED`. The approved normative and physical delta is defined in [`P00-D003_CHANGESET.md`](../implementation/P00-D003_CHANGESET.md).
+This mismatch was tracked as P00-D003 and resolved by the accepted decision. The normative and
+physical outcome is encoded in `AutPlay_Track_Identity_v1.md`, the ER model, the PostgreSQL schema,
+and the executable Alembic migrations.
 
 ## Decision drivers
 

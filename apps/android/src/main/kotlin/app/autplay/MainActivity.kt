@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
@@ -38,6 +41,8 @@ import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.util.UnstableApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -61,6 +66,7 @@ import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatusRepository
 import app.autplay.application.download.DownloadIntentRepository
 import app.autplay.application.playback.NewPlaybackQueueEntry
+import app.autplay.application.playback.ActiveQueueContextRepository
 import app.autplay.application.playback.PlaybackPersistenceRepository
 import app.autplay.application.recommendation.HomeFeed
 import app.autplay.application.recommendation.HomeRecommendationItem
@@ -83,8 +89,12 @@ import app.autplay.download.DownloadStorageClass
 import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackSessionOwner
 import app.autplay.playback.PlaybackRuntimeState
-import app.autplay.playback.PlaybackUiState
 import app.autplay.playback.ServicePlaybackSessionOwner
+import app.autplay.playback.presentation.PlaybackInteractionRouter
+import app.autplay.playback.presentation.PlaybackPresentationActionPort
+import app.autplay.playback.presentation.PlaybackPresentationAdapter
+import app.autplay.playback.presentation.WaveCoordinatorHostPlaybackCommandPort
+import app.autplay.playback.presentation.WavePlaybackCommandOutcome
 import app.autplay.work.DeferredWorkKind
 import app.autplay.work.DeferredWorkRequest
 import app.autplay.work.DeferredWorkScheduler
@@ -103,6 +113,18 @@ import app.autplay.ui.AutPlayThemeMode
 import app.autplay.ui.UiDestination
 import app.autplay.ui.ServerFeaturesScreen
 import app.autplay.ui.ServerFeaturesUiState
+import app.autplay.ui.CoreTrackUiItem
+import app.autplay.ui.HomeRecommendationUiItem
+import app.autplay.ui.HomeReleaseUiItem
+import app.autplay.ui.HomeProductScreen
+import app.autplay.ui.HomeScreenUiState
+import app.autplay.ui.LibraryProductScreen
+import app.autplay.ui.LibraryScreenUiState
+import app.autplay.ui.SearchProductScreen
+import app.autplay.ui.SearchScreenUiState
+import app.autplay.ui.rememberAutPlayNavigationState
+import app.autplay.ui.player.NowPlayingScreen
+import app.autplay.ui.player.PlaybackMiniPlayer
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import kotlinx.coroutines.launch
@@ -114,6 +136,7 @@ internal const val BOOTSTRAP_LABEL = "AutPlay"
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val database = AutPlayRuntime.database(applicationContext)
         val repository = LocalLibraryCommandRepository(database)
         val settingsStore = applicationNonSecretSettingsStore(applicationContext)
@@ -231,11 +254,36 @@ private fun OfflineLibraryScreen(
     val libraryEntries by repository.entries(binding?.serverProfileId?.value).collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var destination by remember { mutableStateOf<UiDestination>(UiDestination.Home) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val activeQueueContextRepository = remember(context, scope) {
+        ActiveQueueContextRepository(AutPlayRuntime.database(context).queueDao(), scope)
+    }
+    val playerAdapter = remember(context, lifecycleOwner, activeQueueContextRepository) {
+        PlaybackPresentationAdapter(context, lifecycleOwner.lifecycle, activeQueueContextRepository)
+    }
+    val playbackActions = remember(playerAdapter, waveCoordinator) {
+        PlaybackInteractionRouter(
+            direct = PlaybackPresentationActionPort(playerAdapter),
+            wave = waveCoordinator?.let(::WaveCoordinatorHostPlaybackCommandPort),
+        )
+    }
+    DisposableEffect(playerAdapter) {
+        onDispose { playerAdapter.close() }
+    }
+    val playerState by playerAdapter.state.collectAsState()
+    val navigation = rememberAutPlayNavigationState()
+    val destination = navigation.current
+    BackHandler(enabled = navigation.canNavigateBack) { navigation.navigateBack() }
     val view = legacyView(destination)
-    var searchText by remember { mutableStateOf("") }
+    var searchText by rememberSaveable { mutableStateOf("") }
+    var searchCompleted by rememberSaveable { mutableStateOf(false) }
     var searchResults by remember { mutableStateOf<List<UserTrackRefEntity>>(emptyList()) }
+    var libraryTrackRefs by remember { mutableStateOf<Map<String, UserTrackRefEntity>>(emptyMap()) }
     var stableError by remember { mutableStateOf<String?>(null) }
+    var homeError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
+    var searchError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
+    var libraryError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
+    var homeRetryNonce by remember { mutableStateOf(false) }
     val playlists by sliceRepository.playlists(binding?.serverProfileId?.value).collectAsState(initial = emptyList())
     val history by sliceRepository.history(binding?.serverProfileId?.value).collectAsState(initial = emptyList())
     val downloads by downloadRepository.observeIntents().collectAsState(initial = emptyList())
@@ -247,7 +295,7 @@ private fun OfflineLibraryScreen(
     val importJob by importRepository.observeLatestJob(importProfileId).collectAsState(initial = null)
     val importItems by (importJob?.let { importRepository.observeReviewItems(it.importJobId) } ?: flowOf(emptyList()))
         .collectAsState(initial = emptyList())
-    var selectedImportEntryId by remember { mutableStateOf<String?>(null) }
+    var selectedImportEntryId by rememberSaveable { mutableStateOf<String?>(null) }
     var homeFeed by remember(
         binding?.serverProfileId?.value,
         binding?.userId?.value,
@@ -261,9 +309,9 @@ private fun OfflineLibraryScreen(
     val selectedImportItem = importItems.firstOrNull { it.entry.importEntryId == selectedImportEntryId }
     val importCandidates by (selectedImportItem?.latestEvaluation?.decisionId?.let(importRepository::observeCandidates) ?: flowOf(emptyList()))
         .collectAsState(initial = emptyList())
-    var selectedTrackRefId by remember { mutableStateOf<String?>(null) }
+    var selectedTrackRefId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedUploadCandidate by remember { mutableStateOf<VaultUploadCandidate?>(null) }
-    var remoteImportJobId by remember(binding?.serverProfileId?.value) { mutableStateOf<String?>(null) }
+    var remoteImportJobId by rememberSaveable(binding?.serverProfileId?.value) { mutableStateOf<String?>(null) }
     var serverUiState by remember(binding?.serverProfileId?.value) { mutableStateOf(ServerFeaturesUiState()) }
     val serverStateRepository = remember { ServerFeatureStateRepository(AutPlayRuntime.database(context)) }
     val durableRemoteImports by (
@@ -294,6 +342,23 @@ private fun OfflineLibraryScreen(
     LaunchedEffect(libraryEntries, selectedTrackRefId) {
         val activeIds = libraryEntries.filter { it.removedAtMs == null }.map { it.localUserTrackRefId }
         if (selectedTrackRefId !in activeIds) selectedTrackRefId = activeIds.firstOrNull()
+    }
+    LaunchedEffect(libraryEntries) {
+        libraryTrackRefs = libraryEntries.associate { entry ->
+            entry.localUserTrackRefId to repository.trackRef(entry.localUserTrackRefId)
+        }.mapNotNull { (id, track) -> track?.let { id to it } }.toMap()
+    }
+    LaunchedEffect(binding?.serverProfileId?.value) {
+        if (searchCompleted) {
+            searchError = false
+            runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
+                .onSuccess { searchResults = it }
+                .onFailure {
+                    searchResults = emptyList()
+                    searchError = true
+                    stableError = "SEARCH_UNAVAILABLE"
+                }
+        }
     }
     LaunchedEffect(selectedTrackRefId, binding?.serverProfileId?.value) {
         val trackRefId = selectedTrackRefId
@@ -364,13 +429,18 @@ private fun OfflineLibraryScreen(
                 .onFailure { stableError = "IMPORT_UNAVAILABLE" }
         }
     }
-    LaunchedEffect(view, binding) {
+    LaunchedEffect(view, binding, homeRetryNonce) {
         if (view == "Home" && binding != null) {
             homeFeed = null
+            homeError = false
             runCatching { recommendationRepository.loadHomeFeed(binding, System.currentTimeMillis()) }
-                .onSuccess { homeFeed = it }
+                .onSuccess {
+                    homeFeed = it
+                    homeError = false
+                }
                 .onFailure {
                     homeFeed = null
+                    homeError = true
                     stableError = "HOME_FEED_UNAVAILABLE"
                 }
             // Refresh is durable and never blocks the first cached/local render.
@@ -401,7 +471,7 @@ private fun OfflineLibraryScreen(
                     importProfileId = importProfileId,
                     importRepository = importRepository,
                 )
-                destination = UiDestination.ImportReview
+                navigation.navigate(UiDestination.ImportReview)
                 if (outcome.truncated) stableError = "LIBRARY_ROOT_SCAN_LIMIT_REACHED"
             }.onFailure { stableError = "LIBRARY_ROOT_PERMISSION_UNAVAILABLE" }
         }
@@ -451,68 +521,223 @@ private fun OfflineLibraryScreen(
             }
         }
     }
+    val activeHomeFeed = homeFeed?.takeIf { feed ->
+        binding != null &&
+            feed.ownerProfileId == binding.serverProfileId.value &&
+            feed.ownerUserId == binding.userId.value &&
+            feed.ownerDeviceId == binding.deviceId.value
+    }
+    val homeRecommendationSectionLabel = stringResource(R.string.home_recommendations)
+    val homeRecommendations = activeHomeFeed?.recommendationSections.orEmpty().flatMap { (section, items) ->
+        items.map { item ->
+            val presentationId = activeHomeFeed?.presentationId.orEmpty()
+            val key = recommendationKey(presentationId, item)
+            HomeRecommendationUiItem(
+                id = key,
+                title = item.title,
+                artist = item.artist,
+                section = if (section.equals("FOR_YOU", ignoreCase = true)) {
+                    homeRecommendationSectionLabel
+                } else {
+                    section.replace('_', ' ')
+                },
+                feedbackEnabled = presentationResults.containsKey(key),
+            )
+        }
+    }
+    fun recommendationFor(key: String): Pair<String, HomeRecommendationItem>? {
+        val feed = activeHomeFeed ?: return null
+        val presentationId = feed.presentationId ?: return null
+        val item = feed.recommendationSections.values.flatten().firstOrNull {
+            recommendationKey(presentationId, it) == key
+        } ?: return null
+        return presentationId to item
+    }
+    fun recordRecommendationVisibility(key: String) {
+        if (presentationResults.containsKey(key)) return
+        val activeBinding = binding ?: return
+        val (presentationId, item) = recommendationFor(key) ?: return
+        scope.launch {
+            runCatching {
+                recommendationRepository.recordPresentation(
+                    activeBinding,
+                    LocalId(presentationId),
+                    item,
+                    System.currentTimeMillis(),
+                )
+            }.onSuccess { presentationResults[key] = it }
+                .onFailure { stableError = "IMPRESSION_UNAVAILABLE" }
+        }
+    }
+    fun recordHomeFeedback(key: String, preference: String) {
+        val activeBinding = binding ?: return
+        val (presentationId, item) = recommendationFor(key) ?: return
+        val impression = presentationResults[key] ?: return
+        scope.launch {
+            runCatching {
+                sliceRepository.setPreference(
+                    activeBinding,
+                    LocalId(item.localUserTrackRefId),
+                    LocalId.random(),
+                    preference,
+                    false,
+                    recommendationRepository.attributionJson(
+                        LocalId(presentationId),
+                        impression.impressionEventId,
+                        item,
+                    ),
+                    System.currentTimeMillis(),
+                )
+                homeFeed = recommendationRepository.loadHomeFeed(activeBinding, System.currentTimeMillis())
+            }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
+        }
+    }
+    fun startSearchTrack(trackRefId: String) {
+        scope.launch {
+            runCatching {
+                val snapshotId = LocalId.random()
+                playbackRepository.activateQueue(
+                    snapshotId = snapshotId,
+                    entries = listOf(
+                        NewPlaybackQueueEntry(
+                            queueEntryId = LocalId.random(),
+                            trackRefId = LocalId(trackRefId),
+                            sourceOrigin = "SEARCH",
+                            sourceAudioPolicy = "LOCAL_THEN_VAULT",
+                        ),
+                    ),
+                    queueType = "SEARCH",
+                    sourceContextId = null,
+                    serverProfileId = binding?.serverProfileId?.value,
+                    listeningContext = "GENERAL",
+                    nowMs = System.currentTimeMillis(),
+                )
+                playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
+            }.onFailure { stableError = "PLAYBACK_UNAVAILABLE" }
+        }
+    }
     AutPlayAdaptiveShell(
         selectedDestination = destination,
-        onDestinationSelected = { destination = it },
+        onDestinationSelected = navigation::navigate,
         unreadSyncConflicts = syncStatus.deadLetters + syncStatus.conflicts,
-        onProfileClick = { destination = UiDestination.Profile },
-        onNowPlayingClick = { destination = UiDestination.NowPlaying },
+        canNavigateBack = navigation.canNavigateBack,
+        onNavigateBack = { navigation.navigateBack() },
+        onProfileClick = { navigation.navigate(UiDestination.Profile) },
+        onSettingsClick = { navigation.navigate(UiDestination.Settings) },
+        onNowPlayingClick = { navigation.navigate(UiDestination.NowPlaying) },
+        nowPlayingAvailable = playerState.mediaId != null,
         nowPlayingBar = {
-            PlaybackMiniBar(
-                playbackState = playbackState,
-                onOpen = { destination = UiDestination.NowPlaying },
-                onPlayPause = {
-                    scope.launch {
-                        playbackOwner.dispatch(
-                            if (playbackState.isPlaying) PlaybackCommand.Pause else PlaybackCommand.Resume,
+            if (playerState.mediaId != null) {
+                PlaybackMiniPlayer(
+                    state = playerState,
+                    onOpen = { navigation.navigate(UiDestination.NowPlaying) },
+                    onTogglePlayPause = playbackActions::toggleDirectPlayPause,
+                    onObservingChanged = { playerAdapter.setSurfaceObserving("mini", it) },
+                )
+            }
+        },
+        detailPane = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.expanded_queue_title), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.expanded_queue_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                playerState.title?.let { title ->
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        },
+    ) { _, contentPadding, _ ->
+        when (destination) {
+            UiDestination.Home -> HomeProductScreen(
+                state = HomeScreenUiState(
+                    localMode = binding == null,
+                    loading = binding != null && activeHomeFeed == null,
+                    offlineFallback = activeHomeFeed?.isStaleFallback == true,
+                    releases = activeHomeFeed?.recentRelevantReleases.orEmpty().map { release ->
+                        HomeReleaseUiItem(
+                            release.localReleaseId,
+                            release.title,
+                            release.artist,
+                            release.releaseDateText,
                         )
+                    },
+                    recommendations = homeRecommendations,
+                    error = homeError,
+                ),
+                contentPadding = contentPadding,
+                onOpenListenTogether = { navigation.navigate(UiDestination.WaveRooms) },
+                onRecommendationVisible = ::recordRecommendationVisibility,
+                onLike = { recordHomeFeedback(it, "LIKED") },
+                onDislike = { recordHomeFeedback(it, "DISLIKED") },
+                onRetry = { homeRetryNonce = !homeRetryNonce },
+            )
+            UiDestination.Search -> SearchProductScreen(
+                state = SearchScreenUiState(
+                    query = searchText,
+                    results = searchResults.map { result ->
+                        CoreTrackUiItem(
+                            result.localUserTrackRefId,
+                            result.rawTitle ?: stringResource(R.string.player_nothing_playing),
+                            result.rawArtist,
+                        )
+                    },
+                    searched = searchCompleted,
+                    error = searchError,
+                ),
+                contentPadding = contentPadding,
+                onQueryChange = { searchText = it.take(200) },
+                onSearch = {
+                    scope.launch {
+                        searchError = false
+                        runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
+                            .onSuccess {
+                                searchResults = it
+                                searchCompleted = true
+                                searchError = false
+                            }
+                            .onFailure {
+                                searchCompleted = true
+                                searchError = true
+                                stableError = "SEARCH_UNAVAILABLE"
+                            }
+                    }
+                },
+                onPlay = ::startSearchTrack,
+                onRetry = {
+                    scope.launch {
+                        searchError = false
+                        runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
+                            .onSuccess {
+                                searchResults = it
+                                searchCompleted = true
+                            }
+                            .onFailure {
+                                searchError = true
+                                stableError = "SEARCH_UNAVAILABLE"
+                            }
                     }
                 },
             )
-        },
-    ) { _, contentPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(text = destination.label, style = MaterialTheme.typography.headlineSmall)
-            if (destination == UiDestination.Library) {
-            Text(text = "$entryCount local track(s)", modifier = Modifier.padding(vertical = 12.dp))
-            if (binding == null) {
-                Text("Standalone changes stay local until you choose a server profile")
-            }
-            Button(
-                onClick = {
-                    scope.launch {
-                        repository.add(
-                            AddLocalTrackCommand(
-                                binding = binding,
-                                trackRefId = LocalId.random(),
-                                libraryEntryId = LocalId.random(),
-                                localChangeId = LocalId.random(),
-                                title = "Offline sample",
-                                artist = "AutPlay",
-                                occurredAtMs = System.currentTimeMillis(),
-                            ),
+            UiDestination.Library -> LibraryProductScreen(
+                state = LibraryScreenUiState(
+                    localMode = binding == null,
+                    tracks = libraryEntries.filter { it.removedAtMs == null }.map { item ->
+                        val track = libraryTrackRefs[item.localUserTrackRefId]
+                        CoreTrackUiItem(
+                            id = item.localUserTrackRefId,
+                            title = track?.rawTitle ?: stringResource(R.string.player_nothing_playing),
+                            artist = track?.rawArtist,
+                            selected = item.localUserTrackRefId == selectedTrackRefId,
+                            permissionRevoked = item.availabilityStatus == "PERMISSION_REVOKED",
                         )
-                    }
-                },
-            ) {
-                Text("Add offline sample")
-            }
-            libraryEntries.filter { it.removedAtMs == null }.forEach { item ->
-                OutlinedButton(onClick = { selectedTrackRefId = item.localUserTrackRefId }) {
-                    val selected = item.localUserTrackRefId == selectedTrackRefId
-                    Text("${if (selected) "✓ " else ""}${item.localUserTrackRefId.take(12)}…")
-                }
-            }
-            libraryEntries.firstOrNull { it.localUserTrackRefId == selectedTrackRefId }?.let { entry ->
-                Button(
-                    onClick = {
+                    },
+                    error = libraryError,
+                ),
+                contentPadding = contentPadding,
+                onAddLocal = { importLauncher.launch(arrayOf("audio/*")) },
+                onSelect = { selectedTrackRefId = it },
+                onRemoveOrRestore = { trackRefId ->
+                    val entry = libraryEntries.firstOrNull { it.localUserTrackRefId == trackRefId }
+                    if (entry != null) {
                         scope.launch {
                             runCatching {
                                 if (entry.removedAtMs == null) {
@@ -530,17 +755,49 @@ private fun OfflineLibraryScreen(
                                         System.currentTimeMillis(),
                                     )
                                 }
-                            }.onFailure { stableError = "LIBRARY_UPDATE_UNAVAILABLE" }
+                            }.onSuccess { libraryError = false }
+                                .onFailure {
+                                    libraryError = true
+                                    stableError = "LIBRARY_UPDATE_UNAVAILABLE"
+                                }
                         }
-                    },
-                ) { Text(if (entry.removedAtMs == null) "Remove selected track" else "Restore selected track") }
-                Button(
-                    onClick = {
+                    }
+                },
+                onLike = { trackRefId ->
+                    scope.launch {
+                        runCatching {
+                            sliceRepository.setPreference(
+                                binding,
+                                LocalId(trackRefId),
+                                LocalId.random(),
+                                "LIKED",
+                                false,
+                                null,
+                                System.currentTimeMillis(),
+                            )
+                        }.onSuccess { libraryError = false }
+                            .onFailure {
+                                libraryError = true
+                                stableError = "PREFERENCE_UNAVAILABLE"
+                            }
+                    }
+                },
+            )
+            UiDestination.NowPlaying -> NowPlayingScreen(
+                state = playerState,
+                onTogglePlayPause = playbackActions::toggleDirectPlayPause,
+                onToggleShuffle = playbackActions::toggleDirectShuffle,
+                onCycleRepeat = playbackActions::cycleDirectRepeatMode,
+                onSeekBegin = playerAdapter::beginSeek,
+                onSeekUpdate = playerAdapter::updateSeek,
+                onSeekCommit = playbackActions::commitDirectSeek,
+                onLike = {
+                    playbackState.localUserTrackRefId?.let { trackRefId ->
                         scope.launch {
                             runCatching {
                                 sliceRepository.setPreference(
                                     binding,
-                                    LocalId(entry.localUserTrackRefId),
+                                    LocalId(trackRefId),
                                     LocalId.random(),
                                     "LIKED",
                                     false,
@@ -549,28 +806,38 @@ private fun OfflineLibraryScreen(
                                 )
                             }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
                         }
-                    },
-                ) { Text("Like selected track") }
-                Button(
-                    onClick = {
+                    }
+                },
+                onDislike = {
+                    playbackState.localUserTrackRefId?.let { trackRefId ->
                         scope.launch {
                             runCatching {
-                                sliceRepository.recordListening(
+                                sliceRepository.setPreference(
                                     binding,
+                                    LocalId(trackRefId),
                                     LocalId.random(),
-                                    LocalId(entry.localUserTrackRefId),
-                                    1_000,
-                                    null,
+                                    "DISLIKED",
                                     false,
-                                    "ORGANIC",
-                                    now = System.currentTimeMillis(),
+                                    null,
+                                    System.currentTimeMillis(),
                                 )
-                            }.onFailure { stableError = "HISTORY_UNAVAILABLE" }
+                            }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
                         }
-                    },
-                ) { Text("Record logical listen") }
-            }
-            }
+                    }
+                },
+                feedbackEnabled = playbackState.localUserTrackRefId != null,
+                onObservingChanged = { playerAdapter.setSurfaceObserving("full", it) },
+                modifier = Modifier.padding(contentPadding),
+            )
+            else -> Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(text = stringResource(destination.labelRes), style = MaterialTheme.typography.headlineSmall)
             when (view) {
                 "Home" -> {
                     Text("Home")
@@ -975,6 +1242,8 @@ private fun OfflineLibraryScreen(
                     resolveServerRecordingId = { trackRefId ->
                         repository.trackRef(trackRefId)?.serverRecordingId
                     },
+                    onStartPlayback = playbackActions::startWavePlayback,
+                    onPausePlayback = playbackActions::pauseWavePlayback,
                     onError = { stableError = it },
                 )
                 "Server" -> ServerFeaturesScreen(
@@ -1119,8 +1388,8 @@ private fun OfflineLibraryScreen(
                 )
                 "Profile" -> ProfileFrontendScreen(
                     settings = settings,
-                    onOpenSettings = { destination = UiDestination.Settings },
-                    onOpenSync = { destination = UiDestination.SyncStatus },
+                    onOpenSettings = { navigation.navigate(UiDestination.Settings) },
+                    onOpenSync = { navigation.navigate(UiDestination.SyncStatus) },
                     onLogout = {
                         launchServerAction("SERVER_LOGOUT") { server ->
                             server.logout()
@@ -1163,7 +1432,7 @@ private fun OfflineLibraryScreen(
                                 runCatching {
                                     scanLibraryRoot(context, treeUri, importProfileId, importRepository)
                                 }.onSuccess { outcome ->
-                                    destination = UiDestination.ImportReview
+                                    navigation.navigate(UiDestination.ImportReview)
                                     if (outcome.truncated) stableError = "LIBRARY_ROOT_SCAN_LIMIT_REACHED"
                                 }.onFailure { stableError = "LIBRARY_ROOT_SCAN_UNAVAILABLE" }
                             }
@@ -1171,11 +1440,12 @@ private fun OfflineLibraryScreen(
                     },
                     onExportSettings = { settingsExportLauncher.launch("autplay-settings.json") },
                     onImportSettings = { settingsImportLauncher.launch(arrayOf("application/json", "text/json")) },
-                    onNavigate = { destination = it },
+                    onNavigate = navigation::navigate,
                 )
             }
             stableError?.let { Text(it) }
         }
+    }
     }
 }
 
@@ -1192,33 +1462,13 @@ internal fun TrackPreferenceActions(
 }
 
 @Composable
-private fun PlaybackMiniBar(
-    playbackState: PlaybackUiState,
-    onOpen: () -> Unit,
-    onPlayPause: () -> Unit,
-) {
-    Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(onClick = onOpen) {
-                Text((playbackState.title ?: "Nothing playing").take(28))
-            }
-            Button(onClick = onPlayPause, enabled = playbackState.title != null) {
-                Text(if (playbackState.isPlaying) "Pause" else "Play")
-            }
-        }
-    }
-}
-
-@Composable
 private fun WaveFrontendScreen(
     coordinator: WaveCoordinator?,
     isProfileBound: Boolean,
     localTrackRefId: String?,
     resolveServerRecordingId: suspend (String) -> String?,
+    onStartPlayback: suspend () -> WavePlaybackCommandOutcome,
+    onPausePlayback: suspend () -> WavePlaybackCommandOutcome,
     onError: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1301,21 +1551,33 @@ private fun WaveFrontendScreen(
                 ) { Text("Add first library track to room") }
                 Button(onClick = {
                     scope.launch {
-                        runCatching { coordinator.startFirstQueued() }
-                            .onSuccess { started ->
-                                waveActionMessage = if (started) {
+                        when (onStartPlayback()) {
+                            WavePlaybackCommandOutcome.Started -> {
+                                waveActionMessage =
                                     "Synchronized start scheduled."
-                                } else {
-                                    "Start gate is waiting for every present device to become ready."
-                                }
                             }
-                            .onFailure { onError("WAVE_START_UNAVAILABLE") }
+                            WavePlaybackCommandOutcome.WaitingForReadyDevices -> {
+                                waveActionMessage =
+                                    "Start gate is waiting for every present device to become ready."
+                            }
+                            WavePlaybackCommandOutcome.RoleRejected,
+                            WavePlaybackCommandOutcome.CommandFailed,
+                            -> onError("WAVE_START_UNAVAILABLE")
+                            WavePlaybackCommandOutcome.Paused -> Unit
+                        }
                     }
                 }) { Text("Start synchronized playback") }
                 Button(onClick = {
                     scope.launch {
-                        runCatching { coordinator.pauseRoom() }
-                            .onFailure { onError("WAVE_PAUSE_UNAVAILABLE") }
+                        when (onPausePlayback()) {
+                            WavePlaybackCommandOutcome.Paused -> Unit
+                            WavePlaybackCommandOutcome.RoleRejected,
+                            WavePlaybackCommandOutcome.CommandFailed,
+                            -> onError("WAVE_PAUSE_UNAVAILABLE")
+                            WavePlaybackCommandOutcome.Started,
+                            WavePlaybackCommandOutcome.WaitingForReadyDevices,
+                            -> Unit
+                        }
                     }
                 }) { Text("Pause room") }
             }
@@ -1445,18 +1707,13 @@ private fun SettingsFrontendScreen(
     Text("Credentials, server addresses and device bindings are never exported.")
 
     Text("Features", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    listOf(
-        UiDestination.Playlists,
-        UiDestination.Downloads,
-        UiDestination.History,
-        UiDestination.ImportReview,
-        UiDestination.SyncStatus,
-        UiDestination.ServerFeatures,
-        UiDestination.PrivacyAndData,
-    ).forEach { target ->
-        Button(onClick = { onNavigate(target) }) { Text(target.label) }
+    UiDestination.secondaryNavigation.forEach { target ->
+        Button(onClick = { onNavigate(target) }) { Text(stringResource(target.labelRes)) }
     }
 }
+
+private fun recommendationKey(presentationId: String, item: HomeRecommendationItem): String =
+    "$presentationId:${item.recommendationRequestId}:${item.sourceRank}"
 
 private fun legacyView(destination: UiDestination): String = when (destination) {
     UiDestination.Home -> "Home"

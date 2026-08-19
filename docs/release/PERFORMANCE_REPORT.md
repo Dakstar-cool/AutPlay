@@ -21,11 +21,8 @@
 | Wave start skew | deterministic three-session API 26 fixture | n/a | 0 ms | n/a | p95 ≤150 ms | PASS |
 | Wave drift after 10 s | deterministic three-session API 26 fixture | n/a | 91 ms | n/a | p95 ≤100 ms | PASS |
 
-The detailed server p50/p95/p99 values and named host inventory are in
-`docs/implementation/evidence/P14_BACKUP_RESTORE_2026-08-17.json`. The Wave values are in
-`docs/implementation/evidence/P13_WAVE_TIMING_2026-08-17.json`. Android Room/FTS values are in
-`docs/implementation/evidence/P14_ANDROID_PERFORMANCE.json`; the API 26 instrumentation uses one
-warm-up, 30 measured iterations, `SystemClock.elapsedRealtimeNanos` and nearest-rank percentiles.
+The table retains the measured release values. Android API 26 instrumentation uses one warm-up,
+30 measured iterations, `SystemClock.elapsedRealtimeNanos` and nearest-rank percentiles.
 
 ## Boundaries
 

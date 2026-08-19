@@ -11,10 +11,9 @@ its trusted-local, single-API-process boundary. P12 delivered A-029 and A-031, b
 host has no NVIDIA accelerator and no reviewed model artifact. It therefore cannot produce the
 real CUDA OOM, throughput, p95 job time, peak-VRAM or quality-delta evidence required by A-030.
 
-The user explicitly authorized Codex on 2026-08-17 to approve in-scope corrections and
-improvements autonomously and requested completion without routine approval round-trips. This is
-an explicit approval for the already designed P00-D005 release-governance choice; it is not
-evidence that the missing hardware experiment ran.
+The user explicitly authorized autonomous in-scope corrections and improvements on 2026-08-17.
+This is an explicit approval for the already designed P00-D005 release-governance choice; it is
+not evidence that the missing hardware experiment ran.
 
 ## Decision
 
@@ -40,8 +39,7 @@ evidence that the missing hardware experiment ran.
 
 ## Evidence
 
-- `docs/implementation/HANDOFF_P12.md`
-- `docs/implementation/evidence/P12_GPU_HARDWARE_PROBE_2026-08-17.json`
-- `docs/implementation/HANDOFF_P13.md`
-- `docs/build-pack/MVP_ACCEPTANCE_MATRIX.md`
-
+- `docs/release/TEST_EVIDENCE.md`
+- `docs/release/RELEASE_NOTES_RC1.md`
+- the isolated GPU and Wave test suites under `gpu/tests`, `server/tests`, and
+  `apps/android/src/androidTest`

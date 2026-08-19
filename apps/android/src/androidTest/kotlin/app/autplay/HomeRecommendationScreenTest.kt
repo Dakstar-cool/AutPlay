@@ -71,32 +71,22 @@ class HomeRecommendationScreenTest {
     @Test
     fun profileHomeShowsRelevantReleaseAndOfflineRecommendationWithoutDuplicateImpression() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onAllNodesWithText("Home")[0].performClick()
+        composeRule.onAllNodesWithText(context.getString(R.string.nav_home))[0].performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Home status: FRESH_OFFLINE_PACK").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("Local recommendation").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Home status: FRESH_OFFLINE_PACK").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Relevant release — AutPlay Artist · 2026-08-17").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(
-            "1. Local recommendation — AutPlay Artist",
-            useUnmergedTree = true,
-        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Relevant release").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Local recommendation").performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking { AutPlayRuntime.database(context).journalDao().eventCount() == 1 }
         }
 
         scenario?.recreate()
-        composeRule.onAllNodesWithText("Home")[0].performClick()
+        composeRule.onAllNodesWithText(context.getString(R.string.nav_home))[0].performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(
-                "1. Local recommendation — AutPlay Artist",
-                useUnmergedTree = true,
-            ).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("Local recommendation").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText(
-            "1. Local recommendation — AutPlay Artist",
-            useUnmergedTree = true,
-        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Local recommendation").performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking { AutPlayRuntime.database(context).journalDao().eventCount() == 1 }
         }
@@ -105,9 +95,9 @@ class HomeRecommendationScreenTest {
     @Test
     fun activeOwnerSwitchClearsPreviousHomeFeedBeforeRenderingNewOwner() = runBlocking {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onAllNodesWithText("Home")[0].performClick()
+        composeRule.onAllNodesWithText(context.getString(R.string.nav_home))[0].performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("1. Local recommendation — AutPlay Artist").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("Local recommendation").fetchSemanticsNodes().isNotEmpty()
         }
 
         applicationNonSecretSettingsStore(context).update(
@@ -119,10 +109,12 @@ class HomeRecommendationScreenTest {
             ),
         )
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Home status: NO_USABLE_OFFLINE_PACK").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(context.getString(R.string.home_empty_recommendations))
+                .fetchSemanticsNodes()
+                .isNotEmpty()
         }
         assertTrue(
-            composeRule.onAllNodesWithText("1. Local recommendation — AutPlay Artist")
+            composeRule.onAllNodesWithText("Local recommendation")
                 .fetchSemanticsNodes().isEmpty(),
         )
     }

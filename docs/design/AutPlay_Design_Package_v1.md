@@ -33,7 +33,6 @@
 | [PostgreSQL decisions](<AutPlay_PostgreSQL_Schema_v1.md>) | Physical decisions, Alembic plan и test matrix | v1 |
 | [PostgreSQL DDL](<AutPlay_PostgreSQL_Schema_v1.sql>) | Executable reference schema | v1 |
 | [Android Room Schema](<AutPlay_Android_Room_Schema_v1.md>) | Local-first Android persistence contract | v1 |
-| [Codex Goal: Schema Foundation](<AutPlay_Codex_Goal_Schema_Foundation_v1.md>) | Bounded implementation prompt | v1 |
 
 ---
 

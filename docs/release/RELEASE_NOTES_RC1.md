@@ -42,7 +42,3 @@ No image or APK was pushed, deployed, published or production-signed.
 - `docs/release/SECURITY_REVIEW.md`
 - `docs/release/PERFORMANCE_REPORT.md`
 - `docs/operations/PRIVACY_DELETE_EXPORT.md`
-- `docs/implementation/evidence/P14_RELEASE_INVENTORY.json`
-- `docs/implementation/evidence/P14_LICENSE_INVENTORY.json`
-- `docs/implementation/evidence/P14_ANDROID_PERFORMANCE.json`
-- `docs/implementation/evidence/P14_BACKUP_RESTORE_2026-08-17.json`

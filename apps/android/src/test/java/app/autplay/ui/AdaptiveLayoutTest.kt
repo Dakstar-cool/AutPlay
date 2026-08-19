@@ -21,8 +21,9 @@ class AdaptiveLayoutTest {
             UiDestination.railNavigation.map(UiDestination::route).toSet().size,
         )
         assertEquals(
-            listOf("home", "search", "library", "wave-rooms", "settings"),
+            listOf("home", "search", "library"),
             UiDestination.compactNavigation.map(UiDestination::route),
         )
+        assertEquals(UiDestination.all.size, UiDestination.all.map(UiDestination::route).toSet().size)
     }
 }

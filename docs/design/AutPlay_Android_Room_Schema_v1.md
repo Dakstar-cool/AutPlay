@@ -1206,7 +1206,8 @@ The executable ownership boundary is:
 - local readability is checked first, then an authorized Vault reference is obtained and credentials are attached only when the data source opens;
 - queue/session replacement and recovery finalize stale logical sessions against their captured owner and attribution exactly once.
 
-The normalized exported Room schema v2 hash and v1→v2 migration/device evidence are recorded in `docs/implementation/HANDOFF_P08.md` and `docs/implementation/VERSIONS.md`.
+The exported Room schemas and named migration tests under `apps/android/schemas` and
+`apps/android/src/androidTest` are the executable compatibility evidence.
 
 ---
 
@@ -1238,9 +1239,8 @@ The executable sync boundary is:
 - a coordinator attempt drains at most ten pages and requests WorkManager retry when more pages
   remain.
 
-The normalized exported Room schema v7 hash, every intermediate v3-v6 hash, v2→v7 migration
-preservation and API 26 coordinator/profile/reset evidence are recorded in
-`docs/implementation/HANDOFF_P09.md` and `docs/implementation/VERSIONS.md`.
+The exported Room schemas, intermediate migration definitions, and API 26 tests under
+`apps/android` are the executable preservation evidence.
 
 ---
 
@@ -1257,5 +1257,5 @@ event, auth failure or process restart stops Wave execution until a fresh authen
 clock calibration. P08 Media3 remains the sole playback/download owner, and Wave failures never
 rewrite ordinary library rows. The v10 Room identity hash is
 `eff029c0b73e3189b9ab8e31b0261541` and the exported-file SHA-256 is
-`9f42becf68b2bd5a92a1bf788dbc3cda361894db3690d1fa9a77f6cd34aa7c90`; API 26 v9→v10 preservation evidence is recorded in
-`docs/implementation/HANDOFF_P13.md`.
+`9f42becf68b2bd5a92a1bf788dbc3cda361894db3690d1fa9a77f6cd34aa7c90`; the API 26 migration tests
+under `apps/android/src/androidTest` verify v9→v10 preservation.

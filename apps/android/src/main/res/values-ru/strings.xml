@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AutPlay</string>
+    <string name="download_channel_name">Офлайн-загрузки</string>
+
+    <string name="nav_home">Главная</string>
+    <string name="nav_search">Поиск</string>
+    <string name="nav_library">Моя музыка</string>
+    <string name="nav_playlists">Плейлисты</string>
+    <string name="nav_downloads">Загрузки</string>
+    <string name="nav_history">История прослушивания</string>
+    <string name="nav_import_review">Импорт и проверка</string>
+    <string name="nav_now_playing">Сейчас играет</string>
+    <string name="nav_wave_rooms">Совместное прослушивание</string>
+    <string name="nav_sync_status">Синхронизация</string>
+    <string name="nav_server_features">Личный сервер</string>
+    <string name="nav_profile">Профиль</string>
+    <string name="nav_settings">Настройки</string>
+    <string name="nav_privacy_data">Приватность и данные</string>
+    <string name="action_back">Назад</string>
+    <string name="action_open_profile">Открыть профиль</string>
+    <string name="action_open_settings">Открыть настройки</string>
+
+    <string name="home_local_title">Ваша музыка всегда рядом</string>
+    <string name="home_local_subtitle">Локальное воспроизведение работает без сервера.</string>
+    <string name="home_my_wave">Моя волна</string>
+    <string name="home_listen_together">Совместное прослушивание</string>
+    <string name="home_loading">Загружаем локальную Главную</string>
+    <string name="home_offline_fallback">Офлайн-рекомендации показывают только музыку, доступную на этом устройстве.</string>
+    <string name="home_recommendations">Для вас</string>
+    <string name="home_new_releases">Новые релизы</string>
+    <string name="home_empty_recommendations">Пока нет доступных локальных рекомендаций</string>
+    <string name="home_empty_releases">Пока нет подходящих новых релизов</string>
+
+    <string name="search_hint">Поиск в медиатеке</string>
+    <string name="search_action">Найти</string>
+    <string name="search_local_scope">Локально</string>
+    <string name="search_vault_scope">Vault</string>
+    <string name="search_external_scope">Внешние источники</string>
+    <string name="search_remote_unavailable">Поиск в Vault недоступен на этом локальном экране.</string>
+    <string name="search_external_unavailable">Нет настроенного разрешённого внешнего источника музыки.</string>
+    <string name="search_empty">Локальных результатов нет</string>
+    <plurals name="search_result_count">
+        <item quantity="one">%d результат</item>
+        <item quantity="few">%d результата</item>
+        <item quantity="many">%d результатов</item>
+        <item quantity="other">%d результата</item>
+    </plurals>
+
+    <string name="library_title">Моя музыка</string>
+    <string name="library_local_mode">Хранится на телефоне и доступна без сети</string>
+    <string name="library_add_local">Добавить локальный трек</string>
+    <string name="library_empty_body">Выберите папку с музыкой или добавьте локальный трек.</string>
+    <string name="library_unknown_artist">Неизвестный исполнитель</string>
+    <string name="library_permission_revoked">Доступ к файлу отозван. Сохраните трек и снова выберите папку либо используйте разрешённый источник Vault.</string>
+    <plurals name="library_track_count">
+        <item quantity="one">%d локальный трек</item>
+        <item quantity="few">%d локальных трека</item>
+        <item quantity="many">%d локальных треков</item>
+        <item quantity="other">%d локального трека</item>
+    </plurals>
+    <string name="action_play">Воспроизвести</string>
+    <string name="action_pause">Пауза</string>
+    <string name="action_previous">Назад</string>
+    <string name="action_next">Далее</string>
+    <string name="action_like">Нравится</string>
+    <string name="action_dislike">Не нравится</string>
+    <string name="action_remove">Убрать</string>
+
+    <string name="player_nothing_playing">Ничего не играет</string>
+    <string name="player_unknown_artist">Неизвестный исполнитель</string>
+    <string name="player_queue_context">Текущая очередь</string>
+    <string name="player_buffering">Буферизация</string>
+    <string name="player_timeline_unknown">Шкала времени недоступна</string>
+    <string name="player_timeline_live">Прямая трансляция или неизвестная длительность</string>
+    <string name="player_timeline_locked_wave">Позицию воспроизведения контролирует ведущий комнаты.</string>
+    <string name="player_timeline_recovering">Восстанавливаем совместное прослушивание. Прямое управление заблокировано.</string>
+    <string name="player_seek_description">Позиция воспроизведения</string>
+    <string name="player_shuffle">Перемешать</string>
+    <string name="player_repeat_off">Повтор выключен</string>
+    <string name="player_repeat_one">Повтор трека</string>
+    <string name="player_repeat_all">Повтор очереди</string>
+    <string name="player_progress_description">%1$s из %2$s</string>
+    <string name="player_source_local">На этом устройстве</string>
+    <string name="player_source_vault">Личный Vault</string>
+    <string name="player_source_download">Загружено</string>
+    <string name="player_source_unknown">Источник определяется</string>
+    <string name="player_controls_unavailable">Управление недоступно для этого трека.</string>
+
+    <string name="state_loading_title">Загрузка</string>
+    <string name="state_empty_title">Здесь пока пусто</string>
+    <string name="state_offline_title">Нет сети</string>
+    <string name="state_error_title">Что-то пошло не так</string>
+    <string name="state_error_body">Последнее действие не выполнено. Локальная медиатека остаётся доступной.</string>
+    <string name="action_retry">Повторить</string>
+    <string name="state_permission_title">Нужно разрешение</string>
+    <string name="state_playback_unavailable_title">Воспроизведение недоступно</string>
+    <string name="state_local_continues">Локальная медиатека и воспроизведение продолжают работать.</string>
+
+    <string name="expanded_queue_title">Далее</string>
+    <string name="expanded_queue_body">Долговечная очередь остаётся активной, пока вы переходите между экранами.</string>
+    <string name="library_selected">Выбранный трек</string>
+    <string name="player_queue_transition_unavailable">Предыдущий и следующий трек недоступны, пока переход по очереди нельзя безопасно сохранить.</string>
+</resources>

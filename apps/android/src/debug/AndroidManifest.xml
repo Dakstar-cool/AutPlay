@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Trusted-LAN development only. The release manifest remains HTTPS-only. -->
-    <application android:usesCleartextTraffic="true" />
+    <application>
+        <activity
+            android:name="app.autplay.ui.M3VisualEvidenceActivity"
+            android:exported="true" />
+    </application>
 </manifest>

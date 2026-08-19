@@ -1,0 +1,73 @@
+name: CI / Android
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-host:
+    name: Android host / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Microsoft JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: microsoft
+          java-version: "17.0.20+8"
+          cache: gradle
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          cache-dependency-path: |
+            build.gradle.kts
+            settings.gradle.kts
+            gradle.properties
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            apps/android/build.gradle.kts
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            server/uv.lock
+
+      - name: Install pinned Android SDK packages
+        shell: bash
+        run: |
+          sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager_path"
+          "$sdkmanager_path" "platforms;android-36.1" "build-tools;36.1.0"
+
+      - name: Run canonical Android host gate
+        run: bash scripts/check.sh
+
+      - name: Upload short-lived Android build evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-host-${{ github.sha }}
+          path: |
+            apps/android/build/outputs/apk/debug/android-debug.apk
+            apps/android/build/outputs/apk/release/android-release-unsigned.apk
+            apps/android/build/reports/lint-results-debug.html
+            apps/android/build/test-results/testDebugUnitTest/
+          if-no-files-found: error
+          retention-days: 7

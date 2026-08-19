@@ -58,7 +58,7 @@ DISPOSABLE_PASSWORD_ALLOWLIST = {
     "scripts/p14_release_audit.py",
 }
 INTERNAL_PACKAGES = {
-    "autplay-codex-harness",
+    "autplay-contract-tools",
     "autplay-gpu-worker",
     "autplay-server",
 }

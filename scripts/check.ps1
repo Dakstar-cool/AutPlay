@@ -20,25 +20,19 @@ try {
     & "$PSScriptRoot\bootstrap.ps1" -ServerOnly:$ServerOnly
 
     & uv lock --check
-    if ($LASTEXITCODE -ne 0) { throw "AutPlay Codex harness uv lock freshness check failed" }
+    if ($LASTEXITCODE -ne 0) { throw "AutPlay contract tooling uv lock freshness check failed" }
 
-    & uv run --frozen python -c "import autplay_codex"
-    if ($LASTEXITCODE -ne 0) { throw "AutPlay Codex harness package import failed" }
+    & uv run --frozen ruff check tests/contract tests/release
+    if ($LASTEXITCODE -ne 0) { throw "Root test Ruff lint failed" }
 
-    & uv run --frozen ruff check tools/autplay_codex tests/contract
-    if ($LASTEXITCODE -ne 0) { throw "Root tooling/contract Ruff lint failed" }
+    & uv run --frozen ruff format --check tests/contract tests/release
+    if ($LASTEXITCODE -ne 0) { throw "Root test Ruff format check failed" }
 
-    & uv run --frozen ruff format --check tools/autplay_codex tests/contract
-    if ($LASTEXITCODE -ne 0) { throw "Root tooling/contract Ruff format check failed" }
+    & uv run --frozen mypy tests/contract tests/release
+    if ($LASTEXITCODE -ne 0) { throw "Root test mypy failed" }
 
-    & uv run --frozen mypy tools/autplay_codex/src tools/autplay_codex/tests tests/contract
-    if ($LASTEXITCODE -ne 0) { throw "Root tooling/contract mypy failed" }
-
-    & uv run --frozen pytest tools/autplay_codex/tests
-    if ($LASTEXITCODE -ne 0) { throw "AutPlay Codex harness pytest failed" }
-
-    & uv run --frozen pytest tests/contract
-    if ($LASTEXITCODE -ne 0) { throw "Sync contract validation failed" }
+    & uv run --frozen pytest tests/contract tests/release
+    if ($LASTEXITCODE -ne 0) { throw "Root contract/release validation failed" }
 
     & uv lock --project server --check
     if ($LASTEXITCODE -ne 0) { throw "uv lock freshness check failed" }
@@ -77,8 +71,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Runtime Docker Compose configuration validation failed" }
 
     if (-not $ServerOnly) {
-        $gradleJavaHomeArgument = "-Dorg.gradle.java.home=$env:JAVA_HOME"
-        & .\gradlew.bat $gradleJavaHomeArgument --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug assembleRelease
+        $gradleArguments = @(
+            "--no-daemon",
+            "--console=plain",
+            "lintDebug",
+            "testDebugUnitTest",
+            "assembleDebug",
+            "assembleRelease"
+        )
+        & .\gradlew.bat @gradleArguments
         if ($LASTEXITCODE -ne 0) { throw "Android lint/unit/debug/release-R8 gate failed" }
     }
 

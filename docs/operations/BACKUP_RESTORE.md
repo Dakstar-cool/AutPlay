@@ -46,12 +46,10 @@ uv run --project server --frozen python scripts/p14_drill.py
 ```
 
 The command uses two independently named, loopback-only disposable Compose projects, a generated
-temporary Vault root and a 100,000-record catalog. Bytes are published by the production
-`FilesystemVaultStorage`; the restored root is checked by `VaultReconciliationService` in APPLY
-mode. A healthy object remains available, then injected corruption is moved to recoverable
-quarantine while both object and replica database states become `QUARANTINED`. The command writes
-`docs/implementation/evidence/P14_BACKUP_RESTORE_2026-08-17.json`, removes scoped containers,
-networks and volumes, and never accepts a production DSN.
+temporary Vault root and a 100,000-record catalog. It verifies production Vault publication,
+restore, reconciliation and corruption quarantine, then removes scoped containers, networks and
+volumes. Its detailed JSON output is kept as ignored local operator release evidence and is not
+committed.
 
 ## Failure and rollback
 

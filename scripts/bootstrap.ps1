@@ -21,17 +21,12 @@ try {
 
     & uv sync --frozen --python 3.14.7
     if ($LASTEXITCODE -ne 0) {
-        throw "AutPlay Codex harness uv sync failed"
+        throw "AutPlay contract tooling uv sync failed"
     }
 
-    $harnessPythonVersion = (& uv run --frozen python -c "import platform; print(platform.python_version())").Trim()
-    if ($LASTEXITCODE -ne 0 -or $harnessPythonVersion -ne "3.14.7") {
-        throw "AutPlay harness requires CPython 3.14.7; observed: $harnessPythonVersion"
-    }
-
-    & uv run --frozen autplay-codex --version
-    if ($LASTEXITCODE -ne 0) {
-        throw "AutPlay Codex harness entry point failed"
+    $contractPythonVersion = (& uv run --frozen python -c "import platform; print(platform.python_version())").Trim()
+    if ($LASTEXITCODE -ne 0 -or $contractPythonVersion -ne "3.14.7") {
+        throw "AutPlay contract tooling requires CPython 3.14.7; observed: $contractPythonVersion"
     }
 
     & uv sync --project server --frozen --python 3.14.7
@@ -71,13 +66,15 @@ try {
             throw "ANDROID_HOME lacks platform 36.1 or Build Tools 36.1.0"
         }
 
-        $gradleJavaHomeArgument = "-Dorg.gradle.java.home=$env:JAVA_HOME"
-        $gradleVersion = (& .\gradlew.bat $gradleJavaHomeArgument --no-daemon --version | Out-String)
+        $gradleArguments = @("--no-daemon", "--version")
+        $gradleVersion = (& .\gradlew.bat @gradleArguments | Out-String)
+        $normalizedJavaHome = $env:JAVA_HOME.TrimEnd([char[]]@(92, 47))
+        $escapedJavaHome = [Regex]::Escape($normalizedJavaHome)
         if (
             $LASTEXITCODE -ne 0 -or
             $gradleVersion -notmatch '(?m)^Gradle 9\.3\.1\r?$' -or
             $gradleVersion -notmatch '(?m)^Launcher JVM:\s+17\.0\.20 \(Microsoft 17\.0\.20\+8-LTS\)\r?$' -or
-            $gradleVersion -notmatch '(?m)^Daemon JVM:.*\(from org\.gradle\.java\.home\)\r?$'
+            $gradleVersion -notmatch "(?m)^Daemon JVM:\s+$escapedJavaHome \(no Daemon JVM specified, using current Java home\)\r?$"
         ) {
             throw "Gradle wrapper or pinned JDK resolution failed"
         }

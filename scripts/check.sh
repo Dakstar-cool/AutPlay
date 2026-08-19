@@ -72,12 +72,10 @@ else
 fi
 
 uv lock --check
-uv run --frozen python -c "import autplay_codex"
-uv run --frozen ruff check tools/autplay_codex tests/contract
-uv run --frozen ruff format --check tools/autplay_codex tests/contract
-uv run --frozen mypy tools/autplay_codex/src tools/autplay_codex/tests tests/contract
-uv run --frozen pytest tools/autplay_codex/tests
-uv run --frozen pytest tests/contract
+uv run --frozen ruff check tests/contract tests/release
+uv run --frozen ruff format --check tests/contract tests/release
+uv run --frozen mypy tests/contract tests/release
+uv run --frozen pytest tests/contract tests/release
 
 uv lock --project server --check
 uv run --project server --frozen python -c "import autplay"

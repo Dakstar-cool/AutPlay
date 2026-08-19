@@ -55,3 +55,20 @@ test-results/
 *.log
 *.tmp
 tmp/
+
+# Local AI/development orchestration (kept on developer machines, not in Git)
+/AGENTS.md
+/FIRST_MESSAGE_TO_CODEX.md
+/START_HERE.md
+/autplay-codex.toml
+/.agents/
+/.codex/agents/
+/.codex/config.toml
+/.codex/hooks.json
+/docs/build-pack/
+/docs/implementation/
+/tools/autplay_codex/
+/schemas/autplay-codex-review-result.schema.json
+/schemas/autplay-codex-task-result.schema.json
+/docs/design/AutPlay_Codex_Goal_Schema_Foundation_v1.md
+/docs/release/sbom/python-root.cdx.json

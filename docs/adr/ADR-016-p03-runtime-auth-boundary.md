@@ -79,7 +79,7 @@ The absence of password credential persistence is intentional evidence, not plac
 - Unit and real-PostgreSQL auth tests cover Argon2id parameters, token claim confusion/tampering/expiry, opaque refresh representation, serialized one-time bootstrap, rotation with absolute expiry, replay revocation, logout/device revocation, and cross-user failure.
 - Settings tests cover the disabled password-login boundary and sanitized configuration errors.
 - Job-control tests cover fenced lease behavior against the unchanged P02 schema.
-- `HANDOFF_P03.md` records both 298-test canonical gates and the non-root CPU runtime image/API/worker smoke with exact cleanup evidence.
+- The server auth, settings, jobs, and runtime tests retain this executable boundary.
 
 ## Reversal trigger
 

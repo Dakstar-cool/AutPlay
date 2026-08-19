@@ -1,15 +1,9 @@
 [project]
-name = "autplay-codex-harness"
+name = "autplay-contract-tools"
 version = "0.1.0"
-description = "Local Codex development orchestration for AutPlay"
+description = "Language-neutral contract validation tools for AutPlay"
 requires-python = ">=3.14.7,<3.15"
-dependencies = [
-    "openai-codex==0.144.4",
-]
-
-[project.scripts]
-autplay-codex = "autplay_codex.cli:main"
-autplay-phase-stop = "autplay_codex.phase_orchestrator:main"
+dependencies = []
 
 [dependency-groups]
 dev = [
@@ -22,16 +16,9 @@ dev = [
     "types-jsonschema==4.26.0.20260518",
 ]
 
-[build-system]
-requires = ["uv_build==0.12.3"]
-build-backend = "uv_build"
-
 [tool.uv]
+package = false
 required-version = "==0.12.3"
-
-[tool.uv.build-backend]
-module-name = "autplay_codex"
-module-root = "tools/autplay_codex/src"
 
 [tool.ruff]
 line-length = 100
@@ -47,8 +34,8 @@ quote-style = "double"
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["tools/autplay_codex/src", "tools/autplay_codex/tests"]
+files = ["tests/contract", "tests/release"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
-testpaths = ["tools/autplay_codex/tests"]
+testpaths = ["tests/contract", "tests/release"]

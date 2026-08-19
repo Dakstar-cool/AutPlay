@@ -2,4 +2,99 @@
 <resources>
     <string name="app_name">AutPlay</string>
     <string name="download_channel_name">Offline downloads</string>
+
+    <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_library">My music</string>
+    <string name="nav_playlists">Playlists</string>
+    <string name="nav_downloads">Downloads</string>
+    <string name="nav_history">Listening history</string>
+    <string name="nav_import_review">Imports and review</string>
+    <string name="nav_now_playing">Now playing</string>
+    <string name="nav_wave_rooms">Listen together</string>
+    <string name="nav_sync_status">Sync status</string>
+    <string name="nav_server_features">Personal server</string>
+    <string name="nav_profile">Profile</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_privacy_data">Privacy and data</string>
+    <string name="action_back">Back</string>
+    <string name="action_open_profile">Open profile</string>
+    <string name="action_open_settings">Open settings</string>
+
+    <string name="home_local_title">Your music, ready when you are</string>
+    <string name="home_local_subtitle">Local playback stays available without a server.</string>
+    <string name="home_my_wave">My Wave</string>
+    <string name="home_listen_together">Listen together</string>
+    <string name="home_loading">Loading your local Home feed</string>
+    <string name="home_offline_fallback">Offline recommendations are shown only for music available on this device.</string>
+    <string name="home_recommendations">For you</string>
+    <string name="home_new_releases">New releases</string>
+    <string name="home_empty_recommendations">No locally available recommendations yet</string>
+    <string name="home_empty_releases">No relevant new releases yet</string>
+
+    <string name="search_hint">Search your library</string>
+    <string name="search_action">Search</string>
+    <string name="search_local_scope">Local</string>
+    <string name="search_vault_scope">Vault</string>
+    <string name="search_external_scope">External</string>
+    <string name="search_remote_unavailable">Vault search is unavailable in this local search surface.</string>
+    <string name="search_external_unavailable">No authorized external music source is configured.</string>
+    <string name="search_empty">No local results</string>
+    <plurals name="search_result_count">
+        <item quantity="one">%d result</item>
+        <item quantity="other">%d results</item>
+    </plurals>
+
+    <string name="library_title">My music</string>
+    <string name="library_local_mode">Stored on this phone and available offline</string>
+    <string name="library_add_local">Add local track</string>
+    <string name="library_empty_body">Choose a music folder or add a local track to get started.</string>
+    <string name="library_unknown_artist">Unknown artist</string>
+    <string name="library_permission_revoked">Access to this file was revoked. Keep the track and choose a folder again or use an authorized Vault source.</string>
+    <plurals name="library_track_count">
+        <item quantity="one">%d local track</item>
+        <item quantity="other">%d local tracks</item>
+    </plurals>
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_previous">Previous</string>
+    <string name="action_next">Next</string>
+    <string name="action_like">Like</string>
+    <string name="action_dislike">Dislike</string>
+    <string name="action_remove">Remove</string>
+
+    <string name="player_nothing_playing">Nothing playing</string>
+    <string name="player_unknown_artist">Unknown artist</string>
+    <string name="player_queue_context">Current queue</string>
+    <string name="player_buffering">Buffering</string>
+    <string name="player_timeline_unknown">Timeline unavailable</string>
+    <string name="player_timeline_live">Live or unknown duration</string>
+    <string name="player_timeline_locked_wave">The room host controls playback position.</string>
+    <string name="player_timeline_recovering">Restoring synchronized playback. Direct controls stay locked.</string>
+    <string name="player_seek_description">Playback position</string>
+    <string name="player_shuffle">Shuffle</string>
+    <string name="player_repeat_off">Repeat off</string>
+    <string name="player_repeat_one">Repeat one</string>
+    <string name="player_repeat_all">Repeat all</string>
+    <string name="player_progress_description">%1$s of %2$s</string>
+    <string name="player_source_local">On this device</string>
+    <string name="player_source_vault">Personal Vault</string>
+    <string name="player_source_download">Downloaded</string>
+    <string name="player_source_unknown">Source is being resolved</string>
+    <string name="player_controls_unavailable">Controls are unavailable for this item.</string>
+
+    <string name="state_loading_title">Loading</string>
+    <string name="state_empty_title">Nothing here yet</string>
+    <string name="state_offline_title">Offline</string>
+    <string name="state_error_title">Something went wrong</string>
+    <string name="state_error_body">The last action could not be completed. Your local library remains available.</string>
+    <string name="action_retry">Try again</string>
+    <string name="state_permission_title">Permission required</string>
+    <string name="state_playback_unavailable_title">Playback unavailable</string>
+    <string name="state_local_continues">Your local library and playback remain available.</string>
+
+    <string name="expanded_queue_title">Up next</string>
+    <string name="expanded_queue_body">The durable queue stays active while you browse.</string>
+    <string name="library_selected">Selected track</string>
+    <string name="player_queue_transition_unavailable">Previous and next stay unavailable until the queue transition can be saved safely.</string>
 </resources>

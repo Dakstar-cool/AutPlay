@@ -1,23 +1,27 @@
 # AutPlay RC1 test evidence
 
-## Executed P14 evidence
+This document is the historical RC1 result summary. Raw phase JSON is kept as local operator
+evidence rather than distributed in Git. Re-run the canonical checks and the release/restore
+scripts for evidence against the current checkout.
+
+## Executed release evidence
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Canonical repository gate | PASS | root 85/85; contracts 53/53; server 425 passed/1 Windows symlink skip; Android lint/unit/release/R8; real PostgreSQL 18.4/pgvector 0.8.6; scoped cleanup |
-| P14 drill tool Ruff/format/mypy | PASS | root Ruff/format + root/server strict mypy commands |
-| Isolated PostgreSQL/Vault restore | PASS | `docs/implementation/evidence/P14_BACKUP_RESTORE_2026-08-17.json` |
+| Canonical repository gate | PASS | contracts 53/53; server 425 passed/1 Windows symlink skip; Android lint/unit/release/R8; real PostgreSQL 18.4/pgvector 0.8.6; scoped cleanup |
+| Release tooling Ruff/format/mypy | PASS | root Ruff/format + root/server strict mypy commands |
+| Isolated PostgreSQL/Vault restore | PASS | two isolated PostgreSQL projects, manifest/hash verification and corruption quarantine |
 | Large catalog benchmark | PASS | same report; 100,000 rows, p50/p95/p99 5.525/6.403/6.665 ms |
-| Android Room/FTS benchmark | PASS | `P14_ANDROID_PERFORMANCE.json`: API 26, 30 samples; FTS p50/p95/p99 9.397/12.555/13.254 ms and 1,000-entry playlist 8.760/11.876/11.879 ms |
-| Joined offline-to-online E2E | PASS | `P14_ANDROID_SERVER_E2E_2026-08-17.json`: one execution crosses file-backed Room journal/reopen, production OkHttp serialization/auth, FastAPI HTTP, PostgreSQL 18.4, post-commit ACK loss/immutable retry and second Android DB projection; server counts are inbox=1, sync event=1, user projection=1, device cursors=2 |
-| Python SBOM/vulnerability audit | PASS | three CycloneDX documents; three `P14_UV_AUDIT_*.json`, zero findings |
-| Dependency license inventory | PASS with publication review boundary | `P14_LICENSE_INVENTORY.json`: 299 resolved environment entries, zero unresolved; LGPL/MPL and proprietary GPU obligations declared |
-| Production secret scan | PASS | `P14_SECRET_SCAN.json`, zero findings |
+| Android Room/FTS benchmark | PASS | API 26, 30 samples; FTS p50/p95/p99 9.397/12.555/13.254 ms and 1,000-entry playlist 8.760/11.876/11.879 ms |
+| Joined offline-to-online E2E | PASS | one execution crosses file-backed Room journal/reopen, production OkHttp serialization/auth, FastAPI HTTP, PostgreSQL 18.4, post-commit ACK loss/immutable retry and second Android DB projection; server counts are inbox=1, sync event=1, user projection=1, device cursors=2 |
+| Python SBOM/vulnerability audit | PASS | three generated CycloneDX documents and zero reported audit findings |
+| Dependency license inventory | PASS with publication review boundary | 299 resolved environment entries, zero unresolved; LGPL/MPL and proprietary GPU obligations declared |
+| Production secret scan | PASS | zero findings |
 | Targeted auth/redaction/Vault/API/filesystem | PASS | 66 passed, 1 Windows symlink-privilege skip |
-| Android host lint/unit/R8/release | PASS | `P14_RELEASE_BUILD.json` and RC build command |
+| Android host lint/unit/R8/release | PASS | canonical release build command |
 | Android API 26 connected suite | PASS after visibility and P14 E2E additions | 82 passed, 0 skipped/failures |
-| Dev-signed APK install/restart | PASS on API 26 emulator and physical Samsung SM-A556E | `P14_RELEASE_BUILD.json` and `P14_ANDROID_DEVICE_SMOKE.json`; v2/v3 signature, install/background/battery-policy/process-death/restart verified without data clearing |
-| CPU server image | PASS local build | content image ID in `P14_RELEASE_BUILD.json`; no push |
+| Dev-signed APK install/restart | PASS on API 26 emulator and physical Samsung SM-A556E | v2/v3 signature, install/background/battery-policy/process-death/restart verified without data clearing |
+| CPU server image | PASS local build | local content image verified; no push |
 
 ## Mandatory scenario mapping
 

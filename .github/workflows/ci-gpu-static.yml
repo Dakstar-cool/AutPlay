@@ -1,0 +1,62 @@
+name: CI / GPU static
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ci-gpu-static.yml"
+      - ".python-version"
+      - "gpu/**"
+      - "server/**"
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/ci-gpu-static.yml"
+      - ".python-version"
+      - "gpu/**"
+      - "server/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-gpu-static-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gpu-static:
+    name: GPU project / CPU runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: true
+          cache-dependency-glob: gpu/uv.lock
+
+      - name: Synchronize isolated GPU project
+        run: uv sync --project gpu --frozen --python 3.14.7
+
+      - name: Check isolated GPU lock
+        run: uv lock --project gpu --check
+
+      - name: Lint isolated GPU project
+        run: uv run --project gpu --frozen ruff check gpu/src gpu/tests
+
+      - name: Check isolated GPU formatting
+        run: uv run --project gpu --frozen ruff format --check gpu/src gpu/tests
+
+      - name: Type-check isolated GPU project
+        run: uv run --project gpu --frozen mypy gpu/src gpu/tests
+
+      - name: Test isolated GPU project without accelerator claims
+        run: uv run --project gpu --frozen pytest gpu/tests

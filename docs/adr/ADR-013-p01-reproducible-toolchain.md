@@ -35,7 +35,8 @@ P01 must turn the design-only repository into a reproducible CPU-first server an
 - Keep caches and generated artifacts untracked. Root scripts select and assert CPython `3.14.7`, reject a different uv/JDK/SDK/Gradle baseline, force Gradle's daemon to the validated `JAVA_HOME`, and reject reuse of the fixed disposable Compose project.
 - Deliberately suppress only Android lint's version-availability detectors. Versions change through a compatibility review, not an unrelated lint run; all correctness warnings remain errors.
 
-Exact dependency pins, official-source links and executed evidence are maintained in [`VERSIONS.md`](../implementation/VERSIONS.md).
+Exact dependency pins are committed in the Python locks, Gradle version catalog, wrapper
+properties, and digest-pinned Compose files.
 
 ## Consequences
 
@@ -60,7 +61,7 @@ This ADR creates no data migration or API compatibility promise. P02 validates t
 - Frozen Python sync, import, Ruff, mypy and 13 pytest cases pass on CPython 3.14.7.
 - Android lint, host unit test and debug APK build pass on Microsoft JDK 17.0.20 and Gradle 9.3.1.
 - Runtime SQL reports PostgreSQL `18.4` and vector extension `0.8.6`; scoped resources are absent after cleanup.
-- See [`HANDOFF_P01.md`](../implementation/HANDOFF_P01.md) for commands and results.
+- The root bootstrap/check scripts reproduce these checks from committed configuration.
 
 ## Reversal trigger
 

@@ -1,0 +1,133 @@
+name: Delivery / Release candidate bundle
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable candidate tag in vX.Y.Z or vX.Y.Z-rc.N form
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Verify and package local-first candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Validate candidate version
+        id: candidate
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Release version must match vX.Y.Z or vX.Y.Z-rc.N" >&2
+            exit 1
+          fi
+          source_commit="$(git rev-parse HEAD)"
+          tag_commit="$(git rev-list -n 1 "$RELEASE_VERSION")"
+          if [[ "$tag_commit" != "$source_commit" ]]; then
+            echo "Candidate tag does not resolve to the checked-out commit" >&2
+            exit 1
+          fi
+          echo "SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Microsoft JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: microsoft
+          java-version: "17.0.20+8"
+          cache: gradle
+          cache-dependency-path: |
+            build.gradle.kts
+            settings.gradle.kts
+            gradle.properties
+            gradle/libs.versions.toml
+            gradle/wrapper/gradle-wrapper.properties
+            apps/android/build.gradle.kts
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            server/uv.lock
+
+      - name: Install pinned Android SDK packages
+        shell: bash
+        run: |
+          sdkmanager_path="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager_path"
+          "$sdkmanager_path" "platforms;android-36.1" "build-tools;36.1.0"
+
+      - name: Run canonical release host gate
+        run: bash scripts/check.sh
+
+      - name: Build CPU server image
+        run: docker build --file server/Dockerfile --tag "autplay-server:${RELEASE_VERSION}" .
+
+      - name: Assemble immutable candidate bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="release-bundle"
+          mkdir -p "$bundle_dir/sbom"
+          cp apps/android/build/outputs/apk/release/android-release-unsigned.apk \
+            "$bundle_dir/autplay-${RELEASE_VERSION}-unsigned.apk"
+          docker save "autplay-server:${RELEASE_VERSION}" | gzip -9 -n \
+            > "$bundle_dir/autplay-server-${RELEASE_VERSION}.oci.tar.gz"
+          uv export --frozen --format cyclonedx1.5 \
+            --output-file "$bundle_dir/sbom/python-root.cdx.json"
+          uv export --project server --frozen --format cyclonedx1.5 \
+            --output-file "$bundle_dir/sbom/python-server.cdx.json"
+          uv export --project gpu --frozen --format cyclonedx1.5 \
+            --output-file "$bundle_dir/sbom/python-gpu.cdx.json"
+          ./gradlew --no-daemon --console=plain :apps:android:dependencies \
+            --configuration releaseRuntimeClasspath \
+            > "$bundle_dir/ANDROID_RELEASE_DEPENDENCIES.txt"
+          cp docs/release/RC1_CHECKLIST.md "$bundle_dir/"
+          cp docs/release/RELEASE_NOTES_RC1.md "$bundle_dir/"
+          cp docs/release/SECURITY_REVIEW.md "$bundle_dir/"
+          {
+            echo "release_version=$RELEASE_VERSION"
+            echo "git_commit=$SOURCE_COMMIT"
+            echo "server_image_id=$(docker image inspect --format '{{.Id}}' "autplay-server:${RELEASE_VERSION}")"
+            echo "android_signature=UNSIGNED"
+            echo "container_distribution=WORKFLOW_ARTIFACT_ONLY"
+            echo "production_deployment=NOT_CONFIGURED"
+          } > "$bundle_dir/manifest.txt"
+          find "$bundle_dir" -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed "s#  $bundle_dir/#  #" \
+            > "$bundle_dir/SHA256SUMS"
+
+      - name: Upload candidate bundle without publishing it
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: autplay-${{ env.RELEASE_VERSION }}-${{ steps.candidate.outputs.source_commit }}
+          path: release-bundle/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

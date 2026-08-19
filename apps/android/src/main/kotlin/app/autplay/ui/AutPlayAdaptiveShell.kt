@@ -1,23 +1,19 @@
 package app.autplay.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -26,63 +22,102 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.autplay.R
 
 private val CompactBreakpoint: Dp = 600.dp
 private val ExpandedBreakpoint: Dp = 840.dp
 
-/**
- * Responsive application frame. It is intentionally stateless: data-backed screens and actions are
- * supplied by the parent, preserving the Android local-first domain boundaries.
- */
+/** Adaptive product frame with three compact primary destinations and saveable route content. */
 @Composable
 public fun AutPlayAdaptiveShell(
     selectedDestination: UiDestination,
     onDestinationSelected: (UiDestination) -> Unit,
     modifier: Modifier = Modifier,
     unreadSyncConflicts: Int = 0,
+    canNavigateBack: Boolean = false,
+    onNavigateBack: () -> Unit = {},
     onProfileClick: () -> Unit = { onDestinationSelected(UiDestination.Profile) },
+    onSettingsClick: () -> Unit = { onDestinationSelected(UiDestination.Settings) },
     onNowPlayingClick: () -> Unit = { onDestinationSelected(UiDestination.NowPlaying) },
+    nowPlayingAvailable: Boolean = false,
     nowPlayingBar: @Composable () -> Unit = {},
-    content: @Composable (destination: UiDestination, contentPadding: PaddingValues) -> Unit,
+    detailPane: @Composable (UiWidthClass) -> Unit = {},
+    content: @Composable (
+        destination: UiDestination,
+        contentPadding: PaddingValues,
+        widthClass: UiWidthClass,
+    ) -> Unit,
 ) {
+    val stateHolder = rememberSaveableStateHolder()
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val widthClass = widthClassFor(maxWidth)
-        if (widthClass == UiWidthClass.Compact) {
+        val widthClass = remember(maxWidth) { widthClassFor(maxWidth) }
+        val routeContent: @Composable (PaddingValues) -> Unit = { padding ->
+            stateHolder.SaveableStateProvider(selectedDestination.route) {
+                content(selectedDestination, padding, widthClass)
+            }
+        }
+        if (selectedDestination == UiDestination.NowPlaying) {
+            Scaffold(
+                topBar = {
+                    AutPlayTopBar(
+                        canNavigateBack = true,
+                        onNavigateBack = onNavigateBack,
+                        onProfileClick = onProfileClick,
+                        onSettingsClick = onSettingsClick,
+                        onNowPlayingClick = onNowPlayingClick,
+                        nowPlayingAvailable = false,
+                    )
+                },
+            ) { padding -> routeContent(padding) }
+        } else if (widthClass == UiWidthClass.Compact) {
             CompactShell(
-                selectedDestination = selectedDestination,
-                onDestinationSelected = onDestinationSelected,
-                unreadSyncConflicts = unreadSyncConflicts,
-                onProfileClick = onProfileClick,
-                onNowPlayingClick = onNowPlayingClick,
-                nowPlayingBar = nowPlayingBar,
-                content = content,
+                selectedDestination,
+                onDestinationSelected,
+                unreadSyncConflicts,
+                canNavigateBack,
+                onNavigateBack,
+                onProfileClick,
+                onSettingsClick,
+                onNowPlayingClick,
+                nowPlayingAvailable,
+                nowPlayingBar,
+                routeContent,
             )
         } else {
             RailShell(
-                selectedDestination = selectedDestination,
-                onDestinationSelected = onDestinationSelected,
-                unreadSyncConflicts = unreadSyncConflicts,
-                onProfileClick = onProfileClick,
-                onNowPlayingClick = onNowPlayingClick,
-                nowPlayingBar = nowPlayingBar,
-                content = content,
+                widthClass,
+                selectedDestination,
+                onDestinationSelected,
+                unreadSyncConflicts,
+                canNavigateBack,
+                onNavigateBack,
+                onProfileClick,
+                onSettingsClick,
+                onNowPlayingClick,
+                nowPlayingAvailable,
+                nowPlayingBar,
+                detailPane,
+                routeContent,
             )
         }
     }
 }
 
-/** Public for previews and screen-level tests without requiring a device configuration. */
+/** Public for previews and deterministic width-class tests. */
 public fun widthClassFor(width: Dp): UiWidthClass = when {
     width < CompactBreakpoint -> UiWidthClass.Compact
     width < ExpandedBreakpoint -> UiWidthClass.Medium
@@ -94,99 +129,154 @@ private fun CompactShell(
     selectedDestination: UiDestination,
     onDestinationSelected: (UiDestination) -> Unit,
     unreadSyncConflicts: Int,
+    canNavigateBack: Boolean,
+    onNavigateBack: () -> Unit,
     onProfileClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
+    nowPlayingAvailable: Boolean,
     nowPlayingBar: @Composable () -> Unit,
-    content: @Composable (UiDestination, PaddingValues) -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
-        topBar = { AutPlayTopBar(onProfileClick, onNowPlayingClick) },
+        topBar = {
+            AutPlayTopBar(
+                canNavigateBack,
+                onNavigateBack,
+                onProfileClick,
+                onSettingsClick,
+                onNowPlayingClick,
+                nowPlayingAvailable,
+            )
+        },
         bottomBar = {
             Column {
                 nowPlayingBar()
-                NavigationBar {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     UiDestination.compactNavigation.forEach { destination ->
-                        CompactNavigationItem(destination, selectedDestination, unreadSyncConflicts, onDestinationSelected)
+                        CompactNavigationItem(
+                            destination,
+                            selectedDestination,
+                            unreadSyncConflicts,
+                            onDestinationSelected,
+                        )
                     }
                 }
             }
         },
-    ) { padding -> content(selectedDestination, padding) }
+    ) { padding -> content(padding) }
 }
 
 @Composable
 private fun RailShell(
+    widthClass: UiWidthClass,
     selectedDestination: UiDestination,
     onDestinationSelected: (UiDestination) -> Unit,
     unreadSyncConflicts: Int,
+    canNavigateBack: Boolean,
+    onNavigateBack: () -> Unit,
     onProfileClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
+    nowPlayingAvailable: Boolean,
     nowPlayingBar: @Composable () -> Unit,
-    content: @Composable (UiDestination, PaddingValues) -> Unit,
+    detailPane: @Composable (UiWidthClass) -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
 ) {
     Row(Modifier.fillMaxSize()) {
-        NavigationRail(modifier = Modifier.fillMaxHeight()) {
+        NavigationRail(
+            modifier = Modifier.fillMaxHeight().width(128.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
             Column(
                 modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 UiDestination.railNavigation.forEach { destination ->
-                    RailNavigationItem(destination, selectedDestination, unreadSyncConflicts, onDestinationSelected)
+                    RailNavigationItem(
+                        destination,
+                        selectedDestination,
+                        unreadSyncConflicts,
+                        onDestinationSelected,
+                    )
                 }
             }
-            RailAction("Profile", "●", onProfileClick)
-            RailAction("Now playing", "▶", onNowPlayingClick)
         }
         Scaffold(
             modifier = Modifier.weight(1f),
-            topBar = { AutPlayTopBar(onProfileClick, onNowPlayingClick) },
+            topBar = {
+                AutPlayTopBar(
+                    canNavigateBack,
+                    onNavigateBack,
+                    onProfileClick,
+                    onSettingsClick,
+                    onNowPlayingClick,
+                    nowPlayingAvailable,
+                )
+            },
             bottomBar = nowPlayingBar,
-        ) { padding -> content(selectedDestination, padding) }
+        ) { padding ->
+            if (widthClass == UiWidthClass.Expanded) {
+                Row(Modifier.fillMaxSize()) {
+                    Box(Modifier.weight(1f).fillMaxHeight()) { content(padding) }
+                    Surface(
+                        modifier = Modifier.width(320.dp).fillMaxHeight().padding(padding),
+                        color = AutPlayTokens.colors.raisedSurface,
+                        tonalElevation = 1.dp,
+                    ) {
+                        Box(Modifier.padding(20.dp)) { detailPane(widthClass) }
+                    }
+                }
+            } else {
+                content(padding)
+            }
+        }
     }
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun AutPlayTopBar(onProfileClick: () -> Unit, onNowPlayingClick: () -> Unit) {
+private fun AutPlayTopBar(
+    canNavigateBack: Boolean,
+    onNavigateBack: () -> Unit,
+    onProfileClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onNowPlayingClick: () -> Unit,
+    nowPlayingAvailable: Boolean,
+) {
     TopAppBar(
-        title = { Text("AutPlay", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        actions = {
-            HeaderAction("Now playing", "▶", onNowPlayingClick)
-            HeaderAction("Profile", "●", onProfileClick)
+        title = { Text(stringResource(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        navigationIcon = {
+            if (canNavigateBack) {
+                AutPlayIconButton(AutPlayIcon.Back, R.string.action_back, onNavigateBack)
+            }
         },
+        actions = {
+            if (nowPlayingAvailable) {
+                AutPlayIconButton(AutPlayIcon.Play, R.string.nav_now_playing, onNowPlayingClick)
+            }
+            AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
+            AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
     )
 }
 
 @Composable
-private fun HeaderAction(label: String, glyph: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.semantics { contentDescription = label }) {
-        Text(glyph, style = MaterialTheme.typography.titleLarge)
-    }
-}
-
-@Composable
-private fun RowScope.CompactNavigationItem(
+private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
     destination: UiDestination,
     selectedDestination: UiDestination,
     unreadSyncConflicts: Int,
     onDestinationSelected: (UiDestination) -> Unit,
 ) {
-    TextButton(
+    val label = stringResource(destination.labelRes)
+    NavigationBarItem(
+        selected = destination == selectedDestination,
         onClick = { onDestinationSelected(destination) },
-        modifier = Modifier.weight(1f),
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            DestinationGlyph(destination, unreadSyncConflicts)
-            Text(
-                destination.label,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                color = if (destination == selectedDestination) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+        icon = { DestinationIcon(destination, unreadSyncConflicts) },
+        label = { Text(label, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis) },
+    )
 }
 
 @Composable
@@ -196,40 +286,26 @@ private fun RailNavigationItem(
     unreadSyncConflicts: Int,
     onDestinationSelected: (UiDestination) -> Unit,
 ) {
+    val label = stringResource(destination.labelRes)
     NavigationRailItem(
         selected = destination == selectedDestination,
         onClick = { onDestinationSelected(destination) },
-        icon = { DestinationGlyph(destination, unreadSyncConflicts) },
-        label = { Text(destination.label, maxLines = 1) },
+        icon = { DestinationIcon(destination, unreadSyncConflicts) },
+        label = { Text(label, maxLines = 1) },
     )
 }
 
 @Composable
-private fun DestinationGlyph(destination: UiDestination, unreadSyncConflicts: Int) {
+private fun DestinationIcon(destination: UiDestination, unreadSyncConflicts: Int) {
+    val label = stringResource(destination.labelRes)
     Box(contentAlignment = Alignment.TopEnd) {
-        Text(
-            destination.glyph,
-            modifier = Modifier.size(24.dp).semantics { contentDescription = destination.label },
-            style = MaterialTheme.typography.titleLarge,
+        AutPlayPlatformIcon(
+            destination.icon,
+            null,
+            Modifier.semantics { contentDescription = label },
         )
         if (destination == UiDestination.SyncStatus && unreadSyncConflicts > 0) {
             Badge { Text(unreadSyncConflicts.coerceAtMost(99).toString()) }
-        }
-    }
-}
-
-@Composable
-private fun RailAction(label: String, glyph: String, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = 12.dp),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(glyph, style = MaterialTheme.typography.titleLarge)
-            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
 }

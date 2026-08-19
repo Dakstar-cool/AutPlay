@@ -1,11 +1,18 @@
 package app.autplay
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -18,6 +25,8 @@ import app.autplay.application.importing.MatchCandidateInput
 import app.autplay.application.importing.RecordShadowEvaluationCommand
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.RecordingProjectionEntity
+import app.autplay.data.local.entity.LibraryEntryEntity
+import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
@@ -62,17 +71,17 @@ class OfflineLibraryScreenTest {
     @Test
     fun offlineCommandRemainsVisibleAfterActivityRecreation() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onNodeWithText("Library").performClick()
-        composeRule.onNodeWithText("0 local track(s)").assertIsDisplayed()
-        composeRule.onNodeWithText("Add offline sample").performClick()
+        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
+        composeRule.onNodeWithText(trackCount(0)).assertIsDisplayed()
+        runBlocking { seedLibraryTrack(PROFILE) }
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("1 local track(s)").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(trackCount(1)).fetchSemanticsNodes().isNotEmpty()
         }
 
         scenario?.recreate()
 
-        composeRule.onNodeWithText("Library").performClick()
-        composeRule.onNodeWithText("1 local track(s)").assertIsDisplayed()
+        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
+        composeRule.onNodeWithText(trackCount(1)).assertIsDisplayed()
     }
 
     @Test
@@ -80,15 +89,36 @@ class OfflineLibraryScreenTest {
         applicationNonSecretSettingsStore(context).update(NonSecretSettings())
         scenario = ActivityScenario.launch(MainActivity::class.java)
 
-        composeRule.onNodeWithText("Library").performClick()
-        composeRule.onNodeWithText("Standalone changes stay local until you choose a server profile").assertIsDisplayed()
-        composeRule.onNodeWithText("Add offline sample").performClick()
+        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.library_local_mode)).assertIsDisplayed()
+        seedLibraryTrack("legacy-unscoped")
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("1 local track(s)").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(trackCount(1)).fetchSemanticsNodes().isNotEmpty()
         }
         scenario?.recreate()
-        composeRule.onNodeWithText("Library").performClick()
-        composeRule.onNodeWithText("1 local track(s)").assertIsDisplayed()
+        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
+        composeRule.onNodeWithText(trackCount(1)).assertIsDisplayed()
+        Unit
+    }
+
+    @Test
+    fun completedLocalSearchRestoresResultsAfterActivityRecreation() = runBlocking {
+        seedLibraryTrack(PROFILE)
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+
+        composeRule.onNode(hasText(context.getString(R.string.nav_search)) and hasClickAction()).performClick()
+        composeRule.onNode(hasSetTextAction()).performTextInput("Offline sample")
+        composeRule.onNodeWithTag("local-search-submit").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Offline sample").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        scenario?.recreate()
+
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Offline sample").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(hasSetTextAction()).assertTextContains("Offline sample")
         Unit
     }
 
@@ -124,13 +154,17 @@ class OfflineLibraryScreenTest {
         database.close()
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onNodeWithText("More").performClick()
-        composeRule.onNodeWithText("Import review").performScrollTo().performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_open_settings)).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.nav_import_review)).performScrollTo().performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Import REVIEW_REQUIRED: 1 row(s)").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Import REVIEW_REQUIRED: 1 row(s)").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Review Ambiguous").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Hard-conflict warning: [\"VERSION_MARKER_CONFLICT\"]")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onAllNodesWithText("Hard-conflict warning: [\"VERSION_MARKER_CONFLICT\"]")[0]
             .performScrollTo()
             .assertIsDisplayed()
@@ -155,6 +189,50 @@ class OfflineLibraryScreenTest {
         extractorVersionsJson = "{\"schema_version\":1}",
     )
 
+    private fun trackCount(count: Int): String =
+        context.resources.getQuantityString(R.plurals.library_track_count, count, count)
+
+    private suspend fun seedLibraryTrack(profileId: String) {
+        val database = AutPlayRuntime.database(context)
+        database.libraryDao().upsertTrackRef(
+            UserTrackRefEntity(
+                localUserTrackRefId = TRACK,
+                serverUserTrackRefId = null,
+                localRecordingId = null,
+                serverRecordingId = null,
+                resolutionStatus = "UNRESOLVED",
+                rawTitle = "Offline sample",
+                rawArtist = "AutPlay test",
+                rawAlbum = null,
+                rawDurationMs = null,
+                resolutionConfidence = null,
+                syncState = "LOCAL_ONLY",
+                serverRowVersion = null,
+                lastLocalSequence = 0,
+                createdAtMs = 1,
+                updatedAtMs = 1,
+                deletedAtMs = null,
+                serverProfileId = profileId,
+            ),
+        )
+        database.libraryDao().upsertEntry(
+            LibraryEntryEntity(
+                localLibraryEntryId = ENTRY,
+                serverLibraryEntryId = null,
+                localUserTrackRefId = TRACK,
+                addedAtMs = 1,
+                source = "TEST_FIXTURE",
+                availabilityStatus = "UNAVAILABLE",
+                syncState = "LOCAL_ONLY",
+                serverRowVersion = null,
+                lastLocalSequence = 0,
+                removedAtMs = null,
+                updatedAtMs = 1,
+                serverProfileId = profileId,
+            ),
+        )
+    }
+
     private fun recording(id: String, title: String) = RecordingProjectionEntity(
         localRecordingId = id,
         serverRecordingId = null,
@@ -172,4 +250,10 @@ class OfflineLibraryScreenTest {
         catalogVersion = 0,
         projectionUpdatedAtMs = 1,
     )
+
+    private companion object {
+        const val PROFILE = "51111111-1111-4111-8111-111111111111"
+        const val TRACK = "91111111-1111-4111-8111-111111111111"
+        const val ENTRY = "92111111-1111-4111-8111-111111111111"
+    }
 }

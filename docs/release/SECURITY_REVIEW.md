@@ -22,10 +22,13 @@ public TLS/edge policy and an approved GPU model remain outside this local RC ev
 
 ## Dependency and secret evidence
 
-- CycloneDX 1.5 SBOMs: `docs/release/sbom/python-root.cdx.json`,
-  `python-server.cdx.json`, `python-gpu.cdx.json`.
-- `P14_LICENSE_INVENTORY.json` resolves license metadata for 37 root, 47 server, 56 GPU and
-  159 Android release-runtime entries with zero unresolved licenses. LGPL/MPL notice/linking and
+These are historical RC1 results. The release-candidate workflow and local release audit regenerate
+the current dependency, license, vulnerability and secret-scan evidence.
+
+- Committed CycloneDX 1.5 SBOMs cover the server and isolated GPU projects. The release-candidate
+  workflow generates a fresh root contract-tool SBOM for each bundle.
+- The RC1 license inventory resolved every recorded Python and Android release-runtime entry.
+  LGPL/MPL notice/linking and
   NVIDIA proprietary redistribution obligations are explicit; publication still requires legal/
   notice review and is outside P14.
 - `uv audit` queried OSV for 36 root, 46 server and 55 isolated-GPU packages: zero reported

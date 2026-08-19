@@ -1,4 +1,0 @@
-interface:
-  display_name: "AutPlay Development"
-  short_description: "Route and verify substantial AutPlay work"
-  default_prompt: "Use $autplay-development to implement and verify the next eligible AutPlay task safely."
