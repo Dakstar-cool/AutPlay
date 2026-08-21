@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-heading"><div><p class="eyebrow">AutPlay Admin</p><h1>{{ t(page_title_key) }}</h1><p>{{ t(page_intro_key) }}</p></div><span class="pill pill-{{ tone }}">{{ t(status_key) }}</span></header>
+{% if unavailable %}<section class="empty" aria-labelledby="unavailable-title"><h2 id="unavailable-title">{{ t("unavailable_title") }}</h2><p>{{ t("unavailable_body") }}</p><p><span class="pill">{{ t("cli_only") }}</span></p></section>{% else %}<dl class="facts">{% for item in facts %}<div><dt>{{ t(item.label) }}</dt><dd>{{ item.value }}</dd></div>{% endfor %}</dl>{% endif %}
+{% endblock %}

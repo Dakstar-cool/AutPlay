@@ -46,9 +46,16 @@ class RefreshingSessionCredentials(
         .callTimeout(Duration.ofSeconds(30))
         .build(),
     private val now: () -> Instant = Instant::now,
+    private val m5Rotation: M5SessionRotationClient? = null,
 ) {
     suspend fun access(profileId: ServerProfileId): SessionAccess {
         val current = readEnvelope(profileId) ?: throw SessionRequiredException()
+        if (current.bindingCommitId != null) {
+            val rotation = m5Rotation ?: throw SessionRequiredException()
+            rotation.persistSuccessor(profileId, current)
+            if (current.refreshPending || current.shouldRefresh(now())) return rotateM5(profileId, current.generation)
+            return current.toAccess()
+        }
         if (current.refreshPending) throw SessionRequiredException()
         return if (current.shouldRefresh(now())) {
             refreshCurrent(profileId, current.generation)
@@ -60,7 +67,30 @@ class RefreshingSessionCredentials(
     suspend fun refreshAfterRejection(
         profileId: ServerProfileId,
         rejectedGeneration: Long,
-    ): SessionAccess = refreshCurrent(profileId, rejectedGeneration)
+    ): SessionAccess {
+        val current = readEnvelope(profileId) ?: throw SessionRequiredException()
+        return if (current.bindingCommitId != null) rotateM5(profileId, rejectedGeneration) else refreshCurrent(profileId, rejectedGeneration)
+    }
+
+    private suspend fun rotateM5(profileId: ServerProfileId, rejectedGeneration: Long): SessionAccess = mutex(profileId).withLock {
+        val current = readEnvelope(profileId) ?: throw SessionRequiredException()
+        if (current.bindingCommitId == null) throw SessionRequiredException()
+        if (current.generation != rejectedGeneration && !current.refreshPending && !current.shouldRefresh(now())) return@withLock current.toAccess()
+        val rotation = m5Rotation ?: throw SessionRequiredException()
+        val pending = if (current.refreshPending) current else rotation.prepare(profileId, current)
+        if (!current.refreshPending) persist(profileId, pending)
+        try {
+            val successor = rotation.execute(profileId, pending)
+            persist(profileId, successor)
+            rotation.persistSuccessor(profileId, successor)
+            successor.toAccess()
+        } catch (error: SessionRequiredException) {
+            throw error
+        } catch (_: Exception) {
+            // Retain the exact encrypted request for an idempotent replay after a lost response.
+            throw SessionRequiredException()
+        }
+    }
 
     private suspend fun refreshCurrent(
         profileId: ServerProfileId,
@@ -68,6 +98,7 @@ class RefreshingSessionCredentials(
     ): SessionAccess = mutex(profileId).withLock {
         val current = readEnvelope(profileId) ?: throw SessionRequiredException()
         if (current.refreshPending) throw SessionRequiredException()
+        if (current.bindingCommitId != null) throw SessionRequiredException()
         if (current.generation != rejectedGeneration && !current.shouldRefresh(now())) {
             return@withLock current.toAccess()
         }

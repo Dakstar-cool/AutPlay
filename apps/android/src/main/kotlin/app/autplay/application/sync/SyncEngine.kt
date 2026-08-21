@@ -3,6 +3,11 @@ package app.autplay.application.sync
 import androidx.room3.withWriteTransaction
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.AppliedServerEventEntity
+import app.autplay.data.local.entity.ArtistCreditProjectionEntity
+import app.autplay.data.local.entity.ArtistCreditNameProjectionEntity
+import app.autplay.data.local.entity.ArtistProjectionEntity
+import app.autplay.data.local.entity.CatalogArtistCreditLinkEntity
+import app.autplay.data.local.entity.CatalogArtistCreditLinkOwnerEntity
 import app.autplay.data.local.entity.DeferredServerEventEntity
 import app.autplay.data.local.entity.OfflineJournalEventEntity
 import app.autplay.data.local.entity.SyncConflictEntity
@@ -19,10 +24,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 
 /** Bounded, payload-free state rendered by the Sync Status surface. */
 data class SyncStatus(
@@ -220,6 +229,7 @@ class SyncCoordinator(
 
     /** Only CLEAN rows accept a remote projection. DIRTY rows retain local intent and get a conflict. */
     private suspend fun applyProjection(binding: ClientEventBinding, event: RemoteEvent): Boolean {
+        if (event.eventType in CATALOG_ARTIST_EVENT_TYPES) return applyArtistCatalogProjection(binding, event)
         if (event.eventType in setOf("RECOMMENDATION_IMPRESSION_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED")) {
             database.syncDao().insertInteractionFact(app.autplay.data.local.entity.RecommendationInteractionFactEntity(binding.serverProfileId.value, event.eventId, event.eventType, event.payloadJson, nowMs()))
             return true
@@ -256,8 +266,144 @@ class SyncCoordinator(
             database.syncDao().upsertConflict(SyncConflictEntity(conflictId(profile, event.eventId), profile, event.aggregateType, local, null, event.eventId, if (event.operation == "DELETE") "DELETE_VS_EDIT" else "STALE_VERSION", null, event.payloadJson, "OPEN", null, nowMs(), null))
             return true
         }
-        if (event.operation == "UPSERT") applyPayloadProjection(event.aggregateType, local, event.payloadJson)
+        if (event.operation == "UPSERT" && !applyPayloadProjection(event.aggregateType, local, event.payloadJson)) return false
         updateCleanVersion(event.aggregateType, local, event.serverRowVersion)
+        return true
+    }
+
+    /** Applies canonical IDs only; names are display evidence and never identity/backfill keys. */
+    private suspend fun applyArtistCatalogProjection(binding: ClientEventBinding, event: RemoteEvent): Boolean {
+        if (event.operation != "UPSERT") return false
+        val root = runCatching { Json.parseToJsonElement(event.payloadJson).jsonObject }.getOrNull() ?: return false
+        val profile = binding.serverProfileId.value
+        val version = event.serverRowVersion?.takeIf { it > 0 } ?: return false
+        val deletedAtMs = runCatching {
+            root["deleted_at"]?.jsonPrimitive?.contentOrNull?.let { java.time.Instant.parse(it).toEpochMilli() }
+        }.getOrElse { return false }
+        return when (event.eventType) {
+            "CATALOG_ARTIST_UPSERTED" -> applyArtistProjection(event, root, profile, version, deletedAtMs)
+            "CATALOG_ARTIST_CREDIT_UPSERTED" -> applyArtistCreditProjection(event, root, profile, version, deletedAtMs)
+            "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", "CATALOG_RELEASE_CREDIT_LINK_UPSERTED" ->
+                applyArtistCreditLinkProjection(event, root, profile, version, deletedAtMs)
+            else -> false
+        }
+    }
+
+    private suspend fun applyArtistProjection(
+        event: RemoteEvent,
+        root: JsonObject,
+        profile: String,
+        version: Long,
+        deletedAtMs: Long?,
+    ): Boolean {
+        val id = root["artist_id"]?.jsonPrimitive?.contentOrNull ?: return false
+        if (canonicalUuid(id) == null || event.aggregateType != "ARTIST" || event.aggregateServerId != id) return false
+        val dao = database.catalogProjectionDao()
+        if ((dao.artist(profile, id)?.serverRowVersion ?: -1) >= version) return true
+        val name = root["name"]?.jsonPrimitive?.contentOrNull ?: return false
+        dao.upsertArtists(listOf(ArtistProjectionEntity(
+            remoteLocalId(profile, "artist:$id"), profile, id, name,
+            root["sort_name"]?.jsonPrimitive?.contentOrNull,
+            root["artist_type"]?.jsonPrimitive?.contentOrNull,
+            root["disambiguation"]?.jsonPrimitive?.contentOrNull,
+            root["country_code"]?.jsonPrimitive?.contentOrNull,
+            root["identity_status"]?.jsonPrimitive?.contentOrNull,
+            version, nowMs(), deletedAtMs,
+        )))
+        return true
+    }
+
+    private suspend fun applyArtistCreditProjection(
+        event: RemoteEvent,
+        root: JsonObject,
+        profile: String,
+        version: Long,
+        deletedAtMs: Long?,
+    ): Boolean {
+        val id = root["artist_credit_id"]?.jsonPrimitive?.contentOrNull ?: return false
+        if (canonicalUuid(id) == null || event.aggregateType != "ARTIST_CREDIT" || event.aggregateServerId != id) return false
+        val dao = database.catalogProjectionDao()
+        if ((dao.artistCredit(profile, id)?.serverRowVersion ?: -1) >= version) return true
+        val displayName = root["display_name"]?.jsonPrimitive?.contentOrNull ?: return false
+        val names = root["names"]?.jsonArray ?: return false
+        if (names.size > MAX_ARTIST_CREDIT_NAMES) return false
+        val members = ArrayList<ArtistCreditNameProjectionEntity>(names.size)
+        val positions = HashSet<Int>(names.size)
+        for (element in names) {
+            val member = runCatching { element.jsonObject }.getOrNull() ?: return false
+            val artistId = member["artist_id"]?.jsonPrimitive?.contentOrNull ?: return false
+            if (canonicalUuid(artistId) == null) return false
+            val position = member["position"]?.jsonPrimitive?.intOrNull ?: return false
+            val creditedName = member["credited_name"]?.jsonPrimitive?.contentOrNull ?: return false
+            val joinPhrase = member["join_phrase"]?.jsonPrimitive?.contentOrNull ?: return false
+            val role = member["role"]?.jsonPrimitive?.contentOrNull ?: return false
+            if (position < 0 || !positions.add(position)) return false
+            members += ArtistCreditNameProjectionEntity(
+                remoteLocalId(profile, "artist-credit-name:$id:$position"), profile, id,
+                artistId, position, creditedName, joinPhrase, role,
+            )
+        }
+        dao.upsertArtistCredits(listOf(ArtistCreditProjectionEntity(
+            remoteLocalId(profile, "artist-credit:$id"), profile, id, displayName,
+            version, nowMs(), deletedAtMs,
+        )))
+        dao.deleteArtistCreditNames(profile, id)
+        if (members.isNotEmpty()) dao.upsertArtistCreditNames(members)
+        return true
+    }
+
+    private suspend fun applyArtistCreditLinkProjection(
+        event: RemoteEvent,
+        root: JsonObject,
+        profile: String,
+        version: Long,
+        deletedAtMs: Long?,
+    ): Boolean {
+        val type = if (event.eventType == "CATALOG_RECORDING_CREDIT_LINK_UPSERTED") "RECORDING" else "RELEASE"
+        val aggregateType = if (type == "RECORDING") "RECORDING_ARTIST_CREDIT" else "RELEASE_ARTIST_CREDIT"
+        val subjectKey = if (type == "RECORDING") "recording_id" else "release_id"
+        val subjectId = root[subjectKey]?.jsonPrimitive?.contentOrNull ?: return false
+        val creditId = root["artist_credit_id"]?.jsonPrimitive?.contentOrNull ?: return false
+        if (canonicalUuid(subjectId) == null || canonicalUuid(creditId) == null) return false
+        val ownerIds = root["owner_recording_ids"]?.jsonArray ?: return false
+        if (ownerIds.isEmpty() || ownerIds.size > MAX_OWNER_RECORDING_PAGE) return false
+        val canonicalOwnerIds = ownerIds.map { element ->
+            canonicalUuid(runCatching { element.jsonPrimitive.content }.getOrNull() ?: return false)
+                ?: return false
+        }.toSortedSet()
+        if (canonicalOwnerIds.size != ownerIds.size) return false
+        val scopeId = root["owner_scope_id"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf(OWNER_SCOPE_PATTERN::matches) ?: return false
+        val ownerPage = root["owner_recording_page"]?.jsonPrimitive?.intOrNull ?: return false
+        val ownerPageCount = root["owner_recording_page_count"]?.jsonPrimitive?.intOrNull ?: return false
+        if (ownerPageCount < 1 || ownerPage !in 0 until ownerPageCount) return false
+        if (event.aggregateType != aggregateType || event.aggregateServerId != subjectId) return false
+        val dao = database.catalogProjectionDao()
+        val existing = dao.artistCreditLink(profile, type, subjectId)
+        if (existing != null && existing.serverRowVersion > version) return true
+        if (existing != null && event.sequence > 0 && existing.lastServerSequence >= event.sequence) return true
+        val newScope = existing == null || existing.ownerScopeId != scopeId ||
+            existing.serverRowVersion != version || existing.serverArtistCreditId != creditId
+        if (newScope) {
+            if (ownerPage != 0) return false
+            dao.deleteArtistCreditLinkOwners(profile, type, subjectId)
+        } else {
+            val current = existing
+            if (current.ownerPageCount != ownerPageCount) return false
+            if (ownerPage <= current.lastOwnerPage) return true
+            if (ownerPage != current.lastOwnerPage + 1) return false
+        }
+        dao.upsertArtistCreditLinkOwners(canonicalOwnerIds.map { ownerId ->
+            CatalogArtistCreditLinkOwnerEntity(
+                remoteLocalId(profile, "artist-credit-link-owner:$type:$subjectId:$scopeId:$ownerId"),
+                profile, type, subjectId, scopeId, ownerId,
+            )
+        })
+        dao.upsertArtistCreditLinks(listOf(CatalogArtistCreditLinkEntity(
+            remoteLocalId(profile, "artist-credit-link:$type:$subjectId"), profile,
+            type, subjectId, creditId, scopeId, ownerPageCount, ownerPage,
+            ownerPage == ownerPageCount - 1, version, event.sequence, nowMs(), deletedAtMs,
+        )))
         return true
     }
 
@@ -369,13 +515,31 @@ class SyncCoordinator(
             "PLAYLIST_ENTRY" -> database.playlistDao().entry(local)?.let { database.playlistDao().upsertEntry(it.copy(serverRowVersion = version, syncState = "CLEAN")) }
         }
     }
-    private suspend fun applyPayloadProjection(type: String, local: String, payload: String) {
+    private suspend fun applyPayloadProjection(type: String, local: String, payload: String): Boolean {
         when (type) {
-            "USER_TRACK_REF" -> database.libraryDao().trackRef(local)?.let { row -> database.libraryDao().upsertTrackRef(row.copy(rawTitle = payloadString(payload, "title") ?: row.rawTitle, rawArtist = payloadString(payload, "artist") ?: row.rawArtist)) }
+            "USER_TRACK_REF" -> {
+                val row = database.libraryDao().trackRef(local) ?: return false
+                val root = runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: return false
+                val recordingId = if (root.containsKey("recording_id")) {
+                    val raw = runCatching { root["recording_id"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+                    raw?.let(::canonicalUuid) ?: if (raw == null) null else return false
+                } else row.serverRecordingId
+                database.libraryDao().upsertTrackRef(row.copy(
+                    serverRecordingId = recordingId,
+                    resolutionStatus = payloadString(payload, "resolution_status") ?: row.resolutionStatus,
+                    rawTitle = payloadString(payload, "title") ?: row.rawTitle,
+                    rawArtist = payloadString(payload, "artist") ?: row.rawArtist,
+                    rawAlbum = payloadString(payload, "album") ?: row.rawAlbum,
+                ))
+            }
             "PLAYLIST" -> database.playlistDao().playlist(local)?.let { row -> database.playlistDao().upsertPlaylist(row.copy(name = payloadString(payload, "name") ?: row.name, description = payloadString(payload, "description") ?: row.description)) }
             "PLAYLIST_ENTRY" -> database.playlistDao().entry(local)?.let { row -> payloadString(payload, "position_key")?.let { database.playlistDao().upsertEntry(row.copy(positionKey = it, activePositionKey = it)) } }
         }
+        return true
     }
+
+    private fun canonicalUuid(value: String): String? = runCatching { UUID.fromString(value).toString() }
+        .getOrNull()?.takeIf { it == value }
     private suspend fun applyDeleteProjection(type: String, local: String) {
         val now = nowMs()
         when (type) {
@@ -433,7 +597,11 @@ class SyncCoordinator(
         const val COMPACTION_SAFETY_WINDOW = 100L
         const val COMPACTION_BATCH_LIMIT = 500
         const val TOMBSTONE_RETAIN_MS = 30L * 24 * 60 * 60 * 1000
-        val KNOWN_EVENT_TYPES = setOf("USER_TRACK_REF_CREATED", "LIBRARY_ENTRY_UPSERTED", "USER_TRACK_PREFERENCE_SET", "PLAYLIST_CREATED", "PLAYLIST_METADATA_PATCHED", "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED", "AGGREGATE_DELETED", "AGGREGATE_REDIRECT", "LISTENING_EVENT_RECORDED", "RECOMMENDATION_IMPRESSION_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED")
+        const val MAX_ARTIST_CREDIT_NAMES = 1_000
+        const val MAX_OWNER_RECORDING_PAGE = 100
+        val OWNER_SCOPE_PATTERN = Regex("^[a-f0-9]{64}$")
+        val CATALOG_ARTIST_EVENT_TYPES = setOf("CATALOG_ARTIST_UPSERTED", "CATALOG_ARTIST_CREDIT_UPSERTED", "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", "CATALOG_RELEASE_CREDIT_LINK_UPSERTED")
+        val KNOWN_EVENT_TYPES = setOf("USER_TRACK_REF_CREATED", "USER_TRACK_REF_PATCHED", "LIBRARY_ENTRY_UPSERTED", "USER_TRACK_PREFERENCE_SET", "PLAYLIST_CREATED", "PLAYLIST_METADATA_PATCHED", "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED", "AGGREGATE_DELETED", "AGGREGATE_REDIRECT", "LISTENING_EVENT_RECORDED", "RECOMMENDATION_IMPRESSION_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED") + CATALOG_ARTIST_EVENT_TYPES
     }
 }
 

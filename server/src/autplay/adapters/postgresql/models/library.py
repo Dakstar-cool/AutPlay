@@ -503,6 +503,13 @@ Index(
 )
 
 Index(
+    "ix_user_track_ref_recording_user_active",
+    UserTrackRefRow.recording_id,
+    UserTrackRefRow.user_id,
+    postgresql_where=text("recording_id IS NOT NULL AND deleted_at IS NULL"),
+)
+
+Index(
     "ix_user_track_ref_user_status",
     UserTrackRefRow.user_id,
     UserTrackRefRow.resolution_status,

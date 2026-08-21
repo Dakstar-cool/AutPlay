@@ -73,6 +73,13 @@ from .playlist import (
     PlaylistRow,
     SmartPlaylistRuleRow,
 )
+from .profile_pairing import (
+    EnrollmentExchangeReceiptRow,
+    EnrollmentInvitationRow,
+    ProfileLifecycleCommandRow,
+    ServerInstanceRow,
+    SessionRotationReceiptRow,
+)
 from .sync import (
     BootstrapSessionRow,
     BootstrapSnapshotItemRow,
@@ -102,11 +109,30 @@ from .wave import (
     WaveRoomRow,
     WaveTimingReportRow,
 )
+from .web_admin import (
+    WebLoginChallengeRow,
+    WebLoginRateWindowRow,
+    WebSessionInvitationRow,
+    WebSessionRotationEvidenceRow,
+    WebSessionRow,
+    WebTerminalReceiptRow,
+)
 
 MAPPED_ROWS: tuple[type[Base], ...] = (
     UserAccountRow,
     DeviceRow,
     UserSessionRow,
+    ServerInstanceRow,
+    EnrollmentInvitationRow,
+    EnrollmentExchangeReceiptRow,
+    SessionRotationReceiptRow,
+    ProfileLifecycleCommandRow,
+    WebSessionInvitationRow,
+    WebLoginChallengeRow,
+    WebSessionRow,
+    WebSessionRotationEvidenceRow,
+    WebTerminalReceiptRow,
+    WebLoginRateWindowRow,
     ArtistRow,
     ArtistCreditRow,
     ArtistCreditNameRow,
@@ -202,6 +228,8 @@ __all__ = (
     "EmbeddingModelActivationRow",
     "EmbeddingModelRow",
     "EnrichmentJobRow",
+    "EnrollmentExchangeReceiptRow",
+    "EnrollmentInvitationRow",
     "ExternalReferenceRow",
     "IdempotencyRecordRow",
     "ImportEntryRow",
@@ -219,6 +247,7 @@ __all__ = (
     "OfflineRecommendationPackRow",
     "PlaylistEntryRow",
     "PlaylistRow",
+    "ProfileLifecycleCommandRow",
     "RecommendationInputSnapshotRow",
     "RecommendationItemRow",
     "RecommendationPipelineVersionRow",
@@ -232,6 +261,8 @@ __all__ = (
     "ReleaseGroupRow",
     "ReleaseRow",
     "ReleaseTrackRow",
+    "ServerInstanceRow",
+    "SessionRotationReceiptRow",
     "SmartPlaylistRuleRow",
     "SourceObservationRow",
     "SourceProviderRow",
@@ -250,5 +281,11 @@ __all__ = (
     "UserTrackRefRow",
     "VaultObjectRow",
     "VaultReplicaRow",
+    "WebLoginChallengeRow",
+    "WebLoginRateWindowRow",
+    "WebSessionInvitationRow",
+    "WebSessionRotationEvidenceRow",
+    "WebSessionRow",
+    "WebTerminalReceiptRow",
     "WorkRow",
 )

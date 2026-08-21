@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
 from alembic.script import ScriptDirectory
+from sqlalchemy.exc import DBAPIError
 
 from .conftest import DatabaseHarness
 
@@ -47,11 +49,11 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0015_wave_runtime"]
+    assert heads == ["0019_m6_web_admin_runtime"]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 75
+    assert _object_count(database_harness, empty_database_name) == 86
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -59,7 +61,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 75
+    assert _object_count(database_harness, empty_database_name) == 86
 
 
 def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHarness) -> None:
@@ -84,5 +86,42 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0013_recommendation_runtime",
         "0014_gpu_enrichment",
         "0015_wave_runtime",
+        "0016_artist_id_sync_contract",
+        "0017_profile_pairing_runtime",
+        "0018_profile_lifecycle_cleanup",
+        "0019_m6_web_admin_runtime",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
+
+
+def test_artist_sync_downgrade_refuses_durable_catalog_events(
+    database_harness: DatabaseHarness, empty_database_name: str
+) -> None:
+    database_harness.upgrade(empty_database_name)
+    with database_harness.connect(empty_database_name) as connection:
+        row = connection.execute(
+            "INSERT INTO account.user_account (display_name, role) "
+            "VALUES ('artist-downgrade-owner', 'OWNER') RETURNING user_id"
+        ).fetchone()
+        if row is None:
+            raise AssertionError("expected owner insert to return a user ID")
+        user_id = row[0]
+        connection.execute(
+            "INSERT INTO sync.sync_event "
+            "(user_id, event_type, schema_version, aggregate_type, aggregate_id, payload) "
+            "VALUES (%s, 'CATALOG_ARTIST_UPSERTED', 1, 'ARTIST', uuidv7(), '{}'::jsonb)",
+            (user_id,),
+        )
+        connection.commit()
+
+    with pytest.raises(DBAPIError, match="refusing Artist sync downgrade with catalog events"):
+        database_harness.downgrade(empty_database_name, "0015_wave_runtime")
+    # Alembic executes the attempted multi-revision downgrade atomically; the
+    # M5B contract remains present when the predecessor refuses its rollback.
+    assert _current_revision(database_harness, empty_database_name) == ("0019_m6_web_admin_runtime")
+
+    with database_harness.connect(empty_database_name) as connection:
+        connection.execute("DELETE FROM sync.sync_event")
+        connection.commit()
+    database_harness.downgrade(empty_database_name, "0015_wave_runtime")
+    assert _current_revision(database_harness, empty_database_name) == "0015_wave_runtime"

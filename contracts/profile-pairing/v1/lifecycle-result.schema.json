@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/lifecycle-result.schema.json",
+  "title": "LifecycleResult",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "operation_id", "outcome", "terminal_at"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "outcome": {"enum": ["APPLIED", "ALREADY_TERMINAL"]},
+    "terminal_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED"
+}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-card" aria-labelledby="login-title">
+  <p class="eyebrow">AutPlay Admin</p>
+  <h1 id="login-title">{{ t("login_title") }}</h1>
+  <p>{{ t("login_intro") }}</p>
+  {% if error_code %}<div class="error" role="alert"><strong>{{ t("terminal_error_title") }}</strong><br>{{ t("diagnostic_code") }}: <code>{{ error_code }}</code></div>{% endif %}
+  <form method="post" action="/admin/login" autocomplete="off">
+    <input type="hidden" name="preauth_nonce" value="{{ preauth_nonce }}">
+    <input type="hidden" name="challenge_id" value="{{ challenge_id }}">
+    <input type="hidden" name="operation_id" value="{{ operation_id }}">
+    <label for="browser-invitation">{{ t("browser_invitation") }}</label>
+    <input id="browser-invitation" name="browser_invitation" type="password" required minlength="40" maxlength="128" autocomplete="off" spellcheck="false">
+    <p class="field-help">{{ t("secret_warning") }}</p>
+    <button type="submit">{{ t("sign_in") }}</button>
+  </form>
+</section>
+{% endblock %}

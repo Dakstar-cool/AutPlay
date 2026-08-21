@@ -80,12 +80,14 @@ class LibraryVerticalSliceRepository(
     suspend fun removeLibrary(binding: ClientEventBinding?, entryId: LocalId, changeId: LocalId, now: Long): SliceMutationResult =
         mutate(binding, changeId, "LIBRARY_ENTRY_UPSERTED", "LIBRARY_ENTRY", entryId, now, "{\"library_entry_local_id\":${q(entryId.value)},\"removed_at_ms\":$now}") { sequence, bound ->
             val existing = database.libraryDao().entry(entryId.value) ?: missing()
+            ensureOwned(binding, existing.serverProfileId)
             database.libraryDao().upsertEntry(existing.copy(removedAtMs = now, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
     suspend fun restoreLibrary(binding: ClientEventBinding?, entryId: LocalId, changeId: LocalId, now: Long): SliceMutationResult =
         mutate(binding, changeId, "LIBRARY_ENTRY_UPSERTED", "LIBRARY_ENTRY", entryId, now, "{\"library_entry_local_id\":${q(entryId.value)},\"removed_at_ms\":null}") { sequence, bound ->
             val existing = database.libraryDao().entry(entryId.value) ?: missing()
+            ensureOwned(binding, existing.serverProfileId)
             database.libraryDao().upsertEntry(existing.copy(removedAtMs = null, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
@@ -94,15 +96,33 @@ class LibraryVerticalSliceRepository(
         val attribution = attributionJson?.let(::validateAttribution)
         val payload = "{\"attribution\":${attribution ?: "null"},\"excluded_from_taste\":$excluded,\"local_user_track_ref_id\":${q(trackRefId.value)},\"preference\":${q(preference)}}"
         return mutate(binding, changeId, "USER_TRACK_PREFERENCE_SET", "USER_TRACK_PREFERENCE", trackRefId, now, payload) { sequence, bound ->
-            database.libraryDao().trackRef(trackRefId.value) ?: missing()
-            database.libraryDao().upsertPreference(UserTrackPreferenceEntity(trackRefId.value, preference, null, excluded, sync(bound), sequence, now))
+            val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
+            ensureOwned(binding, track.serverProfileId)
+            database.libraryDao().upsertPreference(
+                UserTrackPreferenceEntity(
+                    trackRefId.value,
+                    preference,
+                    null,
+                    excluded,
+                    sync(bound),
+                    sequence,
+                    now,
+                    binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
+                ),
+            )
         }
     }
 
     suspend fun createPlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult {
         require(name.isNotBlank() && name.length <= 500)
         return mutate(binding, changeId, "PLAYLIST_CREATED", "PLAYLIST", playlistId, now, "{\"description\":${description?.let(::q) ?: "null"},\"name\":${q(name)}}") { sequence, bound ->
-            database.playlistDao().insertPlaylist(PlaylistEntity(playlistId.value, null, name, description, "PRIVATE", "MANUAL", null, null, sync(bound), null, sequence, now, now, null))
+            database.playlistDao().insertPlaylist(
+                PlaylistEntity(
+                    playlistId.value, null, name, description, "PRIVATE", "MANUAL", null, null,
+                    sync(bound), null, sequence, now, now, null,
+                    binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
+                ),
+            )
         }
     }
 
@@ -110,12 +130,14 @@ class LibraryVerticalSliceRepository(
         mutate(binding, changeId, "PLAYLIST_METADATA_PATCHED", "PLAYLIST", playlistId, now, "{\"description\":${description?.let(::q) ?: "null"},\"name\":${q(name)}}") { sequence, bound ->
             require(name.isNotBlank() && name.length <= 500)
             val row = database.playlistDao().playlist(playlistId.value) ?: missing()
+            ensureOwned(binding, row.serverProfileId)
             database.playlistDao().upsertPlaylist(row.copy(name = name, description = description, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
     suspend fun deletePlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, now: Long): SliceMutationResult =
         mutate(binding, changeId, "AGGREGATE_DELETED", "PLAYLIST", playlistId, now, "{}") { sequence, bound ->
             val row = database.playlistDao().playlist(playlistId.value) ?: missing()
+            ensureOwned(binding, row.serverProfileId)
             database.playlistDao().upsertPlaylist(row.copy(deletedAtMs = now, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
             val entries = database.playlistDao().activeEntryList(playlistId.value, MAX_PLAYLIST_ENTRIES)
             database.playlistDao().upsertEntries(entries.map { it.copy(removedAtMs = now, activePositionKey = null, syncState = sync(bound), lastLocalSequence = sequence) })
@@ -126,8 +148,10 @@ class LibraryVerticalSliceRepository(
         val payload = "{\"attribution\":${attribution ?: "null"},\"before_local_playlist_entry_id\":${beforeEntryId?.let { q(it.value) } ?: "null"},\"local_playlist_entry_id\":${q(entryId.value)},\"local_playlist_id\":${q(playlistId.value)},\"local_user_track_ref_id\":${q(trackRefId.value)}}"
         return mutate(binding, changeId, "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY", entryId, now, payload) { sequence, bound ->
             val playlist = database.playlistDao().playlist(playlistId.value) ?: missing()
+            ensureOwned(binding, playlist.serverProfileId)
             if (playlist.deletedAtMs != null) removed()
-            database.libraryDao().trackRef(trackRefId.value) ?: missing()
+            val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
+            ensureOwned(binding, track.serverProfileId)
             val active = database.playlistDao().activeEntryList(playlistId.value, MAX_PLAYLIST_ENTRIES)
             if (active.size >= MAX_PLAYLIST_ENTRIES) tooMany()
             val index = beforeEntryId?.let { id -> active.indexOfFirst { it.localPlaylistEntryId == id.value }.takeIf { it >= 0 } } ?: active.size
@@ -140,19 +164,27 @@ class LibraryVerticalSliceRepository(
                 key = PlaylistPositionKeys.between(ordered.getOrNull(index - 1)?.activePositionKey, ordered.getOrNull(index)?.activePositionKey)
             }
             checkNotNull(key)
-            database.playlistDao().insertEntry(PlaylistEntryEntity(entryId.value, null, playlistId.value, trackRefId.value, key, key, null, now, sync(bound), null, sequence, null))
+            database.playlistDao().insertEntry(
+                PlaylistEntryEntity(
+                    entryId.value, null, playlistId.value, trackRefId.value, key, key, null, now,
+                    sync(bound), null, sequence, null,
+                    binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
+                ),
+            )
         }
     }
 
     suspend fun removePlaylistEntry(binding: ClientEventBinding?, entryId: LocalId, changeId: LocalId, now: Long): SliceMutationResult =
         mutate(binding, changeId, "AGGREGATE_DELETED", "PLAYLIST_ENTRY", entryId, now, "{\"local_playlist_entry_id\":${q(entryId.value)}}") { sequence, bound ->
             val row = database.playlistDao().entry(entryId.value) ?: missing()
+            ensureOwned(binding, row.serverProfileId)
             database.playlistDao().upsertEntry(row.copy(removedAtMs = now, activePositionKey = null, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
     suspend fun reorderPlaylistEntry(binding: ClientEventBinding?, entryId: LocalId, beforeEntryId: LocalId?, changeId: LocalId, now: Long): SliceMutationResult =
         mutate(binding, changeId, "PLAYLIST_ENTRY_MOVED", "PLAYLIST_ENTRY", entryId, now, "{\"before_local_playlist_entry_id\":${beforeEntryId?.let { q(it.value) } ?: "null"}}") { sequence, bound ->
             val row = database.playlistDao().entry(entryId.value) ?: missing()
+            ensureOwned(binding, row.serverProfileId)
             if (row.removedAtMs != null) removed()
             val active = database.playlistDao().activeEntryList(row.localPlaylistId, MAX_PLAYLIST_ENTRIES).filterNot { it.localPlaylistEntryId == entryId.value }
             val index = beforeEntryId?.let { id -> active.indexOfFirst { it.localPlaylistEntryId == id.value }.takeIf { it >= 0 } } ?: active.size
@@ -198,6 +230,7 @@ class LibraryVerticalSliceRepository(
         val attribution = attributionJson?.let(::validateAttribution)
         require(origin != "RECOMMENDED" || attribution != null)
         val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
+        ensureOwned(binding, track.serverProfileId)
         val ratio = durationMs?.let { (playedMs.toDouble() / it).coerceIn(0.0, 1.0) }
         val payload = "{\"completion_ratio\":${ratio ?: "null"},\"context\":${q(context)},\"event_origin\":${q(origin)},\"excluded_from_taste\":$excluded,\"explicit_feedback\":\"NONE\",\"interaction_type\":\"LISTENING_EVENT_RECORDED\",\"local_user_track_ref_id\":${q(trackRefId.value)},\"played_ms\":$playedMs,\"recommendation\":${attribution ?: "null"},\"recording_id\":${track.serverRecordingId?.let(::q) ?: "null"},\"server_user_track_ref_id\":${track.serverUserTrackRefId?.let(::q) ?: "null"},\"track_duration_ms\":${durationMs ?: "null"}}"
         return mutate(binding, listeningEventId, "LISTENING_EVENT_RECORDED", "LISTENING_EVENT", listeningEventId, now, payload) { sequence, bound ->
@@ -221,6 +254,7 @@ class LibraryVerticalSliceRepository(
                     attribution,
                     sessionStartPositionMs,
                     sessionEndPositionMs,
+                    binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
                 ),
             )
         }
@@ -231,9 +265,21 @@ class LibraryVerticalSliceRepository(
         val payload = "{\"artist\":${q(artist)},\"library_entry_local_id\":${q(libraryEntryId.value)},\"title\":${q(title)}}"
         return mutate(binding, changeId, "USER_TRACK_REF_CREATED", "USER_TRACK_REF", trackRefId, now, payload) { sequence, bound ->
             val status = when (inspection.status) { ContentUriStatus.AVAILABLE -> "AVAILABLE"; ContentUriStatus.MISSING -> "MISSING"; ContentUriStatus.PERMISSION_REVOKED -> "PERMISSION_REVOKED"; ContentUriStatus.INVALID -> error("checked") }
-            database.libraryDao().upsertTrackRef(UserTrackRefEntity(trackRefId.value, null, null, null, "UNRESOLVED", title, artist, null, null, null, sync(bound), null, sequence, now, now, null))
+            database.libraryDao().upsertTrackRef(
+                UserTrackRefEntity(
+                    trackRefId.value, null, null, null, "UNRESOLVED", title, artist, null, null,
+                    null, sync(bound), null, sequence, now, now, null,
+                    binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
+                ),
+            )
             val availability = when (inspection.status) { ContentUriStatus.AVAILABLE -> "LOCAL"; ContentUriStatus.MISSING -> "NOT_FOUND"; ContentUriStatus.PERMISSION_REVOKED -> "PENDING"; ContentUriStatus.INVALID -> error("checked") }
-            database.libraryDao().upsertEntry(LibraryEntryEntity(libraryEntryId.value, null, trackRefId.value, now, "IMPORT", availability, sync(bound), null, sequence, null, now))
+            database.libraryDao().upsertEntry(
+                LibraryEntryEntity(
+                    libraryEntryId.value, null, trackRefId.value, now, "IMPORT", availability,
+                    sync(bound), null, sequence, null, now,
+                    binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
+                ),
+            )
             database.localAudioDao().upsertState(LocalAudioStateEntity(audioStateId.value, trackRefId.value, null, null, inspection.uri, persistedPermission, null, null, null, null, null, null, null, null, null, null, status, "USER_IMPORT", inspection.byteSize, null, now, now, now))
             database.searchDao().insertContent(TrackSearchContentEntity(localUserTrackRefId = trackRefId.value, title = title, artist = artist, album = null, aliases = null, transliterations = null))
         }
@@ -359,6 +405,9 @@ class LibraryVerticalSliceRepository(
     }
 
     private fun sync(bound: Boolean) = if (bound) "DIRTY" else "LOCAL_ONLY"
+    private fun ensureOwned(binding: ClientEventBinding?, rowProfileId: String) {
+        if (rowProfileId != (binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID)) missing()
+    }
     /** Runs only after Room commits; WorkManager enqueue failure cannot roll back local intent. */
     private fun scheduleSync(binding: ClientEventBinding?, result: SliceMutationResult) {
         if (!result.journaled || binding == null) return
@@ -368,5 +417,8 @@ class LibraryVerticalSliceRepository(
     private fun missing(): Nothing = throw LocalSliceException(LocalSliceErrorCode.NOT_FOUND)
     private fun removed(): Nothing = throw LocalSliceException(LocalSliceErrorCode.REMOVED)
     private fun tooMany(): Nothing = throw LocalSliceException(LocalSliceErrorCode.TOO_MANY_ENTRIES)
-    private companion object { const val MAX_PLAYLIST_ENTRIES = 10_000 }
+    private companion object {
+        const val MAX_PLAYLIST_ENTRIES = 10_000
+        const val LEGACY_PROFILE_ID = "legacy-unscoped"
+    }
 }

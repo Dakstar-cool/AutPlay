@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/capabilities.schema.json",
+  "title": "Capabilities",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "payload", "payload_sha256", "signature_algorithm", "signature_b64url"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "payload": {
+      "type": "object",
+      "required": ["server_instance_id", "identity_epoch", "user_id", "device_id", "product_version", "api_major", "capability_revision", "operations", "limits", "issued_at", "expires_at"],
+      "properties": {
+        "server_instance_id": {"type": "string", "format": "uuid"},
+        "identity_epoch": {"type": "integer", "minimum": 1},
+        "user_id": {"type": "string", "format": "uuid"},
+        "device_id": {"type": "string", "format": "uuid"},
+        "product_version": {"type": "string", "minLength": 1, "maxLength": 32},
+        "api_major": {"type": "integer", "minimum": 1, "maximum": 255},
+        "capability_revision": {"type": "integer", "minimum": 1},
+        "operations": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$"}},
+        "limits": {"type": "object", "maxProperties": 64, "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 2147483647}},
+        "required_features": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$"}},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": true
+    },
+    "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signature_algorithm": {"const": "ES256-P1363"},
+    "signature_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED",
+  "x-autplay-max-canonical-bytes": 65536,
+  "x-autplay-max-ttl-seconds": 3600
+}

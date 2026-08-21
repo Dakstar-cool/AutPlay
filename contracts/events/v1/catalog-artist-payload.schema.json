@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/catalog-artist-payload.schema.json",
+  "title": "AutPlay Catalog Artist Payload v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["artist_id", "name", "sort_name", "artist_type", "disambiguation", "country_code", "identity_status", "deleted_at"],
+  "properties": {
+    "artist_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "sort_name": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 1000}, {"type": "null"}]},
+    "artist_type": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 100}, {"type": "null"}]},
+    "disambiguation": {"anyOf": [{"type": "string", "maxLength": 2000}, {"type": "null"}]},
+    "country_code": {"anyOf": [{"type": "string", "minLength": 2, "maxLength": 2}, {"type": "null"}]},
+    "identity_status": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 100}, {"type": "null"}]},
+    "deleted_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+  }
+}

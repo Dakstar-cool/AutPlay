@@ -2,6 +2,7 @@ package app.autplay.application.server
 
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.domain.ServerProfileId
@@ -124,11 +125,12 @@ class ServerFeatureRepository(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .callTimeout(Duration.ofSeconds(45))
         .build(),
+    private val m5Rotation: M5SessionRotationClient? = null,
 ) {
     private val serverRoot = serverBaseUrl.trimEnd('/')
     private val streamRoot = streamBaseUrl.trimEnd('/')
     private val apiBaseUrl = "$serverRoot/api/v1"
-    private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl, credentials, client)
+    private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl, credentials, client, m5Rotation = m5Rotation)
 
     suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
         ServerHealth(

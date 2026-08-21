@@ -35,6 +35,12 @@
     "serverEvent": {
       "type": "object",
       "additionalProperties": true,
+      "allOf": [
+        {"if": {"properties": {"event_type": {"const": "CATALOG_ARTIST_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "ARTIST"}, "payload": {"$ref": "catalog-artist-payload.schema.json"}}}},
+        {"if": {"properties": {"event_type": {"const": "CATALOG_ARTIST_CREDIT_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "ARTIST_CREDIT"}, "payload": {"$ref": "catalog-artist-credit-payload.schema.json"}}}},
+        {"if": {"properties": {"event_type": {"const": "CATALOG_RECORDING_CREDIT_LINK_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "RECORDING_ARTIST_CREDIT"}, "payload": {"$ref": "catalog-recording-credit-link-payload.schema.json"}}}},
+        {"if": {"properties": {"event_type": {"const": "CATALOG_RELEASE_CREDIT_LINK_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "RELEASE_ARTIST_CREDIT"}, "payload": {"$ref": "catalog-release-credit-link-payload.schema.json"}}}}
+      ],
       "required": [
         "server_sequence",
         "event_id",

@@ -151,6 +151,52 @@
       }
     },
     {
+      "schema": "catalog-artist-payload.schema.json",
+      "instance": {
+        "artist_id": "c1111111-1111-4111-8111-111111111111",
+        "name": "Same Name",
+        "sort_name": "Same Name",
+        "artist_type": "FUTURE_TYPE",
+        "disambiguation": null,
+        "country_code": null,
+        "identity_status": "FUTURE_STATUS",
+        "deleted_at": null
+      }
+    },
+    {
+      "schema": "catalog-artist-credit-payload.schema.json",
+      "instance": {
+        "artist_credit_id": "c2111111-1111-4211-8211-111111111111",
+        "display_name": "Lead feat. Guest",
+        "names": [{"artist_id": "c1111111-1111-4111-8111-111111111111", "position": 0, "credited_name": "Lead", "join_phrase": " feat. ", "role": "PRIMARY"}],
+        "deleted_at": null
+      }
+    },
+    {
+      "schema": "catalog-recording-credit-link-payload.schema.json",
+      "instance": {
+        "recording_id": "c3111111-1111-4311-8311-111111111111",
+        "artist_credit_id": "c2111111-1111-4211-8211-111111111111",
+        "owner_scope_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner_recording_page": 0,
+        "owner_recording_page_count": 1,
+        "owner_recording_ids": ["c3111111-1111-4311-8311-111111111111"],
+        "deleted_at": null
+      }
+    },
+    {
+      "schema": "catalog-release-credit-link-payload.schema.json",
+      "instance": {
+        "release_id": "c4111111-1111-4411-8411-111111111111",
+        "artist_credit_id": "c2111111-1111-4211-8211-111111111111",
+        "owner_scope_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner_recording_page": 0,
+        "owner_recording_page_count": 1,
+        "owner_recording_ids": ["c3111111-1111-4311-8311-111111111111"],
+        "deleted_at": null
+      }
+    },
+    {
       "schema": "error.schema.json",
       "instance": {
         "code": "CURSOR_INVALID",

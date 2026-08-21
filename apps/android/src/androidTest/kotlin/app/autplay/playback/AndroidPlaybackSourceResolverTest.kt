@@ -23,6 +23,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AndroidPlaybackSourceResolverTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val testPackageName = InstrumentationRegistry.getInstrumentation().context.packageName
     private val name = "autplay-p08-source.db"
     private lateinit var database: AutPlayDatabase
 
@@ -40,7 +41,7 @@ class AndroidPlaybackSourceResolverTest {
     @Test fun readableLocalWinsBeforeConfiguredVault() = runBlocking {
         val track = track(1)
         database.libraryDao().upsertTrackRef(track)
-        database.localAudioDao().upsertState(audio(track, "content://app.autplay.test.readable/audio/1"))
+        database.localAudioDao().upsertState(audio(track, "content://$testPackageName.readable/audio/1"))
         val resolver = AndroidPlaybackSourceResolver(context, database, applicationNonSecretSettingsStore(context))
         val result = resolver.resolve(LocalId(track.localUserTrackRefId), 10) as AndroidSourceResolution.Available
         assertEquals(SelectedAudioSource.LOCAL_URI, result.value.source)
@@ -59,7 +60,7 @@ class AndroidPlaybackSourceResolverTest {
         )
         val track = track(2)
         database.libraryDao().upsertTrackRef(track)
-        val state = audio(track, "content://app.autplay.test.revoked/audio/1")
+        val state = audio(track, "content://$testPackageName.revoked/audio/1")
         database.localAudioDao().upsertState(state)
         val resolver = AndroidPlaybackSourceResolver(context, database, applicationNonSecretSettingsStore(context))
         val result = resolver.resolve(LocalId(track.localUserTrackRefId), 20) as AndroidSourceResolution.Available

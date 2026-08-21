@@ -39,14 +39,45 @@ data class SessionCredentialEnvelope(
     val refreshToken: String?,
     val generation: Long,
     val refreshPending: Boolean = false,
+    /** M5 secret/non-secret crash-recovery marker and session lineage. */
+    val bindingCommitId: String? = null,
+    val sessionId: String? = null,
+    val sessionFamilyId: String? = null,
+    val sessionGeneration: Long? = null,
+    /** Encrypted exact M5 rotation replay material; never present for legacy P03 credentials. */
+    val m5PendingRotationId: String? = null,
+    val m5PendingRotationRequest: String? = null,
+    val m5PendingSuccessorRefreshToken: String? = null,
+    val m5PendingExchangeId: String? = null,
+    val m5PendingExchangeRequest: String? = null,
+    val m5PendingExchangeSuccessorRefreshToken: String? = null,
+    /** Encrypted F-018 consent snapshot retained until idempotent Room materialization succeeds. */
+    val m5PendingMaterializationRequest: String? = null,
 ) {
     init {
         require(accessToken.isNotBlank() && accessToken.length <= MAX_TOKEN_CHARS)
         require(refreshToken == null || (refreshToken.isNotBlank() && refreshToken.length <= MAX_TOKEN_CHARS))
         require(generation >= 0)
+        val m5 = listOf(bindingCommitId, sessionId, sessionFamilyId, sessionGeneration)
+        require(m5.all { it == null } || m5.all { it != null }) { "M5 credential lineage must be complete." }
+        require(sessionGeneration == null || sessionGeneration >= 0)
+        val pending = listOf(m5PendingRotationId, m5PendingRotationRequest, m5PendingSuccessorRefreshToken)
+        require(pending.all { it == null } || pending.all { it != null }) { "M5 pending rotation must be complete." }
+        require(m5PendingRotationId == null || refreshPending) { "M5 pending rotation requires durable pending state." }
+        val exchange = listOf(m5PendingExchangeId, m5PendingExchangeRequest, m5PendingExchangeSuccessorRefreshToken)
+        require(exchange.all { it == null } || exchange.all { it != null }) { "M5 pending exchange must be complete." }
+        require(m5PendingExchangeId == null || refreshPending) { "M5 pending exchange requires durable pending state." }
+        require(m5PendingRotationId == null || m5PendingExchangeId == null) { "M5 pending operations are mutually exclusive." }
+        require(
+            m5PendingMaterializationRequest == null ||
+                (m5.all { it != null } && m5PendingMaterializationRequest.length in 2..MAX_MATERIALIZATION_CHARS),
+        ) { "M5 pending materialization requires complete active lineage." }
     }
 
-    private companion object { const val MAX_TOKEN_CHARS = 4_096 }
+    private companion object {
+        const val MAX_TOKEN_CHARS = 4_096
+        const val MAX_MATERIALIZATION_CHARS = 8_192
+    }
 }
 
 /** Keeps old raw access-token values readable while new profiles retain their refresh credential. */
@@ -62,6 +93,17 @@ object SessionCredentialEnvelopeCodec {
             },
             generation = value["generation"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0,
             refreshPending = value["refresh_pending"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+            bindingCommitId = value["binding_commit_id"]?.jsonPrimitive?.content,
+            sessionId = value["session_id"]?.jsonPrimitive?.content,
+            sessionFamilyId = value["session_family_id"]?.jsonPrimitive?.content,
+            sessionGeneration = value["session_generation"]?.jsonPrimitive?.content?.toLongOrNull(),
+            m5PendingRotationId = value["m5_pending_rotation_id"]?.jsonPrimitive?.content,
+            m5PendingRotationRequest = value["m5_pending_rotation_request"]?.jsonPrimitive?.content,
+            m5PendingSuccessorRefreshToken = value["m5_pending_successor_refresh_token"]?.jsonPrimitive?.content,
+            m5PendingExchangeId = value["m5_pending_exchange_id"]?.jsonPrimitive?.content,
+            m5PendingExchangeRequest = value["m5_pending_exchange_request"]?.jsonPrimitive?.content,
+            m5PendingExchangeSuccessorRefreshToken = value["m5_pending_exchange_successor_refresh_token"]?.jsonPrimitive?.content,
+            m5PendingMaterializationRequest = value["m5_pending_materialization_request"]?.jsonPrimitive?.content,
         )
     }
 
@@ -70,6 +112,17 @@ object SessionCredentialEnvelopeCodec {
         value.refreshToken?.let { put("refresh_token", it) }
         put("generation", value.generation)
         put("refresh_pending", value.refreshPending)
+        value.bindingCommitId?.let { put("binding_commit_id", it) }
+        value.sessionId?.let { put("session_id", it) }
+        value.sessionFamilyId?.let { put("session_family_id", it) }
+        value.sessionGeneration?.let { put("session_generation", it) }
+        value.m5PendingRotationId?.let { put("m5_pending_rotation_id", it) }
+        value.m5PendingRotationRequest?.let { put("m5_pending_rotation_request", it) }
+        value.m5PendingSuccessorRefreshToken?.let { put("m5_pending_successor_refresh_token", it) }
+        value.m5PendingExchangeId?.let { put("m5_pending_exchange_id", it) }
+        value.m5PendingExchangeRequest?.let { put("m5_pending_exchange_request", it) }
+        value.m5PendingExchangeSuccessorRefreshToken?.let { put("m5_pending_exchange_successor_refresh_token", it) }
+        value.m5PendingMaterializationRequest?.let { put("m5_pending_materialization_request", it) }
     }.toString().toByteArray(StandardCharsets.UTF_8)
 
     private fun JsonObject.requiredString(name: String): String =

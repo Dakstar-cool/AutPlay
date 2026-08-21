@@ -234,8 +234,12 @@ class ArtistCreditNameRow(Base):
         ),
         PrimaryKeyConstraint("artist_credit_id", "position", name="artist_credit_name_pkey"),
         CheckConstraint(
-            "role IN ('PRIMARY', 'FEATURED', 'REMIXER', 'CONDUCTOR', 'OTHER')",
+            "length(role) BETWEEN 1 AND 100",
             name="ck_artist_credit_name_role",
+        ),
+        CheckConstraint(
+            "length(join_phrase) <= 1000",
+            name="artist_credit_name_join_phrase_check",
         ),
         {"schema": "catalog"},
     )
@@ -835,6 +839,13 @@ Index(
     "ix_recording_artist_credit",
     RecordingRow.artist_credit_id,
     RecordingRow.identity_status,
+)
+
+Index(
+    "ix_release_artist_credit_active",
+    ReleaseRow.artist_credit_id,
+    ReleaseRow.release_id,
+    postgresql_where=text("deleted_at IS NULL"),
 )
 
 Index(

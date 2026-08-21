@@ -97,6 +97,7 @@ public enum class AutPlayIcon {
     Shuffle,
     Repeat,
     Check,
+    Favorite,
 }
 
 /** Width categories based on the Android adaptive-layout guidance breakpoints. */

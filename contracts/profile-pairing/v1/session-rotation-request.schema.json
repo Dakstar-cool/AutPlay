@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/session-rotation-request.schema.json",
+  "title": "SessionRotationRequest",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "rotation_id", "expected_server_instance_id", "expected_identity_epoch", "device_id", "parent_session_id", "current_generation", "current_refresh_token", "next_refresh_token_sha256", "request_sha256", "signature_algorithm", "device_signature_b64url"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "rotation_id": {"type": "string", "format": "uuid"},
+    "expected_server_instance_id": {"type": "string", "format": "uuid"},
+    "expected_identity_epoch": {"type": "integer", "minimum": 1},
+    "device_id": {"type": "string", "format": "uuid"},
+    "parent_session_id": {"type": "string", "format": "uuid"},
+    "current_generation": {"type": "integer", "minimum": 0},
+    "current_refresh_token": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "next_refresh_token_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signature_algorithm": {"const": "ES256-P1363"},
+    "device_signature_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+  },
+  "additionalProperties": false,
+  "x-autplay-sensitive": true,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED"
+}

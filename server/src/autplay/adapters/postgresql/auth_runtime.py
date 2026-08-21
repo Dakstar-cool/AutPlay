@@ -145,6 +145,7 @@ class SqlAlchemyAuthRepository:
             issued_at=session.issued_at,
             expires_at=session.expires_at,
             revoked_at=session.revoked_at,
+            session_mode=session.session_mode,
         )
 
     def revoke_session(self, session_id: UUID, *, revoked_at: datetime) -> None:

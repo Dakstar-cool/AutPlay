@@ -7,12 +7,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import app.autplay.R
 import app.autplay.application.server.RemoteImportEntry
 import app.autplay.application.server.RemoteImportReport
 import org.junit.Rule
@@ -24,6 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 @RunWith(AndroidJUnit4::class)
 class ServerFeaturesScreenTest {
     @get:Rule val compose = createComposeRule()
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
     fun candidateAcceptanceIsAbsentWhenServerDoesNotExposeEvidence() {
@@ -55,23 +58,25 @@ class ServerFeaturesScreenTest {
                                 nextAfter = "page-2",
                             ),
                         ),
-                        onRefreshHealth = {}, onRefreshLibrary = {}, onSearch = {},
-                        onChooseServerImport = {}, onRefreshImport = {},
-                        onLoadNextImport = { nextLoaded.set(true) }, onCancelImport = {},
-                        onResumeImport = {}, onReviewImport = { _, _ -> },
-                        onUploadSelectedTrack = {}, onCancelUpload = {},
-                        onRecommendations = {}, onExactReplay = {}, onAlgorithmicReplay = {},
+                        actions = ServerFeaturesActions(
+                            refreshHealth = {}, refreshLibrary = {}, search = {},
+                            chooseServerImport = {}, refreshImport = {},
+                            loadNextImport = { nextLoaded.set(true) }, cancelImport = {},
+                            resumeImport = {}, reviewImport = { _, _ -> },
+                            uploadSelectedTrack = {}, cancelUpload = {},
+                            recommendations = {}, exactReplay = {}, algorithmicReplay = {},
+                        ),
                     )
                 }
             }
         }
 
-        compose.onNodeWithText("Candidate evidence is not exposed by this server response; blind accept is disabled.")
+        compose.onNodeWithText(context.getString(R.string.server_import_needs_choice))
             .performScrollTo()
             .assertIsDisplayed()
-        compose.onNodeWithText("Keep unresolved").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Create Recording").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Load next import rows").performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.import_keep_unresolved)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.import_create_new_track)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.action_show_more)).performScrollTo().performClick()
         assertTrue(nextLoaded.get())
         compose.onAllNodesWithText("Accept", substring = true).assertCountEquals(0)
     }

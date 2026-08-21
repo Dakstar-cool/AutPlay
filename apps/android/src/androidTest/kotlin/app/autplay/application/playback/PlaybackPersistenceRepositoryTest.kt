@@ -41,7 +41,7 @@ class PlaybackPersistenceRepositoryTest {
     fun repeatedTrackQueueAndAttributionSessionRestoreFinalizeExactlyOnce() = runBlocking {
         val trackId = id(1)
         val recordingId = uuid(2)
-        database.libraryDao().upsertTrackRef(track(trackId, recordingId))
+        database.libraryDao().upsertTrackRef(track(trackId, recordingId, uuid(8)))
         val snapshotId = id(3)
         val firstEntry = id(4)
         val secondEntry = id(5)
@@ -105,9 +105,37 @@ class PlaybackPersistenceRepositoryTest {
     }
 
     @Test
+    fun queueCanStartFromSelectedDuplicateOccurrenceWithoutChangingOrder() = runBlocking {
+        val trackId = id(71)
+        database.libraryDao().upsertTrackRef(track(trackId, uuid(72)))
+        val firstEntry = id(73)
+        val selectedDuplicate = id(74)
+        val repository = PlaybackPersistenceRepository(database)
+
+        repository.activateQueue(
+            snapshotId = id(75),
+            entries = listOf(
+                NewPlaybackQueueEntry(firstEntry, trackId, "PLAYLIST", "LOCAL_THEN_VAULT"),
+                NewPlaybackQueueEntry(selectedDuplicate, trackId, "PLAYLIST", "LOCAL_THEN_VAULT"),
+            ),
+            queueType = "PLAYLIST",
+            sourceContextId = id(76).value,
+            serverProfileId = null,
+            listeningContext = "GENERAL",
+            nowMs = 100,
+            startEntryId = selectedDuplicate,
+        )
+
+        val restored = requireNotNull(repository.restoreActive())
+        assertEquals(listOf(firstEntry.value, selectedDuplicate.value), restored.entries.map { it.queueEntryId })
+        assertEquals(1, restored.media.currentIndex)
+        Unit
+    }
+
+    @Test
     fun replacedQueueFinalizesAgainstCapturedOwnerAndOriginalSnapshot() = runBlocking {
         val trackId = id(31)
-        database.libraryDao().upsertTrackRef(track(trackId, uuid(32)))
+        database.libraryDao().upsertTrackRef(track(trackId, uuid(32), uuid(37)))
         val repository = PlaybackPersistenceRepository(database)
         val firstSnapshot = id(33)
         val firstEntry = id(34)
@@ -139,7 +167,7 @@ class PlaybackPersistenceRepositoryTest {
     @Test
     fun startupRecoveryFinalizesInactiveSessionAfterQueueReplacementCrashWindow() = runBlocking {
         val trackId = id(51)
-        database.libraryDao().upsertTrackRef(track(trackId, uuid(52)))
+        database.libraryDao().upsertTrackRef(track(trackId, uuid(52), uuid(57)))
         val repository = PlaybackPersistenceRepository(database)
         val oldSnapshot = id(53)
         val oldEntry = id(54)
@@ -176,7 +204,11 @@ class PlaybackPersistenceRepositoryTest {
         Unit
     }
 
-    private fun track(id: LocalId, recordingId: String) = UserTrackRefEntity(
+    private fun track(
+        id: LocalId,
+        recordingId: String,
+        serverProfileId: String = "legacy-unscoped",
+    ) = UserTrackRefEntity(
         localUserTrackRefId = id.value,
         serverUserTrackRefId = uuid(20),
         localRecordingId = null,
@@ -193,6 +225,7 @@ class PlaybackPersistenceRepositoryTest {
         createdAtMs = 1,
         updatedAtMs = 1,
         deletedAtMs = null,
+        serverProfileId = serverProfileId,
     )
 
     private fun id(seed: Int) = LocalId(uuid(seed))

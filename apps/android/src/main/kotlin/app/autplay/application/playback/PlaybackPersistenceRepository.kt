@@ -52,6 +52,7 @@ class PlaybackPersistenceRepository(
         serverProfileId: String?,
         listeningContext: String,
         nowMs: Long,
+        startEntryId: LocalId? = null,
     ) {
         require(entries.isNotEmpty() && entries.size <= MAX_QUEUE_ENTRIES)
         require(entries.map { it.queueEntryId }.distinct().size == entries.size)
@@ -72,6 +73,8 @@ class PlaybackPersistenceRepository(
                 recommendationAttributionJson = attribution,
             )
         }
+        val currentEntryId = startEntryId?.value ?: rows.first().queueEntryId
+        require(rows.any { it.queueEntryId == currentEntryId })
         database.withWriteTransaction {
             database.queueDao().deactivateOtherSnapshots(snapshotId.value, nowMs)
             database.queueDao().insertSnapshot(
@@ -79,7 +82,7 @@ class PlaybackPersistenceRepository(
                     queueSnapshotId = snapshotId.value,
                     queueType = queueType,
                     sourceContextId = sourceContextId,
-                    currentEntryId = rows.first().queueEntryId,
+                    currentEntryId = currentEntryId,
                     currentPositionMs = 0,
                     shuffleMode = "OFF",
                     repeatMode = "OFF",

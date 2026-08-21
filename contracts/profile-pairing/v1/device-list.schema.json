@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/device-list.schema.json",
+  "title": "DeviceList",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "devices"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "devices": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["device_id", "device_name", "platform", "key_thumbprint_sha256", "created_at", "revoked_at", "last_seen_at"],
+        "properties": {
+          "device_id": {"type": "string", "format": "uuid"},
+          "device_name": {"type": "string", "minLength": 1, "maxLength": 120},
+          "platform": {"type": "string", "minLength": 1, "maxLength": 32},
+          "key_thumbprint_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "revoked_at": {"type": ["string", "null"], "format": "date-time"},
+          "last_seen_at": {"type": ["string", "null"], "format": "date-time"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED"
+}

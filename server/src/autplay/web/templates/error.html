@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="empty" aria-labelledby="error-title"><h1 id="error-title">{{ title }}</h1><p>{{ message }}</p><p>{{ t("diagnostic_code") }}: <code>{{ error_code }}</code></p>{% if retry_url %}<a class="button" href="{{ retry_url }}?lang={{ locale }}">{{ t("nav_dashboard") }}</a>{% endif %}</section>
+{% endblock %}

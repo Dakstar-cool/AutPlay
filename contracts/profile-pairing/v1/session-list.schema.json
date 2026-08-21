@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/session-list.schema.json",
+  "title": "SessionList",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "sessions"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "sessions": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["session_id", "device_id", "family_id", "generation", "issued_at", "absolute_expires_at", "revoked_at", "current"],
+        "properties": {
+          "session_id": {"type": "string", "format": "uuid"},
+          "device_id": {"type": "string", "format": "uuid"},
+          "family_id": {"type": "string", "format": "uuid"},
+          "generation": {"type": "integer", "minimum": 0},
+          "issued_at": {"type": "string", "format": "date-time"},
+          "absolute_expires_at": {"type": "string", "format": "date-time"},
+          "revoked_at": {"type": ["string", "null"], "format": "date-time"},
+          "current": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED"
+}

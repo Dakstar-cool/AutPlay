@@ -127,6 +127,7 @@ class DeviceRow(Base):
         BYTEA(),
         nullable=True,
     )
+    public_key_thumbprint_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -170,6 +171,11 @@ class DeviceRow(Base):
         CheckConstraint(
             "row_version >= 1",
             name="device_row_version_check",
+        ),
+        CheckConstraint(
+            "public_key_thumbprint_sha256 IS NULL "
+            "OR octet_length(public_key_thumbprint_sha256) = 32",
+            name="ck_device_public_key_thumbprint_len",
         ),
         UniqueConstraint("user_id", "device_id", name="uq_device_user_pair"),
         CheckConstraint(
@@ -220,6 +226,11 @@ class UserSessionRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
+    family_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    generation: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    session_mode: Mapped[str] = mapped_column(
+        Text(), nullable=False, server_default=text("'LEGACY'")
+    )
 
     __table_args__ = (
         PrimaryKeyConstraint("session_id", name="user_session_pkey"),
@@ -250,6 +261,11 @@ class UserSessionRow(Base):
             "expires_at > issued_at",
             name="ck_user_session_expiry",
         ),
+        CheckConstraint(
+            "generation IS NULL OR generation >= 0",
+            name="ck_user_session_generation",
+        ),
+        CheckConstraint("session_mode IN ('LEGACY', 'V2')", name="ck_user_session_mode"),
         {"schema": "account"},
     )
 

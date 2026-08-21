@@ -16,7 +16,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.autplay.R
 import app.autplay.application.server.RemoteImportEntry
 import app.autplay.application.server.RemoteImportReport
 import app.autplay.application.server.RemoteLibraryEntry
@@ -35,6 +37,23 @@ data class ServerFeaturesUiState(
     val stableMessage: String? = null,
 )
 
+data class ServerFeaturesActions(
+    val refreshHealth: () -> Unit,
+    val refreshLibrary: () -> Unit,
+    val search: (String) -> Unit,
+    val chooseServerImport: () -> Unit,
+    val refreshImport: () -> Unit,
+    val loadNextImport: () -> Unit,
+    val cancelImport: () -> Unit,
+    val resumeImport: () -> Unit,
+    val reviewImport: (RemoteImportEntry, String) -> Unit,
+    val uploadSelectedTrack: () -> Unit,
+    val cancelUpload: () -> Unit,
+    val recommendations: (Boolean) -> Unit,
+    val exactReplay: () -> Unit,
+    val algorithmicReplay: () -> Unit,
+)
+
 /** Online diagnostics/actions. The primary library and player remain Room/local-first. */
 @Composable
 fun ServerFeaturesScreen(
@@ -42,142 +61,128 @@ fun ServerFeaturesScreen(
     selectedTrackLabel: String?,
     selectedTrackUploadEligible: Boolean,
     state: ServerFeaturesUiState,
-    onRefreshHealth: () -> Unit,
-    onRefreshLibrary: () -> Unit,
-    onSearch: (String) -> Unit,
-    onChooseServerImport: () -> Unit,
-    onRefreshImport: () -> Unit,
-    onLoadNextImport: () -> Unit,
-    onCancelImport: () -> Unit,
-    onResumeImport: () -> Unit,
-    onReviewImport: (RemoteImportEntry, String) -> Unit,
-    onUploadSelectedTrack: () -> Unit,
-    onCancelUpload: () -> Unit,
-    onRecommendations: (Boolean) -> Unit,
-    onExactReplay: () -> Unit,
-    onAlgorithmicReplay: () -> Unit,
+    actions: ServerFeaturesActions,
 ) {
     var searchText by remember { mutableStateOf("") }
-    Text("Personal server", style = MaterialTheme.typography.titleLarge)
+    Text(stringResource(R.string.server_title), style = MaterialTheme.typography.titleLarge)
     Text(
-        if (isBound) "Authenticated server profile active. Local playback and edits remain available offline."
-        else "Bind a server profile before using online surfaces.",
+        stringResource(if (isBound) R.string.server_connected_body else R.string.server_not_connected_body),
     )
-    state.busyAction?.let { Text("Working: $it") }
-    state.stableMessage?.let { Text(it) }
+    state.busyAction?.let { Text(stringResource(R.string.action_in_progress)) }
+    state.stableMessage?.let { Text(stringResource(R.string.action_failed_friendly)) }
 
-    Section("Connection") {
+    Section(stringResource(R.string.server_connection_section)) {
         state.health?.let { health ->
-            Text("API ${if (health.apiReady) "ready" else "unavailable"} · Stream ${if (health.streamLive) "live" else "unavailable"}")
-        } ?: Text("Not checked")
-        Button(enabled = isBound && state.busyAction == null, onClick = onRefreshHealth) {
-            Text("Check API and stream")
+            Text(
+                stringResource(
+                    if (health.apiReady && health.streamLive) R.string.server_connection_ready
+                    else R.string.server_connection_limited,
+                ),
+            )
+        } ?: Text(stringResource(R.string.server_connection_not_checked))
+        Button(enabled = isBound && state.busyAction == null, onClick = actions.refreshHealth) {
+            Text(stringResource(R.string.server_check_connection))
         }
     }
 
-    Section("Server snapshot") {
+    Section(stringResource(R.string.server_library_section)) {
         val snapshot = state.library
         Text(
-            snapshot?.let { "${it.entries.size} entries · ${it.playlists.size} playlists · ${it.history.size} listens" }
-                ?: "Not loaded. This is an online reconciliation view, not the primary library.",
+            snapshot?.let {
+                stringResource(R.string.server_library_summary, it.entries.size, it.playlists.size, it.history.size)
+            } ?: stringResource(R.string.server_library_not_loaded),
         )
-        Button(enabled = isBound && state.busyAction == null, onClick = onRefreshLibrary) {
-            Text("Load server snapshot")
+        Button(enabled = isBound && state.busyAction == null, onClick = actions.refreshLibrary) {
+            Text(stringResource(R.string.server_library_refresh))
         }
         OutlinedTextField(
             value = searchText,
             onValueChange = { searchText = it.take(200) },
-            label = { Text("Search server IDs/status") },
+            label = { Text(stringResource(R.string.server_search_label)) },
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedButton(
             enabled = isBound && searchText.isNotBlank() && state.busyAction == null,
-            onClick = { onSearch(searchText) },
-        ) { Text("Search server") }
-        state.searchResults.take(20).forEach { entry ->
-            Text("${entry.availabilityStatus} · ${entry.userTrackRefId.take(8)}…")
-        }
+            onClick = { actions.search(searchText) },
+        ) { Text(stringResource(R.string.search_action)) }
+        if (state.searchResults.isNotEmpty()) Text(stringResource(R.string.server_search_results, state.searchResults.size))
     }
 
-    Section("Server import") {
-        Text("Upload a user-owned CSV, JSON or HTML export (maximum 2 MiB).")
-        Button(enabled = isBound && state.busyAction == null, onClick = onChooseServerImport) {
-            Text("Choose export file")
+    Section(stringResource(R.string.server_import_section)) {
+        Text(stringResource(R.string.server_import_body))
+        Button(enabled = isBound && state.busyAction == null, onClick = actions.chooseServerImport) {
+            Text(stringResource(R.string.server_import_choose))
         }
         state.importReport?.let { report ->
-            Text("${report.state}: ${report.progressCurrent}/${report.progressTotal}")
-            Text(report.counts.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            Text(stringResource(R.string.server_import_progress, report.progressCurrent, report.progressTotal))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = state.busyAction == null, onClick = onRefreshImport) {
-                    Text("Refresh")
+                OutlinedButton(enabled = state.busyAction == null, onClick = actions.refreshImport) {
+                    Text(stringResource(R.string.action_refresh))
                 }
-                OutlinedButton(enabled = state.busyAction == null, onClick = onCancelImport) {
-                    Text("Cancel")
+                OutlinedButton(enabled = state.busyAction == null, onClick = actions.cancelImport) {
+                    Text(stringResource(R.string.action_cancel))
                 }
-                OutlinedButton(enabled = state.busyAction == null, onClick = onResumeImport) {
-                    Text("Resume")
+                OutlinedButton(enabled = state.busyAction == null, onClick = actions.resumeImport) {
+                    Text(stringResource(R.string.action_continue))
                 }
             }
             if (report.nextAfter != null) {
-                OutlinedButton(enabled = state.busyAction == null, onClick = onLoadNextImport) {
-                    Text("Load next import rows")
+                OutlinedButton(enabled = state.busyAction == null, onClick = actions.loadNextImport) {
+                    Text(stringResource(R.string.action_show_more))
                 }
             }
-            report.entries.forEach { entry ->
-                Text("${entry.sourceRowKey} · ${entry.resolverState ?: entry.status} · candidates ${entry.candidateCount}")
-                entry.errorCode?.let { Text("Error: $it") }
+            report.entries.forEachIndexed { index, entry ->
+                Text(stringResource(R.string.server_import_item, index + 1))
+                entry.errorCode?.let { Text(stringResource(R.string.server_import_item_failed)) }
                 if (
                     entry.decisionId != null &&
                     entry.resolverState in setOf("REVIEW_REQUIRED", "NO_MATCH", "DEFERRED_EVIDENCE")
                 ) {
-                    Text("Candidate evidence is not exposed by this server response; blind accept is disabled.")
+                    Text(stringResource(R.string.server_import_needs_choice))
                     OutlinedButton(
                         enabled = state.busyAction == null,
-                        onClick = { onReviewImport(entry, "KEEP_UNRESOLVED") },
-                    ) { Text("Keep unresolved") }
+                        onClick = { actions.reviewImport(entry, "KEEP_UNRESOLVED") },
+                    ) { Text(stringResource(R.string.import_keep_unresolved)) }
                     if (entry.resolverState in setOf("NO_MATCH", "DEFERRED_EVIDENCE")) {
                         OutlinedButton(
                             enabled = state.busyAction == null,
-                            onClick = { onReviewImport(entry, "CREATE_RECORDING") },
-                        ) { Text("Create Recording") }
+                            onClick = { actions.reviewImport(entry, "CREATE_RECORDING") },
+                        ) { Text(stringResource(R.string.import_create_new_track)) }
                     }
                 }
             }
-        } ?: Text("No remote import selected")
+        } ?: Text(stringResource(R.string.server_import_empty))
     }
 
-    Section("Vault") {
-        Text(selectedTrackLabel ?: "Select a local track in Library first")
-        Text(state.uploadStatus ?: "No active upload")
+    Section(stringResource(R.string.server_storage_section)) {
+        Text(selectedTrackLabel ?: stringResource(R.string.server_storage_select_track))
+        Text(stringResource(if (state.uploadStatus == null) R.string.server_storage_idle else R.string.server_storage_in_progress))
         Button(
             enabled = isBound && selectedTrackUploadEligible && state.busyAction == null,
-            onClick = onUploadSelectedTrack,
-        ) { Text("Offer selected track to Vault") }
-        OutlinedButton(enabled = state.uploadStatus != null, onClick = onCancelUpload) {
-            Text("Cancel upload")
+            onClick = actions.uploadSelectedTrack,
+        ) { Text(stringResource(R.string.server_storage_upload)) }
+        OutlinedButton(enabled = state.uploadStatus != null, onClick = actions.cancelUpload) {
+            Text(stringResource(R.string.action_cancel))
         }
     }
 
-    Section("Online recommendations") {
+    Section(stringResource(R.string.server_recommendations_section)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = isBound && state.busyAction == null, onClick = { onRecommendations(false) }) {
-                Text("Recommendations")
+            Button(enabled = isBound && state.busyAction == null, onClick = { actions.recommendations(false) }) {
+                Text(stringResource(R.string.server_recommendations_load))
             }
-            OutlinedButton(enabled = isBound && state.busyAction == null, onClick = { onRecommendations(true) }) {
-                Text("Online Home")
+            OutlinedButton(enabled = isBound && state.busyAction == null, onClick = { actions.recommendations(true) }) {
+                Text(stringResource(R.string.server_recommendations_home))
             }
         }
         state.recommendation?.let { result ->
-            Text("${result.replay} · request ${result.requestId.take(8)}…")
-            result.items.take(25).forEach { item ->
-                Text("#${item.sourceRank} ${item.recordingId.take(8)}… · ${item.reasonCode}")
-            }
+            Text(stringResource(R.string.server_recommendations_count, result.items.size))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = state.busyAction == null, onClick = onExactReplay) {
-                    Text("Exact replay")
+                OutlinedButton(enabled = state.busyAction == null, onClick = actions.exactReplay) {
+                    Text(stringResource(R.string.server_recommendations_repeat))
                 }
-                OutlinedButton(enabled = state.busyAction == null, onClick = onAlgorithmicReplay) {
-                    Text("Algorithmic replay")
+                OutlinedButton(enabled = state.busyAction == null, onClick = actions.algorithmicReplay) {
+                    Text(stringResource(R.string.server_recommendations_refresh))
                 }
             }
         }

@@ -5,7 +5,14 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-from autplay.application.sync import OpaqueCursor, SyncError, _ensure_ascending, _safe
+from autplay.application.sync import (
+    CATALOG_ARTIST_ID_V1,
+    OpaqueCursor,
+    SyncError,
+    _catalog_enabled,
+    _ensure_ascending,
+    _safe,
+)
 from autplay.entrypoints.sync_http import _call
 from autplay.runtime.http import ApiError, install_error_handlers
 from fastapi import FastAPI
@@ -44,6 +51,13 @@ def test_payload_guard_rejects_secrets_and_excessive_nesting() -> None:
     for _ in range(33):
         nested = {"nested": nested}
     assert not _safe(nested)
+
+
+def test_catalog_artist_capability_is_explicit_and_ignores_unknown_strings() -> None:
+    assert not _catalog_enabled({})
+    assert not _catalog_enabled({"capabilities": ["FUTURE_CATALOG_V9"]})
+    assert _catalog_enabled({"capabilities": ["FUTURE_CATALOG_V9", CATALOG_ARTIST_ID_V1]})
+    assert _catalog_enabled({"catalog_projection_version": 1})
 
 
 def test_batch_order_is_contiguous_without_silent_sorting() -> None:

@@ -17,6 +17,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.autplay.application.playback.ActiveQueueContext
+import app.autplay.application.library.CorePlaylistDetail
+import app.autplay.application.library.CorePlaylistDetailEntry
+import app.autplay.application.library.CoreReleaseDetail
+import app.autplay.application.library.CoreReleaseDetailTrack
+import app.autplay.application.library.CoreTechnicalDetails
+import app.autplay.application.library.CoreTrackAvailability
+import app.autplay.application.library.CoreTrackDetail
+import app.autplay.application.library.CoreTrackDetailCapability
+import app.autplay.application.library.CoreTrackPreferenceState
 import app.autplay.R
 import app.autplay.playback.presentation.PlaybackControlGate
 import app.autplay.playback.presentation.PlaybackControlLockReason
@@ -26,9 +35,22 @@ import app.autplay.playback.presentation.PlaybackSourcePresentation
 import app.autplay.playback.presentation.RepeatModePresentation
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.NowPlayingScreen
+import app.autplay.ui.core.DetailKind
+import app.autplay.ui.core.DetailTarget
+import app.autplay.application.artist.ArtistAppearance
+import app.autplay.application.artist.ArtistCredit
+import app.autplay.application.artist.ArtistCreditId
+import app.autplay.application.artist.ArtistCreditMember
+import app.autplay.application.artist.ArtistDetail
+import app.autplay.application.artist.ArtistId
+import app.autplay.application.artist.ArtistKey
+import app.autplay.application.artist.ArtistLocalTarget
+import app.autplay.application.artist.ArtistSummary
+import app.autplay.domain.ServerId
+import app.autplay.domain.ServerProfileId
 import java.util.Locale
 
-/** Test-APK-only deterministic surface used to capture the M3 visual evidence matrix. */
+/** Test-APK-only deterministic surface used to capture post-RC frontend evidence matrices. */
 class M3VisualEvidenceActivity : ComponentActivity() {
     @SuppressLint("AppBundleLocaleChanges") // Debug-only evidence APK always packages both locales.
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +68,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
         val screen = intent.getStringExtra("screen") ?: "home"
         setContent {
             var activeScreen by remember { mutableStateOf(screen) }
-            var fixturePlaying by remember { mutableStateOf(screen == "mini-playing") }
+            var fixturePlaying by remember { mutableStateOf(screen == "mini-playing" || screen == "home") }
             var fixturePositionMs by remember { mutableStateOf(64_000L) }
             var fixtureSeekPreviewMs by remember {
                 mutableStateOf(if (screen == "player-dragging") 140_000L else null)
@@ -108,7 +130,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                             feedbackEnabled = false,
                             onObservingChanged = {},
                         )
-                        "search" -> AutPlayAdaptiveShell(
+                        "search", "search-vault-offline" -> AutPlayAdaptiveShell(
                             selectedDestination = UiDestination.Search,
                             onDestinationSelected = {},
                         ) { _, padding, _ ->
@@ -117,6 +139,9 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                     query = "quiet",
                                     results = listOf(CoreTrackUiItem("search-track", "Quiet Signals", "Mara Lin")),
                                     searched = true,
+                                    vaultAvailable = activeScreen == "search-vault-offline",
+                                    vaultSelected = activeScreen == "search-vault-offline",
+                                    vaultError = activeScreen == "search-vault-offline",
                                 ),
                                 contentPadding = padding,
                                 onQueryChange = {},
@@ -124,17 +149,25 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 onPlay = {},
                             )
                         }
-                        "library" -> AutPlayAdaptiveShell(
+                        "library", "library-empty", "library-albums" -> AutPlayAdaptiveShell(
                             selectedDestination = UiDestination.Library,
                             onDestinationSelected = {},
                         ) { _, padding, _ ->
                             LibraryProductScreen(
                                 state = LibraryScreenUiState(
                                     localMode = true,
-                                    tracks = listOf(
+                                    tracks = if (activeScreen == "library-empty") emptyList() else listOf(
                                         CoreTrackUiItem("library-track", "Quiet Signals", "Mara Lin", selected = true),
                                         CoreTrackUiItem("library-track-2", "Northern Lights", "Sofia Reed"),
                                     ),
+                                    section = if (activeScreen == "library-albums") {
+                                        app.autplay.ui.core.LibrarySection.Albums
+                                    } else {
+                                        app.autplay.ui.core.LibrarySection.Tracks
+                                    },
+                                    albums = if (activeScreen == "library-albums") listOf(
+                                        CoreCollectionUiItem("release", "Northern Lights", "Sofia Reed", 10),
+                                    ) else emptyList(),
                                 ),
                                 contentPadding = padding,
                                 onAddLocal = {},
@@ -143,6 +176,113 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 onLike = {},
                             )
                         }
+                        "detail-track" -> CoreProductDetailScreen(
+                            state = CoreProductDetailUiState(
+                                target = DetailTarget(DetailKind.Track, "track"),
+                                track = CoreTrackDetail(
+                                    localUserTrackRefId = "track",
+                                    localRecordingId = "recording",
+                                    serverRecordingId = null,
+                                    title = "Quiet Signals",
+                                    artistName = "Mara Lin",
+                                    albumName = "Night Archive",
+                                    durationMs = 244_000,
+                                    artworkRef = null,
+                                    preference = CoreTrackPreferenceState("NEUTRAL", false),
+                                    availability = CoreTrackAvailability.PERMISSION_REVOKED,
+                                    capabilities = setOf(
+                                        CoreTrackDetailCapability.LIKE,
+                                        CoreTrackDetailCapability.REAUTHORIZE_LIBRARY_ROOT,
+                                        CoreTrackDetailCapability.OPEN_IDENTITY_REVIEW,
+                                    ),
+                                    technicalDetails = CoreTechnicalDetails(
+                                        resolutionStatus = "REVIEW_REQUIRED",
+                                        resolutionConfidence = 0.72,
+                                        recordingKind = "STUDIO",
+                                        versionText = "Original mix",
+                                    ),
+                                ),
+                            ),
+                        )
+                        "detail-playlist" -> CoreProductDetailScreen(
+                            state = CoreProductDetailUiState(
+                                target = DetailTarget(DetailKind.Playlist, "playlist"),
+                                playlist = CorePlaylistDetail(
+                                    localPlaylistId = "playlist",
+                                    name = "Evening duplicates",
+                                    description = "A local playlist",
+                                    playlistType = "MANUAL",
+                                    entries = listOf(
+                                        CorePlaylistDetailEntry("entry-1", "track", "Quiet Signals", "Mara Lin", 244_000, false),
+                                        CorePlaylistDetailEntry("entry-2", "track", "Quiet Signals", "Mara Lin", 244_000, false),
+                                    ),
+                                ),
+                            ),
+                        )
+                        "detail-release" -> CoreProductDetailScreen(
+                            state = CoreProductDetailUiState(
+                                target = DetailTarget(DetailKind.Release, "release"),
+                                release = CoreReleaseDetail(
+                                    localReleaseId = "release",
+                                    serverReleaseId = null,
+                                    title = "Northern Lights",
+                                    artistName = "Sofia Reed",
+                                    releaseDateText = "2026-08-20",
+                                    releaseType = "ALBUM",
+                                    artworkRef = null,
+                                    tracks = listOf(
+                                        CoreReleaseDetailTrack(
+                                            "release-track-1",
+                                            "recording-1",
+                                            1,
+                                            1,
+                                            "1",
+                                            "Quiet Signals",
+                                            "Sofia Reed",
+                                            244_000,
+                                            "track-1",
+                                        ),
+                                        CoreReleaseDetailTrack(
+                                            "release-track-2",
+                                            "recording-2",
+                                            1,
+                                            2,
+                                            "2",
+                                            "After the Rain",
+                                            "Sofia Reed",
+                                            221_000,
+                                            null,
+                                        ),
+                                    ),
+                                ),
+                                subjectArtistCredits = listOf(artistCreditFixture()),
+                            ),
+                        )
+                        "detail-artist" -> CoreProductDetailScreen(
+                            state = CoreProductDetailUiState(
+                                target = DetailTarget(DetailKind.Artist, ARTIST_ID),
+                                artist = ArtistDetail(
+                                    summary = artistSummaryFixture(),
+                                    credits = listOf(artistCreditFixture()),
+                                ),
+                                artistAppearances = listOf(
+                                    ArtistAppearance(
+                                        ArtistCreditId(CREDIT_ID),
+                                        "RECORDING",
+                                        ServerId(RECORDING_ID),
+                                        "Quiet Signals",
+                                        ArtistLocalTarget.Track("track-1"),
+                                    ),
+                                    ArtistAppearance(
+                                        ArtistCreditId(CREDIT_ID),
+                                        "RELEASE",
+                                        ServerId(RELEASE_ID),
+                                        "Northern Lights",
+                                        ArtistLocalTarget.Release("release"),
+                                    ),
+                                ),
+                            ),
+                        )
                         "permission" -> androidx.compose.foundation.layout.Box(
                             Modifier.fillMaxSize().systemBarsPadding(),
                         ) {
@@ -218,7 +358,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 HomeProductScreen(
                                     state = HomeScreenUiState(
                                         localMode = false,
-                                        loading = activeScreen == "loading",
+                                        recommendationLoading = activeScreen == "loading",
                                         offlineFallback = activeScreen == "offline",
                                         releases = if (activeScreen == "empty") emptyList() else listOf(
                                             HomeReleaseUiItem("release", "Northern Lights", "Sofia Reed", "2026"),
@@ -232,12 +372,34 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                                 true,
                                             ),
                                         ),
+                                        continueListening = if (activeScreen == "empty") null else HomeContinueUiItem(
+                                            "track", "Quiet Signals", "Mara Lin", "1:04",
+                                        ),
+                                        recentlyPlayed = if (activeScreen == "empty") emptyList() else listOf(
+                                            HomeTrackUiItem("recent", "Northern Lights", "Sofia Reed"),
+                                        ),
+                                        playlists = if (activeScreen == "empty") emptyList() else listOf(
+                                            CoreCollectionUiItem("playlist", "Evening duplicates", "A local playlist"),
+                                        ),
+                                        offlineReady = if (activeScreen == "empty") emptyList() else listOf(
+                                            HomeTrackUiItem("offline", "Quiet Signals", "Mara Lin"),
+                                        ),
+                                        problems = if (activeScreen == "permission") listOf(
+                                            HomeProblemUiItem("attention", "1 item needs attention"),
+                                        ) else emptyList(),
                                     ),
                                     contentPadding = padding,
                                     onOpenListenTogether = { activeScreen = "wave" },
                                     onRecommendationVisible = {},
                                     onLike = {},
                                     onDislike = {},
+                                    playerState = playerState(false, PlaybackSourcePresentation.Local).copy(
+                                        isPlaying = fixturePlaying,
+                                    ),
+                                    currentTrackRefId = "track",
+                                    onOpenPlayer = { activeScreen = "player-local" },
+                                    onTogglePlayPause = { fixturePlaying = !fixturePlaying },
+                                    onLikeHeroTrack = {},
                                 )
                             }
                         }
@@ -265,4 +427,30 @@ class M3VisualEvidenceActivity : ComponentActivity() {
         shuffleEnabled = !wave,
         repeatEnabled = !wave,
     )
+
+    private fun artistSummaryFixture() = ArtistSummary(
+        key = ArtistKey(ServerProfileId(PROFILE_ID), ArtistId(ARTIST_ID)),
+        name = "Sofia Reed",
+        sortName = "Reed, Sofia",
+        artistType = "PERSON",
+        disambiguation = "singer and songwriter",
+        countryCode = "GB",
+        identityStatus = "VERIFIED",
+    )
+
+    private fun artistCreditFixture() = ArtistCredit(
+        id = ArtistCreditId(CREDIT_ID),
+        displayName = "Sofia Reed",
+        members = listOf(
+            ArtistCreditMember(ArtistId(ARTIST_ID), 0, "Sofia Reed", "", "PRIMARY"),
+        ),
+    )
+
+    private companion object {
+        const val PROFILE_ID = "11111111-1111-4111-8111-111111111111"
+        const val ARTIST_ID = "22222222-2222-4222-8222-222222222222"
+        const val CREDIT_ID = "33333333-3333-4333-8333-333333333333"
+        const val RECORDING_ID = "44444444-4444-4444-8444-444444444444"
+        const val RELEASE_ID = "55555555-5555-4555-8555-555555555555"
+    }
 }

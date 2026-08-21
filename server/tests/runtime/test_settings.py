@@ -122,6 +122,64 @@ def test_password_login_cannot_be_enabled_without_persistence_contract() -> None
     assert exc_info.value.code == "password_login_persistence_contract_missing"
 
 
+def test_admin_web_requires_exact_origin_and_separate_secret() -> None:
+    base = {
+        "database_url": DATABASE_URL,
+        "auth_signing_secret": AUTH_SECRET,
+        "admin_web_enabled": True,
+    }
+    with pytest.raises(SettingsLoadError):
+        load_api_settings(overrides=base, environ={})
+
+    settings = load_api_settings(
+        overrides=base
+        | {
+            "admin_web_origin": "http://127.0.0.1:8787",
+            "admin_web_source_hmac_secret": "b" * 32,
+            "admin_web_csrf_hmac_secret": "c" * 32,
+        },
+        environ={},
+    )
+
+    assert settings.admin_web_enabled is True
+    assert settings.admin_web_origin == "http://127.0.0.1:8787"
+
+
+@pytest.mark.parametrize(
+    ("origin", "profile"),
+    (
+        ("http://192.168.1.2:8787", RuntimeProfile.DEVELOPMENT),
+        ("http://127.0.0.1:8787", RuntimeProfile.PRODUCTION),
+        ("https://example.test:443", RuntimeProfile.PRODUCTION),
+        ("https://Example.test", RuntimeProfile.PRODUCTION),
+        ("https://example.test/admin", RuntimeProfile.PRODUCTION),
+    ),
+)
+def test_admin_web_rejects_ambiguous_or_unsafe_origin(origin: str, profile: RuntimeProfile) -> None:
+    with pytest.raises(ValueError):
+        ApiSettings(
+            profile=profile,
+            database_url=SecretStr(DATABASE_URL),
+            auth_signing_secret=SecretStr(AUTH_SECRET),
+            admin_web_enabled=True,
+            admin_web_origin=origin,
+            admin_web_source_hmac_secret=SecretStr("b" * 32),
+            admin_web_csrf_hmac_secret=SecretStr("c" * 32),
+        )
+
+
+def test_admin_web_requires_distinct_source_and_csrf_hmac_secrets() -> None:
+    with pytest.raises(ValueError):
+        ApiSettings(
+            database_url=SecretStr(DATABASE_URL),
+            auth_signing_secret=SecretStr(AUTH_SECRET),
+            admin_web_enabled=True,
+            admin_web_origin="http://127.0.0.1:8787",
+            admin_web_source_hmac_secret=SecretStr("b" * 32),
+            admin_web_csrf_hmac_secret=SecretStr("b" * 32),
+        )
+
+
 def test_worker_settings_never_receive_api_signing_secret() -> None:
     settings = load_worker_settings(
         environ={

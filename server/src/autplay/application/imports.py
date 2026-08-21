@@ -15,6 +15,7 @@ from autplay.adapters.postgresql.import_runtime import (
 )
 from autplay.application.job_worker import JobExecutionContext
 from autplay.application.source_adapters import GenericUserExportSourceAdapter
+from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.domain.auth import Principal
 from autplay.domain.jobs import CancelRequestResult, JobLease, JsonValue
 from autplay.ports.source_adapters import UserExportAdapter
@@ -27,9 +28,11 @@ class ImportService:
         self,
         sessions: Callable[[], Session],
         parser: UserExportAdapter | None = None,
+        catalog_publisher: CatalogArtistSyncPublisher | None = None,
     ) -> None:
         self._sessions = sessions
         self._parser = parser or GenericUserExportSourceAdapter()
+        self._catalog_publisher = catalog_publisher or CatalogArtistSyncPublisher()
 
     def start(
         self,
@@ -119,6 +122,10 @@ class ImportService:
                 selected_rank=selected_rank,
                 idempotency_key=idempotency_key,
             )
+            # Review is the production boundary that can resolve/create a recording.
+            # Publish its complete owner-visible catalog closure before this commit.
+            if result.recording_id is not None:
+                self._catalog_publisher.publish(session, principal.user_id)
             session.commit()
             return result
 

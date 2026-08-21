@@ -9,8 +9,13 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
 import app.autplay.data.security.AndroidKeystoreCredentialStore
+import app.autplay.data.security.AndroidM5DeviceKeyStore
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.M5SessionRotationClient
+import app.autplay.data.security.M5RotationContext
+import app.autplay.data.security.M5RotationContextResolver
+import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.settings.NonSecretSettingsStore
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.ServerProfileId
@@ -35,6 +40,7 @@ interface VaultAuthorizationProvider {
 class RefreshingVaultAuthorizationProvider(
     private val settings: NonSecretSettingsStore,
     private val credentials: CredentialStore,
+    private val m5Rotation: M5SessionRotationClient? = null,
 ) : VaultAuthorizationProvider {
     override fun authorize(
         profileId: ServerProfileId,
@@ -45,7 +51,7 @@ class RefreshingVaultAuthorizationProvider(
         if (configured.activeServerProfileId != profileId) return@runBlocking null
         val apiBaseUrl = configured.serverBaseUrl ?: return@runBlocking null
         val streamBaseUrl = configured.streamBaseUrl ?: return@runBlocking null
-        val session = RefreshingSessionCredentials(apiBaseUrl.trimEnd('/') + "/api/v1", credentials)
+        val session = RefreshingSessionCredentials(apiBaseUrl.trimEnd('/') + "/api/v1", credentials, m5Rotation = m5Rotation)
         val access = runCatching {
             if (rejectedGeneration == null) session.access(profileId)
             else session.refreshAfterRejection(profileId, rejectedGeneration)
@@ -153,12 +159,48 @@ class VaultPlaybackDataSource(
     }
 
     companion object {
-        fun productionFactory(context: Context, upstreamFactory: HttpDataSource.Factory): Factory = Factory(
-            upstreamFactory,
-            RefreshingVaultAuthorizationProvider(
-                applicationNonSecretSettingsStore(context.applicationContext),
-                AndroidKeystoreCredentialStore(context.applicationContext),
-            ),
-        )
+        fun productionFactory(context: Context, upstreamFactory: HttpDataSource.Factory): Factory {
+            val settings = applicationNonSecretSettingsStore(context.applicationContext)
+            return Factory(
+                upstreamFactory,
+                RefreshingVaultAuthorizationProvider(
+                    settings,
+                    AndroidKeystoreCredentialStore(context.applicationContext),
+                    M5SessionRotationClient(object : M5RotationContextResolver {
+                    override suspend fun resolve(profileId: ServerProfileId): M5RotationContext? {
+                        val value = settings.settings.first(); val binding = value.m5Binding ?: return null
+                        if (value.activeServerProfileId != profileId || value.deviceId == null || value.serverBaseUrl == null) return null
+                        return M5RotationContext(value.serverBaseUrl, binding.serverInstanceId, binding.identityEpoch, value.deviceId, binding.deviceKeyAlias)
+                    }
+                    override suspend fun persistSuccessor(
+                        profileId: ServerProfileId,
+                        successor: SessionCredentialEnvelope,
+                    ) {
+                        settings.mutate { current ->
+                            val binding = current.m5Binding
+                            if (
+                                current.activeServerProfileId == profileId &&
+                                binding != null &&
+                                binding.bindingCommitId == successor.bindingCommitId &&
+                                binding.sessionFamilyId == successor.sessionFamilyId &&
+                                successor.sessionId != null &&
+                                successor.sessionGeneration != null
+                            ) {
+                                current.copy(
+                                    m5Binding = binding.copy(
+                                        sessionId = successor.sessionId,
+                                        sessionFamilyId = requireNotNull(successor.sessionFamilyId),
+                                        sessionGeneration = successor.sessionGeneration,
+                                    ),
+                                )
+                            } else {
+                                current
+                            }
+                        }
+                    }
+                    }, AndroidM5DeviceKeyStore()),
+                ),
+            )
+        }
     }
 }

@@ -1259,3 +1259,19 @@ rewrite ordinary library rows. The v10 Room identity hash is
 `eff029c0b73e3189b9ab8e31b0261541` and the exported-file SHA-256 is
 `9f42becf68b2bd5a92a1bf788dbc3cda361894db3690d1fa9a77f6cd34aa7c90`; the API 26 migration tests
 under `apps/android/src/androidTest` verify v9→v10 preservation.
+
+---
+
+# 35. Frontend M4 stable Artist identity prerequisite (Room v12)
+
+ADR-028 adds named, non-destructive `MIGRATION_11_12` and five profile-scoped tables:
+`artist_projection`, `artist_credit_projection`, ordered `artist_credit_name_projection`, and
+`catalog_artist_credit_link` plus normalized `catalog_artist_credit_link_owner`. Their server UUIDs
+are authoritative; no name is a key or backfill source. An empty credit-member set is retained as
+unresolved. Recording/Release owner proofs arrive in pages of at most 100 UUIDs. Room deletes the
+prior scope at page zero, stores normalized members, accepts only contiguous pages, and exposes a
+link only after the final page. Every read then intersects those members with a live, same-profile
+`user_track_ref.server_recording_id`. The typed application port uses bounded batch reads and does
+not expose Room entities to Compose. The v12 identity hash is
+`cb830a4861efe1393696302f31bd06be`; exported-file SHA-256 is
+`a7bcf4041ce9199f559312472436ff4574bf858050b491f56926f35f49b5087c`.

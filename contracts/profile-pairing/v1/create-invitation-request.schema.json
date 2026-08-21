@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/create-invitation-request.schema.json",
+  "title": "CreateInvitationRequest",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "operation_id", "expires_in_seconds"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "expires_in_seconds": {"type": "integer", "minimum": 60, "maximum": 1800}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED"
+}

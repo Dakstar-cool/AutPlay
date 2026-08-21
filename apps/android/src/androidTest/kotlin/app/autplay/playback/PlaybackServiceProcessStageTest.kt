@@ -33,6 +33,7 @@ import org.junit.runner.RunWith
 class PlaybackServiceProcessStageTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
+    private val testPackageName = instrumentation.context.packageName
 
     @Test fun stage1_seedServiceAndWaitForPeriodicCheckpoint() = runBlocking {
         context.stopService(android.content.Intent(context, AutPlayPlaybackService::class.java))
@@ -128,7 +129,7 @@ class PlaybackServiceProcessStageTest {
         localUserTrackRefId = trackId.value,
         localRecordingId = null,
         serverAudioVariantId = null,
-        contentUri = "content://app.autplay.test.readable/audio/process",
+        contentUri = "content://$testPackageName.readable/audio/process",
         persistedUriPermission = false,
         localSha256 = null,
         fingerprintAlgorithm = null,

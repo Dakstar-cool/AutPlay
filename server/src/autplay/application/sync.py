@@ -10,15 +10,20 @@ import base64
 import hashlib
 import hmac
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import rfc8785
 from sqlalchemy import Engine, delete, func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.models import (
+    ArtistCreditNameRow,
+    ArtistCreditRow,
+    ArtistRow,
     BootstrapSessionRow,
     BootstrapSnapshotItemRow,
     DeviceEventInboxRow,
@@ -27,11 +32,15 @@ from autplay.adapters.postgresql.models import (
     IdempotencyRecordRow,
     LibraryEntryRow,
     ListeningEventRow,
+    MediumRow,
     PlaylistEntryRow,
     PlaylistRow,
     RecommendationItemRow,
     RecommendationRequestRow,
     RecordingRedirectRow,
+    RecordingRow,
+    ReleaseRow,
+    ReleaseTrackRow,
     SyncEventRow,
     TombstoneRow,
     UserInteractionEventRow,
@@ -43,6 +52,12 @@ from autplay.domain.auth import Principal
 _MAX_PAYLOAD_BYTES: Final = 262_144
 _MAX_BATCH: Final = 100
 _MAX_PULL: Final = 500
+_EVENT_INSERT_BATCH: Final = 500
+_OWNER_RECORDING_PAGE_SIZE: Final = 100
+CATALOG_ARTIST_ID_V1: Final = "CATALOG_ARTIST_ID_V1"
+_CATALOG_AGGREGATES: Final = frozenset(
+    {"ARTIST", "ARTIST_CREDIT", "RECORDING_ARTIST_CREDIT", "RELEASE_ARTIST_CREDIT"}
+)
 _MISSING: Final = object()
 _SAFE_KEY = __import__("re").compile(r"^[a-z][a-z0-9_]{0,99}$")
 _FORBIDDEN = __import__("re").compile(
@@ -76,6 +91,102 @@ class _ProjectionConflict(Exception):
 
 class _AttributionNotFound(Exception):
     """Non-disclosing missing or foreign recommendation pointer."""
+
+
+@dataclass(frozen=True)
+class CatalogArtistProjection:
+    """Typed, owner-scoped catalog projection emitted only to capable sync clients."""
+
+    aggregate_type: str
+    aggregate_id: UUID
+    row_version: int
+    payload: dict[str, Any]
+
+
+class CatalogArtistSyncPublisher:
+    """Publish deterministic catalog closure events without deriving identity from names."""
+
+    def publish(self, session: Session, owner_user_id: UUID) -> int:
+        resolved_refs = list(
+            session.scalars(
+                select(UserTrackRefRow)
+                .where(
+                    UserTrackRefRow.user_id == owner_user_id,
+                    UserTrackRefRow.deleted_at.is_(None),
+                    UserTrackRefRow.recording_id.is_not(None),
+                )
+                .order_by(UserTrackRefRow.user_track_ref_id)
+            )
+        )
+        candidates: list[dict[str, Any]] = []
+        for ref in resolved_refs:
+            payload = {
+                "recording_id": str(ref.recording_id),
+                "title": ref.raw_title,
+                "artist": ref.raw_artist,
+                "album": ref.raw_album,
+                "duration_ms": ref.raw_duration_ms,
+                "resolution_status": ref.resolution_status,
+            }
+            payload_digest = hashlib.sha256(_canonical_payload_bytes(payload)).hexdigest()
+            event_id = uuid5(
+                NAMESPACE_URL,
+                f"autplay:user-track-ref-projection-v1:{owner_user_id}:"
+                f"{ref.user_track_ref_id}:{ref.row_version}:{payload_digest}",
+            )
+            candidates.append(
+                {
+                    "event_id": event_id,
+                    "user_id": owner_user_id,
+                    "origin_device_id": None,
+                    "event_type": "USER_TRACK_REF_PATCHED",
+                    "schema_version": 1,
+                    "aggregate_type": "USER_TRACK_REF",
+                    "aggregate_id": ref.user_track_ref_id,
+                    "server_row_version": ref.row_version,
+                    "operation": "UPSERT",
+                    "payload": payload,
+                }
+            )
+        projections = _catalog_artist_projections(session, owner_user_id)
+        for projection in projections:
+            # A release's source row_version can stay unchanged while this owner's
+            # reachable recording closure changes.  Bind event identity to the full
+            # canonical payload so that newly resolved tracks produce a new fact.
+            payload_digest = hashlib.sha256(
+                _canonical_payload_bytes(projection.payload)
+            ).hexdigest()
+            event_id = uuid5(
+                NAMESPACE_URL,
+                f"autplay:catalog-artist-v1:{owner_user_id}:{projection.aggregate_type}:"
+                f"{projection.aggregate_id}:{projection.row_version}:{payload_digest}",
+            )
+            candidates.append(
+                {
+                    "event_id": event_id,
+                    "user_id": owner_user_id,
+                    "origin_device_id": None,
+                    "event_type": {
+                        "ARTIST": "CATALOG_ARTIST_UPSERTED",
+                        "ARTIST_CREDIT": "CATALOG_ARTIST_CREDIT_UPSERTED",
+                        "RECORDING_ARTIST_CREDIT": "CATALOG_RECORDING_CREDIT_LINK_UPSERTED",
+                        "RELEASE_ARTIST_CREDIT": "CATALOG_RELEASE_CREDIT_LINK_UPSERTED",
+                    }[projection.aggregate_type],
+                    "schema_version": 1,
+                    "aggregate_type": projection.aggregate_type,
+                    "aggregate_id": projection.aggregate_id,
+                    "server_row_version": projection.row_version,
+                    "operation": "UPSERT",
+                    "payload": projection.payload,
+                }
+            )
+        for start in range(0, len(candidates), _EVENT_INSERT_BATCH):
+            session.execute(
+                pg_insert(SyncEventRow)
+                .values(candidates[start : start + _EVENT_INSERT_BATCH])
+                .on_conflict_do_nothing(index_elements=[SyncEventRow.event_id])
+            )
+        return len(candidates)
 
 
 class OpaqueCursor:
@@ -841,7 +952,11 @@ class SyncService:
             "from_cursor": token,
             "next_cursor": next_cursor,
             "has_more": more,
-            "events": [_server_event(row, tombstones.get(row.event_id)) for row in page],
+            "events": [
+                _server_event(row, tombstones.get(row.event_id))
+                for row in page
+                if _catalog_enabled(body) or row.aggregate_type not in _CATALOG_AGGREGATES
+            ],
             "server_time": _iso(_now()),
         }
 
@@ -863,13 +978,18 @@ class SyncService:
                     user_id=principal.user_id,
                     device_id=device_id,
                     journal_epoch=epoch,
+                    capabilities=sorted(_effective_capabilities(body)),
                     high_water_server_sequence=int(high or 0),
                     created_at=_now(),
                     expires_at=_now() + timedelta(hours=1),
                 )
                 session.add(snapshot)
                 snapshot_id = snapshot.snapshot_id
-                projections = _bootstrap_projections(session, principal.user_id)
+                projections = _bootstrap_projections(
+                    session,
+                    principal.user_id,
+                    include_catalog_artist=_catalog_enabled(body),
+                )
                 for ordinal, item in enumerate(projections, start=1):
                     session.add(
                         BootstrapSnapshotItemRow(
@@ -916,6 +1036,10 @@ class SyncService:
             )
         page, has_more = items[:_MAX_PULL], len(items) > _MAX_PULL
         next_ordinal = page[-1].ordinal if page else start
+        # The first page owns capability negotiation.  Continuations are bound to
+        # that frozen snapshot and must not silently filter rows when a retry omits
+        # optional negotiation fields.
+        catalog_visible = CATALOG_ARTIST_ID_V1 in snapshot.capabilities
         aggregates = [
             {
                 "aggregate_type": item.aggregate_type,
@@ -925,6 +1049,7 @@ class SyncService:
             }
             for item in page
             if item.aggregate_type not in {"TOMBSTONE", "RECORDING_REDIRECT"}
+            and (catalog_visible or item.aggregate_type not in _CATALOG_AGGREGATES)
         ]
         return {
             "protocol_version": 1,
@@ -1087,8 +1212,7 @@ def _event(principal: Principal, device_id: UUID, value: dict[str, Any]) -> dict
     payload = value["payload"]
     if not isinstance(payload, dict) or not _safe(payload):
         raise SyncError("REQUEST_VALIDATION_FAILED")
-    if len(rfc8785.dumps(payload)) > _MAX_PAYLOAD_BYTES:
-        raise SyncError("PAYLOAD_TOO_LARGE")
+    _canonical_payload_bytes(payload)
     omitted = {key: item for key, item in value.items() if key != "request_hash"}
     digest = hashlib.sha256(rfc8785.dumps(omitted)).hexdigest()
     supplied = value["request_hash"]
@@ -1137,6 +1261,14 @@ def _safe(value: Any, depth: int = 0) -> bool:
     if isinstance(value, list):
         return len(value) <= 10_000 and all(_safe(item, depth + 1) for item in value)
     return value is None or isinstance(value, str | int | float | bool)
+
+
+def _canonical_payload_bytes(payload: dict[str, Any]) -> bytes:
+    """Return bounded wire bytes for inbound and server-generated sync payloads."""
+    canonical = rfc8785.dumps(payload)
+    if len(canonical) > _MAX_PAYLOAD_BYTES:
+        raise SyncError("PAYLOAD_TOO_LARGE")
+    return canonical
 
 
 def _json_object(value: Any) -> dict[str, Any]:
@@ -1422,7 +1554,9 @@ def _aggregate(row: SyncEventRow) -> dict[str, Any]:
     }
 
 
-def _bootstrap_projections(session: Session, user_id: UUID) -> list[tuple[str, UUID, int, Any]]:
+def _bootstrap_projections(
+    session: Session, user_id: UUID, *, include_catalog_artist: bool = False
+) -> list[tuple[str, UUID, int, Any]]:
     """Materialize live owner projections, never replaying patch event payloads."""
     values: list[tuple[str, UUID, int, Any]] = []
     for ref_row in session.scalars(
@@ -1436,6 +1570,9 @@ def _bootstrap_projections(session: Session, user_id: UUID) -> list[tuple[str, U
                 ref_row.user_track_ref_id,
                 ref_row.row_version,
                 {
+                    "recording_id": str(ref_row.recording_id)
+                    if ref_row.recording_id is not None
+                    else None,
                     "title": ref_row.raw_title,
                     "artist": ref_row.raw_artist,
                     "album": ref_row.raw_album,
@@ -1547,8 +1684,204 @@ def _bootstrap_projections(session: Session, user_id: UUID) -> list[tuple[str, U
                     },
                 )
             )
+    if include_catalog_artist:
+        values.extend(
+            (item.aggregate_type, item.aggregate_id, item.row_version, item.payload)
+            for item in _catalog_artist_projections(session, user_id)
+        )
     values.sort(key=lambda value: (value[0], str(value[1])))
     return values
 
 
-__all__ = ("OpaqueCursor", "SyncError", "SyncService")
+def _capabilities(body: dict[str, Any]) -> set[str]:
+    """Accept only a small additive capability vocabulary; unknown values remain inert."""
+    values = body.get("capabilities", [])
+    if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
+        return set()
+    return {item for item in values if item == CATALOG_ARTIST_ID_V1}
+
+
+def _catalog_enabled(body: dict[str, Any]) -> bool:
+    return body.get("catalog_projection_version") == 1 or CATALOG_ARTIST_ID_V1 in _capabilities(
+        body
+    )
+
+
+def _effective_capabilities(body: dict[str, Any]) -> set[str]:
+    """Persist the negotiated projection, including the numeric compatibility alias."""
+    capabilities = _capabilities(body)
+    if body.get("catalog_projection_version") == 1:
+        capabilities.add(CATALOG_ARTIST_ID_V1)
+    return capabilities
+
+
+def _owner_recording_pages(recording_ids: set[UUID] | list[UUID]) -> list[dict[str, Any]]:
+    """Page a complete owner proof without truncating or creating an oversized payload."""
+    ordered = sorted(set(recording_ids), key=str)
+    if not ordered:
+        raise ValueError("owner recording proof is empty")
+    scope_id = hashlib.sha256("\0".join(map(str, ordered)).encode()).hexdigest()
+    page_count = (len(ordered) + _OWNER_RECORDING_PAGE_SIZE - 1) // _OWNER_RECORDING_PAGE_SIZE
+    return [
+        {
+            "owner_scope_id": scope_id,
+            "owner_recording_page": page,
+            "owner_recording_page_count": page_count,
+            "owner_recording_ids": [
+                str(value)
+                for value in ordered[
+                    page * _OWNER_RECORDING_PAGE_SIZE : (page + 1) * _OWNER_RECORDING_PAGE_SIZE
+                ]
+            ],
+        }
+        for page in range(page_count)
+    ]
+
+
+def _catalog_artist_projections(session: Session, user_id: UUID) -> list[CatalogArtistProjection]:
+    """Return the catalog closure reachable from one owner's resolved tracks.
+
+    Names are display evidence only.  The canonical UUID from catalog.artist is the
+    sole Artist identity and an empty child set remains an explicit unresolved credit.
+    """
+    recording_ids = sorted(
+        set(
+            session.scalars(
+                select(UserTrackRefRow.recording_id).where(
+                    UserTrackRefRow.user_id == user_id,
+                    UserTrackRefRow.deleted_at.is_(None),
+                    UserTrackRefRow.recording_id.is_not(None),
+                )
+            )
+        ),
+        key=str,
+    )
+    if not recording_ids:
+        return []
+    recordings = list(
+        session.scalars(select(RecordingRow).where(RecordingRow.recording_id.in_(recording_ids)))
+    )
+    credit_ids = {row.artist_credit_id for row in recordings}
+    release_rows = list(
+        session.execute(
+            select(ReleaseRow, ReleaseTrackRow.recording_id)
+            .join(MediumRow, MediumRow.release_id == ReleaseRow.release_id)
+            .join(ReleaseTrackRow, ReleaseTrackRow.medium_id == MediumRow.medium_id)
+            .where(ReleaseTrackRow.recording_id.in_(recording_ids))
+        )
+    )
+    releases_by_id = {release.release_id: release for release, _ in release_rows}
+    release_owner_recordings: dict[UUID, set[UUID]] = {}
+    for release, recording_id in release_rows:
+        release_owner_recordings.setdefault(release.release_id, set()).add(recording_id)
+    releases = list(releases_by_id.values())
+    credit_ids.update(row.artist_credit_id for row in releases)
+    credits = list(
+        session.scalars(
+            select(ArtistCreditRow).where(ArtistCreditRow.artist_credit_id.in_(credit_ids))
+        )
+    )
+    names = list(
+        session.scalars(
+            select(ArtistCreditNameRow)
+            .where(ArtistCreditNameRow.artist_credit_id.in_(credit_ids))
+            .order_by(ArtistCreditNameRow.artist_credit_id, ArtistCreditNameRow.position)
+        )
+    )
+    names_by_credit: dict[UUID, list[ArtistCreditNameRow]] = {}
+    for name in names:
+        names_by_credit.setdefault(name.artist_credit_id, []).append(name)
+    artist_ids = {name.artist_id for name in names}
+    artists = list(session.scalars(select(ArtistRow).where(ArtistRow.artist_id.in_(artist_ids))))
+    values: list[CatalogArtistProjection] = []
+    for artist in artists:
+        values.append(
+            CatalogArtistProjection(
+                "ARTIST",
+                artist.artist_id,
+                artist.row_version,
+                {
+                    "artist_id": str(artist.artist_id),
+                    "name": artist.name,
+                    "sort_name": artist.sort_name,
+                    "artist_type": artist.artist_type,
+                    "disambiguation": artist.disambiguation,
+                    "country_code": artist.country_code,
+                    "identity_status": artist.identity_status,
+                    "deleted_at": _iso(artist.deleted_at) if artist.deleted_at else None,
+                },
+            )
+        )
+    for credit in credits:
+        values.append(
+            CatalogArtistProjection(
+                "ARTIST_CREDIT",
+                credit.artist_credit_id,
+                credit.row_version,
+                {
+                    "artist_credit_id": str(credit.artist_credit_id),
+                    "display_name": credit.display_name,
+                    "names": [
+                        {
+                            "artist_id": str(name.artist_id),
+                            "position": name.position,
+                            "credited_name": name.credited_name,
+                            "join_phrase": name.join_phrase,
+                            "role": name.role,
+                        }
+                        for name in names_by_credit.get(credit.artist_credit_id, [])
+                    ],
+                    "deleted_at": _iso(credit.deleted_at) if credit.deleted_at else None,
+                },
+            )
+        )
+    for recording in recordings:
+        for owner_page in _owner_recording_pages({recording.recording_id}):
+            values.append(
+                CatalogArtistProjection(
+                    "RECORDING_ARTIST_CREDIT",
+                    recording.recording_id,
+                    recording.row_version,
+                    {
+                        "recording_id": str(recording.recording_id),
+                        "artist_credit_id": str(recording.artist_credit_id),
+                        **owner_page,
+                        "deleted_at": _iso(recording.deleted_at) if recording.deleted_at else None,
+                    },
+                )
+            )
+    for release in releases:
+        for owner_page in _owner_recording_pages(release_owner_recordings[release.release_id]):
+            values.append(
+                CatalogArtistProjection(
+                    "RELEASE_ARTIST_CREDIT",
+                    release.release_id,
+                    release.row_version,
+                    {
+                        "release_id": str(release.release_id),
+                        "artist_credit_id": str(release.artist_credit_id),
+                        **owner_page,
+                        "deleted_at": _iso(release.deleted_at) if release.deleted_at else None,
+                    },
+                )
+            )
+    for projection in values:
+        _canonical_payload_bytes(projection.payload)
+    return sorted(
+        values,
+        key=lambda value: (
+            value.aggregate_type,
+            str(value.aggregate_id),
+            int(value.payload.get("owner_recording_page", 0)),
+        ),
+    )
+
+
+__all__ = (
+    "CATALOG_ARTIST_ID_V1",
+    "CatalogArtistProjection",
+    "CatalogArtistSyncPublisher",
+    "OpaqueCursor",
+    "SyncError",
+    "SyncService",
+)

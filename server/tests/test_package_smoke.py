@@ -20,6 +20,7 @@ PACKAGE_MODULES = (
 RUNTIME_MODULES = (
     "alembic",
     "fastapi",
+    "jinja2",
     "psycopg",
     "pydantic",
     "pydantic_settings",

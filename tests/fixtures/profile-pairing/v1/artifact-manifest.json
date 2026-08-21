@@ -1,0 +1,29 @@
+{
+  "contract_version": "v1",
+  "generated_at": "2026-08-20T00:00:00Z",
+  "algorithm": "SHA-256",
+  "artifacts": [
+    {"path": "docs/design/AutPlay_Profile_Pairing_Security_Contract_v1.md", "sha256": "951d83a885695fc6627c0c02b35661e63b1d93c5aefa92aad313ccec1969d7d3"},
+    {"path": "docs/adr/ADR-029-m5-server-identity-discovery-enrollment-capabilities.md", "sha256": "e63cc62bab9c55e84a042df6ff40c051c7667b0ad53b626566b0870846c82e03"},
+    {"path": "docs/adr/ADR-030-m5-device-session-and-local-binding-lifecycle.md", "sha256": "60904bd8e7e917a14ec8764e01a8be327cd1c17ae38987606d7a45d7d3f12830"},
+    {"path": "contracts/openapi/v1/autplay-profile-pairing.openapi.json", "sha256": "4cb4c8c326a5add098bec6ee721c0d8b9cf0397c3f3df5aa9df80cd524f9d793"},
+    {"path": "contracts/profile-pairing/README.md", "sha256": "a5e18d22563d7ed15840f037f4603d77a4e9d1d19aa0c180848414328295f014"},
+    {"path": "contracts/profile-pairing/v1/capabilities.schema.json", "sha256": "d3610b4118ffab988c6f4ef20febe2dc491797973228721ed2ff33d9cba2f84f"},
+    {"path": "contracts/profile-pairing/v1/create-invitation-request.schema.json", "sha256": "a257b57be410bd1bfed8597e00e33a590f06485a6ab5c6ec3f089513af3c2bae"},
+    {"path": "contracts/profile-pairing/v1/device-list.schema.json", "sha256": "5086f750d2833574c422a8c4aedc9b4dc3e91077a5fb7882ac2d84249366a9c8"},
+    {"path": "contracts/profile-pairing/v1/discovery-metadata.schema.json", "sha256": "8d31b78a3f2047fef87093853693f2e0cfe2b6ce2798215543d1c6b31d662d7b"},
+    {"path": "contracts/profile-pairing/v1/enrollment-exchange-request.schema.json", "sha256": "1907578ef82462e74e57a1c2d9ee75b4dc3d284777d707ef56a120a93bc7336d"},
+    {"path": "contracts/profile-pairing/v1/enrollment-exchange-response.schema.json", "sha256": "88059170c41fcc929af0b656a4a98a7666a300dbe0dd479b8d584dc53baf61ad"},
+    {"path": "contracts/profile-pairing/v1/enrollment-invitation.schema.json", "sha256": "a506c57d6fa5cc950bc7364ee00bd05cde83ad093ae133ab359620c7a935104e"},
+    {"path": "contracts/profile-pairing/v1/error.schema.json", "sha256": "b6e951fa87b339f107d9c26beef9551477314ec0edec3a142f8c9b2f58bb7766"},
+    {"path": "contracts/profile-pairing/v1/lifecycle-command.schema.json", "sha256": "91b13df15e33f9d698ca9f1c54e4ce80bfb131e8967adc58a73503313d4627d7"},
+    {"path": "contracts/profile-pairing/v1/lifecycle-result.schema.json", "sha256": "fa5a24d8e1efeb1f40279d66052b06d2b8a9c4a2e30c23a7956911eb97396d81"},
+    {"path": "contracts/profile-pairing/v1/session-list.schema.json", "sha256": "be23a686655381f1eb0381797d5829d92903a5369c0bfcbfd13a5dcdae2eb28d"},
+    {"path": "contracts/profile-pairing/v1/session-rotation-request.schema.json", "sha256": "dfced4576d12049388f81ef91f2efe49d81f5166f7a7ec2793006274712146e2"},
+    {"path": "contracts/profile-pairing/v1/session-rotation-response.schema.json", "sha256": "16d67906f4ef5ca33da9f0e82fdef2e22224beee9b61e117bfa2c6ec376be3d3"},
+    {"path": "tests/fixtures/profile-pairing/v1/schema-examples.json", "sha256": "96b06e03ee5f7e45f2f4c3f5453d04a3af2f0f7998c2dbbd64d7e91b83e3f255"},
+    {"path": "tests/fixtures/profile-pairing/v1/invalid-cases.json", "sha256": "12a9a57b6fc81f904f27bfc3f3f2f801f1f7d9c9a855a1e78eba776c5ce64d29"},
+    {"path": "tests/fixtures/profile-pairing/v1/security-vectors.json", "sha256": "1b756b530a3ff0b8bc9f5312b5368082b72a4665a418597b1e759aa51efe4caf"},
+    {"path": "tests/fixtures/profile-pairing/v1/hash-vectors.json", "sha256": "fd99a51f1991fc897eb3fe311a25121423f794d76cf8e5d5536e94f23d2a4a11"}
+  ]
+}

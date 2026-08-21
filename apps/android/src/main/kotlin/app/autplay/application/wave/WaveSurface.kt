@@ -6,6 +6,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.res.stringResource
+import app.autplay.R
 import app.autplay.domain.wave.WaveRuntimeState
 
 /** Minimal observable surface. Host operations are explicit callbacks; membership/authorization stays server-owned. */
@@ -13,14 +15,13 @@ import app.autplay.domain.wave.WaveRuntimeState
 fun WaveSurface(coordinator: WaveCoordinator, onHostPlay: () -> Unit, onHostPause: () -> Unit, onClose: () -> Unit) {
     val state by coordinator.uiState.collectAsState()
     Column {
-        Text("Wave: ${state.state}")
-        state.message?.let { message -> Text(text = message) }
-        if (state.state in setOf(WaveRuntimeState.DEGRADED, WaveRuntimeState.REJOINING)) Text("Wave is degraded; local library and queue are unchanged.")
-        if (state.state == WaveRuntimeState.PREFLIGHT) Text("Checking local/download/Vault availability before shared start.")
+        Text(stringResource(R.string.wave_title))
+        if (state.state in setOf(WaveRuntimeState.DEGRADED, WaveRuntimeState.REJOINING)) Text(stringResource(R.string.wave_connection_problem_body))
+        if (state.state == WaveRuntimeState.PREFLIGHT) Text(stringResource(R.string.wave_preparing_body))
         if (state.isHost) {
-            Button(onClick = onHostPlay) { Text("Wave play") }
-            Button(onClick = onHostPause) { Text("Wave pause") }
-            Button(onClick = onClose) { Text("Close Wave") }
-        } else if (state.roomId != null) Text("Host controls this Wave. Transfer is server-authorized.")
+            Button(onClick = onHostPlay) { Text(stringResource(R.string.wave_start_playback)) }
+            Button(onClick = onHostPause) { Text(stringResource(R.string.wave_pause_playback)) }
+            Button(onClick = onClose) { Text(stringResource(R.string.wave_close_room)) }
+        } else if (state.roomId != null) Text(stringResource(R.string.wave_host_controls))
     }
 }

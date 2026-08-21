@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
     implementation(libs.squareup.okhttp)
+    implementation(libs.zxing.core)
 
     ksp(libs.androidx.room3.compiler)
 

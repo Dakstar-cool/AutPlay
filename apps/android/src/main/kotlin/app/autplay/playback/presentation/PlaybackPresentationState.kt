@@ -55,7 +55,7 @@ enum class PlaybackControlLockReason {
 
 /** Pure fail-closed policy shared by every direct Media3 control. */
 object PlaybackCommandGate {
-    private val ordinaryQueueTypes = setOf("USER", "SEARCH")
+    private val ordinaryQueueTypes = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
 
     fun evaluate(
         context: ActiveQueueContext,

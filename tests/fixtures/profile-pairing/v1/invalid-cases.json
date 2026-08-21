@@ -1,0 +1,19 @@
+{
+  "contract_version": "v1",
+  "cases": [
+    {"case_id": "discovery-credential-in-origin", "schema": "discovery-metadata.schema.json", "mutation": {"path": "payload.api_origin", "value": "https://user:secret@server.test.invalid"}, "expected_error": "semantic_origin_credentials_forbidden"},
+    {"case_id": "capabilities-too-many-operations", "schema": "capabilities.schema.json", "mutation": {"path": "payload.operations", "value_factory": "65_unique_operations"}, "expected_error": "maxItems"},
+    {"case_id": "invitation-secret-wrong-length", "schema": "enrollment-invitation.schema.json", "mutation": {"path": "invitation_secret", "value": "short"}, "expected_error": "pattern"},
+    {"case_id": "exchange-wrong-platform", "schema": "enrollment-exchange-request.schema.json", "mutation": {"path": "platform", "value": "IOS"}, "expected_error": "const"},
+    {"case_id": "exchange-extra-bearer", "schema": "enrollment-exchange-request.schema.json", "mutation": {"path": "refresh_token", "value": "TEST_ONLY_FORBIDDEN"}, "expected_error": "additionalProperties"},
+    {"case_id": "response-nonzero-first-generation", "schema": "enrollment-exchange-response.schema.json", "mutation": {"path": "refresh_generation", "value": 1}, "expected_error": "const"},
+    {"case_id": "device-list-overflow", "schema": "device-list.schema.json", "mutation": {"path": "devices", "value_factory": "101_devices"}, "expected_error": "maxItems"},
+    {"case_id": "session-negative-generation", "schema": "session-list.schema.json", "mutation": {"path": "sessions.0.generation", "value": -1}, "expected_error": "minimum"},
+    {"case_id": "lifecycle-missing-operation", "schema": "lifecycle-command.schema.json", "mutation": {"path": "operation_id", "delete": true}, "expected_error": "required"},
+    {"case_id": "error-leaks-details", "schema": "error.schema.json", "mutation": {"path": "details", "value": {"raw_path": "TEST_ONLY_FORBIDDEN"}}, "expected_error": "additionalProperties"},
+    {"case_id": "create-invitation-ttl-overflow", "schema": "create-invitation-request.schema.json", "mutation": {"path": "expires_in_seconds", "value": 1801}, "expected_error": "maximum"},
+    {"case_id": "rotation-current-secret-wrong-length", "schema": "session-rotation-request.schema.json", "mutation": {"path": "current_refresh_token", "value": "short"}, "expected_error": "pattern"},
+    {"case_id": "rotation-response-zero-successor-generation", "schema": "session-rotation-response.schema.json", "mutation": {"path": "generation", "value": 0}, "expected_error": "minimum"},
+    {"case_id": "lifecycle-result-unknown-outcome", "schema": "lifecycle-result.schema.json", "mutation": {"path": "outcome", "value": "UNKNOWN"}, "expected_error": "enum"}
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay Profile and Pairing API",
+    "version": "1.0.0-draft",
+    "description": "M5A contract only. These operations are not implemented until M5B evidence exists."
+  },
+  "servers": [{"url": "/api/v1"}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/pairing/discovery": {
+      "get": {
+        "operationId": "getDiscoveryMetadata",
+        "x-autplay-authorization": "PUBLIC_NO_AUTHORITY",
+        "security": [],
+        "responses": {
+          "200": {"description": "Signed public discovery metadata", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DiscoveryMetadata"}}}},
+          "503": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/profile/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT",
+        "responses": {
+          "200": {"description": "Signed authenticated capabilities", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Capabilities"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "409": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/pairing/enrollment/invitations": {
+      "post": {
+        "operationId": "createEnrollmentInvitation",
+        "x-autplay-authorization": "ACTIVE_OWNER_OR_ADMIN_SELF_ACCOUNT",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateInvitationRequest"}}}},
+        "responses": {
+          "201": {"description": "Secret invitation rendered once", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EnrollmentInvitation"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"},
+          "429": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/pairing/enrollment/invitations/{invitation_id}/cancel": {
+      "post": {
+        "operationId": "cancelEnrollmentInvitation",
+        "x-autplay-authorization": "ISSUER_OR_OWNER_SELF_ACCOUNT",
+        "parameters": [{"$ref": "#/components/parameters/InvitationId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleCommand"}}}},
+        "responses": {
+          "200": {"description": "Invitation is terminally cancelled or already terminal", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleResult"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/pairing/enrollment/exchanges": {
+      "post": {
+        "operationId": "exchangeEnrollmentInvitation",
+        "x-autplay-authorization": "INVITATION_BEARER_FIRST_SUCCESS_BINDS_DEVICE_POP",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EnrollmentExchangeRequest"}}}},
+        "responses": {
+          "201": {"description": "Device-bound session created", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EnrollmentExchangeResponse"}}}},
+          "200": {"description": "Exact idempotent replay of the same exchange", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EnrollmentExchangeResponse"}}}},
+          "409": {"$ref": "#/components/responses/ErrorResponse"},
+          "429": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/account/devices": {
+      "get": {
+        "operationId": "listDevices",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT",
+        "responses": {
+          "200": {"description": "Devices for the authenticated account", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceList"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/account/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT",
+        "responses": {
+          "200": {"description": "Sessions for the authenticated account", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionList"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/account/sessions/rotate": {
+      "post": {
+        "operationId": "rotateDeviceSession",
+        "x-autplay-authorization": "MATCHING_REFRESH_AND_DEVICE_POP",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionRotationRequest"}}}},
+        "responses": {
+          "200": {"description": "One successor session or exact replay", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionRotationResponse"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "409": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/account/sessions/current/logout": {
+      "post": {
+        "operationId": "logoutCurrentSession",
+        "x-autplay-authorization": "ACTIVE_SESSION_EXACT_SELF",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleCommand"}}}},
+        "responses": {
+          "200": {"description": "Current session is terminally revoked", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleResult"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/account/sessions/logout-all": {
+      "post": {
+        "operationId": "logoutAllSessions",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleCommand"}}}},
+        "responses": {
+          "200": {"description": "All account sessions are terminally revoked", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleResult"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/account/devices/{device_id}/revoke": {
+      "post": {
+        "operationId": "revokeDevice",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT_DEVICE",
+        "parameters": [{"$ref": "#/components/parameters/DeviceId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleCommand"}}}},
+        "responses": {
+          "200": {"description": "Device and its sessions are terminally revoked", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LifecycleResult"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    },
+    "parameters": {
+      "InvitationId": {"name": "invitation_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "DeviceId": {"name": "device_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+    },
+    "headers": {
+      "CacheControlNoStore": {"description": "Secret-bearing response caching is forbidden", "schema": {"type": "string", "const": "no-store"}},
+      "PragmaNoCache": {"description": "Legacy intermediary caching is forbidden", "schema": {"type": "string", "const": "no-cache"}}
+    },
+    "responses": {
+      "ErrorResponse": {"description": "Stable safe error", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProfilePairingError"}}}}
+    },
+    "schemas": {
+      "DiscoveryMetadata": {"$ref": "../../profile-pairing/v1/discovery-metadata.schema.json"},
+      "Capabilities": {"$ref": "../../profile-pairing/v1/capabilities.schema.json"},
+      "CreateInvitationRequest": {"$ref": "../../profile-pairing/v1/create-invitation-request.schema.json"},
+      "EnrollmentInvitation": {"$ref": "../../profile-pairing/v1/enrollment-invitation.schema.json"},
+      "EnrollmentExchangeRequest": {"$ref": "../../profile-pairing/v1/enrollment-exchange-request.schema.json"},
+      "EnrollmentExchangeResponse": {"$ref": "../../profile-pairing/v1/enrollment-exchange-response.schema.json"},
+      "DeviceList": {"$ref": "../../profile-pairing/v1/device-list.schema.json"},
+      "SessionList": {"$ref": "../../profile-pairing/v1/session-list.schema.json"},
+      "SessionRotationRequest": {"$ref": "../../profile-pairing/v1/session-rotation-request.schema.json"},
+      "SessionRotationResponse": {"$ref": "../../profile-pairing/v1/session-rotation-response.schema.json"},
+      "LifecycleCommand": {"$ref": "../../profile-pairing/v1/lifecycle-command.schema.json"},
+      "LifecycleResult": {"$ref": "../../profile-pairing/v1/lifecycle-result.schema.json"},
+      "ProfilePairingError": {"$ref": "../../profile-pairing/v1/error.schema.json"}
+    }
+  },
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED",
+  "x-autplay-contract-version": "v1"
+}

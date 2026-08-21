@@ -6,6 +6,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     CheckConstraint,
     ForeignKeyConstraint,
@@ -449,6 +450,9 @@ class BootstrapSessionRow(Base):
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     journal_epoch: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    capabilities: Mapped[list[str]] = mapped_column(
+        ARRAY(Text()), nullable=False, server_default=text("ARRAY[]::text[]")
+    )
     high_water_server_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)

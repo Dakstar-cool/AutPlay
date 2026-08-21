@@ -1,11 +1,18 @@
 package app.autplay
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -71,22 +78,18 @@ class HomeRecommendationScreenTest {
     @Test
     fun profileHomeShowsRelevantReleaseAndOfflineRecommendationWithoutDuplicateImpression() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onAllNodesWithText(context.getString(R.string.nav_home))[0].performClick()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Local recommendation").fetchSemanticsNodes().isNotEmpty()
-        }
+        openHome()
+        scrollHomeTo(hasTestTag("home-recommendation"))
         composeRule.onNodeWithText("Relevant release").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Local recommendation").performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodesWithTag("home-recommendation")[0].performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking { AutPlayRuntime.database(context).journalDao().eventCount() == 1 }
         }
 
         scenario?.recreate()
-        composeRule.onAllNodesWithText(context.getString(R.string.nav_home))[0].performClick()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Local recommendation").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithText("Local recommendation").performScrollTo().assertIsDisplayed()
+        openHome()
+        scrollHomeTo(hasTestTag("home-recommendation"))
+        composeRule.onAllNodesWithTag("home-recommendation")[0].performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking { AutPlayRuntime.database(context).journalDao().eventCount() == 1 }
         }
@@ -95,10 +98,8 @@ class HomeRecommendationScreenTest {
     @Test
     fun activeOwnerSwitchClearsPreviousHomeFeedBeforeRenderingNewOwner() = runBlocking {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onAllNodesWithText(context.getString(R.string.nav_home))[0].performClick()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Local recommendation").fetchSemanticsNodes().isNotEmpty()
-        }
+        openHome()
+        scrollHomeTo(hasTestTag("home-recommendation"))
 
         applicationNonSecretSettingsStore(context).update(
             NonSecretSettings(
@@ -108,15 +109,31 @@ class HomeRecommendationScreenTest {
                 serverBaseUrl = "https://offline.test",
             ),
         )
+        scrollHomeTo(hasText(context.getString(R.string.home_empty_recommendations)))
+        assertTrue(composeRule.onAllNodesWithTag("home-recommendation").fetchSemanticsNodes().isEmpty())
+        // The same recording remains in the local recently-added projection outside the
+        // profile-owned recommendation card; standalone content must survive owner changes.
+        scrollHomeTo(hasTestTag("home-recent"))
+        composeRule.onNodeWithTag("home-recent")
+            .assert(hasText("Local recommendation"))
+            .assertIsDisplayed()
+        Unit
+    }
+
+    private fun openHome() {
+        val label = context.getString(R.string.nav_home)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(context.getString(R.string.home_empty_recommendations))
-                .fetchSemanticsNodes()
-                .isNotEmpty()
+            composeRule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
         }
-        assertTrue(
-            composeRule.onAllNodesWithText("Local recommendation")
-                .fetchSemanticsNodes().isEmpty(),
-        )
+        composeRule.onAllNodesWithText(label)[0].performClick()
+    }
+
+    private fun scrollHomeTo(matcher: SemanticsMatcher) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("home-product-list").performScrollToNode(matcher)
+            }.isSuccess
+        }
     }
 
     private suspend fun seed(db: AutPlayDatabase) {

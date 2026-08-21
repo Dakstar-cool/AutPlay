@@ -1,0 +1,10 @@
+{
+  "contract_version": "v1",
+  "algorithm": "RFC8785-SHA256",
+  "cases": [
+    {"case_id": "discovery-payload", "schema_example_index": 0, "expected_sha256": "35a2a11e0bc9cc6ad9be4820584409a48a555371bdd5e211ab2a2dcdbcfc0131"},
+    {"case_id": "capabilities-payload", "schema_example_index": 1, "expected_sha256": "7208d3e60c8ea84e3314d2991bba4a8a9c8134104c6904c0c35074e967415a30"},
+    {"case_id": "exchange-request", "schema_example_index": 3, "expected_sha256": "4eb5f432e7ab04565ed94ad0100c17414c4e301fb30c7c2217d2d9081e3afaea"},
+    {"case_id": "rotation-request", "schema_example_index": 10, "expected_sha256": "1d79cf600978d44c8af68c078913758ebaf6b6007d3d2585d7a21ffb35306e66"}
+  ]
+}

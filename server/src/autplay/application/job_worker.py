@@ -221,6 +221,11 @@ class JobWorker:
         outcome = self._execute(lease, self._registry.handler_for(lease.key))
         return WorkerTick(outcome, len(recovered), str(lease.fence.job_id))
 
+    @property
+    def idle_poll_interval(self) -> timedelta:
+        """Expose the configured bounded idle delay to process maintenance hooks."""
+        return self._settings.idle_poll_interval
+
     def run_forever(self, stop_event: threading.Event) -> None:
         """Run bounded iterations until a cooperative process stop is requested."""
 

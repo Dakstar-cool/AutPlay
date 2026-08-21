@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar, Final, Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,6 +49,14 @@ _API_ENV_FIELDS: Final = {
     "access_token_ttl_seconds": "ACCESS_TOKEN_TTL_SECONDS",
     "refresh_token_ttl_seconds": "REFRESH_TOKEN_TTL_SECONDS",
     "password_login_enabled": "PASSWORD_LOGIN_ENABLED",
+    "profile_identity_private_key_pem": "PROFILE_IDENTITY_PRIVATE_KEY_PEM",
+    "profile_label_hint": "PROFILE_LABEL_HINT",
+    "profile_api_origin": "PROFILE_API_ORIGIN",
+    "profile_stream_origin": "PROFILE_STREAM_ORIGIN",
+    "admin_web_enabled": "ADMIN_WEB_ENABLED",
+    "admin_web_origin": "ADMIN_WEB_ORIGIN",
+    "admin_web_source_hmac_secret": "ADMIN_WEB_SOURCE_HMAC_SECRET",
+    "admin_web_csrf_hmac_secret": "ADMIN_WEB_CSRF_HMAC_SECRET",
 }
 _STREAM_ENV_FIELDS: Final = {
     "host": "STREAM_HOST",
@@ -64,8 +73,17 @@ _WORKER_ENV_FIELDS: Final = {
     "max_attempts": "WORKER_MAX_ATTEMPTS",
     "retry_base_seconds": "WORKER_RETRY_BASE_SECONDS",
     "retry_max_seconds": "WORKER_RETRY_MAX_SECONDS",
+    "profile_receipt_cleanup_interval_seconds": "PROFILE_RECEIPT_CLEANUP_INTERVAL_SECONDS",
 }
-_SECRET_FIELDS: Final = frozenset({"database_url", "auth_signing_secret"})
+_SECRET_FIELDS: Final = frozenset(
+    {
+        "database_url",
+        "auth_signing_secret",
+        "profile_identity_private_key_pem",
+        "admin_web_source_hmac_secret",
+        "admin_web_csrf_hmac_secret",
+    }
+)
 
 
 class RuntimeProfile(StrEnum):
@@ -174,6 +192,24 @@ class ApiSettings(_ExplicitSettings):
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=900)
     refresh_token_ttl_seconds: int = Field(default=2_592_000, ge=3_600, le=7_776_000)
     password_login_enabled: bool = False
+    profile_identity_private_key_pem: SecretStr | None = Field(
+        default=None, repr=False, max_length=16_384
+    )
+    profile_label_hint: str = Field(default="AutPlay server", min_length=1, max_length=80)
+    profile_api_origin: str = Field(
+        default="https://autplay.invalid", min_length=1, max_length=2048
+    )
+    profile_stream_origin: str = Field(
+        default="https://autplay.invalid", min_length=1, max_length=2048
+    )
+    admin_web_enabled: bool = False
+    admin_web_origin: str | None = Field(default=None, min_length=1, max_length=2048)
+    admin_web_source_hmac_secret: SecretStr | None = Field(
+        default=None, repr=False, min_length=32, max_length=4_096
+    )
+    admin_web_csrf_hmac_secret: SecretStr | None = Field(
+        default=None, repr=False, min_length=32, max_length=4_096
+    )
 
     @field_validator("host")
     @classmethod
@@ -188,6 +224,19 @@ class ApiSettings(_ExplicitSettings):
             raise ValueError("password login requires an approved credential persistence contract")
         if self.refresh_token_ttl_seconds <= self.access_token_ttl_seconds:
             raise ValueError("refresh token TTL must exceed access token TTL")
+        if self.admin_web_enabled:
+            if (
+                self.admin_web_origin is None
+                or self.admin_web_source_hmac_secret is None
+                or self.admin_web_csrf_hmac_secret is None
+            ):
+                raise ValueError("admin Web requires an origin and separate HMAC secrets")
+            if (
+                self.admin_web_source_hmac_secret.get_secret_value()
+                == self.admin_web_csrf_hmac_secret.get_secret_value()
+            ):
+                raise ValueError("admin Web source and CSRF HMAC secrets must differ")
+            _validate_admin_web_origin(self.admin_web_origin, profile=self.profile)
         return self
 
 
@@ -201,6 +250,7 @@ class WorkerSettings(_ExplicitSettings):
     max_attempts: int = Field(default=5, ge=1, le=20)
     retry_base_seconds: float = Field(default=2.0, ge=0.1, le=3_600.0)
     retry_max_seconds: float = Field(default=300.0, ge=1.0, le=86_400.0)
+    profile_receipt_cleanup_interval_seconds: int = Field(default=300, ge=1, le=3_600)
 
     @model_validator(mode="after")
     def _validate_worker_timing(self) -> Self:
@@ -429,6 +479,39 @@ def _is_true(value: object) -> bool:
     if value is True:
         return True
     return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _validate_admin_web_origin(value: str, *, profile: RuntimeProfile) -> None:
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.hostname is None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or value.endswith("/")
+    ):
+        raise ValueError("admin Web origin must be one canonical origin without a path")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("admin Web origin port is invalid") from error
+    host = parsed.hostname
+    assert host is not None
+    canonical_host = f"[{host}]" if ":" in host else host
+    canonical_authority = canonical_host if port is None else f"{canonical_host}:{port}"
+    if not host.isascii() or parsed.netloc != canonical_authority:
+        raise ValueError("admin Web origin host must be normalized ASCII lowercase")
+    if parsed.scheme == "http" and (
+        profile is RuntimeProfile.PRODUCTION or host not in {"127.0.0.1", "::1"}
+    ):
+        raise ValueError("cleartext admin Web is limited to non-production literal loopback")
+    if parsed.scheme == "https" and port == 443:
+        raise ValueError("admin Web origin must omit the default HTTPS port")
+    if parsed.scheme == "http" and port == 80:
+        raise ValueError("admin Web origin must omit the default HTTP port")
 
 
 __all__ = (

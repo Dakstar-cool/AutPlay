@@ -85,6 +85,10 @@ REQUIRED_INTERACTION_INVALID_CASE_IDS = {
     "event-aggregate-id-mismatch",
 }
 PUBLIC_SCHEMA_TO_OPENAPI = {
+    "catalog-artist-payload.schema.json": "CatalogArtistPayload",
+    "catalog-artist-credit-payload.schema.json": "CatalogArtistCreditPayload",
+    "catalog-recording-credit-link-payload.schema.json": "CatalogRecordingCreditLinkPayload",
+    "catalog-release-credit-link-payload.schema.json": "CatalogReleaseCreditLinkPayload",
     "bootstrap-request.schema.json": "BootstrapRequest",
     "bootstrap-response.schema.json": "BootstrapResponse",
     "client-event.schema.json": "ClientEvent",
@@ -276,6 +280,53 @@ def test_language_neutral_examples_validate_against_every_public_schema() -> Non
             openapi_component_validator(component).iter_errors(example["instance"])
         )
         assert not openapi_errors, (component, openapi_errors)
+
+
+def test_catalog_artist_payload_dispatch_is_typed_and_member_bound_is_shared() -> None:
+    artist_id = "c1111111-1111-4111-8111-111111111111"
+    credit_id = "c2111111-1111-4211-8211-111111111111"
+    malformed_artist = {
+        "aggregate_type": "ARTIST",
+        "aggregate_server_id": artist_id,
+        "server_row_version": 1,
+        "payload": {"name": "Missing canonical identity"},
+    }
+    assert list(openapi_component_validator("BootstrapAggregate").iter_errors(malformed_artist))
+
+    member = {
+        "artist_id": artist_id,
+        "position": 0,
+        "credited_name": "Member",
+        "join_phrase": "",
+        "role": "OTHER",
+    }
+    overflow = {
+        "artist_credit_id": credit_id,
+        "display_name": "Large credit",
+        "names": [member] * 1001,
+        "deleted_at": None,
+    }
+    assert list(validator("catalog-artist-credit-payload.schema.json").iter_errors(overflow))
+    assert list(openapi_component_validator("CatalogArtistCreditPayload").iter_errors(overflow))
+
+    link = copy.deepcopy(
+        next(
+            example["instance"]
+            for example in load_json(FIXTURES / "schema-examples.json")["examples"]
+            if example["schema"] == "catalog-release-credit-link-payload.schema.json"
+        )
+    )
+    link["owner_recording_ids"] = [
+        f"{value:08x}-1111-4111-8111-111111111111" for value in range(101)
+    ]
+    schema_errors = list(
+        validator("catalog-release-credit-link-payload.schema.json").iter_errors(link)
+    )
+    openapi_errors = list(
+        openapi_component_validator("CatalogReleaseCreditLinkPayload").iter_errors(link)
+    )
+    assert any(error.validator == "maxItems" for error in schema_errors)
+    assert any(error.validator == "maxItems" for error in openapi_errors)
 
 
 def test_known_user_interaction_events_validate_and_are_reproducibly_hashed() -> None:

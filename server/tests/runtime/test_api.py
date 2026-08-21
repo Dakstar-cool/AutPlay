@@ -37,6 +37,17 @@ def _settings() -> ApiSettings:
     )
 
 
+def _admin_settings() -> ApiSettings:
+    return ApiSettings(
+        database_url=SecretStr(DATABASE_URL),
+        auth_signing_secret=SecretStr(AUTH_SECRET),
+        admin_web_enabled=True,
+        admin_web_origin="https://admin.test",
+        admin_web_source_hmac_secret=SecretStr("source-secret-is-distinct-and-at-least-32-bytes"),
+        admin_web_csrf_hmac_secret=SecretStr("csrf-secret-is-distinct-and-at-least-32-bytes"),
+    )
+
+
 def _app(result: ReadinessResult) -> FastAPI:
     return create_app(_settings(), readiness_probe=StaticProbe(result))
 
@@ -140,6 +151,26 @@ def test_public_registration_login_and_bootstrap_routes_do_not_exist() -> None:
 
     assert all(response.status_code == 404 for response in responses)
     assert all(response.json()["error"]["code"] == "not_found" for response in responses)
+
+
+def test_admin_web_is_absent_when_disabled_and_bundled_when_enabled() -> None:
+    disabled = _app(ReadinessResult(ready=True, component="postgresql"))
+    enabled = create_app(
+        _admin_settings(),
+        readiness_probe=StaticProbe(ReadinessResult(ready=True, component="postgresql")),
+    )
+    with TestClient(disabled, base_url="https://admin.test") as client:
+        missing = client.get("/admin/static/admin-v1.css")
+    with TestClient(enabled, base_url="https://admin.test") as client:
+        asset = client.get("/admin/static/admin-v1.css")
+        missing_admin = client.get("/admin/not-a-real-surface/extra")
+
+    assert missing.status_code == 404
+    assert asset.status_code == 200 and "immutable" in asset.headers["cache-control"]
+    assert missing_admin.status_code == 404
+    assert missing_admin.headers["cache-control"] == "no-store"
+    assert missing_admin.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in missing_admin.headers["content-security-policy"]
 
 
 def test_validation_and_unhandled_errors_do_not_echo_inputs() -> None:

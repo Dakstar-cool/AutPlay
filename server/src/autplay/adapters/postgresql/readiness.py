@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0015_wave_runtime"
+EXPECTED_MIGRATION_HEAD: Final = "0019_m6_web_admin_runtime"
 
 
 @dataclass(frozen=True, slots=True)

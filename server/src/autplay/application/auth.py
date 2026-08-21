@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from autplay.domain.auth import (
+    AccessTokenClaims,
     AccountRole,
     DeviceDescription,
     InvalidAccessTokenError,
@@ -118,6 +119,11 @@ class AuthService:
     def authenticate_access(self, token: str) -> Principal:
         """Decode an access token and reload every mutable authorization gate."""
 
+        principal, _ = self.authenticate_access_with_claims(token)
+        return principal
+
+    def authenticate_access_with_claims(self, token: str) -> tuple[Principal, AccessTokenClaims]:
+        """Authenticate an active principal and retain the verified JWT identity."""
         now = _aware(self.clock.now())
         claims = self.access_tokens.decode(token, now=now)
         with self.unit_of_work_factory() as unit_of_work:
@@ -129,7 +135,11 @@ class AuthService:
             )
         if principal is None:
             raise InvalidAccessTokenError
-        return principal
+        return principal, claims
+
+    def decode_access(self, token: str) -> AccessTokenClaims:
+        """Validate JWT cryptography and expiry without authorizing a protected route."""
+        return self.access_tokens.decode(token, now=_aware(self.clock.now()))
 
     def rotate_refresh(self, refresh_token: str, *, request_id: UUID | None = None) -> TokenPair:
         """Rotate one refresh generation and detect reuse of revoked generations."""
@@ -147,6 +157,10 @@ class AuthService:
             repository = unit_of_work.auth
             stored = repository.get_session_by_refresh_hash_for_update(digest)
             if stored is None:
+                raise InvalidRefreshTokenError
+            # V2 credentials are rotated only through the device-PoP pairing
+            # protocol; accepting them here would silently bypass that gate.
+            if stored.session_mode != "LEGACY":
                 raise InvalidRefreshTokenError
 
             if stored.revoked_at is not None:

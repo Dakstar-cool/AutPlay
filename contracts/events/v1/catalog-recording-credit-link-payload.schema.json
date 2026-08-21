@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/events/v1/catalog-recording-credit-link-payload.schema.json",
+  "title": "AutPlay Catalog Recording Artist Credit Link Payload v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["recording_id", "artist_credit_id", "owner_scope_id", "owner_recording_page", "owner_recording_page_count", "owner_recording_ids", "deleted_at"],
+  "properties": {
+    "recording_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "artist_credit_id": {"$ref": "client-event.schema.json#/$defs/uuid"},
+    "owner_scope_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "owner_recording_page": {"type": "integer", "minimum": 0},
+    "owner_recording_page_count": {"type": "integer", "minimum": 1},
+    "owner_recording_ids": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"$ref": "client-event.schema.json#/$defs/uuid"}},
+    "deleted_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+  }
+}

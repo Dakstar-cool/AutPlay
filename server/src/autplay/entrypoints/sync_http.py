@@ -32,6 +32,10 @@ def create_sync_router(
         body["protocol_version"] = _query_int(body, "protocol_version")
         if "limit" in body:
             body["limit"] = _query_int(body, "limit")
+        if "catalog_projection_version" in body:
+            body["catalog_projection_version"] = _query_int(body, "catalog_projection_version")
+        if "capabilities" in body:
+            body["capabilities"] = _query_capabilities(body)
         return _call(lambda: service.pull(_principal(request), body))
 
     @router.post("/sync/bootstrap")
@@ -73,6 +77,13 @@ def _query_int(body: dict[str, Any], key: str) -> int:
         return int(body[key])
     except KeyError, ValueError:
         raise ApiError("request_validation_failed", "The sync request is invalid.", 422) from None
+
+
+def _query_capabilities(body: dict[str, Any]) -> list[str]:
+    value = body.get("capabilities")
+    if not isinstance(value, str) or len(value) > 4096:
+        raise ApiError("request_validation_failed", "The sync request is invalid.", 422)
+    return [item for item in value.split(",") if item]
 
 
 __all__ = ("create_sync_router",)

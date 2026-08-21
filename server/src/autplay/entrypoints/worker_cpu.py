@@ -8,8 +8,9 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
+from time import monotonic
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,6 +29,7 @@ from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
     TransactionalIngestRepository,
 )
+from autplay.adapters.postgresql.web_admin import SqlAlchemyWebAdminRepository
 from autplay.adapters.system import Uuid7Generator
 from autplay.application.imports import ImportJobHandler
 from autplay.application.job_worker import (
@@ -36,6 +38,7 @@ from autplay.application.job_worker import (
     JobWorker,
     JobWorkerSettings,
 )
+from autplay.application.profile_pairing import cleanup_expired_pairing_receipts
 from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
 from autplay.domain.vault import VaultLimits
@@ -83,7 +86,14 @@ def import_handlers(handler: ImportJobHandler) -> Mapping[JobKey, JobHandler]:
     return {JobKey("library.import", 1): handler}
 
 
-def run_cpu_worker(worker: JobWorker, stop_event: threading.Event | None = None) -> None:
+def run_cpu_worker(
+    worker: JobWorker,
+    stop_event: threading.Event | None = None,
+    *,
+    profile_receipt_cleanup: Callable[[], int] | None = None,
+    web_admin_cleanup: Callable[[], int] | None = None,
+    cleanup_interval: timedelta = timedelta(minutes=5),
+) -> None:
     """Run until SIGINT/SIGTERM or a supplied cooperative stop event."""
 
     process_stop = stop_event or threading.Event()
@@ -97,8 +107,27 @@ def run_cpu_worker(worker: JobWorker, stop_event: threading.Event | None = None)
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, request_stop)
+    if cleanup_interval <= timedelta(0) or cleanup_interval > timedelta(hours=1):
+        raise ValueError("profile receipt cleanup interval must be within (0, 1 hour]")
+    next_cleanup_at = 0.0
     try:
-        worker.run_forever(process_stop)
+        while not process_stop.is_set():
+            current = monotonic()
+            if current >= next_cleanup_at:
+                if profile_receipt_cleanup is not None:
+                    try:
+                        profile_receipt_cleanup()
+                    except SQLAlchemyError:
+                        _LOGGER.exception("profile_receipt_cleanup_failed")
+                if web_admin_cleanup is not None:
+                    try:
+                        web_admin_cleanup()
+                    except SQLAlchemyError:
+                        _LOGGER.exception("web_admin_cleanup_failed")
+                next_cleanup_at = current + cleanup_interval.total_seconds()
+            tick = worker.run_once()
+            if tick.outcome.value == "IDLE":
+                process_stop.wait(worker.idle_poll_interval.total_seconds())
     finally:
         for signum, previous in previous_handlers.items():
             signal.signal(signum, previous)
@@ -203,10 +232,27 @@ def main(arguments: Sequence[str] | None = None) -> int:
             ),
         )
         try:
+
+            def cleanup() -> int:
+                return cleanup_expired_pairing_receipts(sessions, limit=10_000)
+
+            def web_cleanup() -> int:
+                with sessions.begin() as session:
+                    return SqlAlchemyWebAdminRepository(session).cleanup_expired(10_000)
+
             if namespace.once:
+                cleanup()
+                web_cleanup()
                 worker.run_once()
             else:
-                run_cpu_worker(worker)
+                run_cpu_worker(
+                    worker,
+                    profile_receipt_cleanup=cleanup,
+                    web_admin_cleanup=web_cleanup,
+                    cleanup_interval=timedelta(
+                        seconds=runtime_settings.profile_receipt_cleanup_interval_seconds
+                    ),
+                )
         except SQLAlchemyError as error:
             _LOGGER.error(
                 "worker_database_failure",

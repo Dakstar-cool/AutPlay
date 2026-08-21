@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ page_title }} · {{ t("app_name") }}</title>
+  <link rel="stylesheet" href="/admin/static/admin-v1.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">{{ t("skip_to_content") }}</a>
+  {% if development_mode %}<p class="development-warning" role="status">{{ t("development_warning") }}</p>{% endif %}
+  <header class="site-header">
+    <a class="brand" href="/admin/?lang={{ locale }}" aria-label="{{ t('nav_dashboard') }}">AutPlay <span>Admin</span></a>
+    <a class="language" href="{{ language_url }}" lang="{{ other_locale }}" hreflang="{{ other_locale }}">{{ t("language_switch") }}</a>
+  </header>
+  {% if authenticated %}
+  <nav class="primary-nav" aria-label="{{ t('navigation') }}">
+    {% for item in navigation %}
+    <a href="{{ item.href }}?lang={{ locale }}"{% if item.current %} aria-current="page"{% endif %}>{{ t(item.label) }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+  <main id="main" tabindex="-1">
+    {% if flash %}<p class="notice" role="status" aria-live="polite">{{ flash }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer><p>{{ t("footer_privacy") }}</p></footer>
+</body>
+</html>

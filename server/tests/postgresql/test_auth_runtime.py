@@ -473,6 +473,27 @@ class InsertedSession:
     session_id: UUID
 
 
+def test_legacy_refresh_rejects_v2_session_without_mutating_it(
+    auth_runtime: AuthRuntime,
+    database_connection: Connection[Any],
+) -> None:
+    """P03 refresh remains available to legacy rows but cannot bypass M5B device PoP."""
+    pair = _bootstrap(auth_runtime)
+    database_connection.execute(
+        "UPDATE account.user_session SET session_mode = 'V2' WHERE session_id = %s",
+        (pair.session_id,),
+    )
+    database_connection.commit()
+
+    with pytest.raises(InvalidRefreshTokenError):
+        auth_runtime.service.rotate_refresh(pair.refresh_token)
+
+    assert database_connection.execute(
+        "SELECT session_mode, revoked_at FROM account.user_session WHERE session_id = %s",
+        (pair.session_id,),
+    ).fetchone() == ("V2", None)
+
+
 def _bootstrap(runtime: AuthRuntime) -> TokenPair:
     return runtime.service.bootstrap_owner(
         BootstrapOwnerCommand(

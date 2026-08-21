@@ -91,7 +91,9 @@
           {"$ref": "#/components/parameters/ServerProfileId"},
           {"$ref": "#/components/parameters/JournalEpoch"},
           {"$ref": "#/components/parameters/Cursor"},
-          {"$ref": "#/components/parameters/Limit"}
+          {"$ref": "#/components/parameters/Limit"},
+          {"$ref": "#/components/parameters/CatalogProjectionVersion"},
+          {"$ref": "#/components/parameters/Capabilities"}
         ],
         "responses": {
           "200": {
@@ -192,6 +194,15 @@
         "in": "query",
         "required": false,
         "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}
+      },
+      "CatalogProjectionVersion": {
+        "name": "catalog_projection_version", "in": "query", "required": false,
+        "schema": {"const": 1}
+      },
+      "Capabilities": {
+        "name": "capabilities", "in": "query", "required": false,
+        "description": "Comma-separated optional client capabilities.",
+        "schema": {"type": "string", "maxLength": 4096}
       }
     },
     "responses": {
@@ -232,6 +243,40 @@
           {"type": "array", "items": {"$ref": "#/components/schemas/SafeValue"}},
           {"$ref": "#/components/schemas/SafeObject"}
         ]
+      },
+      "CatalogArtistPayload": {
+        "type": "object", "additionalProperties": true,
+        "required": ["artist_id", "name", "sort_name", "artist_type", "disambiguation", "country_code", "identity_status", "deleted_at"],
+        "properties": {
+          "artist_id": {"$ref": "#/components/schemas/Uuid"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "sort_name": {"oneOf": [{"type": "string", "minLength": 1, "maxLength": 1000}, {"type": "null"}]},
+          "artist_type": {"oneOf": [{"type": "string", "minLength": 1, "maxLength": 100}, {"type": "null"}]},
+          "disambiguation": {"oneOf": [{"type": "string", "maxLength": 2000}, {"type": "null"}]},
+          "country_code": {"oneOf": [{"type": "string", "minLength": 2, "maxLength": 2}, {"type": "null"}]},
+          "identity_status": {"oneOf": [{"type": "string", "minLength": 1, "maxLength": 100}, {"type": "null"}]},
+          "deleted_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "CatalogArtistCreditPayload": {
+        "type": "object", "additionalProperties": true,
+        "required": ["artist_credit_id", "display_name", "names", "deleted_at"],
+        "properties": {
+          "artist_credit_id": {"$ref": "#/components/schemas/Uuid"},
+          "display_name": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "names": {"type": "array", "maxItems": 1000, "items": {"type": "object", "additionalProperties": true, "required": ["artist_id", "position", "credited_name", "join_phrase", "role"], "properties": {"artist_id": {"$ref": "#/components/schemas/Uuid"}, "position": {"type": "integer", "minimum": 0}, "credited_name": {"type": "string", "minLength": 1, "maxLength": 1000}, "join_phrase": {"type": "string", "maxLength": 1000}, "role": {"type": "string", "minLength": 1, "maxLength": 100}}}},
+          "deleted_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "CatalogRecordingCreditLinkPayload": {
+        "type": "object", "additionalProperties": true,
+        "required": ["recording_id", "artist_credit_id", "owner_scope_id", "owner_recording_page", "owner_recording_page_count", "owner_recording_ids", "deleted_at"],
+        "properties": {"recording_id": {"$ref": "#/components/schemas/Uuid"}, "artist_credit_id": {"$ref": "#/components/schemas/Uuid"}, "owner_scope_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "owner_recording_page": {"type": "integer", "minimum": 0}, "owner_recording_page_count": {"type": "integer", "minimum": 1}, "owner_recording_ids": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/components/schemas/Uuid"}}, "deleted_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}}
+      },
+      "CatalogReleaseCreditLinkPayload": {
+        "type": "object", "additionalProperties": true,
+        "required": ["release_id", "artist_credit_id", "owner_scope_id", "owner_recording_page", "owner_recording_page_count", "owner_recording_ids", "deleted_at"],
+        "properties": {"release_id": {"$ref": "#/components/schemas/Uuid"}, "artist_credit_id": {"$ref": "#/components/schemas/Uuid"}, "owner_scope_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "owner_recording_page": {"type": "integer", "minimum": 0}, "owner_recording_page_count": {"type": "integer", "minimum": 1}, "owner_recording_ids": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/components/schemas/Uuid"}}, "deleted_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}}
       },
       "BindingFields": {
         "type": "object",
@@ -554,6 +599,18 @@
       "BootstrapAggregate": {
         "type": "object",
         "additionalProperties": true,
+        "x-autplay-catalog-aggregate-payloads": {
+          "ARTIST": "#/components/schemas/CatalogArtistPayload",
+          "ARTIST_CREDIT": "#/components/schemas/CatalogArtistCreditPayload",
+          "RECORDING_ARTIST_CREDIT": "#/components/schemas/CatalogRecordingCreditLinkPayload",
+          "RELEASE_ARTIST_CREDIT": "#/components/schemas/CatalogReleaseCreditLinkPayload"
+        },
+        "allOf": [
+          {"if": {"properties": {"aggregate_type": {"const": "ARTIST"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "#/components/schemas/CatalogArtistPayload"}}}},
+          {"if": {"properties": {"aggregate_type": {"const": "ARTIST_CREDIT"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "#/components/schemas/CatalogArtistCreditPayload"}}}},
+          {"if": {"properties": {"aggregate_type": {"const": "RECORDING_ARTIST_CREDIT"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "#/components/schemas/CatalogRecordingCreditLinkPayload"}}}},
+          {"if": {"properties": {"aggregate_type": {"const": "RELEASE_ARTIST_CREDIT"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "#/components/schemas/CatalogReleaseCreditLinkPayload"}}}}
+        ],
         "required": ["aggregate_type", "aggregate_server_id", "server_row_version", "payload"],
         "properties": {
           "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},
@@ -584,6 +641,18 @@
       "ServerEvent": {
         "type": "object",
         "additionalProperties": true,
+        "x-autplay-catalog-event-payloads": {
+          "CATALOG_ARTIST_UPSERTED": "#/components/schemas/CatalogArtistPayload",
+          "CATALOG_ARTIST_CREDIT_UPSERTED": "#/components/schemas/CatalogArtistCreditPayload",
+          "CATALOG_RECORDING_CREDIT_LINK_UPSERTED": "#/components/schemas/CatalogRecordingCreditLinkPayload",
+          "CATALOG_RELEASE_CREDIT_LINK_UPSERTED": "#/components/schemas/CatalogReleaseCreditLinkPayload"
+        },
+        "allOf": [
+          {"if": {"properties": {"event_type": {"const": "CATALOG_ARTIST_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "ARTIST"}, "payload": {"$ref": "#/components/schemas/CatalogArtistPayload"}}}},
+          {"if": {"properties": {"event_type": {"const": "CATALOG_ARTIST_CREDIT_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "ARTIST_CREDIT"}, "payload": {"$ref": "#/components/schemas/CatalogArtistCreditPayload"}}}},
+          {"if": {"properties": {"event_type": {"const": "CATALOG_RECORDING_CREDIT_LINK_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "RECORDING_ARTIST_CREDIT"}, "payload": {"$ref": "#/components/schemas/CatalogRecordingCreditLinkPayload"}}}},
+          {"if": {"properties": {"event_type": {"const": "CATALOG_RELEASE_CREDIT_LINK_UPSERTED"}}, "required": ["event_type"]}, "then": {"properties": {"aggregate_type": {"const": "RELEASE_ARTIST_CREDIT"}, "payload": {"$ref": "#/components/schemas/CatalogReleaseCreditLinkPayload"}}}}
+        ],
         "required": [
           "server_sequence",
           "event_id",
@@ -652,6 +721,8 @@
                 "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
               },
               "pending_local_event_count": {"type": "integer", "minimum": 0}
+              ,"catalog_projection_version": {"const": 1}
+              ,"capabilities": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 100}}
             }
           }
         ]

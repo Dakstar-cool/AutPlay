@@ -2,6 +2,7 @@ package app.autplay.application.wave
 
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.wave.WaveAvailability
@@ -37,8 +38,9 @@ class OkHttpWaveTransport(
     private val credentials: CredentialStore,
     private val client: OkHttpClient = OkHttpClient(),
     private val authBaseUrl: String = baseUrl.trimEnd('/').removeSuffix("/api") + "/api/v1",
+    private val m5Rotation: M5SessionRotationClient? = null,
 ) : WaveTransport {
-    private val sessionCredentials = RefreshingSessionCredentials(authBaseUrl, credentials, client)
+    private val sessionCredentials = RefreshingSessionCredentials(authBaseUrl, credentials, client, m5Rotation = m5Rotation)
 
     override suspend fun create(allowUserIds: List<String>): WaveSnapshot {
         require(allowUserIds.size <= 7) { "WAVE_ALLOWLIST_TOO_LARGE" }

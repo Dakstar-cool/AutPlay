@@ -45,6 +45,17 @@ _P09_AUTOGENERATE_EXCLUDED = {
     "command",
     "preflight",
     "timing_report",
+    "server_instance",
+    "enrollment_invitation",
+    "enrollment_exchange_receipt",
+    "session_rotation_receipt",
+    "profile_lifecycle_command",
+    "web_session_invitation",
+    "web_login_challenge",
+    "web_session",
+    "web_session_rotation_evidence",
+    "web_terminal_receipt",
+    "web_login_rate_window",
 }
 
 
@@ -56,8 +67,11 @@ def _include_object(
     compare_to: object | None,
 ) -> bool:
     """P09 physical runtime DDL is additive and audited by dedicated integration tests."""
-    del object_, reflected, compare_to
-    return not (type_ == "table" and name in _P09_AUTOGENERATE_EXCLUDED)
+    del reflected, compare_to
+    if type_ == "table":
+        return name not in _P09_AUTOGENERATE_EXCLUDED
+    table = getattr(object_, "table", None)
+    return getattr(table, "name", None) not in _P09_AUTOGENERATE_EXCLUDED
 
 
 def _database_url() -> str:

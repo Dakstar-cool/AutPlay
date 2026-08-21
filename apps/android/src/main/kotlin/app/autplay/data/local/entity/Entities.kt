@@ -16,6 +16,81 @@ data class RecordingProjectionEntity(@PrimaryKey @ColumnInfo(name = "local_recor
 @Entity(tableName = "release_projection", indices = [Index(value = ["server_release_id"], unique = true)])
 data class ReleaseProjectionEntity(@PrimaryKey @ColumnInfo(name = "local_release_id") val localReleaseId: String, @ColumnInfo(name = "server_release_id") val serverReleaseId: String?, @ColumnInfo(name = "server_release_group_id") val serverReleaseGroupId: String?, val title: String, @ColumnInfo(name = "display_artist") val displayArtist: String, @ColumnInfo(name = "release_date_text") val releaseDateText: String?, @ColumnInfo(name = "release_type") val releaseType: String?, @ColumnInfo(name = "artwork_ref") val artworkRef: String?, @ColumnInfo(name = "catalog_version") val catalogVersion: Long, @ColumnInfo(name = "projection_updated_at_ms") val projectionUpdatedAtMs: Long, @ColumnInfo(name = "is_deleted") val isDeleted: Boolean)
 
+/** Server-authoritative identity.  Display names are intentionally neither keys nor unique. */
+@Entity(tableName = "artist_projection", indices = [Index(value = ["server_profile_id", "server_artist_id"], unique = true), Index(value = ["server_profile_id", "name"])])
+data class ArtistProjectionEntity(
+    @PrimaryKey @ColumnInfo(name = "local_artist_id") val localArtistId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "server_artist_id") val serverArtistId: String,
+    val name: String,
+    @ColumnInfo(name = "sort_name") val sortName: String?,
+    @ColumnInfo(name = "artist_type") val artistType: String?,
+    val disambiguation: String?,
+    @ColumnInfo(name = "country_code") val countryCode: String?,
+    @ColumnInfo(name = "identity_status") val identityStatus: String?,
+    @ColumnInfo(name = "server_row_version") val serverRowVersion: Long,
+    @ColumnInfo(name = "projection_updated_at_ms") val projectionUpdatedAtMs: Long,
+    @ColumnInfo(name = "deleted_at_ms") val deletedAtMs: Long? = null,
+)
+
+/** Ordered credit aggregate; an empty child set represents unresolved legacy evidence. */
+@Entity(tableName = "artist_credit_projection", indices = [Index(value = ["server_profile_id", "server_artist_credit_id"], unique = true)])
+data class ArtistCreditProjectionEntity(
+    @PrimaryKey @ColumnInfo(name = "local_artist_credit_id") val localArtistCreditId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "server_artist_credit_id") val serverArtistCreditId: String,
+    @ColumnInfo(name = "display_name") val displayName: String?,
+    @ColumnInfo(name = "server_row_version") val serverRowVersion: Long,
+    @ColumnInfo(name = "projection_updated_at_ms") val projectionUpdatedAtMs: Long,
+    @ColumnInfo(name = "deleted_at_ms") val deletedAtMs: Long? = null,
+)
+
+@Entity(tableName = "artist_credit_name_projection", indices = [Index(value = ["server_profile_id", "server_artist_credit_id", "position"], unique = true), Index(value = ["server_profile_id", "server_artist_id"])])
+data class ArtistCreditNameProjectionEntity(
+    @PrimaryKey @ColumnInfo(name = "local_artist_credit_name_id") val localArtistCreditNameId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "server_artist_credit_id") val serverArtistCreditId: String,
+    @ColumnInfo(name = "server_artist_id") val serverArtistId: String,
+    val position: Int,
+    @ColumnInfo(name = "credited_name") val creditedName: String,
+    @ColumnInfo(name = "join_phrase") val joinPhrase: String,
+    val role: String,
+)
+
+@Entity(tableName = "catalog_artist_credit_link", indices = [Index(value = ["server_profile_id", "subject_type", "subject_server_id"], unique = true), Index(value = ["server_profile_id", "server_artist_credit_id"])])
+data class CatalogArtistCreditLinkEntity(
+    @PrimaryKey @ColumnInfo(name = "local_catalog_artist_credit_link_id") val localLinkId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "subject_type") val subjectType: String,
+    @ColumnInfo(name = "subject_server_id") val subjectServerId: String,
+    @ColumnInfo(name = "server_artist_credit_id") val serverArtistCreditId: String,
+    @ColumnInfo(name = "owner_scope_id") val ownerScopeId: String,
+    @ColumnInfo(name = "owner_page_count") val ownerPageCount: Int,
+    @ColumnInfo(name = "last_owner_page") val lastOwnerPage: Int,
+    @ColumnInfo(name = "owner_scope_complete") val ownerScopeComplete: Boolean,
+    @ColumnInfo(name = "server_row_version") val serverRowVersion: Long,
+    @ColumnInfo(name = "last_server_sequence") val lastServerSequence: Long,
+    @ColumnInfo(name = "projection_updated_at_ms") val projectionUpdatedAtMs: Long,
+    @ColumnInfo(name = "deleted_at_ms") val deletedAtMs: Long? = null,
+)
+
+/** One bounded page member; visibility still requires a live same-profile UTR. */
+@Entity(
+    tableName = "catalog_artist_credit_link_owner",
+    indices = [
+        Index(value = ["server_profile_id", "subject_type", "subject_server_id", "owner_scope_id", "owner_recording_id"], unique = true),
+        Index(value = ["server_profile_id", "owner_recording_id"]),
+    ],
+)
+data class CatalogArtistCreditLinkOwnerEntity(
+    @PrimaryKey @ColumnInfo(name = "local_catalog_artist_credit_link_owner_id") val localOwnerId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "subject_type") val subjectType: String,
+    @ColumnInfo(name = "subject_server_id") val subjectServerId: String,
+    @ColumnInfo(name = "owner_scope_id") val ownerScopeId: String,
+    @ColumnInfo(name = "owner_recording_id") val ownerRecordingId: String,
+)
+
 @Entity(tableName = "release_track_projection", foreignKeys = [ForeignKey(entity = ReleaseProjectionEntity::class, parentColumns = ["local_release_id"], childColumns = ["local_release_id"], onDelete = ForeignKey.RESTRICT), ForeignKey(entity = RecordingProjectionEntity::class, parentColumns = ["local_recording_id"], childColumns = ["local_recording_id"], onDelete = ForeignKey.RESTRICT)], indices = [Index(value = ["server_release_track_id"], unique = true), Index(value = ["local_release_id"]), Index(value = ["local_recording_id"])])
 data class ReleaseTrackProjectionEntity(@PrimaryKey @ColumnInfo(name = "local_release_track_id") val localReleaseTrackId: String, @ColumnInfo(name = "server_release_track_id") val serverReleaseTrackId: String?, @ColumnInfo(name = "local_release_id") val localReleaseId: String, @ColumnInfo(name = "local_recording_id") val localRecordingId: String, @ColumnInfo(name = "medium_position") val mediumPosition: Int, @ColumnInfo(name = "sequence_no") val sequenceNo: Int, @ColumnInfo(name = "number_text") val numberText: String?, @ColumnInfo(name = "credited_title") val creditedTitle: String, @ColumnInfo(name = "credited_artist") val creditedArtist: String, @ColumnInfo(name = "duration_ms") val durationMs: Long?)
 

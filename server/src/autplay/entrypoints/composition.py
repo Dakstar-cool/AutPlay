@@ -9,6 +9,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
+from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
+from autplay.adapters.postgresql.admin_views_runtime import SqlAlchemyAdminViewService
 from autplay.adapters.postgresql.auth_runtime import SqlAlchemyAuthUnitOfWorkFactory
 from autplay.adapters.postgresql.recommendations import (
     SqlAlchemyOfflinePackRepository,
@@ -16,11 +18,15 @@ from autplay.adapters.postgresql.recommendations import (
 )
 from autplay.adapters.postgresql.vault_uow import SqlAlchemyVaultUnitOfWorkFactory
 from autplay.adapters.postgresql.wave import SqlAlchemyWaveService
+from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec, OpaqueRefreshTokenCodec
 from autplay.adapters.system import SystemClock, Uuid7Generator
+from autplay.application.admin_commands import AdminCommandService
 from autplay.application.auth import AuthService
+from autplay.application.catalog_artist_sync import CatalogArtistMutationService
 from autplay.application.imports import ImportService
 from autplay.application.library import LibraryService
+from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
@@ -33,7 +39,9 @@ from autplay.application.vault_uploads import (
     VaultPrincipal,
     VaultUploadService,
 )
+from autplay.application.web_admin import WebAdminService
 from autplay.domain.auth import Principal
+from autplay.domain.profile_pairing import load_private_key
 from autplay.domain.vault import OpaqueStorageKey, Sha256Digest, VaultLimits
 from autplay.entrypoints.stream_http import AuthorizedStream
 from autplay.entrypoints.vault_http import UploadView
@@ -58,6 +66,59 @@ def build_auth_service(settings: ApiSettings, engine: Engine) -> AuthService:
         refresh_tokens=OpaqueRefreshTokenCodec(),
         access_token_ttl=access_ttl,
         refresh_token_ttl=timedelta(seconds=settings.refresh_token_ttl_seconds),
+    )
+
+
+def build_profile_pairing_service(
+    settings: ApiSettings, engine: Engine
+) -> ProfilePairingService | None:
+    """Assemble M5B only when an operator supplied a persistent secret-file key."""
+    pem = settings.profile_identity_private_key_pem
+    if pem is None:
+        return None
+    return ProfilePairingService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        private_key=load_private_key(pem.get_secret_value().encode("utf-8")),
+        label_hint=settings.profile_label_hint,
+        api_origin=settings.profile_api_origin,
+        stream_origin=settings.profile_stream_origin,
+        access_tokens=Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
+        ),
+        access_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
+    )
+
+
+def build_web_admin_service(settings: ApiSettings, engine: Engine) -> WebAdminService | None:
+    """Assemble optional browser authority with its dedicated CSRF derivation secret."""
+
+    secret = settings.admin_web_csrf_hmac_secret
+    if secret is None:
+        return None
+    return WebAdminService(
+        SqlAlchemyWebAdminUnitOfWorkFactory(
+            sessionmaker(engine, class_=Session, expire_on_commit=False)
+        ),
+        csrf_secret=secret.get_secret_value().encode("utf-8"),
+    )
+
+
+def build_admin_view_service(engine: Engine) -> SqlAlchemyAdminViewService:
+    """Assemble owner-scoped read models with one short session per query."""
+
+    return SqlAlchemyAdminViewService(sessionmaker(engine, class_=Session, expire_on_commit=False))
+
+
+def build_admin_command_service(engine: Engine) -> AdminCommandService:
+    """Assemble audited, idempotent Android administration commands for Web."""
+
+    return AdminCommandService(
+        SqlAlchemyAdminCommandRepository(
+            sessionmaker(engine, class_=Session, expire_on_commit=False)
+        )
     )
 
 
@@ -214,9 +275,14 @@ def build_library_service(engine: Engine) -> LibraryService:
 
 
 def build_import_service(engine: Engine) -> ImportService:
-    """Assemble bounded P10 import parsing and PostgreSQL transactions."""
+    """Assemble imports; review publishes Artist closure in the same transaction."""
 
     return ImportService(sessionmaker(engine, class_=Session, expire_on_commit=False))
+
+
+def build_catalog_artist_mutation_service(engine: Engine) -> CatalogArtistMutationService:
+    """Expose the sole transaction-owned canonical Artist mutation boundary."""
+    return CatalogArtistMutationService(engine)
 
 
 def build_sync_service(settings: ApiSettings, engine: Engine) -> SyncService:
@@ -310,13 +376,18 @@ def _upload_view(info: UploadInfo) -> UploadView:
 
 
 __all__ = (
+    "build_admin_command_service",
+    "build_admin_view_service",
     "build_auth_service",
+    "build_catalog_artist_mutation_service",
     "build_import_service",
     "build_library_service",
+    "build_profile_pairing_service",
     "build_recommendation_service",
     "build_stream_auth_service",
     "build_stream_lookup",
     "build_sync_service",
     "build_vault_http_service",
     "build_wave_service",
+    "build_web_admin_service",
 )

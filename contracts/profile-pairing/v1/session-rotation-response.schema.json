@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-pairing/v1/session-rotation-response.schema.json",
+  "title": "SessionRotationResponse",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "rotation_id", "session_id", "parent_session_id", "family_id", "generation", "refresh_absolute_expires_at", "receipt_expires_at", "access_token", "access_expires_at", "replayed"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "rotation_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"},
+    "parent_session_id": {"type": "string", "format": "uuid"},
+    "family_id": {"type": "string", "format": "uuid"},
+    "generation": {"type": "integer", "minimum": 1},
+    "refresh_absolute_expires_at": {"type": "string", "format": "date-time"},
+    "receipt_expires_at": {"type": "string", "format": "date-time"},
+    "access_token": {"type": "string", "minLength": 32, "maxLength": 8192},
+    "access_expires_at": {"type": "string", "format": "date-time"},
+    "replayed": {"type": "boolean"}
+  },
+  "additionalProperties": false,
+  "x-autplay-sensitive": true,
+  "x-autplay-implementation-status": "DRAFT_NOT_IMPLEMENTED"
+}

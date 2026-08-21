@@ -1,0 +1,118 @@
+{
+  "contract_version": "v1",
+  "status": "ACCEPTED",
+  "allowed_roles": ["OWNER", "ADMIN"],
+  "browser_invitation": {
+    "delivery": "LOCAL_CLI_ATTACHED_TTY_ONLY",
+    "entropy_bytes": 32,
+    "default_ttl_seconds": 300,
+    "max_ttl_seconds": 600,
+    "max_active_per_user": 3,
+    "max_issued_per_operator_hour": 10,
+    "persisted_secret_form": "SHA256_ONLY"
+  },
+  "session": {
+    "bearer_entropy_bytes": 32,
+    "idle_expiry_seconds": 1800,
+    "absolute_expiry_seconds": 43200,
+    "rotation_seconds": 900,
+    "max_active_per_user": 8,
+    "persisted_bearer_form": "SHA256_ONLY",
+    "predecessor_authority": "NONE"
+  },
+  "release_cookie": {
+    "name": "__Host-autplay_admin",
+    "secure": true,
+    "http_only": true,
+    "same_site": "Strict",
+    "path": "/",
+    "domain_attribute": false
+  },
+  "release_preauth_cookie": {
+    "name": "__Host-autplay_login",
+    "secure": true,
+    "http_only": true,
+    "same_site": "Strict",
+    "path": "/",
+    "max_age_seconds": 300,
+    "domain_attribute": false
+  },
+  "unsafe_development": {
+    "cleartext_hosts": ["127.0.0.1", "[::1]"],
+    "cookie_name": "autplay_admin_dev",
+    "path": "/admin",
+    "preauth_cookie_name": "autplay_login_dev",
+    "preauth_cookie_path": "/admin/login",
+    "preauth_max_age_seconds": 300
+  },
+  "authenticated_mutation_guards": [
+    "ACTIVE_SERVER_SESSION",
+    "EXACT_ORIGIN",
+    "SYNCHRONIZER_TOKEN",
+    "APPLICATION_OPERATION_ID"
+  ],
+  "login_bootstrap_guards": [
+    "EXACT_ORIGIN",
+    "PREAUTH_COOKIE",
+    "PREAUTH_FORM_NONCE",
+    "LOGIN_OPERATION_ID",
+    "BROWSER_INVITATION"
+  ],
+  "login_lost_response": "TERMINAL_UNKNOWN_NEW_CLI_INVITATION_REQUIRED",
+  "rotation": {
+    "safe_get_auth_maintenance": true,
+    "head_rotation": false,
+    "due_post_application_mutation": false,
+    "lost_response": "NEW_CLI_INVITATION_REQUIRED"
+  },
+  "terminal_lifecycle_retry": {
+    "applies_to": [
+      "LOGOUT_CURRENT_BROWSER",
+      "LOGOUT_ALL_BROWSER",
+      "REVOKE_INITIATING_BROWSER_SESSION"
+    ],
+    "active_authority": false,
+    "exact_bindings": [
+      "SERVER_INSTANCE_ID",
+      "USER_ID",
+      "WEB_SESSION_ID",
+      "TOKEN_GENERATION",
+      "TOKEN_SHA256",
+      "OPERATION_ID",
+      "ACTION",
+      "TARGET",
+      "REASON_CODE",
+      "CANONICAL_REQUEST_SHA256"
+    ],
+    "result": "ORIGINAL_TERMINAL_RESPONSE_AND_COOKIE_CLEAR_ONLY",
+    "retention": "ABSOLUTE_SESSION_EXPIRY_PLUS_300_SECONDS",
+    "cleanup_max_seconds_after_retention": 86400
+  },
+  "stable_failure_codes": [
+    "authentication_required",
+    "forbidden",
+    "csrf_invalid",
+    "origin_invalid",
+    "browser_session_expired",
+    "browser_session_revoked",
+    "browser_session_rotated",
+    "browser_login_outcome_unknown",
+    "browser_session_rotation_required",
+    "rate_limited",
+    "operation_conflict",
+    "server_unavailable"
+  ],
+  "prohibited_authentication_secret_locations": [
+    "URL",
+    "BROWSER_HISTORY",
+    "HTML_RESPONSE",
+    "JAVASCRIPT_STORAGE",
+    "DIAGNOSTIC_SCREENSHOT",
+    "LOG",
+    "EXPORT"
+  ],
+  "request_integrity_nonce_html": "HIDDEN_NO_STORE_SAME_ORIGIN_ONLY",
+  "web_enrollment_invitation_capability": "LIST_AND_CANCEL_METADATA_ONLY",
+  "cross_origin_cors": false,
+  "get_head_mutation": false
+}

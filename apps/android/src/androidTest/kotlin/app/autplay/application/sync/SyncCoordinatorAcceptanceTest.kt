@@ -16,10 +16,15 @@ import app.autplay.data.security.SessionRequiredException
 import app.autplay.application.library.AddLocalTrackCommand
 import app.autplay.application.library.AddLocalTrackResult
 import app.autplay.application.library.LocalLibraryCommandRepository
+import app.autplay.application.artist.ArtistId
+import app.autplay.application.artist.ArtistKey
+import app.autplay.application.artist.ArtistCreditId
+import app.autplay.application.artist.RoomArtistCatalogPort
 import app.autplay.application.search.LocalTrackSearchRepository
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
+import app.autplay.domain.ServerId
 import app.autplay.domain.UserId
 import java.io.IOException
 import java.util.UUID
@@ -149,6 +154,161 @@ class SyncCoordinatorAcceptanceTest {
         val second = db.libraryDao().trackRefByServerId(otherProfile.value, server)
         assertNotNull(first); assertNotNull(second)
         assertFalse(first!!.localUserTrackRefId == second!!.localUserTrackRefId)
+    }
+
+    @Test fun catalogArtistReplayAndStaleVersionCannotReplaceNewerIdentity() = runBlocking {
+        seed(profile, "catalog-start")
+        val artistId = "12121212-1212-4212-8212-121212121212"
+        val newer = RemoteEvent(
+            "13131313-1313-4313-8313-131313131313",
+            1,
+            "CATALOG_ARTIST_UPSERTED",
+            1,
+            """{"artist_id":"$artistId","name":"New Name","sort_name":"New Name","artist_type":"FUTURE_TYPE","disambiguation":null,"country_code":null,"identity_status":"FUTURE_STATUS","deleted_at":null}""",
+            "ARTIST",
+            artistId,
+            2,
+        )
+        val stale = newer.copy(
+            eventId = "14141414-1414-4414-8414-141414141414",
+            sequence = 2,
+            payloadJson = """{"artist_id":"$artistId","name":"Old Name","sort_name":"Old Name","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""",
+            serverRowVersion = 1,
+        )
+        val page = PullPage("catalog-next", false, listOf(newer, stale))
+        val coordinator = SyncCoordinator(db, FakeTransport(pull = page))
+
+        assertEquals(true, coordinator.run(binding))
+        assertEquals("New Name", db.catalogProjectionDao().artist(profile.value, artistId)?.name)
+        assertEquals(2L, db.catalogProjectionDao().artist(profile.value, artistId)?.serverRowVersion)
+
+        // Process/restart replay with the same event IDs is a no-op and still advances safely.
+        assertEquals(true, coordinator.run(binding))
+        assertEquals("New Name", db.catalogProjectionDao().artist(profile.value, artistId)?.name)
+    }
+
+    @Test fun serverFormatArtistBootstrapAndPullReachTypedOwnedPort() = runBlocking {
+        seed(profile, "before-bootstrap")
+        db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(bootstrapState = "NOT_STARTED"))
+        val trackRefId = "15151515-1515-4515-8515-151515151515"
+        val recordingId = "16161616-1616-4616-8616-161616161616"
+        val releaseId = "17171717-1717-4717-8717-171717171717"
+        val artistOne = "18181818-1818-4818-8818-181818181818"
+        val artistTwo = "19191919-1919-4919-8919-191919191919"
+        val creditId = "20202020-2020-4020-8020-202020202020"
+        val unresolvedCreditId = "21212121-2121-4121-8121-212121212121"
+        val ownerIds = """["$recordingId"]"""
+        val ownerScope = "a".repeat(64)
+        val bootstrapEvents = listOf(
+            RemoteEvent(trackRefId, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$recordingId","title":"Owned","artist":"Same","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", trackRefId, 2),
+            RemoteEvent(artistOne, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistOne","name":"Same Name","sort_name":"Same Name","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""", "ARTIST", artistOne, 1),
+            RemoteEvent(artistTwo, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistTwo","name":"Same Name","sort_name":"Same Name","artist_type":"FUTURE_TYPE","disambiguation":"Other","country_code":null,"identity_status":"FUTURE_STATUS","deleted_at":null}""", "ARTIST", artistTwo, 1),
+            RemoteEvent(creditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$creditId","display_name":"Lead feat. Guest","names":[{"artist_id":"$artistOne","position":0,"credited_name":"Lead","join_phrase":" feat. ","role":"PRIMARY"},{"artist_id":"$artistTwo","position":1,"credited_name":"Guest","join_phrase":"","role":"FUTURE_ROLE"}],"deleted_at":null}""", "ARTIST_CREDIT", creditId, 3),
+            RemoteEvent(unresolvedCreditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$unresolvedCreditId","display_name":"Unresolved","names":[],"deleted_at":null}""", "ARTIST_CREDIT", unresolvedCreditId, 1),
+            RemoteEvent(recordingId, 0, "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", 1, """{"recording_id":"$recordingId","artist_credit_id":"$creditId","owner_scope_id":"$ownerScope","owner_recording_page":0,"owner_recording_page_count":1,"owner_recording_ids":$ownerIds,"deleted_at":null}""", "RECORDING_ARTIST_CREDIT", recordingId, 2),
+            RemoteEvent(releaseId, 0, "CATALOG_RELEASE_CREDIT_LINK_UPSERTED", 1, """{"release_id":"$releaseId","artist_credit_id":"$unresolvedCreditId","owner_scope_id":"$ownerScope","owner_recording_page":0,"owner_recording_page_count":1,"owner_recording_ids":$ownerIds,"deleted_at":null}""", "RELEASE_ARTIST_CREDIT", releaseId, 1),
+        )
+        val snapshot = BootstrapPage("22222222-3333-4333-8333-222222222222", null, "artist-cursor", false, bootstrapEvents)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(bootstrapPages = listOf(snapshot))).run(binding))
+
+        val port = RoomArtistCatalogPort(db)
+        assertEquals(listOf(artistOne, artistTwo), port.browse(profile, 10).map { it.key.artistId.value }.sorted())
+        val detail = port.detail(ArtistKey(profile, ArtistId(artistOne)), 10, 10)!!
+        assertEquals(listOf(0, 1), detail.credits.single().members.map { it.position })
+        assertEquals("FUTURE_ROLE", detail.credits.single().members[1].role)
+        assertEquals(0, port.credit(profile, ArtistCreditId(unresolvedCreditId), 10)!!.members.size)
+        assertEquals(creditId, port.subjectCredits(profile, "RECORDING", ServerId(recordingId), 10).single().creditId.value)
+        assertEquals(unresolvedCreditId, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).single().creditId.value)
+        assertEquals(0, port.browse(otherProfile, 10).size)
+        assertEquals(recordingId, db.libraryDao().trackRefByServerId(profile.value, trackRefId)?.serverRecordingId)
+
+        val rename = RemoteEvent(
+            "23232323-2323-4323-8323-232323232323", 10, "CATALOG_ARTIST_UPSERTED", 1,
+            """{"artist_id":"$artistOne","name":"Renamed","sort_name":"Renamed","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""",
+            "ARTIST", artistOne, 2,
+        )
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("artist-next", false, listOf(rename)))).run(binding))
+        assertEquals("Renamed", port.detail(ArtistKey(profile, ArtistId(artistOne)), 10, 10)?.summary?.name)
+
+        val removedOwner = RemoteEvent(
+            "28282828-2828-4828-8828-282828282828", 11, "AGGREGATE_DELETED", 1,
+            "{}", "USER_TRACK_REF", trackRefId, 3, "DELETE",
+            "29292929-2929-4929-8929-292929292929",
+        )
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("artist-pruned", false, listOf(removedOwner)))).run(binding))
+        assertEquals(0, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).size)
+    }
+
+    @Test fun artistCreditMemberBoundaryAcceptsOneThousandAndRejectsOverflowAtomically() = runBlocking {
+        seed(profile, "member-start")
+        val creditId = "24242424-2424-4424-8424-242424242424"
+        val artistId = "25252525-2525-4525-8525-252525252525"
+        fun payload(count: Int) = (0 until count).joinToString(
+            prefix = """{"artist_credit_id":"$creditId","display_name":"Large","names":[""",
+            postfix = """],"deleted_at":null}""",
+        ) { position ->
+            """{"artist_id":"$artistId","position":$position,"credited_name":"Member","join_phrase":"","role":"OTHER"}"""
+        }
+        val accepted = RemoteEvent(
+            "26262626-2626-4626-8626-262626262626", 1,
+            "CATALOG_ARTIST_CREDIT_UPSERTED", 1, payload(1_000),
+            "ARTIST_CREDIT", creditId, 1,
+        )
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("member-next", false, listOf(accepted)))).run(binding))
+        assertEquals(1_000, db.catalogProjectionDao().namesForCredit(profile.value, creditId, 1_000).size)
+
+        val overflow = accepted.copy(
+            eventId = "27272727-2727-4727-8727-272727272727",
+            sequence = 2,
+            payloadJson = payload(1_001),
+            serverRowVersion = 2,
+        )
+        runCatching {
+            SyncCoordinator(db, FakeTransport(pull = PullPage("must-not-advance", false, listOf(overflow)))).run(binding)
+        }
+        assertEquals("member-next", db.syncDao().cursor(profile.value)?.opaqueCursor)
+        assertEquals(1L, db.catalogProjectionDao().artistCredit(profile.value, creditId)?.serverRowVersion)
+        assertEquals(1_000, db.catalogProjectionDao().namesForCredit(profile.value, creditId, 1_000).size)
+    }
+
+    @Test fun pagedOwnerScopeStaysHiddenUntilItsFinalBoundedPage() = runBlocking {
+        seed(profile, "paged-owner-start")
+        db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(bootstrapState = "NOT_STARTED"))
+        val ownerOne = "30303030-3030-4030-8030-303030303030"
+        val ownerTwo = "31313131-3131-4131-8131-313131313131"
+        val refOne = "32323232-3232-4232-8232-323232323232"
+        val refTwo = "33333333-3333-4333-8333-333333333333"
+        val releaseId = "34343434-3434-4434-8434-343434343434"
+        val creditId = "35353535-3535-4535-8535-353535353535"
+        val artistId = "36363636-3636-4636-8636-363636363636"
+        val scope = "b".repeat(64)
+        val pageZero = RemoteEvent(
+            releaseId, 0, "CATALOG_RELEASE_CREDIT_LINK_UPSERTED", 1,
+            """{"release_id":"$releaseId","artist_credit_id":"$creditId","owner_scope_id":"$scope","owner_recording_page":0,"owner_recording_page_count":2,"owner_recording_ids":["$ownerOne"],"deleted_at":null}""",
+            "RELEASE_ARTIST_CREDIT", releaseId, 1,
+        )
+        val bootstrap = BootstrapPage(
+            "37373737-3737-4737-8737-373737373737", null, "paged-owner-mid", false,
+            listOf(
+                RemoteEvent(refOne, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$ownerOne","title":"One","artist":"Paged","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", refOne, 1),
+                RemoteEvent(refTwo, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$ownerTwo","title":"Two","artist":"Paged","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", refTwo, 1),
+                RemoteEvent(artistId, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistId","name":"Paged","sort_name":"Paged","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""", "ARTIST", artistId, 1),
+                RemoteEvent(creditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$creditId","display_name":"Paged","names":[{"artist_id":"$artistId","position":0,"credited_name":"Paged","join_phrase":"","role":"PRIMARY"}],"deleted_at":null}""", "ARTIST_CREDIT", creditId, 1),
+                pageZero,
+            ),
+        )
+        assertEquals(true, SyncCoordinator(db, FakeTransport(bootstrapPages = listOf(bootstrap))).run(binding))
+        val port = RoomArtistCatalogPort(db)
+        assertEquals(0, port.browse(profile, 10).size)
+
+        val pageOne = pageZero.copy(
+            eventId = "38383838-3838-4838-8838-383838383838",
+            sequence = 1,
+            payloadJson = """{"release_id":"$releaseId","artist_credit_id":"$creditId","owner_scope_id":"$scope","owner_recording_page":1,"owner_recording_page_count":2,"owner_recording_ids":["$ownerTwo"],"deleted_at":null}""",
+        )
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("paged-owner-done", false, listOf(pageOne)))).run(binding))
+        assertEquals(listOf(artistId), port.browse(profile, 10).map { it.key.artistId.value })
+        assertEquals(creditId, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).single().creditId.value)
     }
 
     @Test fun malformedAppliedAckIsRetriedBeforeAnyProfileOrVersionMutation() = runBlocking {

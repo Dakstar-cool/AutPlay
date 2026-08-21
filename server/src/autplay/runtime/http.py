@@ -61,7 +61,7 @@ def error_response(
 ) -> JSONResponse:
     """Build the uniform, user-safe error envelope."""
 
-    response_headers = {"Cache-Control": "no-store"}
+    response_headers = {"Cache-Control": "no-store", "Pragma": "no-cache"}
     if headers is not None:
         response_headers.update(headers)
     return JSONResponse(

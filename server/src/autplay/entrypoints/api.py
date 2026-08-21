@@ -20,19 +20,32 @@ from autplay.adapters.postgresql.readiness import (
 )
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.auth import AuthService
+from autplay.application.profile_pairing import ProfilePairingService
+from autplay.application.web_admin import WebAdminService
+from autplay.entrypoints.admin_web_http import (
+    AdminCommandsHttp,
+    AdminViewsHttp,
+    Renderer,
+    create_admin_web_router,
+)
 from autplay.entrypoints.auth_http import bearer_authentication, create_auth_router
 from autplay.entrypoints.composition import (
+    build_admin_command_service,
+    build_admin_view_service,
     build_auth_service,
     build_import_service,
     build_library_service,
+    build_profile_pairing_service,
     build_recommendation_service,
     build_stream_lookup,
     build_sync_service,
     build_vault_http_service,
     build_wave_service,
+    build_web_admin_service,
 )
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
+from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.entrypoints.recommendation_http import (
     RecommendationHttpService,
     create_recommendation_router,
@@ -48,6 +61,8 @@ from autplay.runtime.http import (
 from autplay.runtime.logging import configure_json_logging
 from autplay.runtime.metrics import RuntimeMetrics
 from autplay.runtime.settings import ApiSettings, SettingsLoadError, load_api_settings
+from autplay.runtime.web_security import AdminWebSecurityMiddleware
+from autplay.web.renderer import AdminTemplateRenderer
 
 API_V1_PREFIX: Final = "/api/v1"
 SERVICE_NAME: Final = "autplay-api"
@@ -65,6 +80,11 @@ def create_app(
     recommendation_service: RecommendationHttpService | None = None,
     sync_service: object | None = None,
     wave_service: Any | None = None,
+    profile_pairing_service: ProfilePairingService | None = None,
+    admin_web_service: WebAdminService | None = None,
+    admin_view_service: AdminViewsHttp | None = None,
+    admin_command_service: AdminCommandsHttp | None = None,
+    admin_renderer: Renderer | None = None,
 ) -> FastAPI:
     """Create one API instance without connecting to PostgreSQL at import time."""
 
@@ -79,6 +99,11 @@ def create_app(
     recommendations = recommendation_service or build_recommendation_service(engine)
     sync = sync_service or build_sync_service(resolved_settings, engine)
     wave = wave_service or build_wave_service(engine)
+    pairing = (
+        profile_pairing_service
+        if profile_pairing_service is not None
+        else build_profile_pairing_service(resolved_settings, engine)
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -104,6 +129,13 @@ def create_app(
     app.add_middleware(RequestRuntimeMiddleware, metrics=runtime_metrics)
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
+    api_router.include_router(
+        create_profile_pairing_router(
+            pairing,
+            authenticated=bearer_authentication(authentication),
+            decode_access=getattr(authentication, "decode_access", None),
+        )
+    )
     api_router.include_router(
         create_vault_router(uploads, authenticated=bearer_authentication(authentication))
     )
@@ -131,6 +163,25 @@ def create_app(
         )
     )
     app.include_router(api_router)
+    if resolved_settings.admin_web_enabled:
+        app.add_middleware(AdminWebSecurityMiddleware)
+        web = admin_web_service or build_web_admin_service(resolved_settings, engine)
+        if web is None:
+            raise RuntimeError("admin Web service configuration is unavailable")
+        origin = resolved_settings.admin_web_origin
+        source_secret = resolved_settings.admin_web_source_hmac_secret
+        if origin is None or source_secret is None:
+            raise RuntimeError("admin Web security configuration is unavailable")
+        app.include_router(
+            create_admin_web_router(
+                web=web,
+                views=admin_view_service or build_admin_view_service(engine),
+                commands=admin_command_service or build_admin_command_service(engine),
+                renderer=admin_renderer or AdminTemplateRenderer(),
+                origin=origin,
+                source_secret=source_secret.get_secret_value().encode("utf-8"),
+            )
+        )
 
     @app.get("/health/live", include_in_schema=False)
     async def health_live() -> dict[str, str]:

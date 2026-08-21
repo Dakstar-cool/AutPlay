@@ -169,7 +169,7 @@ Release/threshold rows, activation events, decisions и candidate evidence яв�
 - `ix_match_decision_matcher_time`;
 - `ix_match_candidate_evidence_recording`.
 
-Три новые functions — `app_private.reject_identity_history_mutation()`, `app_private.validate_match_policy_activation()` и `app_private.validate_match_decision()`. Eight new triggers состоят из трех immutable-registry triggers, activation validator, двух deferred decision/evidence aggregate validators и двух deferred import/UserTrackRef projection validators. Эта P04 delta `-1 + 6` tables, `-1 + 6` explicit indexes, `+3` functions и `+8` triggers дала inventory 57/53/13/40; P06 `0011_vault_runtime` добавляет 2 tables, 4 indexes и 1 trigger, P09 `0012_sync_runtime` — 3 tables и 2 explicit indexes, P11 `0013_recommendation_runtime` — 2 tables, 1 explicit index, 2 immutable-row functions и 2 triggers, P12 `0014_gpu_enrichment` — 4 tables, 4 explicit indexes, 4 integrity/immutability functions и 6 triggers, а P13 `0015_wave_runtime` — 7 tables и 3 explicit indexes. Текущий exact physical inventory — 75/67/19/49.
+Три новые functions — `app_private.reject_identity_history_mutation()`, `app_private.validate_match_policy_activation()` и `app_private.validate_match_decision()`. Eight new triggers состоят из трех immutable-registry triggers, activation validator, двух deferred decision/evidence aggregate validators и двух deferred import/UserTrackRef projection validators. Эта P04 delta `-1 + 6` tables, `-1 + 6` explicit indexes, `+3` functions и `+8` triggers дала inventory 57/53/13/40; P06 `0011_vault_runtime` добавляет 2 tables, 4 indexes и 1 trigger, P09 `0012_sync_runtime` — 3 tables и 2 explicit indexes, P11 `0013_recommendation_runtime` — 2 tables, 1 explicit index, 2 immutable-row functions и 2 triggers, P12 `0014_gpu_enrichment` — 4 tables, 4 explicit indexes, 4 integrity/immutability functions и 6 triggers, а P13 `0015_wave_runtime` — 7 tables и 3 explicit indexes. Текущий exact physical inventory — 73/69/19/49.
 
 ---
 
@@ -608,3 +608,42 @@ Schema v1 готова к initial Alembic implementation, когда:
 9. Alembic schema snapshots и drift check добавлены в CI.
 10. Backup/restore drill проходит после upgrade head.
 11. Initial identity activation history пуст; applied auto-match до benchmark отклоняется без изменения F-016 или P00-D004.
+
+---
+
+# 15. Frontend M4 stable Artist identity prerequisite
+
+ADR-028 confirms existing `catalog.artist.artist_id` as the sole canonical Artist UUID. Alembic
+`0016_artist_id_sync_contract` adds a live UTR reverse partial index, an active Release-credit
+index, persisted bootstrap capabilities, a concurrency-safe 1,000-member credit bound, and a
+child-change trigger that advances the parent credit row version. It performs no name backfill,
+merge, deletion, or reinterpretation; credits without `artist_credit_name` rows remain unresolved.
+
+---
+
+# 16. M5B profile-pairing runtime delta
+
+Alembic `0017_profile_pairing_runtime` adds the `account.server_instance`,
+`account.enrollment_invitation`, `account.enrollment_exchange_receipt`, and
+`account.session_rotation_receipt` evidence tables plus the active-invitation index. It adds
+nullable device public-key thumbprints and v2 session lineage (`family_id`, `generation`).
+`account.user_session.session_mode` is `LEGACY` for every existing P03 row and `V2` only for
+device-PoP pairing sessions; the legacy refresh endpoint therefore cannot rotate a v2 session.
+Alembic `0018_profile_lifecycle_cleanup` adds one durable lifecycle-command fact keyed by the
+client operation UUID. It preserves actor, target, action, bounded reason, exact terminal outcome
+and terminal instant; exact duplicate requests therefore return the original result rather than a
+new timestamp. Its two receipt-expiry indexes support the CPU worker's bounded no-broker cleanup
+cadence (at most one hour), which removes a receipt no later than 24 hours after its grace boundary.
+The additive M5B delta changes the live inventory from 68 to 73 tables and 69 explicit indexes
+while retaining 19 functions and 49 triggers.
+
+---
+
+# 17. M6 administrative web runtime delta
+
+Alembic `0019_m6_web_admin_runtime` adds isolated, opaque-only browser invitation, login
+challenge, web-session, predecessor-rotation evidence, terminal-receipt, and login-rate-window
+state. Browser authority is never represented by the Android bearer/session tables. The five
+expiry and active-state indexes make bounded cleanup and active-session lookup deterministic.
+The additive M6 delta changes the live inventory to 79 tables and 77 explicit indexes while
+retaining 19 functions and 49 triggers.

@@ -37,6 +37,7 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /** Maps user intent to Media3 commands and reconciles only coarse state back into Room. */
@@ -49,6 +50,15 @@ class DownloadIntentRepository(
 
     fun observeIntents(limit: Int = 100): Flow<List<DownloadIntentEntity>> =
         database.localAudioDao().observeDownloadIntents(limit.coerceIn(1, 100))
+
+    fun observePresentation(profileId: String?, limit: Int = 100): Flow<List<DownloadIntentPresentation>> {
+        val bounded = limit.coerceIn(1, 100)
+        val rows = profileId?.let { database.localAudioDao().observeDownloadIntentsForProfile(it, bounded) }
+            ?: database.localAudioDao().observeStandaloneDownloadIntents(bounded)
+        return rows.map { intents ->
+            intents.map { DownloadIntentPresentation(it.downloadIntentId, it.localUserTrackRefId, it.state) }
+        }
+    }
 
     suspend fun requestPreferredVaultDownload(
         trackRefId: LocalId,
@@ -308,3 +318,9 @@ class DownloadIntentRepository(
         const val MINIMUM_FREE_FLOOR_BYTES = 64L * 1024 * 1024
     }
 }
+
+data class DownloadIntentPresentation(
+    val stableId: String,
+    val localUserTrackRefId: String,
+    val state: String,
+)

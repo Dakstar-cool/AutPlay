@@ -3,6 +3,7 @@ package app.autplay.application.recommendation
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.RefreshingSessionCredentials
+import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
@@ -27,8 +28,9 @@ class OkHttpRecommendationPackTransport(
     private val baseUrl: String,
     private val credentials: CredentialStore,
     private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(30)).build(),
+    private val m5Rotation: M5SessionRotationClient? = null,
 ) : RecommendationPackTransport {
-    private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client)
+    private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client, m5Rotation = m5Rotation)
 
     override suspend fun fetch(
         binding: ClientEventBinding,

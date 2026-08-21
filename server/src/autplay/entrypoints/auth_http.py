@@ -117,6 +117,10 @@ def bearer_authentication(service: AuthService) -> Callable[[Request], None]:
             raise _access_error()
         try:
             request.state.principal = service.authenticate_access(credential)
+            decode_access = getattr(service, "decode_access", None)
+            if callable(decode_access):
+                claims = decode_access(credential)
+                request.state.access_token_id = claims.token_id
         except InvalidAccessTokenError as error:
             raise _access_error() from error
 

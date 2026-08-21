@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-card danger-zone" aria-labelledby="confirm-title">
+  <p class="eyebrow">AutPlay Admin</p><h1 id="confirm-title">{{ t("confirm") }}</h1><p>{{ t(consequence_key) }}</p>
+  <dl class="facts"><div><dt>{{ t("target") }}</dt><dd>{% if target_name %}{{ target_name }} — {% endif %}{{ t(target_name_key) }}</dd></div></dl>
+  <form method="post" action="{{ action_url }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ operation_id }}">
+    <input type="hidden" name="target" value="{{ hidden_target }}">
+    <input type="hidden" name="reason_code" value="{{ reason_code }}">
+    <button class="danger" type="submit">{{ t(confirm_label_key) }}</button>
+    <a class="button secondary" href="{{ cancel_url }}?lang={{ locale }}">{{ t("cancel") }}</a>
+  </form>
+</section>
+{% endblock %}

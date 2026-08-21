@@ -16,6 +16,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LocalImportReviewRepositoryTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val testPackageName = InstrumentationRegistry.getInstrumentation().context.packageName
     private val databaseName = "autplay-p10-import.db"
 
     @After
@@ -218,7 +219,7 @@ class LocalImportReviewRepositoryTest {
     fun recoverableProviderIoFailurePersistsUnavailableUriIntent() = runBlocking {
         val database = AutPlayDatabase.open(context, databaseName)
         val repository = LocalImportReviewRepository(database)
-        val uri = "content://app.autplay.test.readable/audio"
+        val uri = "content://$testPackageName.readable/audio"
         val inspection = ContentUriInspector(context.contentResolver) {
             object : java.io.InputStream() {
                 override fun read(): Int = throw java.io.IOException("TEST_TRANSIENT_IO")

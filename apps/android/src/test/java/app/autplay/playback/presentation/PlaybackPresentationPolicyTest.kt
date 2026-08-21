@@ -62,6 +62,18 @@ class PlaybackPresentationPolicyTest {
     }
 
     @Test
+    fun libraryAndPlaylistQueuesAllowDirectControls() {
+        listOf("LIBRARY", "PLAYLIST").forEach { queueType ->
+            val context = ActiveQueueContext.Loaded("queue", "entry-1", queueType)
+
+            assertEquals(
+                PlaybackControlGate.Allowed,
+                PlaybackCommandGate.evaluate(context, "entry-1", commandAvailable = true),
+            )
+        }
+    }
+
+    @Test
     fun gestureClampsAndCommitsExactlyOnce() {
         val state = seekableState()
         val dragged = TimelineSeekGesture.drag(TimelineSeekGesture.begin(state, 900), -5) as TimelineSeekGesture.Dragging

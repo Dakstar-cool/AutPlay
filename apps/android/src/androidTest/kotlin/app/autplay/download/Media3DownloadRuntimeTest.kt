@@ -48,6 +48,7 @@ class Media3DownloadRuntimeTest {
         val sourceFactory = InterruptingDataSourceFactory(ByteArray(64 * 1024) { (it % 251).toByte() })
         val executor = Executors.newFixedThreadPool(2)
         val manager = DownloadManager(context, databaseProvider, cache, sourceFactory, executor)
+        val cacheKey = "range-resume-${UUID.randomUUID()}"
         val terminal = CountDownLatch(1)
         val result = AtomicReference<Download>()
         manager.addListener(object : DownloadManager.Listener {
@@ -60,16 +61,16 @@ class Media3DownloadRuntimeTest {
         })
         try {
             manager.addDownload(
-                DownloadRequest.Builder("range-resume", Uri.parse("test://audio/range-resume"))
+                DownloadRequest.Builder(cacheKey, Uri.parse("test://audio/range-resume"))
                     .setMimeType(MimeTypes.AUDIO_MPEG)
-                    .setCustomCacheKey("range-resume")
+                    .setCustomCacheKey(cacheKey)
                     .build(),
             )
             manager.resumeDownloads()
             assertTrue("Media3 download did not terminate", terminal.await(30, TimeUnit.SECONDS))
             assertEquals(Download.STATE_COMPLETED, result.get().state)
             assertTrue("Expected a resumed non-zero range", sourceFactory.openPositions.any { it > 0 })
-            assertEquals(sourceFactory.payloadSize.toLong(), cache.getCachedBytes("range-resume", 0, sourceFactory.payloadSize.toLong()))
+            assertEquals(sourceFactory.payloadSize.toLong(), cache.getCachedBytes(cacheKey, 0, sourceFactory.payloadSize.toLong()))
         } finally {
             manager.release()
             executor.shutdownNow()

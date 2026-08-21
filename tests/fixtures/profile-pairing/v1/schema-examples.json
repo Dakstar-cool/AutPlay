@@ -1,0 +1,184 @@
+{
+  "contract_version": "v1",
+  "examples": [
+    {
+      "schema": "discovery-metadata.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "payload": {
+          "server_instance_id": "11111111-1111-4111-8111-111111111111",
+          "identity_epoch": 1,
+          "identity_public_key_spki_b64": "TEST_ONLY_P256_SPKI_PUBLIC_EVIDENCE_000000000000",
+          "identity_thumbprint_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "label_hint": "Test Home Server",
+          "api_origin": "https://server.test.invalid",
+          "stream_origin": "https://stream.test.invalid",
+          "supported_api_majors": [1],
+          "enrollment_protocol_available": true,
+          "issued_at": "2030-01-01T00:00:00Z",
+          "expires_at": "2030-01-01T00:05:00Z"
+        },
+        "payload_sha256": "35a2a11e0bc9cc6ad9be4820584409a48a555371bdd5e211ab2a2dcdbcfc0131",
+        "signature_algorithm": "ES256-P1363",
+        "signature_b64url": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "schema": "capabilities.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "payload": {
+          "server_instance_id": "11111111-1111-4111-8111-111111111111",
+          "identity_epoch": 1,
+          "user_id": "22222222-2222-4222-8222-222222222222",
+          "device_id": "33333333-3333-4333-8333-333333333333",
+          "product_version": "1.0.0-test",
+          "api_major": 1,
+          "capability_revision": 7,
+          "operations": ["device.list", "device.revoke", "session.list"],
+          "limits": {"max_devices": 20, "max_page_size": 100},
+          "required_features": [],
+          "issued_at": "2030-01-01T00:00:00Z",
+          "expires_at": "2030-01-01T00:30:00Z"
+        },
+        "payload_sha256": "7208d3e60c8ea84e3314d2991bba4a8a9c8134104c6904c0c35074e967415a30",
+        "signature_algorithm": "ES256-P1363",
+        "signature_b64url": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    {
+      "schema": "enrollment-invitation.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "invitation_id": "44444444-4444-4444-8444-444444444444",
+        "server_instance_id": "11111111-1111-4111-8111-111111111111",
+        "identity_epoch": 1,
+        "identity_thumbprint_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "api_origin": "https://server.test.invalid",
+        "stream_origin": "https://stream.test.invalid",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "account_display_name": "Test Owner",
+        "issued_at": "2030-01-01T00:00:00Z",
+        "expires_at": "2030-01-01T00:10:00Z",
+        "invitation_secret": "TEST_ONLY_INVITATION_SECRET_000000000000000",
+        "secret_handling": "DISPLAY_ONCE_NO_CLIPBOARD_NO_LOG_NO_EXPORT"
+      }
+    },
+    {
+      "schema": "enrollment-exchange-request.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "exchange_id": "55555555-5555-4555-8555-555555555555",
+        "binding_commit_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "invitation_id": "44444444-4444-4444-8444-444444444444",
+        "invitation_secret": "TEST_ONLY_INVITATION_SECRET_000000000000000",
+        "expected_server_instance_id": "11111111-1111-4111-8111-111111111111",
+        "expected_identity_epoch": 1,
+        "expected_identity_thumbprint_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "expected_api_origin": "https://server.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "expected_user_id": "22222222-2222-4222-8222-222222222222",
+        "device_name": "Test Android",
+        "platform": "ANDROID",
+        "app_version": "1.0.0-test",
+        "device_public_key_spki_b64": "TEST_ONLY_P256_DEVICE_PUBLIC_EVIDENCE_00000000",
+        "device_key_thumbprint_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "next_refresh_token_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "client_nonce_b64url": "TEST_ONLY_NONCE_000000",
+        "request_sha256": "4eb5f432e7ab04565ed94ad0100c17414c4e301fb30c7c2217d2d9081e3afaea",
+        "signature_algorithm": "ES256-P1363",
+        "device_signature_b64url": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      }
+    },
+    {
+      "schema": "enrollment-exchange-response.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "exchange_id": "55555555-5555-4555-8555-555555555555",
+        "binding_commit_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "server_instance_id": "11111111-1111-4111-8111-111111111111",
+        "user_id": "22222222-2222-4222-8222-222222222222",
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "session_id": "66666666-6666-4666-8666-666666666666",
+        "refresh_generation": 0,
+        "refresh_absolute_expires_at": "2030-04-01T00:00:00Z",
+        "receipt_expires_at": "2030-04-01T00:05:00Z",
+        "access_token": "TEST_ONLY_ACCESS_TOKEN_NOT_A_REAL_CREDENTIAL_000000",
+        "access_expires_at": "2030-01-01T00:15:00Z",
+        "replayed": false
+      }
+    },
+    {
+      "schema": "device-list.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "devices": [{"device_id": "33333333-3333-4333-8333-333333333333", "device_name": "Test Android", "platform": "ANDROID", "key_thumbprint_sha256": "3333333333333333333333333333333333333333333333333333333333333333", "created_at": "2030-01-01T00:00:00Z", "revoked_at": null, "last_seen_at": "2030-01-01T00:01:00Z"}]
+      }
+    },
+    {
+      "schema": "session-list.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "sessions": [{"session_id": "66666666-6666-4666-8666-666666666666", "device_id": "33333333-3333-4333-8333-333333333333", "family_id": "77777777-7777-4777-8777-777777777777", "generation": 0, "issued_at": "2030-01-01T00:00:00Z", "absolute_expires_at": "2030-04-01T00:00:00Z", "revoked_at": null, "current": true}]
+      }
+    },
+    {
+      "schema": "lifecycle-command.schema.json",
+      "instance": {"contract_version": "v1", "schema_version": 1, "operation_id": "88888888-8888-4888-8888-888888888888", "reason_code": "user_requested"}
+    },
+    {
+      "schema": "error.schema.json",
+      "instance": {"contract_version": "v1", "schema_version": 1, "error_code": "remote_outcome_unknown", "safe_message": "The server result is unknown.", "request_id": "99999999-9999-4999-8999-999999999999", "retryable": true}
+    },
+    {
+      "schema": "create-invitation-request.schema.json",
+      "instance": {"contract_version": "v1", "schema_version": 1, "operation_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "expires_in_seconds": 600}
+    },
+    {
+      "schema": "session-rotation-request.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "rotation_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "expected_server_instance_id": "11111111-1111-4111-8111-111111111111",
+        "expected_identity_epoch": 1,
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "parent_session_id": "66666666-6666-4666-8666-666666666666",
+        "current_generation": 0,
+        "current_refresh_token": "TEST_ONLY_CURRENT_REFRESH_00000000000000000",
+        "next_refresh_token_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_sha256": "1d79cf600978d44c8af68c078913758ebaf6b6007d3d2585d7a21ffb35306e66",
+        "signature_algorithm": "ES256-P1363",
+        "device_signature_b64url": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+      }
+    },
+    {
+      "schema": "session-rotation-response.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "rotation_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "session_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "parent_session_id": "66666666-6666-4666-8666-666666666666",
+        "family_id": "77777777-7777-4777-8777-777777777777",
+        "generation": 1,
+        "refresh_absolute_expires_at": "2030-04-01T00:00:00Z",
+        "receipt_expires_at": "2030-04-01T00:05:00Z",
+        "access_token": "TEST_ONLY_ROTATED_ACCESS_TOKEN_NOT_REAL_000000",
+        "access_expires_at": "2030-01-01T00:30:00Z",
+        "replayed": false
+      }
+    },
+    {
+      "schema": "lifecycle-result.schema.json",
+      "instance": {"contract_version": "v1", "schema_version": 1, "operation_id": "88888888-8888-4888-8888-888888888888", "outcome": "APPLIED", "terminal_at": "2030-01-01T00:02:00Z"}
+    }
+  ]
+}

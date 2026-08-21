@@ -11,7 +11,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,22 +34,30 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.util.UnstableApi
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.work.WorkManager
-import app.autplay.application.library.AddLocalTrackCommand
-import app.autplay.application.library.LocalLibraryCommandRepository
 import app.autplay.application.library.LibraryVerticalSliceRepository
+import app.autplay.application.library.CorePlaylistDetail
+import app.autplay.application.library.CoreProductRepository
+import app.autplay.application.library.CoreReleaseSummary
+import app.autplay.application.library.CoreReleaseDetail
+import app.autplay.application.library.CoreTrackDetail
+import app.autplay.application.artist.RoomArtistCatalogPort
 import app.autplay.application.search.LocalTrackSearchRepository
+import app.autplay.application.search.LocalTrackSearchResult
 import app.autplay.application.settings.SettingsTransferCodec
 import app.autplay.application.importing.ContentUriInspector
 import app.autplay.application.importing.ContentTreeAudioScanner
@@ -65,28 +72,30 @@ import app.autplay.application.importing.treeUriImportCommand
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatusRepository
 import app.autplay.application.download.DownloadIntentRepository
-import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.ActiveQueueContextRepository
 import app.autplay.application.playback.PlaybackPersistenceRepository
 import app.autplay.application.recommendation.HomeFeed
 import app.autplay.application.recommendation.HomeRecommendationItem
 import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.recommendation.RecommendationPresentationResult
-import app.autplay.application.server.RemoteImportEntry
 import app.autplay.application.server.ServerFeatureRepository
 import app.autplay.application.server.ServerFeatureStateRepository
 import app.autplay.application.wave.WaveCoordinator
+import app.autplay.application.profilepairing.PairingFailure
+import app.autplay.application.profilepairing.PairingState
+import app.autplay.application.profilepairing.OkHttpProfilePairingPort
+import app.autplay.application.profilepairing.ProfilePairingRuntime
+import app.autplay.application.profilebinding.M5BindingMaterializationCoordinator
+import app.autplay.data.local.RoomM5LocalIntentMaterializer
+import app.autplay.data.security.AndroidKeystoreCredentialStore
+import app.autplay.data.security.AndroidM5DeviceKeyStore
 import app.autplay.data.local.AutPlayDatabase
-import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.local.entity.RemoteImportJobProjectionEntity
 import app.autplay.data.local.entity.VaultUploadIntentEntity
-import app.autplay.data.security.AndroidKeystoreCredentialStore
 import app.autplay.data.settings.NonSecretSettings
 import app.autplay.data.settings.NonSecretSettingsStore
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
-import app.autplay.download.DownloadStorageClass
-import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackSessionOwner
 import app.autplay.playback.PlaybackRuntimeState
 import app.autplay.playback.ServicePlaybackSessionOwner
@@ -95,40 +104,51 @@ import app.autplay.playback.presentation.PlaybackPresentationActionPort
 import app.autplay.playback.presentation.PlaybackPresentationAdapter
 import app.autplay.playback.presentation.WaveCoordinatorHostPlaybackCommandPort
 import app.autplay.playback.presentation.WavePlaybackCommandOutcome
-import app.autplay.work.DeferredWorkKind
-import app.autplay.work.DeferredWorkRequest
 import app.autplay.work.DeferredWorkScheduler
-import app.autplay.work.DeferredWorkSubject
 import app.autplay.work.SyncWorker
 import app.autplay.work.RecommendationPackWorkScheduler
 import app.autplay.work.RemoteImportWorkScheduler
-import app.autplay.work.VaultUploadWorkScheduler
 import app.autplay.work.WorkManagerDeferredWorkScheduler
 import app.autplay.work.shouldScheduleRemoteImport
 import app.autplay.ui.AutPlayAccent
-import app.autplay.ui.AutPlayAdaptiveShell
 import app.autplay.ui.AutPlayAppearance
 import app.autplay.ui.AutPlayTheme
 import app.autplay.ui.AutPlayThemeMode
 import app.autplay.ui.UiDestination
-import app.autplay.ui.ServerFeaturesScreen
+import app.autplay.ui.core.SearchGenerationGuard
+import app.autplay.ui.core.SearchResultStore
+import app.autplay.ui.core.SearchScope
+import app.autplay.ui.core.DetailKind
+import app.autplay.ui.core.DetailTarget
+import app.autplay.ui.core.CoreTrackSummary
+import app.autplay.ui.core.LibraryFilter
+import app.autplay.ui.core.LibrarySection
+import app.autplay.ui.core.TrackAvailability
+import app.autplay.ui.core.buildLibraryTrackSummaries
+import app.autplay.ui.core.buildHomeScreenUiState
+import app.autplay.ui.core.buildLibraryScreenUiState
+import app.autplay.ui.core.countHomeProblems
+import app.autplay.ui.core.SingleFlightActionGate
+import app.autplay.ui.core.rememberCoreProductUiState
+import app.autplay.ui.core.CoreProductUiState
 import app.autplay.ui.ServerFeaturesUiState
 import app.autplay.ui.CoreTrackUiItem
+import app.autplay.ui.ArtistBrowseUiState
+import app.autplay.ui.CoreProductDetailUiState
+import app.autplay.ui.CoreProductRouteActions
 import app.autplay.ui.HomeRecommendationUiItem
-import app.autplay.ui.HomeReleaseUiItem
-import app.autplay.ui.HomeProductScreen
-import app.autplay.ui.HomeScreenUiState
-import app.autplay.ui.LibraryProductScreen
-import app.autplay.ui.LibraryScreenUiState
-import app.autplay.ui.SearchProductScreen
+import app.autplay.ui.HomeProblemUiItem
+import app.autplay.ui.LegacyImportRouteActions
+import app.autplay.ui.LegacyImportRouteState
+import app.autplay.ui.profilepairing.ProfilePairingUiState
 import app.autplay.ui.SearchScreenUiState
 import app.autplay.ui.rememberAutPlayNavigationState
-import app.autplay.ui.player.NowPlayingScreen
-import app.autplay.ui.player.PlaybackMiniPlayer
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.flowOf
+import java.util.concurrent.ConcurrentHashMap
 
 internal const val BOOTSTRAP_LABEL = "AutPlay"
 
@@ -138,7 +158,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val database = AutPlayRuntime.database(applicationContext)
-        val repository = LocalLibraryCommandRepository(database)
         val settingsStore = applicationNonSecretSettingsStore(applicationContext)
         val playbackRepository = PlaybackPersistenceRepository(database)
         val playbackOwner = ServicePlaybackSessionOwner(applicationContext)
@@ -149,7 +168,6 @@ class MainActivity : ComponentActivity() {
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
         setContent {
             AutPlayBootstrap(
-                repository,
                 settingsStore,
                 LocalTrackSearchRepository(database),
                 LibraryVerticalSliceRepository(database, syncScheduler = syncScheduler),
@@ -169,7 +187,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 @UnstableApi
 internal fun AutPlayBootstrap(
-    repository: LocalLibraryCommandRepository? = null,
     settingsStore: NonSecretSettingsStore? = null,
     searchRepository: LocalTrackSearchRepository? = null,
     sliceRepository: LibraryVerticalSliceRepository? = null,
@@ -181,7 +198,7 @@ internal fun AutPlayBootstrap(
     importRepository: LocalImportReviewRepository? = null,
     recommendationRepository: OfflineRecommendationRepository? = null,
 ) {
-    if (repository == null || settingsStore == null || searchRepository == null || sliceRepository == null ||
+    if (settingsStore == null || searchRepository == null || sliceRepository == null ||
         playbackRepository == null || playbackOwner == null || downloadRepository == null || syncStatusRepository == null || syncScheduler == null || importRepository == null || recommendationRepository == null
     ) {
         MaterialTheme {
@@ -192,13 +209,22 @@ internal fun AutPlayBootstrap(
             }
         }
     } else {
-        val settings by settingsStore.settings.collectAsState(initial = NonSecretSettings())
+        val loadedSettings by settingsStore.settings.collectAsState(initial = null as NonSecretSettings?)
+        if (loadedSettings == null) {
+            AutPlayTheme(appearanceFrom(NonSecretSettings())) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    Box(contentAlignment = Alignment.Center) { Text(text = BOOTSTRAP_LABEL) }
+                }
+            }
+            return
+        }
+        val settings = checkNotNull(loadedSettings)
         val binding = settings.activeUserId?.let { userId ->
             val deviceId = settings.deviceId ?: return@let null
             val profileId = settings.activeServerProfileId ?: return@let null
             ClientEventBinding(userId, deviceId, profileId)
-        }
-        val context = LocalContext.current
+    }
+    val context = LocalContext.current
         var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
         LaunchedEffect(binding) {
             waveCoordinator?.close()
@@ -211,22 +237,23 @@ internal fun AutPlayBootstrap(
         }
         AutPlayTheme(appearanceFrom(settings)) {
             Surface(modifier = Modifier.fillMaxSize()) {
-                OfflineLibraryScreen(
-                    repository,
-                    binding,
-                    searchRepository,
-                    sliceRepository,
-                    playbackRepository,
-                    playbackOwner,
-                    downloadRepository,
-                    syncStatusRepository,
-                    syncScheduler,
-                    importRepository,
-                    recommendationRepository,
-                    settings,
-                    settingsStore,
-                    waveCoordinator,
-                )
+                key(binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID) {
+                    OfflineLibraryScreen(
+                        binding,
+                        searchRepository,
+                        sliceRepository,
+                        playbackRepository,
+                        playbackOwner,
+                        downloadRepository,
+                        syncStatusRepository,
+                        syncScheduler,
+                        importRepository,
+                        recommendationRepository,
+                        settings,
+                        settingsStore,
+                        waveCoordinator,
+                    )
+                }
             }
         }
     }
@@ -235,7 +262,6 @@ internal fun AutPlayBootstrap(
 @Composable
 @UnstableApi
 private fun OfflineLibraryScreen(
-    repository: LocalLibraryCommandRepository,
     binding: ClientEventBinding?,
     searchRepository: LocalTrackSearchRepository,
     sliceRepository: LibraryVerticalSliceRepository,
@@ -250,13 +276,49 @@ private fun OfflineLibraryScreen(
     settingsStore: NonSecretSettingsStore,
     waveCoordinator: WaveCoordinator?,
 ) {
-    val entryCount by repository.activeEntryCount(binding?.serverProfileId?.value).collectAsState(initial = 0)
-    val libraryEntries by repository.entries(binding?.serverProfileId?.value).collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var pairingSafeError by remember { mutableStateOf<String?>(null) }
+    val pairingOrigins = remember { ConcurrentHashMap<String, String>() }
+    val allowUnsafePairingHttp = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    val pairingRuntime = remember(context, settingsStore, sliceRepository, syncScheduler) {
+        val credentialStore = AndroidKeystoreCredentialStore(context.applicationContext)
+        val deviceKeys = AndroidM5DeviceKeyStore()
+        val port = OkHttpProfilePairingPort(
+            originForProfile = { profile -> pairingOrigins[profile.value] },
+            credentials = credentialStore,
+            deviceKeys = deviceKeys,
+            allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
+        )
+        ProfilePairingRuntime(
+            scope = scope,
+            settings = settingsStore,
+            credentials = credentialStore,
+            deviceKeys = deviceKeys,
+            port = port,
+            materialization = M5BindingMaterializationCoordinator(
+                settingsStore,
+                credentialStore,
+                deviceKeys,
+                RoomM5LocalIntentMaterializer(AutPlayRuntime.database(context), sliceRepository, syncScheduler),
+            ),
+            deviceName = android.os.Build.MODEL ?: "Android device",
+            reportSafeError = { pairingSafeError = it },
+            registerOrigin = { profile, origin -> pairingOrigins[profile.value] = origin },
+            allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
+        )
+    }
+    val pairingRuntimeState by pairingRuntime.state.collectAsState()
+    LaunchedEffect(pairingRuntime) { pairingRuntime.recoverAndRefresh() }
+    val resources = LocalResources.current
+    val coreProductRepository = remember(context) { CoreProductRepository(AutPlayRuntime.database(context)) }
+    val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
+    val libraryEntries by remember(coreProductRepository, binding?.serverProfileId?.value) {
+        coreProductRepository.libraryEntries(binding?.serverProfileId?.value)
+    }.collectAsState(initial = emptyList())
     val lifecycleOwner = LocalLifecycleOwner.current
     val activeQueueContextRepository = remember(context, scope) {
-        ActiveQueueContextRepository(AutPlayRuntime.database(context).queueDao(), scope)
+        ActiveQueueContextRepository.fromDatabase(AutPlayRuntime.database(context), scope)
     }
     val playerAdapter = remember(context, lifecycleOwner, activeQueueContextRepository) {
         PlaybackPresentationAdapter(context, lifecycleOwner.lifecycle, activeQueueContextRepository)
@@ -273,29 +335,59 @@ private fun OfflineLibraryScreen(
     val playerState by playerAdapter.state.collectAsState()
     val navigation = rememberAutPlayNavigationState()
     val destination = navigation.current
-    BackHandler(enabled = navigation.canNavigateBack) { navigation.navigateBack() }
     val view = legacyView(destination)
-    var searchText by rememberSaveable { mutableStateOf("") }
+    val coreProductState = rememberCoreProductUiState(binding?.serverProfileId?.value)
+    val coreActionGate = remember { SingleFlightActionGate() }
     var searchCompleted by rememberSaveable { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<UserTrackRefEntity>>(emptyList()) }
-    var libraryTrackRefs by remember { mutableStateOf<Map<String, UserTrackRefEntity>>(emptyMap()) }
+    var searchSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var searchResults by remember { mutableStateOf<List<LocalTrackSearchResult>>(emptyList()) }
+    var searchLoading by remember { mutableStateOf(false) }
+    var vaultSearchLoading by remember { mutableStateOf(false) }
+    var vaultSearchError by remember { mutableStateOf(false) }
+    var vaultSearchResultCount by remember { mutableStateOf<Int?>(null) }
+    val searchGeneration = remember { SearchGenerationGuard() }
+    val searchResultStore = remember { SearchResultStore<LocalTrackSearchResult>() }
     var stableError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(pairingSafeError) {
+        pairingSafeError?.let {
+            stableError = it
+            pairingSafeError = null
+        }
+    }
     var homeError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
     var searchError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
     var libraryError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
+    var libraryImportInProgress by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
+    var lastImportedTitle by remember(binding?.serverProfileId?.value) { mutableStateOf<String?>(null) }
     var homeRetryNonce by remember { mutableStateOf(false) }
-    val playlists by sliceRepository.playlists(binding?.serverProfileId?.value).collectAsState(initial = emptyList())
-    val history by sliceRepository.history(binding?.serverProfileId?.value).collectAsState(initial = emptyList())
-    val downloads by downloadRepository.observeIntents().collectAsState(initial = emptyList())
     val playbackState by PlaybackRuntimeState.state.collectAsState()
-    val syncStatus by (binding?.let(syncStatusRepository::observe) ?: flowOf(
-        app.autplay.application.sync.SyncStatus(0, 0, 0, null, "STANDALONE"),
-    )).collectAsState(initial = app.autplay.application.sync.SyncStatus(0, 0, 0, null, "LOADING"))
-    val importProfileId = binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID
-    val importJob by importRepository.observeLatestJob(importProfileId).collectAsState(initial = null)
-    val importItems by (importJob?.let { importRepository.observeReviewItems(it.importJobId) } ?: flowOf(emptyList()))
-        .collectAsState(initial = emptyList())
     var selectedImportEntryId by rememberSaveable { mutableStateOf<String?>(null) }
+    val repositorySnapshot = rememberOfflineRepositorySnapshot(
+        coreProductRepository,
+        artistCatalogPort,
+        downloadRepository,
+        syncStatusRepository,
+        importRepository,
+        binding,
+        selectedImportEntryId,
+    )
+    val playlists = repositorySnapshot.playlists
+    val libraryReleases = repositorySnapshot.releases
+    val libraryPreferences = repositorySnapshot.preferences
+    val historyCount = repositorySnapshot.historyCount
+    val downloads = repositorySnapshot.downloads
+    val localAudioStates = repositorySnapshot.localAudio
+    val downloadedTrackIds = repositorySnapshot.downloadedTrackIds
+    val homeRecentlyAdded = repositorySnapshot.recentlyAdded
+    val homeRecentlyPlayed = repositorySnapshot.recentlyPlayed
+    val homePlaylists = repositorySnapshot.homePlaylists
+    val homeActiveQueue = repositorySnapshot.activeQueue
+    val syncStatus = repositorySnapshot.syncStatus
+    val importProfileId = repositorySnapshot.importProfileId
+    val importJob = repositorySnapshot.importJob
+    val importItems = repositorySnapshot.importItems
+    val selectedImportItem = repositorySnapshot.selectedImportItem
+    val importCandidates = repositorySnapshot.importCandidates
     var homeFeed by remember(
         binding?.serverProfileId?.value,
         binding?.userId?.value,
@@ -306,10 +398,30 @@ private fun OfflineLibraryScreen(
         binding?.userId?.value,
         binding?.deviceId?.value,
     ) { mutableStateMapOf<String, RecommendationPresentationResult>() }
-    val selectedImportItem = importItems.firstOrNull { it.entry.importEntryId == selectedImportEntryId }
-    val importCandidates by (selectedImportItem?.latestEvaluation?.decisionId?.let(importRepository::observeCandidates) ?: flowOf(emptyList()))
-        .collectAsState(initial = emptyList())
-    var selectedTrackRefId by rememberSaveable { mutableStateOf<String?>(null) }
+    val coreBindingKey = binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID
+    var selectedTrackRefId by remember(coreBindingKey) {
+        mutableStateOf(
+            coreProductState.selectedDetail
+                ?.takeIf { it.kind == DetailKind.Track }
+                ?.stableId,
+        )
+    }
+    val coreDetailState = rememberOfflineCoreDetailState(
+        repository = coreProductRepository,
+        artistCatalogPort = artistCatalogPort,
+        target = coreProductState.selectedDetail,
+        profileId = binding?.serverProfileId?.value,
+        contextKey = coreBindingKey,
+        reportError = { stableError = it },
+    )
+    fun closeCoreDetail() {
+        selectedTrackRefId = null
+        coreProductState.clearDetail()
+    }
+    val hasVisibleCoreDetail = destination == UiDestination.Library && coreProductState.selectedDetail != null
+    BackHandler(enabled = hasVisibleCoreDetail || navigation.canNavigateBack) {
+        if (hasVisibleCoreDetail) closeCoreDetail() else navigation.navigateBack()
+    }
     var selectedUploadCandidate by remember { mutableStateOf<VaultUploadCandidate?>(null) }
     var remoteImportJobId by rememberSaveable(binding?.serverProfileId?.value) { mutableStateOf<String?>(null) }
     var serverUiState by remember(binding?.serverProfileId?.value) { mutableStateOf(ServerFeaturesUiState()) }
@@ -340,42 +452,51 @@ private fun OfflineLibraryScreen(
     }
 
     LaunchedEffect(libraryEntries, selectedTrackRefId) {
-        val activeIds = libraryEntries.filter { it.removedAtMs == null }.map { it.localUserTrackRefId }
-        if (selectedTrackRefId !in activeIds) selectedTrackRefId = activeIds.firstOrNull()
-    }
-    LaunchedEffect(libraryEntries) {
-        libraryTrackRefs = libraryEntries.associate { entry ->
-            entry.localUserTrackRefId to repository.trackRef(entry.localUserTrackRefId)
-        }.mapNotNull { (id, track) -> track?.let { id to it } }.toMap()
-    }
-    LaunchedEffect(binding?.serverProfileId?.value) {
-        if (searchCompleted) {
-            searchError = false
-            runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
-                .onSuccess { searchResults = it }
-                .onFailure {
-                    searchResults = emptyList()
-                    searchError = true
-                    stableError = "SEARCH_UNAVAILABLE"
-                }
+        val activeIds = libraryEntries.filterNot { it.removed }.map { it.localUserTrackRefId }
+        if (
+            selectedTrackRefId != null &&
+            coreProductState.selectedDetail?.kind in setOf(null, DetailKind.Track) &&
+            selectedTrackRefId !in activeIds
+        ) {
+            selectedTrackRefId = null
         }
     }
+    LaunchedEffect(selectedTrackRefId) {
+        selectedTrackRefId?.let { coreProductState.selectDetail(DetailTarget(DetailKind.Track, it)) }
+            ?: if (coreProductState.selectedDetail?.kind == DetailKind.Track) coreProductState.clearDetail() else Unit
+    }
+    RefreshSearchOnBindingEffect(
+        binding = binding,
+        context = context,
+        completed = searchCompleted,
+        coreState = coreProductState,
+        generation = searchGeneration,
+        resultStore = searchResultStore,
+        repository = searchRepository,
+        setResults = { searchResults = it },
+        setLoading = { searchLoading = it },
+        setError = { searchError = it },
+        setVaultLoading = { vaultSearchLoading = it },
+        setVaultError = { vaultSearchError = it },
+        setVaultResultCount = { vaultSearchResultCount = it },
+        reportError = { stableError = it },
+    )
     LaunchedEffect(selectedTrackRefId, binding?.serverProfileId?.value) {
         val trackRefId = selectedTrackRefId
         selectedUploadCandidate = if (trackRefId == null || binding == null) {
             null
         } else {
-            val track = repository.trackRef(trackRefId)
-            val local = AutPlayRuntime.database(context).localAudioDao()
-                .statesForPlayback(trackRefId, 10)
-                .firstOrNull { it.status == "AVAILABLE" }
-            if (track?.serverRecordingId != null && local != null) {
+            val available = coreProductRepository.availableAudioForTrack(
+                trackRefId,
+                binding.serverProfileId.value,
+            )
+            if (available != null) {
                 VaultUploadCandidate(
                     trackRefId,
-                    track.serverRecordingId,
-                    local.localAudioStateId,
-                    local.localSha256,
-                    local.byteSize,
+                    available.serverRecordingId,
+                    available.localAudioStateId,
+                    available.localSha256,
+                    available.byteSize,
                 )
             } else {
                 null
@@ -402,33 +523,27 @@ private fun OfflineLibraryScreen(
             serverUiState = serverUiState.copy(busyAction = null)
         }
     }
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            val inspector = ContentUriInspector(context.contentResolver)
-            val permission = inspector.acquirePersistableReadPermission(uri.toString(), android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-            runCatching {
-                val now = System.currentTimeMillis()
-                val inspection = inspector.inspectWithDigest(uri.toString())
-                val job = importRepository.createOrResume(
-                    singleUriImportCommand(importProfileId, inspection, permission, now),
-                )
-                val entry = importRepository.entriesOnce(job.importJobId).single()
-                importRepository.recordShadowEvaluation(
-                    RecordShadowEvaluationCommand(
-                        importEntryId = entry.importEntryId,
-                        idempotencyKey = "local-uri-evidence-v1",
-                        resolverState = ImportResolverState.DEFERRED_EVIDENCE,
-                        evidenceMode = "AUDIO_AVAILABLE",
-                        matcherVersion = "android-local-shadow/1",
-                        explanationJson = "{\"schema_version\":1,\"reason_code\":\"FINGERPRINT_EVIDENCE_DEFERRED\"}",
-                        candidates = emptyList(),
-                        nowMs = now,
-                    ),
-                )
-            }
-                .onFailure { stableError = "IMPORT_UNAVAILABLE" }
-        }
-    }
+    val activityLaunchers = rememberOfflineActivityLaunchers(
+        binding = binding,
+        scope = scope,
+        context = context,
+        sliceRepository = sliceRepository,
+        importProfileId = importProfileId,
+        importRepository = importRepository,
+        coreProductState = coreProductState,
+        settings = settings,
+        settingsStore = settingsStore,
+        serverStateRepository = serverStateRepository,
+        launchServerAction = ::launchServerAction,
+        navigate = navigation::navigate,
+        setRemoteImportJobId = { remoteImportJobId = it },
+        setServerUiState = { serverUiState = it },
+        serverUiState = { serverUiState },
+        setLibraryImportInProgress = { libraryImportInProgress = it },
+        setLibraryError = { libraryError = it },
+        setLastImportedTitle = { lastImportedTitle = it },
+        reportError = { stableError = it },
+    )
     LaunchedEffect(view, binding, homeRetryNonce) {
         if (view == "Home" && binding != null) {
             homeFeed = null
@@ -457,70 +572,6 @@ private fun OfflineLibraryScreen(
             }
         }
     }
-    val libraryRootLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) scope.launch {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-                settingsStore.mutate { current -> current.copy(libraryRootTreeUri = uri.toString()) }
-                val outcome = scanLibraryRoot(
-                    context = context,
-                    treeUri = uri.toString(),
-                    importProfileId = importProfileId,
-                    importRepository = importRepository,
-                )
-                navigation.navigate(UiDestination.ImportReview)
-                if (outcome.truncated) stableError = "LIBRARY_ROOT_SCAN_LIMIT_REACHED"
-            }.onFailure { stableError = "LIBRARY_ROOT_PERMISSION_UNAVAILABLE" }
-        }
-    }
-    val settingsExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri ->
-        if (uri != null) scope.launch {
-            runCatching {
-                context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                    output.write(SettingsTransferCodec.encode(settings))
-                } ?: error("SETTINGS_EXPORT_TARGET_UNAVAILABLE")
-            }.onFailure { stableError = "SETTINGS_EXPORT_UNAVAILABLE" }
-        }
-    }
-    val settingsImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            runCatching {
-                val bytes = context.contentResolver.openInputStream(uri)?.use(::readBoundedSettingsBytes)
-                    ?: error("SETTINGS_IMPORT_SOURCE_UNAVAILABLE")
-                settingsStore.mutate { current -> SettingsTransferCodec.decode(bytes, current) }
-            }.onFailure { stableError = "SETTINGS_IMPORT_UNAVAILABLE" }
-        }
-    }
-    val serverImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            launchServerAction("SERVER_IMPORT_START") { server ->
-                val format = serverImportFormat(context, uri)
-                val payload = context.contentResolver.openInputStream(uri)?.use(::readBoundedServerImportBytes)
-                    ?: error("SERVER_IMPORT_SOURCE_UNAVAILABLE")
-                val started = server.startImport(payload, format, materialize = true)
-                val activeBinding = checkNotNull(binding)
-                serverStateRepository.recordImportStart(
-                    activeBinding.serverProfileId,
-                    started,
-                    System.currentTimeMillis(),
-                )
-                remoteImportJobId = started.importJobId
-                val report = server.importReport(started.importJobId)
-                serverStateRepository.recordImportReport(
-                    activeBinding.serverProfileId,
-                    report,
-                    System.currentTimeMillis(),
-                )
-                RemoteImportWorkScheduler.enqueue(context, started.importJobId)
-                serverUiState = serverUiState.copy(importReport = report, stableMessage = "SERVER_IMPORT_STARTED")
-            }
-        }
-    }
     val activeHomeFeed = homeFeed?.takeIf { feed ->
         binding != null &&
             feed.ownerProfileId == binding.serverProfileId.value &&
@@ -545,924 +596,577 @@ private fun OfflineLibraryScreen(
             )
         }
     }
-    fun recommendationFor(key: String): Pair<String, HomeRecommendationItem>? {
-        val feed = activeHomeFeed ?: return null
-        val presentationId = feed.presentationId ?: return null
-        val item = feed.recommendationSections.values.flatten().firstOrNull {
-            recommendationKey(presentationId, it) == key
-        } ?: return null
-        return presentationId to item
+    val homeReleases = (
+        libraryReleases + activeHomeFeed?.recentRelevantReleases.orEmpty().map { release ->
+            CoreReleaseSummary(release.localReleaseId, release.title, release.artist)
+        }
+    ).distinctBy(CoreReleaseSummary::stableId)
+    val coreCommandActions = buildCoreCommandActions(
+        scope = scope,
+        binding = { binding },
+        activeHomeFeed = { activeHomeFeed },
+        presentationResults = presentationResults,
+        actionGate = coreActionGate,
+        recommendationRepository = recommendationRepository,
+        sliceRepository = sliceRepository,
+        setHomeFeed = { homeFeed = it },
+        reportError = { stableError = it },
+        playbackRepository = playbackRepository,
+        playbackOwner = playbackOwner,
+        searchResultStore = searchResultStore,
+        searchSessionId = { searchSessionId },
+        setSearchSessionId = { searchSessionId = it },
+        playlistDetail = { coreDetailState.playlist },
+        libraryEntries = { libraryEntries },
+        setLibraryError = { libraryError = it },
+        selectedDetail = { coreProductState.selectedDetail },
+        closeCoreDetail = ::closeCoreDetail,
+        coreProductRepository = coreProductRepository,
+        setTrackDetail = { coreDetailState.track = it },
+        bindingContextKey = { coreBindingKey },
+        setLoadedDetailContextKey = { coreDetailState.loadedContextKey = it },
+        downloadRepository = downloadRepository,
+    )
+    val searchCommandActions = buildSearchCommandActions(
+        scope = scope,
+        context = context,
+        binding = { binding },
+        coreState = coreProductState,
+        generation = searchGeneration,
+        resultStore = searchResultStore,
+        searchRepository = searchRepository,
+        state = SearchActionState(
+            setCompleted = { searchCompleted = it },
+            setSessionId = { searchSessionId = it },
+            setResults = { searchResults = it },
+            setLoading = { searchLoading = it },
+            setError = { searchError = it },
+            setVaultLoading = { vaultSearchLoading = it },
+            setVaultError = { vaultSearchError = it },
+            setVaultResultCount = { vaultSearchResultCount = it },
+        ),
+        reportError = { stableError = it },
+    )
+    fun resumeHomeQueue(trackRefId: String) {
+        if (playbackState.localUserTrackRefId == trackRefId && playerState.mediaId != null) {
+            playbackActions.toggleDirectPlayPause()
+        } else {
+            coreCommandActions.startTrack(trackRefId, "HOME", "USER", null)
+        }
+        navigation.navigate(UiDestination.NowPlaying)
     }
-    fun recordRecommendationVisibility(key: String) {
-        if (presentationResults.containsKey(key)) return
-        val activeBinding = binding ?: return
-        val (presentationId, item) = recommendationFor(key) ?: return
-        scope.launch {
-            runCatching {
-                recommendationRepository.recordPresentation(
-                    activeBinding,
-                    LocalId(presentationId),
-                    item,
-                    System.currentTimeMillis(),
-                )
-            }.onSuccess { presentationResults[key] = it }
-                .onFailure { stableError = "IMPRESSION_UNAVAILABLE" }
+    fun openHomePlaylist(stableId: String) {
+        coreProductState.selectDetail(DetailTarget(DetailKind.Playlist, stableId))
+        navigation.navigate(UiDestination.Library)
+    }
+    fun openOfflineLibrary() {
+        coreProductState.librarySection = LibrarySection.Offline
+        navigation.navigate(UiDestination.Library)
+    }
+    fun openCoreDetail(target: DetailTarget) {
+        selectedTrackRefId = target.takeIf { it.kind == DetailKind.Track }?.stableId
+        coreProductState.selectDetail(target)
+        navigation.navigate(UiDestination.Library)
+    }
+    fun openCoreCollection(section: LibrarySection, stableId: String) {
+        when (section) {
+            LibrarySection.Albums -> openCoreDetail(DetailTarget(DetailKind.Release, stableId))
+            LibrarySection.Artists -> openCoreDetail(DetailTarget(DetailKind.Artist, stableId))
+            LibrarySection.Playlists -> openCoreDetail(DetailTarget(DetailKind.Playlist, stableId))
+            else -> Unit
         }
     }
-    fun recordHomeFeedback(key: String, preference: String) {
-        val activeBinding = binding ?: return
-        val (presentationId, item) = recommendationFor(key) ?: return
-        val impression = presentationResults[key] ?: return
-        scope.launch {
-            runCatching {
-                sliceRepository.setPreference(
-                    activeBinding,
-                    LocalId(item.localUserTrackRefId),
-                    LocalId.random(),
-                    preference,
-                    false,
-                    recommendationRepository.attributionJson(
-                        LocalId(presentationId),
-                        impression.impressionEventId,
-                        item,
-                    ),
-                    System.currentTimeMillis(),
-                )
-                homeFeed = recommendationRepository.loadHomeFeed(activeBinding, System.currentTimeMillis())
-            }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
+    val visibleSearchResults = searchResultStore.visibleFor(
+        coreProductState.query,
+        coreProductState.scopes + SearchScope.Local,
+        binding?.serverProfileId?.value,
+    )
+    val searchContextIsCurrent = searchResultStore.matchesContext(
+        coreProductState.query,
+        coreProductState.scopes + SearchScope.Local,
+        binding?.serverProfileId?.value,
+    )
+    val untitledTrack = stringResource(R.string.player_nothing_playing)
+    val allLibraryTrackSummaries = buildLibraryTrackSummaries(
+        entries = libraryEntries,
+        audioStates = localAudioStates,
+        preferences = libraryPreferences,
+        downloadedTrackIds = downloadedTrackIds,
+        untitledTrack = untitledTrack,
+    )
+    val homeProblemCounts = countHomeProblems(
+        tracks = allLibraryTrackSummaries,
+        reviewCount = importJob?.reviewRequiredCount ?: 0,
+        downloads = downloads,
+    )
+    fun openHomeProblems() {
+        coreProductState.librarySection = when {
+            homeProblemCounts.reviewRequired > 0 -> LibrarySection.Review
+            homeProblemCounts.permissionRevoked > 0 -> LibrarySection.Unavailable
+            else -> LibrarySection.Offline
         }
+        navigation.navigate(UiDestination.Library)
     }
-    fun startSearchTrack(trackRefId: String) {
-        scope.launch {
-            runCatching {
-                val snapshotId = LocalId.random()
-                playbackRepository.activateQueue(
-                    snapshotId = snapshotId,
-                    entries = listOf(
-                        NewPlaybackQueueEntry(
-                            queueEntryId = LocalId.random(),
-                            trackRefId = LocalId(trackRefId),
-                            sourceOrigin = "SEARCH",
-                            sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                        ),
-                    ),
-                    queueType = "SEARCH",
-                    sourceContextId = null,
-                    serverProfileId = binding?.serverProfileId?.value,
-                    listeningContext = "GENERAL",
-                    nowMs = System.currentTimeMillis(),
-                )
-                playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
-            }.onFailure { stableError = "PLAYBACK_UNAVAILABLE" }
-        }
-    }
-    AutPlayAdaptiveShell(
-        selectedDestination = destination,
-        onDestinationSelected = navigation::navigate,
-        unreadSyncConflicts = syncStatus.deadLetters + syncStatus.conflicts,
-        canNavigateBack = navigation.canNavigateBack,
-        onNavigateBack = { navigation.navigateBack() },
-        onProfileClick = { navigation.navigate(UiDestination.Profile) },
-        onSettingsClick = { navigation.navigate(UiDestination.Settings) },
-        onNowPlayingClick = { navigation.navigate(UiDestination.NowPlaying) },
-        nowPlayingAvailable = playerState.mediaId != null,
-        nowPlayingBar = {
-            if (playerState.mediaId != null) {
-                PlaybackMiniPlayer(
-                    state = playerState,
-                    onOpen = { navigation.navigate(UiDestination.NowPlaying) },
-                    onTogglePlayPause = playbackActions::toggleDirectPlayPause,
-                    onObservingChanged = { playerAdapter.setSurfaceObserving("mini", it) },
-                )
+    val totalHomeProblems = homeProblemCounts.permissionRevoked +
+        homeProblemCounts.reviewRequired + homeProblemCounts.failedDownloads
+    val homeProblems = if (totalHomeProblems == 0) emptyList() else listOf(
+        HomeProblemUiItem(
+            "attention-summary",
+            resources.getQuantityString(
+                R.plurals.home_problem_total_count,
+                totalHomeProblems,
+                totalHomeProblems,
+            ),
+        ),
+    )
+    val homeScreenState = buildHomeScreenUiState(
+        localMode = binding == null,
+        recommendationLoading = binding != null && activeHomeFeed == null,
+        offlineFallback = activeHomeFeed?.isStaleFallback == true,
+        releases = homeReleases,
+        recommendations = homeRecommendations,
+        continueListening = homeActiveQueue,
+        recentlyPlayed = homeRecentlyPlayed,
+        recentlyAdded = homeRecentlyAdded,
+        playlists = homePlaylists,
+        libraryTracks = allLibraryTrackSummaries,
+        problems = homeProblems,
+        recommendationError = homeError,
+        untitledTrack = untitledTrack,
+    )
+    val libraryScreenState = buildLibraryScreenUiState(
+        localMode = binding == null,
+        tracks = allLibraryTrackSummaries,
+        section = coreProductState.librarySection,
+        sort = coreProductState.librarySort,
+        filter = coreProductState.libraryFilter,
+        selectedTrackRefId = selectedTrackRefId,
+        playlists = playlists,
+        releases = libraryReleases,
+        artists = repositorySnapshot.artists,
+        artistBrowseState = when (repositorySnapshot.artistBrowseStatus) {
+            OfflineArtistBrowseStatus.Unavailable -> ArtistBrowseUiState.Unavailable
+            OfflineArtistBrowseStatus.Loading -> ArtistBrowseUiState.Loading
+            OfflineArtistBrowseStatus.Ready -> ArtistBrowseUiState.Ready
+            OfflineArtistBrowseStatus.Error -> ArtistBrowseUiState.Error
+        },
+        reviewCount = importJob?.reviewRequiredCount ?: 0,
+        importingLocalTrack = libraryImportInProgress,
+        lastImportedTitle = lastImportedTitle,
+        error = libraryError,
+    )
+    val detailRequestIsCurrent = coreDetailState.matches(coreBindingKey, coreProductState.selectedDetail)
+    val presentedTrackDetail = coreDetailState.track.takeIf { detailRequestIsCurrent }
+    val presentedReleaseDetail = coreDetailState.release.takeIf { detailRequestIsCurrent }
+    val presentedPlaylistDetail = coreDetailState.playlist.takeIf { detailRequestIsCurrent }
+    val presentedArtistDetail = coreDetailState.artist.takeIf { detailRequestIsCurrent }
+    val presentedArtistAppearances = coreDetailState.artistAppearances.takeIf { detailRequestIsCurrent }.orEmpty()
+    val presentedSubjectArtistCredits = coreDetailState.subjectArtistCredits
+        .takeIf { detailRequestIsCurrent }
+        .orEmpty()
+    val presentedDetailError = coreDetailState.error && detailRequestIsCurrent
+    val presentedDetailLoading = coreProductState.selectedDetail != null &&
+        (coreDetailState.loading || !detailRequestIsCurrent) && !presentedDetailError
+    val searchScreenState = SearchScreenUiState(
+        query = coreProductState.query,
+        results = visibleSearchResults.map { result ->
+            CoreTrackUiItem(
+                result.localUserTrackRefId,
+                result.rawTitle ?: untitledTrack,
+                result.rawArtist,
+            )
+        },
+        searched = searchCompleted && searchContextIsCurrent,
+        loading = searchLoading && searchContextIsCurrent,
+        error = searchError,
+        vaultAvailable = binding != null,
+        vaultSelected = SearchScope.Vault in coreProductState.scopes,
+        vaultLoading = vaultSearchLoading && searchContextIsCurrent,
+        vaultResultCount = vaultSearchResultCount.takeIf { searchContextIsCurrent },
+        vaultError = vaultSearchError && searchContextIsCurrent,
+    )
+    val coreDetailUiState = CoreProductDetailUiState(
+        target = coreProductState.selectedDetail,
+        loading = presentedDetailLoading,
+        error = presentedDetailError,
+        track = presentedTrackDetail,
+        release = presentedReleaseDetail,
+        playlist = presentedPlaylistDetail,
+        artist = presentedArtistDetail,
+        artistAppearances = presentedArtistAppearances,
+        subjectArtistCredits = presentedSubjectArtistCredits,
+    )
+    val coreRouteActions = CoreProductRouteActions(
+        openListenTogether = { navigation.navigate(UiDestination.WaveRooms) },
+        recommendationVisible = coreCommandActions.recordRecommendationVisibility,
+        likeRecommendation = { coreCommandActions.recordHomeFeedback(it, "LIKED") },
+        dislikeRecommendation = { coreCommandActions.recordHomeFeedback(it, "DISLIKED") },
+        retryHome = { homeRetryNonce = !homeRetryNonce },
+        resumeHomeQueue = ::resumeHomeQueue,
+        openHomePlaylist = ::openHomePlaylist,
+        openOffline = ::openOfflineLibrary,
+        openProblems = ::openHomeProblems,
+        changeQuery = searchCommandActions.changeQuery,
+        submitSearch = searchCommandActions.submit,
+        playSearchResult = coreCommandActions.startSearchTrack,
+        changeVaultScope = searchCommandActions.changeVaultScope,
+        changeSearchAnchor = { coreProductState.searchListAnchor = it },
+        addLocal = { activityLaunchers.addLocalAudio.launch(arrayOf("audio/*")) },
+        selectTrack = { selectedTrackRefId = it },
+        removeOrRestore = coreCommandActions.updateLibraryMembership,
+        likeTrack = coreCommandActions.likeTrack,
+        changeLibrarySection = { coreProductState.librarySection = it },
+        changeLibrarySort = { coreProductState.librarySort = it },
+        changeLibraryFilter = { coreProductState.libraryFilter = it },
+        openCollection = ::openCoreCollection,
+        openDetail = ::openCoreDetail,
+        openReview = { navigation.navigate(UiDestination.ImportReview) },
+        changeLibraryAnchor = { coreProductState.libraryListAnchor = it },
+        playTrack = { coreCommandActions.startTrack(it, "LIBRARY", "LIBRARY", null) },
+        playPlaylistEntry = coreCommandActions.startPlaylistEntry,
+        downloadTrack = coreCommandActions.downloadTrack,
+        repairAccess = { activityLaunchers.chooseLibraryRoot.launch(null) },
+    )
+    val nowPlayingRouteActions = buildNowPlayingRouteActions(
+        playbackActions = playbackActions,
+        playerAdapter = playerAdapter,
+        currentTrackRefId = { playbackState.localUserTrackRefId },
+        scope = scope,
+        sliceRepository = sliceRepository,
+        binding = { binding },
+        reportError = { stableError = it },
+    )
+    val serverFeaturesActions = buildServerFeaturesActions(
+        launchServerAction = ::launchServerAction,
+        binding = { binding },
+        state = { serverUiState },
+        setState = { serverUiState = it },
+        remoteImportJobId = { remoteImportJobId },
+        setRemoteImportJobId = { remoteImportJobId = it },
+        stateRepository = serverStateRepository,
+        context = context,
+        selectedUploadCandidate = { selectedUploadCandidate },
+        durableVaultUploads = { durableVaultUploads },
+        scope = scope,
+        chooseServerImport = {
+            activityLaunchers.startServerImport.launch(arrayOf("text/csv", "application/json", "text/html"))
+        },
+    )
+    val legacyImportActions = LegacyImportRouteActions(
+        chooseAudio = { activityLaunchers.addReviewAudio.launch(arrayOf("audio/*")) },
+        selectEntry = { selectedImportEntryId = it },
+        review = { action, candidateId ->
+            selectedImportItem?.let { item ->
+                scope.launch {
+                    runCatching {
+                        importRepository.recordReview(
+                            RecordImportReviewCommand(
+                                importEntryId = item.entry.importEntryId,
+                                localChangeId = LocalId.random().value,
+                                idempotencyKey = LocalId.random().value,
+                                action = action,
+                                candidateId = candidateId,
+                                createdRecordingId = if (action == ImportReviewAction.CREATE_RECORDING) LocalId.random().value else null,
+                                predecessorDecisionId = item.latestEvaluation?.decisionId,
+                                nowMs = System.currentTimeMillis(),
+                            ),
+                        )
+                    }.onFailure { stableError = "IMPORT_REVIEW_UNAVAILABLE" }
+                }
             }
         },
-        detailPane = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.expanded_queue_title), style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.expanded_queue_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                playerState.title?.let { title ->
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                }
-            }
+    )
+    val legacySecondaryState = LegacySecondaryRouteState(
+        destination = destination,
+        view = view,
+        playlists = playlists,
+        libraryEntries = libraryEntries,
+        selectedTrackRefId = selectedTrackRefId,
+        historyCount = historyCount,
+        importState = LegacyImportRouteState(
+            job = importJob,
+            items = importItems,
+            selectedItem = selectedImportItem,
+            candidates = importCandidates,
+        ),
+        downloads = downloads,
+        isProfileBound = binding != null,
+        syncStatus = syncStatus,
+        waveCoordinator = waveCoordinator,
+        serverUiState = serverUiState,
+        selectedTrackLabel = libraryEntries.firstOrNull { it.localUserTrackRefId == selectedTrackRefId }?.let { entry ->
+            stringResource(
+                R.string.server_selected_track,
+                entry.title ?: stringResource(R.string.track_untitled),
+                entry.artistName ?: stringResource(R.string.library_unknown_artist),
+            )
         },
-    ) { _, contentPadding, _ ->
-        when (destination) {
-            UiDestination.Home -> HomeProductScreen(
-                state = HomeScreenUiState(
-                    localMode = binding == null,
-                    loading = binding != null && activeHomeFeed == null,
-                    offlineFallback = activeHomeFeed?.isStaleFallback == true,
-                    releases = activeHomeFeed?.recentRelevantReleases.orEmpty().map { release ->
-                        HomeReleaseUiItem(
-                            release.localReleaseId,
-                            release.title,
-                            release.artist,
-                            release.releaseDateText,
-                        )
-                    },
-                    recommendations = homeRecommendations,
-                    error = homeError,
-                ),
-                contentPadding = contentPadding,
-                onOpenListenTogether = { navigation.navigate(UiDestination.WaveRooms) },
-                onRecommendationVisible = ::recordRecommendationVisibility,
-                onLike = { recordHomeFeedback(it, "LIKED") },
-                onDislike = { recordHomeFeedback(it, "DISLIKED") },
-                onRetry = { homeRetryNonce = !homeRetryNonce },
-            )
-            UiDestination.Search -> SearchProductScreen(
-                state = SearchScreenUiState(
-                    query = searchText,
-                    results = searchResults.map { result ->
-                        CoreTrackUiItem(
-                            result.localUserTrackRefId,
-                            result.rawTitle ?: stringResource(R.string.player_nothing_playing),
-                            result.rawArtist,
-                        )
-                    },
-                    searched = searchCompleted,
-                    error = searchError,
-                ),
-                contentPadding = contentPadding,
-                onQueryChange = { searchText = it.take(200) },
-                onSearch = {
-                    scope.launch {
-                        searchError = false
-                        runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
-                            .onSuccess {
-                                searchResults = it
-                                searchCompleted = true
-                                searchError = false
-                            }
-                            .onFailure {
-                                searchCompleted = true
-                                searchError = true
-                                stableError = "SEARCH_UNAVAILABLE"
-                            }
-                    }
-                },
-                onPlay = ::startSearchTrack,
-                onRetry = {
-                    scope.launch {
-                        searchError = false
-                        runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
-                            .onSuccess {
-                                searchResults = it
-                                searchCompleted = true
-                            }
-                            .onFailure {
-                                searchError = true
-                                stableError = "SEARCH_UNAVAILABLE"
-                            }
-                    }
-                },
-            )
-            UiDestination.Library -> LibraryProductScreen(
-                state = LibraryScreenUiState(
-                    localMode = binding == null,
-                    tracks = libraryEntries.filter { it.removedAtMs == null }.map { item ->
-                        val track = libraryTrackRefs[item.localUserTrackRefId]
-                        CoreTrackUiItem(
-                            id = item.localUserTrackRefId,
-                            title = track?.rawTitle ?: stringResource(R.string.player_nothing_playing),
-                            artist = track?.rawArtist,
-                            selected = item.localUserTrackRefId == selectedTrackRefId,
-                            permissionRevoked = item.availabilityStatus == "PERMISSION_REVOKED",
-                        )
-                    },
-                    error = libraryError,
-                ),
-                contentPadding = contentPadding,
-                onAddLocal = { importLauncher.launch(arrayOf("audio/*")) },
-                onSelect = { selectedTrackRefId = it },
-                onRemoveOrRestore = { trackRefId ->
-                    val entry = libraryEntries.firstOrNull { it.localUserTrackRefId == trackRefId }
-                    if (entry != null) {
-                        scope.launch {
-                            runCatching {
-                                if (entry.removedAtMs == null) {
-                                    sliceRepository.removeLibrary(
-                                        binding,
-                                        LocalId(entry.localLibraryEntryId),
-                                        LocalId.random(),
-                                        System.currentTimeMillis(),
-                                    )
-                                } else {
-                                    sliceRepository.restoreLibrary(
-                                        binding,
-                                        LocalId(entry.localLibraryEntryId),
-                                        LocalId.random(),
-                                        System.currentTimeMillis(),
-                                    )
-                                }
-                            }.onSuccess { libraryError = false }
-                                .onFailure {
-                                    libraryError = true
-                                    stableError = "LIBRARY_UPDATE_UNAVAILABLE"
-                                }
-                        }
-                    }
-                },
-                onLike = { trackRefId ->
-                    scope.launch {
-                        runCatching {
-                            sliceRepository.setPreference(
-                                binding,
-                                LocalId(trackRefId),
-                                LocalId.random(),
-                                "LIKED",
-                                false,
-                                null,
-                                System.currentTimeMillis(),
-                            )
-                        }.onSuccess { libraryError = false }
-                            .onFailure {
-                                libraryError = true
-                                stableError = "PREFERENCE_UNAVAILABLE"
-                            }
-                    }
-                },
-            )
-            UiDestination.NowPlaying -> NowPlayingScreen(
-                state = playerState,
-                onTogglePlayPause = playbackActions::toggleDirectPlayPause,
-                onToggleShuffle = playbackActions::toggleDirectShuffle,
-                onCycleRepeat = playbackActions::cycleDirectRepeatMode,
-                onSeekBegin = playerAdapter::beginSeek,
-                onSeekUpdate = playerAdapter::updateSeek,
-                onSeekCommit = playbackActions::commitDirectSeek,
-                onLike = {
-                    playbackState.localUserTrackRefId?.let { trackRefId ->
-                        scope.launch {
-                            runCatching {
-                                sliceRepository.setPreference(
-                                    binding,
-                                    LocalId(trackRefId),
-                                    LocalId.random(),
-                                    "LIKED",
-                                    false,
-                                    null,
-                                    System.currentTimeMillis(),
-                                )
-                            }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
-                        }
-                    }
-                },
-                onDislike = {
-                    playbackState.localUserTrackRefId?.let { trackRefId ->
-                        scope.launch {
-                            runCatching {
-                                sliceRepository.setPreference(
-                                    binding,
-                                    LocalId(trackRefId),
-                                    LocalId.random(),
-                                    "DISLIKED",
-                                    false,
-                                    null,
-                                    System.currentTimeMillis(),
-                                )
-                            }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
-                        }
-                    }
-                },
-                feedbackEnabled = playbackState.localUserTrackRefId != null,
-                onObservingChanged = { playerAdapter.setSurfaceObserving("full", it) },
-                modifier = Modifier.padding(contentPadding),
-            )
-            else -> Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(text = stringResource(destination.labelRes), style = MaterialTheme.typography.headlineSmall)
-            when (view) {
-                "Home" -> {
-                    Text("Home")
-                    if (binding == null) {
-                        Text("Recommendations need an owner-bound server profile; local library remains available.")
-                    } else {
-                        val feed = homeFeed?.takeIf {
-                            it.ownerProfileId == binding.serverProfileId.value &&
-                                it.ownerUserId == binding.userId.value &&
-                                it.ownerDeviceId == binding.deviceId.value
-                        }
-                        if (feed == null) {
-                            Text("Loading local Home feed")
-                        } else {
-                            if (feed.isStaleFallback) {
-                                Text("Offline fallback: verified pack expired less than 24 hours ago; only locally available tracks are shown.")
-                            }
-                            Text("Home status: ${feed.statusCode}")
-                            Text("New releases")
-                            if (feed.recentRelevantReleases.isEmpty()) Text("No recent relevant releases")
-                            feed.recentRelevantReleases.forEach { release ->
-                                Text("${release.title} — ${release.artist}${release.releaseDateText?.let { " · $it" } ?: ""}")
-                            }
-                            Text("Recommendations")
-                            if (feed.recommendationSections.isEmpty()) Text("No locally available recommendations")
-                            feed.recommendationSections.forEach { (section, items) ->
-                                Text(section.replace('_', ' '))
-                                items.forEach { item ->
-                                    val presentationId = checkNotNull(feed.presentationId)
-                                    val key = "$presentationId:${item.recommendationRequestId}:${item.sourceRank}"
-                                    VisibleRecommendation(
-                                        item = item,
-                                        onPresented = { complete ->
-                                            if (presentationResults.containsKey(key)) {
-                                                complete(true)
-                                            } else {
-                                                scope.launch {
-                                                    runCatching {
-                                                        recommendationRepository.recordPresentation(
-                                                            binding,
-                                                            LocalId(presentationId),
-                                                            item,
-                                                            System.currentTimeMillis(),
-                                                        )
-                                                    }.onSuccess {
-                                                        presentationResults[key] = it
-                                                        complete(true)
-                                                    }.onFailure {
-                                                        stableError = "IMPRESSION_UNAVAILABLE"
-                                                        complete(false)
-                                                    }
-                                                }
-                                            }
-                                        },
-                                    )
-                                    val impression = presentationResults[key]
-                                    Button(
-                                        enabled = impression != null,
-                                        onClick = {
-                                            val recorded = impression ?: return@Button
-                                            scope.launch {
-                                                runCatching {
-                                                    sliceRepository.setPreference(
-                                                        binding,
-                                                        LocalId(item.localUserTrackRefId),
-                                                        LocalId.random(),
-                                                        "LIKED",
-                                                        false,
-                                                        recommendationRepository.attributionJson(
-                                                            LocalId(presentationId),
-                                                            recorded.impressionEventId,
-                                                            item,
-                                                        ),
-                                                        System.currentTimeMillis(),
-                                                    )
-                                                    homeFeed = recommendationRepository.loadHomeFeed(binding, System.currentTimeMillis())
-                                                }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
-                                            }
-                                        },
-                                    ) { Text("Like ${item.title}") }
-                                    Button(
-                                        enabled = impression != null,
-                                        onClick = {
-                                            val recorded = impression ?: return@Button
-                                            scope.launch {
-                                                runCatching {
-                                                    sliceRepository.setPreference(
-                                                        binding,
-                                                        LocalId(item.localUserTrackRefId),
-                                                        LocalId.random(),
-                                                        "DISLIKED",
-                                                        false,
-                                                        recommendationRepository.attributionJson(
-                                                            LocalId(presentationId),
-                                                            recorded.impressionEventId,
-                                                            item,
-                                                        ),
-                                                        System.currentTimeMillis(),
-                                                    )
-                                                    homeFeed = recommendationRepository.loadHomeFeed(binding, System.currentTimeMillis())
-                                                }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
-                                            }
-                                        },
-                                    ) { Text("Dislike ${item.title}") }
-                                }
-                            }
-                        }
-                    }
-                }
-                "Search" -> {
-                    OutlinedTextField(value = searchText, onValueChange = { searchText = it }, label = { Text("Search library") })
-                    Button(onClick = {
-                        scope.launch {
-                            runCatching { searchRepository.search(searchText, binding?.serverProfileId?.value) }
-                                .onSuccess { searchResults = it }
-                                .onFailure { stableError = "SEARCH_UNAVAILABLE" }
-                        }
-                    }) { Text("Run search") }
-                    Text("${searchResults.size} search result(s)")
-                    searchResults.forEach { result ->
-                        Text("${result.rawTitle} — ${result.rawArtist ?: "Unknown artist"}")
-                        Button(onClick = {
-                            scope.launch {
-                                runCatching {
-                                    val snapshotId = LocalId.random()
-                                    playbackRepository.activateQueue(
-                                        snapshotId = snapshotId,
-                                        entries = listOf(
-                                            NewPlaybackQueueEntry(
-                                                queueEntryId = LocalId.random(),
-                                                trackRefId = LocalId(result.localUserTrackRefId),
-                                                sourceOrigin = "SEARCH",
-                                                sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                                            ),
-                                        ),
-                                        queueType = "SEARCH",
-                                        sourceContextId = null,
-                                        serverProfileId = binding?.serverProfileId?.value,
-                                        listeningContext = "GENERAL",
-                                        nowMs = System.currentTimeMillis(),
-                                    )
-                                    playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
-                                }.onFailure { stableError = "PLAYBACK_UNAVAILABLE" }
-                            }
-                        }) { Text("Play ${result.rawTitle}") }
-                    }
-                }
-                "Playlists" -> {
-                    Text("${playlists.size} playlist(s)")
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                runCatching {
-                                    sliceRepository.createPlaylist(
-                                        binding,
-                                        LocalId.random(),
-                                        LocalId.random(),
-                                        "Offline playlist ${playlists.size + 1}",
-                                        null,
-                                        System.currentTimeMillis(),
-                                    )
-                                }.onFailure { stableError = "PLAYLIST_CREATE_UNAVAILABLE" }
-                            }
-                        },
-                    ) { Text("Create playlist") }
-                    val playlist = playlists.firstOrNull()
-                    val entry = libraryEntries.firstOrNull { it.localUserTrackRefId == selectedTrackRefId }
-                    if (playlist != null && entry != null) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    runCatching {
-                                        sliceRepository.addPlaylistEntry(
-                                            binding,
-                                            LocalId(playlist.localPlaylistId),
-                                            LocalId.random(),
-                                            LocalId(entry.localUserTrackRefId),
-                                            LocalId.random(),
-                                            null,
-                                            null,
-                                            System.currentTimeMillis(),
-                                        )
-                                    }.onFailure { stableError = "PLAYLIST_ENTRY_UNAVAILABLE" }
-                                }
-                            },
-                        ) { Text("Add selected track to playlist") }
-                    }
-                }
-                "History" -> Text("${history.size} listening event(s)")
-                "Import" -> {
-                    Text("Choose a MediaStore or SAF audio URI to import; revoked or missing URIs remain repairable.")
-                    Button(onClick = { importLauncher.launch(arrayOf("audio/*")) }) { Text("Choose audio") }
-                    importJob?.let { job ->
-                        Text("Import ${job.state}: ${job.totalEntries} row(s)")
-                        Text("Review ${job.reviewRequiredCount} · Resolved ${job.resolvedCount} · No match ${job.noMatchCount} · Unresolved ${job.unresolvedCount} · Failed ${job.failedCount}")
-                        importItems.forEach { item ->
-                            val entry = item.entry
-                            Text("${entry.rawTitle} — ${entry.rawArtist} · ${item.effectiveState}")
-                            Text("Source: ${entry.sourceAvailability}${if (entry.persistedUriPermission) " · persistent access" else " · repair may be required"}")
-                            if (item.effectiveState in setOf("REVIEW_REQUIRED", "INTEGRITY_CONFLICT", "DEFERRED_EVIDENCE", "NO_MATCH")) {
-                                Button(onClick = { selectedImportEntryId = entry.importEntryId }) { Text("Review ${entry.rawTitle}") }
-                            }
-                        }
-                    } ?: Text("No import job yet")
-                    selectedImportItem?.let { item ->
-                        val entry = item.entry
-                        Text("Review: ${entry.rawTitle} — ${entry.rawArtist}")
-                        if (item.effectiveState == "INTEGRITY_CONFLICT") Text("Hard conflict: resolution is blocked until evidence is cleared")
-                        importCandidates.forEach { candidate ->
-                            Text("Candidate ${candidate.rank}: ${candidate.titleSnapshot} — ${candidate.artistSnapshot}")
-                            Text("Confidence ${candidate.confidence?.toString() ?: "deferred"} · ${candidate.evidenceTier}")
-                            Text("Evidence: ${candidate.featureEvidenceJson}")
-                            if (candidate.hardConflictsJson != "[]") Text("Hard-conflict warning: ${candidate.hardConflictsJson}")
-                            if (item.effectiveState == "REVIEW_REQUIRED") {
-                                Button(onClick = {
-                                    scope.launch {
-                                        runCatching {
-                                            importRepository.recordReview(
-                                                RecordImportReviewCommand(
-                                                    entry.importEntryId,
-                                                    LocalId.random().value,
-                                                    LocalId.random().value,
-                                                    ImportReviewAction.ACCEPT,
-                                                    candidateId = candidate.candidateId,
-                                                    predecessorDecisionId = item.latestEvaluation?.decisionId,
-                                                    nowMs = System.currentTimeMillis(),
-                                                ),
-                                            )
-                                        }.onFailure { stableError = "IMPORT_REVIEW_UNAVAILABLE" }
-                                    }
-                                }) { Text("Accept candidate ${candidate.rank}") }
-                                Button(onClick = {
-                                    scope.launch {
-                                        runCatching {
-                                            importRepository.recordReview(
-                                                RecordImportReviewCommand(
-                                                    entry.importEntryId,
-                                                    LocalId.random().value,
-                                                    LocalId.random().value,
-                                                    ImportReviewAction.REJECT,
-                                                    candidateId = candidate.candidateId,
-                                                    predecessorDecisionId = item.latestEvaluation?.decisionId,
-                                                    nowMs = System.currentTimeMillis(),
-                                                ),
-                                            )
-                                        }.onFailure { stableError = "IMPORT_REVIEW_UNAVAILABLE" }
-                                    }
-                                }) { Text("Reject candidate ${candidate.rank}") }
-                            }
-                        }
-                        Button(onClick = {
-                            scope.launch {
-                                runCatching {
-                                    importRepository.recordReview(
-                                        RecordImportReviewCommand(
-                                            entry.importEntryId,
-                                            LocalId.random().value,
-                                            LocalId.random().value,
-                                            ImportReviewAction.KEEP_UNRESOLVED,
-                                            predecessorDecisionId = item.latestEvaluation?.decisionId,
-                                            nowMs = System.currentTimeMillis(),
-                                        ),
-                                    )
-                                }.onFailure { stableError = "IMPORT_REVIEW_UNAVAILABLE" }
-                            }
-                        }) { Text("Keep unresolved") }
-                        if (item.effectiveState in setOf("REVIEW_REQUIRED", "NO_MATCH", "DEFERRED_EVIDENCE")) {
-                            Button(onClick = {
-                                scope.launch {
-                                    runCatching {
-                                        importRepository.recordReview(
-                                            RecordImportReviewCommand(
-                                                entry.importEntryId,
-                                                LocalId.random().value,
-                                                LocalId.random().value,
-                                                ImportReviewAction.CREATE_RECORDING,
-                                                createdRecordingId = LocalId.random().value,
-                                                predecessorDecisionId = item.latestEvaluation?.decisionId,
-                                                nowMs = System.currentTimeMillis(),
-                                            ),
-                                        )
-                                    }.onFailure { stableError = "IMPORT_REVIEW_UNAVAILABLE" }
-                                }
-                            }) { Text("Create new Recording") }
-                        }
-                    }
-                }
-                "Player" -> {
-                    Text("Mini player · ${playbackState.title ?: "Nothing playing"}")
-                    Text("${playbackState.source ?: "NO_SOURCE"} · ${playbackState.positionMs} ms")
-                    playbackState.unavailableReason?.let { Text("Unavailable: $it") }
-                    val first = libraryEntries.firstOrNull { it.localUserTrackRefId == selectedTrackRefId }
-                    val currentTrackRefId = playbackState.localUserTrackRefId
-                    Button(
-                        enabled = first != null,
-                        onClick = {
-                            val entry = first ?: return@Button
-                            scope.launch {
-                                runCatching {
-                                    val snapshotId = LocalId.random()
-                                    playbackRepository.activateQueue(
-                                        snapshotId = snapshotId,
-                                        entries = listOf(
-                                            NewPlaybackQueueEntry(
-                                                queueEntryId = LocalId.random(),
-                                                trackRefId = LocalId(entry.localUserTrackRefId),
-                                                sourceOrigin = "ORGANIC",
-                                                sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                                            ),
-                                        ),
-                                        queueType = "USER",
-                                        sourceContextId = null,
-                                        serverProfileId = binding?.serverProfileId?.value,
-                                        listeningContext = "GENERAL",
-                                        nowMs = System.currentTimeMillis(),
-                                    )
-                                    playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
-                                }.onFailure { stableError = "PLAYBACK_UNAVAILABLE" }
-                            }
-                        },
-                    ) { Text("Play selected track") }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.Pause) } }) { Text("Pause playback") }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.Resume) } }) { Text("Resume playback") }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.Stop) } }) { Text("Stop and finalize") }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.SeekTo((playbackState.positionMs - 15_000).coerceAtLeast(0))) } }) { Text("Back 15s") }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.SeekTo(playbackState.positionMs + 15_000)) } }) { Text("Forward 15s") }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.SetShuffleEnabled(!playbackState.shuffleEnabled)) } }) { Text("Shuffle ${if (playbackState.shuffleEnabled) "on" else "off"}") }
-                    val nextRepeat = when (playbackState.repeatMode) { "OFF" -> "ALL"; "ALL" -> "ONE"; else -> "OFF" }
-                    Button(onClick = { scope.launch { playbackOwner.dispatch(PlaybackCommand.SetRepeatMode(nextRepeat)) } }) { Text("Repeat ${playbackState.repeatMode}") }
-                    TrackPreferenceActions(
-                        enabled = currentTrackRefId != null,
-                        onLike = {
-                            val trackRefId = currentTrackRefId ?: return@TrackPreferenceActions
-                            scope.launch {
-                                runCatching {
-                                    sliceRepository.setPreference(
-                                        binding, LocalId(trackRefId), LocalId.random(), "LIKED",
-                                        false, null, System.currentTimeMillis(),
-                                    )
-                                }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
-                            }
-                        },
-                        onDislike = {
-                            val trackRefId = currentTrackRefId ?: return@TrackPreferenceActions
-                            scope.launch {
-                                runCatching {
-                                    sliceRepository.setPreference(
-                                        binding, LocalId(trackRefId), LocalId.random(), "DISLIKED",
-                                        false, null, System.currentTimeMillis(),
-                                    )
-                                }.onFailure { stableError = "PREFERENCE_UNAVAILABLE" }
-                            }
-                        },
-                    )
-                    Text("Full player · ${if (playbackState.isPlaying) "Playing" else "Paused"}")
-                }
-                "Downloads" -> {
-                    Text("${downloads.size} download intent(s); Media3 DownloadIndex owns progress")
-                    downloads.firstOrNull()?.let { Text("Latest download: ${it.state}") }
-                    val first = libraryEntries.firstOrNull { it.localUserTrackRefId == selectedTrackRefId }
-                    Button(
-                        enabled = first != null && binding != null,
-                        onClick = {
-                            val entry = first ?: return@Button
-                            val activeBinding = binding ?: return@Button
-                            scope.launch {
-                                runCatching {
-                                    downloadRepository.requestPreferredVaultDownload(
-                                        LocalId(entry.localUserTrackRefId),
-                                        activeBinding.serverProfileId,
-                                        DownloadStorageClass.USER_DOWNLOAD,
-                                        System.currentTimeMillis(),
-                                    )
-                                }.onFailure { stableError = "DOWNLOAD_UNAVAILABLE" }
-                            }
-                        },
-                    ) { Text("Download selected track") }
-                }
-                "Sync" -> {
-                    if (binding == null) {
-                        Text("Sync is unavailable until a server profile is bound")
-                    } else {
-                        Text("Pending: ${syncStatus.pending} · Dead letters: ${syncStatus.deadLetters} · Conflicts: ${syncStatus.conflicts}")
-                        Text("State: ${syncStatus.bootstrapState}")
-                        Text("Last success: ${syncStatus.lastSuccessAtMs?.toString() ?: "Never"}")
-                        syncStatus.lastErrorCode?.let { Text("Last error: $it") }
-                        Button(onClick = {
-                            syncScheduler.enqueue(
-                                DeferredWorkRequest(
-                                    DeferredWorkKind.SYNC,
-                                    DeferredWorkSubject.Device(binding.deviceId),
-                                    binding.serverProfileId,
-                                ),
-                            )
-                        }) { Text("Retry sync") }
-                    }
-                }
-                "Wave" -> WaveFrontendScreen(
-                    coordinator = waveCoordinator,
-                    isProfileBound = binding != null,
-                    localTrackRefId = selectedTrackRefId,
-                    resolveServerRecordingId = { trackRefId ->
-                        repository.trackRef(trackRefId)?.serverRecordingId
-                    },
-                    onStartPlayback = playbackActions::startWavePlayback,
-                    onPausePlayback = playbackActions::pauseWavePlayback,
-                    onError = { stableError = it },
+        selectedTrackUploadEligible = selectedUploadCandidate != null,
+        settings = settings,
+        profilePairing = ProfilePairingUiState(
+            pairing = pairingRuntimeState.pairing,
+            serverLabel = pairingRuntimeState.serverLabel,
+            trustConfirmed = pairingRuntimeState.trustConfirmed,
+            accountLabel = pairingRuntimeState.accountLabel,
+            deviceLabel = pairingRuntimeState.deviceLabel,
+            pendingSyncCount = syncStatus.pending,
+            devices = pairingRuntimeState.devices,
+            sessions = pairingRuntimeState.sessions,
+            localDataChoiceRequired = pairingRuntimeState.localDataChoiceRequired,
+            localDataReview = pairingRuntimeState.localReview?.let { review ->
+                app.autplay.ui.profilepairing.LocalDataReviewUiState(
+                    review.map { app.autplay.ui.profilepairing.PendingLocalDataUiSummary(it.localChangeId, it.eventType, it.occurredAtMs) },
+                    applying = pairingRuntimeState.applyingLocalReview,
                 )
-                "Server" -> ServerFeaturesScreen(
-                    isBound = binding != null,
-                    selectedTrackLabel = selectedTrackRefId?.let { "Selected track ${it.take(12)}…" },
-                    selectedTrackUploadEligible = selectedUploadCandidate != null,
-                    state = serverUiState,
-                    onRefreshHealth = {
-                        launchServerAction("SERVER_HEALTH") { server ->
-                            serverUiState = serverUiState.copy(health = server.health())
-                        }
-                    },
-                    onRefreshLibrary = {
-                        launchServerAction("SERVER_LIBRARY") { server ->
-                            serverUiState = serverUiState.copy(library = server.librarySnapshot())
-                        }
-                    },
-                    onSearch = { query ->
-                        launchServerAction("SERVER_SEARCH") { server ->
-                            serverUiState = serverUiState.copy(searchResults = server.searchLibrary(query))
-                        }
-                    },
-                    onChooseServerImport = {
-                        serverImportLauncher.launch(arrayOf("text/csv", "application/json", "text/html"))
-                    },
-                    onRefreshImport = {
-                        remoteImportJobId?.let { jobId ->
-                            launchServerAction("SERVER_IMPORT_REFRESH") { server ->
-                                val report = server.importReport(jobId)
-                                serverStateRepository.recordImportReport(checkNotNull(binding).serverProfileId, report, System.currentTimeMillis())
-                                serverUiState = serverUiState.copy(importReport = report)
-                            }
-                        }
-                    },
-                    onLoadNextImport = {
-                        val current = serverUiState.importReport
-                        val cursor = current?.nextAfter
-                        if (current != null && cursor != null) {
-                            launchServerAction("SERVER_IMPORT_NEXT") { server ->
-                                val page = server.importReport(current.importJobId, cursor)
-                                serverUiState = serverUiState.copy(
-                                    importReport = page.copy(
-                                        entries = (current.entries + page.entries).distinctBy { it.importEntryId },
-                                    ),
-                                )
-                            }
-                        }
-                    },
-                    onCancelImport = {
-                        remoteImportJobId?.let { jobId ->
-                            launchServerAction("SERVER_IMPORT_CANCEL") { server ->
-                                server.cancelImport(jobId)
-                                val report = server.importReport(jobId)
-                                serverStateRepository.recordImportReport(checkNotNull(binding).serverProfileId, report, System.currentTimeMillis())
-                                serverUiState = serverUiState.copy(importReport = report)
-                            }
-                        }
-                    },
-                    onResumeImport = {
-                        remoteImportJobId?.let { jobId ->
-                            launchServerAction("SERVER_IMPORT_RESUME") { server ->
-                                val resumed = server.resumeImport(jobId)
-                                remoteImportJobId = resumed.importJobId
-                                serverStateRepository.recordImportStart(checkNotNull(binding).serverProfileId, resumed, System.currentTimeMillis())
-                                val report = server.importReport(resumed.importJobId)
-                                serverStateRepository.recordImportReport(binding.serverProfileId, report, System.currentTimeMillis())
-                                RemoteImportWorkScheduler.enqueue(context, resumed.importJobId)
-                                serverUiState = serverUiState.copy(importReport = report)
-                            }
-                        }
-                    },
-                    onReviewImport = { entry, action ->
-                        remoteImportJobId?.let { jobId ->
-                            launchServerAction("SERVER_IMPORT_REVIEW") { server ->
-                                server.reviewImport(jobId, entry, action)
-                                val report = server.importReport(jobId)
-                                serverStateRepository.recordImportReport(checkNotNull(binding).serverProfileId, report, System.currentTimeMillis())
-                                serverUiState = serverUiState.copy(importReport = report)
-                            }
-                        }
-                    },
-                    onUploadSelectedTrack = {
-                        val candidate = selectedUploadCandidate
-                        val activeBinding = binding
-                        if (candidate != null && activeBinding != null) scope.launch {
-                            val intent = serverStateRepository.enqueueVaultUpload(
-                                activeBinding.serverProfileId,
-                                candidate.localAudioStateId,
-                                candidate.serverRecordingId,
-                                candidate.knownSha256,
-                                candidate.knownSize,
-                                System.currentTimeMillis(),
-                            )
-                            VaultUploadWorkScheduler.enqueue(context, intent.uploadIntentId)
-                        }
-                    },
-                    onCancelUpload = {
-                        durableVaultUploads.firstOrNull {
-                            it.state !in setOf(
-                                "COMMITTED", "REUSED", "QUARANTINED", "FAILED", "CANCELLED", "EXPIRED",
-                                "INGEST_POLLING_PAUSED",
-                            )
-                        }
-                            ?.let { upload ->
-                                scope.launch {
-                                    serverStateRepository.cancelVaultUpload(upload.uploadIntentId, System.currentTimeMillis())
-                                    VaultUploadWorkScheduler.enqueue(context, upload.uploadIntentId)
-                                }
-                            }
-                    },
-                    onRecommendations = { home ->
-                        launchServerAction("SERVER_RECOMMENDATIONS") { server ->
-                            val result = if (home) server.homeRecommendations() else server.recommendations()
-                            serverStateRepository.recordRecommendation(
-                                checkNotNull(binding).serverProfileId,
-                                result,
-                                System.currentTimeMillis(),
-                            )
-                            serverUiState = serverUiState.copy(
-                                recommendation = result,
-                            )
-                        }
-                    },
-                    onExactReplay = {
-                        serverUiState.recommendation?.requestId?.let { requestId ->
-                            launchServerAction("SERVER_REPLAY_EXACT") { server ->
-                                val result = server.exactRecommendationReplay(requestId)
-                                serverStateRepository.recordRecommendation(checkNotNull(binding).serverProfileId, result, System.currentTimeMillis())
-                                serverUiState = serverUiState.copy(recommendation = result)
-                            }
-                        }
-                    },
-                    onAlgorithmicReplay = {
-                        serverUiState.recommendation?.requestId?.let { requestId ->
-                            launchServerAction("SERVER_REPLAY_ALGORITHMIC") { server ->
-                                val result = server.algorithmicRecommendationReplay(requestId)
-                                serverStateRepository.recordRecommendation(checkNotNull(binding).serverProfileId, result, System.currentTimeMillis())
-                                serverUiState = serverUiState.copy(recommendation = result)
-                            }
-                        }
-                    },
+            },
+            invitationManagement = (pairingRuntimeState.pairing as? PairingState.Connected)?.let {
+                app.autplay.ui.profilepairing.InvitationManagementUiState(
+                    canCreate = pairingRuntimeState.canCreateInvitation,
+                    minExpiryMinutes = 1,
+                    maxExpiryMinutes = 30,
+                    creating = pairingRuntimeState.invitationPending,
+                    createdSecret = pairingRuntimeState.createdInvitationEnvelope,
+                    cancelling = pairingRuntimeState.invitationPending && pairingRuntimeState.createdInvitationId != null,
                 )
-                "Profile" -> ProfileFrontendScreen(
-                    settings = settings,
-                    onOpenSettings = { navigation.navigate(UiDestination.Settings) },
-                    onOpenSync = { navigation.navigate(UiDestination.SyncStatus) },
-                    onLogout = {
-                        launchServerAction("SERVER_LOGOUT") { server ->
-                            server.logout()
-                            settingsStore.mutate(::deactivateServerBinding)
-                        }
-                    },
-                    onLogoutAll = {
-                        launchServerAction("SERVER_LOGOUT_ALL") { server ->
-                            server.logoutAll()
-                            settingsStore.mutate(::deactivateServerBinding)
-                        }
-                    },
-                    onRevokeCurrentDevice = {
-                        settings.deviceId?.value?.let { deviceId ->
-                            launchServerAction("SERVER_DEVICE_REVOKE") { server ->
-                                server.revokeDevice(deviceId)
-                                settingsStore.mutate(::deactivateServerBinding)
-                            }
-                        }
-                    },
-                    onDisconnectLocally = {
-                        val profileId = settings.activeServerProfileId
-                        if (profileId != null) scope.launch {
-                            AndroidKeystoreCredentialStore(context.applicationContext).clear(profileId)
-                            settingsStore.mutate(::deactivateServerBinding)
-                        }
-                    },
+            },
+            pendingRemoteAction = pairingRuntimeState.pendingLifecycle?.let {
+                when (it) {
+                    app.autplay.application.profilepairing.RuntimeLifecycleAction.LOGOUT_CURRENT -> app.autplay.ui.profilepairing.ProfileRemoteAction.LOGOUT_CURRENT
+                    app.autplay.application.profilepairing.RuntimeLifecycleAction.LOGOUT_ALL -> app.autplay.ui.profilepairing.ProfileRemoteAction.LOGOUT_ALL
+                    app.autplay.application.profilepairing.RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE -> app.autplay.ui.profilepairing.ProfileRemoteAction.REVOKE_CURRENT_DEVICE
+                    app.autplay.application.profilepairing.RuntimeLifecycleAction.DISCONNECT_LOCAL -> app.autplay.ui.profilepairing.ProfileRemoteAction.DISCONNECT_LOCAL
+                }
+            },
+        ),
+        stableError = stableError,
+    )
+    val legacySecondaryActions = buildLegacySecondaryRouteActions(
+        scope = scope,
+        binding = { binding },
+        playlists = { playlists },
+        libraryEntries = { libraryEntries },
+        selectedTrackRefId = { selectedTrackRefId },
+        sliceRepository = sliceRepository,
+        downloadRepository = downloadRepository,
+        syncScheduler = syncScheduler,
+        resolveServerRecordingId = { trackRefId ->
+            coreProductRepository.serverRecordingId(trackRefId, binding?.serverProfileId?.value)
+        },
+        playbackActions = playbackActions,
+        reportError = { stableError = it },
+        serverFeaturesActions = serverFeaturesActions,
+        navigate = navigation::navigate,
+        launchServerAction = ::launchServerAction,
+        settings = settings,
+        settingsStore = settingsStore,
+        context = context,
+        profilePairingRuntime = pairingRuntime,
+        importProfileId = importProfileId,
+        importRepository = importRepository,
+        importActions = legacyImportActions,
+        chooseLibraryRoot = { activityLaunchers.chooseLibraryRoot.launch(null) },
+        exportSettings = { activityLaunchers.exportSettings.launch("autplay-settings.json") },
+        importSettings = { activityLaunchers.importSettings.launch(arrayOf("application/json", "text/json")) },
+    )
+    MainAdaptiveShell(
+        state = MainAdaptiveShellState(
+            destination = destination,
+            unreadSyncConflicts = syncStatus.deadLetters + syncStatus.conflicts,
+            navigationCanGoBack = navigation.canNavigateBack,
+            hasVisibleCoreDetail = hasVisibleCoreDetail,
+            playerState = playerState,
+            currentTrackRefId = playbackState.localUserTrackRefId,
+            currentTrackLiked = playbackState.localUserTrackRefId?.let { trackRefId ->
+                libraryPreferences.any { it.stableId == trackRefId && it.loved }
+            } == true,
+            coreDetailState = coreDetailUiState,
+            selectedDetail = coreProductState.selectedDetail,
+            homeState = homeScreenState,
+            searchState = searchScreenState,
+            libraryState = libraryScreenState,
+            searchListAnchor = coreProductState.searchListAnchor,
+            libraryListAnchor = coreProductState.libraryListAnchor,
+            coreRouteActions = coreRouteActions,
+            nowPlayingFeedbackEnabled = playbackState.localUserTrackRefId != null,
+            nowPlayingActions = nowPlayingRouteActions,
+            legacyState = legacySecondaryState,
+            legacyActions = legacySecondaryActions,
+        ),
+        actions = MainAdaptiveShellActions(
+            navigate = navigation::navigate,
+            navigateBack = navigation::navigateBack,
+            closeCoreDetail = ::closeCoreDetail,
+            togglePlayPause = playbackActions::toggleDirectPlayPause,
+            setMiniPlayerObserving = { playerAdapter.setSurfaceObserving("mini", it) },
+            playTrack = { coreCommandActions.startTrack(it, "LIBRARY", "LIBRARY", null) },
+            playPlaylistEntry = coreCommandActions.startPlaylistEntry,
+            removeOrRestore = coreCommandActions.updateLibraryMembership,
+            likeTrack = coreCommandActions.likeTrack,
+            downloadTrack = coreCommandActions.downloadTrack,
+            repairAccess = { activityLaunchers.chooseLibraryRoot.launch(null) },
+            openReview = { navigation.navigate(UiDestination.ImportReview) },
+            openDetail = ::openCoreDetail,
+        ),
+    )
+}
+
+private data class OfflineActivityLaunchers(
+    val addLocalAudio: ManagedActivityResultLauncher<Array<String>, Uri?>,
+    val addReviewAudio: ManagedActivityResultLauncher<Array<String>, Uri?>,
+    val chooseLibraryRoot: ManagedActivityResultLauncher<Uri?, Uri?>,
+    val exportSettings: ManagedActivityResultLauncher<String, Uri?>,
+    val importSettings: ManagedActivityResultLauncher<Array<String>, Uri?>,
+    val startServerImport: ManagedActivityResultLauncher<Array<String>, Uri?>,
+)
+
+@Composable
+private fun rememberOfflineActivityLaunchers(
+    binding: ClientEventBinding?,
+    scope: CoroutineScope,
+    context: android.content.Context,
+    sliceRepository: LibraryVerticalSliceRepository,
+    importProfileId: String,
+    importRepository: LocalImportReviewRepository,
+    coreProductState: CoreProductUiState,
+    settings: NonSecretSettings,
+    settingsStore: NonSecretSettingsStore,
+    serverStateRepository: ServerFeatureStateRepository,
+    launchServerAction: (String, suspend (ServerFeatureRepository) -> Unit) -> Unit,
+    navigate: (UiDestination) -> Unit,
+    setRemoteImportJobId: (String) -> Unit,
+    setServerUiState: (ServerFeaturesUiState) -> Unit,
+    serverUiState: () -> ServerFeaturesUiState,
+    setLibraryImportInProgress: (Boolean) -> Unit,
+    setLibraryError: (Boolean) -> Unit,
+    setLastImportedTitle: (String?) -> Unit,
+    reportError: (String) -> Unit,
+): OfflineActivityLaunchers {
+    val addLocalAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            setLibraryImportInProgress(true)
+            setLibraryError(false)
+            setLastImportedTitle(null)
+            val inspector = ContentUriInspector(context.contentResolver)
+            val permission = inspector.acquirePersistableReadPermission(
+                uri.toString(),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+            val trackRefId = LocalId.random()
+            runCatching {
+                val now = System.currentTimeMillis()
+                val inspection = inspector.inspectWithDigest(uri.toString())
+                val title = inspection.displayName?.takeIf(String::isNotBlank) ?: "Imported track"
+                sliceRepository.importUri(
+                    binding = binding,
+                    trackRefId = trackRefId,
+                    libraryEntryId = LocalId.random(),
+                    audioStateId = LocalId.random(),
+                    changeId = LocalId.random(),
+                    title = title,
+                    artist = context.getString(R.string.library_unknown_artist),
+                    inspection = inspection,
+                    persistedPermission = permission,
+                    now = now,
                 )
-                "Settings" -> SettingsFrontendScreen(
-                    settings = settings,
-                    onUpdate = { transform ->
-                        scope.launch {
-                            updateFrontendSettings(settingsStore, transform)?.let { stableError = it }
-                        }
-                    },
-                    onChooseLibraryRoot = { libraryRootLauncher.launch(null) },
-                    onRescanLibraryRoot = {
-                        settings.libraryRootTreeUri?.let { treeUri ->
-                            scope.launch {
-                                runCatching {
-                                    scanLibraryRoot(context, treeUri, importProfileId, importRepository)
-                                }.onSuccess { outcome ->
-                                    navigation.navigate(UiDestination.ImportReview)
-                                    if (outcome.truncated) stableError = "LIBRARY_ROOT_SCAN_LIMIT_REACHED"
-                                }.onFailure { stableError = "LIBRARY_ROOT_SCAN_UNAVAILABLE" }
-                            }
-                        }
-                    },
-                    onExportSettings = { settingsExportLauncher.launch("autplay-settings.json") },
-                    onImportSettings = { settingsImportLauncher.launch(arrayOf("application/json", "text/json")) },
-                    onNavigate = navigation::navigate,
-                )
+                title
+            }.onSuccess { title ->
+                setLastImportedTitle(title)
+                coreProductState.librarySection = LibrarySection.Tracks
+                coreProductState.libraryFilter = LibraryFilter.All
+            }.onFailure {
+                setLibraryError(true)
+                reportError("LOCAL_TRACK_IMPORT_UNAVAILABLE")
             }
-            stableError?.let { Text(it) }
+            setLibraryImportInProgress(false)
         }
     }
+    val addReviewAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            val inspector = ContentUriInspector(context.contentResolver)
+            val permission = inspector.acquirePersistableReadPermission(
+                uri.toString(),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+            runCatching {
+                val now = System.currentTimeMillis()
+                val inspection = inspector.inspectWithDigest(uri.toString())
+                val job = importRepository.createOrResume(
+                    singleUriImportCommand(importProfileId, inspection, permission, now),
+                )
+                val entry = importRepository.entriesOnce(job.importJobId).single()
+                importRepository.recordShadowEvaluation(
+                    RecordShadowEvaluationCommand(
+                        importEntryId = entry.importEntryId,
+                        idempotencyKey = "local-uri-evidence-v1",
+                        resolverState = ImportResolverState.DEFERRED_EVIDENCE,
+                        evidenceMode = "AUDIO_AVAILABLE",
+                        matcherVersion = "android-local-shadow/1",
+                        explanationJson = "{\"schema_version\":1,\"reason_code\":\"FINGERPRINT_EVIDENCE_DEFERRED\"}",
+                        candidates = emptyList(),
+                        nowMs = now,
+                    ),
+                )
+            }.onFailure { reportError("IMPORT_UNAVAILABLE") }
+        }
     }
+    val chooseLibraryRoot = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                settingsStore.mutate { current -> current.copy(libraryRootTreeUri = uri.toString()) }
+                val outcome = scanLibraryRoot(context, uri.toString(), importProfileId, importRepository)
+                navigate(UiDestination.ImportReview)
+                if (outcome.truncated) reportError("LIBRARY_ROOT_SCAN_LIMIT_REACHED")
+            }.onFailure { reportError("LIBRARY_ROOT_PERMISSION_UNAVAILABLE") }
+        }
+    }
+    val exportSettings = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                    output.write(SettingsTransferCodec.encode(settings))
+                } ?: error("SETTINGS_EXPORT_TARGET_UNAVAILABLE")
+            }.onFailure { reportError("SETTINGS_EXPORT_UNAVAILABLE") }
+        }
+    }
+    val importSettings = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                val bytes = context.contentResolver.openInputStream(uri)?.use(::readBoundedSettingsBytes)
+                    ?: error("SETTINGS_IMPORT_SOURCE_UNAVAILABLE")
+                settingsStore.mutate { current -> SettingsTransferCodec.decode(bytes, current) }
+            }.onFailure { reportError("SETTINGS_IMPORT_UNAVAILABLE") }
+        }
+    }
+    val startServerImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) launchServerAction("SERVER_IMPORT_START") { server ->
+            val format = serverImportFormat(context, uri)
+            val payload = context.contentResolver.openInputStream(uri)?.use(::readBoundedServerImportBytes)
+                ?: error("SERVER_IMPORT_SOURCE_UNAVAILABLE")
+            val started = server.startImport(payload, format, materialize = true)
+            val activeBinding = checkNotNull(binding)
+            serverStateRepository.recordImportStart(activeBinding.serverProfileId, started, System.currentTimeMillis())
+            setRemoteImportJobId(started.importJobId)
+            val report = server.importReport(started.importJobId)
+            serverStateRepository.recordImportReport(activeBinding.serverProfileId, report, System.currentTimeMillis())
+            RemoteImportWorkScheduler.enqueue(context, started.importJobId)
+            setServerUiState(serverUiState().copy(importReport = report, stableMessage = "SERVER_IMPORT_STARTED"))
+        }
+    }
+    return OfflineActivityLaunchers(
+        addLocalAudio,
+        addReviewAudio,
+        chooseLibraryRoot,
+        exportSettings,
+        importSettings,
+        startServerImport,
+    )
 }
 
 @Composable
-internal fun TrackPreferenceActions(
-    enabled: Boolean,
-    onLike: () -> Unit,
-    onDislike: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Button(enabled = enabled, onClick = onLike) { Text("Like current track") }
-        OutlinedButton(enabled = enabled, onClick = onDislike) { Text("Dislike current track") }
-    }
-}
-
-@Composable
-private fun WaveFrontendScreen(
+internal fun WaveFrontendScreen(
     coordinator: WaveCoordinator?,
     isProfileBound: Boolean,
     localTrackRefId: String?,
@@ -1478,23 +1182,23 @@ private fun WaveFrontendScreen(
     var roomCode by remember { mutableStateOf("") }
     var createdCode by remember { mutableStateOf<String?>(null) }
     var inviteUserIds by remember { mutableStateOf("") }
-    var waveActionMessage by remember { mutableStateOf<String?>(null) }
+    var waveActionMessage by remember { mutableStateOf<Int?>(null) }
     val inviteList = inviteUserIds.split(Regex("[,;\\s]+"))
         .map(String::trim)
         .filter(String::isNotEmpty)
     val inviteIsValid = inviteList.size <= 7 && inviteList.distinct().size == inviteList.size &&
         inviteList.all { value -> runCatching { java.util.UUID.fromString(value) }.isSuccess }
 
-    Text("Listen together with up to eight authenticated devices.")
+    Text(stringResource(R.string.wave_intro))
     if (!isProfileBound || coordinator == null) {
-        Text("Wave needs an active personal-server profile. Local playback stays available.")
+        Text(stringResource(R.string.wave_requires_server))
         return
     }
     if (state.roomId == null) {
         OutlinedTextField(
             value = inviteUserIds,
             onValueChange = { inviteUserIds = it.take(300) },
-            label = { Text("Invite user UUIDs (up to 7)") },
+            label = { Text(stringResource(R.string.wave_invite_codes)) },
             isError = !inviteIsValid,
             minLines = 2,
         )
@@ -1504,11 +1208,11 @@ private fun WaveFrontendScreen(
                     .onSuccess { createdCode = it }
                     .onFailure { onError("WAVE_CREATE_UNAVAILABLE") }
             }
-        }) { Text("Create listening room") }
+        }) { Text(stringResource(R.string.wave_create_room)) }
         OutlinedTextField(
             value = roomCode,
             onValueChange = { roomCode = it.uppercase().filter(Char::isLetterOrDigit).take(10) },
-            label = { Text("10-character room code") },
+            label = { Text(stringResource(R.string.wave_room_code_label)) },
         )
         Button(
             enabled = roomCode.length == 10,
@@ -1518,20 +1222,21 @@ private fun WaveFrontendScreen(
                         .onFailure { onError("WAVE_JOIN_UNAVAILABLE") }
                 }
             },
-        ) { Text("Join room") }
+        ) { Text(stringResource(R.string.wave_join_room)) }
     } else {
         createdCode?.let { code ->
-            Text("Room code: $code")
+            Text(stringResource(R.string.wave_room_code, code))
+            val shareText = stringResource(R.string.wave_share_text, code)
+            val shareTitle = stringResource(R.string.wave_share_title)
             OutlinedButton(onClick = {
                 val share = Intent(Intent.ACTION_SEND)
                     .setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, "AutPlay Wave room: $code")
-                context.startActivity(Intent.createChooser(share, "Share Wave room"))
-            }) { Text("Share room code") }
+                    .putExtra(Intent.EXTRA_TEXT, shareText)
+                context.startActivity(Intent.createChooser(share, shareTitle))
+            }) { Text(stringResource(R.string.wave_share_code)) }
         }
-        Text("State: ${state.state}")
-        Text(if (state.isHost) "You control this room" else "The host controls playback")
-        state.message?.let { Text(it) }
+        Text(waveStateLabel(state.state))
+        Text(stringResource(if (state.isHost) R.string.wave_you_control else R.string.wave_host_controls))
         if (state.isHost) {
             Column {
                 Button(
@@ -1548,17 +1253,15 @@ private fun WaveFrontendScreen(
                             }
                         }
                     },
-                ) { Text("Add first library track to room") }
+                ) { Text(stringResource(R.string.wave_add_selected_track)) }
                 Button(onClick = {
                     scope.launch {
                         when (onStartPlayback()) {
                             WavePlaybackCommandOutcome.Started -> {
-                                waveActionMessage =
-                                    "Synchronized start scheduled."
+                                waveActionMessage = R.string.wave_start_scheduled
                             }
                             WavePlaybackCommandOutcome.WaitingForReadyDevices -> {
-                                waveActionMessage =
-                                    "Start gate is waiting for every present device to become ready."
+                                waveActionMessage = R.string.wave_waiting_devices
                             }
                             WavePlaybackCommandOutcome.RoleRejected,
                             WavePlaybackCommandOutcome.CommandFailed,
@@ -1566,7 +1269,7 @@ private fun WaveFrontendScreen(
                             WavePlaybackCommandOutcome.Paused -> Unit
                         }
                     }
-                }) { Text("Start synchronized playback") }
+                }) { Text(stringResource(R.string.wave_start_playback)) }
                 Button(onClick = {
                     scope.launch {
                         when (onPausePlayback()) {
@@ -1579,57 +1282,34 @@ private fun WaveFrontendScreen(
                             -> Unit
                         }
                     }
-                }) { Text("Pause room") }
+                }) { Text(stringResource(R.string.wave_pause_playback)) }
             }
-            waveActionMessage?.let { Text(it) }
+            waveActionMessage?.let { Text(stringResource(it)) }
             OutlinedButton(onClick = {
                 scope.launch {
                     runCatching { coordinator.closeRoom() }
                         .onFailure { onError("WAVE_CLOSE_UNAVAILABLE") }
                 }
-            }) { Text("Close room") }
+            }) { Text(stringResource(R.string.wave_close_room)) }
         } else {
             OutlinedButton(onClick = {
                 scope.launch {
                     runCatching { coordinator.leave() }
                         .onFailure { onError("WAVE_LEAVE_UNAVAILABLE") }
                 }
-            }) { Text("Leave room") }
+            }) { Text(stringResource(R.string.wave_leave_room)) }
         }
     }
 }
 
 @Composable
-private fun ProfileFrontendScreen(
-    settings: NonSecretSettings,
-    onOpenSettings: () -> Unit,
-    onOpenSync: () -> Unit,
-    onLogout: () -> Unit,
-    onLogoutAll: () -> Unit,
-    onRevokeCurrentDevice: () -> Unit,
-    onDisconnectLocally: () -> Unit,
-) {
-    var capabilityMessage by remember { mutableStateOf<String?>(null) }
-    Text(if (settings.activeUserId == null) "Standalone profile" else "Personal server profile")
-    Text(if (settings.activeUserId == null) "No account is required for the local library." else "Authenticated device profile is active.")
-    Button(onClick = onOpenSettings) { Text("Profile and app settings") }
-    Button(onClick = onOpenSync, enabled = settings.activeUserId != null) { Text("Sync status") }
-    OutlinedButton(onClick = {
-        capabilityMessage = "Password change is not exposed by the current authenticated server contract."
-    }) { Text("Change password") }
-    Text("The server has no device-list endpoint; only this known device can be revoked safely.")
-    OutlinedButton(enabled = settings.activeUserId != null, onClick = onLogout) { Text("Log out this session") }
-    OutlinedButton(enabled = settings.activeUserId != null, onClick = onLogoutAll) { Text("Log out all devices") }
-    OutlinedButton(enabled = settings.deviceId != null, onClick = onRevokeCurrentDevice) { Text("Revoke this device") }
-    OutlinedButton(enabled = settings.activeServerProfileId != null, onClick = onDisconnectLocally) {
-        Text("Disconnect locally now")
-    }
-    Text("Local disconnect does not claim that the server session was revoked.")
-    capabilityMessage?.let { Text(it) }
-}
+internal fun ProfileFrontendScreen(
+    state: app.autplay.ui.profilepairing.ProfilePairingUiState,
+    actions: app.autplay.ui.profilepairing.ProfilePairingActions,
+) = app.autplay.ui.profilepairing.ProfilePairingScreen(state, actions)
 
 @Composable
-private fun SettingsFrontendScreen(
+internal fun SettingsFrontendScreen(
     settings: NonSecretSettings,
     onUpdate: ((NonSecretSettings) -> NonSecretSettings) -> Unit,
     onChooseLibraryRoot: () -> Unit,
@@ -1638,58 +1318,34 @@ private fun SettingsFrontendScreen(
     onImportSettings: () -> Unit,
     onNavigate: (UiDestination) -> Unit,
 ) {
-    var apiOrigin by remember(settings.serverBaseUrl) { mutableStateOf(settings.serverBaseUrl.orEmpty()) }
-    var streamOrigin by remember(settings.streamBaseUrl) { mutableStateOf(settings.streamBaseUrl.orEmpty()) }
-    Text("Appearance", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleMedium)
     listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
         OutlinedButton(onClick = { onUpdate { current -> current.copy(appearanceMode = mode) } }) {
-            Text(if (settings.appearanceMode == mode) "✓ $mode" else mode)
+            val label = appearanceModeLabel(mode)
+            Text(if (settings.appearanceMode == mode) "✓ $label" else label)
         }
     }
     listOf("CORAL", "VIOLET", "GREEN", "BLUE").forEach { palette ->
         OutlinedButton(onClick = { onUpdate { current -> current.copy(accentPalette = palette) } }) {
-            Text(if (settings.accentPalette == palette) "✓ $palette" else palette)
+            val label = accentPaletteLabel(palette)
+            Text(if (settings.accentPalette == palette) "✓ $label" else label)
         }
     }
 
-    Text("Library access", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    Text(if (settings.libraryRootTreeUri == null) "No root folder selected" else "Scoped music folder selected")
-    Button(onClick = onChooseLibraryRoot) { Text("Choose music folder") }
+    Text(stringResource(R.string.settings_library_access), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+    Text(stringResource(if (settings.libraryRootTreeUri == null) R.string.settings_folder_not_selected else R.string.settings_folder_selected))
+    Button(onClick = onChooseLibraryRoot) { Text(stringResource(R.string.settings_choose_folder)) }
     OutlinedButton(
         onClick = onRescanLibraryRoot,
         enabled = settings.libraryRootTreeUri != null,
-    ) { Text("Scan selected folder") }
-    Text("Android stores a revocable SAF permission, never a raw filesystem path.")
+    ) { Text(stringResource(R.string.settings_scan_folder)) }
+    Text(stringResource(R.string.settings_folder_privacy))
 
-    Text("Network and Wave", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    OutlinedTextField(
-        value = apiOrigin,
-        onValueChange = { apiOrigin = it.take(2_048) },
-        label = { Text("API service origin") },
-        placeholder = { Text("https://server.example") },
-        modifier = Modifier.fillMaxWidth(),
-    )
-    OutlinedTextField(
-        value = streamOrigin,
-        onValueChange = { streamOrigin = it.take(2_048) },
-        label = { Text("Stream service origin") },
-        placeholder = { Text("https://stream.example") },
-        modifier = Modifier.fillMaxWidth(),
-    )
-    OutlinedButton(
-        enabled = apiOrigin.isNotBlank() && streamOrigin.isNotBlank(),
-        onClick = {
-            onUpdate { current ->
-                current.copy(
-                    serverBaseUrl = apiOrigin.trim().trimEnd('/'),
-                    streamBaseUrl = streamOrigin.trim().trimEnd('/'),
-                )
-            }
-        },
-    ) { Text("Save service origins") }
-    Text("Addresses are device-local and excluded from settings export.")
+    Text(stringResource(R.string.settings_network), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+    Text(stringResource(R.string.settings_personal_server_body))
+    Button(onClick = { onNavigate(UiDestination.Profile) }) { Text(stringResource(R.string.settings_open_personal_server)) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Allow sync on metered network")
+        Text(stringResource(R.string.settings_metered_sync))
         Switch(
             checked = settings.syncOnMeteredNetwork,
             onCheckedChange = { enabled -> onUpdate { current -> current.copy(syncOnMeteredNetwork = enabled) } },
@@ -1697,22 +1353,65 @@ private fun SettingsFrontendScreen(
     }
     listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
         OutlinedButton(onClick = { onUpdate { current -> current.copy(wavePrefetchMode = mode) } }) {
-            Text(if (settings.wavePrefetchMode == mode) "✓ Wave prefetch $mode" else "Wave prefetch $mode")
+            val label = wavePrefetchLabel(mode)
+            Text(if (settings.wavePrefetchMode == mode) "✓ $label" else label)
         }
     }
 
-    Text("Import and export", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    Button(onClick = onExportSettings) { Text("Export settings") }
-    OutlinedButton(onClick = onImportSettings) { Text("Import settings") }
-    Text("Credentials, server addresses and device bindings are never exported.")
+    Text(stringResource(R.string.settings_transfer), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+    Button(onClick = onExportSettings) { Text(stringResource(R.string.settings_export)) }
+    OutlinedButton(onClick = onImportSettings) { Text(stringResource(R.string.settings_import)) }
+    Text(stringResource(R.string.settings_export_privacy))
 
-    Text("Features", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+    Text(stringResource(R.string.settings_more), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
     UiDestination.secondaryNavigation.forEach { target ->
         Button(onClick = { onNavigate(target) }) { Text(stringResource(target.labelRes)) }
     }
 }
 
-private fun recommendationKey(presentationId: String, item: HomeRecommendationItem): String =
+@Composable
+private fun waveStateLabel(state: app.autplay.domain.wave.WaveRuntimeState): String = stringResource(
+    when (state) {
+        app.autplay.domain.wave.WaveRuntimeState.IDLE -> R.string.wave_state_ready
+        app.autplay.domain.wave.WaveRuntimeState.PREFLIGHT -> R.string.wave_state_preparing
+        app.autplay.domain.wave.WaveRuntimeState.SCHEDULED -> R.string.wave_state_scheduled
+        app.autplay.domain.wave.WaveRuntimeState.PLAYING -> R.string.wave_state_playing
+        app.autplay.domain.wave.WaveRuntimeState.DEGRADED -> R.string.wave_state_connection_problem
+        app.autplay.domain.wave.WaveRuntimeState.REJOINING -> R.string.wave_state_reconnecting
+        app.autplay.domain.wave.WaveRuntimeState.CLOSED -> R.string.wave_state_closed
+    },
+)
+
+@Composable
+private fun appearanceModeLabel(mode: String): String = stringResource(
+    when (mode) {
+        "LIGHT" -> R.string.settings_theme_light
+        "DARK" -> R.string.settings_theme_dark
+        else -> R.string.settings_theme_system
+    },
+)
+
+@Composable
+private fun accentPaletteLabel(palette: String): String = stringResource(
+    when (palette) {
+        "VIOLET" -> R.string.settings_accent_violet
+        "GREEN" -> R.string.settings_accent_green
+        "BLUE" -> R.string.settings_accent_blue
+        else -> R.string.settings_accent_coral
+    },
+)
+
+@Composable
+private fun wavePrefetchLabel(mode: String): String = stringResource(
+    when (mode) {
+        "OFF" -> R.string.settings_wave_prefetch_off
+        "NEXT_3" -> R.string.settings_wave_prefetch_three
+        "AGGRESSIVE_WIFI" -> R.string.settings_wave_prefetch_wifi
+        else -> R.string.settings_wave_prefetch_next
+    },
+)
+
+internal fun recommendationKey(presentationId: String, item: HomeRecommendationItem): String =
     "$presentationId:${item.recommendationRequestId}:${item.sourceRank}"
 
 private fun legacyView(destination: UiDestination): String = when (destination) {
@@ -1783,13 +1482,15 @@ private fun serverImportFormat(context: android.content.Context, uri: Uri): Stri
     }
 }
 
-private fun deactivateServerBinding(settings: NonSecretSettings): NonSecretSettings = settings.copy(
+internal fun deactivateServerBinding(settings: NonSecretSettings): NonSecretSettings = settings.copy(
     activeServerProfileId = null,
     activeUserId = null,
     deviceId = null,
+    m5Binding = null,
+    m5TrustEvidence = null,
 )
 
-private data class VaultUploadCandidate(
+internal data class VaultUploadCandidate(
     val localTrackRefId: String,
     val serverRecordingId: String,
     val localAudioStateId: String,
@@ -1797,9 +1498,9 @@ private data class VaultUploadCandidate(
     val knownSize: Long?,
 )
 
-private data class LibraryRootImportOutcome(val importedCount: Int, val truncated: Boolean)
+internal data class LibraryRootImportOutcome(val importedCount: Int, val truncated: Boolean)
 
-private suspend fun scanLibraryRoot(
+internal suspend fun scanLibraryRoot(
     context: android.content.Context,
     treeUri: String,
     importProfileId: String,
@@ -1849,7 +1550,7 @@ private fun VisibleRecommendation(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("${item.displayPosition}. ${item.title} — ${item.artist}")
-        Text("${item.reasonCode} · original rank ${item.sourceRank}")
+        Text(stringResource(R.string.recommendation_for_you))
     }
 }
 

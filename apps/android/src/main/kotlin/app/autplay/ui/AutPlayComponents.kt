@@ -231,4 +231,5 @@ private fun platformIconResource(icon: AutPlayIcon): Int = when (icon) {
     AutPlayIcon.Shuffle -> R.drawable.ic_autplay_shuffle
     AutPlayIcon.Repeat -> R.drawable.ic_autplay_repeat
     AutPlayIcon.Check -> R.drawable.ic_autplay_check
+    AutPlayIcon.Favorite -> R.drawable.ic_autplay_favorite
 }

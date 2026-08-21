@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application android:usesCleartextTraffic="true">
+        <!-- Lets isolated Compose tests run on a connected, locked physical QA device. -->
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            tools:targetApi="27" />
         <activity
             android:name="app.autplay.ui.M3VisualEvidenceActivity"
             android:exported="true" />

@@ -95,6 +95,7 @@ class AuthSessionState:
     issued_at: datetime
     expires_at: datetime
     revoked_at: datetime | None
+    session_mode: str = "LEGACY"
 
     def is_active_at(self, instant: datetime) -> bool:
         """Return whether all account, device, and session gates are active."""

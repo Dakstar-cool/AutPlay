@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-heading">
+  <div><p class="eyebrow">AutPlay Admin</p><h1>{{ t("dashboard_title") }}</h1><p>{{ t("dashboard_intro") }}</p></div>
+  <dl class="identity"><div><dt>{{ t("server_label") }}</dt><dd>{{ server_label }}</dd></div><div><dt>{{ t("current_account") }}</dt><dd>{{ account_label }}</dd></div><div><dt>{{ t("role") }}</dt><dd>{{ role }}</dd></div></dl>
+</header>
+<section aria-labelledby="health-title">
+  <h2 id="health-title">{{ t("status") }}</h2>
+  <div class="status-grid">
+  {% for item in health %}
+    <article class="status-card"><div class="status-line"><h3>{{ t(item.label) }}</h3><span class="pill pill-{{ item.tone }}">{{ t(item.status) }}</span></div><p>{{ t(item.detail) }}</p></article>
+  {% endfor %}
+  </div>
+</section>
+<section aria-labelledby="capability-title">
+  <h2 id="capability-title">{{ t("details") }}</h2>
+  <dl class="facts">{% for item in facts %}<div><dt>{{ t(item.label) }}</dt><dd>{% if item.value is string and item.value.startswith('status_') %}{{ t(item.value) }}{% else %}{{ item.value }}{% endif %}</dd></div>{% endfor %}</dl>
+</section>
+<section class="danger-zone" aria-label="{{ t('sign_out') }}">
+  <a class="button secondary" href="{{ logout_current_url }}?lang={{ locale }}">{{ t("sign_out") }}</a>
+  <a class="button secondary" href="{{ logout_all_url }}?lang={{ locale }}">{{ t("logout_all") }}</a>
+</section>
+{% endblock %}

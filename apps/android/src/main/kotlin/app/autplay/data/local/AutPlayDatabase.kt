@@ -20,6 +20,11 @@ import app.autplay.data.local.dao.SyncDao
 import app.autplay.data.local.dao.WaveDao
 import app.autplay.data.local.entity.AggregateRedirectEntity
 import app.autplay.data.local.entity.AppliedServerEventEntity
+import app.autplay.data.local.entity.ArtistCreditProjectionEntity
+import app.autplay.data.local.entity.ArtistCreditNameProjectionEntity
+import app.autplay.data.local.entity.ArtistProjectionEntity
+import app.autplay.data.local.entity.CatalogArtistCreditLinkEntity
+import app.autplay.data.local.entity.CatalogArtistCreditLinkOwnerEntity
 import app.autplay.data.local.entity.DeferredServerEventEntity
 import app.autplay.data.local.entity.DownloadIntentEntity
 import app.autplay.data.local.entity.JournalLineageEntity
@@ -67,6 +72,11 @@ import kotlinx.coroutines.Dispatchers
     entities = [
         RecordingProjectionEntity::class,
         ReleaseProjectionEntity::class,
+        ArtistProjectionEntity::class,
+        ArtistCreditProjectionEntity::class,
+        ArtistCreditNameProjectionEntity::class,
+        CatalogArtistCreditLinkEntity::class,
+        CatalogArtistCreditLinkOwnerEntity::class,
         ReleaseTrackProjectionEntity::class,
         UserTrackRefEntity::class,
         UserTrackExternalRefEntity::class,
@@ -106,7 +116,7 @@ import kotlinx.coroutines.Dispatchers
         VaultUploadIntentEntity::class,
         RecommendationResponseSnapshotEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -145,7 +155,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
             ).setDriver(BundledSQLiteDriver())
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */
@@ -319,6 +329,26 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 connection.execSQL("CREATE UNIQUE INDEX index_vault_upload_intent_server_profile_id_server_upload_id ON vault_upload_intent(server_profile_id, server_upload_id)")
                 connection.execSQL("CREATE TABLE recommendation_response_snapshot (server_profile_id TEXT NOT NULL, recommendation_request_id TEXT NOT NULL, replay TEXT NOT NULL, item_count INTEGER NOT NULL, response_sha256 TEXT NOT NULL, received_at_ms INTEGER NOT NULL, PRIMARY KEY(server_profile_id, recommendation_request_id))")
                 connection.execSQL("CREATE INDEX index_recommendation_response_snapshot_server_profile_id_received_at_ms ON recommendation_response_snapshot(server_profile_id, received_at_ms)")
+            }
+        }
+
+        /** Artist identity is additive: no name-derived records are created for legacy credits. */
+        val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("CREATE TABLE artist_projection (local_artist_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, server_artist_id TEXT NOT NULL, name TEXT NOT NULL, sort_name TEXT, artist_type TEXT, disambiguation TEXT, country_code TEXT, identity_status TEXT, server_row_version INTEGER NOT NULL, projection_updated_at_ms INTEGER NOT NULL, deleted_at_ms INTEGER, PRIMARY KEY(local_artist_id))")
+                connection.execSQL("CREATE UNIQUE INDEX index_artist_projection_server_profile_id_server_artist_id ON artist_projection(server_profile_id, server_artist_id)")
+                connection.execSQL("CREATE INDEX index_artist_projection_server_profile_id_name ON artist_projection(server_profile_id, name)")
+                connection.execSQL("CREATE TABLE artist_credit_projection (local_artist_credit_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, server_artist_credit_id TEXT NOT NULL, display_name TEXT, server_row_version INTEGER NOT NULL, projection_updated_at_ms INTEGER NOT NULL, deleted_at_ms INTEGER, PRIMARY KEY(local_artist_credit_id))")
+                connection.execSQL("CREATE UNIQUE INDEX index_artist_credit_projection_server_profile_id_server_artist_credit_id ON artist_credit_projection(server_profile_id, server_artist_credit_id)")
+                connection.execSQL("CREATE TABLE artist_credit_name_projection (local_artist_credit_name_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, server_artist_credit_id TEXT NOT NULL, server_artist_id TEXT NOT NULL, position INTEGER NOT NULL, credited_name TEXT NOT NULL, join_phrase TEXT NOT NULL, role TEXT NOT NULL, PRIMARY KEY(local_artist_credit_name_id))")
+                connection.execSQL("CREATE UNIQUE INDEX index_artist_credit_name_projection_server_profile_id_server_artist_credit_id_position ON artist_credit_name_projection(server_profile_id, server_artist_credit_id, position)")
+                connection.execSQL("CREATE INDEX index_artist_credit_name_projection_server_profile_id_server_artist_id ON artist_credit_name_projection(server_profile_id, server_artist_id)")
+                connection.execSQL("CREATE TABLE catalog_artist_credit_link (local_catalog_artist_credit_link_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, subject_type TEXT NOT NULL, subject_server_id TEXT NOT NULL, server_artist_credit_id TEXT NOT NULL, owner_scope_id TEXT NOT NULL, owner_page_count INTEGER NOT NULL, last_owner_page INTEGER NOT NULL, owner_scope_complete INTEGER NOT NULL, server_row_version INTEGER NOT NULL, last_server_sequence INTEGER NOT NULL, projection_updated_at_ms INTEGER NOT NULL, deleted_at_ms INTEGER, PRIMARY KEY(local_catalog_artist_credit_link_id))")
+                connection.execSQL("CREATE UNIQUE INDEX index_catalog_artist_credit_link_server_profile_id_subject_type_subject_server_id ON catalog_artist_credit_link(server_profile_id, subject_type, subject_server_id)")
+                connection.execSQL("CREATE INDEX index_catalog_artist_credit_link_server_profile_id_server_artist_credit_id ON catalog_artist_credit_link(server_profile_id, server_artist_credit_id)")
+                connection.execSQL("CREATE TABLE catalog_artist_credit_link_owner (local_catalog_artist_credit_link_owner_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, subject_type TEXT NOT NULL, subject_server_id TEXT NOT NULL, owner_scope_id TEXT NOT NULL, owner_recording_id TEXT NOT NULL, PRIMARY KEY(local_catalog_artist_credit_link_owner_id))")
+                connection.execSQL("CREATE UNIQUE INDEX index_catalog_artist_credit_link_owner_server_profile_id_subject_type_subject_server_id_owner_scope_id_owner_recording_id ON catalog_artist_credit_link_owner(server_profile_id, subject_type, subject_server_id, owner_scope_id, owner_recording_id)")
+                connection.execSQL("CREATE INDEX index_catalog_artist_credit_link_owner_server_profile_id_owner_recording_id ON catalog_artist_credit_link_owner(server_profile_id, owner_recording_id)")
             }
         }
     }

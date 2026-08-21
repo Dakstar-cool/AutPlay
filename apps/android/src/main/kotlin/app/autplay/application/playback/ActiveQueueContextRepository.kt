@@ -1,5 +1,6 @@
 package app.autplay.application.playback
 
+import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.dao.QueueDao
 import app.autplay.data.local.entity.QueueSnapshotEntity
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +30,12 @@ class ActiveQueueContextRepository(
             queueType = it.queueType,
         )
     } ?: ActiveQueueContext.Absent
+
+    companion object {
+        /** Keeps QueueDao selection inside the application boundary instead of Compose. */
+        fun fromDatabase(database: AutPlayDatabase, scope: CoroutineScope): ActiveQueueContextRepository =
+            ActiveQueueContextRepository(database.queueDao(), scope)
+    }
 }
 
 sealed interface ActiveQueueContext {

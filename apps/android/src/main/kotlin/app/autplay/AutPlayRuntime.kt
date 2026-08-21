@@ -17,6 +17,10 @@ import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.recommendation.OkHttpRecommendationPackTransport
 import app.autplay.application.server.ServerFeatureRepository
 import app.autplay.data.security.AndroidKeystoreCredentialStore
+import app.autplay.data.security.AndroidM5DeviceKeyStore
+import app.autplay.data.security.M5RotationContext
+import app.autplay.data.security.M5RotationContextResolver
+import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.data.local.AutPlayDatabase
 import kotlinx.coroutines.flow.first
@@ -39,7 +43,7 @@ object AutPlayRuntime {
     suspend fun syncCoordinator(context: Context, binding: ClientEventBinding): SyncCoordinator {
         val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
         check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) { "SYNC_PROFILE_NOT_ACTIVE" }
-        return SyncCoordinator(database(context), OkHttpSyncTransport(apiV1BaseUrl(settings.serverBaseUrl), AndroidKeystoreCredentialStore(context.applicationContext)))
+        return SyncCoordinator(database(context), OkHttpSyncTransport(apiV1BaseUrl(settings.serverBaseUrl), AndroidKeystoreCredentialStore(context.applicationContext), m5Rotation = m5Rotation(context)))
     }
 
     /** Wave is available only for the active authenticated profile; local playback remains independent. */
@@ -56,6 +60,7 @@ object AutPlayRuntime {
                 binding.serverProfileId,
                 AndroidKeystoreCredentialStore(context.applicationContext),
                 authBaseUrl = apiV1BaseUrl(settings.serverBaseUrl),
+                m5Rotation = m5Rotation(context),
             ),
             ServicePlaybackSessionOwner(context.applicationContext),
             AndroidWaveSourceProbe(context.applicationContext, database),
@@ -80,6 +85,7 @@ object AutPlayRuntime {
         val transport = OkHttpRecommendationPackTransport(
             apiV1BaseUrl(settings.serverBaseUrl),
             AndroidKeystoreCredentialStore(context.applicationContext),
+            m5Rotation = m5Rotation(context),
         )
         return repository.refreshPack(binding, transport, nowMs)
     }
@@ -95,10 +101,50 @@ object AutPlayRuntime {
             settings.streamBaseUrl ?: settings.serverBaseUrl,
             binding.serverProfileId,
             AndroidKeystoreCredentialStore(context.applicationContext),
+            m5Rotation = m5Rotation(context),
         )
     }
 
     private fun apiV1BaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api/v1"
+
+    private fun m5Rotation(context: Context): M5SessionRotationClient {
+        val settings = applicationNonSecretSettingsStore(context.applicationContext)
+        return M5SessionRotationClient(object : M5RotationContextResolver {
+            override suspend fun resolve(profileId: app.autplay.domain.ServerProfileId): M5RotationContext? {
+                val value = settings.settings.first()
+                val checkpoint = value.m5Binding ?: return null
+                if (value.activeServerProfileId != profileId || value.deviceId == null || value.serverBaseUrl == null) return null
+                return M5RotationContext(value.serverBaseUrl, checkpoint.serverInstanceId, checkpoint.identityEpoch, value.deviceId, checkpoint.deviceKeyAlias)
+            }
+
+            override suspend fun persistSuccessor(
+                profileId: app.autplay.domain.ServerProfileId,
+                successor: app.autplay.data.security.SessionCredentialEnvelope,
+            ) {
+                settings.mutate { current ->
+                    val checkpoint = current.m5Binding
+                    if (
+                        current.activeServerProfileId == profileId &&
+                        checkpoint != null &&
+                        checkpoint.bindingCommitId == successor.bindingCommitId &&
+                        checkpoint.sessionFamilyId == successor.sessionFamilyId &&
+                        successor.sessionId != null &&
+                        successor.sessionGeneration != null
+                    ) {
+                        current.copy(
+                            m5Binding = checkpoint.copy(
+                                sessionId = successor.sessionId,
+                                sessionFamilyId = requireNotNull(successor.sessionFamilyId),
+                                sessionGeneration = successor.sessionGeneration,
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
+            }
+        }, AndroidM5DeviceKeyStore())
+    }
 
     // Wave's P13 transport owns the `/v1/wave` suffix and therefore receives the `/api` root.
     private fun apiRootBaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api"

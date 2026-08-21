@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -106,7 +107,8 @@ class OfflineLibraryScreenTest {
         seedLibraryTrack(PROFILE)
         scenario = ActivityScenario.launch(MainActivity::class.java)
 
-        composeRule.onNode(hasText(context.getString(R.string.nav_search)) and hasClickAction()).performClick()
+        waitForNavigation(context.getString(R.string.nav_search))
+            .performClick()
         composeRule.onNode(hasSetTextAction()).performTextInput("Offline sample")
         composeRule.onNodeWithTag("local-search-submit").performClick()
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -154,24 +156,35 @@ class OfflineLibraryScreenTest {
         database.close()
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_open_settings)).performClick()
+        val settingsLabel = context.getString(R.string.action_open_settings)
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithContentDescription(settingsLabel).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(settingsLabel).performClick()
         composeRule.onNodeWithText(context.getString(R.string.nav_import_review)).performScrollTo().performClick()
+        val importSummary = context.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Import REVIEW_REQUIRED: 1 row(s)").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(importSummary).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Import REVIEW_REQUIRED: 1 row(s)").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Review Ambiguous").performScrollTo().performClick()
+        composeRule.onNodeWithText(importSummary).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.import_review_item)).performScrollTo().performClick()
+        val conflict = context.getString(R.string.import_candidate_conflict)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Hard-conflict warning: [\"VERSION_MARKER_CONFLICT\"]")
-                .fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(conflict).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onAllNodesWithText("Hard-conflict warning: [\"VERSION_MARKER_CONFLICT\"]")[0]
+        composeRule.onAllNodesWithText(conflict)[0]
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("Accept candidate 1").performScrollTo().performClick()
+        composeRule.onNodeWithText(context.getString(R.string.import_accept_candidate, 1)).performScrollTo().performClick()
+        val resolvedSummary = context.getString(R.string.import_review_summary, 0, 1, 0, 0)
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText("Review 0 · Resolved 1 · No match 0 · Unresolved 0 · Failed 0")
-                .fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(resolvedSummary).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun waitForNavigation(label: String) = composeRule.onNode(hasText(label) and hasClickAction()).also {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
         }
     }
 

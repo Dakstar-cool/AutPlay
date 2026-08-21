@@ -144,11 +144,11 @@ CREATE TABLE catalog.artist_credit_name (
     position integer NOT NULL CHECK (position >= 0),
     artist_id uuid NOT NULL REFERENCES catalog.artist(artist_id) ON DELETE RESTRICT,
     credited_name text NOT NULL CHECK (length(credited_name) BETWEEN 1 AND 1000),
-    join_phrase text NOT NULL DEFAULT '',
+    join_phrase text NOT NULL DEFAULT ''
+        CONSTRAINT artist_credit_name_join_phrase_check CHECK (length(join_phrase) <= 1000),
     role text NOT NULL DEFAULT 'PRIMARY',
     PRIMARY KEY (artist_credit_id, position),
-    CONSTRAINT ck_artist_credit_name_role
-        CHECK (role IN ('PRIMARY', 'FEATURED', 'REMIXER', 'CONDUCTOR', 'OTHER'))
+    CONSTRAINT ck_artist_credit_name_role CHECK (length(role) BETWEEN 1 AND 100)
 );
 
 CREATE INDEX ix_artist_credit_name_artist
@@ -265,6 +265,10 @@ CREATE INDEX ix_release_release_group
 CREATE INDEX ix_release_barcode
     ON catalog.release (barcode)
     WHERE barcode IS NOT NULL;
+
+CREATE INDEX ix_release_artist_credit_active
+    ON catalog.release (artist_credit_id, release_id)
+    WHERE deleted_at IS NULL;
 
 CREATE TABLE catalog.medium (
     medium_id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -890,6 +894,10 @@ CREATE UNIQUE INDEX uq_user_track_ref_active_recording
 CREATE INDEX ix_user_track_ref_user_status
     ON library.user_track_ref (user_id, resolution_status, updated_at DESC)
     WHERE deleted_at IS NULL;
+
+CREATE INDEX ix_user_track_ref_recording_user_active
+    ON library.user_track_ref (recording_id, user_id)
+    WHERE recording_id IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TABLE library.user_track_ref_external_reference (
     user_track_ref_id uuid NOT NULL
@@ -2718,6 +2726,7 @@ CREATE TABLE sync.bootstrap_session (
     high_water_server_sequence bigint NOT NULL CHECK (high_water_server_sequence >= 0),
     expires_at timestamptz NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
+    capabilities text[] NOT NULL DEFAULT ARRAY[]::text[],
     CONSTRAINT ck_bootstrap_expiry CHECK (expires_at > created_at),
     CONSTRAINT fk_bootstrap_owner FOREIGN KEY (user_id, device_id)
         REFERENCES account.device(user_id, device_id) ON DELETE RESTRICT
@@ -3232,10 +3241,234 @@ CREATE TRIGGER tr_recording_tag_set_immutable
 BEFORE UPDATE OR DELETE ON ml.recording_tag_set
 FOR EACH ROW EXECUTE FUNCTION app_private.protect_ml_evidence();
 
+CREATE FUNCTION app_private.enforce_artist_credit_name_limit()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE member_count integer;
+BEGIN
+    IF TG_OP = 'UPDATE' AND OLD.artist_credit_id = NEW.artist_credit_id THEN
+        RETURN NEW;
+    END IF;
+    PERFORM 1 FROM catalog.artist_credit
+    WHERE artist_credit_id = NEW.artist_credit_id FOR UPDATE;
+    SELECT count(*) INTO member_count FROM catalog.artist_credit_name
+    WHERE artist_credit_id = NEW.artist_credit_id;
+    IF member_count >= 1000 THEN
+        RAISE EXCEPTION 'artist credit member limit exceeded'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tr_artist_credit_name_limit
+BEFORE INSERT OR UPDATE OF artist_credit_id ON catalog.artist_credit_name
+FOR EACH ROW EXECUTE FUNCTION app_private.enforce_artist_credit_name_limit();
+
+CREATE FUNCTION app_private.bump_artist_credit_for_member_change()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        UPDATE catalog.artist_credit SET updated_at = now()
+        WHERE artist_credit_id = NEW.artist_credit_id;
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE catalog.artist_credit SET updated_at = now()
+        WHERE artist_credit_id = OLD.artist_credit_id;
+    ELSE
+        UPDATE catalog.artist_credit SET updated_at = now()
+        WHERE artist_credit_id IN (OLD.artist_credit_id, NEW.artist_credit_id);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER tr_artist_credit_name_parent_version
+AFTER INSERT OR UPDATE OR DELETE ON catalog.artist_credit_name
+FOR EACH ROW EXECUTE FUNCTION app_private.bump_artist_credit_for_member_change();
+
 
 -- -----------------------------------------------------------------------------
 -- privileges
 -- -----------------------------------------------------------------------------
+
+-- -----------------------------------------------------------------------------
+-- M5B profile pairing runtime (additive from 0017_profile_pairing_runtime)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE account.server_instance (
+    server_instance_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    identity_epoch bigint NOT NULL DEFAULT 1 CHECK (identity_epoch >= 1),
+    identity_public_key_spki bytea NOT NULL
+        CHECK (octet_length(identity_public_key_spki) BETWEEN 64 AND 256),
+    identity_thumbprint_sha256 bytea NOT NULL
+        CHECK (octet_length(identity_thumbprint_sha256) = 32),
+    label_hint text NOT NULL CHECK (length(label_hint) BETWEEN 1 AND 80),
+    api_origin text NOT NULL CHECK (length(api_origin) BETWEEN 1 AND 2048),
+    stream_origin text NOT NULL CHECK (length(stream_origin) BETWEEN 1 AND 2048),
+    capability_revision bigint NOT NULL DEFAULT 1 CHECK (capability_revision >= 1),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(identity_thumbprint_sha256)
+);
+
+ALTER TABLE account.device ADD COLUMN public_key_thumbprint_sha256 bytea;
+ALTER TABLE account.device ADD CONSTRAINT ck_device_public_key_thumbprint_len
+    CHECK (public_key_thumbprint_sha256 IS NULL
+        OR octet_length(public_key_thumbprint_sha256) = 32);
+ALTER TABLE account.user_session ADD COLUMN family_id uuid;
+ALTER TABLE account.user_session ADD COLUMN generation bigint;
+ALTER TABLE account.user_session ADD COLUMN session_mode text NOT NULL DEFAULT 'LEGACY';
+ALTER TABLE account.user_session ADD CONSTRAINT ck_user_session_generation
+    CHECK (generation IS NULL OR generation >= 0);
+ALTER TABLE account.user_session ADD CONSTRAINT ck_user_session_mode
+    CHECK (session_mode IN ('LEGACY', 'V2'));
+
+CREATE TABLE account.enrollment_invitation (
+    invitation_id uuid PRIMARY KEY DEFAULT uuidv7(),
+    server_instance_id uuid NOT NULL REFERENCES account.server_instance(server_instance_id)
+        ON DELETE RESTRICT,
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    issued_by_user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    invitation_secret_hash bytea NOT NULL UNIQUE CHECK (octet_length(invitation_secret_hash) = 32),
+    issued_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    cancelled_at timestamptz,
+    consumed_at timestamptz,
+    CHECK (expires_at > issued_at)
+);
+CREATE INDEX ix_enrollment_invitation_user_active
+    ON account.enrollment_invitation(user_id, expires_at)
+    WHERE cancelled_at IS NULL AND consumed_at IS NULL;
+
+CREATE TABLE account.enrollment_exchange_receipt (
+    exchange_id uuid PRIMARY KEY,
+    invitation_id uuid NOT NULL REFERENCES account.enrollment_invitation(invitation_id)
+        ON DELETE RESTRICT,
+    request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256) = 32),
+    device_key_thumbprint_sha256 bytea NOT NULL
+        CHECK (octet_length(device_key_thumbprint_sha256) = 32),
+    device_id uuid NOT NULL REFERENCES account.device(device_id) ON DELETE RESTRICT,
+    session_id uuid NOT NULL REFERENCES account.user_session(session_id) ON DELETE RESTRICT,
+    binding_commit_id uuid NOT NULL,
+    receipt_expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE account.session_rotation_receipt (
+    rotation_id uuid PRIMARY KEY,
+    parent_session_id uuid NOT NULL REFERENCES account.user_session(session_id) ON DELETE RESTRICT,
+    successor_session_id uuid NOT NULL REFERENCES account.user_session(session_id) ON DELETE RESTRICT,
+    request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256) = 32),
+    device_key_thumbprint_sha256 bytea NOT NULL
+        CHECK (octet_length(device_key_thumbprint_sha256) = 32),
+    receipt_expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE account.profile_lifecycle_command (
+    operation_id uuid PRIMARY KEY,
+    actor_user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    actor_device_id uuid NOT NULL,
+    actor_session_id uuid NOT NULL,
+    actor_access_token_id uuid,
+    action text NOT NULL CHECK (length(action) BETWEEN 1 AND 200),
+    target_type text NOT NULL CHECK (length(target_type) BETWEEN 1 AND 100),
+    target_id uuid NOT NULL,
+    reason_code text CHECK (reason_code IS NULL OR reason_code ~ '^[a-z][a-z0-9_]{0,63}$'),
+    outcome text NOT NULL CHECK (outcome IN ('PENDING', 'APPLIED', 'ALREADY_TERMINAL')),
+    terminal_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ix_enrollment_exchange_receipt_expiry
+    ON account.enrollment_exchange_receipt(receipt_expires_at);
+CREATE INDEX ix_session_rotation_receipt_expiry
+    ON account.session_rotation_receipt(receipt_expires_at);
+
+-- -----------------------------------------------------------------------------
+-- M6 administrative web runtime (additive from 0019_m6_web_admin_runtime)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE account.web_session_invitation (
+    invitation_id uuid PRIMARY KEY,
+    server_instance_id uuid NOT NULL REFERENCES account.server_instance(server_instance_id) ON DELETE RESTRICT,
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    issuer_kind text NOT NULL CHECK (length(issuer_kind) BETWEEN 1 AND 64),
+    secret_sha256 bytea NOT NULL UNIQUE CHECK (octet_length(secret_sha256) = 32),
+    issued_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    cancelled_at timestamptz,
+    CHECK (expires_at > issued_at)
+);
+CREATE TABLE account.web_login_challenge (
+    challenge_id uuid PRIMARY KEY,
+    login_operation_id uuid NOT NULL UNIQUE,
+    cookie_sha256 bytea NOT NULL UNIQUE CHECK (octet_length(cookie_sha256) = 32),
+    nonce_sha256 bytea NOT NULL CHECK (octet_length(nonce_sha256) = 32),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz
+);
+CREATE TABLE account.web_session (
+    web_session_id uuid PRIMARY KEY,
+    family_id uuid NOT NULL,
+    server_instance_id uuid NOT NULL REFERENCES account.server_instance(server_instance_id) ON DELETE RESTRICT,
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    token_generation bigint NOT NULL CHECK (token_generation >= 0),
+    token_sha256 bytea NOT NULL UNIQUE CHECK (octet_length(token_sha256) = 32),
+    csrf_sha256 bytea NOT NULL CHECK (octet_length(csrf_sha256) = 32),
+    issued_at timestamptz NOT NULL,
+    token_issued_at timestamptz NOT NULL,
+    last_activity_at timestamptz NOT NULL,
+    idle_expires_at timestamptz NOT NULL,
+    absolute_expires_at timestamptz NOT NULL,
+    revoked_at timestamptz,
+    CHECK (absolute_expires_at > issued_at)
+);
+CREATE TABLE account.web_session_rotation_evidence (
+    evidence_id uuid PRIMARY KEY,
+    web_session_id uuid NOT NULL REFERENCES account.web_session(web_session_id) ON DELETE RESTRICT,
+    predecessor_token_sha256 bytea NOT NULL UNIQUE CHECK (octet_length(predecessor_token_sha256) = 32),
+    expires_at timestamptz NOT NULL
+);
+CREATE TABLE account.web_terminal_receipt (
+    operation_id uuid PRIMARY KEY,
+    server_instance_id uuid NOT NULL REFERENCES account.server_instance(server_instance_id) ON DELETE RESTRICT,
+    user_id uuid NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+    web_session_id uuid NOT NULL REFERENCES account.web_session(web_session_id) ON DELETE RESTRICT,
+    token_generation bigint NOT NULL,
+    token_sha256 bytea NOT NULL CHECK (octet_length(token_sha256) = 32),
+    action text NOT NULL,
+    target_type text NOT NULL,
+    target_id uuid NOT NULL,
+    reason_code text,
+    request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256) = 32),
+    outcome text NOT NULL,
+    login_challenge_id uuid,
+    login_cookie_sha256 bytea CHECK (login_cookie_sha256 IS NULL OR octet_length(login_cookie_sha256) = 32),
+    login_invitation_sha256 bytea CHECK (login_invitation_sha256 IS NULL OR octet_length(login_invitation_sha256) = 32),
+    terminal_at timestamptz NOT NULL,
+    receipt_expires_at timestamptz NOT NULL
+);
+CREATE TABLE account.web_login_rate_window (
+    rate_key_sha256 bytea PRIMARY KEY CHECK (octet_length(rate_key_sha256) = 32),
+    window_started_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    attempt_count integer NOT NULL CHECK (attempt_count >= 0)
+);
+CREATE INDEX ix_web_invitation_user_active ON account.web_session_invitation(user_id, expires_at)
+    WHERE consumed_at IS NULL AND cancelled_at IS NULL;
+CREATE INDEX ix_web_invitation_expiry ON account.web_session_invitation(expires_at);
+CREATE INDEX ix_web_login_challenge_expiry ON account.web_login_challenge(expires_at);
+CREATE INDEX ix_web_session_user_active ON account.web_session(user_id, absolute_expires_at)
+    WHERE revoked_at IS NULL;
+CREATE INDEX ix_web_session_expiry ON account.web_session(absolute_expires_at);
+CREATE INDEX ix_web_session_rotation_evidence_expiry ON account.web_session_rotation_evidence(expires_at);
+CREATE INDEX ix_web_terminal_receipt_expiry ON account.web_terminal_receipt(receipt_expires_at);
+CREATE INDEX ix_web_login_rate_window_expiry ON account.web_login_rate_window(expires_at);
 
 REVOKE ALL ON ALL TABLES IN SCHEMA account, catalog, identity, library, playlist,
     vault, importing, sync, jobs, ml, audit FROM PUBLIC;

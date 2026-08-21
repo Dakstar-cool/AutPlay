@@ -463,3 +463,19 @@ The complete non-event-family mapping is:
 
 P04 requires no PostgreSQL migration. Any implementation that needs a different persistent field
 MUST stop and propose it in its owning phase rather than silently changing this contract.
+
+---
+
+## 13. ADR-028 additive catalog Artist projection
+
+Capable v1 clients advertise `CATALOG_ARTIST_ID_V1` (or `catalog_projection_version=1`) and receive
+`ARTIST`, `ARTIST_CREDIT`, `RECORDING_ARTIST_CREDIT`, and `RELEASE_ARTIST_CREDIT` snapshots through
+the four `CATALOG_*_UPSERTED` event types. Credits retain ordered names, join phrases, and raw roles;
+empty names are unresolved. Link payloads carry a complete owner proof as ordered pages with a
+canonical SHA-256 `owner_scope_id`, `owner_recording_page`, `owner_recording_page_count`, and at most
+100 unique `owner_recording_ids` per event. Clients replace a scope at page zero, require contiguous
+pages, normalize the member edges, and hide the link until its final page; no closure is truncated.
+Bootstrap freezes capability on its first page, and continuations reuse that decision. Incremental
+facts share the existing owner/device/epoch cursor and transaction; payload-bound deterministic
+event IDs plus source versions and server sequence make replay safe. Clients without the capability
+scan past catalog events and retain the pre-existing feed.

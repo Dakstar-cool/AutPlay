@@ -42,6 +42,12 @@
     "aggregate": {
       "type": "object",
       "additionalProperties": true,
+      "allOf": [
+        {"if": {"properties": {"aggregate_type": {"const": "ARTIST"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "catalog-artist-payload.schema.json"}}}},
+        {"if": {"properties": {"aggregate_type": {"const": "ARTIST_CREDIT"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "catalog-artist-credit-payload.schema.json"}}}},
+        {"if": {"properties": {"aggregate_type": {"const": "RECORDING_ARTIST_CREDIT"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "catalog-recording-credit-link-payload.schema.json"}}}},
+        {"if": {"properties": {"aggregate_type": {"const": "RELEASE_ARTIST_CREDIT"}}, "required": ["aggregate_type"]}, "then": {"properties": {"payload": {"$ref": "catalog-release-credit-link-payload.schema.json"}}}}
+      ],
       "required": ["aggregate_type", "aggregate_server_id", "server_row_version", "payload"],
       "properties": {
         "aggregate_type": {"type": "string", "minLength": 1, "maxLength": 100},

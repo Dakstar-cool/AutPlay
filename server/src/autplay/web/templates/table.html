@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-heading"><div><p class="eyebrow">AutPlay Admin</p><h1>{{ t(page_title_key) }}</h1><p>{{ t(page_intro_key) }}</p></div></header>
+{% if notice_key %}<p class="notice" role="note">{{ t(notice_key) }}</p>{% endif %}
+{% if rows %}
+<div class="table-scroll" tabindex="0" role="region" aria-label="{{ page_title }}">
+<table>
+  <thead><tr>{% for column in columns %}<th scope="col">{{ t(column.label) }}</th>{% endfor %}{% if actions %}<th scope="col">{{ t("action") }}</th>{% endif %}</tr></thead>
+  <tbody>
+  {% for row in rows %}<tr>{% for column in columns %}<td data-label="{{ t(column.label) }}">{{ row[column.key] }}</td>{% endfor %}{% if actions %}<td class="actions">{% for action in row.actions %}<a class="button secondary" href="{{ action.href }}?lang={{ locale }}">{{ t(action.label) }}</a>{% endfor %}</td>{% endif %}</tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<section class="empty" aria-labelledby="empty-title"><h2 id="empty-title">{{ t("empty_title") }}</h2><p>{{ t("empty_body") }}</p></section>{% endif %}
+{% if previous_url or next_url %}<nav class="pagination" aria-label="Pagination">{% if previous_url %}<a href="{{ previous_url }}">{{ t("previous") }}</a>{% endif %}{% if next_url %}<a href="{{ next_url }}">{{ t("next") }}</a>{% endif %}</nav>{% endif %}
+{% endblock %}

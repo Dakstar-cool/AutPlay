@@ -27,6 +27,7 @@ from autplay.adapters.postgresql.models import (
     MatcherReleaseRow,
     RecordingRedirectRow,
     RecordingRow,
+    SyncEventRow,
     UserTrackRefRow,
 )
 from autplay.application.imports import ImportJobHandler, ImportService
@@ -36,11 +37,18 @@ from autplay.application.job_worker import (
     JobWorkerSettings,
     WorkerOutcome,
 )
+from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.import_identity import CatalogCandidate, IdentityTrack, ParsedImportRow
 from autplay.domain.jobs import CancelRequestResult, RetryPolicy
 from sqlalchemy import Engine, create_engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
+
+
+class _FailingCatalogPublisher(CatalogArtistSyncPublisher):
+    def publish(self, session: Session, owner_user_id: UUID) -> int:
+        del session, owner_user_id
+        raise RuntimeError("injected catalog publisher failure")
 
 
 def test_probabilistic_import_stays_shadow_until_explicit_manual_resolution(
@@ -126,6 +134,20 @@ def test_probabilistic_import_stays_shadow_until_explicit_manual_resolution(
                 selected_rank=1,
                 idempotency_key="accept-first-row",
             )
+        failing_service = ImportService(sessions, catalog_publisher=_FailingCatalogPublisher())
+        with pytest.raises(RuntimeError, match="injected catalog publisher failure"):
+            failing_service.review(
+                principal,
+                created.import_job_id,
+                other.import_entry_id,
+                predecessor_decision_id=other.decision_id,
+                action="ACCEPT",
+                selected_rank=1,
+                idempotency_key="accept-second-row",
+            )
+        with Session(engine) as session:
+            rolled_back = session.get(ImportEntryRow, other.import_entry_id)
+            assert rolled_back is not None and rolled_back.current_match_decision_id is None
         reviewed_other = service.review(
             principal,
             created.import_job_id,
@@ -166,6 +188,14 @@ def test_probabilistic_import_stays_shadow_until_explicit_manual_resolution(
             assert user_ref.recording_id == recording_id
             assert user_ref.resolution_status == "RESOLVED"
             assert user_ref.current_match_decision_id is not None
+            published_types = set(
+                session.scalars(
+                    select(SyncEventRow.event_type).where(SyncEventRow.user_id == principal.user_id)
+                )
+            )
+            assert "USER_TRACK_REF_PATCHED" in published_types
+            assert "CATALOG_ARTIST_CREDIT_UPSERTED" in published_types
+            assert "CATALOG_RECORDING_CREDIT_LINK_UPSERTED" in published_types
             user_review = session.get(MatchDecisionRow, user_ref.current_match_decision_id)
             assert user_review is not None
             assert user_review.query_type == "USER_TRACK_REF"

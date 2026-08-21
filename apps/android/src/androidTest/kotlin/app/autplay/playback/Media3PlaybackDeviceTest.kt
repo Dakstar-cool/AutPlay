@@ -30,11 +30,12 @@ import org.junit.runner.RunWith
 class Media3PlaybackDeviceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
+    private val testPackageName = instrumentation.context.packageName
 
     @Test fun media3PreparesAndPlaysReadableLocalAudio() {
         assertMediaReady(
             DefaultMediaSourceFactory(DefaultDataSource.Factory(context)),
-            MediaItem.fromUri("content://app.autplay.test.readable/audio/1"),
+            MediaItem.fromUri("content://$testPackageName.readable/audio/1"),
         )
     }
 
@@ -47,7 +48,7 @@ class Media3PlaybackDeviceTest {
 
     @Test fun media3PreparesVaultAudioThroughStableReferenceAndAuthorizedOpen() {
         val payload = context.contentResolver.openInputStream(
-            Uri.parse("content://app.autplay.test.readable/audio/1"),
+            Uri.parse("content://$testPackageName.readable/audio/1"),
         )!!.use { it.readBytes() }
         val profile = ServerProfileId(UUID(0, 41).toString())
         val variant = UUID(0, 42).toString()
