@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -189,7 +191,11 @@ def test_reconciliation_quarantines_orphan_and_corrupt_final_bytes(
         )
         database_connection.commit()
         object_path = tmp_path / "objects" / tracked.value[:2] / tracked.value[2:4] / tracked.value
+        if os.name != "nt":
+            object_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         object_path.write_bytes(b"corrupted bytes")
+        if os.name != "nt":
+            object_path.chmod(stat.S_IRUSR)
 
         with factory() as unit:
             first_page = VaultReconciliationService(repository=unit.vault, storage=storage).run(

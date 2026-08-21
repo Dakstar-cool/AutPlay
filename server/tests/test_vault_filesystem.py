@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -193,7 +194,11 @@ def test_stream_refuses_same_size_corruption_before_returning_bytes(tmp_path: Pa
         / committed.storage_key.value[2:4]
         / committed.storage_key.value
     )
+    if os.name != "nt":
+        object_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     object_path.write_bytes(b"corrupt-bytes")
+    if os.name != "nt":
+        object_path.chmod(stat.S_IRUSR)
     assert object_path.stat().st_size == len(payload)
     with pytest.raises(StorageSafetyError):
         storage.open_range(
