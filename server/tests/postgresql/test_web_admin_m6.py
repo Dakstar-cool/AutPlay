@@ -169,6 +169,15 @@ def test_login_rotation_second_rotation_and_logout_receipt_are_atomic(
         "VALUES (%s,%s,%s,1)",
         (b"w" * 32, NOW - timedelta(hours=1), NOW - timedelta(1)),
     )
+    future_expiry = datetime.now(UTC) + timedelta(hours=1)
+    database_connection.execute(
+        "UPDATE account.web_login_challenge SET expires_at=%s",
+        (future_expiry,),
+    )
+    database_connection.execute(
+        "UPDATE account.web_session_invitation SET expires_at=%s",
+        (future_expiry,),
+    )
     database_connection.commit()
     assert web_service.cleanup_expired(2) == 2
     assert web_service.cleanup_expired(100) == 3

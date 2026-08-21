@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 from collections.abc import Sequence
 from io import BufferedReader
@@ -26,6 +27,11 @@ from autplay.ports.vault import (
     ProcessResult,
 )
 
+if sys.platform == "win32":
+    from subprocess import CREATE_NEW_PROCESS_GROUP as _CREATE_NEW_PROCESS_GROUP
+else:
+    _CREATE_NEW_PROCESS_GROUP = 0
+
 
 class SubprocessExecutableRunner:
     """Execute an exact argument vector without a shell or inherited input."""
@@ -37,7 +43,6 @@ class SubprocessExecutableRunner:
 
         if not arguments or timeout_seconds <= 0 or max_output_bytes < 1:
             raise ValueError("invalid executable runner limits")
-        creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
             process = subprocess.Popen(
                 list(arguments),
@@ -47,7 +52,7 @@ class SubprocessExecutableRunner:
                 stderr=subprocess.PIPE,
                 env=_minimal_environment(),
                 start_new_session=os.name != "nt",
-                creationflags=creation_flags,
+                creationflags=_CREATE_NEW_PROCESS_GROUP,
             )
         except OSError as error:
             raise MediaValidationError() from error
