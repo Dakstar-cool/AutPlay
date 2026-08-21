@@ -37,5 +37,8 @@ jobs:
             uv.lock
             server/uv.lock
 
+      - name: Install pinned Playwright Chromium
+        run: uv run --project server --frozen playwright install --with-deps chromium
+
       - name: Run canonical server gate
         run: bash scripts/check.sh --server-only
