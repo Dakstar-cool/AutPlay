@@ -495,11 +495,15 @@ def test_cross_session_lifecycle_commands_complete_without_deadlock(
         logout_future = executor.submit(logout_all)
         revoke_future = executor.submit(revoke_first)
         outcomes = {logout_future.result(timeout=10), revoke_future.result(timeout=10)}
-    assert outcomes <= {"LOGGED_OUT_ALL", "APPLIED", "authentication_required"}
-    assert database_connection.execute(
+    assert outcomes in (
+        {"LOGGED_OUT_ALL", "authentication_required"},
+        {"APPLIED", "authentication_required"},
+    )
+    active_sessions = database_connection.execute(
         "SELECT count(*) FROM account.web_session WHERE user_id=%s AND revoked_at IS NULL",
         (user_id,),
-    ).fetchone() == (0,)
+    ).fetchone()
+    assert active_sessions == ((0,) if "LOGGED_OUT_ALL" in outcomes else (1,))
 
 
 def test_cleanup_bounds_anonymous_challenges_invitations_and_expired_sessions(
