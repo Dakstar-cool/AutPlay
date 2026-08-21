@@ -34,17 +34,21 @@ proposals still require exact-pin review and the affected gates.
 ## Validation state
 
 - YAML syntax, full-SHA action references and read-only workflow permissions: PASS.
-- Canonical Windows server-equivalent gate: PASS; 53 contract and 425 server tests against
-  PostgreSQL 18.4/pgvector 0.8.6, with one expected Windows symlink skip and exact cleanup.
+- Canonical Windows gate: PASS; Android lint/unit/debug/release-R8, 79 contract/release tests and
+  523 server tests against PostgreSQL 18.4/pgvector 0.8.6, with one expected Windows symlink skip
+  and exact cleanup.
 - Isolated GPU static gate: PASS; lint/format/mypy and 21 tests, with two expected Windows symlink
   skips. No accelerator/model claim is made.
 - Independent read-only review: version/source binding and GPU path-trigger findings fixed; no
   remaining Critical/Major workflow finding.
-- Previous hosted Android, server and GPU runs exposed, respectively, a missing Microsoft JDK
-  catalog entry, a Linux-only mypy error before the artifact upload step and stale GPU lock metadata
-  after server dependency changes. The replacement uses the verified exact JDK archive, a
-  platform-safe subprocess constant import and a regenerated pinned GPU lock; replacement hosted
-  evidence is pending.
+- Previous hosted Android, server and GPU runs exposed a missing Microsoft JDK catalog entry,
+  runner-image SDK drift, missing Playwright browser installation, Linux-only subprocess typing and
+  Vault fixture failures, a lifecycle concurrency assertion mismatch, and stale GPU lock metadata.
+  The replacement uses the verified exact JDK archive, an isolated pinned Android SDK, pinned
+  Chromium installation, platform-safe fixtures and imports, and a regenerated GPU lock.
+- Replacement pull request hosted evidence: [Android PASS with the v7 artifact upload step executed](https://github.com/Dakstar-cool/AutPlay/actions/runs/32493803039),
+  [Server PASS](https://github.com/Dakstar-cool/AutPlay/actions/runs/32493802712), and
+  [GPU static PASS](https://github.com/Dakstar-cool/AutPlay/actions/runs/32493803015).
 
 ## Release and deployment boundary
 
