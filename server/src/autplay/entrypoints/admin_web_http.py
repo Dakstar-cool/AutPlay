@@ -113,6 +113,7 @@ def create_admin_web_router(
     renderer: Renderer,
     origin: str,
     source_secret: bytes,
+    discovery_enabled: bool = False,
 ) -> APIRouter:
     if len(source_secret) < 32:
         raise ValueError("admin Web source secret must be at least 32 bytes")
@@ -277,7 +278,7 @@ def create_admin_web_router(
                 "dashboard.html",
                 request,
                 authenticated=True,
-                navigation=navigation("dashboard"),
+                navigation=navigation("dashboard", discovery_enabled=discovery_enabled),
                 **dashboard_context(dashboard_value, actor, locale=locale),
             )
         )
@@ -334,7 +335,7 @@ def create_admin_web_router(
                 "confirm.html",
                 request,
                 authenticated=True,
-                navigation=navigation("sessions"),
+                navigation=navigation("sessions", discovery_enabled=discovery_enabled),
                 consequence_key=(
                     "confirm_cancel"
                     if action == "invitation"
@@ -465,7 +466,7 @@ def create_admin_web_router(
                 template,
                 request,
                 authenticated=True,
-                navigation=navigation(surface),
+                navigation=navigation(surface, discovery_enabled=discovery_enabled),
                 **context,
             )
         )

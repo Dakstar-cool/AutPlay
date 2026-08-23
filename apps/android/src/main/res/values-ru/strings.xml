@@ -29,8 +29,6 @@
     <string name="home_hero_ready">Готово к воспроизведению</string>
     <string name="home_hero_control_locked">Управление недоступно для текущего режима воспроизведения</string>
     <string name="home_hero_empty">Выберите локальный трек, чтобы запустить поток</string>
-    <string name="home_hero_ring_active">Анимированное кольцо воспроизведения</string>
-    <string name="home_hero_ring_idle">Кольцо воспроизведения, пауза</string>
     <string name="home_context_collections">Подборки под момент</string>
     <string name="home_context_collections_placeholder">Контекстные миксы появятся позже. Пока это предварительный набор категорий.</string>
     <string name="home_context_energy">Энергичное</string>
@@ -392,6 +390,10 @@
     <string name="profile_confirm_disconnect_title">Отключить этот телефон?</string>
     <string name="profile_confirm_disconnect_body">Это удалит только локальное подключение и не означает, что удалённый сеанс завершён.</string>
 
+    <string name="settings_language">Язык приложения</string>
+    <string name="settings_language_system">Системный язык</string>
+    <string name="settings_language_russian">Русский</string>
+    <string name="settings_language_english">English</string>
     <string name="settings_appearance">Оформление</string>
     <string name="settings_theme_system">Как на устройстве</string>
     <string name="settings_theme_light">Светлая тема</string>

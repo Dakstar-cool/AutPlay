@@ -39,6 +39,13 @@ android {
         compose = true
     }
 
+    bundle {
+        language {
+            // The in-app language picker must retain every bundled translation at runtime.
+            enableSplit = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

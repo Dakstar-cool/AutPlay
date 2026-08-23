@@ -50,6 +50,23 @@ def test_ffprobe_extracts_audio_and_uses_argument_vector() -> None:
     assert "safe-input.mp3" in runner.arguments
 
 
+def test_ffprobe_treats_zero_unknown_optional_metrics_as_absent() -> None:
+    runner = FakeRunner(
+        ProcessResult(
+            0,
+            b'{"format":{"format_name":"mp3","duration":"12.5","bit_rate":"128000"},'
+            b'"streams":[{"codec_type":"audio","codec_name":"mp3","sample_rate":"44100",'
+            b'"channels":2,"bit_rate":"0","bits_per_raw_sample":"0","bits_per_sample":0}]}',
+            b"",
+        )
+    )
+
+    metadata = FfprobeInspector("ffprobe", runner=runner).inspect(Path("safe-input.mp3"))
+
+    assert metadata.bitrate_bps == 128000
+    assert metadata.bit_depth is None
+
+
 def test_media_tools_reject_corrupt_output_and_timeout() -> None:
     corrupt = FakeRunner(ProcessResult(0, b"not-json", b""))
     with pytest.raises(MediaToolOutputError):

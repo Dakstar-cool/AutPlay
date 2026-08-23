@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/adapter-manifest.schema.json",
+  "title": "Release discovery adapter manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "$defs": {
+    "extensionValue": {
+      "oneOf": [
+        {"type": "string", "maxLength": 512},
+        {"type": "number"},
+        {"type": "boolean"},
+        {"type": "null"},
+        {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "oneOf": [
+              {"type": "string", "maxLength": 512},
+              {"type": "number"},
+              {"type": "boolean"},
+              {"type": "null"}
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "adapter_id",
+    "adapter_version",
+    "provider_id",
+    "provider_key",
+    "capabilities",
+    "credential_requirement",
+    "network_policy",
+    "limits"
+  ],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "adapter_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "adapter_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "provider_id": {"type": "string", "format": "uuid"},
+    "provider_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"enum": ["RELEASE_DISCOVERY", "PLAYABLE_ACQUISITION"]}
+    },
+    "credential_requirement": {
+      "enum": ["NONE", "OPTIONAL_USER_SECRET", "REQUIRED_USER_SECRET"]
+    },
+    "network_policy": {"enum": ["OFFLINE", "PUBLIC_ALLOWLIST_ONLY"]},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_artists_per_run",
+        "max_releases_per_page",
+        "max_tracks_per_release",
+        "request_timeout_seconds"
+      ],
+      "properties": {
+        "max_artists_per_run": {"type": "integer", "minimum": 1, "maximum": 100},
+        "max_releases_per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+        "max_tracks_per_release": {"type": "integer", "minimum": 1, "maximum": 500},
+        "request_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60}
+      }
+    },
+    "rights_capabilities": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"}
+    },
+    "extensions": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "not": {
+          "enum": [
+            "owner_user_id",
+            "user_id",
+            "credential",
+            "access_token",
+            "refresh_token",
+            "authorization",
+            "source_url",
+            "source_uri",
+            "private_url",
+            "raw_path",
+            "raw_provider_payload"
+          ]
+        }
+      },
+      "additionalProperties": {"$ref": "#/$defs/extensionValue"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"contains": {"const": "PLAYABLE_ACQUISITION"}}
+        }
+      },
+      "then": {
+        "required": ["rights_capabilities"],
+        "properties": {"rights_capabilities": {"minItems": 1}}
+      }
+    }
+  ]
+}

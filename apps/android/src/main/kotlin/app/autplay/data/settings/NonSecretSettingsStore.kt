@@ -26,6 +26,7 @@ data class NonSecretSettings(
     /** Stream service origin. It may differ from the API origin in local deployments. */
     val streamBaseUrl: String? = null,
     val syncOnMeteredNetwork: Boolean = false,
+    val appLanguage: String = "SYSTEM",
     val appearanceMode: String = "SYSTEM",
     val accentPalette: String = "CORAL",
     val libraryRootTreeUri: String? = null,
@@ -136,6 +137,7 @@ class DataStoreNonSecretSettingsStore(
                 ?: preferences.remove(STREAM_SERVICE_BASE_URL)
         preferences.remove(LEGACY_SERVER_BASE_URL)
         preferences[SYNC_ON_METERED_NETWORK] = settings.syncOnMeteredNetwork
+        preferences[APP_LANGUAGE] = settings.appLanguage
         preferences[APPEARANCE_MODE] = settings.appearanceMode
         preferences[ACCENT_PALETTE] = settings.accentPalette
         settings.libraryRootTreeUri?.let { preferences[LIBRARY_ROOT_TREE_URI] = it }
@@ -180,6 +182,7 @@ class DataStoreNonSecretSettingsStore(
         serverBaseUrl = apiOrigin,
         streamBaseUrl = preferences[STREAM_SERVICE_BASE_URL] ?: legacyOrigin ?: apiOrigin,
         syncOnMeteredNetwork = preferences[SYNC_ON_METERED_NETWORK] ?: false,
+        appLanguage = preferences[APP_LANGUAGE] ?: "SYSTEM",
         appearanceMode = preferences[APPEARANCE_MODE] ?: "SYSTEM",
         accentPalette = preferences[ACCENT_PALETTE] ?: "CORAL",
         libraryRootTreeUri = preferences[LIBRARY_ROOT_TREE_URI],
@@ -277,6 +280,7 @@ class DataStoreNonSecretSettingsStore(
         val API_SERVICE_BASE_URL = stringPreferencesKey("api_service_base_url")
         val STREAM_SERVICE_BASE_URL = stringPreferencesKey("stream_service_base_url")
         val SYNC_ON_METERED_NETWORK = booleanPreferencesKey("sync_on_metered_network")
+        val APP_LANGUAGE = stringPreferencesKey("app_language")
         val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
         val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
         val LIBRARY_ROOT_TREE_URI = stringPreferencesKey("library_root_tree_uri")

@@ -17,6 +17,7 @@ import app.autplay.domain.LocalId
 import app.autplay.download.DownloadStorageClass
 import app.autplay.playback.presentation.PlaybackInteractionRouter
 import app.autplay.playback.presentation.PlaybackPresentationAdapter
+import app.autplay.ui.AppLanguage
 import app.autplay.ui.ServerFeaturesActions
 import app.autplay.ui.ServerFeaturesUiState
 import app.autplay.ui.UiDestination
@@ -381,6 +382,18 @@ internal fun buildLegacySecondaryRouteActions(
     updateSettings = { transform ->
         scope.launch {
             updateFrontendSettings(settingsStore, transform)?.let(reportError)
+        }
+    },
+    changeAppLanguage = { language ->
+        scope.launch {
+            val error = updateFrontendSettings(settingsStore) { current ->
+                current.copy(appLanguage = language.storedValue)
+            }
+            if (error == null) {
+                synchronizeFrameworkAppLanguage(context, language)
+            } else {
+                reportError(error)
+            }
         }
     },
     chooseLibraryRoot = chooseLibraryRoot,

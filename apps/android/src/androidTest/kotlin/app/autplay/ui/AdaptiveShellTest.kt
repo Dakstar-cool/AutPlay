@@ -19,6 +19,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -40,6 +41,7 @@ import app.autplay.domain.ServerProfileId
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import app.autplay.R
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
@@ -50,6 +52,25 @@ class AdaptiveShellTest {
     @get:Rule
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun directNowPlayingWithoutBackStackDoesNotExposeADeadBackAction() {
+        composeRule.setContent {
+            AutPlayTheme {
+                AutPlayAdaptiveShell(
+                    selectedDestination = UiDestination.NowPlaying,
+                    onDestinationSelected = {},
+                    canNavigateBack = false,
+                ) { _, _, _ -> Text("direct-now-playing") }
+            }
+        }
+
+        composeRule.onNodeWithText("direct-now-playing").assertIsDisplayed()
+        assertTrue(
+            composeRule.onAllNodesWithContentDescription(context.getString(R.string.action_back))
+                .fetchSemanticsNodes().isEmpty(),
+        )
+    }
 
     @Test
     fun compactNavigationRoutesEveryPrimaryActionToContent() {

@@ -17,7 +17,7 @@ def _object_count(database_harness: DatabaseHarness, database_name: str) -> int:
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname IN (
-                'account', 'audit', 'catalog', 'identity', 'importing', 'jobs',
+                'account', 'audit', 'catalog', 'discovery', 'identity', 'importing', 'jobs',
                 'library', 'ml', 'playlist', 'sync', 'vault', 'wave'
             ) AND c.relkind IN ('r', 'p')
             """
@@ -49,11 +49,11 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0019_m6_web_admin_runtime"]
+    assert heads == ["0020_a1b_discovery_runtime"]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 86
+    assert _object_count(database_harness, empty_database_name) == 89
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -61,7 +61,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 86
+    assert _object_count(database_harness, empty_database_name) == 89
 
 
 def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHarness) -> None:
@@ -90,6 +90,7 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0017_profile_pairing_runtime",
         "0018_profile_lifecycle_cleanup",
         "0019_m6_web_admin_runtime",
+        "0020_a1b_discovery_runtime",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 
@@ -118,7 +119,9 @@ def test_artist_sync_downgrade_refuses_durable_catalog_events(
         database_harness.downgrade(empty_database_name, "0015_wave_runtime")
     # Alembic executes the attempted multi-revision downgrade atomically; the
     # M5B contract remains present when the predecessor refuses its rollback.
-    assert _current_revision(database_harness, empty_database_name) == ("0019_m6_web_admin_runtime")
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0020_a1b_discovery_runtime"
+    )
 
     with database_harness.connect(empty_database_name) as connection:
         connection.execute("DELETE FROM sync.sync_event")

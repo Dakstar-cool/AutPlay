@@ -386,7 +386,9 @@ def _positive_int(value: object, *, upper: int | None = None) -> int:
 
 
 def _optional_positive_int(value: object, *, upper: int | None = None) -> int | None:
-    if value is None or value == "N/A":
+    # FFmpeg uses zero for optional codec parameters whose value is unknown,
+    # including MP3 bits_per_sample. Keep malformed and negative values fail-closed.
+    if value is None or value == "N/A" or value == 0 or value == "0":
         return None
     return _positive_int(value, upper=upper)
 

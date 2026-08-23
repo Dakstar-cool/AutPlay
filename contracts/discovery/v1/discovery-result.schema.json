@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/discovery-result.schema.json",
+  "title": "Discovery command result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": [
+    "contract_version",
+    "schema_version",
+    "operation_id",
+    "outcome",
+    "replayed",
+    "terminal"
+  ],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "outcome": {"enum": ["ACCEPTED", "APPLIED", "NO_CHANGE", "REJECTED"]},
+    "resource_id": {"type": ["string", "null"], "format": "uuid"},
+    "resource_state": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+    "safe_reason_code": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "replayed": {"type": "boolean"},
+    "terminal": {"type": "boolean"}
+  }
+}

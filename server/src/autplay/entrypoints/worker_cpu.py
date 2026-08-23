@@ -9,13 +9,14 @@ import signal
 import sys
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from time import monotonic
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
+from autplay.adapters.jamendo import JamendoProvider
 from autplay.adapters.media.tools import (
     ChromaprintTool,
     FfmpegDecodeValidator,
@@ -31,6 +32,11 @@ from autplay.adapters.postgresql.vault_uow import (
 )
 from autplay.adapters.postgresql.web_admin import SqlAlchemyWebAdminRepository
 from autplay.adapters.system import Uuid7Generator
+from autplay.application.bulk_discovery import BulkDiscoveryService
+from autplay.application.discovery_acquisition import (
+    DiscoveryAcquisitionHandler,
+    StandardAnalysisHandler,
+)
 from autplay.application.imports import ImportJobHandler
 from autplay.application.job_worker import (
     JobHandler,
@@ -38,6 +44,7 @@ from autplay.application.job_worker import (
     JobWorker,
     JobWorkerSettings,
 )
+from autplay.application.manual_discovery import ManualDiscoveryService
 from autplay.application.profile_pairing import cleanup_expired_pairing_receipts
 from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
@@ -86,12 +93,25 @@ def import_handlers(handler: ImportJobHandler) -> Mapping[JobKey, JobHandler]:
     return {JobKey("library.import", 1): handler}
 
 
+def discovery_handlers(handler: DiscoveryAcquisitionHandler) -> Mapping[JobKey, JobHandler]:
+    """Return the disabled-by-default manual A1B acquisition registration."""
+
+    return {JobKey("discovery.acquire", 1): handler}
+
+
+def standard_analysis_handlers(handler: StandardAnalysisHandler) -> Mapping[JobKey, JobHandler]:
+    """Keep already-ingested baseline analysis drainable after provider disablement."""
+
+    return {JobKey("audio.standard_analysis", 1): handler}
+
+
 def run_cpu_worker(
     worker: JobWorker,
     stop_event: threading.Event | None = None,
     *,
     profile_receipt_cleanup: Callable[[], int] | None = None,
     web_admin_cleanup: Callable[[], int] | None = None,
+    discovery_cleanup: Callable[[], int] | None = None,
     cleanup_interval: timedelta = timedelta(minutes=5),
 ) -> None:
     """Run until SIGINT/SIGTERM or a supplied cooperative stop event."""
@@ -124,6 +144,11 @@ def run_cpu_worker(
                         web_admin_cleanup()
                     except SQLAlchemyError:
                         _LOGGER.exception("web_admin_cleanup_failed")
+                if discovery_cleanup is not None:
+                    try:
+                        discovery_cleanup()
+                    except SQLAlchemyError:
+                        _LOGGER.exception("discovery_cleanup_failed")
                 next_cleanup_at = current + cleanup_interval.total_seconds()
             tick = worker.run_once()
             if tick.outcome.value == "IDLE":
@@ -215,6 +240,33 @@ def main(arguments: Sequence[str] | None = None) -> int:
         )
         handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest))
         handlers.update(import_handlers(ImportJobHandler(sessions)))
+        handlers.update(standard_analysis_handlers(StandardAnalysisHandler(sessions)))
+        if runtime_settings.jamendo_enabled:
+            client_id = runtime_settings.jamendo_client_id
+            staging_root = runtime_settings.jamendo_staging_root
+            if client_id is None or staging_root is None:
+                raise RuntimeError("Jamendo worker configuration is unavailable")
+            discovery = ManualDiscoveryService(
+                JamendoProvider(
+                    client_id.get_secret_value(),
+                    timeout_seconds=runtime_settings.jamendo_timeout_seconds,
+                ),
+                staging_root=staging_root,
+                max_download_bytes=runtime_settings.jamendo_max_download_bytes,
+                minimum_request_interval_seconds=(
+                    runtime_settings.jamendo_minimum_request_interval_seconds
+                ),
+            )
+            handlers.update(
+                discovery_handlers(
+                    DiscoveryAcquisitionHandler(
+                        sessions,
+                        discovery=discovery,
+                        storage=vault_storage,
+                        limits=vault_limits,
+                    )
+                )
+            )
         worker = build_cpu_worker(
             uow_factory=SqlAlchemyJobUnitOfWorkFactory(sessions),
             ids=Uuid7Generator(),
@@ -238,17 +290,27 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
             def web_cleanup() -> int:
                 with sessions.begin() as session:
-                    return SqlAlchemyWebAdminRepository(session).cleanup_expired(10_000)
+                    return SqlAlchemyWebAdminRepository(session).cleanup_expired(
+                        10_000, datetime.now(UTC)
+                    )
+
+            def discovery_cleanup() -> int:
+                return BulkDiscoveryService(sessions).cleanup_expired(
+                    now=datetime.now(UTC),
+                    limit=10_000,
+                )
 
             if namespace.once:
                 cleanup()
                 web_cleanup()
+                discovery_cleanup()
                 worker.run_once()
             else:
                 run_cpu_worker(
                     worker,
                     profile_receipt_cleanup=cleanup,
                     web_admin_cleanup=web_cleanup,
+                    discovery_cleanup=discovery_cleanup,
                     cleanup_interval=timedelta(
                         seconds=runtime_settings.profile_receipt_cleanup_interval_seconds
                     ),
@@ -279,8 +341,10 @@ if __name__ == "__main__":
 __all__ = (
     "SERVICE_NAME",
     "build_cpu_worker",
+    "discovery_handlers",
     "import_handlers",
     "main",
     "run_cpu_worker",
+    "standard_analysis_handlers",
     "vault_ingest_handlers",
 )

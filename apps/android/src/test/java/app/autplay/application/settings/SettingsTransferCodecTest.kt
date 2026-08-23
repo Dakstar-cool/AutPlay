@@ -21,6 +21,7 @@ class SettingsTransferCodecTest {
             libraryRootTreeUri = "content://provider/tree/music",
         )
         val portable = NonSecretSettings(
+            appLanguage = "RU",
             appearanceMode = "DARK",
             accentPalette = "BLUE",
             syncOnMeteredNetwork = true,
@@ -30,6 +31,7 @@ class SettingsTransferCodecTest {
         val encoded = SettingsTransferCodec.encode(portable)
         val restored = SettingsTransferCodec.decode(encoded, current)
 
+        assertEquals("RU", restored.appLanguage)
         assertEquals("DARK", restored.appearanceMode)
         assertEquals("BLUE", restored.accentPalette)
         assertEquals(true, restored.syncOnMeteredNetwork)
@@ -53,5 +55,15 @@ class SettingsTransferCodecTest {
                 NonSecretSettings(),
             )
         }
+    }
+
+    @Test
+    fun preservesUnknownFutureLanguageValues() {
+        val restored = SettingsTransferCodec.decode(
+            """{"schema_version":1,"app_language":"KLINGON","appearance_mode":"SYSTEM","accent_palette":"CORAL","sync_on_metered_network":false,"wave_prefetch_mode":"NEXT"}""".encodeToByteArray(),
+            NonSecretSettings(),
+        )
+
+        assertEquals("KLINGON", restored.appLanguage)
     }
 }

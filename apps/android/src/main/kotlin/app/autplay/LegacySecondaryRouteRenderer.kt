@@ -26,6 +26,7 @@ import app.autplay.playback.presentation.WavePlaybackCommandOutcome
 import app.autplay.ui.LegacyImportRoute
 import app.autplay.ui.LegacyImportRouteActions
 import app.autplay.ui.LegacyImportRouteState
+import app.autplay.ui.AppLanguage
 import app.autplay.ui.ServerFeaturesActions
 import app.autplay.ui.ServerFeaturesScreen
 import app.autplay.ui.ServerFeaturesUiState
@@ -72,6 +73,7 @@ internal data class LegacySecondaryRouteActions(
     val disconnectLocally: () -> Unit,
     val profilePairing: ProfilePairingActions,
     val updateSettings: ((NonSecretSettings) -> NonSecretSettings) -> Unit,
+    val changeAppLanguage: (AppLanguage) -> Unit,
     val chooseLibraryRoot: () -> Unit,
     val rescanLibraryRoot: () -> Unit,
     val exportSettings: () -> Unit,
@@ -158,6 +160,7 @@ internal fun LegacySecondaryRouteRenderer(
             "Settings" -> SettingsFrontendScreen(
                 settings = state.settings,
                 onUpdate = actions.updateSettings,
+                onAppLanguageChange = actions.changeAppLanguage,
                 onChooseLibraryRoot = actions.chooseLibraryRoot,
                 onRescanLibraryRoot = actions.rescanLibraryRoot,
                 onExportSettings = actions.exportSettings,

@@ -14,6 +14,7 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
         "account",
         "audit",
         "catalog",
+        "discovery",
         "identity",
         "importing",
         "jobs",
@@ -40,6 +41,9 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "account.web_session_rotation_evidence",
     "account.web_terminal_receipt",
     "account.web_login_rate_window",
+    "discovery.bulk_operation",
+    "discovery.candidate",
+    "discovery.bulk_operation_item",
     "catalog.artist",
     "catalog.artist_credit",
     "catalog.artist_credit_name",
@@ -128,6 +132,9 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "account.web_session_rotation_evidence": 4,
     "account.web_terminal_receipt": 17,
     "account.web_login_rate_window": 4,
+    "discovery.bulk_operation": 18,
+    "discovery.candidate": 27,
+    "discovery.bulk_operation_item": 4,
     "catalog.artist": 12,
     "catalog.artist_credit": 7,
     "catalog.artist_credit_name": 6,
@@ -173,7 +180,7 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "vault.audio_fingerprint": 12,
     "vault.recording_canonical_variant": 5,
     "vault.acquisition_record": 9,
-    "vault.upload_session": 25,
+    "vault.upload_session": 27,
     "vault.upload_chunk": 6,
     "importing.import_job": 13,
     "importing.import_entry": 16,
@@ -216,6 +223,9 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_web_session_rotation_evidence_expiry",
         "ix_web_terminal_receipt_expiry",
         "ix_web_login_rate_window_expiry",
+        "ix_bulk_operation_owner_time",
+        "ix_discovery_candidate_owner_state",
+        "ix_bulk_operation_item_candidate",
         "ix_artist_normalized_name_trgm",
         "ix_artist_credit_normalized_name_trgm",
         "ix_artist_credit_name_artist",
@@ -284,7 +294,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_wave_preflight_room_recording",
     }
 )
-EXPECTED_COLUMN_COUNT = 946
+EXPECTED_COLUMN_COUNT = 997
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

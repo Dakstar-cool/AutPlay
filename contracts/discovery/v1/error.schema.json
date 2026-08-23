@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/error.schema.json",
+  "title": "Safe release discovery error v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": ["contract_version", "schema_version", "error_code", "retryable", "correlation_code"],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "error_code": {
+      "enum": [
+        "automation_not_active",
+        "discovery_adapter_unavailable",
+        "discovery_target_not_found",
+        "discovery_not_eligible",
+        "source_authorization_unavailable",
+        "no_authorized_playable_source",
+        "identity_review_required",
+        "candidate_not_selectable",
+        "operation_conflict",
+        "policy_revision_stale",
+        "lease_fence_lost",
+        "provider_rate_limited",
+        "provider_timeout",
+        "provider_schema_invalid",
+        "acquisition_failed_terminal"
+      ]
+    },
+    "retryable": {"type": "boolean"},
+    "retry_after_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 86400},
+    "correlation_code": {"type": "string", "pattern": "^[A-Z0-9]{8,32}$"}
+  }
+}

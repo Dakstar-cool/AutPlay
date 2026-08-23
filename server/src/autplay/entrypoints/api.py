@@ -33,8 +33,10 @@ from autplay.entrypoints.composition import (
     build_admin_command_service,
     build_admin_view_service,
     build_auth_service,
+    build_bulk_discovery_service,
     build_import_service,
     build_library_service,
+    build_manual_discovery_service,
     build_profile_pairing_service,
     build_recommendation_service,
     build_stream_lookup,
@@ -42,6 +44,10 @@ from autplay.entrypoints.composition import (
     build_vault_http_service,
     build_wave_service,
     build_web_admin_service,
+)
+from autplay.entrypoints.discovery_admin_http import (
+    ManualDiscoveryHttp,
+    create_discovery_admin_router,
 )
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
@@ -85,6 +91,7 @@ def create_app(
     admin_view_service: AdminViewsHttp | None = None,
     admin_command_service: AdminCommandsHttp | None = None,
     admin_renderer: Renderer | None = None,
+    discovery_service: ManualDiscoveryHttp | None = None,
 ) -> FastAPI:
     """Create one API instance without connecting to PostgreSQL at import time."""
 
@@ -172,6 +179,19 @@ def create_app(
         source_secret = resolved_settings.admin_web_source_hmac_secret
         if origin is None or source_secret is None:
             raise RuntimeError("admin Web security configuration is unavailable")
+        discovery = discovery_service or build_manual_discovery_service(resolved_settings)
+        if discovery is not None:
+            app.include_router(
+                create_discovery_admin_router(
+                    web=web,
+                    discovery=discovery,
+                    imports=build_import_service(engine),
+                    bulk=build_bulk_discovery_service(engine),
+                    renderer=admin_renderer or AdminTemplateRenderer(),
+                    origin=origin,
+                    token_secret=source_secret.get_secret_value().encode("utf-8"),
+                )
+            )
         app.include_router(
             create_admin_web_router(
                 web=web,
@@ -180,6 +200,7 @@ def create_app(
                 renderer=admin_renderer or AdminTemplateRenderer(),
                 origin=origin,
                 source_secret=source_secret.get_secret_value().encode("utf-8"),
+                discovery_enabled=discovery is not None,
             )
         )
 

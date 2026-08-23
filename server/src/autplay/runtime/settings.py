@@ -10,6 +10,7 @@ files and ambient Pydantic secret directories are intentionally disabled.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from collections.abc import Mapping
 from enum import StrEnum
@@ -57,6 +58,12 @@ _API_ENV_FIELDS: Final = {
     "admin_web_origin": "ADMIN_WEB_ORIGIN",
     "admin_web_source_hmac_secret": "ADMIN_WEB_SOURCE_HMAC_SECRET",
     "admin_web_csrf_hmac_secret": "ADMIN_WEB_CSRF_HMAC_SECRET",
+    "jamendo_enabled": "JAMENDO_ENABLED",
+    "jamendo_client_id": "JAMENDO_CLIENT_ID",
+    "jamendo_staging_root": "JAMENDO_STAGING_ROOT",
+    "jamendo_timeout_seconds": "JAMENDO_TIMEOUT_SECONDS",
+    "jamendo_max_download_bytes": "JAMENDO_MAX_DOWNLOAD_BYTES",
+    "jamendo_minimum_request_interval_seconds": "JAMENDO_MINIMUM_REQUEST_INTERVAL_SECONDS",
 }
 _STREAM_ENV_FIELDS: Final = {
     "host": "STREAM_HOST",
@@ -74,6 +81,12 @@ _WORKER_ENV_FIELDS: Final = {
     "retry_base_seconds": "WORKER_RETRY_BASE_SECONDS",
     "retry_max_seconds": "WORKER_RETRY_MAX_SECONDS",
     "profile_receipt_cleanup_interval_seconds": "PROFILE_RECEIPT_CLEANUP_INTERVAL_SECONDS",
+    "jamendo_enabled": "JAMENDO_ENABLED",
+    "jamendo_client_id": "JAMENDO_CLIENT_ID",
+    "jamendo_staging_root": "JAMENDO_STAGING_ROOT",
+    "jamendo_timeout_seconds": "JAMENDO_TIMEOUT_SECONDS",
+    "jamendo_max_download_bytes": "JAMENDO_MAX_DOWNLOAD_BYTES",
+    "jamendo_minimum_request_interval_seconds": "JAMENDO_MINIMUM_REQUEST_INTERVAL_SECONDS",
 }
 _SECRET_FIELDS: Final = frozenset(
     {
@@ -82,8 +95,10 @@ _SECRET_FIELDS: Final = frozenset(
         "profile_identity_private_key_pem",
         "admin_web_source_hmac_secret",
         "admin_web_csrf_hmac_secret",
+        "jamendo_client_id",
     }
 )
+_FILE_ONLY_SECRET_FIELDS: Final = frozenset({"jamendo_client_id"})
 
 
 class RuntimeProfile(StrEnum):
@@ -210,6 +225,16 @@ class ApiSettings(_ExplicitSettings):
     admin_web_csrf_hmac_secret: SecretStr | None = Field(
         default=None, repr=False, min_length=32, max_length=4_096
     )
+    jamendo_enabled: bool = False
+    jamendo_client_id: SecretStr | None = Field(
+        default=None, repr=False, min_length=4, max_length=100
+    )
+    jamendo_staging_root: Path | None = None
+    jamendo_timeout_seconds: float = Field(default=15.0, ge=1.0, le=15.0)
+    jamendo_max_download_bytes: int = Field(
+        default=150 * 1024 * 1024, ge=1_024, le=1024 * 1024 * 1024
+    )
+    jamendo_minimum_request_interval_seconds: float = Field(default=1.0, ge=1.0, le=60.0)
 
     @field_validator("host")
     @classmethod
@@ -237,6 +262,22 @@ class ApiSettings(_ExplicitSettings):
             ):
                 raise ValueError("admin Web source and CSRF HMAC secrets must differ")
             _validate_admin_web_origin(self.admin_web_origin, profile=self.profile)
+        if self.jamendo_enabled:
+            if not self.admin_web_enabled:
+                raise ValueError("Jamendo manual discovery requires admin Web")
+            if self.jamendo_client_id is None or self.jamendo_staging_root is None:
+                raise ValueError("Jamendo manual discovery requires a client ID and staging root")
+            if (
+                re.fullmatch(r"[A-Za-z0-9_-]{4,100}", self.jamendo_client_id.get_secret_value())
+                is None
+            ):
+                raise ValueError("Jamendo client ID is invalid")
+            if not self.jamendo_staging_root.is_absolute():
+                raise ValueError("Jamendo staging root must be absolute")
+            staging = self.jamendo_staging_root.resolve(strict=False)
+            vault = self.vault_root.resolve(strict=False)
+            if staging == vault or staging.is_relative_to(vault):
+                raise ValueError("Jamendo staging root must stay outside the Vault")
         return self
 
 
@@ -251,6 +292,16 @@ class WorkerSettings(_ExplicitSettings):
     retry_base_seconds: float = Field(default=2.0, ge=0.1, le=3_600.0)
     retry_max_seconds: float = Field(default=300.0, ge=1.0, le=86_400.0)
     profile_receipt_cleanup_interval_seconds: int = Field(default=300, ge=1, le=3_600)
+    jamendo_enabled: bool = False
+    jamendo_client_id: SecretStr | None = Field(
+        default=None, repr=False, min_length=4, max_length=100
+    )
+    jamendo_staging_root: Path | None = None
+    jamendo_timeout_seconds: float = Field(default=15.0, ge=1.0, le=15.0)
+    jamendo_max_download_bytes: int = Field(
+        default=150 * 1024 * 1024, ge=1_024, le=1024 * 1024 * 1024
+    )
+    jamendo_minimum_request_interval_seconds: float = Field(default=1.0, ge=1.0, le=60.0)
 
     @model_validator(mode="after")
     def _validate_worker_timing(self) -> Self:
@@ -258,6 +309,20 @@ class WorkerSettings(_ExplicitSettings):
             raise ValueError("worker heartbeat must be less than half the lease")
         if self.retry_max_seconds < self.retry_base_seconds:
             raise ValueError("retry maximum must not be less than retry base")
+        if self.jamendo_enabled:
+            if self.jamendo_client_id is None or self.jamendo_staging_root is None:
+                raise ValueError("Jamendo acquisition requires a client ID and staging root")
+            if (
+                re.fullmatch(r"[A-Za-z0-9_-]{4,100}", self.jamendo_client_id.get_secret_value())
+                is None
+            ):
+                raise ValueError("Jamendo client ID is invalid")
+            if not self.jamendo_staging_root.is_absolute():
+                raise ValueError("Jamendo staging root must be absolute")
+            staging = self.jamendo_staging_root.resolve(strict=False)
+            vault = self.vault_root.resolve(strict=False)
+            if staging == vault or staging.is_relative_to(vault):
+                raise ValueError("Jamendo staging root must stay outside the Vault")
         return self
 
 
@@ -439,10 +504,16 @@ def _merge_secret_files(
 ) -> None:
     for field_name in _SECRET_FIELDS.intersection(env_fields):
         config_file_key = f"{field_name}_file"
+        env_suffix = env_fields[field_name]
+        if field_name in _FILE_ONLY_SECRET_FIELDS and (
+            field_name in explicit
+            or field_name in merged
+            or f"{_ENV_PREFIX}{env_suffix}" in environment
+        ):
+            raise ValueError("secret must be supplied through a file")
         if field_name in explicit:
             merged.pop(config_file_key, None)
             continue
-        env_suffix = env_fields[field_name]
         if f"{_ENV_PREFIX}{env_suffix}" in environment:
             merged.pop(config_file_key, None)
             continue

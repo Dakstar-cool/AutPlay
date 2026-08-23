@@ -1,0 +1,158 @@
+{
+  "contract_version": "release-discovery-v1",
+  "examples": [
+    {
+      "schema": "adapter-manifest.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "adapter_id": "fixture.discovery",
+        "adapter_version": "1.0.0-test",
+        "provider_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "provider_key": "fixture",
+        "capabilities": ["RELEASE_DISCOVERY"],
+        "credential_requirement": "NONE",
+        "network_policy": "OFFLINE",
+        "limits": {
+          "max_artists_per_run": 10,
+          "max_releases_per_page": 25,
+          "max_tracks_per_release": 50,
+          "request_timeout_seconds": 5
+        },
+        "extensions": {"future_capability_hint": "preserved-not-trusted"}
+      }
+    },
+    {
+      "schema": "discovery-query.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "resource": "CANDIDATES",
+        "limit": 50,
+        "canonical_artist_id": "11111111-1111-4111-8111-111111111111",
+        "release_date_from": "2030-01-01",
+        "source_availability": "METADATA_ONLY"
+      }
+    },
+    {
+      "schema": "discovery-command.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "operation_id": "22222222-2222-4222-8222-222222222222",
+        "action": "START_DISCOVERY",
+        "artist_scope": "SELECTED",
+        "canonical_artist_ids": ["11111111-1111-4111-8111-111111111111"]
+      }
+    },
+    {
+      "schema": "discovery-candidate.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "candidate_id": "33333333-3333-4333-8333-333333333333",
+        "release_candidate_id": "66666666-6666-4666-8666-666666666666",
+        "canonical_artist_id": "11111111-1111-4111-8111-111111111111",
+        "provider_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "provider_key": "fixture",
+        "external_track_reference_id": "fixture-track-01",
+        "market_scope": "ZZ",
+        "display_title": "Synthetic Track",
+        "display_artist_credit": "Synthetic Artist",
+        "display_release_title": "Synthetic Release",
+        "release_date": "2030-02-03",
+        "discovered_at": "2030-02-04T05:06:07Z",
+        "disposition": "UNAVAILABLE",
+        "acquisition_state": null,
+        "analysis_state": null,
+        "source_availability": "METADATA_ONLY",
+        "safe_reason_code": "no_authorized_playable_source",
+        "policy_revision": 1,
+        "duplicate_evidence_count": 0
+      }
+    },
+    {
+      "schema": "discovery-result.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "operation_id": "22222222-2222-4222-8222-222222222222",
+        "outcome": "ACCEPTED",
+        "resource_id": "44444444-4444-4444-8444-444444444444",
+        "resource_state": "QUEUED",
+        "safe_reason_code": null,
+        "replayed": false,
+        "terminal": false
+      }
+    },
+    {
+      "schema": "error.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "error_code": "no_authorized_playable_source",
+        "retryable": false,
+        "retry_after_seconds": null,
+        "correlation_code": "TESTA1A0001"
+      }
+    },
+    {
+      "schema": "discovery-release.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "release_candidate_id": "66666666-6666-4666-8666-666666666666",
+        "canonical_artist_id": "11111111-1111-4111-8111-111111111111",
+        "provider_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "provider_key": "fixture",
+        "external_release_reference_id": "fixture-release-01",
+        "market_scope": "ZZ",
+        "display_title": "Synthetic Release",
+        "display_artist_credit": "Synthetic Artist",
+        "release_date": "2030-02-03",
+        "discovered_at": "2030-02-04T05:06:07Z",
+        "aggregate_status": "UNAVAILABLE",
+        "track_counts": {
+          "total": 1,
+          "selectable": 0,
+          "selected": 0,
+          "ready": 0,
+          "unavailable": 1,
+          "failed": 0
+        }
+      }
+    },
+    {
+      "schema": "discovery-run.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "run_id": "44444444-4444-4444-8444-444444444444",
+        "provider_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "provider_key": "fixture",
+        "state": "COMPLETED",
+        "artist_count": 1,
+        "release_count": 1,
+        "track_count": 1,
+        "created_at": "2030-02-04T05:05:00Z",
+        "updated_at": "2030-02-04T05:06:07Z",
+        "next_eligible_at": null,
+        "safe_error_code": null
+      }
+    },
+    {
+      "schema": "artist-policy.schema.json",
+      "instance": {
+        "contract_version": "release-discovery-v1",
+        "schema_version": 1,
+        "canonical_artist_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 1,
+        "discovery_mode": "MANUAL_ONLY",
+        "import_mode": "REVIEW_REQUIRED",
+        "runtime_automation_active": false,
+        "last_checked_at": null,
+        "next_eligible_at": null
+      }
+    }
+  ]
+}

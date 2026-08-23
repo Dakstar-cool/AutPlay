@@ -1,0 +1,354 @@
+{
+  "contract_version": "release-discovery-v1",
+  "schema_version": 1,
+  "status": "ACCEPTED_CONTRACT_RUNTIME_NOT_IMPLEMENTED",
+  "owner_source": "AUTHENTICATED_WEB_ACTOR_USER_ID",
+  "owner_input_allowed": false,
+  "artist_policy_key": ["OWNER_USER_ID", "CANONICAL_ARTIST_ID"],
+  "safe_default": {
+    "discovery_mode": "MANUAL_ONLY",
+    "import_mode": "REVIEW_REQUIRED"
+  },
+  "contract_modes": {
+    "discovery": ["DISABLED", "MANUAL_ONLY", "SCHEDULED"],
+    "import": ["REVIEW_REQUIRED", "AUTO_IMPORT"]
+  },
+  "runtime_activation": {
+    "A1B": ["MANUAL_ONLY", "REVIEW_REQUIRED"],
+    "SCHEDULED": "A1C_REQUIRED",
+    "AUTO_IMPORT": "A1C_REQUIRED"
+  },
+  "capabilities": {
+    "metadata": "RELEASE_DISCOVERY",
+    "playable_bytes": "PLAYABLE_ACQUISITION",
+    "technical_capability_is_authorization": false,
+    "authorization_owner_scoped": true,
+    "authorization_recheck_points": [
+      "BEFORE_ENQUEUE",
+      "BEFORE_PROVIDER_IO",
+      "BEFORE_VAULT_COMMIT",
+      "BEFORE_OWNER_MATERIALIZATION"
+    ]
+  },
+  "bounds": {
+    "web_page_size": 200,
+    "artists_per_manual_run": 100,
+    "releases_per_provider_page": 100,
+    "tracks_per_release": 500,
+    "provider_request_timeout_seconds": 60
+  },
+  "state_machines": {
+    "discovery_run": {
+      "initial": "QUEUED",
+      "terminal": ["COMPLETED", "PARTIAL", "FAILED_TERMINAL", "CANCELLED"],
+      "transitions": [
+        ["QUEUED", "RUNNING"],
+        ["QUEUED", "CANCELLED"],
+        ["RUNNING", "COMPLETED"],
+        ["RUNNING", "PARTIAL"],
+        ["RUNNING", "RETRY_WAIT"],
+        ["RUNNING", "FAILED_TERMINAL"],
+        ["RUNNING", "CANCELLED"],
+        ["RETRY_WAIT", "QUEUED"],
+        ["RETRY_WAIT", "CANCELLED"]
+      ]
+    },
+    "candidate_disposition": {
+      "initial": "DISCOVERED",
+      "terminal": [],
+      "transitions": [
+        ["DISCOVERED", "ALREADY_IN_LIBRARY"],
+        ["DISCOVERED", "IDENTITY_REVIEW_REQUIRED"],
+        ["DISCOVERED", "SELECTABLE"],
+        ["DISCOVERED", "UNAVAILABLE"],
+        ["IDENTITY_REVIEW_REQUIRED", "SELECTABLE"],
+        ["IDENTITY_REVIEW_REQUIRED", "ALREADY_IN_LIBRARY"],
+        ["IDENTITY_REVIEW_REQUIRED", "UNAVAILABLE"],
+        ["IDENTITY_REVIEW_REQUIRED", "IGNORED"],
+        ["SELECTABLE", "SELECTED"],
+        ["SELECTABLE", "ALREADY_IN_LIBRARY"],
+        ["SELECTABLE", "UNAVAILABLE"],
+        ["SELECTABLE", "IGNORED"],
+        ["SELECTED", "SELECTABLE"],
+        ["SELECTED", "ALREADY_IN_LIBRARY"],
+        ["SELECTED", "UNAVAILABLE"],
+        ["SELECTED", "IGNORED"],
+        ["UNAVAILABLE", "SELECTABLE"],
+        ["UNAVAILABLE", "ALREADY_IN_LIBRARY"],
+        ["UNAVAILABLE", "IDENTITY_REVIEW_REQUIRED"],
+        ["UNAVAILABLE", "IGNORED"],
+        ["IGNORED", "SELECTABLE"],
+        ["IGNORED", "IDENTITY_REVIEW_REQUIRED"],
+        ["IGNORED", "UNAVAILABLE"],
+        ["ALREADY_IN_LIBRARY", "SELECTABLE"]
+      ]
+    },
+    "acquisition": {
+      "initial": "QUEUED",
+      "terminal": ["READY", "FAILED_TERMINAL", "CANCELLED"],
+      "transitions": [
+        ["QUEUED", "ACQUIRING"],
+        ["QUEUED", "CANCELLED"],
+        ["QUEUED", "FAILED_TERMINAL"],
+        ["ACQUIRING", "INGESTING"],
+        ["ACQUIRING", "RETRY_WAIT"],
+        ["ACQUIRING", "FAILED_TERMINAL"],
+        ["ACQUIRING", "CANCELLED"],
+        ["INGESTING", "MATERIALIZING"],
+        ["INGESTING", "RETRY_WAIT"],
+        ["INGESTING", "FAILED_TERMINAL"],
+        ["MATERIALIZING", "READY"],
+        ["MATERIALIZING", "RETRY_WAIT"],
+        ["MATERIALIZING", "FAILED_TERMINAL"],
+        ["RETRY_WAIT", "QUEUED"],
+        ["RETRY_WAIT", "CANCELLED"]
+      ]
+    },
+    "analysis": {
+      "initial": "QUEUED",
+      "terminal": ["COMPLETE", "PARTIAL", "FAILED_TERMINAL"],
+      "transitions": [
+        ["QUEUED", "RUNNING"],
+        ["RUNNING", "COMPLETE"],
+        ["RUNNING", "PARTIAL"],
+        ["RUNNING", "FAILED_RETRYABLE"],
+        ["RUNNING", "FAILED_TERMINAL"],
+        ["FAILED_RETRYABLE", "QUEUED"]
+      ]
+    }
+  },
+  "duplicate_evidence": {
+    "candidate_state": false,
+    "effect": "COALESCE_EXISTING_CANDIDATE_AND_INCREMENT_BOUNDED_COUNT"
+  },
+  "candidate_uniqueness": [
+    "OWNER_USER_ID",
+    "PROVIDER_ID",
+    "MARKET_SCOPE",
+    "EXTERNAL_TRACK_REFERENCE_ID"
+  ],
+  "provider_identity": {
+    "durable_key": "PROVIDER_ID",
+    "provider_key_role": "PRESENTATION_ALIAS_ONLY",
+    "provider_key_rename_changes_identity": false,
+    "authorization_and_uniqueness_use_provider_id": true
+  },
+  "provider_page_uniqueness": [
+    "ADAPTER_ID",
+    "ADAPTER_VERSION",
+    "CANONICAL_QUERY_SHA256",
+    "CURSOR_OR_PAGE_IDENTITY"
+  ],
+  "web_idempotency": [
+    "OWNER_USER_ID",
+    "OPERATION_ID",
+    "SERVER_COMPUTED_CANONICAL_REQUEST_SHA256"
+  ],
+  "canonical_request_hash": {
+    "algorithm": "RFC8785_SHA256",
+    "computed_by": "APPLICATION_AFTER_SCHEMA_VALIDATION",
+    "client_supplied_digest_allowed": false,
+    "material": [
+      "CONTRACT_VERSION",
+      "SCHEMA_VERSION",
+      "OPERATION_ID",
+      "ACTION",
+      "EXACT_ACTION_FIELDS"
+    ],
+    "owner_binding": "SEPARATE_IDEMPOTENCY_TUPLE_MEMBER",
+    "excluded": [
+      "COOKIE",
+      "SESSION",
+      "CSRF_TOKEN",
+      "LOCALE",
+      "PRESENTATION_FIELDS",
+      "CLIENT_CLAIMED_HASH"
+    ],
+    "reject_unknown_or_wrong_action_fields_before_hashing": true
+  },
+  "guarded_transitions": {
+    "candidate_disposition": [
+      {
+        "from": "DISCOVERED",
+        "to": "SELECTABLE",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      },
+      {
+        "from": "IDENTITY_REVIEW_REQUIRED",
+        "to": "SELECTABLE",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "NEW_DURABLE_IDENTITY_EVIDENCE",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      },
+      {
+        "from": "SELECTED",
+        "to": "SELECTABLE",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "EXPLICIT_OWNER_RECONSIDERATION",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      },
+      {
+        "from": "UNAVAILABLE",
+        "to": "SELECTABLE",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "NEW_DURABLE_SOURCE_AUTHORIZATION_OR_EVIDENCE",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      },
+      {
+        "from": "IGNORED",
+        "to": "SELECTABLE",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "EXPLICIT_OWNER_RECONSIDERATION",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      },
+      {
+        "from": "ALREADY_IN_LIBRARY",
+        "to": "SELECTABLE",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "OWNER_LIBRARY_MEMBERSHIP_REMOVED",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      },
+      {
+        "from": "SELECTABLE",
+        "to": "SELECTED",
+        "requires": [
+          "OWNER_MATCH",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "EXPLICIT_OWNER_ACTION",
+          "CURRENT_CANDIDATE_REVISION",
+          "IDENTITY_RESOLVED",
+          "AUTHORIZED_PLAYABLE",
+          "POLICY_ACTIVE"
+        ]
+      }
+    ],
+    "acquisition": [
+      {
+        "from": "MATERIALIZING",
+        "to": "READY",
+        "requires": [
+          "LEASE_FENCE_CURRENT",
+          "POLICY_REVISION_CURRENT",
+          "SOURCE_AUTHORIZATION_CURRENT",
+          "CANONICAL_ARTIST_ELIGIBLE",
+          "ACTIVE_CANONICAL_RECORDING",
+          "NON_AMBIGUOUS_IDENTITY_DECISION",
+          "VALID_AUDIO_VARIANT",
+          "COMMITTED_AVAILABLE_VAULT_OBJECT",
+          "OWNER_ACQUISITION_LINEAGE",
+          "OWNER_RESOLVED_USER_TRACK_REF",
+          "OWNER_ACTIVE_LIBRARY_ENTRY",
+          "OWNER_SYNC_OR_OUTBOX_FACT",
+          "STANDARD_ANALYSIS_JOB_ENQUEUED",
+          "OWNER_CANDIDATE_PROJECTION_READY"
+        ]
+      }
+    ]
+  },
+  "ready_requires": [
+    "ACTIVE_CANONICAL_RECORDING",
+    "NON_AMBIGUOUS_IDENTITY_DECISION",
+    "VALID_AUDIO_VARIANT",
+    "COMMITTED_AVAILABLE_VAULT_OBJECT",
+    "OWNER_ACQUISITION_LINEAGE",
+    "OWNER_RESOLVED_USER_TRACK_REF",
+    "OWNER_ACTIVE_LIBRARY_ENTRY",
+    "OWNER_SYNC_OR_OUTBOX_FACT",
+    "STANDARD_ANALYSIS_JOB_ENQUEUED",
+    "OWNER_CANDIDATE_PROJECTION_READY"
+  ],
+  "job_completed_implies_ready": false,
+  "analysis_failure_rolls_back_ready": false,
+  "identity": {
+    "automatic_uncertain_merge": false,
+    "metadata_is_canonical_truth": false,
+    "exact_byte_reuse_requires_independent_owner_authorization": true
+  },
+  "exposure": {
+    "discovery_creates_impression": false,
+    "acquisition_creates_impression": false,
+    "global_audience_broadcast": false,
+    "cross_owner_library_materialization": false,
+    "ready_candidate_uses_existing_mandatory_filters": true
+  },
+  "web_display_metadata": {
+    "allowed_fields": [
+      "DISPLAY_TITLE",
+      "DISPLAY_ARTIST_CREDIT",
+      "DISPLAY_RELEASE_TITLE",
+      "RELEASE_DATE"
+    ],
+    "owner_scoped_no_store_page_only": true,
+    "escaped_text_only": true,
+    "trusted_html_allowed": false,
+    "routine_log_audit_export_allowed": false,
+    "raw_provider_payload_allowed": false
+  },
+  "derived_projection_invariants": {
+    "release_aggregate_status_is_source_of_truth": false,
+    "release_track_counts_each_lte_total": true,
+    "run_counts_are_bounded_projection_only": true,
+    "policy_runtime_automation_active_is_source_of_truth": false
+  },
+  "prohibited_payload_fields": [
+    "owner_user_id",
+    "user_id",
+    "credential",
+    "access_token",
+    "refresh_token",
+    "authorization",
+    "source_url",
+    "source_uri",
+    "private_url",
+    "raw_path",
+    "raw_provider_payload"
+  ],
+  "stable_failure_codes": [
+    "automation_not_active",
+    "discovery_adapter_unavailable",
+    "discovery_target_not_found",
+    "discovery_not_eligible",
+    "source_authorization_unavailable",
+    "no_authorized_playable_source",
+    "identity_review_required",
+    "candidate_not_selectable",
+    "operation_conflict",
+    "policy_revision_stale",
+    "lease_fence_lost",
+    "provider_rate_limited",
+    "provider_timeout",
+    "provider_schema_invalid",
+    "acquisition_failed_terminal"
+  ]
+}

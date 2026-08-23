@@ -179,8 +179,8 @@ def test_login_rotation_second_rotation_and_logout_receipt_are_atomic(
         (future_expiry,),
     )
     database_connection.commit()
-    assert web_service.cleanup_expired(2) == 2
-    assert web_service.cleanup_expired(100) == 3
+    assert web_service.cleanup_expired(2, now=NOW) == 2
+    assert web_service.cleanup_expired(100, now=NOW) == 3
 
 
 def test_web_invitation_active_cap_is_enforced_in_real_postgresql(
@@ -515,7 +515,7 @@ def test_cleanup_bounds_anonymous_challenges_invitations_and_expired_sessions(
     challenge = web_service.begin_login(now=old)
     web_service.login(challenge, invitation.bearer, b"e" * 32, now=old)
 
-    assert web_service.cleanup_expired(100) == 4
+    assert web_service.cleanup_expired(100, now=NOW) == 4
     for table in (
         "web_login_challenge",
         "web_session_invitation",
@@ -541,4 +541,4 @@ def test_anonymous_challenge_rate_state_is_bounded_and_cleaned(
         "UPDATE account.web_login_rate_window SET expires_at=%s", (NOW - timedelta(1),)
     )
     database_connection.commit()
-    assert web_service.cleanup_expired(100) == 2
+    assert web_service.cleanup_expired(100, now=NOW) == 2

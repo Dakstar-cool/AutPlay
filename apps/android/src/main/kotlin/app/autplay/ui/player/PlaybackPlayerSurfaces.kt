@@ -1,6 +1,7 @@
 package app.autplay.ui.player
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,8 +15,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -30,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
@@ -48,6 +52,8 @@ import app.autplay.playback.presentation.canSeek
 import app.autplay.ui.AutPlayArtwork
 import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayIconButton
+import app.autplay.ui.AutPlayPlatformIcon
+import app.autplay.ui.AutPlayPlaybackHalo
 import app.autplay.ui.AutPlayStateKind
 import app.autplay.ui.AutPlayStateSurface
 import app.autplay.ui.AutPlayTokens
@@ -63,41 +69,45 @@ public fun PlaybackMiniPlayer(
         onObservingChanged(true)
         onDispose { onObservingChanged(false) }
     }
-    Surface(
-        color = AutPlayTokens.colors.miniPlayerSurface,
-        contentColor = AutPlayTokens.colors.onMiniPlayer,
-        tonalElevation = 4.dp,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AutPlayArtwork(state.title ?: stringResource(R.string.player_nothing_playing), size = 48.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        state.title ?: stringResource(R.string.player_nothing_playing),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        state.artist ?: stringResource(R.string.player_unknown_artist),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Surface(
+            color = AutPlayTokens.colors.miniPlayerSurface,
+            contentColor = AutPlayTokens.colors.onMiniPlayer,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    AutPlayArtwork(state.title ?: stringResource(R.string.player_nothing_playing), size = 48.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            state.title ?: stringResource(R.string.player_nothing_playing),
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            state.artist ?: stringResource(R.string.player_unknown_artist),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    AutPlayIconButton(
+                        icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
+                        labelRes = if (state.isPlaying) R.string.action_pause else R.string.action_play,
+                        onClick = onTogglePlayPause,
+                        enabled = state.controls is PlaybackControlGate.Allowed,
                     )
                 }
-                AutPlayIconButton(
-                    icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
-                    labelRes = if (state.isPlaying) R.string.action_pause else R.string.action_play,
-                    onClick = onTogglePlayPause,
-                    enabled = state.controls is PlaybackControlGate.Allowed,
-                )
+                PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(3.dp))
             }
-            PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(3.dp))
         }
     }
 }
@@ -130,17 +140,37 @@ public fun NowPlayingScreen(
         }
         return
     }
-    BoxWithConstraints(modifier.fillMaxSize()) {
-        val artworkSize = if (maxWidth < 420.dp) maxWidth - 48.dp else 360.dp
+    BoxWithConstraints(
+        modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.46f),
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.background,
+                    ),
+                ),
+            ),
+    ) {
+        val haloSize = (maxWidth - 16.dp).coerceAtMost(460.dp)
+        val artworkSize = haloSize * 0.64f
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            AutPlayArtwork(
-                title = state.title ?: stringResource(R.string.player_nothing_playing),
-                size = artworkSize,
-            )
+            Box(modifier = Modifier.size(haloSize), contentAlignment = Alignment.Center) {
+                AutPlayPlaybackHalo(
+                    seed = state.title ?: state.mediaId,
+                    isPlaying = state.isPlaying,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                AutPlayArtwork(
+                    title = state.title ?: stringResource(R.string.player_nothing_playing),
+                    size = artworkSize,
+                )
+            }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     state.title ?: stringResource(R.string.player_nothing_playing),
@@ -166,10 +196,10 @@ public fun NowPlayingScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AutPlayIconButton(AutPlayIcon.Previous, R.string.action_previous, {}, enabled = false)
-                AutPlayIconButton(
-                    if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
-                    if (state.isPlaying) R.string.action_pause else R.string.action_play,
-                    onTogglePlayPause,
+                PrimaryTransportButton(
+                    icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
+                    labelRes = if (state.isPlaying) R.string.action_pause else R.string.action_play,
+                    onClick = onTogglePlayPause,
                     enabled = state.controls is PlaybackControlGate.Allowed,
                 )
                 AutPlayIconButton(AutPlayIcon.Next, R.string.action_next, {}, enabled = false)
@@ -210,6 +240,30 @@ public fun NowPlayingScreen(
                 ) { Text(stringResource(R.string.action_dislike)) }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun PrimaryTransportButton(
+    icon: AutPlayIcon,
+    @androidx.annotation.StringRes labelRes: Int,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    val label = stringResource(labelRes)
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        shadowElevation = 8.dp,
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(64.dp).semantics { contentDescription = label },
+        ) {
+            AutPlayPlatformIcon(icon = icon, contentDescription = null, modifier = Modifier.size(30.dp))
         }
     }
 }

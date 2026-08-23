@@ -562,7 +562,9 @@ class UploadSessionRow(Base):
         PG_UUID(as_uuid=True), nullable=False, server_default=text("uuidv7()")
     )
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    device_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    actor_kind: Mapped[str] = mapped_column(Text(), nullable=False, server_default=text("'DEVICE'"))
+    source_candidate_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     target_recording_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(Text(), nullable=False)
     request_hash: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
@@ -598,6 +600,12 @@ class UploadSessionRow(Base):
             ["user_id"],
             ["account.user_account.user_id"],
             name="upload_session_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["source_candidate_id"],
+            ["discovery.candidate.candidate_id"],
+            name="upload_session_source_candidate_id_fkey",
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
@@ -639,6 +647,11 @@ class UploadSessionRow(Base):
         UniqueConstraint("user_id", "idempotency_key", name="uq_upload_session_user_idempotency"),
         UniqueConstraint("upload_session_id", "user_id", name="uq_upload_session_owner_lookup"),
         UniqueConstraint("staging_key", name="uq_upload_session_staging_key"),
+        UniqueConstraint("source_candidate_id", name="uq_upload_session_source_candidate"),
+        CheckConstraint(
+            "(actor_kind = 'DEVICE' AND device_id IS NOT NULL AND source_candidate_id IS NULL) OR (actor_kind = 'PROVIDER' AND device_id IS NULL AND source_candidate_id IS NOT NULL)",
+            name="ck_upload_session_actor",
+        ),
         CheckConstraint(
             "length(idempotency_key) BETWEEN 1 AND 200", name="upload_session_idempotency_key_check"
         ),

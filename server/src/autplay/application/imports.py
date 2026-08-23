@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.import_runtime import (
+    ImportCollectionArtist,
     ImportJobReport,
     ImportReviewResult,
     ImportStartResult,
@@ -18,6 +19,7 @@ from autplay.application.source_adapters import GenericUserExportSourceAdapter
 from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.domain.auth import Principal
 from autplay.domain.jobs import CancelRequestResult, JobLease, JsonValue
+from autplay.domain.web_admin import WebActor
 from autplay.ports.source_adapters import UserExportAdapter
 
 
@@ -52,12 +54,52 @@ class ImportService:
         )
         with self._sessions() as session:
             result = PostgresImportRepository(session).start(
-                principal=principal,
+                owner_user_id=principal.user_id,
                 parsed=parsed,
                 mode=mode,
             )
             session.commit()
             return result
+
+    def start_for_web(
+        self,
+        actor: WebActor,
+        *,
+        payload: bytes,
+        format_name: str = "TXT",
+        schema_version: str = "1",
+    ) -> ImportStartResult:
+        """Start one owner-scoped Web import without manufacturing an Android principal."""
+
+        parsed = self._parser.parse(
+            payload,
+            format_name=format_name,
+            schema_version=schema_version,
+        )
+        with self._sessions() as session:
+            result = PostgresImportRepository(session).start(
+                owner_user_id=actor.user_id,
+                parsed=parsed,
+                mode="LIBRARY_ONLY",
+            )
+            session.commit()
+            return result
+
+    def collection_artists(
+        self,
+        actor: WebActor,
+        import_job_id: UUID,
+        *,
+        limit: int = 100,
+    ) -> tuple[ImportCollectionArtist, ...]:
+        """Return bounded author counts for a Web actor's TXT collection."""
+
+        with self._sessions() as session:
+            return PostgresImportRepository(session).collection_artists(
+                owner_user_id=actor.user_id,
+                import_job_id=import_job_id,
+                limit=limit,
+            )
 
     def report(
         self,

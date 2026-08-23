@@ -16,6 +16,7 @@ object SettingsTransferCodec {
 
     fun encode(settings: NonSecretSettings): ByteArray = buildJsonObject {
         put("schema_version", SCHEMA_VERSION)
+        put("app_language", settings.appLanguage)
         put("appearance_mode", settings.appearanceMode)
         put("accent_palette", settings.accentPalette)
         put("sync_on_metered_network", settings.syncOnMeteredNetwork)
@@ -29,6 +30,7 @@ object SettingsTransferCodec {
             "SETTINGS_SCHEMA_UNSUPPORTED"
         }
         val appearance = root.getValue("appearance_mode").jsonPrimitive.content
+        val appLanguage = root["app_language"]?.jsonPrimitive?.content ?: current.appLanguage
         val palette = root.getValue("accent_palette").jsonPrimitive.content
         val prefetch = root.getValue("wave_prefetch_mode").jsonPrimitive.content
         require(appearance in setOf("SYSTEM", "LIGHT", "DARK")) { "SETTINGS_APPEARANCE_INVALID" }
@@ -37,6 +39,7 @@ object SettingsTransferCodec {
             "SETTINGS_WAVE_PREFETCH_INVALID"
         }
         return current.copy(
+            appLanguage = appLanguage,
             appearanceMode = appearance,
             accentPalette = palette,
             syncOnMeteredNetwork = root.getValue("sync_on_metered_network").jsonPrimitive.boolean,

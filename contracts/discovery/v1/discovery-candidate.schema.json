@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/discovery-candidate.schema.json",
+  "title": "Redacted owner-scoped discovery candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": [
+    "contract_version",
+    "schema_version",
+    "candidate_id",
+    "release_candidate_id",
+    "canonical_artist_id",
+    "provider_id",
+    "provider_key",
+    "external_track_reference_id",
+    "market_scope",
+    "display_title",
+    "display_artist_credit",
+    "display_release_title",
+    "discovered_at",
+    "disposition",
+    "acquisition_state",
+    "analysis_state",
+    "source_availability",
+    "safe_reason_code",
+    "policy_revision",
+    "duplicate_evidence_count"
+  ],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "candidate_id": {"type": "string", "format": "uuid"},
+    "release_candidate_id": {"type": "string", "format": "uuid"},
+    "canonical_artist_id": {"type": "string", "format": "uuid"},
+    "provider_id": {"type": "string", "format": "uuid"},
+    "provider_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "external_track_reference_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "market_scope": {"type": "string", "minLength": 1, "maxLength": 32},
+    "display_title": {"type": "string", "minLength": 1, "maxLength": 512},
+    "display_artist_credit": {"type": "string", "minLength": 1, "maxLength": 512},
+    "display_release_title": {"type": ["string", "null"], "maxLength": 512},
+    "release_date": {"type": ["string", "null"], "format": "date"},
+    "discovered_at": {"type": "string", "format": "date-time"},
+    "disposition": {
+      "enum": [
+        "DISCOVERED",
+        "ALREADY_IN_LIBRARY",
+        "IDENTITY_REVIEW_REQUIRED",
+        "SELECTABLE",
+        "SELECTED",
+        "UNAVAILABLE",
+        "IGNORED"
+      ]
+    },
+    "acquisition_state": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "QUEUED",
+        "ACQUIRING",
+        "INGESTING",
+        "MATERIALIZING",
+        "READY",
+        "RETRY_WAIT",
+        "FAILED_TERMINAL",
+        "CANCELLED"
+      ]
+    },
+    "analysis_state": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "QUEUED",
+        "RUNNING",
+        "COMPLETE",
+        "PARTIAL",
+        "FAILED_RETRYABLE",
+        "FAILED_TERMINAL"
+      ]
+    },
+    "source_availability": {
+      "enum": ["METADATA_ONLY", "AUTHORIZED_PLAYABLE", "AUTHORIZATION_UNAVAILABLE"]
+    },
+    "safe_reason_code": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "policy_revision": {"type": "integer", "minimum": 1},
+    "duplicate_evidence_count": {"type": "integer", "minimum": 0, "maximum": 2147483647}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"source_availability": {"const": "METADATA_ONLY"}}},
+      "then": {
+        "properties": {
+          "disposition": {"const": "UNAVAILABLE"},
+          "acquisition_state": {"const": null},
+          "analysis_state": {"const": null},
+          "safe_reason_code": {"const": "no_authorized_playable_source"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"source_availability": {"const": "AUTHORIZATION_UNAVAILABLE"}}
+      },
+      "then": {
+        "properties": {
+          "disposition": {"const": "UNAVAILABLE"},
+          "acquisition_state": {"const": null},
+          "analysis_state": {"const": null},
+          "safe_reason_code": {"const": "source_authorization_unavailable"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"disposition": {"enum": ["SELECTABLE", "SELECTED"]}}},
+      "then": {"properties": {"source_availability": {"const": "AUTHORIZED_PLAYABLE"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "acquisition_state": {
+            "enum": [
+              "QUEUED",
+              "ACQUIRING",
+              "INGESTING",
+              "MATERIALIZING",
+              "READY",
+              "RETRY_WAIT",
+              "FAILED_TERMINAL",
+              "CANCELLED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "disposition": {"const": "SELECTED"},
+          "source_availability": {"const": "AUTHORIZED_PLAYABLE"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "analysis_state": {
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "COMPLETE",
+              "PARTIAL",
+              "FAILED_RETRYABLE",
+              "FAILED_TERMINAL"
+            ]
+          }
+        }
+      },
+      "then": {"properties": {"acquisition_state": {"const": "READY"}}}
+    },
+    {
+      "if": {"properties": {"acquisition_state": {"const": "READY"}}},
+      "then": {"properties": {"analysis_state": {"type": "string"}}}
+    }
+  ]
+}

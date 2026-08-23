@@ -1,8 +1,13 @@
 package app.autplay
 
-import android.os.Bundle
+import android.app.LocaleManager
+import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.LocaleList
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -24,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,6 +47,7 @@ import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -114,6 +121,7 @@ import app.autplay.ui.AutPlayAccent
 import app.autplay.ui.AutPlayAppearance
 import app.autplay.ui.AutPlayTheme
 import app.autplay.ui.AutPlayThemeMode
+import app.autplay.ui.AppLanguage
 import app.autplay.ui.UiDestination
 import app.autplay.ui.core.SearchGenerationGuard
 import app.autplay.ui.core.SearchResultStore
@@ -145,6 +153,7 @@ import app.autplay.ui.SearchScreenUiState
 import app.autplay.ui.rememberAutPlayNavigationState
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.flowOf
@@ -219,44 +228,137 @@ internal fun AutPlayBootstrap(
             return
         }
         val settings = checkNotNull(loadedSettings)
-        val binding = settings.activeUserId?.let { userId ->
-            val deviceId = settings.deviceId ?: return@let null
-            val profileId = settings.activeServerProfileId ?: return@let null
-            ClientEventBinding(userId, deviceId, profileId)
-    }
-    val context = LocalContext.current
-        var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
-        LaunchedEffect(binding) {
-            waveCoordinator?.close()
-            waveCoordinator = if (binding == null) null else runCatching {
-                AutPlayRuntime.waveCoordinator(context, binding)
-            }.getOrNull()
-        }
-        DisposableEffect(Unit) {
-            onDispose { waveCoordinator?.close() }
-        }
-        AutPlayTheme(appearanceFrom(settings)) {
-            Surface(modifier = Modifier.fillMaxSize()) {
-                key(binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID) {
-                    OfflineLibraryScreen(
-                        binding,
-                        searchRepository,
-                        sliceRepository,
-                        playbackRepository,
-                        playbackOwner,
-                        downloadRepository,
-                        syncStatusRepository,
-                        syncScheduler,
-                        importRepository,
-                        recommendationRepository,
-                        settings,
+        AppLanguageProvider(settings.appLanguage) {
+            val binding = settings.activeUserId?.let { userId ->
+                val deviceId = settings.deviceId ?: return@let null
+                val profileId = settings.activeServerProfileId ?: return@let null
+                ClientEventBinding(userId, deviceId, profileId)
+            }
+            val context = LocalContext.current
+            val pairingScope = rememberCoroutineScope()
+            var pairingSafeError by remember { mutableStateOf<String?>(null) }
+            val pairingOrigins = remember { ConcurrentHashMap<String, String>() }
+            val allowUnsafePairingHttp =
+                (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            val pairingRuntime = remember(context, settingsStore, sliceRepository, syncScheduler) {
+                val credentialStore = AndroidKeystoreCredentialStore(context.applicationContext)
+                val deviceKeys = AndroidM5DeviceKeyStore()
+                val port = OkHttpProfilePairingPort(
+                    originForProfile = { profile -> pairingOrigins[profile.value] },
+                    credentials = credentialStore,
+                    deviceKeys = deviceKeys,
+                    allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
+                )
+                ProfilePairingRuntime(
+                    scope = pairingScope,
+                    settings = settingsStore,
+                    credentials = credentialStore,
+                    deviceKeys = deviceKeys,
+                    port = port,
+                    materialization = M5BindingMaterializationCoordinator(
                         settingsStore,
-                        waveCoordinator,
-                    )
+                        credentialStore,
+                        deviceKeys,
+                        RoomM5LocalIntentMaterializer(
+                            AutPlayRuntime.database(context),
+                            sliceRepository,
+                            syncScheduler,
+                        ),
+                    ),
+                    deviceName = android.os.Build.MODEL ?: "Android device",
+                    reportSafeError = { pairingSafeError = it },
+                    registerOrigin = { profile, origin -> pairingOrigins[profile.value] = origin },
+                    allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
+                )
+            }
+            val pairingRuntimeState by pairingRuntime.state.collectAsState()
+            LaunchedEffect(pairingRuntime) { pairingRuntime.recoverAndRefresh() }
+            var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
+            LaunchedEffect(binding) {
+                waveCoordinator?.close()
+                waveCoordinator = if (binding == null) null else runCatching {
+                    AutPlayRuntime.waveCoordinator(context, binding)
+                }.getOrNull()
+            }
+            DisposableEffect(Unit) {
+                onDispose { waveCoordinator?.close() }
+            }
+            AutPlayTheme(appearanceFrom(settings)) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    key(binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID) {
+                        OfflineLibraryScreen(
+                            binding,
+                            searchRepository,
+                            sliceRepository,
+                            playbackRepository,
+                            playbackOwner,
+                            downloadRepository,
+                            syncStatusRepository,
+                            syncScheduler,
+                            importRepository,
+                            recommendationRepository,
+                            settings,
+                            settingsStore,
+                            waveCoordinator,
+                            pairingRuntime,
+                            pairingRuntimeState,
+                            pairingSafeError,
+                            clearPairingSafeError = { pairingSafeError = null },
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun AppLanguageProvider(
+    storedLanguage: String,
+    content: @Composable () -> Unit,
+) {
+    val baseContext = LocalContext.current
+    val baseConfiguration = LocalConfiguration.current
+    val knownLanguage = AppLanguage.knownFromStoredValue(storedLanguage)
+    val language = knownLanguage ?: AppLanguage.System
+    LaunchedEffect(baseContext, knownLanguage) {
+        if (knownLanguage != null && knownLanguage != AppLanguage.System) {
+            synchronizeFrameworkAppLanguage(baseContext, knownLanguage)
+        }
+    }
+    val localizedContext = remember(baseContext, baseConfiguration, language) {
+        localizedAppContext(baseContext, language)
+    }
+    if (localizedContext === baseContext) {
+        content()
+    } else {
+        CompositionLocalProvider(
+            LocalContext provides localizedContext,
+            LocalConfiguration provides localizedContext.resources.configuration,
+            LocalResources provides localizedContext.resources,
+            content = content,
+        )
+    }
+}
+
+internal fun synchronizeFrameworkAppLanguage(context: Context, language: AppLanguage) {
+    if (Build.VERSION.SDK_INT < 33) return
+    val desiredLocales = language.languageTag
+        ?.let(LocaleList::forLanguageTags)
+        ?: LocaleList.getEmptyLocaleList()
+    val localeManager = context.getSystemService(LocaleManager::class.java)
+    if (localeManager.applicationLocales.toLanguageTags() != desiredLocales.toLanguageTags()) {
+        localeManager.applicationLocales = desiredLocales
+    }
+}
+
+internal fun localizedAppContext(baseContext: Context, language: AppLanguage): Context {
+    val languageTag = language.languageTag ?: return baseContext
+    val locale = Locale.forLanguageTag(languageTag)
+    val configuration = Configuration(baseContext.resources.configuration).apply {
+        setLocales(LocaleList(locale))
+    }
+    return baseContext.createConfigurationContext(configuration)
 }
 
 @Composable
@@ -275,41 +377,13 @@ private fun OfflineLibraryScreen(
     settings: NonSecretSettings,
     settingsStore: NonSecretSettingsStore,
     waveCoordinator: WaveCoordinator?,
+    pairingRuntime: ProfilePairingRuntime,
+    pairingRuntimeState: app.autplay.application.profilepairing.ProfilePairingRuntimeState,
+    pairingSafeError: String?,
+    clearPairingSafeError: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var pairingSafeError by remember { mutableStateOf<String?>(null) }
-    val pairingOrigins = remember { ConcurrentHashMap<String, String>() }
-    val allowUnsafePairingHttp = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    val pairingRuntime = remember(context, settingsStore, sliceRepository, syncScheduler) {
-        val credentialStore = AndroidKeystoreCredentialStore(context.applicationContext)
-        val deviceKeys = AndroidM5DeviceKeyStore()
-        val port = OkHttpProfilePairingPort(
-            originForProfile = { profile -> pairingOrigins[profile.value] },
-            credentials = credentialStore,
-            deviceKeys = deviceKeys,
-            allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
-        )
-        ProfilePairingRuntime(
-            scope = scope,
-            settings = settingsStore,
-            credentials = credentialStore,
-            deviceKeys = deviceKeys,
-            port = port,
-            materialization = M5BindingMaterializationCoordinator(
-                settingsStore,
-                credentialStore,
-                deviceKeys,
-                RoomM5LocalIntentMaterializer(AutPlayRuntime.database(context), sliceRepository, syncScheduler),
-            ),
-            deviceName = android.os.Build.MODEL ?: "Android device",
-            reportSafeError = { pairingSafeError = it },
-            registerOrigin = { profile, origin -> pairingOrigins[profile.value] = origin },
-            allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
-        )
-    }
-    val pairingRuntimeState by pairingRuntime.state.collectAsState()
-    LaunchedEffect(pairingRuntime) { pairingRuntime.recoverAndRefresh() }
     val resources = LocalResources.current
     val coreProductRepository = remember(context) { CoreProductRepository(AutPlayRuntime.database(context)) }
     val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
@@ -351,7 +425,7 @@ private fun OfflineLibraryScreen(
     LaunchedEffect(pairingSafeError) {
         pairingSafeError?.let {
             stableError = it
-            pairingSafeError = null
+            clearPairingSafeError()
         }
     }
     var homeError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
@@ -1136,7 +1210,13 @@ private fun rememberOfflineActivityLaunchers(
             runCatching {
                 val bytes = context.contentResolver.openInputStream(uri)?.use(::readBoundedSettingsBytes)
                     ?: error("SETTINGS_IMPORT_SOURCE_UNAVAILABLE")
-                settingsStore.mutate { current -> SettingsTransferCodec.decode(bytes, current) }
+                var importedLanguage: AppLanguage? = null
+                settingsStore.mutate { current ->
+                    SettingsTransferCodec.decode(bytes, current).also { imported ->
+                        importedLanguage = AppLanguage.knownFromStoredValue(imported.appLanguage)
+                    }
+                }
+                importedLanguage?.let { synchronizeFrameworkAppLanguage(context, it) }
             }.onFailure { reportError("SETTINGS_IMPORT_UNAVAILABLE") }
         }
     }
@@ -1312,13 +1392,27 @@ internal fun ProfileFrontendScreen(
 internal fun SettingsFrontendScreen(
     settings: NonSecretSettings,
     onUpdate: ((NonSecretSettings) -> NonSecretSettings) -> Unit,
+    onAppLanguageChange: (AppLanguage) -> Unit,
     onChooseLibraryRoot: () -> Unit,
     onRescanLibraryRoot: () -> Unit,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
     onNavigate: (UiDestination) -> Unit,
 ) {
-    Text(stringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleMedium)
+    val appLanguage = AppLanguage.fromStoredValue(settings.appLanguage)
+    Text(stringResource(R.string.settings_language), style = MaterialTheme.typography.titleMedium)
+    AppLanguage.entries.forEach { language ->
+        OutlinedButton(onClick = { onAppLanguageChange(language) }) {
+            val label = stringResource(language.labelRes)
+            Text(if (appLanguage == language) "✓ $label" else label)
+        }
+    }
+
+    Text(
+        stringResource(R.string.settings_appearance),
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(top = 16.dp),
+    )
     listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
         OutlinedButton(onClick = { onUpdate { current -> current.copy(appearanceMode = mode) } }) {
             val label = appearanceModeLabel(mode)

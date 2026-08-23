@@ -89,7 +89,7 @@ def create_import_router(
     @router.post("", response_model=None, status_code=202)
     async def start_import(
         request: Request,
-        format_name: str = Query(alias="format", pattern="^(CSV|JSON|HTML)$"),
+        format_name: str = Query(alias="format", pattern="^(CSV|JSON|HTML|TXT)$"),
         schema_version: str = Query(default="1", min_length=1, max_length=20),
         mode: str = Query(default="LIBRARY_ONLY", pattern="^(LIBRARY_ONLY|MATERIALIZE)$"),
     ) -> JSONResponse:

@@ -1,12 +1,13 @@
 # AutPlay Post-MVP Library Discovery and Contextual Recommendations v1
 
-**Status:** USER-PROVIDED PRODUCT REQUIREMENTS; PROPOSED DELIVERY DESIGN; IMPLEMENTATION NOT STARTED
+**Status:** USER-PROVIDED PRODUCT REQUIREMENTS; A1A CONTRACT ACCEPTED; A1 RUNTIME AND R1 NOT STARTED
 
 **Recorded:** 2026-08-21
 
 **Execution boundary:** post-MVP expansion only; this document does not reopen P00-P14, create P15,
-extend Server M6, select an external provider or authorize implementation without a separate user
-activation.
+extend Server M6 or select an external provider. A1A was separately activated and reached PASS on
+2026-08-21; A1B/A1C and all R1 runtime work still require their owning prompts and
+prerequisites.
 
 ## 1. Purpose
 
@@ -25,6 +26,12 @@ the durable taste profile.
 This specification is narrower than the historical Release Watcher description in `ТЗ AutPlay.md`
 for these two features. Existing security, identity, acquisition, Vault, recommendation and M6 Web
 contracts remain authoritative.
+
+The later
+[`AutPlay_Recommendation_System_Current_and_Future_v1.md`](AutPlay_Recommendation_System_Current_and_Future_v1.md)
+compiles the verified current recommender with this temporal layer and the user's profile-maturity
+cold-start proposal. The dedicated R1A/R1B/R1C prompts own future execution; this document remains
+the original A1/R1 product supplement.
 
 ## 2. Delivery decision: hybrid extension
 
@@ -307,7 +314,23 @@ The temporal layer cannot bypass ACL/availability/identity/dislike/exclusion fil
 artist-repeat and release-repeat safeguards. With insufficient or stale evidence it becomes neutral
 and the P11 baseline remains available.
 
-### 5.5. Architecture and replay
+### 5.5. Profile maturity, score and confidence
+
+Cold-start plasticity is part of the same R1 representation rather than a second recommender. For
+each supported direction, `score` describes estimated affinity and `confidence` describes the
+strength/consistency of its evidence. Confidence cannot be simulated by making a score extreme.
+
+Global profile maturity is derived from bounded effective interaction mass, signal quality,
+coverage/diversity, observation span, recency and contradiction. Registration age alone is not a
+valid maturity proxy. Low maturity/confidence increases the influence of reliable fresh explicit or
+organic evidence within versioned caps; as maturity grows, a single action changes the durable
+profile less while the short-term contextual layer remains responsive.
+
+Organic and recommendation-origin evidence use separate weights to limit self-reinforcing output.
+One Like, repeat or skip cannot produce an unbounded update. With insufficient evidence, confidence
+shrinks the adjustment toward the deterministic P11 baseline and controlled exploration.
+
+### 5.6. Architecture and replay
 
 R1 is implemented behind existing `UserRepresentationProvider`, `Ranker`/`Reranker` and immutable
 pipeline registry seams. The public recommendation request/response and attribution contracts need
@@ -335,7 +358,7 @@ also use a deterministic device-local delta to rerank a verified offline pack, p
 server's immutable source rank and mandatory local policy. Later sync reconciles new interactions;
 it does not rewrite already recorded impressions.
 
-### 5.6. Evaluation and activation
+### 5.7. Evaluation and activation
 
 R1 must pass these gates before serving activation:
 
@@ -359,10 +382,10 @@ These are post-MVP expansion milestones, not P15 and not part of Server M6:
 
 | Milestone | Prerequisites | Bounded outcome |
 | --- | --- | --- |
-| Post-MVP R1-A temporal contract | Current MVP/post-RC line closed; explicit activation | Versioned feature/snapshot/replay contract, offline fixtures and ADR; no serving change |
-| Post-MVP R1-B shadow implementation | R1-A accepted | CPU representation/ranker, additive persistence if required, offline and shadow evidence |
-| Post-MVP R1-C controlled activation | R1-B green; explicit activation decision | New immutable pipeline version, rollback and monitored serving evidence |
-| Post-MVP A1-A discovery/acquisition contract | Server M6 PASS; current MVP/post-RC line closed; explicit activation | Provider-neutral domain/Web contract, rights/provider decision boundary, state machine and ADR; no provider selected implicitly |
+| [Post-MVP R1A adaptive contract](../build-pack/prompts/POST_MVP_R1A_ADAPTIVE_RECOMMENDATIONS_CONTRACT.md) | Current MVP/post-RC line closed; explicit activation | Versioned temporal/maturity/confidence feature, snapshot and replay contract, offline fixtures and ADR; no serving change |
+| [Post-MVP R1B shadow implementation](../build-pack/prompts/POST_MVP_R1B_ADAPTIVE_RECOMMENDATIONS_SHADOW.md) | R1A accepted | CPU representation/ranker, additive persistence if required, offline and shadow evidence |
+| [Post-MVP R1C controlled activation](../build-pack/prompts/POST_MVP_R1C_ADAPTIVE_RECOMMENDATIONS_ACTIVATION.md) | R1B PASS; explicit activation decision | New immutable pipeline version, rollback and monitored serving evidence |
+| [Post-MVP A1A discovery/acquisition contract](../build-pack/prompts/POST_MVP_A1A_DISCOVERY_ACQUISITION_CONTRACT.md) | PASS; P10/P11/Server M6 PASS and explicit activation | Accepted provider-neutral domain/Web contract, immutable provider identity, server-computed idempotency, guarded orthogonal state machines, nine executable schemas/fixtures, ADR-033 and final review zero Critical/Major/Minor; no runtime/provider selected |
 | Post-MVP A1-B manual discovery/import | A1-A accepted; one authorized adapter explicitly selected | Discovery jobs, review/select flow, dedupe/identity/acquisition/ingest integration and Web qualification |
 | Post-MVP A1-C opt-in automation | A1-B green; separate auto-import acceptance | Per-artist policy, guarded auto-import, retry/audit/rollback controls and recommendation integration evidence |
 

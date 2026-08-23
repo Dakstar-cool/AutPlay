@@ -11,7 +11,7 @@ from autplay.domain.web_admin import WebActor, WebSessionMetadata
 
 
 class WebAdminRepository(Protocol):
-    def cleanup_expired(self, limit: int) -> int: ...
+    def cleanup_expired(self, limit: int, now: datetime) -> int: ...
     def issue_invitation(
         self,
         user_id: UUID,

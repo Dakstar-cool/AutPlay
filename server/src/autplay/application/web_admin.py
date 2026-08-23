@@ -39,11 +39,11 @@ class WebAdminService:
         self._units = units
         self._csrf_secret = csrf_secret
 
-    def cleanup_expired(self, limit: int = 10_000) -> int:
+    def cleanup_expired(self, limit: int = 10_000, *, now: datetime | None = None) -> int:
         if not 1 <= limit <= 10_000:
             raise ValueError("web admin cleanup limit must be within 1..10000")
         with self._units() as unit:
-            deleted = unit.web_admin.cleanup_expired(limit)
+            deleted = unit.web_admin.cleanup_expired(limit, _now(now))
             unit.commit()
             return deleted
 

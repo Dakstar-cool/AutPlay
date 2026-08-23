@@ -29,8 +29,6 @@
     <string name="home_hero_ready">Ready to play</string>
     <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
     <string name="home_hero_empty">Choose a local track to start your flow</string>
-    <string name="home_hero_ring_active">Animated playback ring</string>
-    <string name="home_hero_ring_idle">Playback ring, paused</string>
     <string name="home_context_collections">Made for the moment</string>
     <string name="home_context_collections_placeholder">Context mixes are coming soon. The categories below are a preview.</string>
     <string name="home_context_energy">High energy</string>
@@ -378,6 +376,10 @@
     <string name="profile_confirm_disconnect_title">Disconnect this phone?</string>
     <string name="profile_confirm_disconnect_body">This only removes the local connection. It does not claim that a remote session was signed out.</string>
 
+    <string name="settings_language">Application language</string>
+    <string name="settings_language_system">System language</string>
+    <string name="settings_language_russian">Russian</string>
+    <string name="settings_language_english">English</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme_system">Use device theme</string>
     <string name="settings_theme_light">Light theme</string>

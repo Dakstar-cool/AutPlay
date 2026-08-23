@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/discovery-run.schema.json",
+  "title": "Redacted owner-scoped discovery run v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": [
+    "contract_version",
+    "schema_version",
+    "run_id",
+    "provider_id",
+    "provider_key",
+    "state",
+    "artist_count",
+    "release_count",
+    "track_count",
+    "created_at",
+    "updated_at",
+    "next_eligible_at",
+    "safe_error_code"
+  ],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "format": "uuid"},
+    "provider_id": {"type": "string", "format": "uuid"},
+    "provider_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "state": {
+      "enum": [
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED",
+        "PARTIAL",
+        "RETRY_WAIT",
+        "FAILED_TERMINAL",
+        "CANCELLED"
+      ]
+    },
+    "artist_count": {"type": "integer", "minimum": 1, "maximum": 100},
+    "release_count": {"type": "integer", "minimum": 0, "maximum": 10000},
+    "track_count": {"type": "integer", "minimum": 0, "maximum": 50000},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "next_eligible_at": {"type": ["string", "null"], "format": "date-time"},
+    "safe_error_code": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_]{0,63}$"}
+  }
+}

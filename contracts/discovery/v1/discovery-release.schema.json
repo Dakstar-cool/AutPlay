@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/discovery-release.schema.json",
+  "title": "Redacted owner-scoped discovered release v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": [
+    "contract_version",
+    "schema_version",
+    "release_candidate_id",
+    "canonical_artist_id",
+    "provider_id",
+    "provider_key",
+    "external_release_reference_id",
+    "market_scope",
+    "display_title",
+    "display_artist_credit",
+    "release_date",
+    "discovered_at",
+    "aggregate_status",
+    "track_counts"
+  ],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "release_candidate_id": {"type": "string", "format": "uuid"},
+    "canonical_artist_id": {"type": "string", "format": "uuid"},
+    "provider_id": {"type": "string", "format": "uuid"},
+    "provider_key": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "external_release_reference_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "market_scope": {"type": "string", "minLength": 1, "maxLength": 32},
+    "display_title": {"type": "string", "minLength": 1, "maxLength": 512},
+    "display_artist_credit": {"type": "string", "minLength": 1, "maxLength": 512},
+    "release_date": {"type": ["string", "null"], "format": "date"},
+    "discovered_at": {"type": "string", "format": "date-time"},
+    "aggregate_status": {
+      "enum": [
+        "DISCOVERED",
+        "REVIEW_REQUIRED",
+        "SELECTED",
+        "IN_PROGRESS",
+        "PARTIALLY_READY",
+        "READY",
+        "UNAVAILABLE",
+        "FAILED"
+      ]
+    },
+    "track_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "selectable", "selected", "ready", "unavailable", "failed"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0, "maximum": 500},
+        "selectable": {"type": "integer", "minimum": 0, "maximum": 500},
+        "selected": {"type": "integer", "minimum": 0, "maximum": 500},
+        "ready": {"type": "integer", "minimum": 0, "maximum": 500},
+        "unavailable": {"type": "integer", "minimum": 0, "maximum": 500},
+        "failed": {"type": "integer", "minimum": 0, "maximum": 500}
+      }
+    }
+  }
+}

@@ -99,6 +99,14 @@ class ImportStartResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ImportCollectionArtist:
+    """One bounded artist name/count projection from an owner TXT import."""
+
+    name: str
+    track_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class ImportEntryReport:
     """Redacted per-row report; raw user payload never enters this view."""
 
@@ -159,7 +167,7 @@ class PostgresImportRepository:
     def start(
         self,
         *,
-        principal: Principal,
+        owner_user_id: UUID,
         parsed: ParsedImport,
         mode: str,
     ) -> ImportStartResult:
@@ -171,7 +179,7 @@ class PostgresImportRepository:
         identity = hashlib.sha256(
             b"\0".join(
                 (
-                    str(principal.user_id).encode(),
+                    str(owner_user_id).encode(),
                     envelope.adapter_id.encode(),
                     envelope.adapter_version.encode(),
                     envelope.schema_version.encode(),
@@ -195,10 +203,10 @@ class PostgresImportRepository:
         enqueued = PostgresJobRepository(self._session).enqueue(
             EnqueueJob(
                 key=IMPORT_JOB_KEY,
-                user_id=principal.user_id,
+                user_id=owner_user_id,
                 payload=payload,
                 priority=3,
-                idempotency_scope=f"library-import:{principal.user_id}",
+                idempotency_scope=f"library-import:{owner_user_id}",
                 idempotency_key=identity,
             )
         )
@@ -221,7 +229,7 @@ class PostgresImportRepository:
         import_job = ImportJobRow(
             import_job_id=import_job_id,
             job_id=enqueued.job_id,
-            user_id=principal.user_id,
+            user_id=owner_user_id,
             adapter_id=envelope.adapter_id,
             adapter_version=envelope.adapter_version,
             input_sha256=envelope.input_sha256,
@@ -238,6 +246,53 @@ class PostgresImportRepository:
         self._session.flush((import_job,))
         self._session.add_all([_entry_row(import_job_id, parsed, row) for row in parsed.rows])
         return ImportStartResult(import_job_id, enqueued.job_id, replayed=False)
+
+    def collection_artists(
+        self,
+        *,
+        owner_user_id: UUID,
+        import_job_id: UUID,
+        limit: int = 100,
+    ) -> tuple[ImportCollectionArtist, ...]:
+        """Aggregate artist display names from one owner-scoped TXT import."""
+
+        if not 1 <= limit <= 100:
+            raise ValueError("collection artist limit is invalid")
+        job = self._session.scalar(
+            select(ImportJobRow).where(
+                ImportJobRow.import_job_id == import_job_id,
+                ImportJobRow.user_id == owner_user_id,
+            )
+        )
+        if job is None or _summary(job.summary).get("format") != "TXT":
+            raise ImportNotFoundError
+        count = func.count(ImportEntryRow.import_entry_id)
+        rows = self._session.execute(
+            select(ImportEntryRow.raw_artist, count.label("track_count"))
+            .where(
+                ImportEntryRow.import_job_id == import_job_id,
+                ImportEntryRow.raw_artist != "",
+            )
+            .group_by(ImportEntryRow.raw_artist)
+        ).all()
+        aggregated: dict[str, tuple[str, int]] = {}
+        for raw_name, raw_count in rows:
+            name = str(raw_name)
+            normalized = normalize_text(name)
+            if not normalized:
+                continue
+            display, current_count = aggregated.get(normalized, (name, 0))
+            if (name.casefold(), name) < (display.casefold(), display):
+                display = name
+            aggregated[normalized] = (display, current_count + int(raw_count))
+        ordered = sorted(
+            aggregated.items(),
+            key=lambda item: (-item[1][1], item[0], item[1][0]),
+        )
+        return tuple(
+            ImportCollectionArtist(display, track_count)
+            for _, (display, track_count) in ordered[:limit]
+        )
 
     def report(
         self,
@@ -938,6 +993,7 @@ def _initial_summary(parsed: ParsedImport) -> dict[str, JsonValue]:
     issues = Counter(row.error_code for row in parsed.rows if row.error_code is not None)
     return {
         "schema_version": 1,
+        "format": parsed.envelope.format.value,
         "total_rows": len(parsed.rows),
         "valid_rows": parsed.valid_count,
         "malformed_rows": parsed.malformed_count,
@@ -1350,6 +1406,7 @@ def _decimal(value: float | None) -> Decimal | None:
 
 __all__ = (
     "IMPORT_JOB_KEY",
+    "ImportCollectionArtist",
     "ImportEntryReport",
     "ImportJobReport",
     "ImportNotFoundError",

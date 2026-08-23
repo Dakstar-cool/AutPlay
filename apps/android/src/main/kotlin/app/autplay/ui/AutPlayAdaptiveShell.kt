@@ -74,12 +74,13 @@ public fun AutPlayAdaptiveShell(
             Scaffold(
                 topBar = {
                     AutPlayTopBar(
-                        canNavigateBack = true,
+                        canNavigateBack = canNavigateBack,
                         onNavigateBack = onNavigateBack,
                         onProfileClick = onProfileClick,
                         onSettingsClick = onSettingsClick,
                         onNowPlayingClick = onNowPlayingClick,
                         nowPlayingAvailable = false,
+                        immersive = true,
                     )
                 },
             ) { padding -> routeContent(padding) }
@@ -244,22 +245,35 @@ private fun AutPlayTopBar(
     onSettingsClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
     nowPlayingAvailable: Boolean,
+    immersive: Boolean = false,
 ) {
     TopAppBar(
-        title = { Text(stringResource(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = {
+            if (!immersive) {
+                Text(stringResource(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
         navigationIcon = {
             if (canNavigateBack) {
                 AutPlayIconButton(AutPlayIcon.Back, R.string.action_back, onNavigateBack)
             }
         },
         actions = {
-            if (nowPlayingAvailable) {
-                AutPlayIconButton(AutPlayIcon.Play, R.string.nav_now_playing, onNowPlayingClick)
+            if (!immersive) {
+                if (nowPlayingAvailable) {
+                    AutPlayIconButton(AutPlayIcon.Play, R.string.nav_now_playing, onNowPlayingClick)
+                }
+                AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
+                AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
             }
-            AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
-            AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = if (immersive) {
+                MaterialTheme.colorScheme.background.copy(alpha = 0f)
+            } else {
+                MaterialTheme.colorScheme.background
+            },
+        ),
     )
 }
 

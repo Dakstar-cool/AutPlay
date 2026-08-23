@@ -16,11 +16,13 @@ from autplay.ports.web_admin import WebAdminUnitOfWork, WebAdminUnitOfWorkFactor
 class _Repository:
     def __init__(self) -> None:
         self.limit: int | None = None
+        self.cleanup_now: datetime | None = None
         self.receipt_committed = True
         self.login_receipt_args: tuple[UUID, bytes, datetime] | None = None
 
-    def cleanup_expired(self, limit: int) -> int:
+    def cleanup_expired(self, limit: int, now: datetime) -> int:
         self.limit = limit
+        self.cleanup_now = now
         return 3
 
     def login_receipt(self, operation_id: UUID, request_sha256: bytes, now: datetime) -> bool:
@@ -58,8 +60,10 @@ def test_cleanup_is_bounded_and_committed() -> None:
     unit = _Unit(repository)
     service = WebAdminService(_factory(unit))
 
-    assert service.cleanup_expired(17) == 3
+    cleanup_now = datetime(2026, 1, 1)
+    assert service.cleanup_expired(17, now=cleanup_now) == 3
     assert repository.limit == 17
+    assert repository.cleanup_now == cleanup_now
     assert unit.committed is True
 
 

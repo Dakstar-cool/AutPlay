@@ -19,6 +19,7 @@ REFERENCE_SCHEMAS = frozenset(
         "account",
         "audit",
         "catalog",
+        "discovery",
         "identity",
         "importing",
         "jobs",

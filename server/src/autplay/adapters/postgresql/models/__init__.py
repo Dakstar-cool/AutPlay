@@ -24,6 +24,11 @@ from .catalog import (
     ReleaseTrackRow,
     WorkRow,
 )
+from .discovery import (
+    BulkOperationItemRow,
+    BulkOperationRow,
+    DiscoveryCandidateRow,
+)
 from .identity import (
     CalibratorReleaseRow,
     ExternalReferenceRow,
@@ -133,6 +138,9 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     WebSessionRotationEvidenceRow,
     WebTerminalReceiptRow,
     WebLoginRateWindowRow,
+    BulkOperationRow,
+    DiscoveryCandidateRow,
+    BulkOperationItemRow,
     ArtistRow,
     ArtistCreditRow,
     ArtistCreditNameRow,
@@ -218,12 +226,15 @@ __all__ = (
     "AuditEventRow",
     "BootstrapSessionRow",
     "BootstrapSnapshotItemRow",
+    "BulkOperationItemRow",
+    "BulkOperationRow",
     "CalibratorReleaseRow",
     "CatalogChangeItemRow",
     "CatalogChangeSetRow",
     "DeviceEventInboxRow",
     "DeviceRow",
     "DeviceSyncCursorRow",
+    "DiscoveryCandidateRow",
     "EmbeddingBenchmarkReportRow",
     "EmbeddingModelActivationRow",
     "EmbeddingModelRow",

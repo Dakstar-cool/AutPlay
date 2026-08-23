@@ -28,8 +28,8 @@ class SqlAlchemyWebAdminRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def cleanup_expired(self, limit: int) -> int:
-        now = datetime.now(UTC)
+    def cleanup_expired(self, limit: int, now: datetime | None = None) -> int:
+        now = datetime.now(UTC) if now is None else now
         deleted = 0
         for row, key, expiry, extra in (
             (

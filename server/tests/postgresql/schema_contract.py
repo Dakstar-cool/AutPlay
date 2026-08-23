@@ -13,6 +13,7 @@ MODULE_SCHEMAS = (
     "account",
     "audit",
     "catalog",
+    "discovery",
     "identity",
     "importing",
     "jobs",
@@ -23,10 +24,12 @@ MODULE_SCHEMAS = (
     "vault",
 )
 
-EXPECTED_TABLE_COUNT = 79
-EXPECTED_EXPLICIT_INDEX_COUNT = 77
+EXPECTED_TABLE_COUNT = 82
+EXPECTED_EXPLICIT_INDEX_COUNT = 80
 EXPECTED_FUNCTION_COUNT = 21
 EXPECTED_TRIGGER_COUNT = 51
+REFERENCE_P02_TABLE_COUNT = 79
+REFERENCE_P02_EXPLICIT_INDEX_COUNT = 77
 
 TABLE_PATTERN = re.compile(r"(?m)^CREATE TABLE ([a-z_]+)\.([a-z_]+) \(")
 INDEX_PATTERN = re.compile(r"(?m)^CREATE (?:UNIQUE )?INDEX ([a-z0-9_]+)")

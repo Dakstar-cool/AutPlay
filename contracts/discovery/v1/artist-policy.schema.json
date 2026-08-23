@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/artist-policy.schema.json",
+  "title": "Owner-derived canonical artist discovery policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": [
+    "contract_version",
+    "schema_version",
+    "canonical_artist_id",
+    "revision",
+    "discovery_mode",
+    "import_mode",
+    "runtime_automation_active",
+    "last_checked_at",
+    "next_eligible_at"
+  ],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "canonical_artist_id": {"type": "string", "format": "uuid"},
+    "revision": {"type": "integer", "minimum": 1},
+    "discovery_mode": {"enum": ["DISABLED", "MANUAL_ONLY", "SCHEDULED"]},
+    "import_mode": {"enum": ["REVIEW_REQUIRED", "AUTO_IMPORT"]},
+    "runtime_automation_active": {"type": "boolean"},
+    "last_checked_at": {"type": ["string", "null"], "format": "date-time"},
+    "next_eligible_at": {"type": ["string", "null"], "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"runtime_automation_active": {"const": true}}},
+      "then": {
+        "anyOf": [
+          {"properties": {"discovery_mode": {"const": "SCHEDULED"}}},
+          {"properties": {"import_mode": {"const": "AUTO_IMPORT"}}}
+        ]
+      }
+    }
+  ]
+}

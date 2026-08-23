@@ -180,6 +180,40 @@ def test_admin_web_requires_distinct_source_and_csrf_hmac_secrets() -> None:
         )
 
 
+def test_jamendo_is_disabled_by_default_and_requires_non_vault_staging(tmp_path: Path) -> None:
+    base = {
+        "database_url": SecretStr(DATABASE_URL),
+        "auth_signing_secret": SecretStr(AUTH_SECRET),
+        "admin_web_enabled": True,
+        "admin_web_origin": "http://127.0.0.1:8787",
+        "admin_web_source_hmac_secret": SecretStr("b" * 32),
+        "admin_web_csrf_hmac_secret": SecretStr("c" * 32),
+        "vault_root": tmp_path / "vault",
+    }
+    assert ApiSettings.model_validate(base).jamendo_enabled is False
+
+    with pytest.raises(ValueError, match="outside the Vault"):
+        ApiSettings.model_validate(
+            base
+            | {
+                "jamendo_enabled": True,
+                "jamendo_client_id": SecretStr("private-client-id"),
+                "jamendo_staging_root": tmp_path / "vault" / "provider",
+            }
+        )
+
+    enabled = ApiSettings.model_validate(
+        base
+        | {
+            "jamendo_enabled": True,
+            "jamendo_client_id": SecretStr("private-client-id"),
+            "jamendo_staging_root": tmp_path / "provider-staging",
+        }
+    )
+    assert enabled.jamendo_enabled is True
+    assert "private-client-id" not in repr(enabled)
+
+
 def test_worker_settings_never_receive_api_signing_secret() -> None:
     settings = load_worker_settings(
         environ={
@@ -194,6 +228,54 @@ def test_worker_settings_never_receive_api_signing_secret() -> None:
     assert "auth_signing_secret" not in WorkerSettings.model_fields
     assert settings.lease_seconds == 90
     assert settings.heartbeat_seconds == 20
+
+
+def test_worker_jamendo_is_explicit_and_uses_secret_file(tmp_path: Path) -> None:
+    secret_file = tmp_path / "jamendo-client-id"
+    secret_file.write_text("private-client-id\n", encoding="utf-8")
+
+    settings = load_worker_settings(
+        environ={
+            "AUTPLAY_DATABASE_URL": DATABASE_URL,
+            "AUTPLAY_JAMENDO_ENABLED": "true",
+            "AUTPLAY_JAMENDO_CLIENT_ID_FILE": str(secret_file),
+            "AUTPLAY_JAMENDO_STAGING_ROOT": str(tmp_path / "provider-staging"),
+        },
+        overrides={"vault_root": tmp_path / "vault"},
+    )
+
+    assert settings.jamendo_enabled is True
+    assert settings.jamendo_client_id is not None
+    assert settings.jamendo_client_id.get_secret_value() == "private-client-id"
+    assert "private-client-id" not in repr(settings)
+
+
+def test_jamendo_client_id_rejects_direct_environment_secret(tmp_path: Path) -> None:
+    with pytest.raises(SettingsLoadError):
+        load_worker_settings(
+            environ={
+                "AUTPLAY_DATABASE_URL": DATABASE_URL,
+                "AUTPLAY_JAMENDO_ENABLED": "true",
+                "AUTPLAY_JAMENDO_CLIENT_ID": "private-client-id",
+                "AUTPLAY_JAMENDO_STAGING_ROOT": str(tmp_path / "provider-staging"),
+            },
+            overrides={"vault_root": tmp_path / "vault"},
+        )
+
+
+def test_worker_jamendo_staging_must_stay_outside_vault(tmp_path: Path) -> None:
+    secret_file = tmp_path / "jamendo-client-id"
+    secret_file.write_text("private-client-id\n", encoding="utf-8")
+    with pytest.raises(SettingsLoadError):
+        load_worker_settings(
+            environ={
+                "AUTPLAY_DATABASE_URL": DATABASE_URL,
+                "AUTPLAY_JAMENDO_ENABLED": "true",
+                "AUTPLAY_JAMENDO_CLIENT_ID_FILE": str(secret_file),
+                "AUTPLAY_JAMENDO_STAGING_ROOT": str(tmp_path / "vault" / "provider"),
+            },
+            overrides={"vault_root": tmp_path / "vault"},
+        )
 
 
 @pytest.mark.parametrize(

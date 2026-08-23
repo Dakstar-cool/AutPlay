@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,9 +84,8 @@ public fun AutPlayArtwork(
     painter: Painter? = null,
 ) {
     val shape = MaterialTheme.shapes.medium
-    val placeholder = Brush.linearGradient(
-        listOf(MaterialTheme.colorScheme.primaryContainer, AutPlayTokens.colors.raisedSurface),
-    )
+    val palette = remember(title) { playbackVisualPalette(title) }
+    val placeholder = Brush.linearGradient(palette.map { it.copy(alpha = 0.86f) })
     Box(
         modifier = modifier
             .size(size)
@@ -95,11 +95,14 @@ public fun AutPlayArtwork(
         contentAlignment = Alignment.Center,
     ) {
         if (painter == null) {
-            Text(
-                text = title.trim().firstOrNull()?.uppercase() ?: "A",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+            Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.28f)) {
+                Text(
+                    text = title.trim().firstOrNull()?.uppercase() ?: "A",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                )
+            }
         } else {
             Icon(painter = painter, contentDescription = null, tint = Color.Unspecified)
         }

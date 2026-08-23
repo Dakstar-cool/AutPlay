@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-heading"><div><p class="eyebrow">Jamendo API v3</p><h1>{{ t("discovery_title") }}</h1><p>{{ t("discovery_intro") }}</p></div></header>
+{% if flash_key %}<p class="notice" role="status" aria-live="polite">{{ t(flash_key) }}</p>{% endif %}
+{% if bulk_start_result %}<dl class="facts"><div><dt>{{ t("status") }}</dt><dd>{{ bulk_start_result.state }}</dd></div><div><dt>{{ t("queued") }}</dt><dd>{{ bulk_start_result.queued_count }}</dd></div><div><dt>{{ t("ready") }}</dt><dd>{{ bulk_start_result.ready_count }}</dd></div><div><dt>{{ t("failed") }}</dt><dd>{{ bulk_start_result.failed_count }}</dd></div></dl><p><a href="/admin/discovery/operations/{{ bulk_start_result.bulk_operation_id }}">{{ t("refresh_status") }}</a></p>{% endif %}
+<form method="post" action="/admin/discovery/search" class="auth-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="operation_id" value="{{ search_operation_id }}">
+  <label for="query">{{ t("discovery_query") }}</label>
+  <input id="query" name="query" value="{{ query }}" maxlength="200" required autocomplete="off">
+  <button type="submit">{{ t("search") }}</button>
+</form>
+<p class="notice" role="note">{{ t("discovery_staging_notice") }}</p>
+{% if collection_import_enabled %}
+<section class="panel" aria-labelledby="collection-import-title">
+  <h2 id="collection-import-title">{{ t("collection_import_title") }}</h2>
+  <p>{{ t("collection_import_intro") }}</p>
+  <form method="post" action="/admin/discovery/import" enctype="multipart/form-data" class="auth-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ import_operation_id }}">
+    <label for="collection">{{ t("collection_file") }}</label>
+    <input id="collection" name="collection" type="file" accept=".txt,text/plain" required>
+    <button type="submit">{{ t("import_collection") }}</button>
+  </form>
+</section>
+{% endif %}
+{% if artists %}
+<section class="panel" aria-labelledby="collection-expand-title">
+  <h2 id="collection-expand-title">{{ t("collection_expand_title") }}</h2>
+  <p>{{ t("collection_expand_intro") }}</p>
+  <form method="post" action="/admin/discovery/bulk-preview">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ import_operation_id }}">
+    <input type="hidden" name="import_job_id" value="{{ import_job_id }}">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="{{ t('collection_artists') }}"><table>
+      <thead><tr><th scope="col">{{ t("select") }}</th><th scope="col">{{ t("artist") }}</th><th scope="col">{{ t("track_count") }}</th></tr></thead>
+      <tbody>{% for artist in artists %}<tr><td><input type="checkbox" name="artist" value="{{ artist.name }}" aria-label="{{ artist.name }}"></td><td>{{ artist.name }}</td><td>{{ artist.track_count }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    <button type="submit">{{ t("expand") }}</button>
+  </form>
+</section>
+{% endif %}
+{% if artist_resolutions %}
+<section class="panel" aria-labelledby="bulk-resolution-title">
+  <h2 id="bulk-resolution-title">{{ t("bulk_resolution_title") }}</h2>
+  <p>{{ t("bulk_resolution_intro") }}</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="{{ t('bulk_resolution_title') }}"><table>
+    <thead><tr><th scope="col">{{ t("artist") }}</th><th scope="col">{{ t("track_count") }}</th><th scope="col">{{ t("provider_match") }}</th><th scope="col">{{ t("status") }}</th></tr></thead>
+    <tbody>{% for item in artist_resolutions %}<tr><td>{{ item.collection_name }}</td><td>{{ item.collection_track_count }}</td><td>{% if item.provider_artist %}<a href="{{ item.provider_artist.share_url }}" rel="noreferrer">{{ item.provider_artist.name }} · {{ item.provider_artist.provider_artist_id }}</a>{% else %}—{% endif %}</td><td>{{ item.state }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+{% if bulk_pages %}
+<section class="panel" aria-labelledby="bulk-track-title">
+  <h2 id="bulk-track-title">{{ t("bulk_track_preview_title") }}</h2>
+  <p>{{ t("bulk_track_preview_intro") }} {{ bulk_track_count }}.</p>
+  {% for page in bulk_pages %}
+  <h3>{{ page.tracks[0].artist if page.tracks else page.provider_artist_id }}</h3>
+  <p>{{ t("provider_total_tracks") }}: {{ page.total_count }} · {{ t("planned_tracks") }}: {{ page.tracks|length }}</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="{{ t('bulk_track_preview_title') }}"><table>
+    <thead><tr><th scope="col">{{ t("name") }}</th><th scope="col">{{ t("album") }}</th><th scope="col">{{ t("license") }}</th><th scope="col">{{ t("status") }}</th></tr></thead>
+    <tbody>{% for track in page.tracks %}<tr><td><a href="{{ track.share_url }}" rel="noreferrer">{{ track.title }}</a></td><td>{{ track.album or "—" }}</td><td><a href="{{ track.license_url }}" rel="noreferrer">CC</a></td><td>{% if track.acquisition_allowed %}{{ t("eligible_for_queue") }}{% else %}{{ t("not_downloadable") }}{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endfor %}
+  {% if bulk_preview_result and bulk_preview_result.downloadable_candidate_count > 0 %}
+  <p class="notice" role="note">{{ t("bulk_start_confirmation") }}</p>
+  <form method="post" action="/admin/discovery/bulk-start" class="auth-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ bulk_start_operation_id }}">
+    <input type="hidden" name="bulk_start_token" value="{{ bulk_start_token }}">
+    <button type="submit">{{ t("start_expansion") }}</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+{% if rows %}
+<div class="table-scroll" tabindex="0" role="region" aria-label="{{ t('discovery_results') }}"><table>
+<thead><tr><th scope="col">{{ t("artist") }}</th><th scope="col">{{ t("name") }}</th><th scope="col">{{ t("album") }}</th><th scope="col">{{ t("duration") }}</th><th scope="col">{{ t("license") }}</th><th scope="col">{{ t("action") }}</th></tr></thead>
+<tbody>{% for row in rows %}<tr><td>{{ row.artist }}</td><td><a href="{{ row.share_url }}" rel="noreferrer">{{ row.title }}</a></td><td>{{ row.album }}</td><td>{{ row.duration }}</td><td><a href="{{ row.license_url }}" rel="noreferrer">CC</a></td><td>{% if row.available %}<form method="post" action="/admin/discovery/acquire"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ row.operation_id }}"><input type="hidden" name="selection_token" value="{{ row.selection_token }}"><button type="submit">{{ t("add_to_vault") }}</button></form>{% else %}<span class="pill">{{ t("unavailable_title") }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+{% endblock %}

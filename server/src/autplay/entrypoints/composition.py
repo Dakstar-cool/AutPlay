@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
+from autplay.adapters.jamendo import JamendoProvider
 from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
 from autplay.adapters.postgresql.admin_views_runtime import SqlAlchemyAdminViewService
 from autplay.adapters.postgresql.auth_runtime import SqlAlchemyAuthUnitOfWorkFactory
@@ -23,9 +24,11 @@ from autplay.adapters.security.tokens import Hs256AccessTokenCodec, OpaqueRefres
 from autplay.adapters.system import SystemClock, Uuid7Generator
 from autplay.application.admin_commands import AdminCommandService
 from autplay.application.auth import AuthService
+from autplay.application.bulk_discovery import BulkDiscoveryService
 from autplay.application.catalog_artist_sync import CatalogArtistMutationService
 from autplay.application.imports import ImportService
 from autplay.application.library import LibraryService
+from autplay.application.manual_discovery import ManualDiscoveryService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.recommendations import (
     RecommendationService,
@@ -104,6 +107,31 @@ def build_web_admin_service(settings: ApiSettings, engine: Engine) -> WebAdminSe
         ),
         csrf_secret=secret.get_secret_value().encode("utf-8"),
     )
+
+
+def build_manual_discovery_service(settings: ApiSettings) -> ManualDiscoveryService | None:
+    """Assemble the disabled-by-default Jamendo adapter without touching PostgreSQL."""
+
+    if not settings.jamendo_enabled:
+        return None
+    client_id = settings.jamendo_client_id
+    staging_root = settings.jamendo_staging_root
+    if client_id is None or staging_root is None:
+        raise RuntimeError("Jamendo configuration is unavailable")
+    return ManualDiscoveryService(
+        JamendoProvider(
+            client_id.get_secret_value(), timeout_seconds=settings.jamendo_timeout_seconds
+        ),
+        staging_root=staging_root,
+        max_download_bytes=settings.jamendo_max_download_bytes,
+        minimum_request_interval_seconds=settings.jamendo_minimum_request_interval_seconds,
+    )
+
+
+def build_bulk_discovery_service(engine: Engine) -> BulkDiscoveryService:
+    """Assemble short owner-scoped A1B preview/start transactions."""
+
+    return BulkDiscoveryService(sessionmaker(engine, class_=Session, expire_on_commit=False))
 
 
 def build_admin_view_service(engine: Engine) -> SqlAlchemyAdminViewService:
@@ -379,9 +407,11 @@ __all__ = (
     "build_admin_command_service",
     "build_admin_view_service",
     "build_auth_service",
+    "build_bulk_discovery_service",
     "build_catalog_artist_mutation_service",
     "build_import_service",
     "build_library_service",
+    "build_manual_discovery_service",
     "build_profile_pairing_service",
     "build_recommendation_service",
     "build_stream_auth_service",

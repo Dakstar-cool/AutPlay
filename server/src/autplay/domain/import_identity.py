@@ -113,6 +113,7 @@ class ImportFormat(StrEnum):
     CSV = "CSV"
     JSON = "JSON"
     HTML = "HTML"
+    TXT = "TXT"
 
 
 class ImportEnvelopeError(ValueError):
@@ -300,8 +301,10 @@ def parse_import(envelope: ImportEnvelope) -> ParsedImport:
         rows = _parse_csv(text)
     elif envelope.format is ImportFormat.JSON:
         rows = _parse_json(text, envelope.schema_version)
-    else:
+    elif envelope.format is ImportFormat.HTML:
         rows = _parse_html(text)
+    else:
+        rows = _parse_txt(text)
     if len(rows) > MAX_IMPORT_ROWS:
         raise ImportEnvelopeError("import.row_limit_exceeded")
     return ParsedImport(envelope, encoding, tuple(rows))
@@ -666,6 +669,49 @@ def _parse_html(text: str) -> list[ParsedImportRow]:
             rows.append(_malformed_row(number, mapping, "import.html_column_count"))
         else:
             rows.append(_row_from_mapping(number, mapping))
+    return rows
+
+
+def _parse_txt(text: str) -> list[ParsedImportRow]:
+    """Parse a plain list as ``artist<TAB>title[<TAB>album]`` or ``artist - title``."""
+
+    rows: list[ParsedImportRow] = []
+    for number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if len(raw_line.encode("utf-8")) > MAX_ROW_BYTES:
+            rows.append(_malformed_row(number, {"row_present": True}, "import.row_too_large"))
+            continue
+        tab_fields = [value.strip() for value in line.split("\t")]
+        if number == 1 and [value.casefold() for value in tab_fields] in (
+            ["artist", "title"],
+            ["artist", "title", "album"],
+        ):
+            continue
+        if len(tab_fields) in {2, 3}:
+            artist, title = tab_fields[:2]
+            album = tab_fields[2] if len(tab_fields) == 3 else ""
+        elif " - " in line:
+            artist, title = (value.strip() for value in line.split(" - ", 1))
+            album = ""
+        else:
+            rows.append(
+                _malformed_row(
+                    number,
+                    {"row_present": True},
+                    "import.txt_row_malformed",
+                )
+            )
+            continue
+        rows.append(
+            _row_from_mapping(
+                number,
+                {"artist": artist, "title": title, "album": album},
+            )
+        )
+    if not rows:
+        raise ImportEnvelopeError("import.txt_empty")
     return rows
 
 

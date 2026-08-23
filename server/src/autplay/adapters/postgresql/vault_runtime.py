@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import and_, exists, func, or_, select, text
 from sqlalchemy.orm import Session
 
+from autplay.adapters.postgresql.discovery_runtime import (
+    JAMENDO_PROVIDER_ID,
+    refresh_bulk_operations,
+)
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.models.audit import AuditEventRow
 from autplay.adapters.postgresql.models.catalog import RecordingRow
-from autplay.adapters.postgresql.models.identity import RecordingRedirectRow
+from autplay.adapters.postgresql.models.discovery import DiscoveryCandidateRow
+from autplay.adapters.postgresql.models.identity import RecordingRedirectRow, SourceProviderRow
 from autplay.adapters.postgresql.models.jobs import JobRow
 from autplay.adapters.postgresql.models.library import LibraryEntryRow, UserTrackRefRow
+from autplay.adapters.postgresql.models.sync import SyncEventRow
 from autplay.adapters.postgresql.models.vault import (
+    AcquisitionRecordRow,
     AudioFingerprintRow,
     AudioVariantRow,
     UploadChunkRow,
@@ -22,6 +29,7 @@ from autplay.adapters.postgresql.models.vault import (
     VaultObjectRow,
     VaultReplicaRow,
 )
+from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.application.vault_ingest import IngestSession
 from autplay.application.vault_reconciliation import ReconcileReport
 from autplay.application.vault_streaming import AuthorizedStream
@@ -294,6 +302,16 @@ class PostgresVaultRuntime(UploadRepository):
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
+        if session.source_candidate_id is not None and not self._discovery_commit_authorized(
+            session
+        ):
+            session.state = "QUARANTINED"
+            session.error_code = "source_authorization_unavailable"
+            session.completed_at = datetime.now(UTC)
+            self._fail_discovery_candidate(session, session.error_code)
+            self._audit(session, "vault.ingest_quarantined")
+            self._session.flush()
+            return "CONFLICT"
         existing = self._session.execute(
             select(VaultObjectRow)
             .where(VaultObjectRow.sha256 == verified.sha256.value)
@@ -389,6 +407,11 @@ class PostgresVaultRuntime(UploadRepository):
             return True
         if session.vault_object_id is None or session.computed_sha256 is None:
             raise UploadStateError()
+        if session.source_candidate_id is not None and not self._discovery_commit_authorized(
+            session
+        ):
+            self._quarantine_finalize_conflict(session, code="source_authorization_unavailable")
+            return False
         obj = self._session.get(VaultObjectRow, session.vault_object_id)
         if obj is None:
             raise UploadStateError()
@@ -447,6 +470,8 @@ class PostgresVaultRuntime(UploadRepository):
         session.audio_variant_id = variant.audio_variant_id
         session.state = "REUSED" if reused else "COMMITTED"
         session.completed_at = datetime.now(UTC)
+        if session.source_candidate_id is not None:
+            self._finalize_discovery_candidate(session, variant)
         self._audit(session, "vault.ingest_reused" if reused else "vault.ingest_committed")
         self._session.flush()
         return True
@@ -462,6 +487,8 @@ class PostgresVaultRuntime(UploadRepository):
             row.state = "QUARANTINED"
             row.error_code = code[:100]
             row.completed_at = datetime.now(UTC)
+            if row.source_candidate_id is not None:
+                self._fail_discovery_candidate(row, row.error_code)
             self._audit(row, "vault.ingest_quarantined")
             self._session.flush()
 
@@ -554,13 +581,159 @@ class PostgresVaultRuntime(UploadRepository):
             return None
         return variants[0]
 
-    def _quarantine_finalize_conflict(self, session: UploadSessionRow) -> None:
+    def _quarantine_finalize_conflict(
+        self, session: UploadSessionRow, *, code: str = "vault.integrity_conflict"
+    ) -> None:
         self._detach_uncommitted_object(session)
         session.state = "QUARANTINED"
-        session.error_code = "vault.integrity_conflict"
+        session.error_code = code
         session.completed_at = datetime.now(UTC)
+        if session.source_candidate_id is not None:
+            self._fail_discovery_candidate(session, code)
         self._audit(session, "vault.ingest_quarantined")
         self._session.flush()
+
+    def _discovery_commit_authorized(self, upload: UploadSessionRow) -> bool:
+        """Recheck durable provider authority immediately before Vault publication."""
+
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == upload.source_candidate_id,
+                DiscoveryCandidateRow.user_id == upload.user_id,
+                DiscoveryCandidateRow.recording_id == upload.target_recording_id,
+                DiscoveryCandidateRow.provider_id == JAMENDO_PROVIDER_ID,
+                DiscoveryCandidateRow.acquisition_state.in_({"INGESTING", "MATERIALIZING"}),
+            )
+            .with_for_update()
+        )
+        provider = self._session.get(SourceProviderRow, JAMENDO_PROVIDER_ID)
+        return bool(
+            candidate is not None
+            and provider is not None
+            and provider.enabled
+            and provider.deleted_at is None
+            and provider.adapter_id == "autplay.jamendo.manual"
+            and provider.adapter_version == "1.0.0"
+            and {"SEARCH", "DOWNLOAD"}.issubset(set(provider.capabilities))
+        )
+
+    def _finalize_discovery_candidate(
+        self, upload: UploadSessionRow, variant: AudioVariantRow
+    ) -> None:
+        """Commit the owner-visible A1A readiness predicate with Vault metadata."""
+
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == upload.source_candidate_id,
+                DiscoveryCandidateRow.user_id == upload.user_id,
+            )
+            .with_for_update()
+        )
+        if (
+            candidate is None
+            or candidate.acquisition_state not in {"INGESTING", "MATERIALIZING"}
+            or candidate.recording_id != variant.recording_id
+            or candidate.external_reference_id is None
+            or candidate.user_track_ref_id is None
+            or candidate.library_entry_id is None
+        ):
+            raise UploadStateError()
+        library_entry = self._session.scalar(
+            select(LibraryEntryRow)
+            .where(
+                LibraryEntryRow.library_entry_id == candidate.library_entry_id,
+                LibraryEntryRow.user_id == upload.user_id,
+                LibraryEntryRow.user_track_ref_id == candidate.user_track_ref_id,
+                LibraryEntryRow.removed_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if library_entry is None:
+            raise UploadStateError()
+        now = datetime.now(UTC)
+        self._session.add(
+            AcquisitionRecordRow(
+                acquisition_record_id=uuid5(
+                    NAMESPACE_URL,
+                    "autplay:a1b-acquisition-record-v1:"
+                    f"{candidate.candidate_id}:{candidate.source_authorization_revision}",
+                ),
+                audio_variant_id=variant.audio_variant_id,
+                provider_id=candidate.provider_id,
+                external_reference_id=candidate.external_reference_id,
+                authorized_by_user_id=upload.user_id,
+                rights_capability="AUTHORIZED_DOWNLOAD",
+                source_uri_encrypted=None,
+                adapter_version="1.0.0",
+            )
+        )
+        library_entry.availability_status = "VAULT"
+        library_entry.updated_at = now
+        library_entry.row_version += 1
+        analysis_job = PostgresJobRepository(self._session).enqueue(
+            EnqueueJob(
+                key=JobKey("audio.standard_analysis", 1),
+                user_id=upload.user_id,
+                priority=2,
+                payload={"candidate_id": str(candidate.candidate_id)},
+                idempotency_scope=f"audio.standard_analysis:{upload.user_id}",
+                idempotency_key=(
+                    f"{candidate.candidate_id}:{candidate.source_authorization_revision}"
+                ),
+            )
+        )
+        del analysis_job
+        candidate.audio_variant_id = variant.audio_variant_id
+        candidate.staging_key = None
+        candidate.error_code = None
+        candidate.analysis_state = "QUEUED"
+        candidate.acquisition_state = "READY"
+        candidate.updated_at = now
+        candidate.row_version += 1
+        CatalogArtistSyncPublisher().publish(self._session, upload.user_id)
+        self._session.add(
+            SyncEventRow(
+                event_id=uuid5(
+                    NAMESPACE_URL,
+                    "autplay:a1b-library-entry-v1:"
+                    f"{upload.user_id}:{library_entry.library_entry_id}:{library_entry.row_version}",
+                ),
+                user_id=upload.user_id,
+                origin_device_id=None,
+                event_type="LIBRARY_ENTRY_UPSERTED",
+                schema_version=1,
+                aggregate_type="LIBRARY_ENTRY",
+                aggregate_id=library_entry.library_entry_id,
+                payload={
+                    "availability_status": "VAULT",
+                    "source": library_entry.source,
+                    "user_track_ref_id": str(library_entry.user_track_ref_id),
+                },
+                operation="UPSERT",
+                server_row_version=library_entry.row_version,
+            )
+        )
+        refresh_bulk_operations(self._session, candidate.candidate_id, now)
+
+    def _fail_discovery_candidate(self, upload: UploadSessionRow, code: str) -> None:
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == upload.source_candidate_id,
+                DiscoveryCandidateRow.user_id == upload.user_id,
+            )
+            .with_for_update()
+        )
+        if candidate is None or candidate.acquisition_state == "READY":
+            return
+        now = datetime.now(UTC)
+        candidate.acquisition_state = "FAILED_TERMINAL"
+        candidate.error_code = code[:100]
+        candidate.updated_at = now
+        candidate.row_version += 1
+        refresh_bulk_operations(self._session, candidate.candidate_id, now)
 
     def reconcile_inventory(
         self,
@@ -782,7 +955,7 @@ class PostgresVaultRuntime(UploadRepository):
                 action=action,
                 target_type="UPLOAD_SESSION",
                 target_id=session.upload_session_id,
-                metadata_sanitized={"phase": "P06"},
+                metadata_sanitized={"phase": "A1B" if session.actor_kind == "PROVIDER" else "P06"},
             )
         )
 

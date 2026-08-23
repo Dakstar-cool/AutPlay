@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/discovery-query.schema.json",
+  "title": "Owner-derived discovery query v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "CONTRACT_ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "required": ["contract_version", "schema_version", "resource", "limit"],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "resource": {"enum": ["CANDIDATES", "RELEASES", "RUNS", "ARTIST_POLICIES"]},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+    "after": {"type": ["string", "null"], "maxLength": 512},
+    "canonical_artist_id": {"type": "string", "format": "uuid"},
+    "provider_id": {"type": "string", "format": "uuid"},
+    "release_date_from": {"type": "string", "format": "date"},
+    "release_date_to": {"type": "string", "format": "date"},
+    "discovered_at_from": {"type": "string", "format": "date-time"},
+    "discovered_at_to": {"type": "string", "format": "date-time"},
+    "candidate_disposition": {
+      "enum": [
+        "DISCOVERED",
+        "ALREADY_IN_LIBRARY",
+        "IDENTITY_REVIEW_REQUIRED",
+        "SELECTABLE",
+        "SELECTED",
+        "UNAVAILABLE",
+        "IGNORED"
+      ]
+    },
+    "acquisition_state": {
+      "enum": [
+        "QUEUED",
+        "ACQUIRING",
+        "INGESTING",
+        "MATERIALIZING",
+        "READY",
+        "RETRY_WAIT",
+        "FAILED_TERMINAL",
+        "CANCELLED"
+      ]
+    },
+    "analysis_state": {
+      "enum": [
+        "QUEUED",
+        "RUNNING",
+        "COMPLETE",
+        "PARTIAL",
+        "FAILED_RETRYABLE",
+        "FAILED_TERMINAL"
+      ]
+    },
+    "source_availability": {
+      "enum": ["METADATA_ONLY", "AUTHORIZED_PLAYABLE", "AUTHORIZATION_UNAVAILABLE"]
+    }
+  }
+}

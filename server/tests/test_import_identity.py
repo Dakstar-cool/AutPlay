@@ -79,6 +79,32 @@ def test_invalid_outer_envelope_fails_before_row_persistence() -> None:
         ImportEnvelope(ImportFormat.CSV, b"title,artist\na,b", schema_version="2")
 
 
+def test_txt_import_accepts_bounded_tab_and_dash_lines() -> None:
+    parsed = parse_import(
+        ImportEnvelope(
+            ImportFormat.TXT,
+            (
+                b"artist\ttitle\talbum\n"
+                b"Open Artist\tMorning Light\tOpen Album\n"
+                b"Open Artist - Evening Light\n"
+                b"Malformed line\n"
+            ),
+        )
+    )
+
+    assert [(row.artist, row.title, row.album) for row in parsed.rows if row.valid] == [
+        ("Open Artist", "Morning Light", "Open Album"),
+        ("Open Artist", "Evening Light", None),
+    ]
+    assert parsed.malformed_count == 1
+    assert parsed.rows[-1].error_code == "import.txt_row_malformed"
+
+
+def test_txt_import_rejects_an_empty_collection() -> None:
+    with pytest.raises(ImportEnvelopeError, match=r"import\.txt_empty"):
+        parse_import(ImportEnvelope(ImportFormat.TXT, b"\n\r\n"))
+
+
 def test_initial_source_adapters_are_explicitly_safe_and_bounded() -> None:
     generic = GenericUserExportSourceAdapter()
     assert generic.manifest.credential_requirement is CredentialRequirement.NONE

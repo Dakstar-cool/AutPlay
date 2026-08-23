@@ -10,6 +10,7 @@
             tools:targetApi="27" />
         <activity
             android:name="app.autplay.ui.M3VisualEvidenceActivity"
-            android:exported="true" />
+            android:exported="true"
+            android:process=":visualEvidence" />
     </application>
 </manifest>

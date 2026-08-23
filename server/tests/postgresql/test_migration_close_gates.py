@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0020_a1b_discovery_runtime", "0019_m6_web_admin_runtime"),
     ("0019_m6_web_admin_runtime", "0018_profile_lifecycle_cleanup"),
     ("0018_profile_lifecycle_cleanup", "0017_profile_pairing_runtime"),
     ("0017_profile_pairing_runtime", "0016_artist_id_sync_contract"),
@@ -97,7 +98,7 @@ def test_public_has_no_reference_object_access(
              ) acl
         WHERE n.nspname IN (
                   'account', 'audit', 'catalog', 'identity', 'importing', 'jobs',
-                  'library', 'ml', 'playlist', 'sync', 'vault'
+                  'discovery', 'library', 'ml', 'playlist', 'sync', 'vault'
               )
           AND c.relkind IN ('r', 'p')
           AND acl.grantee = 0
@@ -152,7 +153,7 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == "0019_m6_web_admin_runtime"
+    assert _current_revision(database_harness, database_name) == "0020_a1b_discovery_runtime"
 
 
 def test_p12_downgrade_refuses_after_blocking_legacy_active_model(

@@ -1,0 +1,317 @@
+{
+  "contract_version": "release-discovery-v1",
+  "cases": [
+    {
+      "case_id": "metadata-only-visible-not-selectable",
+      "area": "RIGHTS",
+      "input": {
+        "capabilities": ["RELEASE_DISCOVERY"],
+        "authorization": "ABSENT"
+      },
+      "expected_disposition": "UNAVAILABLE",
+      "expected_error_code": "no_authorized_playable_source",
+      "durable_acquisition_count": 0
+    },
+    {
+      "case_id": "playable-capability-without-authorization",
+      "area": "RIGHTS",
+      "input": {
+        "capabilities": ["RELEASE_DISCOVERY", "PLAYABLE_ACQUISITION"],
+        "authorization": "ABSENT"
+      },
+      "expected_disposition": "UNAVAILABLE",
+      "expected_error_code": "source_authorization_unavailable",
+      "durable_acquisition_count": 0
+    },
+    {
+      "case_id": "playable-capability-with-current-authorization",
+      "area": "RIGHTS",
+      "input": {
+        "capabilities": ["RELEASE_DISCOVERY", "PLAYABLE_ACQUISITION"],
+        "authorization": "CURRENT_OWNER_SCOPED",
+        "identity": "RESOLVED"
+      },
+      "expected_disposition": "SELECTABLE",
+      "durable_acquisition_count": 0
+    },
+    {
+      "case_id": "list-foreign-owner",
+      "area": "OWNER_ISOLATION",
+      "operation": "LIST",
+      "expected_error_code": "discovery_target_not_found",
+      "cross_owner_read_count": 0
+    },
+    {
+      "case_id": "filter-foreign-owner",
+      "area": "OWNER_ISOLATION",
+      "operation": "FILTER",
+      "expected_error_code": "discovery_target_not_found",
+      "cross_owner_read_count": 0
+    },
+    {
+      "case_id": "run-foreign-artist",
+      "area": "OWNER_ISOLATION",
+      "operation": "START_DISCOVERY",
+      "expected_error_code": "discovery_target_not_found",
+      "durable_write_count": 0
+    },
+    {
+      "case_id": "select-foreign-candidate",
+      "area": "OWNER_ISOLATION",
+      "operation": "SELECT_CANDIDATE",
+      "expected_error_code": "discovery_target_not_found",
+      "durable_write_count": 0
+    },
+    {
+      "case_id": "retry-foreign-run",
+      "area": "OWNER_ISOLATION",
+      "operation": "RETRY_DISCOVERY",
+      "expected_error_code": "discovery_target_not_found",
+      "durable_write_count": 0
+    },
+    {
+      "case_id": "policy-foreign-artist",
+      "area": "OWNER_ISOLATION",
+      "operation": "SET_ARTIST_POLICY",
+      "expected_error_code": "discovery_target_not_found",
+      "durable_write_count": 0
+    },
+    {
+      "case_id": "materialize-foreign-owner",
+      "area": "OWNER_ISOLATION",
+      "operation": "MATERIALIZE",
+      "expected_error_code": "discovery_target_not_found",
+      "cross_owner_library_write_count": 0
+    },
+    {
+      "case_id": "provider-page-exact-replay",
+      "area": "IDEMPOTENCY",
+      "same_page_identity": true,
+      "candidate_create_count": 1,
+      "duplicate_evidence_count": 1
+    },
+    {
+      "case_id": "web-operation-exact-replay",
+      "area": "IDEMPOTENCY",
+      "same_operation_id": true,
+      "same_request_sha256": true,
+      "durable_write_count": 1,
+      "expected_replayed": true
+    },
+    {
+      "case_id": "web-operation-divergent-replay",
+      "area": "IDEMPOTENCY",
+      "same_operation_id": true,
+      "same_request_sha256": false,
+      "durable_write_count": 1,
+      "expected_error_code": "operation_conflict"
+    },
+    {
+      "case_id": "concurrent-manual-selection",
+      "area": "IDEMPOTENCY",
+      "concurrent_select_count": 2,
+      "active_acquisition_operation_count": 1,
+      "owner_materialization_count": 1
+    },
+    {
+      "case_id": "uncertain-identity-never-auto-merges",
+      "area": "IDENTITY",
+      "identity": "UNCERTAIN",
+      "expected_disposition": "IDENTITY_REVIEW_REQUIRED",
+      "recording_merge_count": 0,
+      "owner_materialization_count": 0
+    },
+    {
+      "case_id": "exact-byte-reuse-needs-owner-authorization",
+      "area": "IDENTITY",
+      "exact_bytes_exist": true,
+      "owner_authorization": "ABSENT",
+      "expected_error_code": "source_authorization_unavailable",
+      "owner_materialization_count": 0
+    },
+    {
+      "case_id": "authorization-revoked-before-provider-io",
+      "area": "REVOCATION",
+      "recheck_point": "BEFORE_PROVIDER_IO",
+      "expected_error_code": "source_authorization_unavailable",
+      "provider_request_count": 0
+    },
+    {
+      "case_id": "authorization-revoked-before-vault-commit",
+      "area": "REVOCATION",
+      "recheck_point": "BEFORE_VAULT_COMMIT",
+      "expected_error_code": "source_authorization_unavailable",
+      "vault_commit_count": 0
+    },
+    {
+      "case_id": "policy-revoked-before-materialization",
+      "area": "REVOCATION",
+      "recheck_point": "BEFORE_OWNER_MATERIALIZATION",
+      "expected_error_code": "policy_revision_stale",
+      "owner_materialization_count": 0
+    },
+    {
+      "case_id": "stale-worker-after-lease-loss",
+      "area": "CRASH_RECOVERY",
+      "lease_fence": "STALE",
+      "expected_error_code": "lease_fence_lost",
+      "vault_commit_count": 0,
+      "owner_materialization_count": 0
+    },
+    {
+      "case_id": "vault-published-database-transaction-lost",
+      "area": "CRASH_RECOVERY",
+      "vault_publication": "SUCCEEDED",
+      "owner_transaction": "FAILED",
+      "expected_acquisition_state": "RETRY_WAIT",
+      "reported_ready": false
+    },
+    {
+      "case_id": "ready-requires-complete-boundary",
+      "area": "READINESS",
+      "all_ready_predicates": true,
+      "expected_acquisition_state": "READY",
+      "owner_materialization_count": 1,
+      "standard_analysis_enqueue_count": 1
+    },
+    {
+      "case_id": "analysis-terminal-failure-keeps-ready",
+      "area": "READINESS",
+      "acquisition_state": "READY",
+      "analysis_state": "FAILED_TERMINAL",
+      "expected_acquisition_state": "READY",
+      "playable": true
+    },
+    {
+      "case_id": "discovery-creates-no-impression",
+      "area": "EXPOSURE",
+      "event": "DISCOVERY_COMPLETED",
+      "impression_create_count": 0
+    },
+    {
+      "case_id": "acquisition-creates-no-impression",
+      "area": "EXPOSURE",
+      "event": "ACQUISITION_READY",
+      "impression_create_count": 0
+    },
+    {
+      "case_id": "ready-track-not-broadcast-globally",
+      "area": "EXPOSURE",
+      "event": "ACQUISITION_READY",
+      "global_feed_insert_count": 0,
+      "cross_owner_library_write_count": 0,
+      "candidate_path": "EXISTING_OWNER_AUTHORIZED_RECOMMENDATION_PIPELINE"
+    },
+    {
+      "case_id": "disabled-adapter-keeps-core-available",
+      "area": "DEGRADATION",
+      "adapter_state": "DISABLED",
+      "cpu_api_available": true,
+      "cpu_worker_core_available": true,
+      "android_local_playback_available": true
+    },
+    {
+      "case_id": "a1b-rejects-scheduled-discovery",
+      "area": "ACTIVATION",
+      "milestone": "A1B",
+      "requested_mode": "SCHEDULED",
+      "expected_error_code": "automation_not_active",
+      "durable_write_count": 0
+    },
+    {
+      "case_id": "a1b-rejects-auto-import",
+      "area": "ACTIVATION",
+      "milestone": "A1B",
+      "requested_mode": "AUTO_IMPORT",
+      "expected_error_code": "automation_not_active",
+      "durable_write_count": 0
+    },
+    {
+      "case_id": "discovered-selectable-missing-common-guard",
+      "area": "TRANSITION_GUARD",
+      "transition": ["DISCOVERED", "SELECTABLE"],
+      "missing_guard": "AUTHORIZED_PLAYABLE",
+      "expected_error_code": "candidate_not_selectable",
+      "transition_count": 0
+    },
+    {
+      "case_id": "identity-review-selectable-needs-new-evidence",
+      "area": "TRANSITION_GUARD",
+      "transition": ["IDENTITY_REVIEW_REQUIRED", "SELECTABLE"],
+      "missing_guard": "NEW_DURABLE_IDENTITY_EVIDENCE",
+      "expected_disposition": "IDENTITY_REVIEW_REQUIRED",
+      "transition_count": 0
+    },
+    {
+      "case_id": "selected-selectable-needs-owner-reconsideration",
+      "area": "TRANSITION_GUARD",
+      "transition": ["SELECTED", "SELECTABLE"],
+      "missing_guard": "EXPLICIT_OWNER_RECONSIDERATION",
+      "expected_error_code": "candidate_not_selectable",
+      "transition_count": 0
+    },
+    {
+      "case_id": "unavailable-selectable-needs-new-authorization",
+      "area": "TRANSITION_GUARD",
+      "transition": ["UNAVAILABLE", "SELECTABLE"],
+      "missing_guard": "NEW_DURABLE_SOURCE_AUTHORIZATION_OR_EVIDENCE",
+      "expected_disposition": "UNAVAILABLE",
+      "transition_count": 0
+    },
+    {
+      "case_id": "ignored-selectable-needs-owner-reconsideration",
+      "area": "TRANSITION_GUARD",
+      "transition": ["IGNORED", "SELECTABLE"],
+      "missing_guard": "EXPLICIT_OWNER_RECONSIDERATION",
+      "expected_disposition": "IGNORED",
+      "transition_count": 0
+    },
+    {
+      "case_id": "already-present-selectable-needs-membership-removal",
+      "area": "TRANSITION_GUARD",
+      "transition": ["ALREADY_IN_LIBRARY", "SELECTABLE"],
+      "missing_guard": "OWNER_LIBRARY_MEMBERSHIP_REMOVED",
+      "expected_disposition": "ALREADY_IN_LIBRARY",
+      "transition_count": 0
+    },
+    {
+      "case_id": "selectable-selected-needs-explicit-owner-action",
+      "area": "TRANSITION_GUARD",
+      "transition": ["SELECTABLE", "SELECTED"],
+      "missing_guard": "EXPLICIT_OWNER_ACTION",
+      "expected_error_code": "candidate_not_selectable",
+      "transition_count": 0
+    },
+    {
+      "case_id": "ready-missing-each-predicate-fails",
+      "area": "TRANSITION_GUARD",
+      "transition": ["MATERIALIZING", "READY"],
+      "missing_predicates_tested": [
+        "ACTIVE_CANONICAL_RECORDING",
+        "NON_AMBIGUOUS_IDENTITY_DECISION",
+        "VALID_AUDIO_VARIANT",
+        "COMMITTED_AVAILABLE_VAULT_OBJECT",
+        "OWNER_ACQUISITION_LINEAGE",
+        "OWNER_RESOLVED_USER_TRACK_REF",
+        "OWNER_ACTIVE_LIBRARY_ENTRY",
+        "OWNER_SYNC_OR_OUTBOX_FACT",
+        "STANDARD_ANALYSIS_JOB_ENQUEUED",
+        "OWNER_CANDIDATE_PROJECTION_READY"
+      ],
+      "each_expected_ready": false,
+      "transition_count": 0
+    },
+    {
+      "case_id": "artist-removed-after-discovery-blocks-reconsideration-and-materialization",
+      "area": "TRANSITION_GUARD",
+      "artist_eligible_at_discovery": true,
+      "artist_eligible_at_reconsideration": false,
+      "artist_eligible_at_materialization": false,
+      "missing_guard": "CANONICAL_ARTIST_ELIGIBLE",
+      "expected_error_code": "discovery_target_not_found",
+      "transition_count": 0,
+      "durable_acquisition_count": 0,
+      "owner_materialization_count": 0
+    }
+  ]
+}
