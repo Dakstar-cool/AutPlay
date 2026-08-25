@@ -1,0 +1,135 @@
+x-autplay-admin-local-environment: &autplay-admin-local-environment
+  AUTPLAY_ADMIN_WEB_ENABLED: "true"
+  AUTPLAY_ADMIN_WEB_ORIGIN: "${AUTPLAY_ADMIN_WEB_ORIGIN:-http://127.0.0.1:8787}"
+  AUTPLAY_ADMIN_WEB_SOURCE_HMAC_SECRET_FILE: /run/secrets/autplay-admin-source-hmac
+  AUTPLAY_ADMIN_WEB_CSRF_HMAC_SECRET_FILE: /run/secrets/autplay-admin-csrf-hmac
+  AUTPLAY_PROFILE_IDENTITY_PRIVATE_KEY_PEM_FILE: /run/secrets/autplay-profile-identity-key
+  AUTPLAY_PROFILE_LABEL_HINT: "${AUTPLAY_PROFILE_LABEL_HINT:-AutPlay local server}"
+  AUTPLAY_PROFILE_API_ORIGIN: "http://${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}:${AUTPLAY_MOBILE_API_PORT:-18787}"
+  AUTPLAY_PROFILE_STREAM_ORIGIN: "http://${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}:${AUTPLAY_MOBILE_STREAM_PORT:-18788}"
+
+x-autplay-mobile-environment: &autplay-mobile-environment
+  AUTPLAY_DATABASE_URL: postgresql+psycopg://autplay:autplay_dev_only@postgres:5432/autplay
+  AUTPLAY_DATABASE_CONNECT_TIMEOUT_SECONDS: "2"
+  AUTPLAY_DATABASE_STATEMENT_TIMEOUT_MS: "5000"
+  AUTPLAY_PROFILE: development
+  AUTPLAY_VAULT_ROOT: /var/lib/autplay/vault
+  AUTPLAY_VAULT_MAX_OBJECT_BYTES: "2147483648"
+  AUTPLAY_VAULT_MAX_CHUNK_BYTES: "1048576"
+  AUTPLAY_VAULT_LOW_DISK_BYTES: "1073741824"
+  AUTPLAY_VAULT_TOOL_TIMEOUT_SECONDS: "120"
+  AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "1048576"
+  AUTPLAY_API_HOST: 0.0.0.0
+  AUTPLAY_API_PORT: "8787"
+  AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+  AUTPLAY_PROFILE_IDENTITY_PRIVATE_KEY_PEM_FILE: /run/secrets/autplay-profile-identity-key
+  AUTPLAY_PROFILE_LABEL_HINT: "${AUTPLAY_PROFILE_LABEL_HINT:-AutPlay local server}"
+  AUTPLAY_PROFILE_API_ORIGIN: "http://${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}:${AUTPLAY_MOBILE_API_PORT:-18787}"
+  AUTPLAY_PROFILE_STREAM_ORIGIN: "http://${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}:${AUTPLAY_MOBILE_STREAM_PORT:-18788}"
+
+services:
+  api:
+    environment:
+      <<: *autplay-admin-local-environment
+    # Admin Web is cleartext only in the explicit development profile. Do not inherit
+    # AUTPLAY_RUNTIME_BIND_HOST from the base runtime: the administrative routes must
+    # remain unreachable from LAN, VPN and public host interfaces.
+    ports: !override
+      - name: api-local
+        target: 8787
+        host_ip: 127.0.0.1
+        published: "${AUTPLAY_API_PORT:-8787}"
+        protocol: tcp
+    secrets:
+      - source: autplay-admin-source-hmac
+        target: autplay-admin-source-hmac
+      - source: autplay-admin-csrf-hmac
+        target: autplay-admin-csrf-hmac
+      - source: autplay-profile-identity-key
+        target: autplay-profile-identity-key
+
+  mobile-api:
+    image: autplay-server:p06-local
+    profiles: [runtime]
+    command: [autplay-api]
+    environment:
+      <<: *autplay-mobile-environment
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 15s
+    secrets:
+      - source: autplay-auth-signing-secret
+        target: autplay-auth-signing-secret
+      - source: autplay-profile-identity-key
+        target: autplay-profile-identity-key
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - name: mobile-api-lan
+        target: 8787
+        host_ip: "${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}"
+        published: "${AUTPLAY_MOBILE_API_PORT:-18787}"
+        protocol: tcp
+    volumes:
+      - vault-data:/var/lib/autplay/vault
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8787/health/ready', timeout=2).read()
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+
+  stream:
+    ports: !override
+      - name: stream-lan
+        target: 8788
+        host_ip: "${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}"
+        published: "${AUTPLAY_MOBILE_STREAM_PORT:-18788}"
+        protocol: tcp
+
+  admin-init:
+    image: autplay-server:p06-local
+    profiles: [runtime]
+    command:
+      - python
+      - -c
+      - >-
+        import urllib.request;
+        urllib.request.urlopen(
+        'http://mobile-api:8787/api/v1/pairing/discovery', timeout=5).read()
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    depends_on:
+      mobile-api:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 128m
+    cpus: 0.25
+
+secrets:
+  autplay-admin-source-hmac:
+    file: "${AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE:?set AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE to a local secret file}"
+  autplay-admin-csrf-hmac:
+    file: "${AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE:?set AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE to a different local secret file}"
+  autplay-profile-identity-key:
+    file: "${AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE:?set AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE to a persistent local P-256 private-key PEM file}"

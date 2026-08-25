@@ -56,6 +56,12 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
                 .putExtra(AutPlayPlaybackService.EXTRA_REPEAT_MODE, command.mode)
             is PlaybackCommand.ScheduledPlay -> intent.setAction(AutPlayPlaybackService.ACTION_SCHEDULED_PLAY)
                 .putExtra(AutPlayPlaybackService.EXTRA_SCHEDULED_AT_MS, command.atMs)
+            is PlaybackCommand.ScheduleSleepTimer -> intent.setAction(AutPlayPlaybackService.ACTION_SCHEDULE_SLEEP_TIMER)
+                .putExtra(AutPlayPlaybackService.EXTRA_SLEEP_TIMER_DURATION_MS, command.durationMs)
+            is PlaybackCommand.StopAfterCurrentItem -> intent
+                .setAction(AutPlayPlaybackService.ACTION_STOP_AFTER_CURRENT_ITEM)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.expectedQueueEntryId.value)
+            PlaybackCommand.CancelSleepTimer -> intent.action = AutPlayPlaybackService.ACTION_CANCEL_SLEEP_TIMER
             is PlaybackCommand.SetSpeed -> intent.setAction(AutPlayPlaybackService.ACTION_SET_SPEED)
                 .putExtra(AutPlayPlaybackService.EXTRA_SPEED, command.speed)
         }
@@ -112,6 +118,10 @@ data class PlaybackUiState(
     val bufferedMs: Long = 0,
     val shuffleEnabled: Boolean = false,
     val repeatMode: String = "OFF",
+    /** Process-local monotonic deadline; null means no sleep timer is active. */
+    val sleepTimerDeadlineElapsedRealtimeMs: Long? = null,
+    /** Queue entry armed to pause exactly at its end; null means this mode is inactive. */
+    val stopAfterQueueEntryId: String? = null,
 )
 
 /** Process-local projection for Compose; Media3/Room remain the execution and persistence owners. */
@@ -150,5 +160,55 @@ sealed interface PlaybackCommand {
 
     /** Wave-only execution action; caller must cancel it when room authority is lost. */
     data class ScheduledPlay(val atMs: Long) : PlaybackCommand
+
+    /** Stops active playback at the monotonic deadline without altering the persisted queue. */
+    data class ScheduleSleepTimer(val durationMs: Long) : PlaybackCommand {
+        init { require(durationMs in SleepTimerPolicy.MIN_DURATION_MS..SleepTimerPolicy.MAX_DURATION_MS) }
+    }
+
+    /** Pauses before Media3 advances beyond the expected current queue entry. */
+    data class StopAfterCurrentItem(val expectedQueueEntryId: LocalId) : PlaybackCommand
+
+    data object CancelSleepTimer : PlaybackCommand
+
     data class SetSpeed(val speed: Float) : PlaybackCommand { init { require(speed in .98f..1.02f || speed == 1f) } }
+}
+
+/**
+ * Pure fail-closed policy for the process-local sleep timer. Wave queues are controlled by room
+ * authority, so a device-local timer must never interfere with their synchronized playback.
+ */
+internal object SleepTimerPolicy {
+    const val MIN_DURATION_MS = 60_000L
+    const val MAX_DURATION_MS = 12 * 60 * 60 * 1_000L
+    const val MAX_WAIT_SLICE_MS = 30_000L
+    private val ordinaryQueueTypes = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
+
+    fun allows(queueType: String?): Boolean = queueType in ordinaryQueueTypes
+
+    fun stopAfterCurrentItemDecision(
+        queueType: String?,
+        expectedQueueEntryId: String?,
+        currentQueueEntryId: String?,
+    ): StopAfterCurrentItemDecision = when {
+        !allows(queueType) -> StopAfterCurrentItemDecision.CLEAR_UNSUPPORTED_QUEUE
+        expectedQueueEntryId.isNullOrBlank() || expectedQueueEntryId != currentQueueEntryId ->
+            StopAfterCurrentItemDecision.REJECT_STALE
+        else -> StopAfterCurrentItemDecision.ARM
+    }
+
+    fun deadline(nowElapsedRealtimeMs: Long, durationMs: Long): Long {
+        require(nowElapsedRealtimeMs >= 0)
+        require(durationMs in MIN_DURATION_MS..MAX_DURATION_MS)
+        return nowElapsedRealtimeMs + durationMs
+    }
+
+    fun nextDelay(deadlineElapsedRealtimeMs: Long, nowElapsedRealtimeMs: Long): Long =
+        (deadlineElapsedRealtimeMs - nowElapsedRealtimeMs).coerceIn(0L, MAX_WAIT_SLICE_MS)
+}
+
+internal enum class StopAfterCurrentItemDecision {
+    ARM,
+    REJECT_STALE,
+    CLEAR_UNSUPPORTED_QUEUE,
 }

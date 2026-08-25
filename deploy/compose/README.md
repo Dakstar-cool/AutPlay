@@ -20,6 +20,62 @@ production TLS edge and deployment decisions.
 
 `autplay_dev_only` is a fixed disposable development credential, not a deployable secret. These files are not production manifests and must never be pointed at real/user data. Production database roles, TLS/domain topology, secret delivery, backup/restore, and public networking require their owning later phase and explicit deployment approval.
 
+## Optional loopback administrative Web
+
+`compose.admin-local.yaml` keeps the server-rendered administrative Web in the existing API process
+at `http://127.0.0.1:8787/admin`. It also adds a separate admin-disabled API process for an Android
+debug client. Both endpoints use the same database, Vault, signing secret and persistent server
+identity, while only the mobile API and stream may bind to a concrete trusted-LAN address. Create
+two different random HMAC secret files and one persistent P-256 private-key PEM file outside the
+repository, then include the overlay after the normal runtime files:
+
+```text
+AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE=<local source-HMAC secret file>
+AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE=<different local CSRF-HMAC secret file>
+AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE=<persistent local P-256 private-key PEM file>
+AUTPLAY_MOBILE_BIND_HOST=<concrete trusted-LAN IPv4>
+AUTPLAY_MOBILE_API_PORT=18787
+AUTPLAY_MOBILE_STREAM_PORT=18788
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.admin-local.yaml --profile runtime up --build --wait
+```
+
+The overlay's one-shot `admin-init` process waits for the mobile API and initializes or verifies the
+server-instance identity through the signed pairing-discovery boundary. Reuse the same private-key
+file for the lifetime of the PostgreSQL data. Replacing it while retaining the database fails
+closed because persisted public evidence no longer matches. An intentional configured origin
+change keeps the same application identity, updates the capability revision, and requires explicit
+confirmation in an already paired client. Restrict the firewall to the selected Wi-Fi interface,
+the two mobile ports, and `LocalSubnet`; never use `0.0.0.0` or expose this HTTP debug topology to
+the Internet. The overlay derives both signed origins from the exact bind address and published
+ports, so they cannot drift independently. Cancel any active Android enrollment invitations before
+an intentional origin change and issue new invitations afterward; old snapshots fail closed.
+
+The first account remains an intentional, locally CLI-created `OWNER`; the accepted authentication
+contract forbids an implicit default account or permanent browser login. On a clean database, run
+the one-time bootstrap from an attached local terminal before requesting browser access, and
+protect the token-bearing JSON it prints:
+
+```text
+docker compose -p <project> -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.admin-local.yaml --profile runtime exec -T api autplay-admin bootstrap-owner --display-name <name> --device-name <server-machine> --platform OTHER --app-version <version>
+```
+
+This command fails closed once any account exists. The created account is `ACTIVE OWNER`, so the
+server machine always retains the supported local CLI bootstrap/recovery path without a network
+login or a reusable default credential. Browser authority is intentionally separate: issue a
+five-minute one-time bearer from an attached local terminal, using the `user_id` retained from the
+first owner bootstrap output:
+
+```text
+docker compose -p <project> -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.admin-local.yaml --profile runtime exec -it api autplay-admin web-session-invite --user-id <owner UUID>
+```
+
+Do not redirect, record or place the printed bearer in shell history. Open `/admin/login` and enter
+it only in the masked form. The browser session is an HttpOnly loopback development cookie with a
+30-minute idle and 12-hour absolute lifetime; the overlay does not create an implicit or permanent
+administrator session. The administrative API publication is always literal `127.0.0.1`; the
+separate mobile API contains no administrative Web routes. Cleartext admin Web remains forbidden
+outside literal loopback.
+
 P12 adds `ml-gpu` under the opt-in `gpu` profile. It is built from `gpu/Dockerfile`, publishes no
 port, has no API/CPU dependency edge, reads Vault and pre-provisioned private model-cache bytes
 read-only and writes only PostgreSQL derived state. The normal `runtime` command does not build or start it. On an

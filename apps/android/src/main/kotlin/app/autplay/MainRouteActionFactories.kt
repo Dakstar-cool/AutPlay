@@ -17,6 +17,8 @@ import app.autplay.domain.LocalId
 import app.autplay.download.DownloadStorageClass
 import app.autplay.playback.presentation.PlaybackInteractionRouter
 import app.autplay.playback.presentation.PlaybackPresentationAdapter
+import app.autplay.playback.PlaybackCommand
+import app.autplay.playback.PlaybackSessionOwner
 import app.autplay.ui.AppLanguage
 import app.autplay.ui.ServerFeaturesActions
 import app.autplay.ui.ServerFeaturesUiState
@@ -41,7 +43,9 @@ import kotlinx.coroutines.launch
 internal fun buildNowPlayingRouteActions(
     playbackActions: PlaybackInteractionRouter,
     playerAdapter: PlaybackPresentationAdapter,
+    playbackOwner: PlaybackSessionOwner,
     currentTrackRefId: () -> String?,
+    currentQueueEntryId: () -> String?,
     scope: CoroutineScope,
     sliceRepository: LibraryVerticalSliceRepository,
     binding: () -> ClientEventBinding?,
@@ -55,6 +59,26 @@ internal fun buildNowPlayingRouteActions(
     seekCommit = playbackActions::commitDirectSeek,
     like = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "LIKED", reportError) },
     dislike = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "DISLIKED", reportError) },
+    clearPreference = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "NEUTRAL", reportError) },
+    scheduleSleepTimer = { durationMs ->
+        scope.launch {
+            runCatching { playbackOwner.dispatch(PlaybackCommand.ScheduleSleepTimer(durationMs)) }
+                .onFailure { reportError("SLEEP_TIMER_UNAVAILABLE") }
+        }
+    },
+    stopAfterCurrentTrack = {
+        val queueEntryId = currentQueueEntryId() ?: return@NowPlayingRouteActions
+        scope.launch {
+            runCatching { playbackOwner.dispatch(PlaybackCommand.StopAfterCurrentItem(LocalId(queueEntryId))) }
+                .onFailure { reportError("SLEEP_TIMER_UNAVAILABLE") }
+        }
+    },
+    cancelSleepTimer = {
+        scope.launch {
+            runCatching { playbackOwner.dispatch(PlaybackCommand.CancelSleepTimer) }
+                .onFailure { reportError("SLEEP_TIMER_UNAVAILABLE") }
+        }
+    },
     observingChanged = { playerAdapter.setSurfaceObserving("full", it) },
 )
 

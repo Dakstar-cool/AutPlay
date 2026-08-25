@@ -180,6 +180,59 @@ def test_admin_web_requires_distinct_source_and_csrf_hmac_secrets() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("origin", "profile", "expected"),
+    (
+        ("HTTP://192.168.1.2:80/", RuntimeProfile.DEVELOPMENT, "http://192.168.1.2"),
+        ("http://172.16.4.5:18787", RuntimeProfile.TEST, "http://172.16.4.5:18787"),
+        ("http://[::1]:18787/", RuntimeProfile.TEST, "http://[::1]:18787"),
+        ("HTTPS://Example.TEST:443/", RuntimeProfile.PRODUCTION, "https://example.test"),
+        ("https://bücher.example", RuntimeProfile.PRODUCTION, "https://xn--bcher-kva.example"),
+    ),
+)
+def test_profile_origins_are_normalized_by_transport_contract(
+    origin: str, profile: RuntimeProfile, expected: str
+) -> None:
+    settings = ApiSettings(
+        profile=profile,
+        database_url=SecretStr(DATABASE_URL),
+        auth_signing_secret=SecretStr(AUTH_SECRET),
+        profile_api_origin=origin,
+        profile_stream_origin=origin,
+    )
+
+    assert settings.profile_api_origin == expected
+    assert settings.profile_stream_origin == expected
+
+
+@pytest.mark.parametrize(
+    ("origin", "profile"),
+    (
+        ("http://8.8.8.8:18787", RuntimeProfile.DEVELOPMENT),
+        ("http://example.test:18787", RuntimeProfile.DEVELOPMENT),
+        ("http://192.168.1.2:18787", RuntimeProfile.PRODUCTION),
+        ("https://user@example.test", RuntimeProfile.PRODUCTION),
+        ("https://example.test/api", RuntimeProfile.PRODUCTION),
+        ("https://example.test?query=yes", RuntimeProfile.PRODUCTION),
+        ("https://example.test#fragment", RuntimeProfile.PRODUCTION),
+        ("https://exa%6dple.test", RuntimeProfile.PRODUCTION),
+        ("https://-example.test", RuntimeProfile.PRODUCTION),
+        ("https://example_.test", RuntimeProfile.PRODUCTION),
+    ),
+)
+def test_profile_origins_reject_unsafe_transport_or_authority(
+    origin: str, profile: RuntimeProfile
+) -> None:
+    with pytest.raises(ValueError):
+        ApiSettings(
+            profile=profile,
+            database_url=SecretStr(DATABASE_URL),
+            auth_signing_secret=SecretStr(AUTH_SECRET),
+            profile_api_origin=origin,
+            profile_stream_origin="https://stream.example.test",
+        )
+
+
 def test_jamendo_is_disabled_by_default_and_requires_non_vault_staging(tmp_path: Path) -> None:
     base = {
         "database_url": SecretStr(DATABASE_URL),

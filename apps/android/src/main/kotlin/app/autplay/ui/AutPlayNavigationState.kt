@@ -61,6 +61,8 @@ public class AutPlayNavigationState internal constructor(
 }
 
 @Composable
-public fun rememberAutPlayNavigationState(): AutPlayNavigationState = rememberSaveable(
+public fun rememberAutPlayNavigationState(
+    initialDestination: UiDestination = UiDestination.Home,
+): AutPlayNavigationState = rememberSaveable(
     saver = AutPlayNavigationState.Saver,
-) { AutPlayNavigationState(UiDestination.Home, emptyList()) }
+) { AutPlayNavigationState(initialDestination, emptyList()) }

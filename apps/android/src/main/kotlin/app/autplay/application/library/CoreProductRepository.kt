@@ -118,7 +118,13 @@ class CoreProductRepository(
     fun preferences(profileId: String?, limit: Int = 2_000): Flow<List<CoreTrackPreferenceSummary>> {
         require(limit in 1..5_000)
         return database.libraryDao().preferencesForProfile(effectiveProfile(profileId), limit).map { rows ->
-            rows.map { CoreTrackPreferenceSummary(it.localUserTrackRefId, it.preference == "LIKED") }
+            rows.map {
+                CoreTrackPreferenceSummary(
+                    stableId = it.localUserTrackRefId,
+                    loved = it.preference == "LIKED",
+                    disliked = it.preference == "DISLIKED",
+                )
+            }
         }
     }
 
@@ -323,7 +329,11 @@ data class CoreResumeQueueSummary(
     val positionMs: Long,
     val queueType: String,
 )
-data class CoreTrackPreferenceSummary(val stableId: String, val loved: Boolean)
+data class CoreTrackPreferenceSummary(
+    val stableId: String,
+    val loved: Boolean,
+    val disliked: Boolean = false,
+)
 data class CoreLocalAudioSummary(
     val stableId: String,
     val status: String,

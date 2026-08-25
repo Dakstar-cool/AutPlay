@@ -21,8 +21,20 @@
     <string name="action_open_profile">Открыть профиль</string>
     <string name="action_open_settings">Открыть настройки</string>
 
+    <string name="onboarding_step">Шаг %1$d из %2$d</string>
+    <string name="onboarding_welcome_title">Музыка прежде всего ваша</string>
+    <string name="onboarding_welcome_body">AutPlay работает с музыкой на этом телефоне. Можно начать локально и самостоятельно управлять своей медиатекой.</string>
+    <string name="onboarding_library_title">Находите, слушайте, продолжайте</string>
+    <string name="onboarding_library_body">В разделе «Моя музыка» добавляйте треки, через поиск находите их, а плеер сохранит вашу очередь.</string>
+    <string name="onboarding_server_title">Подключите личный сервер, когда захотите</string>
+    <string name="onboarding_server_body">Личный сервер необязателен. Он соединяет ваши устройства и позволяет слушать вместе, а локальное воспроизведение продолжает работать без него.</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_continue_local">Продолжить на этом телефоне</string>
+    <string name="onboarding_connect_server">Подключить личный сервер</string>
+    <string name="onboarding_local_note">Для знакомства не нужны аккаунт, сеть или доступ к папке.</string>
+    <string name="onboarding_save_failed">Не удалось сохранить выбор. Попробуйте ещё раз.</string>
+
     <string name="home_my_wave">Моя волна</string>
-    <string name="home_listen_together">Совместное прослушивание</string>
     <string name="home_hero_personal_flow">Ваш персональный поток</string>
     <string name="home_hero_open_player">Открыть полный плеер</string>
     <string name="home_hero_playing">Сейчас играет · кольцо движется вместе с воспроизведением</string>
@@ -191,7 +203,6 @@
     <string name="action_retry">Повторить</string>
     <string name="state_permission_title">Нужно разрешение</string>
     <string name="state_playback_unavailable_title">Воспроизведение недоступно</string>
-    <string name="state_local_continues">Локальная медиатека и воспроизведение продолжают работать.</string>
     <string name="track_untitled">Трек без названия</string>
 
     <string name="expanded_queue_title">Далее</string>
@@ -421,5 +432,22 @@
     <string name="settings_import">Загрузить настройки из файла</string>
     <string name="settings_export_privacy">Пароли, личные адреса и подключения устройств в файл не попадут.</string>
     <string name="settings_more">Другие возможности</string>
+    <string name="player_sleep_timer">Таймер сна</string>
+    <plurals name="player_sleep_timer_active">
+        <item quantity="one">Отключение примерно через %1$d минуту</item>
+        <item quantity="few">Отключение примерно через %1$d минуты</item>
+        <item quantity="many">Отключение примерно через %1$d минут</item>
+        <item quantity="other">Отключение примерно через %1$d минуты</item>
+    </plurals>
+    <string name="player_sleep_timer_body">Автоматически остановить музыку через выбранное время.</string>
+    <string name="player_sleep_timer_cancel">Отключить таймер</string>
+    <string name="player_sleep_timer_dial_description">Таймер сна, от 1 до 60 минут</string>
+    <string name="player_sleep_timer_set">Запустить таймер</string>
+    <string name="player_sleep_timer_after_track">После текущего трека</string>
+    <string name="player_sleep_timer_after_track_active">Воспроизведение остановится после текущего трека.</string>
+    <string name="player_wave_by_track">Волна по треку</string>
+    <string name="player_wave_by_track_body">Будущая персональная подборка на основе текущего трека.</string>
+    <string name="player_wave_by_track_unavailable">Волна по треку пока недоступна</string>
+    <string name="player_coming_soon">Скоро</string>
     <string name="recommendation_for_you">Рекомендовано для вас</string>
 </resources>

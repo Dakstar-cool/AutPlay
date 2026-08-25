@@ -13,6 +13,10 @@ internal data class NowPlayingRouteActions(
     val seekCommit: () -> Unit,
     val like: () -> Unit,
     val dislike: () -> Unit,
+    val clearPreference: () -> Unit,
+    val scheduleSleepTimer: (Long) -> Unit,
+    val stopAfterCurrentTrack: () -> Unit,
+    val cancelSleepTimer: () -> Unit,
     val observingChanged: (Boolean) -> Unit,
 )
 
@@ -20,6 +24,9 @@ internal data class NowPlayingRouteActions(
 internal fun NowPlayingRouteRenderer(
     state: PlaybackPresentationState,
     feedbackEnabled: Boolean,
+    preference: PlaybackPreferenceUiState,
+    sleepTimerRemainingMinutes: Int?,
+    stopAfterCurrentTrackActive: Boolean,
     actions: NowPlayingRouteActions,
     modifier: Modifier = Modifier,
 ) {
@@ -33,7 +40,14 @@ internal fun NowPlayingRouteRenderer(
         onSeekCommit = actions.seekCommit,
         onLike = actions.like,
         onDislike = actions.dislike,
+        preference = preference,
+        onClearPreference = actions.clearPreference,
         feedbackEnabled = feedbackEnabled,
+        sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
+        stopAfterCurrentTrackActive = stopAfterCurrentTrackActive,
+        onSetSleepTimer = actions.scheduleSleepTimer,
+        onStopAfterCurrentTrack = actions.stopAfterCurrentTrack,
+        onCancelSleepTimer = actions.cancelSleepTimer,
         onObservingChanged = actions.observingChanged,
         modifier = modifier,
     )

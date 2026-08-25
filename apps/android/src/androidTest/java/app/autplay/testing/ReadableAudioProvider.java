@@ -17,11 +17,15 @@ import java.io.IOException;
 /** Deterministic short PCM WAV exposed as a real readable content URI for Media3/source tests. */
 public final class ReadableAudioProvider extends ContentProvider {
     private File audio;
+    private File tone;
 
     @Override public boolean onCreate() {
         audio = new File(getContext().getCacheDir(), "p08-readable.wav");
-        try (FileOutputStream output = new FileOutputStream(audio)) {
-            output.write(wavSilence());
+        tone = new File(getContext().getCacheDir(), "p08-tone.wav");
+        try (FileOutputStream output = new FileOutputStream(audio);
+             FileOutputStream toneOutput = new FileOutputStream(tone)) {
+            output.write(wav(false));
+            toneOutput.write(wav(true));
             return true;
         } catch (IOException error) {
             throw new IllegalStateException("TEST_AUDIO_CREATE_FAILED", error);
@@ -29,7 +33,8 @@ public final class ReadableAudioProvider extends ContentProvider {
     }
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        return ParcelFileDescriptor.open(audio, ParcelFileDescriptor.MODE_READ_ONLY);
+        File selected = "tone".equals(uri.getLastPathSegment()) ? tone : audio;
+        return ParcelFileDescriptor.open(selected, ParcelFileDescriptor.MODE_READ_ONLY);
     }
 
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
@@ -43,7 +48,7 @@ public final class ReadableAudioProvider extends ContentProvider {
     @Override public int delete(Uri uri, String selection, String[] selectionArgs) { return 0; }
     @Override public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) { return 0; }
 
-    private static byte[] wavSilence() throws IOException {
+    private static byte[] wav(boolean tone) throws IOException {
         int samples = 320_000;
         int payloadBytes = samples * 2;
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -51,7 +56,10 @@ public final class ReadableAudioProvider extends ContentProvider {
         data.writeBytes("RIFF"); writeLeInt(data, 36 + payloadBytes); data.writeBytes("WAVEfmt "); writeLeInt(data, 16);
         writeLeShort(data, 1); writeLeShort(data, 1); writeLeInt(data, 8_000); writeLeInt(data, 16_000);
         writeLeShort(data, 2); writeLeShort(data, 16); data.writeBytes("data"); writeLeInt(data, payloadBytes);
-        data.write(new byte[payloadBytes]);
+        for (int index = 0; index < samples; index++) {
+            int sample = tone ? (int) (Math.sin(index * 2.0 * Math.PI * 440.0 / 8_000.0) * 12_000) : 0;
+            writeLeShort(data, sample);
+        }
         data.flush();
         return output.toByteArray();
     }

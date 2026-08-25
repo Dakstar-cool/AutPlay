@@ -8,27 +8,31 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Badge
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -62,6 +66,11 @@ public fun AutPlayAdaptiveShell(
         widthClass: UiWidthClass,
     ) -> Unit,
 ) {
+    val lightTheme = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    AutPlaySystemBarIconAppearance(
+        useDarkStatusBarIcons = shouldUseDarkStatusBarIcons(selectedDestination, lightTheme),
+        useDarkNavigationBarIcons = lightTheme,
+    )
     val stateHolder = rememberSaveableStateHolder()
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val widthClass = remember(maxWidth) { widthClassFor(maxWidth) }
@@ -74,6 +83,7 @@ public fun AutPlayAdaptiveShell(
             Scaffold(
                 topBar = {
                     AutPlayTopBar(
+                        destination = selectedDestination,
                         canNavigateBack = canNavigateBack,
                         onNavigateBack = onNavigateBack,
                         onProfileClick = onProfileClick,
@@ -118,6 +128,9 @@ public fun AutPlayAdaptiveShell(
     }
 }
 
+internal fun shouldUseDarkStatusBarIcons(destination: UiDestination, lightTheme: Boolean): Boolean =
+    lightTheme && destination != UiDestination.NowPlaying
+
 /** Public for previews and deterministic width-class tests. */
 public fun widthClassFor(width: Dp): UiWidthClass = when {
     width < CompactBreakpoint -> UiWidthClass.Compact
@@ -142,6 +155,7 @@ private fun CompactShell(
     Scaffold(
         topBar = {
             AutPlayTopBar(
+                selectedDestination,
                 canNavigateBack,
                 onNavigateBack,
                 onProfileClick,
@@ -153,7 +167,11 @@ private fun CompactShell(
         bottomBar = {
             Column {
                 nowPlayingBar()
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                NavigationBar(
+                    modifier = Modifier.height(72.dp),
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.98f),
+                    tonalElevation = 0.dp,
+                ) {
                     UiDestination.compactNavigation.forEach { destination ->
                         CompactNavigationItem(
                             destination,
@@ -208,6 +226,7 @@ private fun RailShell(
             modifier = Modifier.weight(1f),
             topBar = {
                 AutPlayTopBar(
+                    selectedDestination,
                     canNavigateBack,
                     onNavigateBack,
                     onProfileClick,
@@ -239,6 +258,7 @@ private fun RailShell(
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun AutPlayTopBar(
+    destination: UiDestination,
     canNavigateBack: Boolean,
     onNavigateBack: () -> Unit,
     onProfileClick: () -> Unit,
@@ -247,15 +267,22 @@ private fun AutPlayTopBar(
     nowPlayingAvailable: Boolean,
     immersive: Boolean = false,
 ) {
-    TopAppBar(
+    CenterAlignedTopAppBar(
         title = {
             if (!immersive) {
-                Text(stringResource(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    stringResource(topBarTitle(destination)),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         },
         navigationIcon = {
             if (canNavigateBack) {
                 AutPlayIconButton(AutPlayIcon.Back, R.string.action_back, onNavigateBack)
+            } else if (!immersive) {
+                AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
             }
         },
         actions = {
@@ -264,14 +291,12 @@ private fun AutPlayTopBar(
                     AutPlayIconButton(AutPlayIcon.Play, R.string.nav_now_playing, onNowPlayingClick)
                 }
                 AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
-                AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = if (immersive) {
-                MaterialTheme.colorScheme.background.copy(alpha = 0f)
-            } else {
-                MaterialTheme.colorScheme.background
+            containerColor = when {
+                immersive || destination == UiDestination.Home -> Color.Transparent
+                else -> MaterialTheme.colorScheme.background.copy(alpha = 0.96f)
             },
         ),
     )
@@ -290,7 +315,21 @@ private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
         onClick = { onDestinationSelected(destination) },
         icon = { DestinationIcon(destination, unreadSyncConflicts) },
         label = { Text(label, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis) },
+        colors = NavigationBarItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.primary,
+            indicatorColor = Color.Transparent,
+            unselectedIconColor = AutPlayTokens.colors.mutedText,
+            unselectedTextColor = AutPlayTokens.colors.mutedText,
+        ),
     )
+}
+
+private fun topBarTitle(destination: UiDestination): Int = when (destination) {
+    UiDestination.Home -> R.string.home_my_wave
+    UiDestination.Search -> R.string.nav_search
+    UiDestination.Library -> R.string.library_title
+    else -> R.string.app_name
 }
 
 @Composable

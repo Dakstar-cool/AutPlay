@@ -39,6 +39,17 @@ the current dependency, license, vulnerability and secret-scan evidence.
 - Android backup is disabled (`allowBackup=false`, `fullBackupContent=false`); bearer material is
   Keystore-owned. Revoked URI/device credential behavior remains fail-closed and repairable.
 
+### Post-RC dependency remediation (2026-08-24)
+
+- The direct server pin and both server/GPU locks were upgraded from `cryptography==46.0.5` to
+  `cryptography==50.0.0`, covering the six Dependabot alerts grouped against the inherited GPU
+  lock, including GHSA-jwv3-5hgf-82ww / CVE-2026-69249.
+- Fresh frozen OSV audits cover 51 server and 58 isolated-GPU packages with zero vulnerabilities
+  and zero adverse statuses. Regenerated CycloneDX 1.5 SBOMs record the same component counts and
+  the exact `cryptography` 50.0.0 package.
+- The five-test profile-pairing unit set passes against the upgraded package, including the current
+  P-256 key serialization, signing and verification boundary.
+
 ## Residual security boundaries
 
 - No public reverse proxy/domain/TLS, CSRF Web UI, production RBAC topology, backup destination or

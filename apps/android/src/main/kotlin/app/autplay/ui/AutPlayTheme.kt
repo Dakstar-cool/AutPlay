@@ -1,5 +1,8 @@
 package app.autplay.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -9,12 +12,15 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
 /** User-selectable appearance values that can be persisted by the settings layer. */
 public enum class AutPlayThemeMode {
@@ -46,6 +52,8 @@ public data class AutPlaySemanticColors(
     public val border: Color,
     public val mutedText: Color,
     public val softAccent: Color,
+    public val glassSurface: Color,
+    public val glassBorder: Color,
     public val miniPlayerSurface: Color,
     public val onMiniPlayer: Color,
     public val success: Color,
@@ -86,6 +94,10 @@ public fun AutPlayTheme(
         AutPlayThemeMode.Light -> false
         AutPlayThemeMode.Dark -> true
     }
+    AutPlaySystemBarIconAppearance(
+        useDarkStatusBarIcons = !dark,
+        useDarkNavigationBarIcons = !dark,
+    )
     androidx.compose.runtime.CompositionLocalProvider(
         LocalAutPlaySemanticColors provides semanticColors(dark, appearance.accent),
         LocalAutPlayDimensions provides AutPlayDimensions(),
@@ -99,6 +111,30 @@ public fun AutPlayTheme(
     }
 }
 
+/** Route surfaces may override the theme default when edge-to-edge content is intentionally dark. */
+@Composable
+internal fun AutPlaySystemBarIconAppearance(
+    useDarkStatusBarIcons: Boolean,
+    useDarkNavigationBarIcons: Boolean,
+) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = view.context.findActivity()?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = useDarkStatusBarIcons
+                isAppearanceLightNavigationBars = useDarkNavigationBarIcons
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorScheme = if (dark) {
     darkColorScheme(
         primary = accent.darkPrimary,
@@ -107,13 +143,13 @@ private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorSchem
         onPrimaryContainer = Color.White,
         secondary = Color(0xFFB8A7D9),
         tertiary = Color(0xFF78D79A),
-        background = Color(0xFF121212),
-        onBackground = Color(0xFFF5F5F5),
-        surface = Color(0xFF1C1C1E),
-        onSurface = Color(0xFFF5F5F5),
-        surfaceVariant = Color(0xFF262629),
-        onSurfaceVariant = Color(0xFFAAA7A3),
-        outline = Color(0xFF5A585C),
+        background = Color(0xFF08090B),
+        onBackground = Color(0xFFF6F4F1),
+        surface = Color(0xFF111216),
+        onSurface = Color(0xFFF6F4F1),
+        surfaceVariant = Color(0xFF1A1B20),
+        onSurfaceVariant = Color(0xFFA7A5AB),
+        outline = Color(0xFF45464E),
         error = Color(0xFFFFB4AB),
     )
 } else {
@@ -138,12 +174,14 @@ private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorSchem
 private fun semanticColors(dark: Boolean, accent: AutPlayAccent): AutPlaySemanticColors =
     if (dark) {
         AutPlaySemanticColors(
-            raisedSurface = Color(0xFF262629),
-            border = Color(0xFF4D4B4F),
-            mutedText = Color(0xFFAAA7A3),
+            raisedSurface = Color(0xFF191A1F),
+            border = Color(0xFF34353D),
+            mutedText = Color(0xFFA7A5AB),
             softAccent = accent.darkContainer,
-            miniPlayerSurface = Color(0xFFF1EEE8),
-            onMiniPlayer = Color(0xFF24211F),
+            glassSurface = Color(0xB81B1C21),
+            glassBorder = Color(0x3DFFFFFF),
+            miniPlayerSurface = Color(0xF21A1B20),
+            onMiniPlayer = Color(0xFFF6F4F1),
             success = Color(0xFF78D79A),
             info = Color(0xFF8FCBFF),
         )
@@ -153,7 +191,9 @@ private fun semanticColors(dark: Boolean, accent: AutPlayAccent): AutPlaySemanti
             border = Color(0xFFE5E0D8),
             mutedText = Color(0xFF706D68),
             softAccent = accent.lightContainer,
-            miniPlayerSurface = Color(0xFF24211F),
+            glassSurface = Color(0xD9FFFFFF),
+            glassBorder = Color(0x33000000),
+            miniPlayerSurface = Color(0xF224211F),
             onMiniPlayer = Color(0xFFF5F2EC),
             success = Color(0xFF247447),
             info = Color(0xFF21618C),
@@ -161,17 +201,17 @@ private fun semanticColors(dark: Boolean, accent: AutPlayAccent): AutPlaySemanti
     }
 
 private val AutPlayShapes = Shapes(
-    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
-    small = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-    medium = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
-    large = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
-    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(30.dp),
 )
 
 private val AutPlayTypography = Typography(
-    displaySmall = TextStyle(fontSize = 40.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold),
-    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
-    headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.SemiBold),
+    displaySmall = TextStyle(fontSize = 42.sp, lineHeight = 46.sp, fontWeight = FontWeight.Bold),
+    headlineLarge = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Bold),
+    headlineMedium = TextStyle(fontSize = 28.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold),
     headlineSmall = TextStyle(fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
     titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
     titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),

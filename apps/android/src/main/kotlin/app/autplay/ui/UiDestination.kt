@@ -98,6 +98,9 @@ public enum class AutPlayIcon {
     Repeat,
     Check,
     Favorite,
+    ThumbUp,
+    ThumbDown,
+    Timer,
 }
 
 /** Width categories based on the Android adaptive-layout guidance breakpoints. */

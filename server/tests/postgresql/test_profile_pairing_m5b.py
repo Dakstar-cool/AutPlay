@@ -141,6 +141,92 @@ def _rotation_request(
     return request
 
 
+def test_concurrent_first_discovery_creates_one_server_identity(
+    pairing_service: ProfilePairingService, database_connection: Connection[object]
+) -> None:
+    gate = Barrier(2)
+
+    def discover() -> dict[str, object]:
+        gate.wait(timeout=5)
+        return pairing_service.discovery()
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="profile-discovery") as executor:
+        attempts = (executor.submit(discover), executor.submit(discover))
+        discoveries = [future.result(timeout=10) for future in attempts]
+
+    first_payload = discoveries[0]["payload"]
+    second_payload = discoveries[1]["payload"]
+    assert isinstance(first_payload, dict)
+    assert isinstance(second_payload, dict)
+    assert first_payload["server_instance_id"] == second_payload["server_instance_id"]
+    assert database_connection.execute(
+        "SELECT count(*) FROM account.server_instance"
+    ).fetchone() == (1,)
+
+
+def test_discovery_reconciles_configured_origins_without_rotating_identity(
+    database_url: str,
+    database_connection: Connection[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: NOW)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    key = ec.generate_private_key(ec.SECP256R1())
+
+    def service(api_origin: str, stream_origin: str) -> ProfilePairingService:
+        return ProfilePairingService(
+            sessionmaker(engine, class_=Session, expire_on_commit=False),
+            private_key=key,
+            label_hint="M5B configured server",
+            api_origin=api_origin,
+            stream_origin=stream_origin,
+            access_tokens=Hs256AccessTokenCodec(
+                b"m5b-test-access-secret-at-least-thirty-two-bytes",
+                issuer="m5b",
+                audience="m5b",
+            ),
+            access_ttl=timedelta(minutes=10),
+        )
+
+    try:
+        initial_service = service("http://127.0.0.1:18787", "http://127.0.0.1:18788")
+        initial = initial_service.discovery()
+        owner = _owner(database_connection)
+        old_invitation = initial_service.issue_invitation(owner, uuid4(), 60)
+        initial_service.cancel_invitation(
+            owner,
+            UUID(str(old_invitation["invitation_id"])),
+            uuid4(),
+            "server_origin_changed",
+        )
+        configured = service("http://10.20.30.40:18787", "http://10.20.30.40:18788")
+        changed = configured.discovery()
+        configured.discovery()
+        with pytest.raises(ProfilePairingError, match="enrollment_invitation_unavailable"):
+            configured.exchange(_exchange_request(old_invitation)[0])
+        new_invitation = configured.issue_invitation(owner, uuid4(), 60)
+    finally:
+        engine.dispose()
+
+    initial_payload = initial["payload"]
+    changed_payload = changed["payload"]
+    assert isinstance(initial_payload, dict)
+    assert isinstance(changed_payload, dict)
+    assert changed_payload["server_instance_id"] == initial_payload["server_instance_id"]
+    assert changed_payload["identity_epoch"] == initial_payload["identity_epoch"] == 1
+    assert (
+        changed_payload["identity_thumbprint_sha256"]
+        == initial_payload["identity_thumbprint_sha256"]
+    )
+    assert changed_payload["api_origin"] == "http://10.20.30.40:18787"
+    assert changed_payload["stream_origin"] == "http://10.20.30.40:18788"
+    assert new_invitation["api_origin"] == "http://10.20.30.40:18787"
+    assert new_invitation["stream_origin"] == "http://10.20.30.40:18788"
+    assert database_connection.execute(
+        "SELECT api_origin, stream_origin, capability_revision FROM account.server_instance"
+    ).fetchone() == ("http://10.20.30.40:18787", "http://10.20.30.40:18788", 2)
+
+
 def test_invitation_role_ttl_rate_cancel_and_lifecycle_idempotency(
     pairing_service: ProfilePairingService, database_connection: Connection[object]
 ) -> None:

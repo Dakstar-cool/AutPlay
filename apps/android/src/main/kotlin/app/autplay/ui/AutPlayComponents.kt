@@ -235,4 +235,7 @@ private fun platformIconResource(icon: AutPlayIcon): Int = when (icon) {
     AutPlayIcon.Repeat -> R.drawable.ic_autplay_repeat
     AutPlayIcon.Check -> R.drawable.ic_autplay_check
     AutPlayIcon.Favorite -> R.drawable.ic_autplay_favorite
+    AutPlayIcon.ThumbUp -> R.drawable.ic_autplay_thumb_up
+    AutPlayIcon.ThumbDown -> R.drawable.ic_autplay_thumb_down
+    AutPlayIcon.Timer -> R.drawable.ic_autplay_timer
 }

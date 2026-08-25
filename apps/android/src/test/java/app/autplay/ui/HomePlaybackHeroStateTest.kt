@@ -5,6 +5,7 @@ import app.autplay.playback.presentation.PlaybackControlGate
 import app.autplay.playback.presentation.PlaybackControlLockReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,6 +32,30 @@ class HomePlaybackHeroStateTest {
         assertTrue(result.isPlaying)
         assertTrue(result.hasActivePlayback)
         assertTrue(result.liked)
+        assertTrue(result.playPauseEnabled)
+    }
+
+    @Test
+    fun restoredPlaybackRemainsControllableBeforeLocalTrackMappingArrives() {
+        val result = buildHomePlaybackHeroUiState(
+            homeState = homeState(
+                continueListening = HomeContinueUiItem("fallback", "Fallback", "Artist", "0:12"),
+            ),
+            playerState = PlaybackPresentationState(
+                mediaId = "restored-queue-entry",
+                title = "Restored playback",
+                artist = "Current artist",
+                isPlaying = true,
+                controls = PlaybackControlGate.Allowed,
+            ),
+            currentTrackRefId = null,
+            currentTrackLiked = false,
+        )
+
+        assertNull(result.trackId)
+        assertEquals("Restored playback", result.title)
+        assertTrue(result.hasActivePlayback)
+        assertTrue(result.isPlaying)
         assertTrue(result.playPauseEnabled)
     }
 

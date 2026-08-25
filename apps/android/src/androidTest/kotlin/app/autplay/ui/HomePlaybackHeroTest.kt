@@ -110,6 +110,39 @@ class HomePlaybackHeroTest {
     }
 
     @Test
+    fun restoredPlaybackWithoutLocalTrackMappingStillOpensAndToggles() {
+        var playerOpens = 0
+        var toggles = 0
+        composeRule.setContent {
+            AutPlayTheme {
+                HomePlaybackHero(
+                    state = HomePlaybackHeroUiState(
+                        trackId = null,
+                        title = "Restored track",
+                        artist = "Current artist",
+                        isPlaying = true,
+                        hasActivePlayback = true,
+                        liked = false,
+                    ),
+                    localMode = true,
+                    onOpenPlayer = { playerOpens += 1 },
+                    onPlayTrack = {},
+                    onTogglePlayPause = { toggles += 1 },
+                    onLike = {},
+                    onOpenListenTogether = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_pause)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.home_hero_open_player)).performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, toggles)
+            assertEquals(1, playerOpens)
+        }
+    }
+
+    @Test
     fun lockedPlaybackKeepsDirectPauseDisabled() {
         composeRule.setContent {
             AutPlayTheme {

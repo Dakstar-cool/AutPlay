@@ -65,4 +65,29 @@ class PlaybackVisualsTest {
         assertTrue(first in -1f..1f)
         assertTrue(later in -1f..1f)
     }
+
+    @Test
+    fun decodedAudioContourChangesLocalWaveShape() {
+        val silent = playbackHaloDisplacement(
+            angle = 0.4f,
+            phaseRadians = 0.2f,
+            seedA = 0.3f,
+            seedB = 0.7f,
+            layerOffset = 0f,
+            animated = true,
+        )
+        val reactive = playbackHaloDisplacement(
+            angle = 0.4f,
+            phaseRadians = 0.2f,
+            seedA = 0.3f,
+            seedB = 0.7f,
+            layerOffset = 0f,
+            animated = true,
+            audioEnergy = 0.6f,
+            audioContour = listOf(0.9f) + List(11) { 0.1f },
+        )
+
+        assertNotEquals(silent, reactive)
+        assertTrue(reactive in -1f..1f)
+    }
 }

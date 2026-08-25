@@ -14,11 +14,12 @@ import re
 import tomllib
 from collections.abc import Mapping
 from enum import StrEnum
+from ipaddress import IPv4Address, ip_address, ip_network
 from pathlib import Path
 from typing import Any, ClassVar, Final, Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -242,6 +243,14 @@ class ApiSettings(_ExplicitSettings):
         if not value or any(character.isspace() for character in value):
             raise ValueError("API host must be a non-empty host literal")
         return value
+
+    @field_validator("profile_api_origin", "profile_stream_origin")
+    @classmethod
+    def _normalize_profile_origin_field(cls, value: str, info: ValidationInfo) -> str:
+        profile = info.data.get("profile", RuntimeProfile.DEVELOPMENT)
+        if not isinstance(profile, RuntimeProfile):
+            profile = RuntimeProfile(profile)
+        return _normalize_profile_origin(value, profile=profile)
 
     @model_validator(mode="after")
     def _validate_auth_contract(self) -> Self:
@@ -583,6 +592,86 @@ def _validate_admin_web_origin(value: str, *, profile: RuntimeProfile) -> None:
         raise ValueError("admin Web origin must omit the default HTTPS port")
     if parsed.scheme == "http" and port == 80:
         raise ValueError("admin Web origin must omit the default HTTP port")
+
+
+def _normalize_profile_origin(value: str, *, profile: RuntimeProfile) -> str:
+    """Return the deterministic pairing origin permitted by the transport contract."""
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("profile origin is invalid") from error
+    scheme = parsed.scheme.lower()
+    if (
+        scheme not in {"http", "https"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.hostname is None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or "%" in parsed.netloc
+    ):
+        raise ValueError("profile origin must be one origin without credentials or a non-root path")
+
+    raw_host = parsed.hostname
+    assert raw_host is not None
+    try:
+        address = ip_address(raw_host)
+    except ValueError:
+        try:
+            host = raw_host.encode("idna").decode("ascii").lower()
+        except UnicodeError as error:
+            raise ValueError("profile origin host is invalid") from error
+        if not _is_std3_ascii_host(host):
+            raise ValueError("profile origin host is invalid") from None
+        canonical_host = host
+    else:
+        host = address.compressed.lower()
+        canonical_host = f"[{host}]" if address.version == 6 else host
+
+    if scheme == "http" and (
+        profile is RuntimeProfile.PRODUCTION or not _is_debug_cleartext_host(host)
+    ):
+        raise ValueError("cleartext profile origin is limited to non-production trusted LAN")
+    if port == (443 if scheme == "https" else 80):
+        port = None
+    authority = canonical_host if port is None else f"{canonical_host}:{port}"
+    return f"{scheme}://{authority}"
+
+
+def _is_debug_cleartext_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    return isinstance(address, IPv4Address) and any(
+        address in network
+        for network in (
+            ip_network("10.0.0.0/8"),
+            ip_network("172.16.0.0/12"),
+            ip_network("192.168.0.0/16"),
+        )
+    )
+
+
+def _is_std3_ascii_host(host: str) -> bool:
+    """Match Android's IDN.USE_STD3_ASCII_RULES acceptance for DNS hosts."""
+
+    absolute = host.endswith(".")
+    value = host[:-1] if absolute else host
+    if not value or len(host) > 254 or (not absolute and len(host) > 253):
+        return False
+    return all(
+        1 <= len(label) <= 63
+        and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label) is not None
+        for label in value.split(".")
+    )
 
 
 __all__ = (

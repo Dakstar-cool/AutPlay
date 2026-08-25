@@ -19,6 +19,7 @@ class SettingsTransferCodecTest {
             serverBaseUrl = "https://private.example",
             streamBaseUrl = "https://stream.private.example",
             libraryRootTreeUri = "content://provider/tree/music",
+            onboardingRevision = 1,
         )
         val portable = NonSecretSettings(
             appLanguage = "RU",
@@ -40,8 +41,10 @@ class SettingsTransferCodecTest {
         assertEquals(current.serverBaseUrl, restored.serverBaseUrl)
         assertEquals(current.streamBaseUrl, restored.streamBaseUrl)
         assertEquals(current.libraryRootTreeUri, restored.libraryRootTreeUri)
+        assertEquals(1, restored.onboardingRevision)
         assertNull(encoded.decodeToString().takeIf { "private.example" in it })
         assertNull(encoded.decodeToString().takeIf { "stream.private.example" in it })
+        assertNull(encoded.decodeToString().takeIf { "onboarding" in it })
     }
 
     @Test

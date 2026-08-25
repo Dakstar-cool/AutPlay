@@ -46,6 +46,11 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var observedPlaybackStartedAtMs: Long? = null
     private var shuffleSeed: Long? = null
     private var scheduledPlayJob: kotlinx.coroutines.Job? = null
+    private var sleepTimerJob: kotlinx.coroutines.Job? = null
+    private var sleepTimerDeadlineElapsedRealtimeMs: Long? = null
+    private var stopAfterQueueEntryId: String? = null
+    private var sleepTimerGeneration = 0L
+    private val audioContourSink = PlaybackAudioContourSink()
 
     override fun onCreate() {
         super.onCreate()
@@ -56,7 +61,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             database,
             applicationNonSecretSettingsStore(applicationContext),
         )
-        player = ExoPlayer.Builder(this)
+        player = ExoPlayer.Builder(this, ReactivePlaybackRenderersFactory(this, audioContourSink))
             .setMediaSourceFactory(PlaybackMediaSourceFactory.create(this))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -72,6 +77,16 @@ class AutPlayPlaybackService : MediaSessionService() {
             .setCallback(AutPlaySessionCallback(packageName))
             .build()
         scope.launch { restoreQueue(autoplay = false) }
+        scope.launch {
+            while (isActive) {
+                delay(AUDIO_CONTOUR_PUBLISH_MS)
+                if (player.isPlaying && PlaybackAudioContourRuntime.isObservationRequested()) {
+                    PlaybackAudioContourRuntime.publish(audioContourSink.snapshot())
+                } else {
+                    PlaybackAudioContourRuntime.reset()
+                }
+            }
+        }
         scope.launch {
             while (isActive) {
                 delay(PERIODIC_CHECKPOINT_MS)
@@ -115,6 +130,13 @@ class AutPlayPlaybackService : MediaSessionService() {
                 val delayMs = (intent.getLongExtra(EXTRA_SCHEDULED_AT_MS, 0) - SystemClock.elapsedRealtime()).coerceAtLeast(0)
                 scheduledPlayJob = scope.launch { delay(delayMs); player.play() }
             }
+            ACTION_SCHEDULE_SLEEP_TIMER -> scheduleSleepTimer(
+                intent.getLongExtra(EXTRA_SLEEP_TIMER_DURATION_MS, 0),
+            )
+            ACTION_STOP_AFTER_CURRENT_ITEM -> stopAfterCurrentItem(
+                intent.getStringExtra(EXTRA_EXPECTED_QUEUE_ENTRY_ID),
+            )
+            ACTION_CANCEL_SLEEP_TIMER -> cancelSleepTimer()
             ACTION_SET_SPEED -> player.playbackParameters = PlaybackParameters(intent.getFloatExtra(EXTRA_SPEED, 1f).coerceIn(.98f, 1.02f))
         }
         return super.onStartCommand(intent, flags, startId)
@@ -133,6 +155,15 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
         mediaSession.release()
         scheduledPlayJob?.cancel()
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        ++sleepTimerGeneration
+        sleepTimerDeadlineElapsedRealtimeMs = null
+        stopAfterQueueEntryId = null
+        player.setPauseAtEndOfMediaItems(false)
+        audioContourSink.reset()
+        PlaybackAudioContourRuntime.reset()
+        publishRuntimeState()
         player.release()
         scope.cancel()
         super.onDestroy()
@@ -147,6 +178,9 @@ class AutPlayPlaybackService : MediaSessionService() {
             val replacingQueue = restored?.snapshot?.queueSnapshotId?.let { it != queue.snapshot.queueSnapshotId } == true
             if (replacingQueue && logicalSession != null) finalizeCurrentLocked()
             restored = queue
+            if (replacingQueue || !SleepTimerPolicy.allows(queue.snapshot.queueType)) {
+                cancelSleepTimerLocked()
+            }
             logicalSession = if (replacingQueue) persistence.recoverSession() else logicalSession ?: persistence.recoverSession()
             val placeholders = queue.entries.map { entry -> placeholder(entry.queueEntryId) }
             val index = queue.media.currentIndex.coerceIn(placeholders.indices)
@@ -303,8 +337,93 @@ class AutPlayPlaybackService : MediaSessionService() {
                 bufferedMs = (player.bufferedPosition - player.currentPosition).coerceAtLeast(0),
                 shuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = player.repeatMode.fromMedia3RepeatMode(),
+                sleepTimerDeadlineElapsedRealtimeMs = sleepTimerDeadlineElapsedRealtimeMs,
+                stopAfterQueueEntryId = stopAfterQueueEntryId,
             ),
         )
+    }
+
+    /**
+     * Service-owned, session-local timer. It intentionally has no persistence: after process
+     * death there is no trustworthy deadline or authorization context to resume from.
+     */
+    private fun scheduleSleepTimer(durationMs: Long) {
+        if (durationMs !in SleepTimerPolicy.MIN_DURATION_MS..SleepTimerPolicy.MAX_DURATION_MS) return
+        scope.launch {
+            stateMutex.withLock {
+                val queueType = restored?.snapshot?.queueType
+                if (!SleepTimerPolicy.allows(queueType)) {
+                    cancelSleepTimerLocked()
+                    return@withLock
+                }
+                val deadline = SleepTimerPolicy.deadline(SystemClock.elapsedRealtime(), durationMs)
+                val generation = ++sleepTimerGeneration
+                sleepTimerJob?.cancel()
+                stopAfterQueueEntryId = null
+                player.setPauseAtEndOfMediaItems(false)
+                sleepTimerDeadlineElapsedRealtimeMs = deadline
+                publishRuntimeState()
+                sleepTimerJob = scope.launch {
+                    while (true) {
+                        val waitMs = SleepTimerPolicy.nextDelay(deadline, SystemClock.elapsedRealtime())
+                        if (waitMs <= 0L) break
+                        delay(waitMs)
+                    }
+                    stateMutex.withLock {
+                        if (generation != sleepTimerGeneration || sleepTimerDeadlineElapsedRealtimeMs != deadline) {
+                            return@withLock
+                        }
+                        sleepTimerDeadlineElapsedRealtimeMs = null
+                        sleepTimerJob = null
+                        // Pause retains the Media3 queue and the durable playback checkpoint.
+                        player.pause()
+                        publishRuntimeState()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun cancelSleepTimer() {
+        scope.launch { stateMutex.withLock { cancelSleepTimerLocked() } }
+    }
+
+    private fun stopAfterCurrentItem(expectedQueueEntryId: String?) {
+        scope.launch {
+            stateMutex.withLock {
+                val currentQueueEntryId = player.currentMediaItem?.mediaId
+                when (SleepTimerPolicy.stopAfterCurrentItemDecision(
+                    queueType = restored?.snapshot?.queueType,
+                    expectedQueueEntryId = expectedQueueEntryId,
+                    currentQueueEntryId = currentQueueEntryId,
+                )) {
+                    StopAfterCurrentItemDecision.CLEAR_UNSUPPORTED_QUEUE -> {
+                        cancelSleepTimerLocked()
+                        return@withLock
+                    }
+                    StopAfterCurrentItemDecision.REJECT_STALE -> return@withLock
+                    StopAfterCurrentItemDecision.ARM -> Unit
+                }
+                ++sleepTimerGeneration
+                sleepTimerJob?.cancel()
+                sleepTimerJob = null
+                sleepTimerDeadlineElapsedRealtimeMs = null
+                stopAfterQueueEntryId = expectedQueueEntryId
+                player.setPauseAtEndOfMediaItems(true)
+                publishRuntimeState()
+            }
+        }
+    }
+
+    private fun cancelSleepTimerLocked() {
+        ++sleepTimerGeneration
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        val changed = sleepTimerDeadlineElapsedRealtimeMs != null || stopAfterQueueEntryId != null
+        sleepTimerDeadlineElapsedRealtimeMs = null
+        stopAfterQueueEntryId = null
+        player.setPauseAtEndOfMediaItems(false)
+        if (changed) publishRuntimeState()
     }
 
     private inner class PlayerListener : Player.Listener {
@@ -330,6 +449,11 @@ class AutPlayPlaybackService : MediaSessionService() {
                     val current = logicalSession
                     val isSameRestore = reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
                         current?.queueEntryId?.value == mediaItem?.mediaId
+                    if (stopAfterQueueEntryId != null && stopAfterQueueEntryId != mediaItem?.mediaId) {
+                        cancelSleepTimerLocked()
+                    }
+                    audioContourSink.reset()
+                    PlaybackAudioContourRuntime.reset()
                     if (current != null && !isSameRestore) finalizeCurrentLocked()
                     val queue = restored ?: return@withLock
                     val index = player.currentMediaItemIndex
@@ -388,6 +512,15 @@ class AutPlayPlaybackService : MediaSessionService() {
             else scope.launch { stateMutex.withLock { publishRuntimeState() } }
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (reason != Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) return
+            scope.launch {
+                stateMutex.withLock {
+                    if (stopAfterQueueEntryId != null) cancelSleepTimerLocked()
+                }
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             scope.launch {
                 stateMutex.withLock {
@@ -419,12 +552,17 @@ class AutPlayPlaybackService : MediaSessionService() {
         const val ACTION_SET_SHUFFLE = "app.autplay.playback.SET_SHUFFLE"
         const val ACTION_SET_REPEAT = "app.autplay.playback.SET_REPEAT"
         const val ACTION_SCHEDULED_PLAY = "app.autplay.playback.SCHEDULED_PLAY"
+        const val ACTION_SCHEDULE_SLEEP_TIMER = "app.autplay.playback.SCHEDULE_SLEEP_TIMER"
+        const val ACTION_STOP_AFTER_CURRENT_ITEM = "app.autplay.playback.STOP_AFTER_CURRENT_ITEM"
+        const val ACTION_CANCEL_SLEEP_TIMER = "app.autplay.playback.CANCEL_SLEEP_TIMER"
         const val ACTION_SET_SPEED = "app.autplay.playback.SET_SPEED"
         const val EXTRA_QUEUE_SNAPSHOT_ID = "queue_snapshot_id"
         const val EXTRA_POSITION_MS = "position_ms"
         const val EXTRA_SHUFFLE_ENABLED = "shuffle_enabled"
         const val EXTRA_REPEAT_MODE = "repeat_mode"
         const val EXTRA_SCHEDULED_AT_MS = "scheduled_at_ms"
+        const val EXTRA_SLEEP_TIMER_DURATION_MS = "sleep_timer_duration_ms"
+        const val EXTRA_EXPECTED_QUEUE_ENTRY_ID = "expected_queue_entry_id"
         const val EXTRA_SPEED = "speed"
         private val APP_COMMAND_ACTIONS = setOf(
             ACTION_START_QUEUE,
@@ -436,9 +574,13 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_SET_SHUFFLE,
             ACTION_SET_REPEAT,
             ACTION_SCHEDULED_PLAY,
+            ACTION_SCHEDULE_SLEEP_TIMER,
+            ACTION_STOP_AFTER_CURRENT_ITEM,
+            ACTION_CANCEL_SLEEP_TIMER,
             ACTION_SET_SPEED,
         )
         private const val PERIODIC_CHECKPOINT_MS = 15_000L
+        private const val AUDIO_CONTOUR_PUBLISH_MS = 50L
         private const val MAX_CHECKPOINT_DELTA_MS = 300_000L
     }
 }

@@ -7,14 +7,24 @@ import android.view.WindowManager
 import app.autplay.R
 import app.autplay.application.profilepairing.PairingFailure
 import app.autplay.application.profilepairing.PairingState
+import app.autplay.ui.AutPlayIcon
+import app.autplay.ui.AutPlayPlatformIcon
+import app.autplay.ui.AutPlayTokens
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -24,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -133,25 +144,54 @@ internal fun ProfilePairingScreen(
             state.invitationManagement?.createdSecret != null,
     )
 
-    Column(modifier = modifier, verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.profile_personal_server), style = MaterialTheme.typography.titleLarge)
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        PersonalServerHero(state)
         when (val pairing = state.pairing) {
             PairingState.NotConnected, PairingState.Cancelled -> {
-                Text(stringResource(R.string.profile_connection_local))
-                Text(stringResource(R.string.profile_local_body))
-                OutlinedTextField(
-                    value = origin,
-                    onValueChange = { origin = it.take(2048) },
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.profile_server_origin)) },
-                    supportingText = { Text(stringResource(R.string.profile_server_origin_hint)) },
-                    singleLine = true,
-                )
-                Button(
-                    enabled = origin.isNotBlank(),
-                    onClick = { actions.startDiscovery(origin.trim()) },
-                    modifier = Modifier.semantics { role = Role.Button },
-                ) { Text(stringResource(R.string.profile_check_server)) }
+                    shape = MaterialTheme.shapes.large,
+                    color = AutPlayTokens.colors.raisedSurface,
+                    tonalElevation = 1.dp,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_server_origin),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            stringResource(R.string.profile_server_origin_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AutPlayTokens.colors.mutedText,
+                        )
+                        OutlinedTextField(
+                            value = origin,
+                            onValueChange = { origin = it.take(2048) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.profile_server_origin)) },
+                            singleLine = true,
+                        )
+                        Button(
+                            enabled = origin.isNotBlank(),
+                            onClick = { actions.startDiscovery(origin.trim()) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 52.dp)
+                                .semantics { role = Role.Button },
+                        ) { Text(stringResource(R.string.profile_check_server)) }
+                        Text(
+                            stringResource(R.string.profile_local_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AutPlayTokens.colors.mutedText,
+                        )
+                    }
+                }
             }
             is PairingState.CheckingDiscovery -> PairingProgress(R.string.profile_connection_checking, actions.cancelPairing)
             is PairingState.AwaitingTrust -> {
@@ -248,6 +288,54 @@ internal fun ProfilePairingScreen(
                 actions.performRemoteAction(action)
             },
         )
+    }
+}
+
+@Composable
+private fun PersonalServerHero(state: ProfilePairingUiState) {
+    val connected = state.pairing is PairingState.Connected
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = if (connected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            AutPlayTokens.colors.softAccent
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+            ) {
+                AutPlayPlatformIcon(
+                    icon = AutPlayIcon.Server,
+                    contentDescription = null,
+                    modifier = Modifier.padding(12.dp).size(28.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    stringResource(R.string.profile_personal_server),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    stringResource(
+                        if (connected) R.string.profile_connection_connected else R.string.profile_connection_local,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

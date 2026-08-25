@@ -1,5 +1,6 @@
 package app.autplay.ui.player
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,25 +20,36 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +69,13 @@ import app.autplay.ui.AutPlayPlaybackHalo
 import app.autplay.ui.AutPlayStateKind
 import app.autplay.ui.AutPlayStateSurface
 import app.autplay.ui.AutPlayTokens
+import app.autplay.ui.playbackVisualPalette
+
+public enum class PlaybackPreferenceUiState {
+    Neutral,
+    Liked,
+    Disliked,
+}
 
 @Composable
 public fun PlaybackMiniPlayer(
@@ -69,22 +88,23 @@ public fun PlaybackMiniPlayer(
         onObservingChanged(true)
         onDispose { onObservingChanged(false) }
     }
-    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
         Surface(
             color = AutPlayTokens.colors.miniPlayerSurface,
             contentColor = AutPlayTokens.colors.onMiniPlayer,
-            tonalElevation = 6.dp,
-            shadowElevation = 8.dp,
+            tonalElevation = 2.dp,
+            shadowElevation = 14.dp,
             shape = MaterialTheme.shapes.large,
+            border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
             modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
         ) {
             Column {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    AutPlayArtwork(state.title ?: stringResource(R.string.player_nothing_playing), size = 48.dp)
+                    AutPlayArtwork(state.title ?: stringResource(R.string.player_nothing_playing), size = 44.dp)
                     Column(Modifier.weight(1f)) {
                         Text(
                             state.title ?: stringResource(R.string.player_nothing_playing),
@@ -113,6 +133,7 @@ public fun PlaybackMiniPlayer(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 public fun NowPlayingScreen(
     state: PlaybackPresentationState,
     onTogglePlayPause: () -> Unit,
@@ -126,6 +147,13 @@ public fun NowPlayingScreen(
     feedbackEnabled: Boolean,
     onObservingChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    preference: PlaybackPreferenceUiState = PlaybackPreferenceUiState.Neutral,
+    onClearPreference: () -> Unit = {},
+    sleepTimerRemainingMinutes: Int? = null,
+    stopAfterCurrentTrackActive: Boolean = false,
+    onSetSleepTimer: (Long) -> Unit = {},
+    onStopAfterCurrentTrack: () -> Unit = {},
+    onCancelSleepTimer: () -> Unit = {},
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -140,30 +168,71 @@ public fun NowPlayingScreen(
         }
         return
     }
+    val visualSeed = state.title ?: state.mediaId
+    val palette = remember(visualSeed) { playbackVisualPalette(visualSeed) }
+    var showSleepTimer by rememberSaveable { mutableStateOf(false) }
+    val sleepTimerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    if (showSleepTimer) {
+        ModalBottomSheet(
+            onDismissRequest = { showSleepTimer = false },
+            sheetState = sleepTimerSheetState,
+        ) {
+            SleepTimerSheet(
+                remainingMinutes = sleepTimerRemainingMinutes,
+                stopAfterCurrentTrackActive = stopAfterCurrentTrackActive,
+                onSelectMinutes = { minutes ->
+                    onSetSleepTimer(minutes * 60_000L)
+                    showSleepTimer = false
+                },
+                onStopAfterCurrentTrack = {
+                    onStopAfterCurrentTrack()
+                    showSleepTimer = false
+                },
+                onCancel = {
+                    onCancelSleepTimer()
+                    showSleepTimer = false
+                },
+            )
+        }
+    }
     BoxWithConstraints(
         modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.46f),
-                        MaterialTheme.colorScheme.background,
+                        palette.first().copy(alpha = 0.46f),
+                        palette.last().copy(alpha = 0.20f),
+                        MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
                         MaterialTheme.colorScheme.background,
                     ),
                 ),
             ),
     ) {
-        val haloSize = (maxWidth - 16.dp).coerceAtMost(460.dp)
-        val artworkSize = haloSize * 0.64f
+        val haloSize = (maxWidth - 36.dp).coerceAtMost(390.dp)
+        val artworkSize = haloSize * 0.76f
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            Surface(
+                shape = CircleShape,
+                color = AutPlayTokens.colors.glassSurface,
+                border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
+            ) {
+                Text(
+                    "${stringResource(R.string.player_queue_context)} · ${stringResource(sourceLabel(state.source))}",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
+                )
+            }
             Box(modifier = Modifier.size(haloSize), contentAlignment = Alignment.Center) {
-                AutPlayPlaybackHalo(
-                    seed = state.title ?: state.mediaId,
-                    isPlaying = state.isPlaying,
+                    AutPlayPlaybackHalo(
+                        seed = state.title ?: state.mediaId,
+                        isPlaying = state.isPlaying,
+                        surfaceId = "now-playing-halo",
                     modifier = Modifier.fillMaxSize(),
                 )
                 AutPlayArtwork(
@@ -171,21 +240,42 @@ public fun NowPlayingScreen(
                     size = artworkSize,
                 )
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    state.title ?: stringResource(R.string.player_nothing_playing),
-                    style = MaterialTheme.typography.headlineMedium,
-                    textAlign = TextAlign.Center,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                    Text(
+                        state.title ?: stringResource(R.string.player_nothing_playing),
+                        style = MaterialTheme.typography.headlineMedium,
+                        textAlign = TextAlign.Start,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        state.artist ?: stringResource(R.string.player_unknown_artist),
+                        color = AutPlayTokens.colors.mutedText,
+                        textAlign = TextAlign.Start,
+                    )
+                }
+                PreferenceIconButton(
+                    icon = AutPlayIcon.ThumbDown,
+                    labelRes = R.string.action_dislike,
+                    selected = preference == PlaybackPreferenceUiState.Disliked,
+                    enabled = feedbackEnabled,
+                    onClick = {
+                        if (preference == PlaybackPreferenceUiState.Disliked) onClearPreference() else onDislike()
+                    },
                 )
-                Text(
-                    state.artist ?: stringResource(R.string.player_unknown_artist),
-                    color = AutPlayTokens.colors.mutedText,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    "${stringResource(R.string.player_queue_context)} · ${stringResource(sourceLabel(state.source))}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = AutPlayTokens.colors.mutedText,
+                PreferenceIconButton(
+                    icon = AutPlayIcon.ThumbUp,
+                    labelRes = R.string.action_like,
+                    selected = preference == PlaybackPreferenceUiState.Liked,
+                    enabled = feedbackEnabled,
+                    onClick = {
+                        if (preference == PlaybackPreferenceUiState.Liked) onClearPreference() else onLike()
+                    },
                 )
             }
             PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
@@ -195,6 +285,12 @@ public fun NowPlayingScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                AutPlayIconButton(
+                    AutPlayIcon.Shuffle,
+                    R.string.player_shuffle,
+                    onToggleShuffle,
+                    enabled = state.shuffleEnabled,
+                )
                 AutPlayIconButton(AutPlayIcon.Previous, R.string.action_previous, {}, enabled = false)
                 PrimaryTransportButton(
                     icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
@@ -203,23 +299,6 @@ public fun NowPlayingScreen(
                     enabled = state.controls is PlaybackControlGate.Allowed,
                 )
                 AutPlayIconButton(AutPlayIcon.Next, R.string.action_next, {}, enabled = false)
-            }
-            Text(
-                stringResource(R.string.player_queue_transition_unavailable),
-                style = MaterialTheme.typography.bodySmall,
-                color = AutPlayTokens.colors.mutedText,
-                textAlign = TextAlign.Center,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                AutPlayIconButton(
-                    AutPlayIcon.Shuffle,
-                    R.string.player_shuffle,
-                    onToggleShuffle,
-                    enabled = state.shuffleEnabled,
-                )
                 AutPlayIconButton(
                     AutPlayIcon.Repeat,
                     repeatLabel(state.repeatMode),
@@ -227,19 +306,213 @@ public fun NowPlayingScreen(
                     enabled = state.repeatEnabled,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
-                    onClick = onLike,
-                    enabled = feedbackEnabled,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text(stringResource(R.string.action_like)) }
-                OutlinedButton(
-                    onClick = onDislike,
-                    enabled = feedbackEnabled,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text(stringResource(R.string.action_dislike)) }
+            PlayerFeatureCard(
+                icon = AutPlayIcon.Timer,
+                title = stringResource(R.string.player_sleep_timer),
+                body = when {
+                    stopAfterCurrentTrackActive -> stringResource(R.string.player_sleep_timer_after_track_active)
+                    sleepTimerRemainingMinutes != null -> pluralStringResource(
+                        R.plurals.player_sleep_timer_active,
+                        sleepTimerRemainingMinutes,
+                        sleepTimerRemainingMinutes,
+                    )
+                    else -> stringResource(R.string.player_sleep_timer_body)
+                },
+                onClick = { showSleepTimer = true },
+                enabled = state.controls is PlaybackControlGate.Allowed,
+                modifier = Modifier.testTag("player-sleep-timer"),
+            )
+            FutureWaveByTrackCard()
+            Text(
+                stringResource(R.string.player_queue_transition_unavailable),
+                style = MaterialTheme.typography.bodySmall,
+                color = AutPlayTokens.colors.mutedText,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun PreferenceIconButton(
+    icon: AutPlayIcon,
+    @androidx.annotation.StringRes labelRes: Int,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val label = stringResource(labelRes)
+    Surface(
+        shape = CircleShape,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f) else AutPlayTokens.colors.border,
+        ),
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(52.dp).semantics {
+                contentDescription = label
+                if (selected) stateDescription = label
+            },
+        ) {
+            AutPlayPlatformIcon(
+                icon = icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlayerFeatureCard(
+    icon: AutPlayIcon,
+    title: String,
+    body: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth().heightIn(min = 76.dp),
+        shape = MaterialTheme.shapes.large,
+        color = AutPlayTokens.colors.glassSurface,
+        border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AutPlayPlatformIcon(
+                icon = icon,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(body, style = MaterialTheme.typography.bodySmall, color = AutPlayTokens.colors.mutedText)
             }
-            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun FutureWaveByTrackCard() {
+    val unavailable = stringResource(R.string.player_wave_by_track_unavailable)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 92.dp)
+            .testTag("player-wave-by-track")
+            .semantics {
+                contentDescription = unavailable
+                disabled()
+            },
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AutPlayPlatformIcon(
+                icon = AutPlayIcon.Wave,
+                contentDescription = null,
+                modifier = Modifier.size(30.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.player_wave_by_track), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.player_wave_by_track_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)) {
+                Text(
+                    stringResource(R.string.player_coming_soon),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepTimerSheet(
+    remainingMinutes: Int?,
+    stopAfterCurrentTrackActive: Boolean,
+    onSelectMinutes: (Long) -> Unit,
+    onStopAfterCurrentTrack: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    var selectedMinutes by rememberSaveable { mutableIntStateOf(remainingMinutes?.coerceIn(1, 60) ?: 30) }
+    var endAfterCurrentTrack by rememberSaveable { mutableStateOf(stopAfterCurrentTrackActive) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            stringResource(R.string.player_sleep_timer),
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Center,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                stringResource(R.string.player_sleep_timer_after_track),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Switch(
+                checked = endAfterCurrentTrack,
+                onCheckedChange = { endAfterCurrentTrack = it },
+                modifier = Modifier.testTag("sleep-timer-after-track"),
+            )
+        }
+        SleepTimerDial(
+            selectedMinutes = selectedMinutes,
+            onMinutesChanged = { selectedMinutes = it },
+            accessibilityLabel = stringResource(R.string.player_sleep_timer_dial_description),
+            enabled = !endAfterCurrentTrack,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = {
+                if (endAfterCurrentTrack) onStopAfterCurrentTrack() else onSelectMinutes(selectedMinutes.toLong())
+            },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("sleep-timer-confirm"),
+        ) {
+            Text(stringResource(R.string.player_sleep_timer_set))
+        }
+        if (remainingMinutes != null || stopAfterCurrentTrackActive) {
+            OutlinedButton(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) {
+                Text(stringResource(R.string.player_sleep_timer_cancel))
+            }
         }
     }
 }

@@ -1,10 +1,12 @@
 package app.autplay.data.settings
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.DataMigration
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.DeviceId
@@ -15,6 +17,29 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+
+internal const val CURRENT_ONBOARDING_REVISION: Int = 1
+internal val ONBOARDING_REVISION_KEY = intPreferencesKey("onboarding_revision")
+
+/**
+ * Initializes the first-run checkpoint once, before settings are exposed.
+ *
+ * Existing installations predate onboarding and must retain immediate access to pairing and Wave.
+ * Fresh installations persist revision zero so a later app update cannot skip unfinished education.
+ */
+internal class OnboardingRevisionMigration(
+    private val existingInstallation: Boolean,
+) : DataMigration<Preferences> {
+    override suspend fun shouldMigrate(currentData: Preferences): Boolean =
+        currentData[ONBOARDING_REVISION_KEY] == null
+
+    override suspend fun migrate(currentData: Preferences): Preferences =
+        currentData.toMutablePreferences().apply {
+            this[ONBOARDING_REVISION_KEY] = if (existingInstallation) CURRENT_ONBOARDING_REVISION else 0
+        }
+
+    override suspend fun cleanUp(): Unit = Unit
+}
 
 /** Non-secret, device-local connection preferences. Credentials belong in [CredentialStore]. */
 data class NonSecretSettings(
@@ -31,6 +56,8 @@ data class NonSecretSettings(
     val accentPalette: String = "CORAL",
     val libraryRootTreeUri: String? = null,
     val wavePrefetchMode: String = "NEXT",
+    /** Versioned first-run education checkpoint. It is device-local and is never transferred. */
+    val onboardingRevision: Int = 0,
     /** M5 non-secret checkpoint. A matching secret marker is required before remote use. */
     val m5Binding: M5BindingCheckpoint? = null,
     /** Signed public identity/capability evidence needed to fail closed across process restart. */
@@ -143,6 +170,7 @@ class DataStoreNonSecretSettingsStore(
         settings.libraryRootTreeUri?.let { preferences[LIBRARY_ROOT_TREE_URI] = it }
                 ?: preferences.remove(LIBRARY_ROOT_TREE_URI)
         preferences[WAVE_PREFETCH_MODE] = settings.wavePrefetchMode
+        preferences[ONBOARDING_REVISION_KEY] = settings.onboardingRevision
         settings.m5Binding?.let { binding ->
             preferences[M5_BINDING_COMMIT_ID] = binding.bindingCommitId
             preferences[M5_SERVER_INSTANCE_ID] = binding.serverInstanceId
@@ -187,6 +215,7 @@ class DataStoreNonSecretSettingsStore(
         accentPalette = preferences[ACCENT_PALETTE] ?: "CORAL",
         libraryRootTreeUri = preferences[LIBRARY_ROOT_TREE_URI],
         wavePrefetchMode = preferences[WAVE_PREFETCH_MODE] ?: "NEXT",
+        onboardingRevision = preferences[ONBOARDING_REVISION_KEY] ?: 0,
         m5Binding = m5Binding(preferences),
         m5TrustEvidence = m5TrustEvidence(preferences),
         m5LocalDataDecision = preferences[M5_LOCAL_DATA_DECISION],

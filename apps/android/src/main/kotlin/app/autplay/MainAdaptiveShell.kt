@@ -24,6 +24,7 @@ import app.autplay.ui.core.ListAnchor
 import app.autplay.ui.player.NowPlayingRouteActions
 import app.autplay.ui.player.NowPlayingRouteRenderer
 import app.autplay.ui.player.PlaybackMiniPlayer
+import app.autplay.ui.player.PlaybackPreferenceUiState
 
 internal data class MainAdaptiveShellState(
     val destination: UiDestination,
@@ -42,6 +43,9 @@ internal data class MainAdaptiveShellState(
     val libraryListAnchor: ListAnchor?,
     val coreRouteActions: CoreProductRouteActions,
     val nowPlayingFeedbackEnabled: Boolean,
+    val nowPlayingPreference: PlaybackPreferenceUiState,
+    val sleepTimerRemainingMinutes: Int?,
+    val stopAfterCurrentTrackActive: Boolean,
     val nowPlayingActions: NowPlayingRouteActions,
     val legacyState: LegacySecondaryRouteState,
     val legacyActions: LegacySecondaryRouteActions,
@@ -79,9 +83,12 @@ internal fun MainAdaptiveShell(
         onProfileClick = { actions.navigate(UiDestination.Profile) },
         onSettingsClick = { actions.navigate(UiDestination.Settings) },
         onNowPlayingClick = { actions.navigate(UiDestination.NowPlaying) },
-        nowPlayingAvailable = state.playerState.mediaId != null,
+        nowPlayingAvailable = shouldShowPersistentPlayerChrome(
+            destination = state.destination,
+            hasMedia = state.playerState.mediaId != null,
+        ),
         nowPlayingBar = {
-            if (state.playerState.mediaId != null) {
+            if (shouldShowPersistentPlayerChrome(state.destination, state.playerState.mediaId != null)) {
                 PlaybackMiniPlayer(
                     state = state.playerState,
                     onOpen = { actions.navigate(UiDestination.NowPlaying) },
@@ -139,6 +146,9 @@ internal fun MainAdaptiveShell(
             UiDestination.NowPlaying -> NowPlayingRouteRenderer(
                 state = state.playerState,
                 feedbackEnabled = state.nowPlayingFeedbackEnabled,
+                preference = state.nowPlayingPreference,
+                sleepTimerRemainingMinutes = state.sleepTimerRemainingMinutes,
+                stopAfterCurrentTrackActive = state.stopAfterCurrentTrackActive,
                 actions = state.nowPlayingActions,
                 modifier = Modifier.padding(contentPadding),
             )
@@ -150,3 +160,6 @@ internal fun MainAdaptiveShell(
         }
     }
 }
+
+internal fun shouldShowPersistentPlayerChrome(destination: UiDestination, hasMedia: Boolean): Boolean =
+    hasMedia && destination != UiDestination.Home && destination != UiDestination.NowPlaying

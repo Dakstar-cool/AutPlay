@@ -6,12 +6,15 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +30,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import app.autplay.playback.PlaybackAudioContourRuntime
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -39,9 +43,23 @@ import kotlin.math.sin
 public fun AutPlayPlaybackHalo(
     seed: String,
     isPlaying: Boolean,
+    surfaceId: String,
     modifier: Modifier = Modifier,
 ) {
     val animated = shouldAnimatePlaybackHalo(isPlaying, rememberSystemAnimationsEnabled())
+    DisposableEffect(surfaceId, animated) {
+        PlaybackAudioContourRuntime.setSurfaceObserving(surfaceId, animated)
+        onDispose { PlaybackAudioContourRuntime.setSurfaceObserving(surfaceId, false) }
+    }
+    val audioFrame by PlaybackAudioContourRuntime.state.collectAsState()
+    val audioEnergy by animateFloatAsState(
+        targetValue = if (animated) (audioFrame.energy * 4.2f).coerceIn(0f, 1f) else 0f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "playback-halo-energy",
+    )
     val phase = if (animated) {
         val transition = rememberInfiniteTransition(label = "playback-halo")
         val animatedPhase by transition.animateFloat(
@@ -74,6 +92,8 @@ public fun AutPlayPlaybackHalo(
                 seed = numericSeed,
                 layer = layer,
                 animated = animated,
+                audioEnergy = audioEnergy,
+                audioContour = audioFrame.contour,
             )
             drawPath(
                 path = path,
@@ -93,6 +113,8 @@ public fun AutPlayPlaybackHalo(
             seed = numericSeed,
             layer = 3,
             animated = animated,
+            audioEnergy = audioEnergy,
+            audioContour = audioFrame.contour,
         )
         drawPath(
             path = edge,
@@ -141,16 +163,22 @@ private fun organicHaloPath(
     seed: Long,
     layer: Int,
     animated: Boolean,
+    audioEnergy: Float,
+    audioContour: List<Float>,
 ): Path {
     val path = Path()
     val points = 144
     val baseRadius = minDimension * (0.355f + layer * 0.010f)
-    val amplitude = minDimension * if (animated) 0.072f else 0.034f
+    val amplitude = minDimension * if (animated) (0.030f + audioEnergy * 0.092f) else 0.026f
     val phaseRadians = phase * 2f * PI.toFloat()
     val seedA = (seed % 17).toFloat() * 0.19f
     val seedB = (seed % 11).toFloat() * 0.23f
     val layerOffset = layer * 0.72f
-    val breathing = if (animated) 1f + sin(phaseRadians * 2f + layerOffset) * 0.025f else 1f
+    val breathing = if (animated) {
+        1f + sin(phaseRadians * 2f + layerOffset) * (0.008f + audioEnergy * 0.028f)
+    } else {
+        1f
+    }
 
     for (index in 0..points) {
         val angle = index.toFloat() / points.toFloat() * 2f * PI.toFloat()
@@ -161,6 +189,8 @@ private fun organicHaloPath(
             seedB = seedB,
             layerOffset = layerOffset,
             animated = animated,
+            audioEnergy = audioEnergy,
+            audioContour = audioContour,
         )
         val radius = (baseRadius + amplitude * displacement) * breathing
         val point = Offset(
@@ -180,13 +210,21 @@ internal fun playbackHaloDisplacement(
     seedB: Float,
     layerOffset: Float,
     animated: Boolean,
+    audioEnergy: Float = 0f,
+    audioContour: List<Float> = emptyList(),
 ): Float {
     val motion = if (animated) phaseRadians else 0f
-    return (
+    val organic = (
         sin(angle * 2f + motion + seedA + layerOffset) * 0.48f +
             sin(angle * 3f - motion * 0.72f + seedB - layerOffset) * 0.32f +
             sin(angle * 5f + motion * 1.28f + seedA - seedB) * 0.20f
-        ).coerceIn(-1f, 1f)
+        )
+    if (audioContour.isEmpty() || audioEnergy <= 0f) return organic.coerceIn(-1f, 1f)
+    val normalizedAngle = ((angle / (2f * PI.toFloat())) % 1f + 1f) % 1f
+    val contourIndex = (normalizedAngle * audioContour.size).toInt().coerceIn(audioContour.indices)
+    val localAudio = (audioContour[contourIndex] * 4.2f).coerceIn(0f, 1f)
+    val reactive = (localAudio - audioEnergy * 0.42f) * 1.12f
+    return (organic * (0.44f + audioEnergy * 0.42f) + reactive).coerceIn(-1f, 1f)
 }
 
 internal fun playbackVisualPalette(seed: String): List<Color> = when (seed.hashCode().ushr(1) % 5) {

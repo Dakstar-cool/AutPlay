@@ -36,4 +36,12 @@ class AutPlayNavigationStateTest {
         val state = AutPlayNavigationState(UiDestination.Search, listOf(UiDestination.Home))
         assertEquals(listOf("home", "search"), state.savedRoutes())
     }
+
+    @Test
+    fun initialDestinationCanOpenTheServerConnectionProfile() {
+        val state = AutPlayNavigationState(UiDestination.Profile, emptyList())
+
+        assertEquals(UiDestination.Profile, state.current)
+        assertFalse(state.canNavigateBack)
+    }
 }

@@ -5,7 +5,12 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.R
 import app.autplay.application.playback.ActiveQueueContext
@@ -68,6 +73,70 @@ class PlaybackPlayerSurfacesTest {
         composeRule.onNodeWithText(context.getString(R.string.player_timeline_locked_wave)).assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)).assertIsNotEnabled()
         composeRule.onNodeWithContentDescription(context.getString(R.string.player_seek_description)).assertIsNotEnabled()
+        composeRule.onNodeWithTag("player-wave-by-track").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test
+    fun selectedFeedbackCanReturnToNeutralAndTimerUsesMinuteDial() {
+        var cleared = false
+        var scheduledDurationMs: Long? = null
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState(),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                    preference = PlaybackPreferenceUiState.Liked,
+                    onClearPreference = { cleared = true },
+                    onSetSleepTimer = { scheduledDurationMs = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).performClick()
+        composeRule.runOnIdle { check(cleared) }
+
+        composeRule.onNodeWithTag("player-sleep-timer").performScrollTo().performClick()
+        composeRule.onNodeWithTag("sleep-timer-dial")
+            .performSemanticsAction(SemanticsActions.SetProgress) { action -> action(37f) }
+        composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
+        composeRule.runOnIdle { check(scheduledDurationMs == 37L * 60_000L) }
+    }
+
+    @Test
+    fun timerCanStopAfterCurrentTrack() {
+        var stopAfterTrack = false
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState(),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                    onStopAfterCurrentTrack = { stopAfterTrack = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("player-sleep-timer").performScrollTo().performClick()
+        composeRule.onNodeWithTag("sleep-timer-after-track").performClick()
+        composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
+        composeRule.runOnIdle { check(stopAfterTrack) }
     }
 
     private fun ordinaryState() = PlaybackPresentationState(

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -42,6 +42,10 @@ _DISCOVERY_DOMAIN = "AutPlay discovery v1\n"
 _CAPABILITIES_DOMAIN = "AutPlay capabilities v1\n"
 _EXCHANGE_DOMAIN = "AutPlay enrollment exchange v1\n"
 _ROTATION_DOMAIN = "AutPlay session rotation v1\n"
+
+# Stable signed int64 key spelling "AUTPLAY" plus the M5 identity boundary.
+# It serializes the empty-table singleton decision and has no authorization meaning.
+SERVER_INSTANCE_ADVISORY_LOCK = 0x415554504C415905
 
 
 class ProfilePairingService:
@@ -1099,6 +1103,10 @@ class ProfilePairingService:
         )
 
     def _instance(self, s: Session, now: datetime) -> ServerInstanceRow:
+        s.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": SERVER_INSTANCE_ADVISORY_LOCK},
+        )
         row = s.scalar(select(ServerInstanceRow).with_for_update())
         spki = public_spki(self._key)
         thumb = public_key_thumbprint(spki)
@@ -1119,6 +1127,17 @@ class ProfilePairingService:
             s.flush()
         elif row.identity_public_key_spki != spki:
             raise RuntimeError("profile identity key differs from persisted public evidence")
+        elif (
+            row.label_hint != self._label
+            or row.api_origin != self._api
+            or row.stream_origin != self._stream
+        ):
+            row.label_hint = self._label
+            row.api_origin = self._api
+            row.stream_origin = self._stream
+            row.capability_revision += 1
+            row.updated_at = now
+            s.flush()
         return row
 
     def _signed(self, payload: dict[str, object], domain: str) -> dict[str, object]:

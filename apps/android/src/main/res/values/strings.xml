@@ -21,8 +21,20 @@
     <string name="action_open_profile">Open profile</string>
     <string name="action_open_settings">Open settings</string>
 
+    <string name="onboarding_step">Step %1$d of %2$d</string>
+    <string name="onboarding_welcome_title">Music, yours first</string>
+    <string name="onboarding_welcome_body">AutPlay works with music on this phone. You can start locally and stay in control of your library.</string>
+    <string name="onboarding_library_title">Find, play, keep listening</string>
+    <string name="onboarding_library_body">Use My music to add tracks, Search to find them, and the player to keep your queue with you.</string>
+    <string name="onboarding_server_title">Add a personal server when you want</string>
+    <string name="onboarding_server_body">A personal server is optional. It can connect your own devices and enable shared listening, while local playback keeps working without it.</string>
+    <string name="onboarding_next">Continue</string>
+    <string name="onboarding_continue_local">Continue on this phone</string>
+    <string name="onboarding_connect_server">Connect personal server</string>
+    <string name="onboarding_local_note">No account, network, or folder access is needed for this introduction.</string>
+    <string name="onboarding_save_failed">Could not save your choice. Please try again.</string>
+
     <string name="home_my_wave">My Wave</string>
-    <string name="home_listen_together">Listen together</string>
     <string name="home_hero_personal_flow">Your personal flow</string>
     <string name="home_hero_open_player">Open the full player</string>
     <string name="home_hero_playing">Playing · the ring moves with playback</string>
@@ -181,7 +193,6 @@
     <string name="action_retry">Try again</string>
     <string name="state_permission_title">Permission required</string>
     <string name="state_playback_unavailable_title">Playback unavailable</string>
-    <string name="state_local_continues">Your local library and playback remain available.</string>
     <string name="track_untitled">Untitled track</string>
 
     <string name="expanded_queue_title">Up next</string>
@@ -407,5 +418,20 @@
     <string name="settings_import">Load settings from a file</string>
     <string name="settings_export_privacy">Passwords, private addresses and device connections are not included.</string>
     <string name="settings_more">More features</string>
+    <string name="player_sleep_timer">Sleep timer</string>
+    <plurals name="player_sleep_timer_active">
+        <item quantity="one">Turns off in about %1$d minute</item>
+        <item quantity="other">Turns off in about %1$d minutes</item>
+    </plurals>
+    <string name="player_sleep_timer_body">Stop playback automatically after a selected time.</string>
+    <string name="player_sleep_timer_cancel">Turn off timer</string>
+    <string name="player_sleep_timer_dial_description">Sleep timer, 1 to 60 minutes</string>
+    <string name="player_sleep_timer_set">Set timer</string>
+    <string name="player_sleep_timer_after_track">After the current track</string>
+    <string name="player_sleep_timer_after_track_active">Playback will pause after the current track.</string>
+    <string name="player_wave_by_track">Wave by track</string>
+    <string name="player_wave_by_track_body">A future personal mix inspired by the current track.</string>
+    <string name="player_wave_by_track_unavailable">Wave by track is not available yet</string>
+    <string name="player_coming_soon">Coming soon</string>
     <string name="recommendation_for_you">Recommended for you</string>
 </resources>

@@ -5,9 +5,13 @@ import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.autplay.application.playback.ActiveQueueContext
+import app.autplay.application.profilepairing.PairingState
 import app.autplay.application.library.CorePlaylistDetail
 import app.autplay.application.library.CorePlaylistDetailEntry
 import app.autplay.application.library.CoreReleaseDetail
@@ -35,6 +40,11 @@ import app.autplay.playback.presentation.PlaybackSourcePresentation
 import app.autplay.playback.presentation.RepeatModePresentation
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.NowPlayingScreen
+import app.autplay.ui.player.PlaybackPreferenceUiState
+import app.autplay.ui.profilepairing.ProfilePairingActions
+import app.autplay.ui.profilepairing.ProfilePairingScreen
+import app.autplay.ui.profilepairing.ProfilePairingUiState
+import app.autplay.ui.settings.SettingsProductScreen
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 import app.autplay.application.artist.ArtistAppearance
@@ -64,6 +74,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
             resources.updateConfiguration(configuration, resources.displayMetrics)
         }
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val dark = intent.getBooleanExtra("dark", false)
         val screen = intent.getStringExtra("screen") ?: "home"
         setContent {
@@ -114,8 +125,11 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                             },
                             onLike = {},
                             onDislike = {},
+                            preference = PlaybackPreferenceUiState.Liked,
+                            sleepTimerRemainingMinutes = 24,
                             feedbackEnabled = true,
                             onObservingChanged = {},
+                            modifier = Modifier.systemBarsPadding(),
                         )
                         "wave" -> NowPlayingScreen(
                             state = playerState(wave = true, source = PlaybackSourcePresentation.Vault),
@@ -129,7 +143,42 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                             onDislike = {},
                             feedbackEnabled = false,
                             onObservingChanged = {},
+                            modifier = Modifier.systemBarsPadding(),
                         )
+                        "onboarding" -> WelcomeOnboardingScreen(
+                            onComplete = { true },
+                            modifier = Modifier.systemBarsPadding(),
+                        )
+                        "profile" -> Column(
+                            Modifier
+                                .fillMaxSize()
+                                .systemBarsPadding()
+                                .verticalScroll(rememberScrollState())
+                                .padding(16.dp),
+                        ) {
+                            ProfilePairingScreen(
+                                state = ProfilePairingUiState(PairingState.NotConnected),
+                                actions = ProfilePairingActions(),
+                            )
+                        }
+                        "settings" -> Column(
+                            Modifier
+                                .fillMaxSize()
+                                .systemBarsPadding()
+                                .verticalScroll(rememberScrollState())
+                                .padding(16.dp),
+                        ) {
+                            SettingsProductScreen(
+                                settings = app.autplay.data.settings.NonSecretSettings(),
+                                onUpdate = {},
+                                onAppLanguageChange = {},
+                                onChooseLibraryRoot = {},
+                                onRescanLibraryRoot = {},
+                                onExportSettings = {},
+                                onImportSettings = {},
+                                onNavigate = {},
+                            )
+                        }
                         "search", "search-vault-offline" -> AutPlayAdaptiveShell(
                             selectedDestination = UiDestination.Search,
                             onDestinationSelected = {},
@@ -324,8 +373,9 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 )
                                 else -> null
                             }
+                            val fixtureDestination = if (miniState != null) UiDestination.Library else UiDestination.Home
                             AutPlayAdaptiveShell(
-                                selectedDestination = UiDestination.Home,
+                                selectedDestination = fixtureDestination,
                                 onDestinationSelected = { destination ->
                                     activeScreen = when (destination) {
                                         UiDestination.Home -> "home"
@@ -355,7 +405,22 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                     }
                                 },
                             ) { _, padding, _ ->
-                                HomeProductScreen(
+                                if (miniState != null) {
+                                    LibraryProductScreen(
+                                        state = LibraryScreenUiState(
+                                            localMode = true,
+                                            tracks = listOf(
+                                                CoreTrackUiItem("track", "Quiet Signals", "Mara Lin", selected = true),
+                                                CoreTrackUiItem("recent", "Northern Lights", "Sofia Reed"),
+                                            ),
+                                        ),
+                                        contentPadding = padding,
+                                        onAddLocal = {},
+                                        onSelect = {},
+                                        onRemoveOrRestore = {},
+                                        onLike = {},
+                                    )
+                                } else HomeProductScreen(
                                     state = HomeScreenUiState(
                                         localMode = false,
                                         recommendationLoading = activeScreen == "loading",

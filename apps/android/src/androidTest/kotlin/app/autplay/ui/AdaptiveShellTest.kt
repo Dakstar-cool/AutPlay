@@ -158,6 +158,86 @@ class AdaptiveShellTest {
     }
 
     @Test
+    fun activeHomePlaybackRemainsReachableAfterHeroScrollsAway() {
+        composeRule.setContent {
+            AutPlayTheme {
+                HomeProductScreen(
+                    state = HomeScreenUiState(
+                        localMode = true,
+                        recommendationLoading = false,
+                        offlineFallback = false,
+                        releases = listOf(HomeReleaseUiItem("release", "Long page release", "Artist", null)),
+                        recommendations = listOf(
+                            HomeRecommendationUiItem("recommendation", "Recommended track", "Artist", "For you", true),
+                        ),
+                        recentlyPlayed = listOf(HomeTrackUiItem("recent", "Recent track", "Artist")),
+                    ),
+                    contentPadding = PaddingValues(),
+                    onOpenListenTogether = {},
+                    onRecommendationVisible = {},
+                    onLike = {},
+                    onDislike = {},
+                    playerState = PlaybackPresentationState(
+                        mediaId = "active-entry",
+                        title = "Active track",
+                        artist = "Active artist",
+                        isPlaying = true,
+                    ),
+                    currentTrackRefId = "active-track",
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("home-product-list")
+            .performScrollToNode(hasText(context.getString(R.string.home_recommendations)))
+        composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
+        composeRule.onNodeWithText("Active track").assertIsDisplayed()
+    }
+
+    @Test
+    fun stickyHomePlaybackAppearsWhenPlaybackStartsAfterScrolling() {
+        var startPlayback: (() -> Unit)? = null
+        composeRule.setContent {
+            var playerState by remember { mutableStateOf(PlaybackPresentationState()) }
+            startPlayback = {
+                playerState = PlaybackPresentationState(
+                    mediaId = "late-entry",
+                    title = "Late playback",
+                    artist = "Current artist",
+                    isPlaying = true,
+                )
+            }
+            AutPlayTheme {
+                HomeProductScreen(
+                    state = HomeScreenUiState(
+                        localMode = true,
+                        recommendationLoading = false,
+                        offlineFallback = false,
+                        releases = listOf(HomeReleaseUiItem("release", "Long page release", "Artist", null)),
+                        recommendations = listOf(
+                            HomeRecommendationUiItem("recommendation", "Recommended track", "Artist", "For you", true),
+                        ),
+                        recentlyPlayed = listOf(HomeTrackUiItem("recent", "Recent track", "Artist")),
+                    ),
+                    contentPadding = PaddingValues(),
+                    onOpenListenTogether = {},
+                    onRecommendationVisible = {},
+                    onLike = {},
+                    onDislike = {},
+                    playerState = playerState,
+                    currentTrackRefId = null,
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("home-product-list")
+            .performScrollToNode(hasText(context.getString(R.string.home_recommendations)))
+        composeRule.runOnIdle { checkNotNull(startPlayback).invoke() }
+        composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
+        composeRule.onNodeWithText("Late playback").assertIsDisplayed()
+    }
+
+    @Test
     fun searchFailureIsTruthfulAndRetryable() {
         composeRule.setContent {
             var retried by remember { mutableStateOf(false) }

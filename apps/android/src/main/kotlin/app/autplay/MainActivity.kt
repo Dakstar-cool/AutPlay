@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -34,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -101,6 +103,7 @@ import app.autplay.data.local.entity.RemoteImportJobProjectionEntity
 import app.autplay.data.local.entity.VaultUploadIntentEntity
 import app.autplay.data.settings.NonSecretSettings
 import app.autplay.data.settings.NonSecretSettingsStore
+import app.autplay.data.settings.CURRENT_ONBOARDING_REVISION
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
 import app.autplay.playback.PlaybackSessionOwner
@@ -123,6 +126,9 @@ import app.autplay.ui.AutPlayTheme
 import app.autplay.ui.AutPlayThemeMode
 import app.autplay.ui.AppLanguage
 import app.autplay.ui.UiDestination
+import app.autplay.ui.WelcomeOnboardingScreen
+import app.autplay.ui.player.PlaybackPreferenceUiState
+import app.autplay.ui.settings.SettingsProductScreen
 import app.autplay.ui.core.SearchGenerationGuard
 import app.autplay.ui.core.SearchResultStore
 import app.autplay.ui.core.SearchScope
@@ -155,11 +161,22 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.flowOf
 import java.util.concurrent.ConcurrentHashMap
 
 internal const val BOOTSTRAP_LABEL = "AutPlay"
+internal const val ONBOARDING_REVISION = CURRENT_ONBOARDING_REVISION
+
+internal suspend fun completeOnboarding(
+    settingsStore: NonSecretSettingsStore,
+): Boolean = runCatching {
+    settingsStore.mutate {
+        it.copy(onboardingRevision = ONBOARDING_REVISION)
+    }
+}.isSuccess
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -272,39 +289,57 @@ internal fun AutPlayBootstrap(
                 )
             }
             val pairingRuntimeState by pairingRuntime.state.collectAsState()
-            LaunchedEffect(pairingRuntime) { pairingRuntime.recoverAndRefresh() }
+            val onboardingComplete = settings.onboardingRevision >= ONBOARDING_REVISION
+            LaunchedEffect(pairingRuntime, onboardingComplete) {
+                if (onboardingComplete) pairingRuntime.recoverAndRefresh()
+            }
             var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
-            LaunchedEffect(binding) {
+            LaunchedEffect(binding, onboardingComplete) {
                 waveCoordinator?.close()
-                waveCoordinator = if (binding == null) null else runCatching {
+                waveCoordinator = if (binding == null || !onboardingComplete) null else runCatching {
                     AutPlayRuntime.waveCoordinator(context, binding)
                 }.getOrNull()
             }
             DisposableEffect(Unit) {
                 onDispose { waveCoordinator?.close() }
             }
+            var onboardingCompletionRoute by rememberSaveable { mutableStateOf<String?>(null) }
             AutPlayTheme(appearanceFrom(settings)) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    key(binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID) {
-                        OfflineLibraryScreen(
-                            binding,
-                            searchRepository,
-                            sliceRepository,
-                            playbackRepository,
-                            playbackOwner,
-                            downloadRepository,
-                            syncStatusRepository,
-                            syncScheduler,
-                            importRepository,
-                            recommendationRepository,
-                            settings,
-                            settingsStore,
-                            waveCoordinator,
-                            pairingRuntime,
-                            pairingRuntimeState,
-                            pairingSafeError,
-                            clearPairingSafeError = { pairingSafeError = null },
+                    if (settings.onboardingRevision < ONBOARDING_REVISION) {
+                        WelcomeOnboardingScreen(
+                            onComplete = { destination ->
+                                completeOnboarding(settingsStore).also { completed ->
+                                    if (completed) onboardingCompletionRoute = destination.route
+                                }
+                            },
                         )
+                    } else {
+                        val initialDestination = onboardingCompletionRoute
+                            ?.let(UiDestination::fromRoute)
+                            ?: UiDestination.Home
+                        key(binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID) {
+                            OfflineLibraryScreen(
+                                binding,
+                                searchRepository,
+                                sliceRepository,
+                                playbackRepository,
+                                playbackOwner,
+                                downloadRepository,
+                                syncStatusRepository,
+                                syncScheduler,
+                                importRepository,
+                                recommendationRepository,
+                                settings,
+                                settingsStore,
+                                waveCoordinator,
+                                pairingRuntime,
+                                pairingRuntimeState,
+                                pairingSafeError,
+                                initialDestination = initialDestination,
+                                clearPairingSafeError = { pairingSafeError = null },
+                            )
+                        }
                     }
                 }
             }
@@ -380,6 +415,7 @@ private fun OfflineLibraryScreen(
     pairingRuntime: ProfilePairingRuntime,
     pairingRuntimeState: app.autplay.application.profilepairing.ProfilePairingRuntimeState,
     pairingSafeError: String?,
+    initialDestination: UiDestination = UiDestination.Home,
     clearPairingSafeError: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -407,7 +443,7 @@ private fun OfflineLibraryScreen(
         onDispose { playerAdapter.close() }
     }
     val playerState by playerAdapter.state.collectAsState()
-    val navigation = rememberAutPlayNavigationState()
+    val navigation = rememberAutPlayNavigationState(initialDestination)
     val destination = navigation.current
     val view = legacyView(destination)
     val coreProductState = rememberCoreProductUiState(binding?.serverProfileId?.value)
@@ -904,11 +940,19 @@ private fun OfflineLibraryScreen(
     val nowPlayingRouteActions = buildNowPlayingRouteActions(
         playbackActions = playbackActions,
         playerAdapter = playerAdapter,
+        playbackOwner = playbackOwner,
         currentTrackRefId = { playbackState.localUserTrackRefId },
+        currentQueueEntryId = { playbackState.queueEntryId },
         scope = scope,
         sliceRepository = sliceRepository,
         binding = { binding },
         reportError = { stableError = it },
+    )
+    val currentTrackPreference = playbackState.localUserTrackRefId?.let { trackRefId ->
+        libraryPreferences.firstOrNull { it.stableId == trackRefId }
+    }
+    val sleepTimerRemainingMinutes = rememberSleepTimerRemainingMinutes(
+        playbackState.sleepTimerDeadlineElapsedRealtimeMs,
     )
     val serverFeaturesActions = buildServerFeaturesActions(
         launchServerAction = ::launchServerAction,
@@ -1062,6 +1106,13 @@ private fun OfflineLibraryScreen(
             libraryListAnchor = coreProductState.libraryListAnchor,
             coreRouteActions = coreRouteActions,
             nowPlayingFeedbackEnabled = playbackState.localUserTrackRefId != null,
+            nowPlayingPreference = when {
+                currentTrackPreference?.loved == true -> PlaybackPreferenceUiState.Liked
+                currentTrackPreference?.disliked == true -> PlaybackPreferenceUiState.Disliked
+                else -> PlaybackPreferenceUiState.Neutral
+            },
+            sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
+            stopAfterCurrentTrackActive = playbackState.stopAfterQueueEntryId == playbackState.queueEntryId,
             nowPlayingActions = nowPlayingRouteActions,
             legacyState = legacySecondaryState,
             legacyActions = legacySecondaryActions,
@@ -1399,68 +1450,16 @@ internal fun SettingsFrontendScreen(
     onImportSettings: () -> Unit,
     onNavigate: (UiDestination) -> Unit,
 ) {
-    val appLanguage = AppLanguage.fromStoredValue(settings.appLanguage)
-    Text(stringResource(R.string.settings_language), style = MaterialTheme.typography.titleMedium)
-    AppLanguage.entries.forEach { language ->
-        OutlinedButton(onClick = { onAppLanguageChange(language) }) {
-            val label = stringResource(language.labelRes)
-            Text(if (appLanguage == language) "✓ $label" else label)
-        }
-    }
-
-    Text(
-        stringResource(R.string.settings_appearance),
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(top = 16.dp),
+    SettingsProductScreen(
+        settings = settings,
+        onUpdate = onUpdate,
+        onAppLanguageChange = onAppLanguageChange,
+        onChooseLibraryRoot = onChooseLibraryRoot,
+        onRescanLibraryRoot = onRescanLibraryRoot,
+        onExportSettings = onExportSettings,
+        onImportSettings = onImportSettings,
+        onNavigate = onNavigate,
     )
-    listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-        OutlinedButton(onClick = { onUpdate { current -> current.copy(appearanceMode = mode) } }) {
-            val label = appearanceModeLabel(mode)
-            Text(if (settings.appearanceMode == mode) "✓ $label" else label)
-        }
-    }
-    listOf("CORAL", "VIOLET", "GREEN", "BLUE").forEach { palette ->
-        OutlinedButton(onClick = { onUpdate { current -> current.copy(accentPalette = palette) } }) {
-            val label = accentPaletteLabel(palette)
-            Text(if (settings.accentPalette == palette) "✓ $label" else label)
-        }
-    }
-
-    Text(stringResource(R.string.settings_library_access), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    Text(stringResource(if (settings.libraryRootTreeUri == null) R.string.settings_folder_not_selected else R.string.settings_folder_selected))
-    Button(onClick = onChooseLibraryRoot) { Text(stringResource(R.string.settings_choose_folder)) }
-    OutlinedButton(
-        onClick = onRescanLibraryRoot,
-        enabled = settings.libraryRootTreeUri != null,
-    ) { Text(stringResource(R.string.settings_scan_folder)) }
-    Text(stringResource(R.string.settings_folder_privacy))
-
-    Text(stringResource(R.string.settings_network), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    Text(stringResource(R.string.settings_personal_server_body))
-    Button(onClick = { onNavigate(UiDestination.Profile) }) { Text(stringResource(R.string.settings_open_personal_server)) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.settings_metered_sync))
-        Switch(
-            checked = settings.syncOnMeteredNetwork,
-            onCheckedChange = { enabled -> onUpdate { current -> current.copy(syncOnMeteredNetwork = enabled) } },
-        )
-    }
-    listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
-        OutlinedButton(onClick = { onUpdate { current -> current.copy(wavePrefetchMode = mode) } }) {
-            val label = wavePrefetchLabel(mode)
-            Text(if (settings.wavePrefetchMode == mode) "✓ $label" else label)
-        }
-    }
-
-    Text(stringResource(R.string.settings_transfer), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    Button(onClick = onExportSettings) { Text(stringResource(R.string.settings_export)) }
-    OutlinedButton(onClick = onImportSettings) { Text(stringResource(R.string.settings_import)) }
-    Text(stringResource(R.string.settings_export_privacy))
-
-    Text(stringResource(R.string.settings_more), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-    UiDestination.secondaryNavigation.forEach { target ->
-        Button(onClick = { onNavigate(target) }) { Text(stringResource(target.labelRes)) }
-    }
 }
 
 @Composable
@@ -1477,33 +1476,20 @@ private fun waveStateLabel(state: app.autplay.domain.wave.WaveRuntimeState): Str
 )
 
 @Composable
-private fun appearanceModeLabel(mode: String): String = stringResource(
-    when (mode) {
-        "LIGHT" -> R.string.settings_theme_light
-        "DARK" -> R.string.settings_theme_dark
-        else -> R.string.settings_theme_system
-    },
-)
-
-@Composable
-private fun accentPaletteLabel(palette: String): String = stringResource(
-    when (palette) {
-        "VIOLET" -> R.string.settings_accent_violet
-        "GREEN" -> R.string.settings_accent_green
-        "BLUE" -> R.string.settings_accent_blue
-        else -> R.string.settings_accent_coral
-    },
-)
-
-@Composable
-private fun wavePrefetchLabel(mode: String): String = stringResource(
-    when (mode) {
-        "OFF" -> R.string.settings_wave_prefetch_off
-        "NEXT_3" -> R.string.settings_wave_prefetch_three
-        "AGGRESSIVE_WIFI" -> R.string.settings_wave_prefetch_wifi
-        else -> R.string.settings_wave_prefetch_next
-    },
-)
+private fun rememberSleepTimerRemainingMinutes(deadlineElapsedRealtimeMs: Long?): Int? {
+    val remaining by produceState<Int?>(initialValue = null, key1 = deadlineElapsedRealtimeMs) {
+        while (deadlineElapsedRealtimeMs != null) {
+            val remainingMs = deadlineElapsedRealtimeMs - SystemClock.elapsedRealtime()
+            if (remainingMs <= 0L) {
+                value = null
+                break
+            }
+            value = ceil(remainingMs / 60_000.0).toInt().coerceAtLeast(1)
+            delay(30_000L.coerceAtMost(remainingMs))
+        }
+    }
+    return remaining
+}
 
 internal fun recommendationKey(presentationId: String, item: HomeRecommendationItem): String =
     "$presentationId:${item.recommendationRequestId}:${item.sourceRank}"

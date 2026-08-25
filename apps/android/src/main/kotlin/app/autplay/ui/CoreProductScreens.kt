@@ -1,6 +1,8 @@
 package app.autplay.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -9,20 +11,26 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -177,26 +185,39 @@ public fun HomeProductScreen(
         currentTrackRefId = currentTrackRefId,
         currentTrackLiked = currentTrackLiked,
     )
-    LazyColumn(
-        modifier = Modifier.fillMaxWidth().testTag("home-product-list"),
-        contentPadding = PaddingValues(
-            start = AutPlayTokens.dimensions.screenPadding,
-            top = contentPadding.calculateTopPadding() + 12.dp,
-            end = AutPlayTokens.dimensions.screenPadding,
-            bottom = contentPadding.calculateBottomPadding() + 28.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
+    val listState = rememberLazyListState()
+    val showStickyPlayback by remember(listState, heroState.hasActivePlayback) {
+        derivedStateOf { heroState.hasActivePlayback && listState.firstVisibleItemIndex > 0 }
+    }
+    Box(Modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().testTag("home-product-list"),
+            contentPadding = PaddingValues(
+                start = 8.dp,
+                top = 0.dp,
+                end = 8.dp,
+                bottom = contentPadding.calculateBottomPadding() + 28.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
         item(key = "home:playback-hero") {
-            HomePlaybackHero(
-                state = heroState,
-                localMode = state.localMode,
-                onOpenPlayer = onOpenPlayer,
-                onPlayTrack = onPlayTrack,
-                onTogglePlayPause = onTogglePlayPause,
-                onLike = onLikeHeroTrack,
-                onOpenListenTogether = onOpenListenTogether,
-            )
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                HomePlaybackHero(
+                    state = heroState,
+                    localMode = state.localMode,
+                    onOpenPlayer = onOpenPlayer,
+                    onPlayTrack = onPlayTrack,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onLike = onLikeHeroTrack,
+                    onOpenListenTogether = onOpenListenTogether,
+                    modifier = Modifier.requiredWidth(maxWidth + 16.dp),
+                    topChromePadding = contentPadding.calculateTopPadding(),
+                )
+            }
         }
         if (state.offlineFallback) {
             item {
@@ -372,6 +393,17 @@ public fun HomeProductScreen(
                     onAction = onOpenProblems,
                 )
             }
+            }
+        }
+        if (showStickyPlayback) {
+            HomePlaybackStickyControl(
+                state = heroState,
+                onOpenPlayer = onOpenPlayer,
+                onTogglePlayPause = onTogglePlayPause,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = contentPadding.calculateTopPadding() + 8.dp, start = 16.dp, end = 16.dp),
+            )
         }
     }
 }
@@ -540,6 +572,7 @@ public fun LibraryProductScreen(
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
 ) {
+    var controlsExpanded by rememberSaveable { mutableStateOf(false) }
     val listContextKey = "library:${state.section}:${state.sort}:${state.filter}"
     val listKeys = libraryListKeys(state)
     val listState = rememberStableAnchorListState(
@@ -561,15 +594,11 @@ public fun LibraryProductScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item(key = "library:heading") {
-            Text(
-                stringResource(R.string.library_title),
-                style = MaterialTheme.typography.headlineLarge,
-                modifier = Modifier.semantics { heading() },
-            )
+            LibraryShortcutGrid(onSectionChange, onFilterChange)
         }
         item(key = "library:sections") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LibrarySection.entries.forEach { section ->
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(LibrarySection.entries) { section ->
                     AutPlayChip(
                         text = librarySectionLabel(section),
                         selected = state.section == section,
@@ -581,32 +610,64 @@ public fun LibraryProductScreen(
         if (state.section in setOf(LibrarySection.Tracks, LibrarySection.Offline, LibrarySection.Unavailable)) {
             item(key = "library:controls") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.library_sort_label), style = MaterialTheme.typography.labelLarge)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LibrarySort.entries.forEach { sort ->
-                            AutPlayChip(
-                                text = librarySortLabel(sort),
-                                selected = state.sort == sort,
-                                onClick = { onSortChange(sort) },
+                    Surface(
+                        onClick = { controlsExpanded = !controlsExpanded },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        color = AutPlayTokens.colors.raisedSurface,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            AutPlayPlatformIcon(
+                                icon = AutPlayIcon.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.primary,
                             )
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.library_filter_label), style = MaterialTheme.typography.labelLarge)
+                                Text(
+                                    "${librarySortLabel(state.sort)} · ${libraryFilterLabel(state.filter)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AutPlayTokens.colors.mutedText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
-                    Text(stringResource(R.string.library_filter_label), style = MaterialTheme.typography.labelLarge)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(
-                            LibraryFilter.All,
-                            LibraryFilter.Loved,
-                            LibraryFilter.Downloaded,
-                            LibraryFilter.Available,
-                            LibraryFilter.Unavailable,
-                        )
-                            .forEach { filter ->
+                    if (controlsExpanded) {
+                        Text(stringResource(R.string.library_sort_label), style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(LibrarySort.entries) { sort ->
+                                AutPlayChip(
+                                    text = librarySortLabel(sort),
+                                    selected = state.sort == sort,
+                                    onClick = { onSortChange(sort) },
+                                )
+                            }
+                        }
+                        Text(stringResource(R.string.library_filter_label), style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(
+                                listOf(
+                                    LibraryFilter.All,
+                                    LibraryFilter.Loved,
+                                    LibraryFilter.Downloaded,
+                                    LibraryFilter.Available,
+                                    LibraryFilter.Unavailable,
+                                ),
+                            ) { filter ->
                                 AutPlayChip(
                                     text = libraryFilterLabel(filter),
                                     selected = state.filter == filter,
                                     onClick = { onFilterChange(filter) },
                                 )
                             }
+                        }
                     }
                 }
             }
@@ -620,18 +681,43 @@ public fun LibraryProductScreen(
             }
         }
         if (state.localMode) {
-            item(key = "library:local-mode") { AutPlayChip(stringResource(R.string.library_local_mode), true, {}, enabled = false) }
+            item(key = "library:local-mode") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    AutPlayPlatformIcon(
+                        AutPlayIcon.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        stringResource(R.string.library_local_mode),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = AutPlayTokens.colors.mutedText,
+                    )
+                }
+            }
         }
         item(key = "library:add") {
-            Button(
+            OutlinedButton(
                 onClick = onAddLocal,
                 enabled = !state.importingLocalTrack,
-                modifier = Modifier.heightIn(min = 48.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
             ) {
+                AutPlayPlatformIcon(
+                    AutPlayIcon.Import,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
                 Text(
-                    stringResource(
+                    text = stringResource(
                         if (state.importingLocalTrack) R.string.library_adding_local else R.string.library_add_local,
                     ),
+                    modifier = Modifier.padding(start = 8.dp),
                 )
             }
         }
@@ -721,6 +807,78 @@ public fun LibraryProductScreen(
                     onAction = if (state.reviewCount > 0) onOpenReview else null,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun LibraryShortcutGrid(
+    onSectionChange: (LibrarySection) -> Unit,
+    onFilterChange: (LibraryFilter) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LibraryShortcut(
+                label = libraryFilterLabel(LibraryFilter.Loved),
+                icon = AutPlayIcon.Favorite,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onSectionChange(LibrarySection.Tracks)
+                    onFilterChange(LibraryFilter.Loved)
+                },
+            )
+            LibraryShortcut(
+                label = libraryFilterLabel(LibraryFilter.Downloaded),
+                icon = AutPlayIcon.Download,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onSectionChange(LibrarySection.Tracks)
+                    onFilterChange(LibraryFilter.Downloaded)
+                },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LibraryShortcut(
+                label = librarySectionLabel(LibrarySection.Albums),
+                icon = AutPlayIcon.Library,
+                modifier = Modifier.weight(1f),
+                onClick = { onSectionChange(LibrarySection.Albums) },
+            )
+            LibraryShortcut(
+                label = librarySectionLabel(LibrarySection.Playlists),
+                icon = AutPlayIcon.Playlist,
+                modifier = Modifier.weight(1f),
+                onClick = { onSectionChange(LibrarySection.Playlists) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryShortcut(
+    label: String,
+    icon: AutPlayIcon,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 92.dp),
+        shape = MaterialTheme.shapes.large,
+        color = AutPlayTokens.colors.raisedSurface,
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AutPlayPlatformIcon(
+                icon = icon,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -875,8 +1033,21 @@ private fun LibraryTrackCard(
     onRemoveOrRestore: (String) -> Unit,
     onLike: (String) -> Unit,
 ) {
-    AutPlayCard(onClick = { onSelect(track.id) }) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Surface(
+        onClick = { onSelect(track.id) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = if (track.selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
+        } else {
+            AutPlayTokens.colors.raisedSurface
+        },
+        tonalElevation = if (track.selected) 2.dp else 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),

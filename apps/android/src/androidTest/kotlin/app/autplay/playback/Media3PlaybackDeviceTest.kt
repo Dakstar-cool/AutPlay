@@ -1,6 +1,7 @@
 package app.autplay.playback
 
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -18,6 +19,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -44,6 +46,110 @@ class Media3PlaybackDeviceTest {
         assertTrue(callback.isControllerAllowed(context.packageName, false))
         assertTrue(callback.isControllerAllowed("android", true))
         assertFalse(callback.isControllerAllowed("example.attacker", false))
+    }
+
+    @Test fun reactiveRendererProjectsDecodedPcmWithoutAudioCapturePermission() {
+        val ready = CountDownLatch(1)
+        val failure = AtomicReference<PlaybackException?>()
+        val sink = PlaybackAudioContourSink()
+        val player = AtomicReference<ExoPlayer>()
+        PlaybackAudioContourRuntime.setSurfaceObserving("device-test", true)
+        try {
+            instrumentation.runOnMainSync {
+                player.set(
+                    ExoPlayer.Builder(context, ReactivePlaybackRenderersFactory(context, sink))
+                        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context)))
+                        .build()
+                        .also { instance ->
+                            instance.volume = 0f
+                            instance.addListener(object : Player.Listener {
+                                override fun onPlaybackStateChanged(playbackState: Int) {
+                                    if (playbackState == Player.STATE_READY) ready.countDown()
+                                }
+
+                                override fun onPlayerError(error: PlaybackException) {
+                                    failure.set(error)
+                                    ready.countDown()
+                                }
+                            })
+                            instance.setMediaItem(MediaItem.fromUri("content://$testPackageName.readable/audio/tone"))
+                            instance.playWhenReady = true
+                            instance.prepare()
+                        },
+                )
+            }
+            assertTrue("Reactive Media3 player did not reach READY", ready.await(10, TimeUnit.SECONDS))
+            val deadline = SystemClock.elapsedRealtime() + 5_000L
+            while (sink.snapshot().energy <= 0.001f && SystemClock.elapsedRealtime() < deadline) {
+                SystemClock.sleep(50L)
+            }
+            assertNull(failure.get()?.message, failure.get())
+            assertTrue("Decoded PCM did not reach the bounded visual projection", sink.snapshot().energy > 0.001f)
+        } finally {
+            instrumentation.runOnMainSync { player.get()?.release() }
+            PlaybackAudioContourRuntime.setSurfaceObserving("device-test", false)
+        }
+    }
+
+    @Test fun pauseAtEndStopsAtArmedItemBoundaryBeforeSuccessorPlayback() {
+        val pausedAtBoundary = CountDownLatch(1)
+        val transitionCount = AtomicInteger(0)
+        val failure = AtomicReference<PlaybackException?>()
+        val player = AtomicReference<ExoPlayer>()
+        val uri = "content://$testPackageName.readable/audio/tone"
+        fun clippedItem(id: String) = MediaItem.Builder()
+            .setMediaId(id)
+            .setUri(uri)
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder().setEndPositionMs(700L).build(),
+            )
+            .build()
+        instrumentation.runOnMainSync {
+            player.set(
+                ExoPlayer.Builder(context)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context)))
+                    .build()
+                    .also { instance ->
+                        instance.volume = 0f
+                        instance.setPauseAtEndOfMediaItems(true)
+                        instance.addListener(object : Player.Listener {
+                            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                                transitionCount.incrementAndGet()
+                            }
+
+                            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                                    pausedAtBoundary.countDown()
+                                }
+                            }
+
+                            override fun onPlayerError(error: PlaybackException) {
+                                failure.set(error)
+                                pausedAtBoundary.countDown()
+                            }
+                        })
+                        instance.setMediaItems(listOf(clippedItem("armed"), clippedItem("successor")))
+                        instance.playWhenReady = true
+                        instance.prepare()
+                    },
+            )
+        }
+        try {
+            assertTrue("Player did not pause at the armed boundary", pausedAtBoundary.await(10, TimeUnit.SECONDS))
+            SystemClock.sleep(350L)
+            val snapshot = AtomicReference<Triple<Boolean, Int, String?>>()
+            instrumentation.runOnMainSync {
+                val instance = player.get()
+                snapshot.set(Triple(instance.isPlaying, instance.currentMediaItemIndex, instance.currentMediaItem?.mediaId))
+            }
+            assertNull(failure.get()?.message, failure.get())
+            assertFalse(snapshot.get().first)
+            assertEquals(0, snapshot.get().second)
+            assertEquals("armed", snapshot.get().third)
+            assertEquals(1, transitionCount.get())
+        } finally {
+            instrumentation.runOnMainSync { player.get()?.release() }
+        }
     }
 
     @Test fun media3PreparesVaultAudioThroughStableReferenceAndAuthorizedOpen() {
