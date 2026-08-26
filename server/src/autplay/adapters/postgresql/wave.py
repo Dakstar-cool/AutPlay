@@ -80,6 +80,26 @@ class SqlAlchemyWaveService:
                 .mappings()
                 .one()
             )
+            existing = s.execute(
+                text(
+                    "SELECT 1 FROM wave.member WHERE room_id=:room AND device_id=:device "
+                    "AND status='JOINED'"
+                ),
+                {"room": room.room_id, "device": principal.device_id},
+            ).first()
+            participant_count = cast(
+                int,
+                s.execute(
+                    text(
+                        "SELECT (SELECT count(*) FROM wave.member WHERE room_id=:room "
+                        "AND status='JOINED') + (SELECT count(*) FROM social.guest_session "
+                        "WHERE room_id=:room AND state='ACTIVE' AND expires_at>:now)"
+                    ),
+                    {"room": room.room_id, "now": now},
+                ).scalar_one(),
+            )
+            if existing is None and participant_count >= 8:
+                raise WaveConflict()
             s.execute(
                 text(
                     "INSERT INTO wave.member(room_id,user_id,device_id,role,status,joined_at,last_present_at) SELECT :room,:user,:device,'MEMBER','JOINED',:now,:now WHERE EXISTS(SELECT 1 FROM wave.invitation WHERE room_id=:room AND user_id=:user) ON CONFLICT(room_id,device_id) DO UPDATE SET status='JOINED',last_present_at=excluded.last_present_at,left_at=NULL"
@@ -517,24 +537,45 @@ class SqlAlchemyWaveService:
             gate = (
                 s.execute(
                     text(
-                        "SELECT count(*) AS present_count, "
-                        "count(*) FILTER (WHERE EXISTS (SELECT 1 FROM wave.preflight p "
-                        "WHERE p.room_id=m.room_id AND p.device_id=m.device_id "
+                        "WITH participant_gate AS ("
+                        "SELECT EXISTS(SELECT 1 FROM wave.preflight p WHERE p.room_id=m.room_id "
+                        "AND p.device_id=m.device_id AND p.queue_entry_id=:entry "
+                        "AND p.recording_id=:recording AND p.queue_version=:version "
+                        "AND p.final_ready=true AND p.availability<>'UNAVAILABLE' "
+                        "AND p.expires_at>:now) AS ready, "
+                        "(SELECT t.rtt_ms FROM wave.timing_report t WHERE t.room_id=m.room_id "
+                        "AND t.device_id=m.device_id AND t.command_sequence=:expected "
+                        "AND t.reported_at>=:clock_cutoff ORDER BY t.reported_at DESC LIMIT 1) AS rtt, "
+                        "(SELECT t.uncertainty_ms FROM wave.timing_report t WHERE t.room_id=m.room_id "
+                        "AND t.device_id=m.device_id AND t.command_sequence=:expected "
+                        "AND t.reported_at>=:clock_cutoff ORDER BY t.reported_at DESC LIMIT 1) AS uncertainty "
+                        "FROM wave.member m WHERE m.room_id=:room AND m.status='JOINED' "
+                        "AND m.last_present_at>=:presence_cutoff "
+                        "UNION ALL "
+                        "SELECT EXISTS(SELECT 1 FROM social.guest_preflight p "
+                        "WHERE p.room_id=g.room_id AND p.guest_session_id=g.guest_session_id "
                         "AND p.queue_entry_id=:entry AND p.recording_id=:recording "
                         "AND p.queue_version=:version AND p.final_ready=true "
-                        "AND p.availability<>'UNAVAILABLE' AND p.expires_at>:now)) AS ready_count, "
-                        "count(*) FILTER (WHERE EXISTS (SELECT 1 FROM wave.timing_report t "
-                        "WHERE t.room_id=m.room_id AND t.device_id=m.device_id "
-                        "AND t.command_sequence=:expected AND t.rtt_ms<=1000 "
-                        "AND t.uncertainty_ms<=100 AND t.reported_at>=:clock_cutoff)) AS clock_count, "
-                        "coalesce(max((SELECT t.rtt_ms FROM wave.timing_report t "
-                        "WHERE t.room_id=m.room_id AND t.device_id=m.device_id "
-                        "AND t.command_sequence=:expected ORDER BY t.reported_at DESC LIMIT 1)),0) AS max_rtt, "
-                        "coalesce(max((SELECT t.uncertainty_ms FROM wave.timing_report t "
-                        "WHERE t.room_id=m.room_id AND t.device_id=m.device_id "
-                        "AND t.command_sequence=:expected ORDER BY t.reported_at DESC LIMIT 1)),0) AS max_uncertainty "
-                        "FROM wave.member m WHERE m.room_id=:room AND m.status='JOINED' "
-                        "AND m.last_present_at>=:presence_cutoff"
+                        "AND p.availability<>'UNAVAILABLE' AND p.expires_at>:now) AS ready, "
+                        "(SELECT t.rtt_ms FROM social.guest_timing_report t "
+                        "WHERE t.room_id=g.room_id AND t.guest_session_id=g.guest_session_id "
+                        "AND t.command_sequence=:expected AND t.reported_at>=:clock_cutoff "
+                        "ORDER BY t.reported_at DESC LIMIT 1) AS rtt, "
+                        "(SELECT t.uncertainty_ms FROM social.guest_timing_report t "
+                        "WHERE t.room_id=g.room_id AND t.guest_session_id=g.guest_session_id "
+                        "AND t.command_sequence=:expected AND t.reported_at>=:clock_cutoff "
+                        "ORDER BY t.reported_at DESC LIMIT 1) AS uncertainty "
+                        "FROM social.guest_session g JOIN social.guest_invitation i "
+                        "ON i.invitation_id=g.invitation_id WHERE g.room_id=:room "
+                        "AND g.state='ACTIVE' AND g.expires_at>:now "
+                        "AND g.last_present_at>=:presence_cutoff "
+                        "AND i.state IN ('PENDING','DEPLETED') AND i.expires_at>:now) "
+                        "SELECT count(*) AS present_count, "
+                        "count(*) FILTER(WHERE ready) AS ready_count, "
+                        "count(*) FILTER(WHERE rtt BETWEEN 0 AND 1000 "
+                        "AND uncertainty BETWEEN 0 AND 100) AS clock_count, "
+                        "coalesce(max(rtt),0) AS max_rtt, "
+                        "coalesce(max(uncertainty),0) AS max_uncertainty FROM participant_gate"
                     ),
                     {
                         "room": room_id,

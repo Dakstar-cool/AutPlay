@@ -187,9 +187,9 @@ def test_contract_is_accepted_but_runtime_is_explicitly_not_implemented() -> Non
     assert "Implementation effect | Contract artifacts only" in PROMPT.read_text(encoding="utf-8")
 
 
-def test_all_json_schemas_are_valid_versioned_and_runtime_inactive() -> None:
-    paths = list(SCHEMAS.glob("*.schema.json"))
-    assert {path.name for path in paths} == REQUIRED_SCHEMAS
+def test_all_a1a_json_schemas_are_valid_versioned_and_runtime_inactive() -> None:
+    paths = [SCHEMAS / name for name in REQUIRED_SCHEMAS]
+    assert all(path.is_file() for path in paths)
     for path in paths:
         schema = load_json(path)
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"

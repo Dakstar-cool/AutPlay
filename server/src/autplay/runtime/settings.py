@@ -60,6 +60,7 @@ _API_ENV_FIELDS: Final = {
     "admin_web_source_hmac_secret": "ADMIN_WEB_SOURCE_HMAC_SECRET",
     "admin_web_csrf_hmac_secret": "ADMIN_WEB_CSRF_HMAC_SECRET",
     "jamendo_enabled": "JAMENDO_ENABLED",
+    "discovery_automation_enabled": "DISCOVERY_AUTOMATION_ENABLED",
     "jamendo_client_id": "JAMENDO_CLIENT_ID",
     "jamendo_staging_root": "JAMENDO_STAGING_ROOT",
     "jamendo_timeout_seconds": "JAMENDO_TIMEOUT_SECONDS",
@@ -83,6 +84,7 @@ _WORKER_ENV_FIELDS: Final = {
     "retry_max_seconds": "WORKER_RETRY_MAX_SECONDS",
     "profile_receipt_cleanup_interval_seconds": "PROFILE_RECEIPT_CLEANUP_INTERVAL_SECONDS",
     "jamendo_enabled": "JAMENDO_ENABLED",
+    "discovery_automation_enabled": "DISCOVERY_AUTOMATION_ENABLED",
     "jamendo_client_id": "JAMENDO_CLIENT_ID",
     "jamendo_staging_root": "JAMENDO_STAGING_ROOT",
     "jamendo_timeout_seconds": "JAMENDO_TIMEOUT_SECONDS",
@@ -227,6 +229,7 @@ class ApiSettings(_ExplicitSettings):
         default=None, repr=False, min_length=32, max_length=4_096
     )
     jamendo_enabled: bool = False
+    discovery_automation_enabled: bool = False
     jamendo_client_id: SecretStr | None = Field(
         default=None, repr=False, min_length=4, max_length=100
     )
@@ -287,6 +290,8 @@ class ApiSettings(_ExplicitSettings):
             vault = self.vault_root.resolve(strict=False)
             if staging == vault or staging.is_relative_to(vault):
                 raise ValueError("Jamendo staging root must stay outside the Vault")
+        if self.discovery_automation_enabled and not self.jamendo_enabled:
+            raise ValueError("discovery automation requires the Jamendo provider")
         return self
 
 
@@ -302,6 +307,7 @@ class WorkerSettings(_ExplicitSettings):
     retry_max_seconds: float = Field(default=300.0, ge=1.0, le=86_400.0)
     profile_receipt_cleanup_interval_seconds: int = Field(default=300, ge=1, le=3_600)
     jamendo_enabled: bool = False
+    discovery_automation_enabled: bool = False
     jamendo_client_id: SecretStr | None = Field(
         default=None, repr=False, min_length=4, max_length=100
     )
@@ -332,6 +338,14 @@ class WorkerSettings(_ExplicitSettings):
             vault = self.vault_root.resolve(strict=False)
             if staging == vault or staging.is_relative_to(vault):
                 raise ValueError("Jamendo staging root must stay outside the Vault")
+        if self.discovery_automation_enabled and not self.jamendo_enabled:
+            raise ValueError("discovery automation requires the Jamendo provider")
+        if self.discovery_automation_enabled and self.max_attempts != 5:
+            raise ValueError("discovery automation requires exactly five job attempts")
+        if self.discovery_automation_enabled and (
+            self.retry_base_seconds != 2.0 or self.retry_max_seconds != 300.0
+        ):
+            raise ValueError("discovery automation requires the exact bounded retry schedule")
         return self
 
 

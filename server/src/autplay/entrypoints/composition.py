@@ -13,6 +13,9 @@ from autplay.adapters.jamendo import JamendoProvider
 from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
 from autplay.adapters.postgresql.admin_views_runtime import SqlAlchemyAdminViewService
 from autplay.adapters.postgresql.auth_runtime import SqlAlchemyAuthUnitOfWorkFactory
+from autplay.adapters.postgresql.discovery_automation_runtime import (
+    SqlAlchemyDiscoveryAutomationRepository,
+)
 from autplay.adapters.postgresql.recommendations import (
     SqlAlchemyOfflinePackRepository,
     SqlAlchemyRecommendationRuntime,
@@ -26,6 +29,8 @@ from autplay.application.admin_commands import AdminCommandService
 from autplay.application.auth import AuthService
 from autplay.application.bulk_discovery import BulkDiscoveryService
 from autplay.application.catalog_artist_sync import CatalogArtistMutationService
+from autplay.application.discovery_automation import DiscoveryAutomationService
+from autplay.application.guest_room import GuestRoomService
 from autplay.application.imports import ImportService
 from autplay.application.library import LibraryService
 from autplay.application.manual_discovery import ManualDiscoveryService
@@ -133,6 +138,13 @@ def build_bulk_discovery_service(engine: Engine) -> BulkDiscoveryService:
     """Assemble short owner-scoped A1B preview/start transactions."""
 
     return BulkDiscoveryService(sessionmaker(engine, class_=Session, expire_on_commit=False))
+
+
+def build_discovery_automation_service(engine: Engine) -> DiscoveryAutomationService:
+    """Assemble A1C with one short PostgreSQL transaction per operation."""
+
+    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    return DiscoveryAutomationService(SqlAlchemyDiscoveryAutomationRepository(sessions))
 
 
 def build_admin_view_service(engine: Engine) -> SqlAlchemyAdminViewService:
@@ -340,6 +352,11 @@ def build_wave_service(engine: Engine) -> SqlAlchemyWaveService:
     return SqlAlchemyWaveService(sessionmaker(engine, class_=Session, expire_on_commit=False))
 
 
+def build_guest_room_service(engine: Engine) -> GuestRoomService:
+    """Assemble the separate S1D guest capability authority."""
+    return GuestRoomService(sessionmaker(engine, class_=Session, expire_on_commit=False))
+
+
 def build_social_service(settings: ApiSettings, engine: Engine) -> SocialService:
     """Assemble S1C only with the same server identity used for contact cards."""
     pem = settings.profile_identity_private_key_pem
@@ -417,6 +434,8 @@ __all__ = (
     "build_auth_service",
     "build_bulk_discovery_service",
     "build_catalog_artist_mutation_service",
+    "build_discovery_automation_service",
+    "build_guest_room_service",
     "build_import_service",
     "build_library_service",
     "build_manual_discovery_service",

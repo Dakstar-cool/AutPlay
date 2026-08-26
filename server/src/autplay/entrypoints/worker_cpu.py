@@ -23,6 +23,9 @@ from autplay.adapters.media.tools import (
     FfprobeInspector,
     ValidatedMediaInspector,
 )
+from autplay.adapters.postgresql.discovery_automation_runtime import (
+    SqlAlchemyDiscoveryAutomationRepository,
+)
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
@@ -35,7 +38,13 @@ from autplay.adapters.system import Uuid7Generator
 from autplay.application.bulk_discovery import BulkDiscoveryService
 from autplay.application.discovery_acquisition import (
     DiscoveryAcquisitionHandler,
+    ManualDiscoveryBoundaryAuthorizer,
     StandardAnalysisHandler,
+)
+from autplay.application.discovery_automation import (
+    DISCOVERY_SCAN_JOB,
+    DiscoveryAutomationService,
+    DiscoveryScanHandler,
 )
 from autplay.application.imports import ImportJobHandler
 from autplay.application.job_worker import (
@@ -103,6 +112,12 @@ def discovery_handlers(handler: DiscoveryAcquisitionHandler) -> Mapping[JobKey, 
     return {JobKey("discovery.acquire", 1): handler}
 
 
+def discovery_scan_handlers(handler: DiscoveryScanHandler) -> Mapping[JobKey, JobHandler]:
+    """Return the separately gated A1C release-scan registration."""
+
+    return {DISCOVERY_SCAN_JOB: handler}
+
+
 def standard_analysis_handlers(handler: StandardAnalysisHandler) -> Mapping[JobKey, JobHandler]:
     """Keep already-ingested baseline analysis drainable after provider disablement."""
 
@@ -116,7 +131,9 @@ def run_cpu_worker(
     profile_receipt_cleanup: Callable[[], int] | None = None,
     web_admin_cleanup: Callable[[], int] | None = None,
     discovery_cleanup: Callable[[], int] | None = None,
+    discovery_dispatch: Callable[[], int] | None = None,
     cleanup_interval: timedelta = timedelta(minutes=5),
+    discovery_dispatch_interval: timedelta = timedelta(minutes=5),
 ) -> None:
     """Run until SIGINT/SIGTERM or a supplied cooperative stop event."""
 
@@ -133,7 +150,10 @@ def run_cpu_worker(
             signal.signal(signum, request_stop)
     if cleanup_interval <= timedelta(0) or cleanup_interval > timedelta(hours=1):
         raise ValueError("profile receipt cleanup interval must be within (0, 1 hour]")
+    if discovery_dispatch_interval != timedelta(minutes=5):
+        raise ValueError("discovery scheduler interval must remain exactly five minutes")
     next_cleanup_at = 0.0
+    next_discovery_dispatch_at = 0.0
     try:
         while not process_stop.is_set():
             current = monotonic()
@@ -154,6 +174,13 @@ def run_cpu_worker(
                     except SQLAlchemyError:
                         _LOGGER.exception("discovery_cleanup_failed")
                 next_cleanup_at = current + cleanup_interval.total_seconds()
+            if current >= next_discovery_dispatch_at:
+                if discovery_dispatch is not None:
+                    try:
+                        discovery_dispatch()
+                    except SQLAlchemyError:
+                        _LOGGER.exception("discovery_dispatch_failed")
+                next_discovery_dispatch_at = current + discovery_dispatch_interval.total_seconds()
             tick = worker.run_once()
             if tick.outcome.value == "IDLE":
                 process_stop.wait(worker.idle_poll_interval.total_seconds())
@@ -230,6 +257,25 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
             ),
         )
+        discovery: ManualDiscoveryService | None = None
+        release_provider: JamendoProvider | None = None
+        if runtime_settings.jamendo_enabled:
+            client_id = runtime_settings.jamendo_client_id
+            staging_root = runtime_settings.jamendo_staging_root
+            if client_id is None or staging_root is None:
+                raise RuntimeError("Jamendo worker configuration is unavailable")
+            release_provider = JamendoProvider(
+                client_id.get_secret_value(),
+                timeout_seconds=runtime_settings.jamendo_timeout_seconds,
+            )
+            discovery = ManualDiscoveryService(
+                release_provider,
+                staging_root=staging_root,
+                max_download_bytes=runtime_settings.jamendo_max_download_bytes,
+                minimum_request_interval_seconds=(
+                    runtime_settings.jamendo_minimum_request_interval_seconds
+                ),
+            )
         ingest = VaultIngestHandler(
             repository=TransactionalIngestRepository(SqlAlchemyVaultUnitOfWorkFactory(sessions)),
             storage=vault_storage,
@@ -240,27 +286,21 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
                 max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
             ),
+            source_authorizer=(
+                ManualDiscoveryBoundaryAuthorizer(
+                    discovery,
+                    sessions,
+                    automatic_enabled=lambda: runtime_settings.discovery_automation_enabled,
+                )
+                if discovery is not None
+                else None
+            ),
             minimum_free_bytes=runtime_settings.vault_low_disk_bytes,
         )
         handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest))
         handlers.update(import_handlers(ImportJobHandler(sessions)))
         handlers.update(standard_analysis_handlers(StandardAnalysisHandler(sessions)))
-        if runtime_settings.jamendo_enabled:
-            client_id = runtime_settings.jamendo_client_id
-            staging_root = runtime_settings.jamendo_staging_root
-            if client_id is None or staging_root is None:
-                raise RuntimeError("Jamendo worker configuration is unavailable")
-            discovery = ManualDiscoveryService(
-                JamendoProvider(
-                    client_id.get_secret_value(),
-                    timeout_seconds=runtime_settings.jamendo_timeout_seconds,
-                ),
-                staging_root=staging_root,
-                max_download_bytes=runtime_settings.jamendo_max_download_bytes,
-                minimum_request_interval_seconds=(
-                    runtime_settings.jamendo_minimum_request_interval_seconds
-                ),
-            )
+        if discovery is not None:
             handlers.update(
                 discovery_handlers(
                     DiscoveryAcquisitionHandler(
@@ -268,6 +308,21 @@ def main(arguments: Sequence[str] | None = None) -> int:
                         discovery=discovery,
                         storage=vault_storage,
                         limits=vault_limits,
+                        automatic_enabled=lambda: runtime_settings.discovery_automation_enabled,
+                    )
+                )
+            )
+        automation_repository = SqlAlchemyDiscoveryAutomationRepository(sessions)
+        automation = DiscoveryAutomationService(automation_repository)
+        if runtime_settings.discovery_automation_enabled:
+            if release_provider is None:
+                raise RuntimeError("discovery automation provider is unavailable")
+            handlers.update(
+                discovery_scan_handlers(
+                    DiscoveryScanHandler(
+                        automation_repository,
+                        release_provider,
+                        now=lambda: datetime.now(UTC),
                     )
                 )
             )
@@ -302,9 +357,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
             def discovery_cleanup() -> int:
                 return (
-                    BulkDiscoveryService(sessions).cleanup_expired(
-                        now=datetime.now(UTC),
-                        limit=10_000,
+                    automation.cleanup_expired(now=datetime.now(UTC), limit=10_000)
+                    + BulkDiscoveryService(sessions).cleanup_expired(
+                        now=datetime.now(UTC), limit=10_000
                     )
                     + social_cleanup()
                 )
@@ -312,10 +367,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
             def social_cleanup() -> int:
                 return SocialService(sessions, None).cleanup(datetime.now(UTC), limit=10_000)
 
+            def discovery_dispatch() -> int:
+                if not runtime_settings.discovery_automation_enabled:
+                    return 0
+                return automation.dispatch_due(now=datetime.now(UTC), limit=20)
+
             if namespace.once:
                 cleanup()
                 web_cleanup()
                 discovery_cleanup()
+                discovery_dispatch()
                 worker.run_once()
             else:
                 run_cpu_worker(
@@ -323,6 +384,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     profile_receipt_cleanup=cleanup,
                     web_admin_cleanup=web_cleanup,
                     discovery_cleanup=discovery_cleanup,
+                    discovery_dispatch=discovery_dispatch,
                     cleanup_interval=timedelta(
                         seconds=runtime_settings.profile_receipt_cleanup_interval_seconds
                     ),
@@ -354,6 +416,7 @@ __all__ = (
     "SERVICE_NAME",
     "build_cpu_worker",
     "discovery_handlers",
+    "discovery_scan_handlers",
     "import_handlers",
     "main",
     "run_cpu_worker",

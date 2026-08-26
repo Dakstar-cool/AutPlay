@@ -153,6 +153,36 @@ def test_public_registration_login_and_bootstrap_routes_do_not_exist() -> None:
     assert all(response.json()["error"]["code"] == "not_found" for response in responses)
 
 
+def test_guest_capability_header_is_rejected_by_every_non_guest_api_family() -> None:
+    app = _app(ReadinessResult(ready=True, component="postgresql"))
+    capability = "B" * 43
+    room_id = "018f47bc-2f9d-7cc2-8e39-01b4ce17cc88"
+    requests = (
+        ("GET", "/api/v1/library/entries"),
+        ("POST", "/api/v1/sync/push"),
+        ("POST", "/api/v1/recommendations"),
+        ("POST", "/api/v1/vault/uploads"),
+        ("GET", "/api/v1/account/devices"),
+        ("GET", "/api/v1/social/snapshot"),
+        ("GET", f"/api/v1/wave/rooms/{room_id}/snapshot"),
+        ("POST", "/api/v1/imports"),
+        ("GET", "/api/v1/profile/capabilities"),
+    )
+    with TestClient(app) as client:
+        responses = [
+            client.request(
+                method,
+                path,
+                headers={"X-AutPlay-Guest-Capability": capability},
+                json={} if method == "POST" else None,
+            )
+            for method, path in requests
+        ]
+
+    assert all(response.status_code == 401 for response in responses)
+    assert all(capability not in response.text for response in responses)
+
+
 def test_admin_web_is_absent_when_disabled_and_bundled_when_enabled() -> None:
     disabled = _app(ReadinessResult(ready=True, component="postgresql"))
     enabled = create_app(

@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import and_, exists, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.discovery_runtime import (
-    JAMENDO_PROVIDER_ID,
+    BulkDiscoveryError,
+    PostgresBulkDiscoveryRepository,
     refresh_bulk_operations,
 )
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.models.audit import AuditEventRow
 from autplay.adapters.postgresql.models.catalog import RecordingRow
-from autplay.adapters.postgresql.models.discovery import DiscoveryCandidateRow
-from autplay.adapters.postgresql.models.identity import RecordingRedirectRow, SourceProviderRow
+from autplay.adapters.postgresql.models.discovery import (
+    AcquisitionAttemptRow,
+    DiscoveryCandidateRow,
+)
+from autplay.adapters.postgresql.models.identity import RecordingRedirectRow
 from autplay.adapters.postgresql.models.jobs import JobRow
 from autplay.adapters.postgresql.models.library import LibraryEntryRow, UserTrackRefRow
 from autplay.adapters.postgresql.models.sync import SyncEventRow
@@ -42,6 +46,7 @@ from autplay.application.vault_uploads import (
     VaultNotFoundError,
     VaultPrincipal,
 )
+from autplay.domain.discovery import AcquisitionAuthorizationReceipt
 from autplay.domain.jobs import JobKey
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
@@ -278,12 +283,26 @@ class PostgresVaultRuntime(UploadRepository):
         if row.state not in {"PROCESSING", "COMMIT_PREPARED"}:
             return None
         self._session.flush()
+        source_provider_track_id = None
+        if row.source_candidate_id is not None:
+            source_provider_track_id = self._session.scalar(
+                select(DiscoveryCandidateRow.provider_track_id).where(
+                    DiscoveryCandidateRow.candidate_id == row.source_candidate_id,
+                    DiscoveryCandidateRow.user_id == row.user_id,
+                )
+            )
+            if source_provider_track_id is None:
+                return None
         return IngestSession(
-            row.upload_session_id,
-            row.target_recording_id,
-            OpaqueStorageKey(row.staging_key),
-            row.expected_size,
-            row.declared_sha256,
+            upload_session_id=row.upload_session_id,
+            target_recording_id=row.target_recording_id,
+            staging_key=OpaqueStorageKey(row.staging_key),
+            expected_size=row.expected_size,
+            declared_sha256=row.declared_sha256,
+            source_candidate_id=row.source_candidate_id,
+            source_provider_track_id=source_provider_track_id,
+            source_owner_user_id=row.user_id if row.source_candidate_id is not None else None,
+            source_acquisition_attempt_id=row.source_acquisition_attempt_id,
         )
 
     def prepare_commit(
@@ -395,6 +414,7 @@ class PostgresVaultRuntime(UploadRepository):
         evidence: ChromaprintEvidence,
         *,
         reused: bool,
+        authorization_receipt: AcquisitionAuthorizationReceipt | None = None,
     ) -> bool:
         """Make the prepared CAS metadata streamable only after a file publish."""
 
@@ -408,7 +428,9 @@ class PostgresVaultRuntime(UploadRepository):
         if session.vault_object_id is None or session.computed_sha256 is None:
             raise UploadStateError()
         if session.source_candidate_id is not None and not self._discovery_commit_authorized(
-            session
+            session,
+            authorization_receipt=authorization_receipt,
+            receipt_required=True,
         ):
             self._quarantine_finalize_conflict(session, code="source_authorization_unavailable")
             return False
@@ -593,30 +615,42 @@ class PostgresVaultRuntime(UploadRepository):
         self._audit(session, "vault.ingest_quarantined")
         self._session.flush()
 
-    def _discovery_commit_authorized(self, upload: UploadSessionRow) -> bool:
+    def _discovery_commit_authorized(
+        self,
+        upload: UploadSessionRow,
+        *,
+        authorization_receipt: AcquisitionAuthorizationReceipt | None = None,
+        receipt_required: bool = False,
+    ) -> bool:
         """Recheck durable provider authority immediately before Vault publication."""
 
-        candidate = self._session.scalar(
-            select(DiscoveryCandidateRow)
-            .where(
-                DiscoveryCandidateRow.candidate_id == upload.source_candidate_id,
-                DiscoveryCandidateRow.user_id == upload.user_id,
-                DiscoveryCandidateRow.recording_id == upload.target_recording_id,
-                DiscoveryCandidateRow.provider_id == JAMENDO_PROVIDER_ID,
-                DiscoveryCandidateRow.acquisition_state.in_({"INGESTING", "MATERIALIZING"}),
+        if upload.source_candidate_id is None:
+            return False
+        if upload.source_acquisition_attempt_id is None:
+            return False
+        try:
+            candidate = PostgresBulkDiscoveryRepository(self._session).require_commit_authorization(
+                candidate_id=upload.source_candidate_id,
+                owner_user_id=upload.user_id,
+                recording_id=upload.target_recording_id,
+                acquisition_attempt_id=upload.source_acquisition_attempt_id,
             )
-            .with_for_update()
-        )
-        provider = self._session.get(SourceProviderRow, JAMENDO_PROVIDER_ID)
-        return bool(
-            candidate is not None
-            and provider is not None
-            and provider.enabled
-            and provider.deleted_at is None
-            and provider.adapter_id == "autplay.jamendo.manual"
-            and provider.adapter_version == "1.0.0"
-            and {"SEARCH", "DOWNLOAD"}.issubset(set(provider.capabilities))
-        )
+        except BulkDiscoveryError:
+            return False
+        if receipt_required and authorization_receipt is None:
+            return False
+        if authorization_receipt is not None:
+            now = datetime.now(UTC)
+            if (
+                authorization_receipt.candidate_id != candidate.candidate_id
+                or authorization_receipt.provider_track_id != candidate.provider_track_id
+                or authorization_receipt.provider_artist_id != candidate.provider_artist_id
+                or authorization_receipt.boundary != "PRE_MATERIALIZE"
+                or authorization_receipt.checked_at > now
+                or now - authorization_receipt.checked_at > timedelta(minutes=5)
+            ):
+                return False
+        return True
 
     def _finalize_discovery_candidate(
         self, upload: UploadSessionRow, variant: AudioVariantRow
@@ -633,11 +667,20 @@ class PostgresVaultRuntime(UploadRepository):
         )
         if (
             candidate is None
+            or upload.source_acquisition_attempt_id is None
+            or candidate.current_acquisition_attempt_id != upload.source_acquisition_attempt_id
             or candidate.acquisition_state not in {"INGESTING", "MATERIALIZING"}
             or candidate.recording_id != variant.recording_id
             or candidate.external_reference_id is None
             or candidate.user_track_ref_id is None
             or candidate.library_entry_id is None
+        ):
+            raise UploadStateError()
+        attempt = self._session.get(AcquisitionAttemptRow, upload.source_acquisition_attempt_id)
+        if (
+            attempt is None
+            or attempt.candidate_id != candidate.candidate_id
+            or attempt.state not in {"QUEUED", "RUNNING"}
         ):
             raise UploadStateError()
         library_entry = self._session.scalar(
@@ -657,8 +700,7 @@ class PostgresVaultRuntime(UploadRepository):
             AcquisitionRecordRow(
                 acquisition_record_id=uuid5(
                     NAMESPACE_URL,
-                    "autplay:a1b-acquisition-record-v1:"
-                    f"{candidate.candidate_id}:{candidate.source_authorization_revision}",
+                    f"autplay:a1c-acquisition-record-v1:{upload.source_acquisition_attempt_id}",
                 ),
                 audio_variant_id=variant.audio_variant_id,
                 provider_id=candidate.provider_id,
@@ -692,6 +734,11 @@ class PostgresVaultRuntime(UploadRepository):
         candidate.acquisition_state = "READY"
         candidate.updated_at = now
         candidate.row_version += 1
+        attempt.state = "COMPLETED"
+        attempt.error_code = None
+        attempt.completed_at = now
+        attempt.updated_at = now
+        attempt.row_version += 1
         CatalogArtistSyncPublisher().publish(self._session, upload.user_id)
         self._session.add(
             SyncEventRow(
@@ -726,13 +773,30 @@ class PostgresVaultRuntime(UploadRepository):
             )
             .with_for_update()
         )
-        if candidate is None or candidate.acquisition_state == "READY":
+        if (
+            candidate is None
+            or upload.source_acquisition_attempt_id is None
+            or candidate.current_acquisition_attempt_id != upload.source_acquisition_attempt_id
+            or candidate.acquisition_state == "READY"
+        ):
+            return
+        attempt = self._session.get(AcquisitionAttemptRow, upload.source_acquisition_attempt_id)
+        if (
+            attempt is None
+            or attempt.candidate_id != candidate.candidate_id
+            or attempt.state not in {"QUEUED", "RUNNING"}
+        ):
             return
         now = datetime.now(UTC)
         candidate.acquisition_state = "FAILED_TERMINAL"
         candidate.error_code = code[:100]
         candidate.updated_at = now
         candidate.row_version += 1
+        attempt.state = "FAILED"
+        attempt.error_code = code[:100]
+        attempt.completed_at = now
+        attempt.updated_at = now
+        attempt.row_version += 1
         refresh_bulk_operations(self._session, candidate.candidate_id, now)
 
     def reconcile_inventory(

@@ -20,6 +20,8 @@ from autplay.adapters.postgresql.readiness import (
 )
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.auth import AuthService
+from autplay.application.discovery_automation import DiscoveryAutomationService
+from autplay.application.guest_room import GuestRoomService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.web_admin import WebAdminService
 from autplay.entrypoints.admin_web_http import (
@@ -34,6 +36,8 @@ from autplay.entrypoints.composition import (
     build_admin_view_service,
     build_auth_service,
     build_bulk_discovery_service,
+    build_discovery_automation_service,
+    build_guest_room_service,
     build_import_service,
     build_library_service,
     build_manual_discovery_service,
@@ -52,6 +56,8 @@ from autplay.entrypoints.discovery_admin_http import (
     ManualDiscoveryHttp,
     create_discovery_admin_router,
 )
+from autplay.entrypoints.discovery_automation_http import create_discovery_automation_router
+from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
@@ -62,7 +68,7 @@ from autplay.entrypoints.recommendation_http import (
 from autplay.entrypoints.social_http import create_social_router
 from autplay.entrypoints.sync_http import create_sync_router
 from autplay.entrypoints.vault_http import UploadService, create_vault_router
-from autplay.entrypoints.wave_http import create_wave_router
+from autplay.entrypoints.wave_http import WaveBroadcaster, create_wave_router
 from autplay.runtime.http import (
     RequestRuntimeMiddleware,
     error_response,
@@ -90,6 +96,7 @@ def create_app(
     recommendation_service: RecommendationHttpService | None = None,
     sync_service: object | None = None,
     wave_service: Any | None = None,
+    guest_room_service: GuestRoomService | None = None,
     social_service: Any | None = None,
     profile_pairing_service: ProfilePairingService | None = None,
     admin_web_service: WebAdminService | None = None,
@@ -97,6 +104,7 @@ def create_app(
     admin_command_service: AdminCommandsHttp | None = None,
     admin_renderer: Renderer | None = None,
     discovery_service: ManualDiscoveryHttp | None = None,
+    discovery_automation_service: DiscoveryAutomationService | None = None,
 ) -> FastAPI:
     """Create one API instance without connecting to PostgreSQL at import time."""
 
@@ -111,6 +119,7 @@ def create_app(
     recommendations = recommendation_service or build_recommendation_service(engine)
     sync = sync_service or build_sync_service(resolved_settings, engine)
     wave = wave_service or build_wave_service(engine)
+    guest_room = guest_room_service or build_guest_room_service(engine)
     social = social_service or build_social_service(resolved_settings, engine)
     pairing = (
         profile_pairing_service
@@ -167,6 +176,7 @@ def create_app(
     api_router.include_router(
         create_sync_router(sync, authenticated=bearer_authentication(authentication))  # type: ignore[arg-type]
     )
+    wave_broadcaster = WaveBroadcaster()
     api_router.include_router(
         create_wave_router(
             wave,
@@ -174,6 +184,15 @@ def create_app(
             auth_service=authentication,
             source_lookup=build_stream_lookup(engine),
             metrics=runtime_metrics,
+            broadcaster=wave_broadcaster,
+        )
+    )
+    api_router.include_router(
+        create_guest_room_router(
+            guest_room,
+            authenticated=bearer_authentication(authentication),
+            source_secret=resolved_settings.auth_signing_secret.get_secret_value().encode("utf-8"),
+            broadcaster=wave_broadcaster,
         )
     )
     api_router.include_router(
@@ -202,6 +221,18 @@ def create_app(
                     token_secret=source_secret.get_secret_value().encode("utf-8"),
                 )
             )
+            if resolved_settings.discovery_automation_enabled:
+                app.include_router(
+                    create_discovery_automation_router(
+                        web=web,
+                        automation=(
+                            discovery_automation_service
+                            or build_discovery_automation_service(engine)
+                        ),
+                        renderer=admin_renderer or AdminTemplateRenderer(),
+                        origin=origin,
+                    )
+                )
         app.include_router(
             create_admin_web_router(
                 web=web,

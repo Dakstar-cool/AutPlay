@@ -15,6 +15,7 @@ from autplay.adapters.postgresql.catalog_changes import (
 )
 from autplay.adapters.postgresql.import_runtime import (
     IMPORT_JOB_KEY,
+    ImportOperationConflictError,
     ImportReviewConflictError,
     PostgresImportRepository,
 )
@@ -29,6 +30,7 @@ from autplay.adapters.postgresql.models import (
     RecordingRow,
     SyncEventRow,
     UserTrackRefRow,
+    WebImportOperationReceiptRow,
 )
 from autplay.application.imports import ImportJobHandler, ImportService
 from autplay.application.job_worker import (
@@ -41,6 +43,7 @@ from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.import_identity import CatalogCandidate, IdentityTrack, ParsedImportRow
 from autplay.domain.jobs import CancelRequestResult, RetryPolicy
+from autplay.domain.web_admin import WebActor
 from sqlalchemy import Engine, create_engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -49,6 +52,52 @@ class _FailingCatalogPublisher(CatalogArtistSyncPublisher):
     def publish(self, session: Session, owner_user_id: UUID) -> int:
         del session, owner_user_id
         raise RuntimeError("injected catalog publisher failure")
+
+
+def test_web_multipart_operation_is_exactly_replayable_and_conflict_safe(
+    database_url: str,
+) -> None:
+    engine, sessions, principal = _runtime(database_url)
+    actor = WebActor(uuid4(), principal.user_id, uuid4(), AccountRole.OWNER, 0)
+    service = ImportService(sessions)
+    operation_id = uuid4()
+    payload = b"Open Artist - Song\n"
+    try:
+        first = service.start_for_web(actor, payload=payload, operation_id=operation_id)
+        replay = service.start_for_web(actor, payload=payload, operation_id=operation_id)
+        assert first.replayed is False and replay.replayed is True
+        assert replay.import_job_id == first.import_job_id
+
+        with pytest.raises(ImportOperationConflictError, match="operation_conflict"):
+            service.start_for_web(
+                actor,
+                payload=b"Open Artist - Different Song\n",
+                operation_id=operation_id,
+            )
+
+        concurrent_operation_id = uuid4()
+        concurrent_payload = b"Concurrent Artist - New Song\n"
+        barrier = Barrier(2)
+
+        def start_once() -> tuple[UUID, bool]:
+            barrier.wait(timeout=10)
+            result = service.start_for_web(
+                actor,
+                payload=concurrent_payload,
+                operation_id=concurrent_operation_id,
+            )
+            return result.import_job_id, result.replayed
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = tuple(executor.map(lambda _: start_once(), range(2)))
+        assert len({item[0] for item in results}) == 1
+        assert sorted(item[1] for item in results) == [False, True]
+        with Session(engine) as session:
+            assert (
+                session.scalar(select(func.count(WebImportOperationReceiptRow.operation_id))) == 2
+            )
+    finally:
+        engine.dispose()
 
 
 def test_probabilistic_import_stays_shadow_until_explicit_manual_resolution(

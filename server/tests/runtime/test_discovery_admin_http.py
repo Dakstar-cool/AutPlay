@@ -4,7 +4,11 @@ import re
 from typing import cast
 from uuid import UUID, uuid4
 
-from autplay.adapters.postgresql.discovery_runtime import BulkPreviewResult, BulkStartResult
+from autplay.adapters.postgresql.discovery_runtime import (
+    BulkDiscoveryError,
+    BulkPreviewResult,
+    BulkStartResult,
+)
 from autplay.adapters.postgresql.import_runtime import ImportCollectionArtist, ImportStartResult
 from autplay.domain.auth import AccountRole
 from autplay.domain.discovery import (
@@ -158,18 +162,21 @@ class _Imports:
     def __init__(self) -> None:
         self.import_job_id = uuid4()
         self.payloads: list[bytes] = []
+        self.operation_ids: list[UUID] = []
 
     def start_for_web(
         self,
         actor: WebActor,
         *,
         payload: bytes,
+        operation_id: UUID,
         format_name: str = "TXT",
         schema_version: str = "1",
     ) -> ImportStartResult:
         del actor
         assert format_name == "TXT" and schema_version == "1"
         self.payloads.append(payload)
+        self.operation_ids.append(operation_id)
         return ImportStartResult(self.import_job_id, uuid4(), False)
 
     def collection_artists(
@@ -193,6 +200,17 @@ class _Bulk:
         self.previews: list[tuple[UUID, UUID]] = []
         self.starts: list[tuple[UUID, UUID, UUID]] = []
         self.search_starts: list[tuple[UUID, UUID, str]] = []
+        self.eligibility_checks: list[tuple[UUID, tuple[str, ...]]] = []
+        self.provider_checks: list[UUID] = []
+        self.provider_available = True
+
+    def require_provider_available(self, actor: WebActor) -> None:
+        self.provider_checks.append(actor.user_id)
+        if not self.provider_available:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+
+    def require_eligible_artists(self, actor: WebActor, artist_names: tuple[str, ...]) -> None:
+        self.eligibility_checks.append((actor.user_id, artist_names))
 
     def save_preview(
         self,
@@ -283,6 +301,7 @@ def test_authenticated_manual_search_and_acquisition_are_separate() -> None:
     assert search.status_code == 200
     assert "Morning Light" in search.text
     assert discovery.searches == [(web.actor.user_id, "Open Artist Morning Light")]
+    assert bulk.provider_checks == [web.actor.user_id]
     assert discovery.lookups == []
 
     acquire_form = _fields(search.text, "/admin/discovery/acquire")
@@ -295,11 +314,48 @@ def test_authenticated_manual_search_and_acquisition_are_separate() -> None:
     assert acquire.status_code == 200
     assert "queued for verified Vault acquisition" in acquire.text
     assert discovery.lookups == ["10"]
+    assert bulk.provider_checks == [web.actor.user_id, web.actor.user_id]
     assert bulk.search_starts[0][0::2] == (web.actor.user_id, "10")
     status = client.get(f"/admin/discovery/operations/{bulk.bulk_operation_id}?lang=en")
     assert status.status_code == 200
     assert "RUNNING" in status.text
     assert "Refresh operation status" in status.text
+
+
+def test_provider_disable_prevents_search_and_acquisition_provider_io() -> None:
+    client, web, discovery, _, bulk = _client(with_bulk=True)
+    page = client.get("/admin/discovery")
+    search_form = _fields(page.text, "/admin/discovery/search")
+    search_form["query"] = "Morning Light"
+    bulk.provider_available = False
+
+    rejected_search = client.post(
+        "/admin/discovery/search",
+        data=search_form,
+        headers={"Origin": "https://admin.test"},
+    )
+
+    assert rejected_search.status_code == 403
+    assert bulk.provider_checks == [web.actor.user_id]
+    assert discovery.searches == []
+
+    bulk.provider_available = True
+    searched = client.post(
+        "/admin/discovery/search",
+        data=search_form,
+        headers={"Origin": "https://admin.test"},
+    )
+    acquire_form = _fields(searched.text, "/admin/discovery/acquire")
+    bulk.provider_available = False
+    rejected_acquire = client.post(
+        "/admin/discovery/acquire",
+        data=acquire_form,
+        headers={"Origin": "https://admin.test"},
+    )
+
+    assert rejected_acquire.status_code == 403
+    assert discovery.lookups == []
+    assert bulk.search_starts == []
 
 
 def test_selection_token_is_owner_bound_and_origin_is_exact() -> None:

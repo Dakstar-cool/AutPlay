@@ -565,6 +565,9 @@ class UploadSessionRow(Base):
     device_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     actor_kind: Mapped[str] = mapped_column(Text(), nullable=False, server_default=text("'DEVICE'"))
     source_candidate_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    source_acquisition_attempt_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
     target_recording_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(Text(), nullable=False)
     request_hash: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
@@ -609,6 +612,12 @@ class UploadSessionRow(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["source_acquisition_attempt_id"],
+            ["discovery.acquisition_attempt.acquisition_attempt_id"],
+            name="upload_session_source_acquisition_attempt_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["device_id"],
             ["account.device.device_id"],
             name="upload_session_device_id_fkey",
@@ -647,9 +656,13 @@ class UploadSessionRow(Base):
         UniqueConstraint("user_id", "idempotency_key", name="uq_upload_session_user_idempotency"),
         UniqueConstraint("upload_session_id", "user_id", name="uq_upload_session_owner_lookup"),
         UniqueConstraint("staging_key", name="uq_upload_session_staging_key"),
-        UniqueConstraint("source_candidate_id", name="uq_upload_session_source_candidate"),
+        UniqueConstraint(
+            "source_acquisition_attempt_id",
+            name="uq_upload_session_source_acquisition_attempt",
+        ),
         CheckConstraint(
-            "(actor_kind = 'DEVICE' AND device_id IS NOT NULL AND source_candidate_id IS NULL) OR (actor_kind = 'PROVIDER' AND device_id IS NULL AND source_candidate_id IS NOT NULL)",
+            "(actor_kind = 'DEVICE' AND device_id IS NOT NULL AND source_candidate_id IS NULL AND source_acquisition_attempt_id IS NULL) OR "
+            "(actor_kind = 'PROVIDER' AND device_id IS NULL AND source_candidate_id IS NOT NULL AND source_acquisition_attempt_id IS NOT NULL)",
             name="ck_upload_session_actor",
         ),
         CheckConstraint(

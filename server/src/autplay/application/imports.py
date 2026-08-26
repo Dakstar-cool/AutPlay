@@ -66,6 +66,7 @@ class ImportService:
         actor: WebActor,
         *,
         payload: bytes,
+        operation_id: UUID,
         format_name: str = "TXT",
         schema_version: str = "1",
     ) -> ImportStartResult:
@@ -77,10 +78,10 @@ class ImportService:
             schema_version=schema_version,
         )
         with self._sessions() as session:
-            result = PostgresImportRepository(session).start(
+            result = PostgresImportRepository(session).start_for_web(
                 owner_user_id=actor.user_id,
+                operation_id=operation_id,
                 parsed=parsed,
-                mode="LIBRARY_ONLY",
             )
             session.commit()
             return result

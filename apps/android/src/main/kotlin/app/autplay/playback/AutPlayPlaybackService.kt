@@ -178,6 +178,9 @@ class AutPlayPlaybackService : MediaSessionService() {
     private suspend fun restoreQueue(autoplay: Boolean, requiredSnapshotId: String? = null) =
         stateMutex.withLock {
             val queue = persistence.restoreActive() ?: return@withLock
+            if (!GuestQueueRestorePolicy.allows(queue.snapshot.queueType, requiredSnapshotId)) {
+                return@withLock
+            }
             if (requiredSnapshotId != null && queue.snapshot.queueSnapshotId != requiredSnapshotId) {
                 return@withLock
             }
@@ -682,6 +685,12 @@ internal fun resolveCurrentTrackRefId(
     queueEntryId: String?,
     entries: List<Pair<String, String>>,
 ): String? = entries.firstOrNull { (entryId, _) -> entryId == queueEntryId }?.second
+
+/** A guest queue needs a fresh process-local command and is never restored as ambient authority. */
+internal object GuestQueueRestorePolicy {
+    fun allows(queueType: String, requiredSnapshotId: String?): Boolean =
+        queueType != "GUEST_WAVE" || !requiredSnapshotId.isNullOrBlank()
+}
 
 @UnstableApi
 internal class AutPlaySessionCallback(private val applicationPackage: String) : MediaSession.Callback {

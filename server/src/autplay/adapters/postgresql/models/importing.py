@@ -257,6 +257,40 @@ class ImportEntryRow(Base):
     )
 
 
+class WebImportOperationReceiptRow(Base):
+    """Owner-scoped replay receipt for the multipart Admin Web import boundary."""
+
+    __tablename__ = "web_import_operation_receipt"
+
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    request_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    import_job_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "operation_id", name="web_import_operation_receipt_pkey"),
+        ForeignKeyConstraint(
+            ["user_id"],
+            ["account.user_account.user_id"],
+            name="web_import_operation_receipt_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["import_job_id"],
+            ["importing.import_job.import_job_id"],
+            name="web_import_operation_receipt_import_job_id_fkey",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "octet_length(request_sha256) = 32", name="ck_web_import_operation_receipt_hash"
+        ),
+        {"schema": "importing"},
+    )
+
+
 Index(
     "ix_import_job_user",
     ImportJobRow.user_id,
@@ -274,4 +308,5 @@ Index(
 __all__ = (
     "ImportEntryRow",
     "ImportJobRow",
+    "WebImportOperationReceiptRow",
 )

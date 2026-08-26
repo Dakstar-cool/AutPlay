@@ -46,3 +46,38 @@ def test_wave_live_envelope_requires_version_and_ordered_event_fields() -> None:
         "sequence",
         "kind",
     }
+
+
+def test_s1d_guest_wave_contract_is_a_separate_fixed_authority_family() -> None:
+    document = json.loads(OPENAPI.read_text(encoding="utf-8"))
+    paths = document["paths"]
+    guest = document["components"]["securitySchemes"]["guestCapability"]
+    assert guest == {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AutPlay-Guest-Capability",
+        "x-autplay-scope": "EXACT_ROOM_FIXED_ALLOWLIST",
+    }
+    assert paths["/wave/guest/redeem"]["post"]["security"] == []
+    assert paths["/wave/guest/clock"]["post"]["security"] == [{"guestCapability": []}]
+    guest_operations = {
+        path: next(iter(operation.values()))["operationId"]
+        for path, operation in paths.items()
+        if path.startswith("/wave/guest/rooms/")
+    }
+    assert set(guest_operations) == {
+        "/wave/guest/rooms/{room_id}/snapshot",
+        "/wave/guest/rooms/{room_id}/presence",
+        "/wave/guest/rooms/{room_id}/preflight",
+        "/wave/guest/rooms/{room_id}/timing",
+        "/wave/guest/rooms/{room_id}/leave",
+    }
+    assert not any(
+        suffix in path
+        for path in guest_operations
+        for suffix in ("commands", "source", "start", "close")
+    )
+    assert document["components"]["schemas"]["GuestSnapshot"]["properties"]["role"] == {
+        "const": "GUEST"
+    }
+    assert document["x-guest-websocket"]["revalidate"] == ("BEFORE_EVERY_DELIVERY_AND_HEARTBEAT")

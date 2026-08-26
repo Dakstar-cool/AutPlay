@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/guest-redemption.schema.json",
+  "title": "S1D body-only guest document exchange",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1D",
+  "x-autplay-secret-transport": "NO_STORE_POST_BODY_ONLY_BOTH_SECRETS_HASH_ONLY",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation_id", "invitation_id", "room_id", "document_bearer", "session_bearer", "display_name"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"},
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "room_id": {"type": "string", "format": "uuid"},
+    "document_bearer": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "session_bearer": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "display_name": {"type": "string", "minLength": 1, "maxLength": 80}
+  }
+}

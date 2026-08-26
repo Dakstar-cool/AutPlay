@@ -12,7 +12,7 @@ from decimal import Decimal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import rfc8785
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -40,20 +40,25 @@ from .identity_decisions import CreateRecordingReviewCommand, execute_create_rec
 from .import_runtime import PostgresImportRepository
 from .jobs_runtime import PostgresJobRepository
 from .models import (
+    AcquisitionAttemptRow,
     ArtistCreditNameRow,
     ArtistCreditRow,
+    ArtistPolicyRow,
     ArtistRow,
     AudioFingerprintRow,
     AudioVariantRow,
     BulkOperationItemRow,
     BulkOperationRow,
+    CandidateActionReceiptRow,
     DiscoveryCandidateRow,
+    DiscoveryRunCandidateRow,
     ExternalReferenceRow,
     ImportJobRow,
     JobRow,
     LibraryEntryRow,
     MatchDecisionRow,
     RecordingRow,
+    SourceAuthorizationRow,
     SourceProviderRow,
     UploadSessionRow,
     UserTrackRefExternalReferenceRow,
@@ -96,8 +101,10 @@ class BulkStartResult:
 @dataclass(frozen=True, slots=True)
 class AcquisitionTarget:
     candidate_id: UUID
+    acquisition_attempt_id: UUID
     owner_user_id: UUID
     provider_track_id: str
+    origin: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +120,72 @@ class PostgresBulkDiscoveryRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def require_provider_available(self) -> None:
+        """Fail closed before application code performs any provider I/O."""
+
+        self._require_provider()
+
+    def enqueue_explicit_manual_candidate(
+        self,
+        *,
+        owner_user_id: UUID,
+        candidate_id: UUID,
+        operation_id: UUID,
+        action: str,
+        now: datetime,
+    ) -> DiscoveryCandidateRow:
+        """Select or retry one reviewed candidate under fresh manual authority."""
+
+        if action not in {"SELECT", "RETRY"}:
+            raise ValueError("manual candidate action is invalid")
+        self._require_provider()
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == candidate_id,
+                DiscoveryCandidateRow.user_id == owner_user_id,
+            )
+            .with_for_update()
+        )
+        if candidate is None:
+            raise BulkDiscoveryError("discovery_target_not_found")
+        self._require_candidate_artist(candidate)
+        canonical_artist_id = candidate.canonical_artist_id
+        if canonical_artist_id is None:
+            raise BulkDiscoveryError("discovery_target_not_found")
+        allowed_states = (
+            {"NOT_REQUESTED", "CANCELLED"} if action == "SELECT" else {"FAILED_TERMINAL"}
+        )
+        if (
+            candidate.disposition not in {"SELECTABLE", "SELECTED"}
+            or candidate.acquisition_state not in allowed_states
+        ):
+            raise BulkDiscoveryError("candidate_not_selectable")
+        authorization = self._grant_source_authorization(
+            owner_user_id=owner_user_id,
+            canonical_artist_id=canonical_artist_id,
+            bulk_operation_id=None,
+            now=now,
+        )
+        self._enqueue_manual_attempt(
+            candidate,
+            authorization,
+            operation_id=operation_id,
+            now=now,
+        )
+        return candidate
+
+    def require_eligible_artists(
+        self, *, owner_user_id: UUID, artist_names: tuple[str, ...]
+    ) -> None:
+        """Fail closed unless every name maps to one active owner-library artist."""
+
+        self._require_provider()
+        if not 1 <= len(artist_names) <= 20:
+            raise BulkDiscoveryError("discovery_artist_selection_invalid")
+        for name in artist_names:
+            self._eligible_artist_id(owner_user_id, name)
+
     def save_preview(
         self,
         *,
@@ -126,6 +199,12 @@ class PostgresBulkDiscoveryRepository:
 
         self._require_import(owner_user_id, import_job_id)
         self._require_provider()
+        canonical_by_provider: dict[str, UUID] = {}
+        for resolution in resolutions:
+            if resolution.provider_artist is not None:
+                canonical_by_provider[resolution.provider_artist.provider_artist_id] = (
+                    self._eligible_artist_id(owner_user_id, resolution.collection_name)
+                )
         exact_ids = {
             item.provider_artist.provider_artist_id
             for item in resolutions
@@ -188,6 +267,15 @@ class PostgresBulkDiscoveryRepository:
         if operation.import_job_id != import_job_id:
             raise BulkDiscoveryError("operation_conflict")
 
+        authorizations = {
+            provider_artist_id: self._grant_source_authorization(
+                owner_user_id=owner_user_id,
+                canonical_artist_id=canonical_artist_id,
+                bulk_operation_id=operation.bulk_operation_id,
+            )
+            for provider_artist_id, canonical_artist_id in canonical_by_provider.items()
+        }
+
         downloadable = 0
         for ordinal, track in enumerate(tracks):
             candidate_id = uuid5(
@@ -201,6 +289,10 @@ class PostgresBulkDiscoveryRepository:
                     candidate_id=candidate_id,
                     user_id=owner_user_id,
                     provider_id=JAMENDO_PROVIDER_ID,
+                    canonical_artist_id=canonical_by_provider[track.provider_artist_id],
+                    source_authorization_id=authorizations[
+                        track.provider_artist_id
+                    ].authorization_id,
                     market_scope="GLOBAL",
                     provider_track_id=track.provider_track_id,
                     provider_artist_id=track.provider_artist_id,
@@ -212,7 +304,7 @@ class PostgresBulkDiscoveryRepository:
                     share_url=track.share_url,
                     disposition=initial_disposition,
                     acquisition_state="NOT_REQUESTED",
-                    source_authorization_revision=1,
+                    source_authorization_revision=authorizations[track.provider_artist_id].revision,
                 )
                 .on_conflict_do_nothing(
                     index_elements=[
@@ -233,9 +325,16 @@ class PostgresBulkDiscoveryRepository:
                 )
                 .with_for_update()
             )
-            if candidate is None or candidate.provider_artist_id != track.provider_artist_id:
+            if (
+                candidate is None
+                or candidate.provider_artist_id != track.provider_artist_id
+                or candidate.canonical_artist_id != canonical_by_provider[track.provider_artist_id]
+            ):
                 raise BulkDiscoveryError("discovery_provider_response_invalid")
             if candidate.acquisition_state == "NOT_REQUESTED":
+                authorization = authorizations[track.provider_artist_id]
+                candidate.source_authorization_id = authorization.authorization_id
+                candidate.source_authorization_revision = authorization.revision
                 candidate.title = track.title
                 candidate.artist = track.artist
                 candidate.album = track.album
@@ -326,6 +425,8 @@ class PostgresBulkDiscoveryRepository:
             )
             if candidate is None:
                 raise BulkDiscoveryError("discovery_target_not_found")
+            self._require_candidate_authorization(candidate)
+            self._require_candidate_artist(candidate)
             if candidate.acquisition_state == "READY":
                 ready += 1
                 continue
@@ -341,26 +442,19 @@ class PostgresBulkDiscoveryRepository:
             }:
                 queued += 1
                 continue
-            if candidate.acquisition_state != "NOT_REQUESTED":
+            if candidate.acquisition_state not in {
+                "NOT_REQUESTED",
+                "CANCELLED",
+            }:
                 failed += 1
                 continue
-            job = PostgresJobRepository(self._session).enqueue(
-                EnqueueJob(
-                    key=DISCOVERY_ACQUIRE_JOB,
-                    user_id=owner_user_id,
-                    priority=4,
-                    payload={"candidate_id": str(candidate.candidate_id)},
-                    idempotency_scope=f"discovery.acquire:{owner_user_id}",
-                    idempotency_key=(
-                        f"{candidate.candidate_id}:{candidate.source_authorization_revision}"
-                    ),
-                )
+            authorization = self._require_candidate_authorization(candidate)
+            self._enqueue_manual_attempt(
+                candidate,
+                authorization,
+                operation_id=operation_id,
+                now=datetime.now(UTC),
             )
-            candidate.job_id = job.job_id
-            candidate.disposition = "SELECTED"
-            candidate.acquisition_state = "QUEUED"
-            candidate.updated_at = datetime.now(UTC)
-            candidate.row_version += 1
             queued += 1
         operation.queued_count = queued
         operation.ready_count = ready
@@ -391,6 +485,7 @@ class PostgresBulkDiscoveryRepository:
         """Persist one explicit search result and enqueue Vault-first acquisition."""
 
         self._require_provider()
+        canonical_artist_id = self._eligible_artist_id(owner_user_id, evidence.artist)
         if not evidence.acquisition_allowed:
             raise BulkDiscoveryError("discovery_not_eligible")
         request_sha256 = _request_hash(
@@ -452,6 +547,12 @@ class PostgresBulkDiscoveryRepository:
         if inserted_id is None:
             return _start_result(operation, replayed=True)
 
+        authorization = self._grant_source_authorization(
+            owner_user_id=owner_user_id,
+            canonical_artist_id=canonical_artist_id,
+            bulk_operation_id=operation.bulk_operation_id,
+        )
+
         candidate_id = uuid5(
             NAMESPACE_URL,
             f"autplay:a1b-candidate-v1:{owner_user_id}:{JAMENDO_PROVIDER_ID}:GLOBAL:{evidence.provider_track_id}",
@@ -462,6 +563,8 @@ class PostgresBulkDiscoveryRepository:
                 candidate_id=candidate_id,
                 user_id=owner_user_id,
                 provider_id=JAMENDO_PROVIDER_ID,
+                canonical_artist_id=canonical_artist_id,
+                source_authorization_id=authorization.authorization_id,
                 market_scope="GLOBAL",
                 provider_track_id=evidence.provider_track_id,
                 provider_artist_id=evidence.provider_artist_id,
@@ -473,7 +576,7 @@ class PostgresBulkDiscoveryRepository:
                 share_url=evidence.share_url,
                 disposition="SELECTABLE",
                 acquisition_state="NOT_REQUESTED",
-                source_authorization_revision=1,
+                source_authorization_revision=authorization.revision,
             )
             .on_conflict_do_nothing(
                 index_elements=[
@@ -494,9 +597,21 @@ class PostgresBulkDiscoveryRepository:
             )
             .with_for_update()
         )
-        if candidate is None or candidate.provider_artist_id != evidence.provider_artist_id:
+        if (
+            candidate is None
+            or candidate.provider_artist_id != evidence.provider_artist_id
+            or candidate.canonical_artist_id != canonical_artist_id
+        ):
             raise BulkDiscoveryError("discovery_provider_response_invalid")
-        if candidate.acquisition_state == "NOT_REQUESTED":
+        if candidate.acquisition_state in {
+            "NOT_REQUESTED",
+            "CANCELLED",
+        }:
+            candidate.source_authorization_id = authorization.authorization_id
+            candidate.source_authorization_revision = authorization.revision
+            candidate.selection_origin = "MANUAL"
+            candidate.policy_id = None
+            candidate.policy_revision = None
             candidate.title = evidence.title
             candidate.artist = evidence.artist
             candidate.album = evidence.album
@@ -527,27 +642,16 @@ class PostgresBulkDiscoveryRepository:
             "RETRY_WAIT",
         }:
             operation.state = "QUEUED"
-        elif candidate.acquisition_state == "NOT_REQUESTED" and candidate.disposition in {
-            "SELECTABLE",
-            "SELECTED",
-        }:
-            job = PostgresJobRepository(self._session).enqueue(
-                EnqueueJob(
-                    key=DISCOVERY_ACQUIRE_JOB,
-                    user_id=owner_user_id,
-                    priority=4,
-                    payload={"candidate_id": str(candidate.candidate_id)},
-                    idempotency_scope=f"discovery.acquire:{owner_user_id}",
-                    idempotency_key=(
-                        f"{candidate.candidate_id}:{candidate.source_authorization_revision}"
-                    ),
-                )
+        elif candidate.acquisition_state in {
+            "NOT_REQUESTED",
+            "CANCELLED",
+        } and candidate.disposition in {"SELECTABLE", "SELECTED"}:
+            self._enqueue_manual_attempt(
+                candidate,
+                authorization,
+                operation_id=operation_id,
+                now=datetime.now(UTC),
             )
-            candidate.job_id = job.job_id
-            candidate.disposition = "SELECTED"
-            candidate.acquisition_state = "QUEUED"
-            candidate.updated_at = datetime.now(UTC)
-            candidate.row_version += 1
         else:
             raise BulkDiscoveryError("candidate_not_selectable")
         operation.updated_at = datetime.now(UTC)
@@ -627,6 +731,19 @@ class PostgresBulkDiscoveryRepository:
                         UploadSessionRow.source_candidate_id == DiscoveryCandidateRow.candidate_id
                     )
                     .exists(),
+                    ~select(DiscoveryRunCandidateRow.candidate_id)
+                    .where(
+                        DiscoveryRunCandidateRow.candidate_id == DiscoveryCandidateRow.candidate_id
+                    )
+                    .exists(),
+                    ~select(CandidateActionReceiptRow.candidate_id)
+                    .where(
+                        CandidateActionReceiptRow.candidate_id == DiscoveryCandidateRow.candidate_id
+                    )
+                    .exists(),
+                    ~select(AcquisitionAttemptRow.candidate_id)
+                    .where(AcquisitionAttemptRow.candidate_id == DiscoveryCandidateRow.candidate_id)
+                    .exists(),
                 )
                 .order_by(DiscoveryCandidateRow.updated_at, DiscoveryCandidateRow.candidate_id)
                 .limit(remaining)
@@ -642,7 +759,12 @@ class PostgresBulkDiscoveryRepository:
         return len(operation_ids) + len(candidate_ids)
 
     def claim_acquisition(
-        self, *, candidate_id: UUID, owner_user_id: UUID, fence: LeaseFence
+        self,
+        *,
+        candidate_id: UUID,
+        owner_user_id: UUID,
+        fence: LeaseFence,
+        automatic_enabled: bool = False,
     ) -> AcquisitionTarget | None:
         """Fence and enter one candidate's external-I/O state."""
 
@@ -659,20 +781,94 @@ class PostgresBulkDiscoveryRepository:
         )
         if candidate is None or candidate.job_id != fence.job_id:
             raise BulkDiscoveryError("discovery_target_not_found")
+        self._require_provider()
+        attempt = self._require_current_attempt(candidate, fence=fence)
+        self._require_operator_gate(attempt, automatic_enabled=automatic_enabled)
+        self._require_candidate_artist(candidate)
         if candidate.acquisition_state == "READY":
+            return None
+        if candidate.acquisition_state in {"INGESTING", "MATERIALIZING"}:
+            handed_off = self._session.scalar(
+                select(UploadSessionRow.upload_session_id).where(
+                    UploadSessionRow.source_candidate_id == candidate.candidate_id,
+                    UploadSessionRow.source_acquisition_attempt_id
+                    == attempt.acquisition_attempt_id,
+                )
+            )
+            if handed_off is None:
+                raise BulkDiscoveryError("discovery_ingest_state_invalid")
             return None
         if candidate.acquisition_state not in {"QUEUED", "ACQUIRING", "RETRY_WAIT"}:
             raise BulkDiscoveryError("candidate_not_selectable")
         candidate.acquisition_state = "ACQUIRING"
+        attempt.state = "RUNNING"
+        attempt.updated_at = datetime.now(UTC)
+        attempt.row_version += 1
         candidate.updated_at = datetime.now(UTC)
         candidate.row_version += 1
         refresh_bulk_operations(self._session, candidate.candidate_id, candidate.updated_at)
         self._session.flush()
         return AcquisitionTarget(
             candidate.candidate_id,
+            attempt.acquisition_attempt_id,
             candidate.user_id,
             candidate.provider_track_id,
+            attempt.origin,
         )
+
+    def require_before_acquire(
+        self,
+        *,
+        candidate_id: UUID,
+        owner_user_id: UUID,
+        acquisition_attempt_id: UUID,
+        fence: LeaseFence,
+        automatic_enabled: bool,
+    ) -> None:
+        """Revalidate exact attempt and operator authority immediately before provider I/O."""
+
+        self._require_fence(
+            fence, owner_user_id, expected_key=DISCOVERY_ACQUIRE_JOB, candidate_id=candidate_id
+        )
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == candidate_id,
+                DiscoveryCandidateRow.user_id == owner_user_id,
+            )
+            .with_for_update()
+        )
+        if candidate is None or candidate.current_acquisition_attempt_id != acquisition_attempt_id:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        attempt = self._require_current_attempt(candidate, fence=fence)
+        self._require_operator_gate(attempt, automatic_enabled=automatic_enabled)
+        self._require_provider()
+        self._require_candidate_artist(candidate)
+
+    def require_ingest_boundary(
+        self,
+        *,
+        candidate_id: UUID,
+        owner_user_id: UUID,
+        acquisition_attempt_id: UUID,
+        automatic_enabled: bool,
+    ) -> None:
+        """Revalidate exact lineage and operator gate at a Vault publication boundary."""
+
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == candidate_id,
+                DiscoveryCandidateRow.user_id == owner_user_id,
+            )
+            .with_for_update()
+        )
+        if candidate is None or candidate.current_acquisition_attempt_id != acquisition_attempt_id:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        attempt = self._require_current_attempt(candidate)
+        self._require_operator_gate(attempt, automatic_enabled=automatic_enabled)
+        self._require_provider()
+        self._require_candidate_artist(candidate)
 
     def prepare_ingest(
         self,
@@ -708,9 +904,11 @@ class PostgresBulkDiscoveryRepository:
             or not evidence.acquisition_allowed
         ):
             raise BulkDiscoveryError("discovery_not_eligible")
+        attempt = self._require_current_attempt(candidate, fence=fence)
+        self._require_candidate_artist(candidate)
         existing_upload = self._session.scalar(
             select(UploadSessionRow).where(
-                UploadSessionRow.source_candidate_id == candidate.candidate_id
+                UploadSessionRow.source_acquisition_attempt_id == attempt.acquisition_attempt_id
             )
         )
         if existing_upload is not None:
@@ -726,7 +924,7 @@ class PostgresBulkDiscoveryRepository:
         )
         upload_id = uuid5(
             NAMESPACE_URL,
-            f"autplay:a1b-provider-upload-v1:{candidate.candidate_id}:{candidate.source_authorization_revision}",
+            f"autplay:a1c-provider-upload-v1:{attempt.acquisition_attempt_id}",
         )
         ingest_job = PostgresJobRepository(self._session).enqueue(
             EnqueueJob(
@@ -755,8 +953,9 @@ class PostgresBulkDiscoveryRepository:
                 device_id=None,
                 actor_kind="PROVIDER",
                 source_candidate_id=candidate.candidate_id,
+                source_acquisition_attempt_id=attempt.acquisition_attempt_id,
                 target_recording_id=recording.recording_id,
-                idempotency_key=f"discovery:{candidate.candidate_id}",
+                idempotency_key=f"discovery:{attempt.acquisition_attempt_id}",
                 request_hash=request_hash,
                 declared_sha256=verified.sha256.value,
                 expected_size=verified.byte_size,
@@ -813,12 +1012,47 @@ class PostgresBulkDiscoveryRepository:
         )
         if candidate is None or candidate.job_id != fence.job_id:
             raise BulkDiscoveryError("discovery_target_not_found")
+        attempt = self._require_current_attempt(candidate, fence=fence)
         candidate.acquisition_state = "FAILED_TERMINAL" if terminal else "RETRY_WAIT"
         candidate.error_code = error_code[:100]
         candidate.updated_at = datetime.now(UTC)
         candidate.row_version += 1
+        attempt.state = "FAILED" if terminal else "QUEUED"
+        attempt.error_code = error_code[:100]
+        attempt.updated_at = candidate.updated_at
+        attempt.completed_at = candidate.updated_at if terminal else None
+        attempt.row_version += 1
         refresh_bulk_operations(self._session, candidate.candidate_id, candidate.updated_at)
         self._session.flush()
+
+    def require_commit_authorization(
+        self,
+        *,
+        candidate_id: UUID,
+        owner_user_id: UUID,
+        recording_id: UUID,
+        acquisition_attempt_id: UUID,
+    ) -> DiscoveryCandidateRow:
+        """Fence durable owner, source, and artist authority at a Vault boundary."""
+
+        self._require_provider()
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == candidate_id,
+                DiscoveryCandidateRow.user_id == owner_user_id,
+                DiscoveryCandidateRow.recording_id == recording_id,
+                DiscoveryCandidateRow.current_acquisition_attempt_id == acquisition_attempt_id,
+                DiscoveryCandidateRow.provider_id == JAMENDO_PROVIDER_ID,
+                DiscoveryCandidateRow.acquisition_state.in_({"INGESTING", "MATERIALIZING"}),
+            )
+            .with_for_update()
+        )
+        if candidate is None:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        self._require_current_attempt(candidate)
+        self._require_candidate_artist(candidate)
+        return candidate
 
     def claim_analysis(self, *, candidate_id: UUID, owner_user_id: UUID, fence: LeaseFence) -> bool:
         """Fence the standard CPU analysis fact for one already-ready candidate."""
@@ -932,6 +1166,7 @@ class PostgresBulkDiscoveryRepository:
             library_entry = self._active_or_new_library_entry(candidate.user_id, user_ref)
             return recording, user_ref, library_entry, track_reference
 
+        canonical_artist = self._require_candidate_artist(candidate)
         artist_reference = self._session.scalar(
             select(ExternalReferenceRow)
             .where(
@@ -944,21 +1179,13 @@ class PostgresBulkDiscoveryRepository:
         )
         if artist_reference is not None and artist_reference.artist_id is None:
             raise BulkDiscoveryError("identity_review_required")
-        artist = (
-            self._session.get(ArtistRow, artist_reference.artist_id)
-            if artist_reference is not None and artist_reference.artist_id is not None
-            else None
-        )
-        if artist is None:
-            artist = ArtistRow(
-                name=evidence.artist,
-                sort_name=evidence.artist,
-                normalized_name=normalize_text(evidence.artist),
-                artist_type="UNKNOWN",
-                identity_status="PROVISIONAL",
-            )
-            self._session.add(artist)
-            self._session.flush([artist])
+        if (
+            artist_reference is not None
+            and artist_reference.artist_id != canonical_artist.artist_id
+        ):
+            raise BulkDiscoveryError("identity_review_required")
+        artist = canonical_artist
+        if artist_reference is None:
             artist_reference = ExternalReferenceRow(
                 provider_id=JAMENDO_PROVIDER_ID,
                 external_entity_type="ARTIST",
@@ -1076,6 +1303,82 @@ class PostgresBulkDiscoveryRepository:
         self._session.flush([row])
         return row
 
+    def _enqueue_manual_attempt(
+        self,
+        candidate: DiscoveryCandidateRow,
+        authorization: SourceAuthorizationRow,
+        *,
+        operation_id: UUID,
+        now: datetime,
+    ) -> AcquisitionAttemptRow:
+        """Create a fresh manual lineage without reviving a terminal automatic attempt."""
+
+        active_attempt = self._session.scalar(
+            select(AcquisitionAttemptRow)
+            .where(
+                AcquisitionAttemptRow.candidate_id == candidate.candidate_id,
+                AcquisitionAttemptRow.state.in_({"QUEUED", "RUNNING"}),
+            )
+            .with_for_update()
+        )
+        if active_attempt is not None:
+            raise BulkDiscoveryError("candidate_acquisition_in_progress")
+
+        attempt_id = uuid5(
+            NAMESPACE_URL,
+            "autplay:a1c-acquisition-attempt-v1:MANUAL:"
+            f"{candidate.user_id}:{candidate.candidate_id}:{operation_id}",
+        )
+        attempt = self._session.get(AcquisitionAttemptRow, attempt_id)
+        if attempt is None:
+            attempt = AcquisitionAttemptRow(
+                acquisition_attempt_id=attempt_id,
+                candidate_id=candidate.candidate_id,
+                origin="MANUAL",
+                source_authorization_id=authorization.authorization_id,
+                source_authorization_revision=authorization.revision,
+                state="QUEUED",
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(attempt)
+            self._session.flush([attempt])
+        elif (
+            attempt.candidate_id != candidate.candidate_id
+            or attempt.origin != "MANUAL"
+            or attempt.source_authorization_id != authorization.authorization_id
+            or attempt.source_authorization_revision != authorization.revision
+            or attempt.state not in {"QUEUED", "RUNNING", "COMPLETED"}
+        ):
+            raise BulkDiscoveryError("operation_conflict")
+        job = PostgresJobRepository(self._session).enqueue(
+            EnqueueJob(
+                key=DISCOVERY_ACQUIRE_JOB,
+                user_id=candidate.user_id,
+                priority=4,
+                payload={"candidate_id": str(candidate.candidate_id)},
+                idempotency_scope=f"discovery.acquire:{candidate.user_id}",
+                idempotency_key=str(attempt.acquisition_attempt_id),
+            )
+        )
+        if attempt.job_id is not None and attempt.job_id != job.job_id:
+            raise BulkDiscoveryError("operation_conflict")
+        attempt.job_id = job.job_id
+        candidate.current_acquisition_attempt_id = attempt.acquisition_attempt_id
+        candidate.source_authorization_id = authorization.authorization_id
+        candidate.source_authorization_revision = authorization.revision
+        candidate.selection_origin = "MANUAL"
+        candidate.policy_id = None
+        candidate.policy_revision = None
+        candidate.job_id = job.job_id
+        candidate.disposition = "SELECTED"
+        candidate.acquisition_state = "QUEUED"
+        candidate.error_code = None
+        candidate.updated_at = now
+        candidate.row_version += 1
+        self._session.flush([attempt, candidate])
+        return attempt
+
     def _require_fence(
         self,
         fence: LeaseFence,
@@ -1085,7 +1388,13 @@ class PostgresBulkDiscoveryRepository:
         candidate_id: UUID,
     ) -> None:
         row = self._session.scalar(
-            select(JobRow).where(JobRow.job_id == fence.job_id).with_for_update()
+            select(JobRow)
+            .where(
+                JobRow.job_id == fence.job_id,
+                JobRow.lease_deadline.is_not(None),
+                JobRow.lease_deadline > func.now(),
+            )
+            .with_for_update()
         )
         if (
             row is None
@@ -1119,6 +1428,280 @@ class PostgresBulkDiscoveryRepository:
             or provider.adapter_id != "autplay.jamendo.manual"
             or provider.adapter_version != "1.0.0"
             or not {"SEARCH", "DOWNLOAD"}.issubset(set(provider.capabilities))
+        ):
+            raise BulkDiscoveryError("source_authorization_unavailable")
+
+    def _eligible_artist_id(self, owner_user_id: UUID, display_name: str) -> UUID:
+        artist_ids = tuple(
+            self._session.scalars(
+                select(ArtistRow.artist_id)
+                .join(
+                    ArtistCreditNameRow,
+                    ArtistCreditNameRow.artist_id == ArtistRow.artist_id,
+                )
+                .join(
+                    RecordingRow,
+                    RecordingRow.artist_credit_id == ArtistCreditNameRow.artist_credit_id,
+                )
+                .join(UserTrackRefRow, UserTrackRefRow.recording_id == RecordingRow.recording_id)
+                .join(
+                    LibraryEntryRow,
+                    LibraryEntryRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+                )
+                .where(
+                    ArtistRow.normalized_name == normalize_text(display_name),
+                    ArtistRow.deleted_at.is_(None),
+                    RecordingRow.deleted_at.is_(None),
+                    UserTrackRefRow.user_id == owner_user_id,
+                    UserTrackRefRow.resolution_status == "RESOLVED",
+                    UserTrackRefRow.deleted_at.is_(None),
+                    LibraryEntryRow.user_id == owner_user_id,
+                    LibraryEntryRow.removed_at.is_(None),
+                    ~select(DiscoveryCandidateRow.candidate_id)
+                    .where(
+                        DiscoveryCandidateRow.library_entry_id == LibraryEntryRow.library_entry_id,
+                        DiscoveryCandidateRow.acquisition_state != "READY",
+                    )
+                    .exists(),
+                )
+                .distinct()
+                .limit(2)
+            )
+        )
+        if len(artist_ids) != 1:
+            raise BulkDiscoveryError("discovery_target_not_found")
+        return artist_ids[0]
+
+    def _require_candidate_artist(self, candidate: DiscoveryCandidateRow) -> ArtistRow:
+        if candidate.canonical_artist_id is None:
+            raise BulkDiscoveryError("discovery_target_not_found")
+        reachable = self._session.scalar(
+            select(ArtistRow.artist_id)
+            .join(
+                ArtistCreditNameRow,
+                ArtistCreditNameRow.artist_id == ArtistRow.artist_id,
+            )
+            .join(
+                RecordingRow,
+                RecordingRow.artist_credit_id == ArtistCreditNameRow.artist_credit_id,
+            )
+            .join(UserTrackRefRow, UserTrackRefRow.recording_id == RecordingRow.recording_id)
+            .join(
+                LibraryEntryRow,
+                LibraryEntryRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+            )
+            .where(
+                ArtistRow.artist_id == candidate.canonical_artist_id,
+                ArtistRow.deleted_at.is_(None),
+                RecordingRow.deleted_at.is_(None),
+                UserTrackRefRow.user_id == candidate.user_id,
+                UserTrackRefRow.resolution_status == "RESOLVED",
+                UserTrackRefRow.deleted_at.is_(None),
+                LibraryEntryRow.user_id == candidate.user_id,
+                LibraryEntryRow.removed_at.is_(None),
+                ~select(DiscoveryCandidateRow.candidate_id)
+                .where(
+                    DiscoveryCandidateRow.library_entry_id == LibraryEntryRow.library_entry_id,
+                    DiscoveryCandidateRow.acquisition_state != "READY",
+                )
+                .exists(),
+            )
+            .limit(1)
+        )
+        if reachable is None:
+            raise BulkDiscoveryError("discovery_target_not_found")
+        artist = self._session.get(ArtistRow, candidate.canonical_artist_id)
+        if artist is None or artist.deleted_at is not None:
+            raise BulkDiscoveryError("discovery_target_not_found")
+        return artist
+
+    def _grant_source_authorization(
+        self,
+        *,
+        owner_user_id: UUID,
+        canonical_artist_id: UUID,
+        bulk_operation_id: UUID | None,
+        now: datetime | None = None,
+    ) -> SourceAuthorizationRow:
+        granted_at = now or datetime.now(UTC)
+        scope = owner_user_id.bytes + JAMENDO_PROVIDER_ID.bytes + canonical_artist_id.bytes
+        lock_key = int.from_bytes(hashlib.sha256(scope).digest()[:8], "big", signed=True)
+        self._session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        current = self._session.scalar(
+            select(SourceAuthorizationRow)
+            .where(
+                SourceAuthorizationRow.user_id == owner_user_id,
+                SourceAuthorizationRow.provider_id == JAMENDO_PROVIDER_ID,
+                SourceAuthorizationRow.market_scope == "GLOBAL",
+                SourceAuthorizationRow.canonical_artist_id == canonical_artist_id,
+                SourceAuthorizationRow.purpose == "MANUAL",
+                SourceAuthorizationRow.revoked_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if current is not None and current.expires_at > granted_at:
+            self._validate_authorization_values(current, owner_user_id, canonical_artist_id)
+            return current
+        if current is not None:
+            current.revoked_at = granted_at
+            current.row_version += 1
+            self._session.flush([current])
+        revision = (
+            self._session.scalar(
+                select(func.max(SourceAuthorizationRow.revision)).where(
+                    SourceAuthorizationRow.user_id == owner_user_id,
+                    SourceAuthorizationRow.provider_id == JAMENDO_PROVIDER_ID,
+                    SourceAuthorizationRow.market_scope == "GLOBAL",
+                    SourceAuthorizationRow.canonical_artist_id == canonical_artist_id,
+                    SourceAuthorizationRow.purpose == "MANUAL",
+                )
+            )
+            or 0
+        ) + 1
+        authorization = SourceAuthorizationRow(
+            user_id=owner_user_id,
+            provider_id=JAMENDO_PROVIDER_ID,
+            canonical_artist_id=canonical_artist_id,
+            adapter_id="autplay.jamendo.manual",
+            adapter_version="1.0.0",
+            market_scope="GLOBAL",
+            rights_capability="AUTHORIZED_DOWNLOAD",
+            revision=revision,
+            policy_reference="ADR-034:a1b-manual:1",
+            purpose="MANUAL",
+            granted_by_bulk_operation_id=bulk_operation_id,
+            expires_at=granted_at + timedelta(hours=24),
+            granted_at=granted_at,
+        )
+        self._session.add(authorization)
+        self._session.flush([authorization])
+        return authorization
+
+    def _require_candidate_authorization(
+        self, candidate: DiscoveryCandidateRow
+    ) -> SourceAuthorizationRow:
+        if candidate.source_authorization_id is None or candidate.canonical_artist_id is None:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        authorization = self._session.scalar(
+            select(SourceAuthorizationRow)
+            .where(
+                SourceAuthorizationRow.authorization_id == candidate.source_authorization_id,
+                SourceAuthorizationRow.revision == candidate.source_authorization_revision,
+            )
+            .with_for_update()
+        )
+        if authorization is None:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        self._validate_authorization_values(
+            authorization, candidate.user_id, candidate.canonical_artist_id
+        )
+        if authorization.revoked_at is not None or authorization.expires_at <= datetime.now(UTC):
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        return authorization
+
+    def _require_current_attempt(
+        self,
+        candidate: DiscoveryCandidateRow,
+        *,
+        fence: LeaseFence | None = None,
+    ) -> AcquisitionAttemptRow:
+        attempt_id = candidate.current_acquisition_attempt_id
+        if attempt_id is None:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        attempt = self._session.scalar(
+            select(AcquisitionAttemptRow)
+            .where(
+                AcquisitionAttemptRow.acquisition_attempt_id == attempt_id,
+                AcquisitionAttemptRow.candidate_id == candidate.candidate_id,
+            )
+            .with_for_update()
+        )
+        if (
+            attempt is None
+            or attempt.job_id != candidate.job_id
+            or (fence is not None and attempt.job_id != fence.job_id)
+            or attempt.state not in {"QUEUED", "RUNNING"}
+            or candidate.source_authorization_id != attempt.source_authorization_id
+            or candidate.source_authorization_revision != attempt.source_authorization_revision
+        ):
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        authorization = self._session.scalar(
+            select(SourceAuthorizationRow)
+            .where(
+                SourceAuthorizationRow.authorization_id == attempt.source_authorization_id,
+                SourceAuthorizationRow.revision == attempt.source_authorization_revision,
+            )
+            .with_for_update()
+        )
+        if (
+            authorization is None
+            or authorization.user_id != candidate.user_id
+            or authorization.provider_id != JAMENDO_PROVIDER_ID
+            or authorization.canonical_artist_id != candidate.canonical_artist_id
+            or authorization.adapter_id != "autplay.jamendo.manual"
+            or authorization.adapter_version != "1.0.0"
+            or authorization.market_scope != "GLOBAL"
+            or authorization.rights_capability != "AUTHORIZED_DOWNLOAD"
+            or authorization.revoked_at is not None
+            or authorization.expires_at <= datetime.now(UTC)
+        ):
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        if attempt.origin == "MANUAL":
+            if (
+                authorization.purpose != "MANUAL"
+                or authorization.policy_id is not None
+                or authorization.policy_revision is not None
+                or authorization.policy_reference != "ADR-034:a1b-manual:1"
+            ):
+                raise BulkDiscoveryError("source_authorization_unavailable")
+        elif attempt.origin == "AUTOMATIC":
+            policy = self._session.scalar(
+                select(ArtistPolicyRow)
+                .where(
+                    ArtistPolicyRow.policy_id == attempt.policy_id,
+                    ArtistPolicyRow.user_id == candidate.user_id,
+                )
+                .with_for_update()
+            )
+            if (
+                policy is None
+                or policy.current_revision != attempt.policy_revision
+                or policy.discovery_mode != "SCHEDULED"
+                or policy.import_mode != "AUTO_IMPORT"
+                or not policy.automation_enabled
+                or authorization.purpose != "AUTO_IMPORT"
+                or authorization.policy_id != attempt.policy_id
+                or authorization.policy_revision != attempt.policy_revision
+                or authorization.policy_reference != "ADR-042:a1c-auto-import:1"
+            ):
+                raise BulkDiscoveryError("policy_revision_stale")
+        else:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        return attempt
+
+    @staticmethod
+    def _require_operator_gate(attempt: AcquisitionAttemptRow, *, automatic_enabled: bool) -> None:
+        if attempt.origin == "AUTOMATIC" and not automatic_enabled:
+            raise BulkDiscoveryError("automation_not_active")
+
+    @staticmethod
+    def _validate_authorization_values(
+        authorization: SourceAuthorizationRow,
+        owner_user_id: UUID,
+        canonical_artist_id: UUID,
+    ) -> None:
+        if (
+            authorization.user_id != owner_user_id
+            or authorization.provider_id != JAMENDO_PROVIDER_ID
+            or authorization.canonical_artist_id != canonical_artist_id
+            or authorization.adapter_id != "autplay.jamendo.manual"
+            or authorization.adapter_version != "1.0.0"
+            or authorization.market_scope != "GLOBAL"
+            or authorization.rights_capability != "AUTHORIZED_DOWNLOAD"
+            or authorization.purpose != "MANUAL"
+            or authorization.policy_id is not None
+            or authorization.policy_revision is not None
+            or authorization.policy_reference != "ADR-034:a1b-manual:1"
         ):
             raise BulkDiscoveryError("source_authorization_unavailable")
 

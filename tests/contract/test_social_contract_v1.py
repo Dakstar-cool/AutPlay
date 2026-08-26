@@ -58,6 +58,13 @@ S1C_SCHEMAS = {
     "room-invitation.schema.json",
     "social-snapshot.schema.json",
 }
+S1D_SCHEMAS = {
+    "guest-capability.schema.json",
+    "guest-document.schema.json",
+    "guest-invitation-create.schema.json",
+    "guest-invitation.schema.json",
+    "guest-redemption.schema.json",
+}
 REQUIRED_OPERATIONS = {
     "submitAdmissionRequest",
     "pollAdmissionRequest",
@@ -79,6 +86,9 @@ REQUIRED_OPERATIONS = {
     "createRoomInvitation",
     "cancelFriendRoomInvitation",
     "acceptFriendRoomInvitation",
+    "issueGuestRoomDocument",
+    "revokeGuestRoomDocument",
+    "redeemGuestRoomDocument",
 }
 REQUIRED_SCENARIOS = {
     "admission-exact-replay",
@@ -125,20 +135,25 @@ def load(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
-def test_s1b_and_s1c_schema_statuses_and_examples_are_strict() -> None:
+def test_s1b_s1c_and_s1d_schema_statuses_and_examples_are_strict() -> None:
     names = {path.name for path in SCHEMAS.glob("*.schema.json")}
-    assert names == S1B_SCHEMAS | S1C_SCHEMAS
+    assert names == S1B_SCHEMAS | S1C_SCHEMAS | S1D_SCHEMAS
     for path in SCHEMAS.glob("*.schema.json"):
         schema = load(path)
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         assert schema["$id"] == f"https://autplay.local/contracts/social/v1/{path.name}"
-        assert schema["x-autplay-implementation-status"] == (
-            "IMPLEMENTED_S1B" if path.name in S1B_SCHEMAS else "IMPLEMENTED_S1C"
+        expected = (
+            "IMPLEMENTED_S1B"
+            if path.name in S1B_SCHEMAS
+            else "IMPLEMENTED_S1C"
+            if path.name in S1C_SCHEMAS
+            else "IMPLEMENTED_S1D"
         )
+        assert schema["x-autplay-implementation-status"] == expected
         Draft202012Validator.check_schema(schema)
 
     examples = load(FIXTURES / "schema-examples.json")["examples"]
-    assert {item["schema"] for item in examples} == S1B_SCHEMAS | S1C_SCHEMAS
+    assert {item["schema"] for item in examples} == S1B_SCHEMAS | S1C_SCHEMAS | S1D_SCHEMAS
     for item in examples:
         validator = Draft202012Validator(
             load(SCHEMAS / item["schema"]), format_checker=FormatChecker()
@@ -160,10 +175,10 @@ def test_invalid_public_shapes_fail() -> None:
         assert list(validator.iter_errors(item["instance"])), case["case_id"]
 
 
-def test_openapi_freezes_s1c_recovery_and_authority_surface() -> None:
+def test_openapi_freezes_s1d_recovery_and_authority_surface() -> None:
     api = load(OPENAPI)
     validate(api, base_uri=OPENAPI.as_uri())
-    assert api["x-autplay-implementation-status"] == "IMPLEMENTED_S1C"
+    assert api["x-autplay-implementation-status"] == "IMPLEMENTED_S1D"
     assert api["security"] == [{"bearerAuth": []}]
     operations = {
         operation["operationId"]: operation
@@ -234,6 +249,14 @@ def test_openapi_freezes_s1c_recovery_and_authority_surface() -> None:
     )
     assert "RoomInvitationAcceptance" in json.dumps(operations["acceptFriendRoomInvitation"])
     assert "OperationCommand" in json.dumps(operations["cancelFriendRoomInvitation"])
+    issue_guest = operations["issueGuestRoomDocument"]
+    redeem_guest = operations["redeemGuestRoomDocument"]
+    assert issue_guest["x-autplay-authorization"] == "ACTIVE_CURRENT_P13_HOST_EXACT_ROOM"
+    assert issue_guest["responses"]["201"]["headers"]["Cache-Control"]["$ref"].endswith("NoStore")
+    assert redeem_guest["security"] == []
+    assert "GuestRedemption" in json.dumps(redeem_guest["requestBody"])
+    assert "GuestCapability" in json.dumps(redeem_guest["responses"]["200"])
+    assert "BODY_ONLY" in redeem_guest["x-autplay-secret-boundary"]
 
 
 def test_s1c_never_reactivates_guest_or_presence_tracking() -> None:

@@ -19,7 +19,11 @@ from autplay.adapters.postgresql.discovery_runtime import (
     BulkPreviewResult,
     BulkStartResult,
 )
-from autplay.adapters.postgresql.import_runtime import ImportCollectionArtist, ImportStartResult
+from autplay.adapters.postgresql.import_runtime import (
+    ImportCollectionArtist,
+    ImportRuntimeError,
+    ImportStartResult,
+)
 from autplay.domain.discovery import (
     BulkArtistResolution,
     DiscoveryCandidate,
@@ -71,6 +75,7 @@ class CollectionImportHttp(Protocol):
         actor: WebActor,
         *,
         payload: bytes,
+        operation_id: UUID,
         format_name: str = "TXT",
         schema_version: str = "1",
     ) -> ImportStartResult: ...
@@ -85,6 +90,10 @@ class CollectionImportHttp(Protocol):
 
 
 class BulkDiscoveryHttp(Protocol):
+    def require_provider_available(self, actor: WebActor) -> None: ...
+
+    def require_eligible_artists(self, actor: WebActor, artist_names: tuple[str, ...]) -> None: ...
+
     def save_preview(
         self,
         actor: WebActor,
@@ -225,6 +234,8 @@ def create_discovery_admin_router(
     @router.post("/search")
     async def search(request: Request) -> Response:
         try:
+            if bulk is None:
+                raise DiscoveryError("discovery_search_unavailable")
             require_exact_origin(request.scope, origin)
             form = parse_urlencoded_form(
                 request.headers.get("content-type"),
@@ -243,9 +254,10 @@ def create_discovery_admin_router(
                 decode_request_integrity_token(form["csrf_token"]),
                 operation_id,
             )
+            bulk.require_provider_available(authenticated.actor)
             candidates = discovery.search(authenticated.actor.user_id, query, limit=20)
             return render_page(request, authenticated, candidates=candidates, query=query)
-        except ValueError, WebAdminError, DiscoveryError:
+        except ValueError, WebAdminError, DiscoveryError, BulkDiscoveryError:
             return _error(renderer, request, "discovery_search_unavailable", 403, cookies)
 
     @router.post("/import")
@@ -284,7 +296,9 @@ def create_discovery_admin_router(
             payload = await uploaded.read(MAX_IMPORT_BYTES + 1)
             if not 1 <= len(payload) <= MAX_IMPORT_BYTES:
                 raise ValueError("import upload size is invalid")
-            started = imports.start_for_web(authenticated.actor, payload=payload)
+            started = imports.start_for_web(
+                authenticated.actor, payload=payload, operation_id=operation_id
+            )
             artists = imports.collection_artists(
                 authenticated.actor, started.import_job_id, limit=100
             )
@@ -297,7 +311,7 @@ def create_discovery_admin_router(
                 import_job_id=started.import_job_id,
                 artists=artists,
             )
-        except ValueError, WebAdminError, DiscoveryError, ImportEnvelopeError:
+        except ValueError, WebAdminError, DiscoveryError, ImportEnvelopeError, ImportRuntimeError:
             return _error(renderer, request, "discovery_import_unavailable", 403, cookies)
         finally:
             if uploaded is not None:
@@ -368,6 +382,9 @@ def create_discovery_admin_router(
             selected = tuple(
                 (by_name[name].name, by_name[name].track_count) for name in selected_names
             )
+            if bulk is None:
+                raise DiscoveryError("discovery_bulk_unavailable")
+            bulk.require_eligible_artists(authenticated.actor, tuple(name for name, _ in selected))
             resolutions = discovery.resolve_artists(authenticated.actor.user_id, selected)
             exact = tuple(
                 resolution.provider_artist
@@ -460,6 +477,7 @@ def create_discovery_admin_router(
             track_id = _decode_selection(
                 form["selection_token"], authenticated.actor.user_id, token_secret
             )
+            bulk.require_provider_available(authenticated.actor)
             evidence = discovery.lookup_for_acquisition(track_id)
             result = bulk.start_search_acquisition(
                 authenticated.actor,

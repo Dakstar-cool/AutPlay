@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
 from autplay.application.vault_ingest import IngestRepository, IngestSession
+from autplay.domain.discovery import AcquisitionAuthorizationReceipt
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
@@ -122,10 +123,16 @@ class TransactionalIngestRepository(IngestRepository):
         evidence: ChromaprintEvidence,
         *,
         reused: bool,
+        authorization_receipt: AcquisitionAuthorizationReceipt | None = None,
     ) -> bool:
         with self._uow_factory() as unit:
             result = unit.vault.finalize_published(  # type: ignore[attr-defined]
-                session, storage_key, metadata, evidence, reused=reused
+                session,
+                storage_key,
+                metadata,
+                evidence,
+                reused=reused,
+                authorization_receipt=authorization_receipt,
             )
             unit.commit()
         return cast(bool, result)

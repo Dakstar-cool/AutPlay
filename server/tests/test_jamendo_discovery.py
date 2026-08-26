@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import traceback
+from datetime import date
 from pathlib import Path
 from urllib.error import URLError
 from uuid import UUID, uuid4
@@ -14,6 +15,8 @@ from autplay.domain.discovery import (
     DiscoveryError,
     ProviderArtist,
     ProviderArtistTracks,
+    ProviderTrackObservation,
+    ProviderTrackPage,
 )
 
 
@@ -280,3 +283,94 @@ def test_top_track_parser_requires_bounded_full_count(monkeypatch: pytest.Monkey
 
     assert page.total_count == 7
     assert page.tracks[0].provider_artist_id == "20"
+
+
+def _release_page(*, count: int = 25, artist_id: str = "20") -> bytes:
+    results = []
+    for index in range(count):
+        track_id = str(1_000 - index)
+        item = json.loads(
+            _response(
+                allowed=False,
+            )
+        )["results"][0]
+        item.update(
+            {
+                "id": track_id,
+                "artist_id": artist_id,
+                "releasedate": f"2026-08-{25 - index:02d}",
+                "shareurl": f"https://www.jamendo.com/track/{track_id}",
+            }
+        )
+        results.append(item)
+    return json.dumps({"headers": {"status": "success", "code": 0}, "results": results}).encode()
+
+
+@pytest.mark.parametrize("offset", [0, 25])
+def test_release_tracks_uses_exact_bounded_provider_page(
+    monkeypatch: pytest.MonkeyPatch, offset: int
+) -> None:
+    provider = jamendo.JamendoProvider("test-client")
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def request(url: str, parameters: dict[str, str]) -> bytes:
+        calls.append((url, parameters))
+        return _release_page(count=25 if offset == 0 else 1)
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    page = provider.release_tracks("20", offset=offset)
+
+    assert calls == [
+        (
+            jamendo.JAMENDO_TRACKS_URL,
+            {
+                "format": "json",
+                "artist_id": "20",
+                "offset": str(offset),
+                "limit": "25",
+                "order": "releasedate_desc id_desc",
+                "include": "licenses",
+                "audiodlformat": "mp32",
+                "type": "single albumtrack",
+            },
+        )
+    ]
+    assert len(page.observations) == (25 if offset == 0 else 1)
+    assert page.next_offset == (25 if offset == 0 else None)
+    assert page.checkpoint is not None
+    assert "test-client" not in page.checkpoint
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (lambda results: results.__setitem__(0, {**results[0], "artist_id": "21"}), "artist"),
+        (
+            lambda results: results.__setitem__(1, {**results[1], "id": results[0]["id"]}),
+            "duplicate",
+        ),
+        (
+            lambda results: results.__setitem__(0, {**results[0], "releasedate": "not-a-date"}),
+            "date",
+        ),
+        (lambda results: results.reverse(), "ordering"),
+    ],
+)
+def test_release_tracks_rejects_invalid_provider_schema(mutate: object, expected: str) -> None:
+    raw = json.loads(_release_page())
+    action = mutate
+    assert callable(action)
+    action(raw["results"])
+
+    with pytest.raises(DiscoveryError, match="provider_schema_invalid"):
+        jamendo._parse_release_track_page(
+            json.dumps(raw).encode(), provider_artist_id="20", offset=0
+        )
+
+
+def test_provider_track_page_keeps_typed_utc_release_evidence() -> None:
+    observation = ProviderTrackObservation(_candidate(allowed=False), date(2026, 8, 25), "UTC")
+    page = ProviderTrackPage("20", 25, (observation,), None, "v1:2026-08-25:10")
+
+    assert page.observations[0].release_date == date(2026, 8, 25)

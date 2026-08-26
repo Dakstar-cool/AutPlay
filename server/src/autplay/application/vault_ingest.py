@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from autplay.application.job_worker import JobExecutionContext
+from autplay.domain.discovery import AcquisitionAuthorizationReceipt, DiscoveryError
 from autplay.domain.jobs import JobLease, RetryableJobError, TerminalJobError
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
@@ -19,6 +20,7 @@ from autplay.domain.vault import (
     StorageSafetyError,
     VerifiedStagedFile,
 )
+from autplay.ports.discovery import AcquisitionBoundaryAuthorizer
 from autplay.ports.vault import FingerprintGenerator, MediaInspector, VaultStorage
 
 
@@ -31,6 +33,10 @@ class IngestSession:
     staging_key: OpaqueStorageKey
     expected_size: int
     declared_sha256: bytes | None
+    source_candidate_id: UUID | None = None
+    source_provider_track_id: str | None = None
+    source_owner_user_id: UUID | None = None
+    source_acquisition_attempt_id: UUID | None = None
 
 
 class IngestRepository(Protocol):
@@ -52,6 +58,7 @@ class IngestRepository(Protocol):
         evidence: ChromaprintEvidence,
         *,
         reused: bool,
+        authorization_receipt: AcquisitionAuthorizationReceipt | None = None,
     ) -> bool: ...
     def quarantine(self, session: IngestSession, code: str) -> None: ...
 
@@ -66,6 +73,7 @@ class VaultIngestHandler:
         storage: VaultStorage,
         media: MediaInspector,
         fingerprints: FingerprintGenerator,
+        source_authorizer: AcquisitionBoundaryAuthorizer | None = None,
         minimum_free_bytes: int = 0,
     ) -> None:
         if minimum_free_bytes < 0:
@@ -74,6 +82,7 @@ class VaultIngestHandler:
         self._storage = storage
         self._media = media
         self._fingerprints = fingerprints
+        self._source_authorizer = source_authorizer
         self._minimum_free_bytes = minimum_free_bytes
 
     def __call__(self, context: JobExecutionContext, lease: JobLease) -> None:
@@ -113,19 +122,31 @@ class VaultIngestHandler:
             if action not in {"PUBLISH", "REUSED"}:
                 self._repository.quarantine(session, "vault.integrity_conflict")
                 raise TerminalJobError("vault.integrity_conflict")
+            self._recheck_source_permission(session, boundary="PRE_PUBLISH")
+            context.checkpoint({"stage": "SOURCE_AUTHORIZED_PRE_PUBLISH"})
             if action == "REUSED":
+                receipt = self._recheck_source_permission(session, boundary="PRE_MATERIALIZE")
+                context.checkpoint({"stage": "SOURCE_AUTHORIZED_PRE_MATERIALIZE"})
                 finalized = self._repository.finalize_published(
                     session,
                     OpaqueStorageKey(verified.sha256.hex),
                     metadata,
                     evidence,
                     reused=True,
+                    authorization_receipt=receipt,
                 )
             else:
                 committed = self._storage.commit_staging(session.staging_key, verified)
                 context.checkpoint({"stage": "FILE_PUBLISHED"})
+                receipt = self._recheck_source_permission(session, boundary="PRE_MATERIALIZE")
+                context.checkpoint({"stage": "SOURCE_AUTHORIZED_PRE_MATERIALIZE"})
                 finalized = self._repository.finalize_published(
-                    session, committed.storage_key, metadata, evidence, reused=False
+                    session,
+                    committed.storage_key,
+                    metadata,
+                    evidence,
+                    reused=False,
+                    authorization_receipt=receipt,
                 )
             if not finalized:
                 raise TerminalJobError("vault.integrity_conflict")
@@ -139,6 +160,42 @@ class VaultIngestHandler:
             raise TerminalJobError(error.code) from error
         except StorageOperationError as error:
             raise RetryableJobError(error.code) from error
+        except DiscoveryError as error:
+            if error.code in {
+                "discovery_not_eligible",
+                "discovery_provider_response_invalid",
+                "discovery_target_not_found",
+                "automation_not_active",
+                "policy_revision_stale",
+                "source_authorization_unavailable",
+            }:
+                self._repository.quarantine(session, "source_authorization_unavailable")
+                raise TerminalJobError("source_authorization_unavailable") from None
+            raise RetryableJobError(error.code) from None
+
+    def _recheck_source_permission(
+        self, session: IngestSession, *, boundary: str
+    ) -> AcquisitionAuthorizationReceipt | None:
+        provider_track_id = session.source_provider_track_id
+        if provider_track_id is None:
+            return None
+        if (
+            session.source_candidate_id is None
+            or session.source_owner_user_id is None
+            or session.source_acquisition_attempt_id is None
+            or self._source_authorizer is None
+        ):
+            raise DiscoveryError("source_authorization_unavailable")
+        receipt = self._source_authorizer.authorize(
+            session.source_candidate_id,
+            provider_track_id,
+            boundary=boundary,
+            owner_user_id=session.source_owner_user_id,
+            acquisition_attempt_id=session.source_acquisition_attempt_id,
+        )
+        if receipt.provider_track_id != provider_track_id:
+            raise DiscoveryError("source_authorization_unavailable")
+        return receipt
 
     def _cleanup_after_finalization(
         self, context: JobExecutionContext, staging_key: OpaqueStorageKey

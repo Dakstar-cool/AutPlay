@@ -1,0 +1,64 @@
+{
+  "contract_version": "release-discovery-v1",
+  "automation_policy_version": 1,
+  "milestone": "A1C",
+  "runtime_default": "DISABLED_BY_OPERATOR",
+  "safe_product_default": ["MANUAL_ONLY", "REVIEW_REQUIRED"],
+  "operator_gate": "DISCOVERY_AUTOMATION_ENABLED",
+  "operator_gate_default": false,
+  "command_schema": "automation-command.schema.json",
+  "web_operation_namespace": {
+    "scope": ["OWNER_USER_ID", "OPERATION_ID"],
+    "shared_across_actions": true,
+    "divergent_action_result": "operation_conflict"
+  },
+  "provider": {
+    "adapter_id": "autplay.jamendo.manual",
+    "adapter_version": "1.0.0",
+    "page_method": "TRACKS_BY_ARTIST_RELEASE_DATE",
+    "page_size": 25,
+    "max_pages_per_run": 2,
+    "ordering": ["RELEASE_DATE_DESC", "TRACK_ID_DESC"],
+    "checkpoint_max_bytes": 2048
+  },
+  "schedule": {
+    "cadence_seconds": 86400,
+    "scheduler_poll_seconds": 300,
+    "scheduler_claim_limit": 20,
+    "one_active_run_per_policy": true,
+    "manual_run_can_bypass_cadence": false
+  },
+  "auto_import": {
+    "confirmation_code": "AUTO_IMPORT_ADDS_AUTHORIZED_TRACKS_WITHOUT_PER_TRACK_REVIEW_V1",
+    "max_enqueue_per_run": 10,
+    "max_enqueue_per_owner_rolling_24h": 50,
+    "review_required_enqueues_acquisition": false
+  },
+  "authorization": {
+    "purpose_scoped": ["MANUAL", "AUTO_IMPORT"],
+    "captured_policy_revision_required": true,
+    "recheck_boundaries": [
+      "SCHEDULER_RESERVATION",
+      "RUN_CLAIM",
+      "BEFORE_PROVIDER_IO",
+      "PAGE_COMMIT",
+      "AUTO_SELECTION",
+      "ACQUISITION_CLAIM",
+      "BEFORE_ACQUIRE",
+      "PRE_PUBLISH",
+      "PRE_MATERIALIZE"
+    ]
+  },
+  "retry": {
+    "max_attempts": 5,
+    "base_seconds": 2,
+    "max_seconds": 300,
+    "provider_retry_after_max_seconds": 86400
+  },
+  "exposure": {
+    "creates_impression": false,
+    "global_broadcast": false,
+    "cross_owner_library_write": false,
+    "disable_deletes_ready_media": false
+  }
+}

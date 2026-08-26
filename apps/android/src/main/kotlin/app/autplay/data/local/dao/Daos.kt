@@ -309,6 +309,65 @@ interface WaveDao {
 }
 
 @Dao
+interface GuestRoomDao {
+    @Upsert
+    suspend fun upsert(row: app.autplay.data.local.entity.GuestRoomProjectionEntity)
+
+    @Upsert
+    suspend fun upsertPreflight(rows: List<app.autplay.data.local.entity.GuestWavePreflightEntity>)
+
+    @Upsert
+    suspend fun upsertQueue(rows: List<app.autplay.data.local.entity.GuestWaveQueueProjectionEntity>)
+
+    @Query("SELECT * FROM guest_room_projection WHERE state = 'ACTIVE' ORDER BY updated_at_ms DESC LIMIT 1")
+    fun observeActive(): Flow<app.autplay.data.local.entity.GuestRoomProjectionEntity?>
+
+    @Query("SELECT * FROM guest_room_projection WHERE room_id = :roomId ORDER BY updated_at_ms DESC LIMIT 1")
+    suspend fun room(roomId: String): app.autplay.data.local.entity.GuestRoomProjectionEntity?
+
+    @Query("SELECT * FROM guest_room_projection WHERE guest_session_id = :guestSessionId")
+    suspend fun session(guestSessionId: String): app.autplay.data.local.entity.GuestRoomProjectionEntity?
+
+    @Query("UPDATE guest_room_projection SET state = :state, updated_at_ms = :nowMs WHERE guest_session_id = :guestSessionId")
+    suspend fun markState(guestSessionId: String, state: String, nowMs: Long): Int
+
+    @Query("UPDATE guest_room_projection SET last_sequence = :sequence, room_epoch = :roomEpoch, updated_at_ms = :nowMs WHERE guest_session_id = :guestSessionId AND last_sequence < :sequence")
+    suspend fun advance(guestSessionId: String, roomEpoch: String, sequence: Long, nowMs: Long): Int
+
+    @Query("SELECT * FROM guest_wave_preflight WHERE guest_session_id = :guestSessionId ORDER BY queue_entry_id")
+    suspend fun preflight(guestSessionId: String): List<app.autplay.data.local.entity.GuestWavePreflightEntity>
+
+    @Query("SELECT * FROM guest_wave_queue_projection WHERE guest_session_id = :guestSessionId AND sequence = :sequence ORDER BY position LIMIT :limit")
+    suspend fun queue(guestSessionId: String, sequence: Long, limit: Int): List<app.autplay.data.local.entity.GuestWaveQueueProjectionEntity>
+
+    @Query("DELETE FROM guest_wave_queue_projection WHERE guest_session_id = :guestSessionId")
+    suspend fun clearQueue(guestSessionId: String): Int
+
+    @Query("DELETE FROM guest_wave_preflight WHERE guest_session_id = :guestSessionId")
+    suspend fun clearPreflight(guestSessionId: String): Int
+
+    @Query("UPDATE guest_room_projection SET state = 'PROCESS_RESTART_REQUIRED', updated_at_ms = :nowMs WHERE state = 'ACTIVE'")
+    suspend fun retireProcessLostAuthority(nowMs: Long): Int
+
+    @Query("DELETE FROM guest_room_projection WHERE state != 'ACTIVE' AND updated_at_ms <= :cutoffMs")
+    suspend fun deleteTerminalBefore(cutoffMs: Long): Int
+
+    /** Guest snapshot replacement is atomic and never touches account-bound `wave_*` tables. */
+    @Transaction
+    suspend fun replaceSnapshot(
+        room: app.autplay.data.local.entity.GuestRoomProjectionEntity,
+        preflight: List<app.autplay.data.local.entity.GuestWavePreflightEntity>,
+        queue: List<app.autplay.data.local.entity.GuestWaveQueueProjectionEntity>,
+    ) {
+        clearQueue(room.guestSessionId)
+        clearPreflight(room.guestSessionId)
+        upsert(room)
+        upsertPreflight(preflight)
+        upsertQueue(queue)
+    }
+}
+
+@Dao
 interface HistoryDao {
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(event: ListeningEventEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertOnce(event: ListeningEventEntity): Long

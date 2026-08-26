@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -16,7 +17,7 @@ from autplay.adapters.postgresql.discovery_runtime import (
 )
 from autplay.application.job_worker import JobExecutionContext
 from autplay.application.manual_discovery import ManualDiscoveryService
-from autplay.domain.discovery import DiscoveryError
+from autplay.domain.discovery import AcquisitionAuthorizationReceipt, DiscoveryError
 from autplay.domain.jobs import JobLease, RetryableJobError, TerminalJobError
 from autplay.domain.vault import (
     ImmutableObjectConflictError,
@@ -31,6 +32,7 @@ from autplay.ports.vault import VaultStorage
 
 _TERMINAL_DISCOVERY_ERRORS = frozenset(
     {
+        "automation_not_active",
         "candidate_not_selectable",
         "discovery_content_invalid",
         "discovery_not_eligible",
@@ -38,9 +40,54 @@ _TERMINAL_DISCOVERY_ERRORS = frozenset(
         "discovery_provider_response_invalid",
         "discovery_target_not_found",
         "identity_review_required",
+        "policy_revision_stale",
         "source_authorization_unavailable",
     }
 )
+
+
+class ManualDiscoveryBoundaryAuthorizer:
+    """Convert fresh provider evidence into a short-lived ingest-boundary receipt."""
+
+    def __init__(
+        self,
+        discovery: ManualDiscoveryService,
+        sessions: Callable[[], Session],
+        *,
+        automatic_enabled: Callable[[], bool],
+    ) -> None:
+        self._discovery = discovery
+        self._sessions = sessions
+        self._automatic_enabled = automatic_enabled
+
+    def authorize(
+        self,
+        candidate_id: UUID,
+        provider_track_id: str,
+        *,
+        boundary: str,
+        owner_user_id: UUID,
+        acquisition_attempt_id: UUID,
+    ) -> AcquisitionAuthorizationReceipt:
+        try:
+            with self._sessions() as session:
+                PostgresBulkDiscoveryRepository(session).require_ingest_boundary(
+                    candidate_id=candidate_id,
+                    owner_user_id=owner_user_id,
+                    acquisition_attempt_id=acquisition_attempt_id,
+                    automatic_enabled=self._automatic_enabled(),
+                )
+                session.commit()
+        except BulkDiscoveryError as error:
+            raise DiscoveryError(error.code) from None
+        current = self._discovery.lookup_for_acquisition(provider_track_id)
+        return AcquisitionAuthorizationReceipt(
+            candidate_id=candidate_id,
+            provider_track_id=current.provider_track_id,
+            provider_artist_id=current.provider_artist_id,
+            boundary=boundary,
+            checked_at=datetime.now(UTC),
+        )
 
 
 class DiscoveryAcquisitionHandler:
@@ -53,11 +100,13 @@ class DiscoveryAcquisitionHandler:
         discovery: ManualDiscoveryService,
         storage: VaultStorage,
         limits: VaultLimits,
+        automatic_enabled: Callable[[], bool] = lambda: False,
     ) -> None:
         self._sessions = sessions
         self._discovery = discovery
         self._storage = storage
         self._limits = limits
+        self._automatic_enabled = automatic_enabled
 
     def __call__(self, context: JobExecutionContext, lease: JobLease) -> None:
         candidate_id = _candidate_id(lease)
@@ -70,19 +119,29 @@ class DiscoveryAcquisitionHandler:
                     candidate_id=candidate_id,
                     owner_user_id=owner_id,
                     fence=lease.fence,
+                    automatic_enabled=self._automatic_enabled(),
                 )
                 session.commit()
             if target is None:
                 return
             context.checkpoint({"stage": "ACQUIRING"})
+            with self._sessions() as session:
+                PostgresBulkDiscoveryRepository(session).require_before_acquire(
+                    candidate_id=candidate_id,
+                    owner_user_id=owner_id,
+                    acquisition_attempt_id=target.acquisition_attempt_id,
+                    fence=lease.fence,
+                    automatic_enabled=self._automatic_enabled(),
+                )
+                session.commit()
             staged = self._discovery.acquire(
                 owner_id,
                 target.provider_track_id,
-                operation_id=candidate_id,
+                operation_id=target.acquisition_attempt_id,
             )
             context.raise_if_cancelled()
             source = self._discovery.staged_audio_path(owner_id, staged)
-            staging_key = OpaqueStorageKey(f"disc-{candidate_id.hex}")
+            staging_key = OpaqueStorageKey(f"disc-{target.acquisition_attempt_id.hex}")
             self._copy_to_vault(source, staging_key)
             verified = self._storage.verify_staging(staging_key)
             if verified.byte_size != staged.byte_count:
@@ -213,4 +272,8 @@ def _candidate_id(lease: JobLease) -> UUID:
         raise TerminalJobError("discovery.invalid_job_payload") from error
 
 
-__all__ = ("DiscoveryAcquisitionHandler", "StandardAnalysisHandler")
+__all__ = (
+    "DiscoveryAcquisitionHandler",
+    "ManualDiscoveryBoundaryAuthorizer",
+    "StandardAnalysisHandler",
+)

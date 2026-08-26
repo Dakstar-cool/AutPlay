@@ -7,6 +7,7 @@ import androidx.room3.RoomDatabase
 import androidx.room3.migration.Migration
 import app.autplay.data.local.dao.CatalogProjectionDao
 import app.autplay.data.local.dao.HistoryDao
+import app.autplay.data.local.dao.GuestRoomDao
 import app.autplay.data.local.dao.JournalDao
 import app.autplay.data.local.dao.LibraryDao
 import app.autplay.data.local.dao.LocalAudioDao
@@ -30,6 +31,9 @@ import app.autplay.data.local.entity.DownloadIntentEntity
 import app.autplay.data.local.entity.JournalLineageEntity
 import app.autplay.data.local.entity.LibraryEntryEntity
 import app.autplay.data.local.entity.ListeningEventEntity
+import app.autplay.data.local.entity.GuestRoomProjectionEntity
+import app.autplay.data.local.entity.GuestWavePreflightEntity
+import app.autplay.data.local.entity.GuestWaveQueueProjectionEntity
 import app.autplay.data.local.entity.LocalImportEntryEntity
 import app.autplay.data.local.entity.LocalImportJobEntity
 import app.autplay.data.local.entity.LocalMatchCandidateEntity
@@ -115,8 +119,11 @@ import kotlinx.coroutines.Dispatchers
         RemoteImportJobProjectionEntity::class,
         VaultUploadIntentEntity::class,
         RecommendationResponseSnapshotEntity::class,
+        GuestRoomProjectionEntity::class,
+        GuestWavePreflightEntity::class,
+        GuestWaveQueueProjectionEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -142,6 +149,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
 
     abstract fun importReviewDao(): ImportReviewDao
     abstract fun waveDao(): WaveDao
+    abstract fun guestRoomDao(): GuestRoomDao
     abstract fun serverFeatureProjectionDao(): ServerFeatureProjectionDao
 
     companion object {
@@ -155,7 +163,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
             ).setDriver(BundledSQLiteDriver())
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */
@@ -349,6 +357,20 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 connection.execSQL("CREATE TABLE catalog_artist_credit_link_owner (local_catalog_artist_credit_link_owner_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, subject_type TEXT NOT NULL, subject_server_id TEXT NOT NULL, owner_scope_id TEXT NOT NULL, owner_recording_id TEXT NOT NULL, PRIMARY KEY(local_catalog_artist_credit_link_owner_id))")
                 connection.execSQL("CREATE UNIQUE INDEX index_catalog_artist_credit_link_owner_server_profile_id_subject_type_subject_server_id_owner_scope_id_owner_recording_id ON catalog_artist_credit_link_owner(server_profile_id, subject_type, subject_server_id, owner_scope_id, owner_recording_id)")
                 connection.execSQL("CREATE INDEX index_catalog_artist_credit_link_owner_server_profile_id_owner_recording_id ON catalog_artist_credit_link_owner(server_profile_id, owner_recording_id)")
+            }
+        }
+
+        /** S1D adds sanitized guest display/Wave projections; authority remains process-local. */
+        val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("CREATE TABLE IF NOT EXISTS guest_room_projection (guest_session_id TEXT NOT NULL, invitation_id TEXT NOT NULL, room_id TEXT NOT NULL, server_instance_id TEXT NOT NULL, identity_epoch INTEGER NOT NULL, local_media_profile_id TEXT, room_epoch TEXT NOT NULL, queue_version INTEGER NOT NULL, room_state TEXT NOT NULL, display_name TEXT NOT NULL, state TEXT NOT NULL, expires_at_ms INTEGER NOT NULL, last_sequence INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL, PRIMARY KEY(guest_session_id))")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_room_projection_room_id ON guest_room_projection(room_id)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_room_projection_state_expires_at_ms ON guest_room_projection(state, expires_at_ms)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_room_projection_server_instance_id_identity_epoch ON guest_room_projection(server_instance_id, identity_epoch)")
+                connection.execSQL("CREATE TABLE IF NOT EXISTS guest_wave_preflight (guest_session_id TEXT NOT NULL, queue_entry_id TEXT NOT NULL, server_recording_id TEXT NOT NULL, local_user_track_ref_id TEXT, queue_version INTEGER NOT NULL, availability TEXT NOT NULL, final_ready INTEGER NOT NULL, checked_at_ms INTEGER NOT NULL, PRIMARY KEY(guest_session_id, queue_entry_id), FOREIGN KEY(guest_session_id) REFERENCES guest_room_projection(guest_session_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_wave_preflight_guest_session_id ON guest_wave_preflight(guest_session_id)")
+                connection.execSQL("CREATE TABLE IF NOT EXISTS guest_wave_queue_projection (guest_session_id TEXT NOT NULL, sequence INTEGER NOT NULL, position INTEGER NOT NULL, queue_entry_id TEXT NOT NULL, server_recording_id TEXT NOT NULL, local_user_track_ref_id TEXT, ready INTEGER NOT NULL, PRIMARY KEY(guest_session_id, sequence, position), FOREIGN KEY(guest_session_id) REFERENCES guest_room_projection(guest_session_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_wave_queue_projection_guest_session_id_sequence ON guest_wave_queue_projection(guest_session_id, sequence)")
             }
         }
     }

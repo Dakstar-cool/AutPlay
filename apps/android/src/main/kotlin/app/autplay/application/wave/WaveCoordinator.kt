@@ -2,11 +2,9 @@ package app.autplay.application.wave
 
 import android.os.SystemClock
 import app.autplay.data.local.AutPlayDatabase
+import app.autplay.application.guestroom.GuestInvitationReceipt
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
-import app.autplay.data.local.entity.WavePreflightEntity
-import app.autplay.data.local.entity.WaveQueueProjectionEntity
-import app.autplay.data.local.entity.WaveRoomEntity
 import app.autplay.domain.wave.CommandAcceptance
 import app.autplay.domain.wave.WaveAvailability
 import app.autplay.domain.wave.WaveCommand
@@ -37,6 +35,8 @@ interface WaveTransport {
         onFailure: () -> Unit,
     ): AutoCloseable
     suspend fun joinByCode(code: String): WaveSnapshot = throw UnsupportedOperationException("WAVE_JOIN_UNAVAILABLE")
+    suspend fun issueGuestDocument(roomId: String): GuestInvitationReceipt =
+        throw UnsupportedOperationException("GUEST_INVITATION_UNAVAILABLE")
     suspend fun leave(roomId: String) = Unit
     suspend fun close(roomId: String) = Unit
     suspend fun transferHost(roomId: String, targetDeviceId: String) = Unit
@@ -110,7 +110,14 @@ class WaveCoordinator(
     private val unmetered: () -> Boolean = { false },
     private val scope: kotlinx.coroutines.CoroutineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO),
     private val wait: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+    private val projectionStore: WaveProjectionStore = RoomWaveProjectionStore(database),
+    private val playbackSnapshotNamespace: String = "wave",
+    private val playbackQueueType: String = "WAVE",
 ) {
+    init {
+        require(playbackSnapshotNamespace.isNotBlank())
+        require(playbackQueueType.matches(Regex("^[A-Z][A-Z0-9_]{0,99}$")))
+    }
     private val mutableUiState = kotlinx.coroutines.flow.MutableStateFlow(WaveUiState())
     val uiState: StateFlow<WaveUiState> = mutableUiState.asStateFlow()
     private var connection: AutoCloseable? = null
@@ -123,7 +130,7 @@ class WaveCoordinator(
         val activeGeneration = ++generation
         recover(roomId)
         connection?.close()
-        val cached = database.waveDao().room(roomId) ?: return
+        val cached = projectionStore.room(roomId) ?: return
         connection = runWaveTransportCall {
             transport.connect(
                 roomId,
@@ -138,6 +145,11 @@ class WaveCoordinator(
         applySnapshot(snapshot)
         join(snapshot.roomId)
         return snapshot.roomCode
+    }
+    suspend fun issueGuestDocument(): GuestInvitationReceipt {
+        val roomId = uiState.value.roomId ?: throw IllegalStateException("WAVE_ROOM_REQUIRED")
+        check(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
+        return runWaveTransportCall { transport.issueGuestDocument(roomId) }
     }
     suspend fun joinByCode(code: String) {
         applySnapshot(runWaveTransportCall { transport.joinByCode(code) })
@@ -162,8 +174,8 @@ class WaveCoordinator(
     }
     suspend fun submitPreflight(availability: Map<String, WaveAvailability>, finalReady: Boolean) {
         val roomId = uiState.value.roomId ?: return
-        val room = database.waveDao().room(roomId) ?: return
-        val queue = database.waveDao().queue(roomId, room.lastSequence, 100).associateBy { it.queueEntryId }
+        val room = projectionStore.room(roomId) ?: return
+        val queue = projectionStore.queue(roomId, room.lastSequence, 100).associateBy { it.queueEntryId }
         val reports = availability.mapNotNull { (entryId, value) ->
             val entry = queue[entryId] ?: return@mapNotNull null
             WavePreflightReport(
@@ -179,30 +191,30 @@ class WaveCoordinator(
     suspend fun hostCommand(command: WaveCommand) {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         val roomId = uiState.value.roomId ?: return
-        val room = database.waveDao().room(roomId) ?: return
+        val room = projectionStore.room(roomId) ?: return
         runWaveTransportCall { transport.hostCommand(roomId, command, room.queueVersion) }
     }
     /** UI-safe host pause; starting requires an authoritative queued recording. */
     suspend fun pauseRoom() {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         val roomId = uiState.value.roomId ?: return
-        val room = database.waveDao().room(roomId) ?: return
+        val room = projectionStore.room(roomId) ?: return
         hostCommand(WaveCommand(room.lastSequence + 1, "PAUSE"))
     }
     suspend fun enqueueRecording(recordingId: String) {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         java.util.UUID.fromString(recordingId)
         val roomId = uiState.value.roomId ?: return
-        val room = database.waveDao().room(roomId) ?: return
+        val room = projectionStore.room(roomId) ?: return
         hostCommand(WaveCommand(room.lastSequence + 1, "QUEUE", recordingId))
         recover(roomId)
     }
     suspend fun startFirstQueued(): Boolean {
         require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
         val roomId = uiState.value.roomId ?: return false
-        val room = database.waveDao().room(roomId) ?: return false
+        val room = projectionStore.room(roomId) ?: return false
         refreshClock(roomId, room.lastSequence)
-        val current = database.waveDao().queue(roomId, room.lastSequence, 100)
+        val current = projectionStore.queue(roomId, room.lastSequence, 100)
             .minByOrNull { it.position } ?: return false
         val started = runWaveTransportCall {
             transport.start(
@@ -231,14 +243,19 @@ class WaveCoordinator(
         scope.launch {
             if (!isCurrentWaveCallback(uiState.value.roomId, generation, expectedRoomId, expectedGeneration)) return@launch
             val roomId = expectedRoomId
-            val room = database.waveDao().room(roomId) ?: return@launch
+            val room = projectionStore.room(roomId) ?: return@launch
             if (event.epoch != room.roomEpoch) {
                 recover(roomId)
                 return@launch
             }
             when (WaveSequenceRecovery.accept(room.lastSequence, event.command)) {
                 is CommandAcceptance.Applied -> {
-                    database.waveDao().advanceSequence(roomId, event.command.sequence, System.currentTimeMillis())
+                    projectionStore.advance(
+                        roomId,
+                        event.epoch,
+                        event.command.sequence,
+                        System.currentTimeMillis(),
+                    )
                     when (event.command.kind) {
                         "PLAY", "SCHEDULED_PLAY" -> executeScheduledPlay(
                             roomId,
@@ -256,15 +273,15 @@ class WaveCoordinator(
         val value = runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull()
             ?: return
         val queueEntryId = value["queue_entry_id"]?.jsonPrimitive?.contentOrNull ?: return
-        val room = database.waveDao().room(roomId) ?: return
-        val projection = database.waveDao().queue(roomId, room.lastSequence, 100)
+        val room = projectionStore.room(roomId) ?: return
+        val projection = projectionStore.queue(roomId, room.lastSequence, 100)
             .firstOrNull { it.queueEntryId == queueEntryId } ?: return
-        val trackRefId = projection.localUserTrackRefId ?: return
+        val trackRefId = projection.localTrackRefId ?: return
         val snapshotId = activateWaveEntry(
             roomId,
             queueEntryId,
             trackRefId,
-            room.serverProfileId,
+            room.profileId,
         )
         playback?.prepareWaveQueue(snapshotId, queueEntryId)
         scheduledElapsedRealtime(payload)?.let {
@@ -277,7 +294,9 @@ class WaveCoordinator(
         trackRefId: String,
         serverProfileId: String,
     ): String {
-        val snapshotId = java.util.UUID.nameUUIDFromBytes("wave:$roomId".toByteArray()).toString()
+        val snapshotId = java.util.UUID.nameUUIDFromBytes(
+            "$playbackSnapshotNamespace:$roomId".toByteArray(),
+        ).toString()
         playbackPersistence.activateQueue(
             snapshotId = LocalId(snapshotId),
             entries = listOf(
@@ -288,7 +307,7 @@ class WaveCoordinator(
                     sourceAudioPolicy = "PINNED",
                 ),
             ),
-            queueType = "WAVE",
+            queueType = playbackQueueType,
             sourceContextId = roomId,
             serverProfileId = serverProfileId,
             listeningContext = "GENERAL",
@@ -331,8 +350,8 @@ class WaveCoordinator(
         }
         val entriesById = resolvedEntries.associateBy { it.first.queueEntryId }
         val nowMs = System.currentTimeMillis()
-        database.waveDao().replaceSnapshot(
-            WaveRoomEntity(
+        projectionStore.replaceSnapshot(
+            StoredWaveRoom(
                 snapshot.roomId,
                 snapshot.profileId,
                 snapshot.roomEpoch,
@@ -344,8 +363,7 @@ class WaveCoordinator(
             ),
             snapshot.preflight.mapNotNull { (queueEntryId, availability) ->
                 val (entry, localTrackRefId) = entriesById[queueEntryId] ?: return@mapNotNull null
-                WavePreflightEntity(
-                    snapshot.roomId,
+                StoredWavePreflight(
                     queueEntryId,
                     entry.serverRecordingId,
                     localTrackRefId,
@@ -356,8 +374,7 @@ class WaveCoordinator(
                 )
             },
             resolvedEntries.map { (entry, localTrackRefId) ->
-                WaveQueueProjectionEntity(
-                    snapshot.roomId,
+                StoredWaveQueueEntry(
                     snapshot.sequence,
                     entry.position,
                     entry.queueEntryId,

@@ -582,4 +582,18 @@
     <string name="settings_statistics_state_loading">Загрузка</string>
     <string name="settings_statistics_state_updating">Обновление</string>
     <string name="settings_statistics_state_unavailable">Недоступно</string>
+    <string name="guest_invite_without_account">Пригласить гостя без аккаунта</string>
+    <string name="guest_share_title">Отправить защищённое гостевое приглашение AutPlay</string>
+    <string name="guest_room_title">Гостевая комната Wave</string>
+    <string name="guest_media_boundary">Приглашение даёт доступ только к участию в комнате. Музыка должна быть доступна и разрешена на этом устройстве.</string>
+    <string name="guest_room_identifier">Комната %1$s</string>
+    <string name="guest_display_name">Ваше имя в этой комнате</string>
+    <string name="guest_join">Войти как гость</string>
+    <string name="guest_joining">Безопасное подключение…</string>
+    <string name="guest_state_expired">Срок действия гостевого приглашения или сессии истёк.</string>
+    <string name="guest_state_revoked">Владелец отозвал этот гостевой доступ.</string>
+    <string name="guest_state_full">В комнате Wave больше нет свободных мест.</string>
+    <string name="guest_state_unavailable">Гостевой доступ сейчас недоступен.</string>
+    <string name="guest_access_ended">Гостевой доступ завершён. Для повторного входа нужно новое приглашение.</string>
+    <string name="guest_return_to_app">Вернуться в AutPlay</string>
 </resources>

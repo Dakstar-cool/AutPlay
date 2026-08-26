@@ -62,6 +62,10 @@ import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.work.WorkManager
 import app.autplay.application.library.LibraryVerticalSliceRepository
+import app.autplay.application.guestroom.GUEST_DOCUMENT_MIME_TYPE
+import app.autplay.application.guestroom.GuestRoomDocumentCodec
+import app.autplay.application.guestroom.GuestRoomRuntime
+import app.autplay.application.guestroom.GuestRoomStage
 import app.autplay.application.library.CorePlaylistDetail
 import app.autplay.application.library.CoreProductRepository
 import app.autplay.application.library.CoreReleaseSummary
@@ -210,6 +214,7 @@ class MainActivity : ComponentActivity() {
         val syncScheduler = WorkManagerDeferredWorkScheduler(WorkManager.getInstance(applicationContext), SyncWorker::class.java)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
+        consumeGuestDocument(intent)
         setContent {
             AutPlayBootstrap(
                 settingsStore,
@@ -224,6 +229,26 @@ class MainActivity : ComponentActivity() {
                 recommendationRepository,
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        consumeGuestDocument(intent)
+    }
+
+    private fun consumeGuestDocument(source: Intent?) {
+        if (source?.action != Intent.ACTION_SEND || source.type != GUEST_DOCUMENT_MIME_TYPE) return
+        val raw = source.getStringExtra(Intent.EXTRA_TEXT)
+        source.removeExtra(Intent.EXTRA_TEXT)
+        source.action = Intent.ACTION_MAIN
+        source.type = null
+        if (raw == null) return
+        val allowUnsafeDevelopmentHttp =
+            (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        AutPlayRuntime.guestRoomRuntime(applicationContext).acceptDocument(
+            raw,
+            allowUnsafeDevelopmentHttp = allowUnsafeDevelopmentHttp,
+        )
     }
 
 }
@@ -264,12 +289,22 @@ internal fun AutPlayBootstrap(
         }
         val settings = checkNotNull(loadedSettings)
         AppLanguageProvider(settings.appLanguage) {
+            val context = LocalContext.current
+            val guestRuntime = remember(context) { AutPlayRuntime.guestRoomRuntime(context) }
+            val guestState by guestRuntime.state.collectAsState()
+            if (guestState.stage != GuestRoomStage.IDLE) {
+                AutPlayTheme(appearanceFrom(settings)) {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        GuestRoomFrontendScreen(guestRuntime)
+                    }
+                }
+                return@AppLanguageProvider
+            }
             val binding = settings.activeUserId?.let { userId ->
                 val deviceId = settings.deviceId ?: return@let null
                 val profileId = settings.activeServerProfileId ?: return@let null
                 ClientEventBinding(userId, deviceId, profileId)
             }
-            val context = LocalContext.current
             val pairingScope = rememberCoroutineScope()
             var pairingSafeError by remember { mutableStateOf<String?>(null) }
             val pairingOrigins = remember { ConcurrentHashMap<String, String>() }
@@ -1565,6 +1600,7 @@ internal fun WaveFrontendScreen(
     onStartPlayback: suspend () -> WavePlaybackCommandOutcome,
     onPausePlayback: suspend () -> WavePlaybackCommandOutcome,
     onError: (String) -> Unit,
+    settings: NonSecretSettings,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1574,6 +1610,7 @@ internal fun WaveFrontendScreen(
     var createdCode by remember { mutableStateOf<String?>(null) }
     var inviteUserIds by remember { mutableStateOf("") }
     var waveActionMessage by remember { mutableStateOf<Int?>(null) }
+    val guestShareTitle = stringResource(R.string.guest_share_title)
     val inviteList = inviteUserIds.split(Regex("[,;\\s]+"))
         .map(String::trim)
         .filter(String::isNotEmpty)
@@ -1630,6 +1667,41 @@ internal fun WaveFrontendScreen(
         Text(stringResource(if (state.isHost) R.string.wave_you_control else R.string.wave_host_controls))
         if (state.isHost) {
             Column {
+                Button(
+                    enabled = settings.serverBaseUrl != null && settings.m5Binding != null,
+                    onClick = {
+                        scope.launch {
+                            val origin = settings.serverBaseUrl
+                            val identity = settings.m5Binding
+                            if (origin == null || identity == null) {
+                                onError("GUEST_INVITATION_UNAVAILABLE")
+                                return@launch
+                            }
+                            runCatching {
+                                coordinator.issueGuestDocument().use { receipt ->
+                                    GuestRoomDocumentCodec.encode(
+                                        receipt,
+                                        origin,
+                                        identity.serverInstanceId,
+                                        identity.identityEpoch,
+                                    )
+                                }
+                            }.onSuccess { document ->
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = GUEST_DOCUMENT_MIME_TYPE
+                                    putExtra(Intent.EXTRA_TEXT, document)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        share,
+                                        guestShareTitle,
+                                    ),
+                                )
+                            }.onFailure { onError("GUEST_INVITATION_UNAVAILABLE") }
+                        }
+                    },
+                ) { Text(stringResource(R.string.guest_invite_without_account)) }
                 Button(
                     enabled = localTrackRefId != null,
                     onClick = {
@@ -1691,6 +1763,69 @@ internal fun WaveFrontendScreen(
             }) { Text(stringResource(R.string.wave_leave_room)) }
         }
     }
+}
+
+@Composable
+internal fun GuestRoomFrontendScreen(runtime: GuestRoomRuntime) {
+    val scope = rememberCoroutineScope()
+    val state by runtime.state.collectAsState()
+    val coordinator = runtime.activeCoordinator()
+    val waveState by (coordinator?.uiState ?: flowOf(app.autplay.application.wave.WaveUiState()))
+        .collectAsState(initial = app.autplay.application.wave.WaveUiState())
+    var displayName by remember { mutableStateOf("") }
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+    ) {
+        Text(stringResource(R.string.guest_room_title), style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.guest_media_boundary))
+        state.roomId?.let { Text(stringResource(R.string.guest_room_identifier, it.take(8))) }
+        when (state.stage) {
+            GuestRoomStage.DOCUMENT_READY, GuestRoomStage.ERROR -> {
+                state.errorCode?.let {
+                    Text(guestStateMessage(it), color = MaterialTheme.colorScheme.error)
+                }
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it.take(40) },
+                    label = { Text(stringResource(R.string.guest_display_name)) },
+                    singleLine = true,
+                )
+                Button(
+                    enabled = displayName.trim().isNotEmpty(),
+                    onClick = { scope.launch { runtime.redeem(displayName) } },
+                ) { Text(stringResource(R.string.guest_join)) }
+                OutlinedButton(onClick = { scope.launch { runtime.cancel() } }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+            GuestRoomStage.REDEEMING -> Text(stringResource(R.string.guest_joining))
+            GuestRoomStage.ACTIVE -> {
+                Text(state.displayName.orEmpty())
+                Text(waveStateLabel(waveState.state))
+                Text(stringResource(R.string.wave_host_controls))
+                OutlinedButton(onClick = { scope.launch { runtime.leave() } }) {
+                    Text(stringResource(R.string.wave_leave_room))
+                }
+            }
+            GuestRoomStage.TERMINAL -> {
+                Text(state.errorCode?.let { guestStateMessage(it) }
+                    ?: stringResource(R.string.guest_access_ended))
+                Button(onClick = { scope.launch { runtime.cancel() } }) {
+                    Text(stringResource(R.string.guest_return_to_app))
+                }
+            }
+            GuestRoomStage.IDLE -> Unit
+        }
+    }
+}
+
+@Composable
+private fun guestStateMessage(code: String): String = when (code) {
+    "guest_expired" -> stringResource(R.string.guest_state_expired)
+    "guest_revoked" -> stringResource(R.string.guest_state_revoked)
+    "room_full" -> stringResource(R.string.guest_state_full)
+    else -> stringResource(R.string.guest_state_unavailable)
 }
 
 @Composable

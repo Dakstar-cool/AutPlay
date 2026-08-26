@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import app.autplay.application.sync.ClientEventBinding
+import app.autplay.application.guestroom.GuestRoomRuntime
+import app.autplay.application.guestroom.GuestWaveProjectionStore
 import app.autplay.application.sync.OkHttpSyncTransport
 import app.autplay.application.sync.SyncCoordinator
 import app.autplay.application.wave.OkHttpWaveTransport
@@ -31,6 +33,7 @@ import kotlinx.coroutines.CoroutineScope
 /** Process-scoped graph shared by the Activity and Media3 services. */
 object AutPlayRuntime {
     @Volatile private var databaseInstance: AutPlayDatabase? = null
+    @Volatile private var guestRoomRuntimeInstance: GuestRoomRuntime? = null
 
     fun database(context: Context): AutPlayDatabase = databaseInstance ?: synchronized(this) {
         databaseInstance ?: AutPlayDatabase.open(context.applicationContext).also { databaseInstance = it }
@@ -38,9 +41,48 @@ object AutPlayRuntime {
 
     /** Instrumentation-only lifecycle seam; production keeps one database for the process. */
     fun closeDatabaseForTests() = synchronized(this) {
+        guestRoomRuntimeInstance = null
         databaseInstance?.close()
         databaseInstance = null
     }
+
+    /** S1D guest authority is intentionally process-scoped and independent of an account binding. */
+    @OptIn(UnstableApi::class)
+    fun guestRoomRuntime(context: Context): GuestRoomRuntime =
+        guestRoomRuntimeInstance ?: synchronized(this) {
+            guestRoomRuntimeInstance ?: run {
+                val applicationContext = context.applicationContext
+                val database = database(applicationContext)
+                GuestRoomRuntime(
+                    database = database,
+                    coordinatorFactory = { transport, guestSessionId ->
+                        WaveCoordinator(
+                            database,
+                            transport,
+                            ServicePlaybackSessionOwner(applicationContext),
+                            AndroidWaveSourceProbe(applicationContext, database),
+                            Media3WavePrefetchExecutor(applicationContext, database),
+                            prefetchMode = { WavePrefetchMode.NEXT },
+                            projectionStore = GuestWaveProjectionStore(
+                                database,
+                                guestSessionId,
+                            ),
+                            playbackSnapshotNamespace = "guest-wave:$guestSessionId",
+                            playbackQueueType = "GUEST_WAVE",
+                        )
+                    },
+                    localMediaProfileResolver = { document ->
+                        val settings = applicationNonSecretSettingsStore(applicationContext)
+                            .settings.first()
+                        val binding = settings.m5Binding
+                        settings.activeServerProfileId?.value?.takeIf {
+                            binding?.serverInstanceId == document.serverInstanceId &&
+                                binding.identityEpoch == document.identityEpoch
+                        }
+                    },
+                ).also { guestRoomRuntimeInstance = it }
+            }
+        }
 
     /** Resolves profile-scoped non-secret endpoint and Keystore credential only at sync execution. */
     suspend fun syncCoordinator(context: Context, binding: ClientEventBinding): SyncCoordinator {

@@ -17,6 +17,8 @@ A1B_TABLES = frozenset(
         ("discovery", "bulk_operation"),
         ("discovery", "bulk_operation_item"),
         ("discovery", "candidate"),
+        ("discovery", "source_authorization"),
+        ("importing", "web_import_operation_receipt"),
     }
 )
 A1B_INDEXES = frozenset(
@@ -24,7 +26,35 @@ A1B_INDEXES = frozenset(
         "ix_bulk_operation_item_candidate",
         "ix_bulk_operation_owner_time",
         "ix_discovery_candidate_owner_state",
+        "ix_source_authorization_owner_expiry",
+        "uq_source_authorization_current_scope",
     }
+)
+A1C_TABLES = frozenset(
+    {
+        ("discovery", "artist_policy"),
+        ("discovery", "artist_policy_revision"),
+        ("discovery", "run"),
+        ("discovery", "run_page"),
+        ("discovery", "run_candidate"),
+        ("discovery", "acquisition_attempt"),
+        ("discovery", "candidate_action_receipt"),
+    }
+)
+A1C_INDEXES = frozenset(
+    {
+        "ix_artist_policy_due",
+        "ix_discovery_run_policy_slot",
+        "ix_acquisition_attempt_candidate",
+        "ix_candidate_action_receipt_candidate",
+        "uq_acquisition_attempt_active_candidate",
+    }
+)
+A1C_FUNCTIONS = frozenset(
+    {"reject_artist_policy_binding_mutation", "reject_artist_policy_revision_mutation"}
+)
+A1C_TRIGGERS = frozenset(
+    {"trg_artist_policy_binding_immutable", "trg_artist_policy_revision_immutable"}
 )
 S1B_TABLES = frozenset(
     {
@@ -77,6 +107,36 @@ S1C_INDEXES = frozenset(
 )
 S1C_TRIGGERS = frozenset({"trg_social_account_retire"})
 S2_TABLES = frozenset({("social", "profile_statistics_settings")})
+S1D_TABLES = frozenset(
+    {
+        ("social", "guest_invitation"),
+        ("social", "guest_session"),
+        ("social", "guest_operation_receipt"),
+        ("social", "guest_preflight"),
+        ("social", "guest_timing_report"),
+        ("social", "guest_rate_window"),
+    }
+)
+S1D_INDEXES = frozenset(
+    {
+        "ix_social_guest_invitation_room_state",
+        "ix_social_guest_invitation_expiry",
+        "ix_social_guest_session_room_state",
+        "ix_social_guest_session_expiry",
+        "ix_social_guest_operation_expiry",
+        "ix_social_guest_preflight_expiry",
+        "ix_social_guest_timing_reported",
+        "ix_social_guest_rate_expiry",
+    }
+)
+S1D_TRIGGERS = frozenset(
+    {
+        "trg_social_guest_invitation_retire",
+        "trg_social_guest_account_retire",
+        "trg_social_guest_device_retire",
+        "trg_social_guest_user_session_retire",
+    }
+)
 
 
 def test_migrated_database_has_exact_named_inventory(
@@ -121,10 +181,14 @@ def test_migrated_database_has_exact_named_inventory(
     assert len(index_names) == EXPECTED_EXPLICIT_INDEX_COUNT
     assert len(function_names) == EXPECTED_FUNCTION_COUNT
     assert len(trigger_names) == EXPECTED_TRIGGER_COUNT
-    assert table_names == expected.tables | A1B_TABLES | S1B_TABLES | S1C_TABLES | S2_TABLES
-    assert index_names == expected.indexes | A1B_INDEXES | S1B_INDEXES | S1C_INDEXES
-    assert function_names == expected.functions
-    assert trigger_names == expected.triggers | S1C_TRIGGERS
+    assert table_names == (
+        expected.tables | A1B_TABLES | A1C_TABLES | S1B_TABLES | S1C_TABLES | S2_TABLES | S1D_TABLES
+    )
+    assert index_names == (
+        expected.indexes | A1B_INDEXES | A1C_INDEXES | S1B_INDEXES | S1C_INDEXES | S1D_INDEXES
+    )
+    assert function_names == expected.functions | A1C_FUNCTIONS
+    assert trigger_names == expected.triggers | S1C_TRIGGERS | A1C_TRIGGERS | S1D_TRIGGERS
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0
     assert extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}

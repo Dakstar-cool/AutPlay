@@ -13,7 +13,7 @@ from typing import ClassVar, cast
 from uuid import UUID
 
 import rfc8785
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -63,6 +63,7 @@ from .models import (
     RecordingRow,
     SourceProviderRow,
     UserTrackRefRow,
+    WebImportOperationReceiptRow,
 )
 
 IMPORT_JOB_KEY = JobKey("library.import", 1)
@@ -87,6 +88,10 @@ class ImportStateConflictError(ImportRuntimeError):
 
 class ImportReviewConflictError(ImportRuntimeError):
     code = "import.review_conflict"
+
+
+class ImportOperationConflictError(ImportRuntimeError):
+    code = "operation_conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +251,58 @@ class PostgresImportRepository:
         self._session.flush((import_job,))
         self._session.add_all([_entry_row(import_job_id, parsed, row) for row in parsed.rows])
         return ImportStartResult(import_job_id, enqueued.job_id, replayed=False)
+
+    def start_for_web(
+        self,
+        *,
+        owner_user_id: UUID,
+        operation_id: UUID,
+        parsed: ParsedImport,
+    ) -> ImportStartResult:
+        """Bind one multipart operation UUID to its canonical request and import."""
+
+        request_sha256 = hashlib.sha256(
+            rfc8785.dumps(
+                {
+                    "action": "web_txt_import",
+                    "adapter_id": parsed.envelope.adapter_id,
+                    "adapter_version": parsed.envelope.adapter_version,
+                    "format": parsed.envelope.format.value,
+                    "input_sha256": parsed.envelope.input_sha256.hex(),
+                    "mode": "LIBRARY_ONLY",
+                    "operation_id": str(operation_id),
+                    "schema_version": parsed.envelope.schema_version,
+                }
+            )
+        ).digest()
+        lock_key = int.from_bytes(
+            hashlib.sha256(owner_user_id.bytes + operation_id.bytes).digest()[:8],
+            "big",
+            signed=True,
+        )
+        self._session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        receipt = self._session.get(
+            WebImportOperationReceiptRow,
+            {"user_id": owner_user_id, "operation_id": operation_id},
+        )
+        if receipt is not None:
+            if not hmac.compare_digest(receipt.request_sha256, request_sha256):
+                raise ImportOperationConflictError
+            stored = self._session.get(ImportJobRow, receipt.import_job_id)
+            if stored is None:
+                raise ImportRuntimeError("import.idempotency_projection_missing")
+            return ImportStartResult(stored.import_job_id, stored.job_id, replayed=True)
+        result = self.start(owner_user_id=owner_user_id, parsed=parsed, mode="LIBRARY_ONLY")
+        self._session.add(
+            WebImportOperationReceiptRow(
+                user_id=owner_user_id,
+                operation_id=operation_id,
+                request_sha256=request_sha256,
+                import_job_id=result.import_job_id,
+            )
+        )
+        self._session.flush()
+        return result
 
     def collection_artists(
         self,
@@ -1410,6 +1467,7 @@ __all__ = (
     "ImportEntryReport",
     "ImportJobReport",
     "ImportNotFoundError",
+    "ImportOperationConflictError",
     "ImportProcessProgress",
     "ImportReviewConflictError",
     "ImportReviewResult",

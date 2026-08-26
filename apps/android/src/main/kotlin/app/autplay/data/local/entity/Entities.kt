@@ -404,6 +404,84 @@ data class WaveQueueProjectionEntity(
     @ColumnInfo(name = "ready") val ready: Boolean,
 )
 
+/**
+ * Sanitized S1D display/recovery projection. Raw document and session bearers are process-only and
+ * must never become columns, navigation arguments, saved state, diagnostics, or export payloads.
+ */
+@Entity(
+    tableName = "guest_room_projection",
+    indices = [
+        Index(value = ["room_id"]),
+        Index(value = ["state", "expires_at_ms"]),
+        Index(value = ["server_instance_id", "identity_epoch"]),
+    ],
+)
+data class GuestRoomProjectionEntity(
+    @PrimaryKey @ColumnInfo(name = "guest_session_id") val guestSessionId: String,
+    @ColumnInfo(name = "invitation_id") val invitationId: String,
+    @ColumnInfo(name = "room_id") val roomId: String,
+    @ColumnInfo(name = "server_instance_id") val serverInstanceId: String,
+    @ColumnInfo(name = "identity_epoch") val identityEpoch: Long,
+    @ColumnInfo(name = "local_media_profile_id") val localMediaProfileId: String?,
+    @ColumnInfo(name = "room_epoch") val roomEpoch: String,
+    @ColumnInfo(name = "queue_version") val queueVersion: Long,
+    @ColumnInfo(name = "room_state") val roomState: String,
+    @ColumnInfo(name = "display_name") val displayName: String,
+    @ColumnInfo(name = "state") val state: String,
+    @ColumnInfo(name = "expires_at_ms") val expiresAtMs: Long,
+    @ColumnInfo(name = "last_sequence") val lastSequence: Long,
+    @ColumnInfo(name = "updated_at_ms") val updatedAtMs: Long,
+)
+
+/** Guest-only preflight projection; capability material and media locations are never columns. */
+@Entity(
+    tableName = "guest_wave_preflight",
+    primaryKeys = ["guest_session_id", "queue_entry_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = GuestRoomProjectionEntity::class,
+            parentColumns = ["guest_session_id"],
+            childColumns = ["guest_session_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["guest_session_id"])],
+)
+data class GuestWavePreflightEntity(
+    @ColumnInfo(name = "guest_session_id") val guestSessionId: String,
+    @ColumnInfo(name = "queue_entry_id") val queueEntryId: String,
+    @ColumnInfo(name = "server_recording_id") val serverRecordingId: String,
+    @ColumnInfo(name = "local_user_track_ref_id") val localUserTrackRefId: String?,
+    @ColumnInfo(name = "queue_version") val queueVersion: Long,
+    @ColumnInfo(name = "availability") val availability: String,
+    @ColumnInfo(name = "final_ready") val finalReady: Boolean,
+    @ColumnInfo(name = "checked_at_ms") val checkedAtMs: Long,
+)
+
+/** Guest-only authoritative queue snapshot, isolated from account-bound `wave_queue_projection`. */
+@Entity(
+    tableName = "guest_wave_queue_projection",
+    primaryKeys = ["guest_session_id", "sequence", "position"],
+    foreignKeys = [
+        ForeignKey(
+            entity = GuestRoomProjectionEntity::class,
+            parentColumns = ["guest_session_id"],
+            childColumns = ["guest_session_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["guest_session_id", "sequence"])],
+)
+data class GuestWaveQueueProjectionEntity(
+    @ColumnInfo(name = "guest_session_id") val guestSessionId: String,
+    @ColumnInfo(name = "sequence") val sequence: Long,
+    @ColumnInfo(name = "position") val position: Long,
+    @ColumnInfo(name = "queue_entry_id") val queueEntryId: String,
+    @ColumnInfo(name = "server_recording_id") val serverRecordingId: String,
+    @ColumnInfo(name = "local_user_track_ref_id") val localUserTrackRefId: String?,
+    @ColumnInfo(name = "ready") val ready: Boolean,
+)
+
 @Entity(tableName = "listening_event", foreignKeys = [ForeignKey(entity = UserTrackRefEntity::class, parentColumns = ["local_user_track_ref_id"], childColumns = ["local_user_track_ref_id"], onDelete = ForeignKey.RESTRICT)], indices = [Index(value = ["started_at_ms"]), Index(value = ["sync_state", "created_at_ms"]), Index(value = ["local_user_track_ref_id"]), Index(value = ["server_profile_id"])])
 data class ListeningEventEntity(
     @PrimaryKey @ColumnInfo(name = "listening_event_id") val listeningEventId: String,

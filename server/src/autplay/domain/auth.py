@@ -36,6 +36,19 @@ class Principal:
 
 
 @dataclass(frozen=True, slots=True)
+class GuestPrincipal:
+    """One expiring capability principal scoped to one Wave Room."""
+
+    guest_session_id: UUID
+    invitation_id: UUID
+    room_id: UUID
+    room_epoch: int
+    role: str
+    allowed_actions: frozenset[str]
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class AccessTokenClaims:
     """Integrity-checked access-token claims before database authorization."""
 
@@ -155,6 +168,7 @@ __all__ = (
     "AuthenticationError",
     "DeviceDescription",
     "DevicePlatform",
+    "GuestPrincipal",
     "InvalidAccessTokenError",
     "InvalidRefreshTokenError",
     "OwnedObjectNotFoundError",

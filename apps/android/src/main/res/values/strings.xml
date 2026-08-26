@@ -554,4 +554,18 @@
     <string name="settings_statistics_state_loading">Loading</string>
     <string name="settings_statistics_state_updating">Updating</string>
     <string name="settings_statistics_state_unavailable">Unavailable</string>
+    <string name="guest_invite_without_account">Invite a guest without an account</string>
+    <string name="guest_share_title">Share secure AutPlay guest invitation</string>
+    <string name="guest_room_title">Guest Wave room</string>
+    <string name="guest_media_boundary">This invitation grants room participation only. Music must already be available and authorized on this device.</string>
+    <string name="guest_room_identifier">Room %1$s</string>
+    <string name="guest_display_name">Your name in this room</string>
+    <string name="guest_join">Join as guest</string>
+    <string name="guest_joining">Joining securely…</string>
+    <string name="guest_state_expired">This guest invitation or session has expired.</string>
+    <string name="guest_state_revoked">The host revoked this guest access.</string>
+    <string name="guest_state_full">This Wave room is full.</string>
+    <string name="guest_state_unavailable">Guest access is currently unavailable.</string>
+    <string name="guest_access_ended">Guest access has ended. A new invitation is required to join again.</string>
+    <string name="guest_return_to_app">Return to AutPlay</string>
 </resources>

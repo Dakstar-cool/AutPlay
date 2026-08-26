@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/automation-command.schema.json",
+  "title": "Owner-derived A1C automation command v1",
+  "type": "object",
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "A1C_RUNTIME_IMPLEMENTED",
+  "required": ["contract_version", "schema_version", "operation_id", "action"],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "action": {
+      "enum": [
+        "START_DISCOVERY",
+        "SELECT_CANDIDATE",
+        "RETRY_CANDIDATE",
+        "IGNORE_CANDIDATE",
+        "SET_ARTIST_POLICY"
+      ]
+    },
+    "policy_id": {"type": "string", "format": "uuid"},
+    "candidate_id": {"type": "string", "format": "uuid"},
+    "canonical_artist_id": {"type": "string", "format": "uuid"},
+    "provider_artist_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20,
+      "pattern": "^[0-9]{1,20}$"
+    },
+    "discovery_mode": {"enum": ["DISABLED", "MANUAL_ONLY", "SCHEDULED"]},
+    "import_mode": {"enum": ["REVIEW_REQUIRED", "AUTO_IMPORT"]},
+    "automation_enabled": {"type": "boolean"},
+    "expected_policy_revision": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "null"}
+      ]
+    },
+    "consequence_confirmation": {
+      "oneOf": [
+        {
+          "const": "AUTO_IMPORT_ADDS_AUTHORIZED_TRACKS_WITHOUT_PER_TRACK_REVIEW_V1"
+        },
+        {"type": "null"}
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {"action": {"const": "START_DISCOVERY"}},
+      "required": ["policy_id"],
+      "not": {
+        "anyOf": [
+          {"required": ["candidate_id"]},
+          {"required": ["canonical_artist_id"]},
+          {"required": ["provider_artist_id"]},
+          {"required": ["discovery_mode"]},
+          {"required": ["import_mode"]},
+          {"required": ["automation_enabled"]},
+          {"required": ["expected_policy_revision"]},
+          {"required": ["consequence_confirmation"]}
+        ]
+      }
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": ["SELECT_CANDIDATE", "RETRY_CANDIDATE", "IGNORE_CANDIDATE"]
+        }
+      },
+      "required": ["candidate_id"],
+      "not": {
+        "anyOf": [
+          {"required": ["policy_id"]},
+          {"required": ["canonical_artist_id"]},
+          {"required": ["provider_artist_id"]},
+          {"required": ["discovery_mode"]},
+          {"required": ["import_mode"]},
+          {"required": ["automation_enabled"]},
+          {"required": ["expected_policy_revision"]},
+          {"required": ["consequence_confirmation"]}
+        ]
+      }
+    },
+    {
+      "properties": {"action": {"const": "SET_ARTIST_POLICY"}},
+      "required": [
+        "canonical_artist_id",
+        "provider_artist_id",
+        "discovery_mode",
+        "import_mode",
+        "automation_enabled",
+        "expected_policy_revision",
+        "consequence_confirmation"
+      ],
+      "not": {
+        "anyOf": [
+          {"required": ["policy_id"]},
+          {"required": ["candidate_id"]}
+        ]
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"discovery_mode": {"const": "SCHEDULED"}}},
+          "then": {"properties": {"automation_enabled": {"const": true}}},
+          "else": {"properties": {"automation_enabled": {"const": false}}}
+        },
+        {
+          "if": {"properties": {"import_mode": {"const": "AUTO_IMPORT"}}},
+          "then": {
+            "properties": {
+              "consequence_confirmation": {
+                "const": "AUTO_IMPORT_ADDS_AUTHORIZED_TRACKS_WITHOUT_PER_TRACK_REVIEW_V1"
+              }
+            }
+          },
+          "else": {"properties": {"consequence_confirmation": {"type": "null"}}}
+        }
+      ]
+    }
+  ]
+}

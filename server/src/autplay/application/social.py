@@ -747,7 +747,17 @@ class SocialService:
                 )
                 or 0
             )
-            if member_count >= 8:
+            guest_count = cast(
+                int,
+                s.execute(
+                    text(
+                        "SELECT count(*) FROM social.guest_session WHERE room_id=:room "
+                        "AND state='ACTIVE' AND expires_at>:now"
+                    ),
+                    {"room": room.room_id, "now": now},
+                ).scalar_one(),
+            )
+            if member_count + guest_count >= 8:
                 invite.state = "FULL"
                 invite.terminal_at = now
                 invite.terminal_reason = "FULL"

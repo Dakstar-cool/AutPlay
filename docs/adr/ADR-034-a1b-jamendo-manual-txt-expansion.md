@@ -1,6 +1,6 @@
 # ADR-034: A1B Jamendo manual TXT collection expansion
 
-- Status: Accepted for implementation; runtime milestone in progress
+- Status: Accepted; runtime milestone PASS on 2026-08-26
 - Date: 2026-08-23
 - Scope: Post-MVP A1B manual discovery/import only
 - Decision owner: explicit user activation and confirmation of the bounded manual scheme

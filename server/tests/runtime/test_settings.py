@@ -243,7 +243,12 @@ def test_jamendo_is_disabled_by_default_and_requires_non_vault_staging(tmp_path:
         "admin_web_csrf_hmac_secret": SecretStr("c" * 32),
         "vault_root": tmp_path / "vault",
     }
-    assert ApiSettings.model_validate(base).jamendo_enabled is False
+    defaults = ApiSettings.model_validate(base)
+    assert defaults.jamendo_enabled is False
+    assert defaults.discovery_automation_enabled is False
+
+    with pytest.raises(ValueError, match="automation requires"):
+        ApiSettings.model_validate(base | {"discovery_automation_enabled": True})
 
     with pytest.raises(ValueError, match="outside the Vault"):
         ApiSettings.model_validate(
@@ -264,6 +269,7 @@ def test_jamendo_is_disabled_by_default_and_requires_non_vault_staging(tmp_path:
         }
     )
     assert enabled.jamendo_enabled is True
+    assert enabled.discovery_automation_enabled is False
     assert "private-client-id" not in repr(enabled)
 
 
@@ -298,9 +304,65 @@ def test_worker_jamendo_is_explicit_and_uses_secret_file(tmp_path: Path) -> None
     )
 
     assert settings.jamendo_enabled is True
+    assert settings.discovery_automation_enabled is False
     assert settings.jamendo_client_id is not None
     assert settings.jamendo_client_id.get_secret_value() == "private-client-id"
     assert "private-client-id" not in repr(settings)
+
+
+def test_worker_automation_gate_is_explicit_and_requires_provider(tmp_path: Path) -> None:
+    with pytest.raises(SettingsLoadError):
+        load_worker_settings(
+            environ={
+                "AUTPLAY_DATABASE_URL": DATABASE_URL,
+                "AUTPLAY_DISCOVERY_AUTOMATION_ENABLED": "true",
+            },
+            overrides={"vault_root": tmp_path / "vault"},
+        )
+
+    secret_file = tmp_path / "jamendo-automation-client-id"
+    secret_file.write_text("private-client-id\n", encoding="utf-8")
+    settings = load_worker_settings(
+        environ={
+            "AUTPLAY_DATABASE_URL": DATABASE_URL,
+            "AUTPLAY_JAMENDO_ENABLED": "true",
+            "AUTPLAY_DISCOVERY_AUTOMATION_ENABLED": "true",
+            "AUTPLAY_JAMENDO_CLIENT_ID_FILE": str(secret_file),
+            "AUTPLAY_JAMENDO_STAGING_ROOT": str(tmp_path / "provider-staging"),
+        },
+        overrides={"vault_root": tmp_path / "vault"},
+    )
+    assert settings.discovery_automation_enabled is True
+
+    with pytest.raises(SettingsLoadError, match="runtime_configuration_invalid"):
+        load_worker_settings(
+            environ={
+                "AUTPLAY_DATABASE_URL": DATABASE_URL,
+                "AUTPLAY_JAMENDO_ENABLED": "true",
+                "AUTPLAY_DISCOVERY_AUTOMATION_ENABLED": "true",
+                "AUTPLAY_JAMENDO_CLIENT_ID_FILE": str(secret_file),
+                "AUTPLAY_JAMENDO_STAGING_ROOT": str(tmp_path / "provider-staging"),
+                "AUTPLAY_WORKER_MAX_ATTEMPTS": "6",
+            },
+            overrides={"vault_root": tmp_path / "vault"},
+        )
+
+    for field, value in (
+        ("AUTPLAY_WORKER_RETRY_BASE_SECONDS", "3"),
+        ("AUTPLAY_WORKER_RETRY_MAX_SECONDS", "301"),
+    ):
+        with pytest.raises(SettingsLoadError, match="runtime_configuration_invalid"):
+            load_worker_settings(
+                environ={
+                    "AUTPLAY_DATABASE_URL": DATABASE_URL,
+                    "AUTPLAY_JAMENDO_ENABLED": "true",
+                    "AUTPLAY_DISCOVERY_AUTOMATION_ENABLED": "true",
+                    "AUTPLAY_JAMENDO_CLIENT_ID_FILE": str(secret_file),
+                    "AUTPLAY_JAMENDO_STAGING_ROOT": str(tmp_path / "provider-staging"),
+                    field: value,
+                },
+                overrides={"vault_root": tmp_path / "vault"},
+            )
 
 
 def test_jamendo_client_id_rejects_direct_environment_secret(tmp_path: Path) -> None:

@@ -253,6 +253,7 @@ class UserSessionRow(Base):
             name="fk_user_session_device_owner",
             ondelete="RESTRICT",
         ),
+        UniqueConstraint("user_id", "device_id", "session_id", name="uq_user_session_actor"),
         CheckConstraint(
             "octet_length(refresh_token_hash) = 32",
             name="ck_user_session_hash_len",

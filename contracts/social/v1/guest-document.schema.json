@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/guest-document.schema.json",
+  "title": "S1D non-HTTP Android guest Room app document",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1D",
+  "x-autplay-document-transport": "ANDROID_APP_DOCUMENT_OR_QR_NOT_HTTP_URL",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "version", "server_origin", "server_instance_id", "identity_epoch", "room_id", "invitation_id", "document_bearer", "expires_at"],
+  "properties": {
+    "type": {"const": "autplay-guest-v1"},
+    "version": {"const": 1},
+    "server_origin": {"type": "string", "format": "uri", "maxLength": 2048},
+    "server_instance_id": {"type": "string", "format": "uuid"},
+    "identity_epoch": {"type": "integer", "minimum": 1},
+    "room_id": {"type": "string", "format": "uuid"},
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "document_bearer": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "expires_at": {"type": "string", "format": "date-time"}
+  }
+}

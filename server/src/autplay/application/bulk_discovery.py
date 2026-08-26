@@ -47,6 +47,21 @@ class BulkDiscoveryService:
             session.commit()
             return result
 
+    def require_eligible_artists(self, actor: WebActor, artist_names: tuple[str, ...]) -> None:
+        """Authorize selected canonical artists before provider metadata I/O."""
+
+        with self._sessions() as session:
+            PostgresBulkDiscoveryRepository(session).require_eligible_artists(
+                owner_user_id=actor.user_id, artist_names=artist_names
+            )
+
+    def require_provider_available(self, actor: WebActor) -> None:
+        """Authorize the configured adapter immediately before provider I/O."""
+
+        del actor
+        with self._sessions() as session:
+            PostgresBulkDiscoveryRepository(session).require_provider_available()
+
     def start(
         self,
         actor: WebActor,

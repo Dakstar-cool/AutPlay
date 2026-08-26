@@ -8,6 +8,14 @@ import org.junit.Test
 
 class SleepTimerPolicyTest {
     @Test
+    fun guestQueueRequiresFreshProcessCommand() {
+        assertFalse(GuestQueueRestorePolicy.allows("GUEST_WAVE", null))
+        assertFalse(GuestQueueRestorePolicy.allows("GUEST_WAVE", ""))
+        assertTrue(GuestQueueRestorePolicy.allows("GUEST_WAVE", "snapshot-id"))
+        assertTrue(GuestQueueRestorePolicy.allows("WAVE", null))
+    }
+
+    @Test
     fun ordinaryRestoredQueueCanScheduleTimerButWaveAndUnknownQueuesCannot() {
         assertTrue(SleepTimerPolicy.allows("LIBRARY"))
         assertTrue(SleepTimerPolicy.allows("PLAYLIST"))

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
 from urllib.parse import urlsplit
+from uuid import UUID
 
 _TRACK_ID = re.compile(r"\d{1,20}")
 
@@ -57,6 +59,27 @@ class DiscoveryCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class AcquisitionAuthorizationReceipt:
+    """Ephemeral evidence from a fresh provider check at one ingest boundary."""
+
+    candidate_id: UUID
+    provider_track_id: str
+    provider_artist_id: str
+    boundary: str
+    checked_at: datetime
+
+    def __post_init__(self) -> None:
+        if _TRACK_ID.fullmatch(self.provider_track_id) is None:
+            raise ValueError("provider track id is invalid")
+        if _TRACK_ID.fullmatch(self.provider_artist_id) is None:
+            raise ValueError("provider artist id is invalid")
+        if self.boundary not in {"PRE_PUBLISH", "PRE_MATERIALIZE"}:
+            raise ValueError("acquisition authorization boundary is invalid")
+        if self.checked_at.tzinfo is None:
+            raise ValueError("authorization receipt time must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True)
 class StagedAcquisition:
     """A downloaded provider object that has not entered the Vault or Catalog."""
 
@@ -106,6 +129,63 @@ class ProviderArtistTracks:
             raise ValueError("provider artist track page is inconsistent")
         if any(track.provider_artist_id != self.provider_artist_id for track in self.tracks):
             raise ValueError("provider artist track page contains another artist")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderTrackObservation:
+    """One release-ordered provider observation, never Catalog identity or a locator."""
+
+    candidate: DiscoveryCandidate
+    release_date: date
+    release_timezone: str
+
+    def __post_init__(self) -> None:
+        # Jamendo exposes a calendar date rather than a local release instant. Keeping its
+        # explicit UTC interpretation prevents adapter-local time from changing checkpoints.
+        if self.release_timezone != "UTC":
+            raise ValueError("provider release timezone is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderTrackPage:
+    """One fixed scheduled-discovery page with a bounded opaque resume marker."""
+
+    provider_artist_id: str
+    offset: int
+    observations: tuple[ProviderTrackObservation, ...]
+    next_offset: int | None
+    checkpoint: str | None
+
+    def __post_init__(self) -> None:
+        if _TRACK_ID.fullmatch(self.provider_artist_id) is None:
+            raise ValueError("provider artist id is invalid")
+        if self.offset not in {0, 25}:
+            raise ValueError("provider page offset is invalid")
+        if len(self.observations) > 25:
+            raise ValueError("provider page is too large")
+        if any(
+            observation.candidate.provider_artist_id != self.provider_artist_id
+            for observation in self.observations
+        ):
+            raise ValueError("provider page contains another artist")
+        track_ids = tuple(
+            observation.candidate.provider_track_id for observation in self.observations
+        )
+        if len(track_ids) != len(set(track_ids)):
+            raise ValueError("provider page contains duplicate tracks")
+        order = tuple(
+            (observation.release_date, int(observation.candidate.provider_track_id))
+            for observation in self.observations
+        )
+        if order != tuple(sorted(order, reverse=True)):
+            raise ValueError("provider page ordering is invalid")
+        expected_next_offset = 25 if self.offset == 0 and len(self.observations) == 25 else None
+        if self.next_offset != expected_next_offset:
+            raise ValueError("provider page continuation is invalid")
+        if self.checkpoint is not None and not 1 <= len(self.checkpoint) <= 2_048:
+            raise ValueError("provider page checkpoint is invalid")
+        if bool(self.observations) != (self.checkpoint is not None):
+            raise ValueError("provider page checkpoint is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,5 +247,7 @@ __all__ = (
     "DiscoveryError",
     "ProviderArtist",
     "ProviderArtistTracks",
+    "ProviderTrackObservation",
+    "ProviderTrackPage",
     "StagedAcquisition",
 )

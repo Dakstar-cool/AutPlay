@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from threading import Barrier
 from typing import Any
 
@@ -40,7 +41,9 @@ TEST_KEY = JobKey("p03.test", 1)
 LEASE = timedelta(minutes=5)
 
 
-def test_worker_cli_readiness_and_once_use_the_migrated_database(database_url: str) -> None:
+def test_worker_cli_readiness_and_once_use_the_migrated_database(
+    database_url: str, tmp_path: Path
+) -> None:
     environment = {
         key: value for key, value in os.environ.items() if not key.startswith("AUTPLAY_")
     }
@@ -48,6 +51,7 @@ def test_worker_cli_readiness_and_once_use_the_migrated_database(database_url: s
         {
             "AUTPLAY_DATABASE_URL": database_url,
             "AUTPLAY_PROFILE": "test",
+            "AUTPLAY_VAULT_ROOT": str(tmp_path / "vault"),
         }
     )
     readiness = subprocess.run(

@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
-  "info": {"title": "AutPlay S1C Identity, Trust and Social API", "version": "1.0.0-s1c-contract"},
+  "info": {"title": "AutPlay S1D Identity, Trust and Social API", "version": "1.0.0-s1d-contract"},
   "servers": [{"url": "/api/v1"}],
   "security": [{"bearerAuth": []}],
-  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1D",
   "paths": {
     "/social/contact-card": {
       "get": {
@@ -206,6 +206,36 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationCommand"}}}},
         "responses": {"200": {"description": "Idempotent cancellation receipt", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RoomInvitation"}}}}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}
       }
+    },
+    "/social/guest-documents": {
+      "post": {
+        "operationId": "issueGuestRoomDocument",
+        "x-autplay-authorization": "ACTIVE_CURRENT_P13_HOST_EXACT_ROOM",
+        "x-autplay-rate-limit": "20/host/15m",
+        "x-autplay-secret-boundary": "BODY_ONLY_HASH_ONLY_NO_URL_OR_LOG",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GuestInvitationCreate"}}}},
+        "responses": {"201": {"description": "Hash-only exact-Room guest invitation metadata", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GuestInvitation"}}}}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/guest-documents/{invitation_id}/revoke": {
+      "post": {
+        "operationId": "revokeGuestRoomDocument",
+        "x-autplay-authorization": "EXACT_CREATING_P13_HOST_DEVICE",
+        "parameters": [{"$ref": "#/components/parameters/InvitationId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationCommand"}}}},
+        "responses": {"200": {"description": "Idempotent invitation and live-session revocation", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GuestInvitation"}}}}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/wave/guest/redeem": {
+      "post": {
+        "operationId": "redeemGuestRoomDocument",
+        "security": [],
+        "x-autplay-authorization": "EXACT_BODY_ONLY_DOCUMENT_SECRET_ROOM_EPOCH_CAPACITY_AND_USE_COUNT",
+        "x-autplay-rate-limit": "30/source/15m; 10/document/15m",
+        "x-autplay-secret-boundary": "DOCUMENT_AND_SESSION_BEARERS_BODY_ONLY_HASH_ONLY",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GuestRedemption"}}}},
+        "responses": {"200": {"description": "Separate exact-Room guest capability metadata; client retains its own volatile session bearer", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GuestCapability"}}}}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}}
+      }
     }
   },
   "components": {
@@ -248,6 +278,11 @@
       "RoomInvitation": {"$ref": "../../social/v1/room-invitation.schema.json"},
       "RoomInvitationAccept": {"$ref": "../../social/v1/room-invitation-accept.schema.json"},
       "RoomInvitationAcceptance": {"$ref": "../../social/v1/room-invitation-acceptance.schema.json"},
+      "GuestInvitationCreate": {"$ref": "../../social/v1/guest-invitation-create.schema.json"},
+      "GuestDocument": {"$ref": "../../social/v1/guest-document.schema.json"},
+      "GuestInvitation": {"$ref": "../../social/v1/guest-invitation.schema.json"},
+      "GuestRedemption": {"$ref": "../../social/v1/guest-redemption.schema.json"},
+      "GuestCapability": {"$ref": "../../social/v1/guest-capability.schema.json"},
       "Error": {"type": "object", "additionalProperties": false, "required": ["code"], "properties": {"code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}
     },
     "responses": {"Error": {"description": "Stable non-disclosing error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}}

@@ -1,5 +1,7 @@
 package app.autplay.application.wave
 
+import app.autplay.application.guestroom.GuestInvitationReceipt
+import app.autplay.application.guestroom.GuestRoomDocumentCodec
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.RefreshingSessionCredentials
 import app.autplay.data.security.M5SessionRotationClient
@@ -8,6 +10,7 @@ import app.autplay.domain.ServerProfileId
 import app.autplay.domain.wave.WaveAvailability
 import app.autplay.domain.wave.WaveCommand
 import java.nio.charset.StandardCharsets
+import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -121,6 +124,38 @@ class OkHttpWaveTransport(
             buildJsonObject { put("room_code", code.uppercase()) },
         ),
     )
+
+    override suspend fun issueGuestDocument(roomId: String): GuestInvitationReceipt {
+        val normalizedRoomId = UUID.fromString(roomId).toString()
+        val documentBearer = GuestRoomDocumentCodec.generateBearer()
+        return try {
+            val payload = postJson(
+                "/v1/social/guest-documents",
+                buildJsonObject {
+                    put("operation_id", UUID.randomUUID().toString())
+                    put("room_id", normalizedRoomId)
+                    put(
+                        "document_bearer",
+                        java.util.Base64.getUrlEncoder().withoutPadding()
+                            .encodeToString(documentBearer),
+                    )
+                    put("ttl_seconds", 900)
+                    put("max_uses", 1)
+                },
+            )
+            GuestInvitationReceipt(
+                invitationId = UUID.fromString(
+                    payload.getValue("invitation_id").jsonPrimitive.content,
+                ).toString(),
+                roomId = normalizedRoomId,
+                expiresAt = Instant.parse(payload.getValue("expires_at").jsonPrimitive.content),
+                documentBearer = documentBearer,
+            )
+        } catch (error: Exception) {
+            documentBearer.fill(0)
+            throw error
+        }
+    }
 
     override suspend fun leave(roomId: String) {
         postJson("/v1/wave/rooms/${UUID.fromString(roomId)}/leave", buildJsonObject {})

@@ -1,0 +1,22 @@
+{
+  "contract_version": "release-discovery-v1",
+  "automation_policy_version": 1,
+  "cases": [
+    {"case_id": "operator-gate-default-off", "provider_call_count": 0, "job_enqueue_count": 0},
+    {"case_id": "review-required-discovers-only", "observation_count": 25, "acquisition_enqueue_count": 0},
+    {"case_id": "auto-import-needs-exact-confirmation", "wrong_confirmation": true, "durable_write_count": 0},
+    {"case_id": "concurrent-policy-cas-one-wins", "committed_revision_count": 1, "loser_error": "policy_revision_stale"},
+    {"case_id": "concurrent-scheduler-one-run", "run_count": 1, "job_count": 1},
+    {"case_id": "manual-run-obeys-cadence", "before_next_eligible": true, "run_count": 0},
+    {"case_id": "policy-revoked-before-provider-io", "provider_call_count": 0},
+    {"case_id": "policy-revoked-after-provider-response", "observation_count": 25, "auto_selection_count": 0},
+    {"case_id": "policy-revoked-before-vault-publish", "vault_publish_count": 0, "ready_count": 0},
+    {"case_id": "policy-revoked-before-materialize", "owner_materialization_count": 0, "ready_count": 0},
+    {"case_id": "auto-cancel-does-not-revoke-manual", "manual_authorization_active": true},
+    {"case_id": "manual-after-cancelled-auto-new-attempt", "auto_attempt_state": "CANCELLED", "manual_attempt_state": "QUEUED"},
+    {"case_id": "auto-import-run-cap", "eligible_candidate_count": 25, "acquisition_enqueue_count": 10},
+    {"case_id": "auto-import-owner-rolling-cap", "prior_24h_enqueue_count": 47, "acquisition_enqueue_count": 3},
+    {"case_id": "disable-keeps-ready-media", "ready_before": 1, "ready_after": 1, "library_delete_count": 0},
+    {"case_id": "automation-creates-no-exposure", "impression_count": 0, "global_insert_count": 0, "cross_owner_write_count": 0}
+  ]
+}

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-heading"><div><p class="eyebrow">A1C</p><h1>Discovery automation</h1><p>Owner-scoped scheduled release checks. Confirmed provider artist IDs are shown; credentials, raw URLs and payloads are never displayed.</p></div></header>
+{% if notice %}<p class="notice" role="status" aria-live="polite">{{ notice }}</p>{% endif %}
+<section class="panel" aria-labelledby="policy-title">
+  <h2 id="policy-title">Set artist policy</h2>
+  <form method="post" action="/admin/discovery/automation/set-policy" class="auth-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ policy_operation_id }}">
+    <label>Canonical artist ID <input name="canonical_artist_id" required maxlength="36" autocomplete="off"></label>
+    <label>Confirmed provider artist ID <input name="provider_artist_id" required maxlength="20" autocomplete="off"></label>
+    <label>Discovery mode <select name="discovery_mode"><option value="DISABLED">Disabled</option><option value="MANUAL_ONLY">Manual only</option><option value="SCHEDULED">Scheduled</option></select></label>
+    <label>Import mode <select name="import_mode"><option value="REVIEW_REQUIRED">Review required</option><option value="AUTO_IMPORT">Automatic import</option></select></label>
+    <label>Automation enabled <select name="automation_enabled"><option value="false">No</option><option value="true">Yes</option></select></label>
+    <label>Expected revision (optional) <input name="expected_revision" inputmode="numeric" maxlength="10" autocomplete="off"></label>
+    <label>Automatic import confirmation <input name="confirmation_code" maxlength="128" autocomplete="off" placeholder="Required only for AUTO_IMPORT"></label>
+    <p class="notice" role="note">Exact AUTO_IMPORT confirmation: <code>{{ auto_import_confirmation }}</code></p>
+    <button type="submit">Save policy</button>
+  </form>
+</section>
+<section class="panel" aria-labelledby="policies-title">
+  <h2 id="policies-title">Policies</h2>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Policies"><table><thead><tr><th scope="col">Canonical artist</th><th scope="col">Provider artist</th><th scope="col">Mode</th><th scope="col">Revision</th><th scope="col">Next eligible</th><th scope="col">Action</th></tr></thead><tbody>
+  {% for policy in policies %}<tr><td>{{ policy.canonical_artist_id }}</td><td>{{ policy.provider_artist_id }}</td><td>{{ policy.discovery_mode }} / {{ policy.import_mode }}</td><td>{{ policy.revision }}</td><td>{{ format_datetime(policy.next_eligible_at) }}</td><td><form method="post" action="/admin/discovery/automation/run-now"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ run_operation_ids[policy.policy_id|string] }}"><input type="hidden" name="policy_id" value="{{ policy.policy_id }}"><button type="submit">Run now</button></form></td></tr>{% else %}<tr><td colspan="6">No policies.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="panel" aria-labelledby="runs-title">
+  <h2 id="runs-title">Runs</h2>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Runs"><table><thead><tr><th scope="col">State</th><th scope="col">Observed</th><th scope="col">Selected</th><th scope="col">Pages</th><th scope="col">Created</th><th scope="col">Candidates</th></tr></thead><tbody>
+  {% for run in runs %}<tr><td>{{ run.state }}</td><td>{{ run.observed_count }}</td><td>{{ run.selected_count }}</td><td>{{ run.page_count }}</td><td>{{ format_datetime(run.created_at) }}</td><td><a href="/admin/discovery/automation/runs/{{ run.run_id }}?lang={{ locale }}">View</a></td></tr>{% else %}<tr><td colspan="6">No runs.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% if selected_run_id %}<section class="panel" aria-labelledby="candidates-title"><h2 id="candidates-title">Candidates</h2><div class="table-scroll" tabindex="0" role="region" aria-label="Candidates"><table><thead><tr><th scope="col">Title</th><th scope="col">Artist</th><th scope="col">Album</th><th scope="col">Release date</th><th scope="col">Disposition</th><th scope="col">Acquisition</th><th scope="col">Actions</th></tr></thead><tbody>{% for candidate in candidates %}<tr><td>{{ candidate.title }}</td><td>{{ candidate.artist }}</td><td>{{ candidate.album or "—" }}</td><td>{{ format_datetime(candidate.released_at) }}</td><td>{{ candidate.disposition }}</td><td>{{ candidate.acquisition_state }}</td><td>{% for action in ("select", "retry", "ignore") %}<form method="post" action="/admin/discovery/automation/candidates/{{ action }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ candidate_operation_ids[candidate.candidate_id|string][action] }}"><input type="hidden" name="candidate_id" value="{{ candidate.candidate_id }}"><input type="hidden" name="run_id" value="{{ selected_run_id }}"><button type="submit">{{ action|capitalize }}</button></form>{% endfor %}</td></tr>{% else %}<tr><td colspan="7">No candidates.</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% endblock %}

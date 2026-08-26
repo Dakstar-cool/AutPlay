@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+import threading
+import time
+from collections.abc import Callable, Mapping
+from datetime import date
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -15,6 +18,8 @@ from autplay.domain.discovery import (
     DiscoveryError,
     ProviderArtist,
     ProviderArtistTracks,
+    ProviderTrackObservation,
+    ProviderTrackPage,
 )
 from autplay.ports.source_adapters import (
     AdapterLimits,
@@ -64,13 +69,24 @@ class JamendoProvider:
         limits=AdapterLimits(0, 1, MAX_RESULTS, 15.0),
     )
 
-    def __init__(self, client_id: str, *, timeout_seconds: float = 15.0) -> None:
+    def __init__(
+        self,
+        client_id: str,
+        *,
+        timeout_seconds: float = 15.0,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         if re.fullmatch(r"[A-Za-z0-9_-]{4,100}", client_id) is None:
             raise ValueError("Jamendo client ID is invalid")
         if not 1.0 <= timeout_seconds <= self.manifest.limits.timeout_seconds:
             raise ValueError("Jamendo timeout is invalid")
         self._client_id = client_id
         self._timeout_seconds = timeout_seconds
+        self._monotonic_clock = monotonic_clock
+        self._sleeper = sleeper
+        self._gate_lock = threading.Lock()
+        self._last_request = 0.0
         self._opener = build_opener(_NoRedirects())
 
     def search(self, query: str, *, limit: int) -> tuple[DiscoveryCandidate, ...]:
@@ -183,6 +199,34 @@ class JamendoProvider:
         except ValueError as error:
             raise DiscoveryError("discovery_provider_response_invalid") from error
 
+    def release_tracks(self, provider_artist_id: str, *, offset: int) -> ProviderTrackPage:
+        """Read exactly one deterministic A1C release-discovery page.
+
+        This deliberately has a separate port from the manual search/top-track API: callers
+        cannot choose an arbitrary size, cursor, chart ordering, or provider artist mapping.
+        """
+
+        if re.fullmatch(r"\d{1,20}", provider_artist_id) is None:
+            raise DiscoveryError("provider_schema_invalid")
+        if offset not in {0, 25}:
+            raise DiscoveryError("provider_schema_invalid")
+        payload = self._request_json(
+            JAMENDO_TRACKS_URL,
+            {
+                "format": "json",
+                "artist_id": provider_artist_id,
+                "offset": str(offset),
+                "limit": "25",
+                "order": "releasedate_desc id_desc",
+                "include": "licenses",
+                "audiodlformat": "mp32",
+                "type": "single albumtrack",
+            },
+        )
+        return _parse_release_track_page(
+            payload, provider_artist_id=provider_artist_id, offset=offset
+        )
+
     def acquire(
         self,
         candidate: DiscoveryCandidate,
@@ -203,6 +247,7 @@ class JamendoProvider:
             method="GET",
         )
         try:
+            self._wait_for_request_slot()
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
                 content_type = response.headers.get_content_type().casefold()
                 content_length = response.headers.get("Content-Length")
@@ -241,6 +286,7 @@ class JamendoProvider:
             method="GET",
         )
         try:
+            self._wait_for_request_slot()
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
                 content_length = response.headers.get("Content-Length")
                 if content_length is not None and int(content_length) > MAX_RESPONSE_BYTES:
@@ -253,6 +299,16 @@ class JamendoProvider:
         if len(payload) > MAX_RESPONSE_BYTES:
             raise DiscoveryError("discovery_response_too_large")
         return payload
+
+    def _wait_for_request_slot(self) -> None:
+        """Keep every provider surface at the existing one-request-per-second ceiling."""
+
+        with self._gate_lock:
+            now = self._monotonic_clock()
+            delay = 1.0 - (now - self._last_request)
+            if delay > 0:
+                self._sleeper(delay)
+            self._last_request = self._monotonic_clock()
 
 
 def _parse_candidates(payload: bytes, *, limit: int) -> tuple[DiscoveryCandidate, ...]:
@@ -296,6 +352,62 @@ def _parse_full_count(payload: bytes) -> int:
     if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= 1_000_000:
         raise DiscoveryError("discovery_provider_response_invalid")
     return raw
+
+
+def _parse_release_track_page(
+    payload: bytes, *, provider_artist_id: str, offset: int
+) -> ProviderTrackPage:
+    """Parse only the schema required for an A1C checkpointable page."""
+
+    try:
+        document = json.loads(payload)
+        if not isinstance(document, dict):
+            raise ValueError("document")
+        headers = document.get("headers")
+        results = document.get("results")
+        if (
+            not isinstance(headers, dict)
+            or headers.get("status") != "success"
+            or headers.get("code") != 0
+            or not isinstance(results, list)
+            or len(results) > 25
+        ):
+            raise ValueError("envelope")
+        observations = tuple(
+            ProviderTrackObservation(
+                candidate=_parse_candidate(raw),
+                release_date=_release_date(raw),
+                release_timezone="UTC",
+            )
+            for raw in results
+            if isinstance(raw, dict)
+        )
+        if len(observations) != len(results):
+            raise ValueError("result")
+        checkpoint = (
+            f"v1:{observations[-1].release_date.isoformat()}:{observations[-1].candidate.provider_track_id}"
+            if observations
+            else None
+        )
+        return ProviderTrackPage(
+            provider_artist_id=provider_artist_id,
+            offset=offset,
+            observations=observations,
+            next_offset=25 if offset == 0 and len(observations) == 25 else None,
+            checkpoint=checkpoint,
+        )
+    except (DiscoveryError, TypeError, ValueError) as error:
+        raise DiscoveryError("provider_schema_invalid") from error
+
+
+def _release_date(value: Mapping[str, object]) -> date:
+    raw = value.get("releasedate")
+    if not isinstance(raw, str) or len(raw) != 10:
+        raise ValueError("release date")
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as error:
+        raise ValueError("release date") from error
 
 
 def _parse_candidate(value: Mapping[str, object]) -> DiscoveryCandidate:

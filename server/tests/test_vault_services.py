@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import TracebackType
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.postgresql.vault_uow import TransactionalIngestRepository
+from autplay.application.job_worker import JobLeaseLost
 from autplay.application.vault_ingest import IngestRepository, IngestSession, VaultIngestHandler
 from autplay.application.vault_streaming import parse_single_range
 from autplay.application.vault_uploads import (
@@ -16,10 +18,12 @@ from autplay.application.vault_uploads import (
     VaultPrincipal,
     VaultUploadService,
 )
+from autplay.domain.discovery import AcquisitionAuthorizationReceipt, DiscoveryError
 from autplay.domain.jobs import JobKey, RetryableJobError, TerminalJobError
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
+    CommitResult,
     OpaqueStorageKey,
     Sha256Digest,
     StagedFileNotFoundError,
@@ -124,6 +128,95 @@ def test_missing_staging_is_classified_and_upload_is_quarantined() -> None:
     assert repository.quarantine_code == "staged_file_not_found"
 
 
+@pytest.mark.parametrize(
+    ("failed_boundary", "expected_publish_count"),
+    (("PRE_PUBLISH", 0), ("PRE_MATERIALIZE", 1)),
+)
+def test_fresh_provider_revocation_blocks_publish_or_finalization(
+    tmp_path: Path,
+    failed_boundary: str,
+    expected_publish_count: int,
+) -> None:
+    candidate_id = uuid4()
+    owner_id = uuid4()
+    attempt_id = uuid4()
+    session = IngestSession(
+        uuid4(),
+        uuid4(),
+        OpaqueStorageKey("provider-stage"),
+        1,
+        None,
+        source_candidate_id=candidate_id,
+        source_provider_track_id="10",
+        source_owner_user_id=owner_id,
+        source_acquisition_attempt_id=attempt_id,
+    )
+    repository = _BoundaryRepository(session)
+    storage = _BoundaryStorage(tmp_path)
+    authorizer = _BoundaryAuthorizer(candidate_id, failed_boundary)
+    handler = VaultIngestHandler(
+        repository=cast(IngestRepository, repository),
+        storage=cast(VaultStorage, storage),
+        media=cast(MediaInspector, _Media()),
+        fingerprints=cast(FingerprintGenerator, _Fingerprints()),
+        source_authorizer=authorizer,
+    )
+
+    with pytest.raises(TerminalJobError, match="source_authorization_unavailable"):
+        handler(cast(object, _Context()), cast(object, _Lease(session.upload_session_id)))  # type: ignore[arg-type]
+
+    assert authorizer.calls == ["PRE_PUBLISH"] + (
+        ["PRE_MATERIALIZE"] if failed_boundary == "PRE_MATERIALIZE" else []
+    )
+    assert storage.publish_count == expected_publish_count
+    assert repository.finalize_count == 0
+    assert repository.quarantine_code == "source_authorization_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("lost_stage", "expected_publish_count"),
+    (
+        ("SOURCE_AUTHORIZED_PRE_PUBLISH", 0),
+        ("SOURCE_AUTHORIZED_PRE_MATERIALIZE", 1),
+    ),
+)
+def test_lost_lease_after_authorization_blocks_irreversible_boundary(
+    tmp_path: Path,
+    lost_stage: str,
+    expected_publish_count: int,
+) -> None:
+    candidate_id = uuid4()
+    session = IngestSession(
+        uuid4(),
+        uuid4(),
+        OpaqueStorageKey("provider-stage"),
+        1,
+        None,
+        source_candidate_id=candidate_id,
+        source_provider_track_id="10",
+        source_owner_user_id=uuid4(),
+        source_acquisition_attempt_id=uuid4(),
+    )
+    repository = _BoundaryRepository(session)
+    storage = _BoundaryStorage(tmp_path)
+    handler = VaultIngestHandler(
+        repository=cast(IngestRepository, repository),
+        storage=cast(VaultStorage, storage),
+        media=cast(MediaInspector, _Media()),
+        fingerprints=cast(FingerprintGenerator, _Fingerprints()),
+        source_authorizer=_BoundaryAuthorizer(candidate_id, "NEVER"),
+    )
+
+    with pytest.raises(JobLeaseLost):
+        handler(
+            cast(object, _LeaseLosingContext(lost_stage)),  # type: ignore[arg-type]
+            cast(object, _Lease(session.upload_session_id)),  # type: ignore[arg-type]
+        )
+
+    assert storage.publish_count == expected_publish_count
+    assert repository.finalize_count == 0
+
+
 class _Vault:
     def __init__(self, session: IngestSession) -> None:
         self._session = session
@@ -146,8 +239,9 @@ class _Vault:
         evidence: object,
         *,
         reused: bool,
+        authorization_receipt: object | None = None,
     ) -> bool:
-        del session, storage_key, metadata, evidence, reused
+        del session, storage_key, metadata, evidence, reused, authorization_receipt
         return True
 
     def quarantine(self, session: object, code: str) -> None:
@@ -221,6 +315,15 @@ class _Context:
         del value
 
 
+class _LeaseLosingContext:
+    def __init__(self, lost_stage: str) -> None:
+        self.lost_stage = lost_stage
+
+    def checkpoint(self, value: object) -> None:
+        if isinstance(value, dict) and value.get("stage") == self.lost_stage:
+            raise JobLeaseLost
+
+
 class _MissingRepository:
     def __init__(self, session: IngestSession) -> None:
         self.session = session
@@ -242,3 +345,90 @@ class _MissingStorage(_CapacityStorage):
     def verify_staging(self, key: OpaqueStorageKey) -> VerifiedStagedFile:
         del key
         raise StagedFileNotFoundError()
+
+
+class _BoundaryRepository:
+    def __init__(self, session: IngestSession) -> None:
+        self.session = session
+        self.finalize_count = 0
+        self.quarantine_code: str | None = None
+
+    def start_ingest(self, upload_session_id: object, job_id: object) -> IngestSession:
+        del upload_session_id, job_id
+        return self.session
+
+    def prepare_commit(self, *_: object) -> str:
+        return "PUBLISH"
+
+    def finalize_published(self, *_: object, **__: object) -> bool:
+        self.finalize_count += 1
+        return True
+
+    def quarantine(self, session: IngestSession, code: str) -> None:
+        assert session == self.session
+        self.quarantine_code = code
+
+
+class _BoundaryStorage(_CapacityStorage):
+    def __init__(self, root: Path) -> None:
+        super().__init__(100)
+        self.path = root / "provider-stage"
+        self.path.write_bytes(b"x")
+        self.publish_count = 0
+
+    def verify_staging(self, key: OpaqueStorageKey) -> VerifiedStagedFile:
+        del key
+        return VerifiedStagedFile(1, Sha256Digest(b"x" * 32))
+
+    def staging_path_for_media(self, key: OpaqueStorageKey) -> Path:
+        del key
+        return self.path
+
+    def commit_staging(self, key: OpaqueStorageKey, verified: VerifiedStagedFile) -> CommitResult:
+        del key, verified
+        self.publish_count += 1
+        return CommitResult(OpaqueStorageKey("x" * 64), False)
+
+    def cleanup_staging(self, key: OpaqueStorageKey) -> None:
+        del key
+
+
+class _Media:
+    def inspect(self, path: Path) -> AudioTechnicalMetadata:
+        del path
+        return AudioTechnicalMetadata("opus", "ogg", 48_000, 2, 1, None, None)
+
+
+class _Fingerprints:
+    def fingerprint(self, path: Path) -> ChromaprintEvidence:
+        del path
+        return ChromaprintEvidence("chromaprint", "1.6.1", 1, b"fp")
+
+
+class _BoundaryAuthorizer:
+    def __init__(self, candidate_id: UUID, failed_boundary: str) -> None:
+        self.candidate_id = candidate_id
+        self.failed_boundary = failed_boundary
+        self.calls: list[str] = []
+
+    def authorize(
+        self,
+        candidate_id: UUID,
+        provider_track_id: str,
+        *,
+        boundary: str,
+        owner_user_id: UUID,
+        acquisition_attempt_id: UUID,
+    ) -> AcquisitionAuthorizationReceipt:
+        del owner_user_id, acquisition_attempt_id
+        assert candidate_id == self.candidate_id and provider_track_id == "10"
+        self.calls.append(boundary)
+        if boundary == self.failed_boundary:
+            raise DiscoveryError("source_authorization_unavailable")
+        return AcquisitionAuthorizationReceipt(
+            candidate_id=candidate_id,
+            provider_track_id=provider_track_id,
+            provider_artist_id="20",
+            boundary=boundary,
+            checked_at=datetime.now(UTC),
+        )

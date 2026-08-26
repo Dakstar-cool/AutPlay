@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/guest-invitation.schema.json",
+  "title": "S1D guest Room invitation receipt without bearer material",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1D",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation_id", "invitation_id", "kind", "state", "room_id", "room_epoch", "role", "allowed_actions", "max_uses", "consumed_uses", "expires_at", "media_boundary"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"},
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "kind": {"const": "GUEST"},
+    "state": {"enum": ["PENDING", "DEPLETED", "REVOKED", "EXPIRED", "ROOM_CLOSED"]},
+    "room_id": {"type": "string", "format": "uuid"},
+    "room_epoch": {"type": "integer", "minimum": 1},
+    "role": {"const": "GUEST"},
+    "allowed_actions": {"const": ["ROOM_SNAPSHOT", "ROOM_EVENTS", "ROOM_PRESENCE", "ROOM_PREFLIGHT", "ROOM_TIMING", "ROOM_LEAVE"]},
+    "max_uses": {"type": "integer", "minimum": 1, "maximum": 8},
+    "consumed_uses": {"type": "integer", "minimum": 0, "maximum": 8},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "media_boundary": {"const": "INDEPENDENT_DEVICE_AUTHORIZATION_ONLY"}
+  }
+}
