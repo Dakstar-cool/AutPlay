@@ -1,0 +1,12 @@
+{
+  "examples": [
+    {"schema": "settings-command.schema.json", "instance": {"operation_id": "01992f90-45ac-7000-8000-000000000001", "expected_revision": 0, "friends_can_view_statistics": true}},
+    {"schema": "settings-view.schema.json", "instance": {"schema_version": 1, "friends_can_view_statistics": false, "revision": 0}},
+    {"schema": "settings-receipt.schema.json", "instance": {"schema_version": 1, "operation_id": "01992f90-45ac-7000-8000-000000000001", "friends_can_view_statistics": true, "revision": 1}},
+    {"schema": "profile-statistics.schema.json", "instance": {"schema_version": 1, "through_utc_date": "2026-08-24", "windows": [
+      {"window": "LAST_7_COMPLETE_DAYS", "play_session_count": 7, "listened_ms": 840000, "unique_track_count": 4},
+      {"window": "LAST_30_COMPLETE_DAYS", "play_session_count": 31, "listened_ms": 3720000, "unique_track_count": 18},
+      {"window": "LAST_365_COMPLETE_DAYS", "play_session_count": 365, "listened_ms": 43800000, "unique_track_count": 120}
+    ]}}
+  ]
+}

@@ -22,8 +22,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.application.social.ProfileStatisticsSettingsState
 import app.autplay.data.settings.NonSecretSettings
 import app.autplay.ui.AppLanguage
 import app.autplay.ui.AutPlayIcon
@@ -40,6 +44,9 @@ internal fun SettingsProductScreen(
     onRescanLibraryRoot: () -> Unit,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
+    statisticsSettings: ProfileStatisticsSettingsState = ProfileStatisticsSettingsState.Unavailable,
+    statisticsSettingsErrorCode: String? = null,
+    onStatisticsVisibilityChange: (Boolean) -> Unit = {},
     onNavigate: (UiDestination) -> Unit,
 ) {
     Column(
@@ -133,6 +140,65 @@ internal fun SettingsProductScreen(
             }
         }
 
+        SettingsSection(icon = AutPlayIcon.Privacy, titleRes = R.string.settings_statistics_privacy) {
+            Text(
+                stringResource(R.string.settings_statistics_share_explanation),
+                color = AutPlayTokens.colors.mutedText,
+            )
+            val confirmed = statisticsSettings as? ProfileStatisticsSettingsState.Confirmed
+            val checked = when (statisticsSettings) {
+                is ProfileStatisticsSettingsState.Confirmed -> statisticsSettings.enabled
+                is ProfileStatisticsSettingsState.Updating -> statisticsSettings.confirmed.enabled
+                ProfileStatisticsSettingsState.Loading,
+                ProfileStatisticsSettingsState.Unavailable,
+                -> false
+            }
+            val switchStateDescription = stringResource(
+                when (statisticsSettings) {
+                    ProfileStatisticsSettingsState.Loading -> R.string.settings_statistics_state_loading
+                    is ProfileStatisticsSettingsState.Updating -> R.string.settings_statistics_state_updating
+                    ProfileStatisticsSettingsState.Unavailable -> R.string.settings_statistics_state_unavailable
+                    is ProfileStatisticsSettingsState.Confirmed -> if (statisticsSettings.enabled) {
+                        R.string.settings_statistics_state_shared
+                    } else {
+                        R.string.settings_statistics_state_private
+                    }
+                },
+            )
+            SettingsSwitchRow(
+                label = stringResource(R.string.settings_statistics_share),
+                checked = checked,
+                enabled = confirmed != null,
+                stateDescriptionText = switchStateDescription,
+                onCheckedChange = onStatisticsVisibilityChange,
+            )
+            Text(
+                stringResource(
+                    when (statisticsSettings) {
+                        ProfileStatisticsSettingsState.Loading -> R.string.settings_statistics_loading
+                        is ProfileStatisticsSettingsState.Updating -> R.string.settings_statistics_updating
+                        ProfileStatisticsSettingsState.Unavailable -> if (settings.activeServerProfileId == null) {
+                            R.string.settings_statistics_unavailable_local
+                        } else {
+                            R.string.settings_statistics_unavailable_server
+                        }
+                        is ProfileStatisticsSettingsState.Confirmed -> if (statisticsSettings.enabled) {
+                            R.string.settings_statistics_state_shared
+                        } else {
+                            R.string.settings_statistics_state_private
+                        }
+                    },
+                ),
+                color = AutPlayTokens.colors.mutedText,
+            )
+            if (statisticsSettingsErrorCode != null && confirmed != null) {
+                Text(
+                    stringResource(R.string.settings_statistics_update_failed),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+
         SettingsSection(icon = AutPlayIcon.Privacy, titleRes = R.string.settings_transfer) {
             Text(stringResource(R.string.settings_export_privacy), color = AutPlayTokens.colors.mutedText)
             Button(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
@@ -215,14 +281,28 @@ private fun ChoiceColumn(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SettingsSwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingsSwitchRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    stateDescriptionText: String? = null,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.heightIn(min = 48.dp).semantics {
+                contentDescription = label
+                stateDescriptionText?.let { stateDescription = it }
+            },
+        )
     }
 }
 

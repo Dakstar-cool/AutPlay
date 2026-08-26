@@ -16,6 +16,8 @@ import app.autplay.application.profilepairing.CapabilityState
 import app.autplay.application.profilepairing.PairingFlowSnapshot
 import app.autplay.application.profilepairing.PairingState
 import app.autplay.application.profilepairing.TrustedServerIdentity
+import app.autplay.application.profilepairing.AdmissionAccount
+import app.autplay.application.profilepairing.AdmissionState
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
@@ -38,6 +40,26 @@ class ProfilePairingScreenTest {
         compose.onNodeWithText(context.getString(R.string.profile_connection_local)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_check_server)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_local_body)).assertIsDisplayed()
+    }
+
+    @Test
+    fun approvedAdmissionRequiresExplicitAccountConfirmation() {
+        val confirmations = AtomicInteger(0)
+        render(
+            ProfilePairingUiState(
+                pairing = connectedState(),
+                admission = AdmissionUiState(
+                    AdmissionState.Approved(
+                        approvedCheckpoint(),
+                        AdmissionAccount(UserId("66666666-6666-4666-8666-666666666666"), "Owner"),
+                    ),
+                ),
+            ),
+            ProfilePairingActions(admission = AdmissionActions(confirmAccount = confirmations::incrementAndGet)),
+        )
+        compose.onNodeWithText("Approved for Owner (66666666-6666-4666-8666-666666666666). Confirm this account before connecting.").assertIsDisplayed()
+        compose.onNodeWithText("Confirm account").performClick()
+        compose.runOnIdle { assertEquals(1, confirmations.get()) }
     }
 
     @Test
@@ -240,6 +262,19 @@ class ProfilePairingScreenTest {
 
     private fun reviewState() = LocalDataReviewUiState(
         items = listOf(PendingLocalDataUiSummary("change-1", "PLAY", 10L)),
+    )
+
+    private fun approvedCheckpoint() = app.autplay.application.profilepairing.AdmissionCheckpoint(
+        requestId = "77777777-7777-4777-8777-777777777777",
+        requestSha256 = "b".repeat(64),
+        serverProfileId = ServerProfileId("11111111-1111-4111-8111-111111111111"),
+        serverInstanceId = "44444444-4444-4444-8444-444444444444",
+        identityEpoch = 1,
+        identityThumbprintSha256 = "a".repeat(64),
+        deviceKeyThumbprintSha256 = "c".repeat(64),
+        generationId = "88888888-8888-4888-8888-888888888888",
+        apiOrigin = "https://example.test",
+        streamOrigin = "https://stream.example.test",
     )
 
 }

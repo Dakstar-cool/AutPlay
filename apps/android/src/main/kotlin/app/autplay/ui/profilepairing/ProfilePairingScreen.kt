@@ -66,6 +66,8 @@ internal data class ProfilePairingUiState(
     val invitationManagement: InvitationManagementUiState? = null,
     /** Application-owned in-flight action; prevents duplicate destructive commands. */
     val pendingRemoteAction: ProfileRemoteAction? = null,
+    /** S1B approval state is independent from local library/playback state. */
+    val admission: AdmissionUiState? = null,
 )
 
 /** A safe local-intent row: it deliberately contains neither payloads nor server credentials. */
@@ -124,6 +126,8 @@ internal data class ProfilePairingActions(
     val retry: () -> Unit = {},
     val openSync: () -> Unit = {},
     val performRemoteAction: (ProfileRemoteAction) -> Unit = {},
+    val reenrollTrustedDevice: () -> Unit = {},
+    val admission: AdmissionActions = AdmissionActions(),
 )
 
 @Composable
@@ -138,10 +142,7 @@ internal fun ProfilePairingScreen(
     var pendingConfirmation by rememberSaveable { mutableStateOf<ProfileRemoteAction?>(null) }
 
     SecureWindowWhileVisible(
-        enabled = (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) ||
-            state.pairing is PairingState.AwaitingConfirmation ||
-            state.pairing is PairingState.ExchangingInvitation ||
-            state.invitationManagement?.createdSecret != null,
+        enabled = requiresSecureProfileWindow(state),
     )
 
     Column(
@@ -231,6 +232,7 @@ internal fun ProfilePairingScreen(
                 OutlinedButton(onClick = actions.cancelPairing) { Text(stringResource(R.string.profile_cancel)) }
             }
         }
+        state.admission?.let { AdmissionPanel(it, actions.admission) }
 
         if (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
             OutlinedTextField(
@@ -290,6 +292,13 @@ internal fun ProfilePairingScreen(
         )
     }
 }
+
+internal fun requiresSecureProfileWindow(state: ProfilePairingUiState): Boolean =
+    (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) ||
+        state.pairing is PairingState.AwaitingConfirmation ||
+        state.pairing is PairingState.ExchangingInvitation ||
+        state.invitationManagement?.createdSecret != null ||
+        state.admission != null
 
 @Composable
 private fun PersonalServerHero(state: ProfilePairingUiState) {
@@ -585,6 +594,7 @@ private fun ConnectedProfile(
         state.sessions.forEach { Text(it) }
     }
     Text(stringResource(R.string.profile_local_data_preserved))
+    OutlinedButton(enabled = remoteActionPending == null, onClick = actions.reenrollTrustedDevice) { Text("Re-enroll trusted device") }
     ProfileActionButton(ProfileRemoteAction.LOGOUT_CURRENT, remoteActionPending, requestConfirmation)
     ProfileActionButton(ProfileRemoteAction.LOGOUT_ALL, remoteActionPending, requestConfirmation)
     ProfileActionButton(ProfileRemoteAction.REVOKE_CURRENT_DEVICE, remoteActionPending, requestConfirmation)

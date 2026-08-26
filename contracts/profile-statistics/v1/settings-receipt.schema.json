@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/profile-statistics/v1/settings-receipt.schema.json",
+  "title": "S2 profile statistics visibility mutation receipt",
+  "x-autplay-implementation-status": "IMPLEMENTED_S2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation_id", "friends_can_view_statistics", "revision"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "friends_can_view_statistics": {"type": "boolean"},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
+  }
+}

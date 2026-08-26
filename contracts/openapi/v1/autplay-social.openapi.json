@@ -1,0 +1,255 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "AutPlay S1C Identity, Trust and Social API", "version": "1.0.0-s1c-contract"},
+  "servers": [{"url": "/api/v1"}],
+  "security": [{"bearerAuth": []}],
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "paths": {
+    "/social/contact-card": {
+      "get": {
+        "operationId": "getOwnContactCard",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT_SAME_SERVER",
+        "x-autplay-rate-limit": "60/account/15m",
+        "responses": {"200": {"description": "Signed caller-owned contact card; no directory lookup", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContactCard"}}}}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/snapshot": {
+      "get": {
+        "operationId": "getSocialSnapshot",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT_ONLY",
+        "x-autplay-rate-limit": "60/account/15m",
+        "responses": {"200": {"description": "Bounded caller-owned social recovery state; never a directory", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SocialSnapshot"}}}}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/admission-requests": {
+      "post": {
+        "operationId": "submitAdmissionRequest",
+        "security": [],
+        "x-autplay-authorization": "M5_DISCOVERY_TRUSTED_EXACT_DEVICE_POP_NO_SESSION",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionRequest"}}}},
+        "responses": {
+          "202": {"description": "Server-derived expiry plus raw review locator and independent poll bearer, each returned once", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionCreated"}}}},
+          "409": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/social/admission-requests/{request_id}/poll": {
+      "post": {
+        "operationId": "pollAdmissionRequest",
+        "security": [{"admissionPollBearer": []}],
+        "x-autplay-authorization": "EXACT_POLL_BEARER_AND_EXACT_DEVICE_KEY_POP_NON_DISCLOSING",
+        "parameters": [{"$ref": "#/components/parameters/RequestId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionPoll"}}}},
+        "responses": {
+          "200": {"description": "Coarse status only; never repeats a locator or bearer", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionStatus"}}}},
+          "404": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/social/admission-requests/{request_id}/recover": {
+      "post": {
+        "operationId": "recoverAdmissionCreationSecrets",
+        "security": [],
+        "x-autplay-authorization": "EXACT_PENDING_REQUEST_HASH_SERVER_BINDING_AND_DEVICE_KEY_POP",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionRecovery"}}}},
+        "parameters": [{"$ref": "#/components/parameters/RequestId"}],
+        "responses": {
+          "200": {"description": "Atomically invalidate the prior secret generation and return one newly generated locator/bearer pair without creating another request", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionCreated"}}}},
+          "404": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/social/admission-requests/{request_id}/exchange": {
+      "post": {
+        "operationId": "exchangeApprovedAdmission",
+        "security": [{"admissionPollBearer": []}],
+        "x-autplay-authorization": "EXACT_APPROVED_REQUEST_POLL_BEARER_HEADER_SERVER_BINDING_AND_DEVICE_KEY_POP",
+        "x-autplay-proof-domain": "autplay:s1b:admission-exchange:v1\\n",
+        "parameters": [{"$ref": "#/components/parameters/RequestId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionExchange"}}}},
+        "responses": {
+          "201": {"description": "Ordinary M5 device/session issuance; trust only materializes for an exact TRUST_DEVICE decision", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "../../profile-pairing/v1/enrollment-exchange-response.schema.json"}}}},
+          "200": {"description": "Exact idempotent replay after mutable authority revalidation", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "../../profile-pairing/v1/enrollment-exchange-response.schema.json"}}}},
+          "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/social/trusted-keys/re-enrollment/challenge": {
+      "post": {
+        "operationId": "createTrustedKeyReenrollmentChallenge",
+        "security": [],
+        "x-autplay-authorization": "EXACT_ACTIVE_TRUSTED_KEY_SERVER_BINDING_AND_DEVICE_KEY_POP",
+        "x-autplay-proof-domain": "autplay:s1b:trusted-reenrollment:v1\\n",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustedReenrollmentChallengeRequest"}}}},
+        "responses": {"201": {"description": "One-time hash-only challenge bound to the exact key", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustedReenrollmentChallenge"}}}}, "404": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/trusted-keys/re-enrollment/exchange": {
+      "post": {
+        "operationId": "exchangeTrustedKeyReenrollment",
+        "security": [],
+        "x-autplay-authorization": "FRESH_EXACT_CHALLENGE_ACTIVE_TRUSTED_KEY_NO_KEY_BLOCK_AND_DEVICE_KEY_POP",
+        "x-autplay-proof-domain": "autplay:s1b:trusted-reenrollment:v1\\n",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustedReenrollment"}}}},
+        "responses": {"201": {"description": "Ordinary M5 device/session issuance for the same exact key", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "../../profile-pairing/v1/enrollment-exchange-response.schema.json"}}}}, "200": {"description": "Exact idempotent replay", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "../../profile-pairing/v1/enrollment-exchange-response.schema.json"}}}}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/web/social/admission-review/resolve": {
+      "post": {
+        "operationId": "resolveAdmissionReviewLocator",
+        "security": [{"webSessionCookie": []}],
+        "x-autplay-authorization": "M6_WEB_OWNER_OR_ADMIN_EXACT_SELF_ACCOUNT_ONLY",
+        "x-autplay-m6-mutation-boundary": "EXACT_ORIGIN_CSRF_SYNCHRONIZER_AND_OPERATION_ID_REQUIRED",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReviewLocatorResolution"}}}},
+        "responses": {
+          "200": {"description": "Raw locator consumed into a server-side M6 session binding; the response has no binding secret", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReviewBinding"}}}},
+          "404": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/web/social/admission-review/decision": {
+      "post": {
+        "operationId": "decideAdmissionRequest",
+        "security": [{"webSessionCookie": []}],
+        "x-autplay-authorization": "M6_WEB_OWNER_OR_ADMIN_EXACT_SELF_ACCOUNT_ONLY",
+        "x-autplay-m6-mutation-boundary": "EXACT_ORIGIN_CSRF_SYNCHRONIZER_AND_OPERATION_ID_REQUIRED",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionDecision"}}}},
+        "responses": {"200": {"description": "Idempotent terminal decision for the session-bound review", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AdmissionStatus"}}}}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/web/social/trusted-keys/commands": {
+      "post": {
+        "operationId": "commandTrustedKey",
+        "security": [{"webSessionCookie": []}],
+        "x-autplay-authorization": "M6_WEB_OWNER_OR_ADMIN_EXACT_SELF_ACCOUNT_ONLY",
+        "x-autplay-m6-mutation-boundary": "EXACT_ORIGIN_CSRF_SYNCHRONIZER_AND_OPERATION_ID_REQUIRED",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustedKeyCommand"}}}},
+        "responses": {"200": {"description": "Exact-key lifecycle consequence"}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/friendships/commands": {
+      "post": {
+        "operationId": "commandFriendship",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT_SAME_SERVER",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FriendshipCommand"}}}},
+        "x-autplay-rate-limit": "30/account/15m; 10/pair/15m",
+        "responses": {"200": {"description": "Idempotent durable non-disclosing friendship receipt", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FriendshipReceipt"}}}}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/presence/settings": {
+      "get": {
+        "operationId": "getPresenceSettings",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT",
+        "responses": {"200": {"description": "Caller-owned persisted private settings", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PresenceSettingsView"}}}}}
+      },
+      "put": {
+        "operationId": "setPresenceSettings",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PresenceSettings"}}}},
+        "x-autplay-rate-limit": "10/account/15m",
+        "responses": {"200": {"description": "Default-private settings updated idempotently", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PresenceSettingsView"}}}}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/presence/heartbeat": {
+      "post": {
+        "operationId": "heartbeatPresence",
+        "x-autplay-authorization": "ACTIVE_SESSION_EXACT_DEVICE_SERVER_DERIVED_EXPIRY",
+        "x-autplay-rate-limit": "1/30s/device",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PresenceHeartbeat"}}}},
+        "responses": {"204": {"description": "Freshness derived by the server; no response body"}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/friends/{account_id}/presence": {
+      "get": {
+        "operationId": "getFriendPresence",
+        "x-autplay-authorization": "ACTIVE_MUTUAL_FRIEND_NO_BLOCK_SUBJECT_OPT_IN",
+        "parameters": [{"$ref": "#/components/parameters/AccountId"}],
+        "x-autplay-rate-limit": "120/account/15m",
+        "responses": {"200": {"description": "Read-only coarse server aggregate", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PresenceAggregate"}}}}, "404": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/friends/presence": {
+      "get": {
+        "operationId": "getFriendPresencePage",
+        "x-autplay-authorization": "ACTIVE_SESSION_OWN_MUTUAL_FRIENDS_NO_BLOCK",
+        "x-autplay-rate-limit": "120/account/15m",
+        "responses": {"200": {"description": "Bounded aggregate presence for caller's friends", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PresencePage"}}}}, "429": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/room-invitations": {
+      "post": {
+        "operationId": "createRoomInvitation",
+        "x-autplay-authorization": "ACTIVE_P13_HOST_ONLY_FRIEND_POLICY",
+        "x-autplay-rate-limit": "20/host/15m; 8/pending-room",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FriendRoomInvitationCreate"}}}},
+        "responses": {"201": {"description": "Server-expiring exact friend/Room invitation", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RoomInvitation"}}}}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/room-invitations/{invitation_id}/accept": {
+      "post": {
+        "operationId": "acceptFriendRoomInvitation",
+        "x-autplay-authorization": "ACTIVE_TARGET_ACCOUNT_DEVICE_BOUND_P13_JOIN",
+        "parameters": [{"$ref": "#/components/parameters/InvitationId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RoomInvitationAccept"}}}},
+        "responses": {"200": {"description": "One idempotent ordinary device-bound P13 membership", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RoomInvitationAcceptance"}}}}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/social/room-invitations/{invitation_id}/cancel": {
+      "post": {
+        "operationId": "cancelFriendRoomInvitation",
+        "x-autplay-authorization": "ACTIVE_INVITATION_CREATOR_ONLY",
+        "parameters": [{"$ref": "#/components/parameters/InvitationId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationCommand"}}}},
+        "responses": {"200": {"description": "Idempotent cancellation receipt", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RoomInvitation"}}}}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer"},
+      "admissionPollBearer": {"type": "apiKey", "in": "header", "name": "X-AutPlay-Admission-Poll", "description": "Raw 128-bit polling bearer. It is forbidden in URLs, logs, exports and persisted Android work/state."},
+      "webSessionCookie": {"type": "apiKey", "in": "cookie", "name": "__Host-autplay_admin", "description": "Existing M6 Secure HttpOnly host-only SameSite=Strict session cookie; bounded loopback development may use its accepted local exception."}
+    },
+    "headers": {"NoStore": {"schema": {"type": "string", "const": "no-store"}}},
+    "parameters": {
+      "RequestId": {"name": "request_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "AccountId": {"name": "account_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "InvitationId": {"name": "invitation_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+    },
+    "schemas": {
+      "AdmissionRequest": {"$ref": "../../social/v1/admission-request.schema.json"},
+      "AdmissionCreated": {"$ref": "../../social/v1/admission-created.schema.json"},
+      "AdmissionPoll": {"$ref": "../../social/v1/admission-poll.schema.json"},
+      "AdmissionRecovery": {"$ref": "../../social/v1/admission-recovery.schema.json"},
+      "AdmissionStatus": {"$ref": "../../social/v1/admission-status.schema.json"},
+      "AdmissionExchange": {"$ref": "../../social/v1/admission-exchange.schema.json"},
+      "TrustedReenrollmentChallengeRequest": {"$ref": "../../social/v1/trusted-reenrollment-challenge-request.schema.json"},
+      "TrustedReenrollmentChallenge": {"$ref": "../../social/v1/trusted-reenrollment-challenge.schema.json"},
+      "TrustedReenrollment": {"$ref": "../../social/v1/trusted-reenrollment.schema.json"},
+      "ReviewLocatorResolution": {"$ref": "../../social/v1/review-locator-resolution.schema.json"},
+      "ReviewBinding": {"$ref": "../../social/v1/review-binding.schema.json"},
+      "AdmissionDecision": {"$ref": "../../social/v1/admission-decision.schema.json"},
+      "TrustedKeyCommand": {"$ref": "../../social/v1/trusted-key-command.schema.json"},
+      "FriendshipCommand": {"$ref": "../../social/v1/friendship-command.schema.json"},
+      "FriendshipReceipt": {"$ref": "../../social/v1/friendship-receipt.schema.json"},
+      "ContactCard": {"$ref": "../../social/v1/contact-card.schema.json"},
+      "SocialSnapshot": {"$ref": "../../social/v1/social-snapshot.schema.json"},
+      "OperationCommand": {"$ref": "../../social/v1/operation-command.schema.json"},
+      "PresenceSettings": {"$ref": "../../social/v1/presence-settings.schema.json"},
+      "PresenceSettingsView": {"$ref": "../../social/v1/presence-settings-view.schema.json"},
+      "PresenceHeartbeat": {"$ref": "../../social/v1/presence-heartbeat.schema.json"},
+      "PresenceAggregate": {"$ref": "../../social/v1/presence-aggregate.schema.json"},
+      "PresencePage": {"$ref": "../../social/v1/presence-page.schema.json"},
+      "FriendRoomInvitationCreate": {"$ref": "../../social/v1/friend-room-invitation-create.schema.json"},
+      "RoomInvitation": {"$ref": "../../social/v1/room-invitation.schema.json"},
+      "RoomInvitationAccept": {"$ref": "../../social/v1/room-invitation-accept.schema.json"},
+      "RoomInvitationAcceptance": {"$ref": "../../social/v1/room-invitation-acceptance.schema.json"},
+      "Error": {"type": "object", "additionalProperties": false, "required": ["code"], "properties": {"code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}
+    },
+    "responses": {"Error": {"description": "Stable non-disclosing error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}}
+  }
+}

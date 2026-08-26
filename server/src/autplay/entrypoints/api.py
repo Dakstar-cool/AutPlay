@@ -39,12 +39,15 @@ from autplay.entrypoints.composition import (
     build_manual_discovery_service,
     build_profile_pairing_service,
     build_recommendation_service,
+    build_social_service,
     build_stream_lookup,
     build_sync_service,
     build_vault_http_service,
     build_wave_service,
     build_web_admin_service,
 )
+from autplay.entrypoints.device_admission_http import create_device_admission_router
+from autplay.entrypoints.device_admission_web import DeviceAdmissionWebAdapter
 from autplay.entrypoints.discovery_admin_http import (
     ManualDiscoveryHttp,
     create_discovery_admin_router,
@@ -56,6 +59,7 @@ from autplay.entrypoints.recommendation_http import (
     RecommendationHttpService,
     create_recommendation_router,
 )
+from autplay.entrypoints.social_http import create_social_router
 from autplay.entrypoints.sync_http import create_sync_router
 from autplay.entrypoints.vault_http import UploadService, create_vault_router
 from autplay.entrypoints.wave_http import create_wave_router
@@ -86,6 +90,7 @@ def create_app(
     recommendation_service: RecommendationHttpService | None = None,
     sync_service: object | None = None,
     wave_service: Any | None = None,
+    social_service: Any | None = None,
     profile_pairing_service: ProfilePairingService | None = None,
     admin_web_service: WebAdminService | None = None,
     admin_view_service: AdminViewsHttp | None = None,
@@ -106,6 +111,7 @@ def create_app(
     recommendations = recommendation_service or build_recommendation_service(engine)
     sync = sync_service or build_sync_service(resolved_settings, engine)
     wave = wave_service or build_wave_service(engine)
+    social = social_service or build_social_service(resolved_settings, engine)
     pairing = (
         profile_pairing_service
         if profile_pairing_service is not None
@@ -143,6 +149,7 @@ def create_app(
             decode_access=getattr(authentication, "decode_access", None),
         )
     )
+    api_router.include_router(create_device_admission_router(pairing))
     api_router.include_router(
         create_vault_router(uploads, authenticated=bearer_authentication(authentication))
     )
@@ -168,6 +175,9 @@ def create_app(
             source_lookup=build_stream_lookup(engine),
             metrics=runtime_metrics,
         )
+    )
+    api_router.include_router(
+        create_social_router(social, authenticated=bearer_authentication(authentication))
     )
     app.include_router(api_router)
     if resolved_settings.admin_web_enabled:
@@ -201,6 +211,9 @@ def create_app(
                 origin=origin,
                 source_secret=source_secret.get_secret_value().encode("utf-8"),
                 discovery_enabled=discovery is not None,
+                device_admission=(
+                    DeviceAdmissionWebAdapter(pairing) if pairing is not None else None
+                ),
             )
         )
 

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/presence-page.schema.json",
+  "title": "S1C bounded friend aggregate-presence page",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "type": "object", "additionalProperties": false,
+  "required": ["items"],
+  "properties": {"items": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "presence"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "presence": {"enum": ["OFFLINE", "ONLINE", "AVAILABLE_TO_INVITE", "IN_ROOM"]}}}}}
+}

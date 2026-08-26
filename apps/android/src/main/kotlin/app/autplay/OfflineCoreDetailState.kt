@@ -184,7 +184,7 @@ internal fun rememberOfflineCoreDetailState(
     reportError: (String) -> Unit,
 ): OfflineCoreDetailState {
     val state = remember(contextKey) { OfflineCoreDetailState() }
-    LaunchedEffect(target, profileId) {
+    LaunchedEffect(target, profileId, contextKey) {
         state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
     }
     return state

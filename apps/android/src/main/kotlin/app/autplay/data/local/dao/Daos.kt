@@ -250,11 +250,15 @@ interface QueueDao {
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertSnapshot(row: QueueSnapshotEntity)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertEntries(rows: List<QueueEntryEntity>)
     @Query("SELECT * FROM queue_snapshot WHERE active_slot = 'ACTIVE' LIMIT 1") fun activeSnapshot(): Flow<QueueSnapshotEntity?>
+    @Query("SELECT e.* FROM queue_entry e JOIN queue_snapshot s ON s.queue_snapshot_id = e.queue_snapshot_id WHERE s.active_slot = 'ACTIVE' ORDER BY e.position ASC LIMIT :limit") fun activeEntries(limit: Int): Flow<List<QueueEntryEntity>>
     @Query("SELECT * FROM queue_snapshot WHERE active_slot = 'ACTIVE' LIMIT 1") suspend fun activeSnapshotOnce(): QueueSnapshotEntity?
     @Query("SELECT * FROM queue_snapshot WHERE active_slot IS NULL AND active_listening_event_id IS NOT NULL ORDER BY updated_at_ms ASC LIMIT :limit") suspend fun inactiveSnapshotsWithActiveSessions(limit: Int): List<QueueSnapshotEntity>
     @Query("SELECT * FROM queue_snapshot WHERE queue_snapshot_id = :snapshotId") suspend fun snapshot(snapshotId: String): QueueSnapshotEntity?
     @Query("SELECT * FROM queue_entry WHERE queue_entry_id = :entryId") suspend fun entry(entryId: String): QueueEntryEntity?
     @Query("SELECT * FROM queue_entry WHERE queue_snapshot_id = :snapshotId ORDER BY position ASC LIMIT :limit") suspend fun entries(snapshotId: String, limit: Int): List<QueueEntryEntity>
+    @Query("DELETE FROM queue_entry WHERE queue_snapshot_id = :snapshotId") suspend fun deleteEntriesForSnapshot(snapshotId: String): Int
+    @Query("UPDATE queue_snapshot SET queue_type = :queueType, source_context_id = :sourceContextId, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")
+    suspend fun promoteActiveSnapshot(snapshotId: String, queueType: String, sourceContextId: String?, nowMs: Long): Int
     @Query("UPDATE queue_snapshot SET is_active = 0, active_slot = NULL, updated_at_ms = :nowMs WHERE active_slot = 'ACTIVE' AND queue_snapshot_id != :exceptSnapshotId") suspend fun deactivateOtherSnapshots(exceptSnapshotId: String, nowMs: Long): Int
     @Query("UPDATE queue_snapshot SET current_entry_id = :entryId, current_position_ms = :positionMs, shuffle_mode = :shuffleMode, repeat_mode = :repeatMode, seed = :seed, active_listening_event_id = :listeningEventId, active_session_started_at_ms = :startedAtMs, active_session_start_position_ms = :startPositionMs, active_session_observed_played_ms = :observedPlayedMs, active_session_user_id = :sessionUserId, active_session_device_id = :sessionDeviceId, active_session_server_profile_id = :sessionServerProfileId, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId")
     suspend fun checkpoint(
@@ -314,7 +318,110 @@ interface HistoryDao {
     @Query("SELECT * FROM listening_event ORDER BY started_at_ms DESC LIMIT :limit") fun recent(limit: Int): Flow<List<ListeningEventEntity>>
     @Query("SELECT * FROM listening_event WHERE server_profile_id = :profileId ORDER BY started_at_ms DESC LIMIT :limit") fun recentForProfile(profileId: String, limit: Int): Flow<List<ListeningEventEntity>>
     @Query("SELECT * FROM listening_event WHERE server_profile_id = 'legacy-unscoped' ORDER BY started_at_ms DESC LIMIT :limit") fun recentLegacy(limit: Int): Flow<List<ListeningEventEntity>>
+
+    @Query(
+        """
+        SELECT COUNT(*) AS play_session_count,
+               COALESCE(SUM(played_ms), 0) AS listened_ms,
+               COUNT(DISTINCT COALESCE(
+                   user_track_ref.server_recording_id,
+                   listening_event.server_recording_id,
+                   user_track_ref.local_recording_id,
+                   listening_event.local_user_track_ref_id
+               )) AS unique_track_count
+        FROM listening_event
+        JOIN user_track_ref
+          ON user_track_ref.local_user_track_ref_id = listening_event.local_user_track_ref_id
+         AND user_track_ref.server_profile_id = listening_event.server_profile_id
+        WHERE listening_event.server_profile_id = :profileId
+          AND listening_event.started_at_ms >= :fromInclusiveMs
+          AND listening_event.started_at_ms <= :throughInclusiveMs
+          AND listening_event.played_ms > 0
+        """,
+    )
+    fun ownerWindow(
+        profileId: String,
+        fromInclusiveMs: Long,
+        throughInclusiveMs: Long,
+    ): Flow<OwnerStatisticsWindowProjection>
+
+    @Query(
+        """
+        SELECT COALESCE(
+                   user_track_ref.server_recording_id,
+                   listening_event.server_recording_id,
+                   user_track_ref.local_recording_id,
+                   listening_event.local_user_track_ref_id
+               ) AS identity_key,
+               MAX(user_track_ref.raw_title) AS title,
+               MAX(user_track_ref.raw_artist) AS artist_name,
+               COUNT(*) AS play_session_count,
+               COALESCE(SUM(listening_event.played_ms), 0) AS listened_ms
+        FROM listening_event
+        JOIN user_track_ref
+          ON user_track_ref.local_user_track_ref_id = listening_event.local_user_track_ref_id
+         AND user_track_ref.server_profile_id = listening_event.server_profile_id
+        WHERE listening_event.server_profile_id = :profileId
+          AND listening_event.started_at_ms >= :fromInclusiveMs
+          AND listening_event.started_at_ms <= :throughInclusiveMs
+          AND listening_event.played_ms > 0
+        GROUP BY identity_key
+        ORDER BY play_session_count DESC, listened_ms DESC, identity_key ASC
+        LIMIT :limit
+        """,
+    )
+    fun ownerTopTracks(
+        profileId: String,
+        fromInclusiveMs: Long,
+        throughInclusiveMs: Long,
+        limit: Int,
+    ): Flow<List<OwnerTopTrackProjection>>
+
+    @Query(
+        """
+        SELECT NULLIF(TRIM(user_track_ref.raw_artist), '') AS artist_name,
+               COUNT(*) AS play_session_count,
+               COALESCE(SUM(listening_event.played_ms), 0) AS listened_ms
+        FROM listening_event
+        JOIN user_track_ref
+          ON user_track_ref.local_user_track_ref_id = listening_event.local_user_track_ref_id
+         AND user_track_ref.server_profile_id = listening_event.server_profile_id
+        WHERE listening_event.server_profile_id = :profileId
+          AND listening_event.started_at_ms >= :fromInclusiveMs
+          AND listening_event.started_at_ms <= :throughInclusiveMs
+          AND listening_event.played_ms > 0
+        GROUP BY NULLIF(TRIM(user_track_ref.raw_artist), '')
+        ORDER BY play_session_count DESC, listened_ms DESC, artist_name ASC
+        LIMIT :limit
+        """,
+    )
+    fun ownerTopArtists(
+        profileId: String,
+        fromInclusiveMs: Long,
+        throughInclusiveMs: Long,
+        limit: Int,
+    ): Flow<List<OwnerTopArtistProjection>>
 }
+
+data class OwnerStatisticsWindowProjection(
+    @androidx.room3.ColumnInfo(name = "play_session_count") val playSessionCount: Long,
+    @androidx.room3.ColumnInfo(name = "listened_ms") val listenedMs: Long,
+    @androidx.room3.ColumnInfo(name = "unique_track_count") val uniqueTrackCount: Long,
+)
+
+data class OwnerTopTrackProjection(
+    @androidx.room3.ColumnInfo(name = "identity_key") val identityKey: String,
+    val title: String?,
+    @androidx.room3.ColumnInfo(name = "artist_name") val artistName: String?,
+    @androidx.room3.ColumnInfo(name = "play_session_count") val playSessionCount: Long,
+    @androidx.room3.ColumnInfo(name = "listened_ms") val listenedMs: Long,
+)
+
+data class OwnerTopArtistProjection(
+    @androidx.room3.ColumnInfo(name = "artist_name") val artistName: String?,
+    @androidx.room3.ColumnInfo(name = "play_session_count") val playSessionCount: Long,
+    @androidx.room3.ColumnInfo(name = "listened_ms") val listenedMs: Long,
+)
 
 @Dao
 interface JournalDao {

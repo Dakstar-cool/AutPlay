@@ -12,6 +12,9 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0023_s2_profile_stats", "0022_s1c_social_runtime"),
+    ("0022_s1c_social_runtime", "0021_s1b_device_admission"),
+    ("0021_s1b_device_admission", "0020_a1b_discovery_runtime"),
     ("0020_a1b_discovery_runtime", "0019_m6_web_admin_runtime"),
     ("0019_m6_web_admin_runtime", "0018_profile_lifecycle_cleanup"),
     ("0018_profile_lifecycle_cleanup", "0017_profile_pairing_runtime"),
@@ -98,7 +101,7 @@ def test_public_has_no_reference_object_access(
              ) acl
         WHERE n.nspname IN (
                   'account', 'audit', 'catalog', 'identity', 'importing', 'jobs',
-                  'discovery', 'library', 'ml', 'playlist', 'sync', 'vault'
+                  'discovery', 'library', 'ml', 'playlist', 'social', 'sync', 'vault'
               )
           AND c.relkind IN ('r', 'p')
           AND acl.grantee = 0
@@ -153,7 +156,7 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == "0020_a1b_discovery_runtime"
+    assert _current_revision(database_harness, database_name) == ("0023_s2_profile_stats")
 
 
 def test_p12_downgrade_refuses_after_blocking_legacy_active_model(

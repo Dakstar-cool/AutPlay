@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/friendship-command.schema.json",
+  "title": "S1C same-server friendship command",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "type": "object", "additionalProperties": false,
+  "required": ["operation_id", "action"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"}, "target_account_id": {"type": "string", "format": "uuid"},
+    "action": {"enum": ["SEND_REQUEST", "ACCEPT_REQUEST", "DECLINE_REQUEST", "CANCEL_REQUEST", "REMOVE_FRIEND", "BLOCK_USER", "UNBLOCK_USER"]},
+    "contact_card": {"type": "object", "additionalProperties": false, "required": ["server_instance_id", "account_id", "display_name_hint", "issued_at", "expires_at", "signature_b64url"], "properties": {"server_instance_id": {"type": "string", "format": "uuid"}, "account_id": {"type": "string", "format": "uuid"}, "display_name_hint": {"type": "string", "minLength": 1, "maxLength": 120}, "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "signature_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}}}
+  },
+  "allOf": [
+    {"if": {"properties": {"action": {"const": "SEND_REQUEST"}}}, "then": {"required": ["contact_card"], "not": {"required": ["target_account_id"]}}},
+    {"if": {"properties": {"action": {"enum": ["ACCEPT_REQUEST", "DECLINE_REQUEST", "CANCEL_REQUEST", "REMOVE_FRIEND", "BLOCK_USER", "UNBLOCK_USER"]}}}, "then": {"required": ["target_account_id"], "not": {"required": ["contact_card"]}}}
+  ],
+  "x-autplay-target-derivation": "SEND_REQUEST target is derived only from the verified contact_card.account_id"
+}

@@ -213,6 +213,37 @@ class PlaybackPersistenceRepository(
         return next
     }
 
+    /** Persists a paused Media3 selection without inventing a logical listening session. */
+    suspend fun selectIdleEntry(
+        snapshotId: LocalId,
+        entryId: LocalId,
+        positionMs: Long,
+        shuffleMode: String,
+        repeatMode: String,
+        seed: Long?,
+        nowMs: Long,
+    ) {
+        require(database.queueDao().entry(entryId.value)?.queueSnapshotId == snapshotId.value)
+        require(
+            database.queueDao().checkpoint(
+                snapshotId.value,
+                entryId.value,
+                positionMs.coerceAtLeast(0),
+                shuffleMode,
+                repeatMode,
+                seed,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                nowMs,
+            ) == 1,
+        )
+    }
+
     suspend fun finalizeSession(
         current: LogicalListeningCheckpoint,
         endPositionMs: Long,

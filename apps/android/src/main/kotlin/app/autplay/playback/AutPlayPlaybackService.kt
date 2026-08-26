@@ -118,6 +118,12 @@ class AutPlayPlaybackService : MediaSessionService() {
                 val requested = intent.getStringExtra(EXTRA_QUEUE_SNAPSHOT_ID)
                 restoreQueue(autoplay = false, requiredSnapshotId = requested)
             }
+            ACTION_REFRESH_QUEUE -> scope.launch {
+                val requested = intent.getStringExtra(EXTRA_QUEUE_SNAPSHOT_ID)
+                refreshQueue(requested)
+            }
+            ACTION_NEXT -> moveWithinOrdinaryQueue(next = true)
+            ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
             ACTION_RESUME -> player.play()
             ACTION_PAUSE -> player.pause()
             ACTION_STOP -> scope.launch { finalizeCurrent(); player.stop(); stopSelf() }
@@ -187,6 +193,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             player.setMediaItems(placeholders, index, queue.media.currentPositionMs)
             resolveIndex(queue, index)
             if (index + 1 < queue.entries.size) resolveIndex(queue, index + 1)
+            player.seekTo(index, queue.media.currentPositionMs)
             player.repeatMode = queue.snapshot.repeatMode.toMedia3RepeatMode()
             shuffleSeed = queue.snapshot.seed
             if (queue.snapshot.shuffleMode != "OFF") {
@@ -198,6 +205,51 @@ class AutPlayPlaybackService : MediaSessionService() {
             if (autoplay) player.play()
             publishRuntimeState(unavailableReason = null)
         }
+
+    /** Reloads a committed ordinary queue while preserving the active stable entry and player mode. */
+    private suspend fun refreshQueue(requiredSnapshotId: String?) = stateMutex.withLock {
+        val currentId = player.currentMediaItem?.mediaId ?: return@withLock
+        val currentPositionMs = player.currentPosition.coerceAtLeast(0)
+        val shouldPlay = player.playWhenReady
+        val preservedRepeatMode = player.repeatMode
+        val preservedShuffleEnabled = player.shuffleModeEnabled
+        val preservedShuffleSeed = if (preservedShuffleEnabled) {
+            shuffleSeed ?: System.currentTimeMillis()
+        } else {
+            shuffleSeed
+        }
+        shuffleSeed = preservedShuffleSeed
+        logicalSession?.let { checkpointCurrent(it, currentPositionMs) }
+        val queue = persistence.restoreActive() ?: return@withLock
+        if (queue.snapshot.queueSnapshotId != requiredSnapshotId || queue.snapshot.currentEntryId != currentId) return@withLock
+        restored = queue
+        val placeholders = queue.entries.map { placeholder(it.queueEntryId) }
+        val index = queue.entries.indexOfFirst { it.queueEntryId == currentId }
+        if (index < 0) return@withLock
+        player.setMediaItems(placeholders, index, currentPositionMs)
+        resolveIndex(queue, index); if (index + 1 < queue.entries.size) resolveIndex(queue, index + 1)
+        player.seekTo(index, currentPositionMs)
+        player.repeatMode = preservedRepeatMode
+        if (preservedShuffleEnabled) {
+            player.setShuffleOrder(
+                ShuffleOrder.DefaultShuffleOrder(placeholders.size, requireNotNull(preservedShuffleSeed)),
+            )
+        }
+        player.shuffleModeEnabled = preservedShuffleEnabled
+        player.prepare()
+        if (shouldPlay) player.play()
+        publishRuntimeState(unavailableReason = null)
+    }
+
+    /** Wave movement is room-authoritative; only ordinary queues may invoke local navigation. */
+    private fun moveWithinOrdinaryQueue(next: Boolean) {
+        scope.launch {
+            stateMutex.withLock {
+                if (restored?.snapshot?.queueType !in ORDINARY_QUEUE_TYPES) return@withLock
+                if (next) player.seekToNextMediaItem() else player.seekToPreviousMediaItem()
+            }
+        }
+    }
 
     private suspend fun resolveIndex(queue: RestoredPlaybackQueue, index: Int) {
         if (index !in queue.entries.indices) return
@@ -270,6 +322,25 @@ class AutPlayPlaybackService : MediaSessionService() {
             shuffleSeed,
             System.currentTimeMillis(),
         ).also { logicalSession = it }
+    }
+
+    private suspend fun checkpointPlayerStateLocked() {
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        logicalSession?.let {
+            checkpointCurrent(it, positionMs)
+            return
+        }
+        val queue = restored ?: return
+        val entryId = player.currentMediaItem?.mediaId ?: return
+        persistence.selectIdleEntry(
+            snapshotId = LocalId(queue.snapshot.queueSnapshotId),
+            entryId = LocalId(entryId),
+            positionMs = positionMs,
+            shuffleMode = if (player.shuffleModeEnabled) "SEEDED" else "OFF",
+            repeatMode = player.repeatMode.fromMedia3RepeatMode(),
+            seed = shuffleSeed,
+            nowMs = System.currentTimeMillis(),
+        )
     }
 
     private suspend fun finalizeCurrent() {
@@ -462,6 +533,16 @@ class AutPlayPlaybackService : MediaSessionService() {
                     if (player.isPlaying) {
                         ensureSession()
                         observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
+                    } else if (!isSameRestore && mediaItem != null) {
+                        persistence.selectIdleEntry(
+                            snapshotId = LocalId(queue.snapshot.queueSnapshotId),
+                            entryId = LocalId(mediaItem.mediaId),
+                            positionMs = player.currentPosition.coerceAtLeast(0),
+                            shuffleMode = if (player.shuffleModeEnabled) "SEEDED" else "OFF",
+                            repeatMode = player.repeatMode.fromMedia3RepeatMode(),
+                            seed = shuffleSeed,
+                            nowMs = System.currentTimeMillis(),
+                        )
                     }
                     publishRuntimeState()
                 }
@@ -476,9 +557,14 @@ class AutPlayPlaybackService : MediaSessionService() {
             if (reason != Player.DISCONTINUITY_REASON_SEEK) return
             scope.launch {
                 stateMutex.withLock {
-                    val current = logicalSession ?: return@withLock
-                    logicalSession = LogicalListeningSession.seek(current, newPosition.positionMs.coerceAtLeast(0))
-                    checkpointCurrent(requireNotNull(logicalSession), newPosition.positionMs.coerceAtLeast(0))
+                    val positionMs = newPosition.positionMs.coerceAtLeast(0)
+                    val current = logicalSession
+                    if (current == null) {
+                        checkpointPlayerStateLocked()
+                    } else {
+                        logicalSession = LogicalListeningSession.seek(current, positionMs)
+                        checkpointCurrent(requireNotNull(logicalSession), positionMs)
+                    }
                     publishRuntimeState()
                 }
             }
@@ -492,7 +578,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                         shuffleSeed = System.currentTimeMillis()
                         player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(size, requireNotNull(shuffleSeed)))
                     }
-                    logicalSession?.let { checkpointCurrent(it, player.currentPosition.coerceAtLeast(0)) }
+                    checkpointPlayerStateLocked()
                     publishRuntimeState()
                 }
             }
@@ -501,7 +587,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         override fun onRepeatModeChanged(repeatMode: Int) {
             scope.launch {
                 stateMutex.withLock {
-                    logicalSession?.let { checkpointCurrent(it, player.currentPosition.coerceAtLeast(0)) }
+                    checkpointPlayerStateLocked()
                     publishRuntimeState()
                 }
             }
@@ -545,6 +631,9 @@ class AutPlayPlaybackService : MediaSessionService() {
     companion object {
         const val ACTION_START_QUEUE = "app.autplay.playback.START_QUEUE"
         const val ACTION_PREPARE_QUEUE = "app.autplay.playback.PREPARE_QUEUE"
+        const val ACTION_REFRESH_QUEUE = "app.autplay.playback.REFRESH_QUEUE"
+        const val ACTION_NEXT = "app.autplay.playback.NEXT"
+        const val ACTION_PREVIOUS = "app.autplay.playback.PREVIOUS"
         const val ACTION_RESUME = "app.autplay.playback.RESUME"
         const val ACTION_PAUSE = "app.autplay.playback.PAUSE"
         const val ACTION_STOP = "app.autplay.playback.STOP"
@@ -567,6 +656,9 @@ class AutPlayPlaybackService : MediaSessionService() {
         private val APP_COMMAND_ACTIONS = setOf(
             ACTION_START_QUEUE,
             ACTION_PREPARE_QUEUE,
+            ACTION_REFRESH_QUEUE,
+            ACTION_NEXT,
+            ACTION_PREVIOUS,
             ACTION_RESUME,
             ACTION_PAUSE,
             ACTION_STOP,
@@ -582,6 +674,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         private const val PERIODIC_CHECKPOINT_MS = 15_000L
         private const val AUDIO_CONTOUR_PUBLISH_MS = 50L
         private const val MAX_CHECKPOINT_DELTA_MS = 300_000L
+        private val ORDINARY_QUEUE_TYPES = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
     }
 }
 

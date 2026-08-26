@@ -22,7 +22,12 @@ from autplay.domain.web_admin import (
     WebAdminError,
     WebSessionCredentials,
 )
-from autplay.entrypoints.admin_web_http import Renderer, create_admin_web_router
+from autplay.entrypoints.admin_web_http import (
+    DeviceAdmissionReview,
+    Renderer,
+    TrustedDeviceWebItem,
+    create_admin_web_router,
+)
 from autplay.web.renderer import AdminTemplateRenderer
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -217,7 +222,62 @@ class _Commands:
         return {}
 
 
-def _client(renderer: Renderer | None = None) -> tuple[TestClient, _Web]:
+class _Admission:
+    def __init__(self) -> None:
+        self.request_id = uuid4()
+        self.key_reference = uuid4()
+        self.calls: list[tuple[object, ...]] = []
+
+    def resolve_review_locator(
+        self, actor: WebActor, locator: str, operation_id: UUID, request_sha256: bytes
+    ) -> None:
+        assert actor and locator == "locator-secret" and operation_id and len(request_sha256) == 32
+        self.calls.append(("resolve", actor.user_id, operation_id))
+
+    def review(self, actor: WebActor) -> DeviceAdmissionReview:
+        assert actor
+        return DeviceAdmissionReview(
+            request_id=self.request_id,
+            device_label="Phone <script>",
+            platform="ANDROID",
+            app_version="1.0",
+            device_model_hint="Test Model",
+            api_major=1,
+            requested_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC),
+            sas_3x4=("0123", "4567", "8901"),
+        )
+
+    def decide_review(
+        self,
+        actor: WebActor,
+        request_id: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None:
+        assert actor and request_id == self.request_id and len(request_sha256) == 32
+        self.calls.append((action, actor.user_id, operation_id))
+
+    def trusted_devices(self, actor: WebActor) -> tuple[TrustedDeviceWebItem, ...]:
+        assert actor
+        return (TrustedDeviceWebItem(self.key_reference, "Phone", "ANDROID", "TRUSTED", 1),)
+
+    def manage_trusted_device(
+        self,
+        actor: WebActor,
+        key_reference: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None:
+        assert actor and key_reference == self.key_reference and len(request_sha256) == 32
+        self.calls.append((action, actor.user_id, operation_id))
+
+
+def _client(
+    renderer: Renderer | None = None, admission: _Admission | None = None
+) -> tuple[TestClient, _Web]:
     web = _Web()
     commands = _Commands()
     web.commands = commands
@@ -230,9 +290,62 @@ def _client(renderer: Renderer | None = None) -> tuple[TestClient, _Web]:
             renderer=renderer or _Renderer(),
             origin="https://admin.test",
             source_secret=b"s" * 32,
+            device_admission=admission,
         )
     )
     return TestClient(app, base_url="https://admin.test"), web
+
+
+def _form(text: str) -> dict[str, str]:
+    return dict(re.findall(r'name="([^\"]+)" value="([^\"]*)"', text))
+
+
+def test_connection_request_uses_body_only_locator_and_session_scoped_review() -> None:
+    admission = _Admission()
+    client, web = _client(AdminTemplateRenderer(), admission)
+    client.cookies.set("__Host-autplay_admin", "session")
+    start = client.get("/admin/connection-requests")
+    assert start.status_code == 200 and "locator-secret" not in start.text
+    form = _form(start.text) | {"review_locator": "locator-secret"}
+    missing_origin = client.post("/admin/connection-requests/resolve", data=form)
+    assert missing_origin.status_code == 403 and not admission.calls
+    resolved = client.post(
+        "/admin/connection-requests/resolve",
+        data=form,
+        headers={"Origin": "https://admin.test"},
+        follow_redirects=False,
+    )
+    assert resolved.status_code == 303 and "locator-secret" not in resolved.headers["location"]
+    reviewed = client.get("/admin/connection-requests/review")
+    assert reviewed.status_code == 200 and "&lt;script&gt;" in reviewed.text
+    assert "0123" in reviewed.text and "4567" in reviewed.text and "8901" in reviewed.text
+    assert "locator-secret" not in reviewed.text and "review_binding" not in reviewed.text
+    decision = _form(reviewed.text)
+    applied = client.post(
+        "/admin/connection-requests/decision/approve-once",
+        data=decision,
+        headers={"Origin": "https://admin.test"},
+        follow_redirects=False,
+    )
+    assert applied.status_code == 303 and admission.calls[-1][0] == "APPROVE_ONCE"
+    assert admission.calls[-1][1] == web.actor.user_id
+
+
+def test_trusted_device_actions_are_exact_and_consequence_specific() -> None:
+    admission = _Admission()
+    client, _ = _client(AdminTemplateRenderer(), admission)
+    client.cookies.set("__Host-autplay_admin", "session")
+    page = client.get("/admin/trusted-devices")
+    assert page.status_code == 200
+    assert "Remove trust" in page.text and "Revoke access and remove trust" in page.text
+    form = _form(page.text)
+    response = client.post(
+        f"/admin/trusted-devices/{admission.key_reference}/revoke-and-remove",
+        data=form,
+        headers={"Origin": "https://admin.test"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303 and admission.calls[-1][0] == "REVOKE_AND_REMOVE"
 
 
 def test_login_and_security_headers() -> None:

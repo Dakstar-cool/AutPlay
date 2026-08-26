@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/presence-settings-view.schema.json",
+  "title": "S1C persisted private presence settings view",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "type": "object", "additionalProperties": false,
+  "required": ["friend_presence_visibility_enabled", "room_activity_sharing_enabled", "invite_availability_enabled"],
+  "properties": {
+    "friend_presence_visibility_enabled": {"type": "boolean"},
+    "room_activity_sharing_enabled": {"type": "boolean"},
+    "invite_availability_enabled": {"type": "boolean"}
+  }
+}

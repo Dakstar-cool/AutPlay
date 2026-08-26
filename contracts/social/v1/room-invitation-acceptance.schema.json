@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/room-invitation-acceptance.schema.json",
+  "title": "S1C device-bound P13 membership acceptance receipt",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "type": "object", "additionalProperties": false,
+  "required": ["operation_id", "invitation_id", "room_id", "room_epoch", "membership_state"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"},
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "room_id": {"type": "string", "format": "uuid"},
+    "room_epoch": {"type": "integer", "minimum": 0},
+    "membership_state": {"const": "MEMBER"}
+  }
+}

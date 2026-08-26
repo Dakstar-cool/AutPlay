@@ -18,7 +18,7 @@
 
     <g transform="translate(54 146)">
       <rect width="430" height="370" rx="26" fill="#141111"/>
-      <text x="34" y="48" fill="#FFB4AB" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ANDROID · ЛОКАЛЬНЫЙ ИСТОЧНИК ИСТИНЫ</text>
+      <text x="34" y="48" fill="#FFB4AB" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ANDROID · LOCAL-FIRST</text>
 
       <g transform="translate(34 76)">
         <rect width="362" height="68" rx="16" fill="#FFF8F7"/>
@@ -59,10 +59,10 @@
       <g transform="translate(32 76)">
         <rect width="200" height="90" rx="16" fill="#FFFFFF" stroke="#78B8E2"/>
         <text x="20" y="35" fill="#141111" font-size="22" font-weight="700">FastAPI</text>
-        <text x="20" y="63" fill="#3F6680" font-size="18">вход · синхр. · Wave</text>
+        <text x="20" y="63" fill="#3F6680" font-size="18">друзья · синхр. · Wave</text>
         <rect x="222" width="200" height="90" rx="16" fill="#FFFFFF" stroke="#78B8E2"/>
         <text x="242" y="35" fill="#141111" font-size="22" font-weight="700">PostgreSQL</text>
-        <text x="242" y="63" fill="#3F6680" font-size="18">данные · события · задачи</text>
+        <text x="242" y="63" fill="#3F6680" font-size="18">данные · stats · jobs</text>
       </g>
 
       <path d="M243 172V205" stroke="#00639B" stroke-width="3" marker-end="url(#arrow-teal)"/>

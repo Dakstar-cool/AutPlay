@@ -5,9 +5,9 @@ from __future__ import annotations
 from .conftest import REFERENCE_DDL_PATH
 from .schema_contract import (
     EXPECTED_FUNCTION_COUNT,
-    EXPECTED_TRIGGER_COUNT,
     REFERENCE_P02_EXPLICIT_INDEX_COUNT,
     REFERENCE_P02_TABLE_COUNT,
+    REFERENCE_P02_TRIGGER_COUNT,
     parse_reference_names,
 )
 
@@ -19,7 +19,7 @@ def test_reference_ddl_declares_exact_p02_inventory() -> None:
     assert len(names.tables) == REFERENCE_P02_TABLE_COUNT
     assert len(names.indexes) == REFERENCE_P02_EXPLICIT_INDEX_COUNT
     assert len(names.functions) == EXPECTED_FUNCTION_COUNT
-    assert len(names.triggers) == EXPECTED_TRIGGER_COUNT
+    assert len(names.triggers) == REFERENCE_P02_TRIGGER_COUNT
     assert ("importing", "match_candidate") not in names.tables
     assert {
         ("identity", "matcher_release"),

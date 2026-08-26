@@ -15,6 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -32,6 +36,12 @@ import app.autplay.application.library.CoreTrackDetailCapability
 import app.autplay.application.library.CoreTrackAvailability
 import app.autplay.ui.core.DetailTarget
 import app.autplay.ui.core.DetailKind
+import app.autplay.ui.playlist.AddTrackToPlaylistDialog
+import app.autplay.ui.playlist.ManualPlaylistActions
+import app.autplay.ui.playlist.ManualPlaylistEditor
+import app.autplay.ui.playlist.ManualPlaylistEntryUi
+import app.autplay.ui.playlist.ManualPlaylistText
+import app.autplay.ui.playlist.ManualPlaylistUi
 import java.text.NumberFormat
 
 public data class CoreProductDetailUiState(
@@ -55,11 +65,35 @@ public fun CoreProductDetailScreen(
     onPlayPlaylistEntry: (String) -> Unit = {},
     onRemoveOrRestore: (String) -> Unit = {},
     onLike: (String) -> Unit = {},
+    /** Opens an exact-target playlist chooser; the caller owns the local mutation. */
+    onAddToPlaylist: (String) -> Unit = {},
+    onPlayNext: (String) -> Unit = {},
+    onAddToQueue: (String) -> Unit = {},
+    manualPlaylists: List<ManualPlaylistUi> = emptyList(),
+    manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
     onDownload: (String) -> Unit = {},
     onRepairAccess: () -> Unit = {},
     onOpenReview: () -> Unit = {},
     onOpenDetail: (DetailTarget) -> Unit = {},
 ) {
+    var addTrackToPlaylistId by remember { mutableStateOf<String?>(null) }
+    val playlistText = ManualPlaylistText(
+        create = stringResource(R.string.playlist_create),
+        rename = stringResource(R.string.playlist_rename),
+        delete = stringResource(R.string.playlist_delete),
+        cancel = stringResource(R.string.action_cancel),
+        save = stringResource(R.string.action_save),
+        add = stringResource(R.string.playlist_add_selected),
+        remove = stringResource(R.string.action_remove),
+        moveUp = stringResource(R.string.playlist_move_up),
+        moveDown = stringResource(R.string.playlist_move_down),
+        name = stringResource(R.string.playlist_name),
+        description = stringResource(R.string.playlist_description),
+        selectPlaylist = stringResource(R.string.playlist_select_target),
+        confirmDelete = stringResource(R.string.playlist_confirm_delete),
+        empty = stringResource(R.string.playlist_empty),
+        play = stringResource(R.string.action_play),
+    )
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(
@@ -113,6 +147,22 @@ public fun CoreProductDetailScreen(
                                 )
                             }
                         }
+                        OutlinedButton(
+                            onClick = {
+                                onAddToPlaylist(detail.localUserTrackRefId)
+                                addTrackToPlaylistId = detail.localUserTrackRefId
+                            },
+                            enabled = manualPlaylists.isNotEmpty(),
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.playlist_add_selected)) }
+                        OutlinedButton(
+                            onClick = { onPlayNext(detail.localUserTrackRefId) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.queue_play_next)) }
+                        OutlinedButton(
+                            onClick = { onAddToQueue(detail.localUserTrackRefId) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text(stringResource(R.string.queue_add_to_end)) }
                     }
                 }
                 if (CoreTrackDetailCapability.DOWNLOAD in detail.capabilities) {
@@ -242,26 +292,37 @@ public fun CoreProductDetailScreen(
             state.playlist != null -> {
                 val detail = state.playlist
                 item { DetailHeading(detail.name, detail.description) }
-                items(detail.entries, key = { it.localPlaylistEntryId }) { entry ->
-                    AutPlayCard(
-                        onClick = if (entry.unavailable) null else {
-                            { onPlayPlaylistEntry(entry.localPlaylistEntryId) }
-                        },
-                    ) {
-                        Column {
-                            Text(entry.title ?: stringResource(R.string.player_nothing_playing), style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                entry.artistName ?: stringResource(R.string.library_unknown_artist),
-                                color = AutPlayTokens.colors.mutedText,
-                            )
-                            if (entry.unavailable) {
-                                Text(stringResource(R.string.detail_unavailable), color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
+                item(key = "playlist-editor:${detail.localPlaylistId}") {
+                    ManualPlaylistEditor(
+                        playlist = ManualPlaylistUi(
+                            playlistId = detail.localPlaylistId,
+                            name = detail.name,
+                            description = detail.description,
+                            entries = detail.entries.map { entry ->
+                                ManualPlaylistEntryUi(
+                                    entryId = entry.localPlaylistEntryId,
+                                    trackRefId = entry.localUserTrackRefId,
+                                    title = entry.title ?: stringResource(R.string.player_nothing_playing),
+                                    subtitle = entry.artistName ?: stringResource(R.string.library_unknown_artist),
+                                    playable = !entry.unavailable,
+                                )
+                            },
+                        ),
+                        actions = manualPlaylistActions.copy(playEntry = onPlayPlaylistEntry),
+                        text = playlistText,
+                    )
                 }
             }
         }
+    }
+    addTrackToPlaylistId?.let { trackRefId ->
+        AddTrackToPlaylistDialog(
+            trackRefId = trackRefId,
+            playlists = manualPlaylists,
+            actions = manualPlaylistActions,
+            onDismiss = { addTrackToPlaylistId = null },
+            text = playlistText,
+        )
     }
 }
 

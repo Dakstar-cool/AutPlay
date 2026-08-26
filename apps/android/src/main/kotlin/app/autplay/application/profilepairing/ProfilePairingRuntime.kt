@@ -98,6 +98,118 @@ class ProfilePairingRuntime(
         mutableState.value = mutableState.value.copy(pairing = current, trustConfirmed = true)
     }
 
+    /**
+     * Re-establishes the explicitly accepted server identity for an interrupted first admission.
+     * The checkpoint exists only after the user confirmed M5 discovery; a fresh signed discovery
+     * still has to match every persisted identity/origin field before admission recovery continues.
+     */
+    suspend fun recoverAdmissionTrust(checkpoint: AdmissionCheckpoint): Boolean {
+        val pending = PairingFlowSnapshot(
+            generationId = checkpoint.generationId,
+            apiOrigin = checkpoint.apiOrigin,
+            streamOrigin = checkpoint.streamOrigin,
+            serverProfileId = checkpoint.serverProfileId,
+            expectedServerInstanceId = checkpoint.serverInstanceId,
+            expectedIdentityEpoch = checkpoint.identityEpoch,
+            expectedIdentityThumbprintSha256 = checkpoint.identityThumbprintSha256,
+            expectedUserId = null,
+            expectedDeviceId = null,
+            deviceKeyThumbprintSha256 = checkpoint.deviceKeyThumbprintSha256,
+            operationId = null,
+            bindingCommitId = null,
+        )
+        mutableState.value = ProfilePairingRuntimeState(
+            pairing = PairingState.CheckingDiscovery(pending),
+        )
+        val document = when (val result = port.discovery(checkpoint.apiOrigin)) {
+            is PairingNetworkResult.Failure -> {
+                if (isCurrentDiscovery(pending)) blocked(result.code.failure())
+                return false
+            }
+            is PairingNetworkResult.Success -> result.value
+        }
+        if (!isCurrentDiscovery(pending)) {
+            document.identityPublicKeySpki.fill(0)
+            return false
+        }
+        if (
+            document.apiOrigin != checkpoint.apiOrigin ||
+            document.streamOrigin != checkpoint.streamOrigin ||
+            document.identity.serverInstanceId != checkpoint.serverInstanceId ||
+            document.identity.identityEpoch != checkpoint.identityEpoch ||
+            document.identity.identityThumbprintSha256 != checkpoint.identityThumbprintSha256
+        ) {
+            document.identityPublicKeySpki.fill(0)
+            blocked(PairingFailure.SERVER_IDENTITY_CHANGED)
+            return false
+        }
+        if (runCatching {
+                port.seedTrustedIdentity(document.identity, document.identityPublicKeySpki)
+            }.isFailure
+        ) {
+            document.identityPublicKeySpki.fill(0)
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return false
+        }
+        registerOrigin(checkpoint.serverProfileId, checkpoint.apiOrigin)
+        mutableState.value = ProfilePairingRuntimeState(
+            pairing = PairingState.AwaitingTrust(pending),
+            serverLabel = document.labelHint,
+            identityPublicKeySpki = document.identityPublicKeySpki,
+            trustConfirmed = true,
+        )
+        return true
+    }
+
+    /**
+     * Stores a session minted by the S1B exact-key admission exchange through the ordinary M5
+     * credential/binding path.  The caller has already shown and confirmed the Web account.
+     */
+    suspend fun completeAdmissionEnrollment(
+        checkpoint: AdmissionCheckpoint,
+        account: AdmissionAccount,
+        bindingCommitId: String,
+        session: EnrollmentSession,
+    ): Boolean {
+        val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return false
+        if (!mutableState.value.trustConfirmed || awaiting.snapshot.serverProfileId != checkpoint.serverProfileId ||
+            awaiting.snapshot.expectedServerInstanceId != checkpoint.serverInstanceId ||
+            awaiting.snapshot.expectedIdentityEpoch != checkpoint.identityEpoch ||
+            awaiting.snapshot.expectedIdentityThumbprintSha256 != checkpoint.identityThumbprintSha256
+        ) return false
+        val snapshot = awaiting.snapshot.copy(
+            generationId = checkpoint.generationId,
+            expectedUserId = account.userId,
+            expectedDeviceId = session.deviceId,
+            deviceKeyThumbprintSha256 = checkpoint.deviceKeyThumbprintSha256,
+            operationId = UUID.randomUUID().toString(),
+            bindingCommitId = bindingCommitId,
+            expectedDeviceName = deviceName.take(120),
+        )
+        mutableState.value = mutableState.value.copy(pairing = PairingState.ExchangingInvitation(snapshot))
+        return persistBinding(snapshot, keyAlias(checkpoint.serverProfileId), session, mutableState.value.identityPublicKeySpki, "KEEP_LOCAL")
+    }
+
+    /** Replaces a local trusted-key session using the same account and existing M5 binding. */
+    suspend fun completeTrustedReenrollment(
+        checkpoint: AdmissionCheckpoint,
+        account: AdmissionAccount,
+        bindingCommitId: String,
+        session: EnrollmentSession,
+    ): Boolean {
+        val connected = mutableState.value.pairing as? PairingState.Connected ?: return false
+        val current = connected.snapshot
+        if (current.serverProfileId != checkpoint.serverProfileId || current.expectedUserId != account.userId ||
+            current.expectedServerInstanceId != checkpoint.serverInstanceId || current.expectedIdentityEpoch != checkpoint.identityEpoch ||
+            current.expectedIdentityThumbprintSha256 != checkpoint.identityThumbprintSha256) return false
+        val snapshot = current.copy(generationId = UUID.randomUUID().toString(), expectedDeviceId = session.deviceId, bindingCommitId = bindingCommitId)
+        val evidence = mutableState.value.identityPublicKeySpki ?: settings.settings.first().m5TrustEvidence?.identityPublicKeySpkiB64?.let {
+            runCatching { Base64.getDecoder().decode(it) }.getOrNull()
+        } ?: return false
+        mutableState.value = mutableState.value.copy(pairing = PairingState.ExchangingInvitation(snapshot))
+        return persistBinding(snapshot, keyAlias(checkpoint.serverProfileId), session, evidence, "KEEP_LOCAL")
+    }
+
     fun exchangeInvitation(rawEnvelope: String) = scope.launch {
         val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return@launch
         if (!mutableState.value.trustConfirmed) return@launch
@@ -428,11 +540,16 @@ class ProfilePairingRuntime(
         scope.launch {
             val current = settings.settings.first()
             val pending = current.m5PendingExchangeCheckpoint
+            val admissionCheckpoint = current.m5AdmissionCheckpoint?.let {
+                runCatching { AdmissionCheckpointCodec.decode(it) }.getOrNull()
+            }
             val parts = pending?.split('|').orEmpty()
             val effectiveGeneration = generation ?: parts.getOrNull(2)
+                ?: admissionCheckpoint?.generationId
             val profile = inMemoryPending?.snapshot?.serverProfileId
                 ?: cancellingSnapshot?.serverProfileId
                 ?: parts.getOrNull(1)?.let { runCatching { ServerProfileId(it) }.getOrNull() }
+                ?: admissionCheckpoint?.serverProfileId
             val committed = current.m5Binding?.takeIf {
                 cancellingSnapshot?.bindingCommitId != null &&
                     it.bindingCommitId == cancellingSnapshot.bindingCommitId
@@ -447,11 +564,12 @@ class ProfilePairingRuntime(
                 cleared.copy(
                     m5CancelledPairingGenerationId = effectiveGeneration ?: latest.m5CancelledPairingGenerationId,
                     m5PendingExchangeCheckpoint = if (clearPending) null else latestPending,
+                    m5AdmissionCheckpoint = null,
                     m5TrustEvidence = if (clearPending && cleared.m5Binding == null) null else cleared.m5TrustEvidence,
                 )
             }
             profile?.let { runCatching { credentials.clear(it) } }
-            alias?.let { runCatching { deviceKeys.delete(it) } }
+            (alias ?: profile?.let(::keyAlias))?.let { runCatching { deviceKeys.delete(it) } }
         }
     }
 

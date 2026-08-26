@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/admission-status.schema.json",
+  "title": "S1B targetless admission polling status",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1B",
+  "x-autplay-sensitive": true,
+  "type": "object", "additionalProperties": false,
+  "required": ["request_id", "state", "expires_at"],
+  "properties": {
+    "request_id": {"type": "string", "format": "uuid"}, "state": {"enum": ["PENDING", "APPROVED", "TRUSTED", "REJECTED", "BLOCKED", "EXPIRED"]},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "approved_account_id": {"type": "string", "format": "uuid"},
+    "approved_account_label": {"type": "string", "minLength": 1, "maxLength": 120}
+  },
+  "allOf": [
+    {"if": {"properties": {"state": {"enum": ["APPROVED", "TRUSTED"]}}}, "then": {"required": ["approved_account_id", "approved_account_label"]}}
+  ]
+}

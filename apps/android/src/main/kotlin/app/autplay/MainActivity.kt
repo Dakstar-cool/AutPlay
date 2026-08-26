@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -52,7 +53,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.ManagedActivityResultLauncher
@@ -82,7 +85,10 @@ import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatusRepository
 import app.autplay.application.download.DownloadIntentRepository
 import app.autplay.application.playback.ActiveQueueContextRepository
+import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
+import app.autplay.application.playback.QueueEditFailure
+import app.autplay.application.playback.QueueEditorRepository
 import app.autplay.application.recommendation.HomeFeed
 import app.autplay.application.recommendation.HomeRecommendationItem
 import app.autplay.application.recommendation.OfflineRecommendationRepository
@@ -95,6 +101,11 @@ import app.autplay.application.profilepairing.PairingState
 import app.autplay.application.profilepairing.OkHttpProfilePairingPort
 import app.autplay.application.profilepairing.ProfilePairingRuntime
 import app.autplay.application.profilebinding.M5BindingMaterializationCoordinator
+import app.autplay.application.social.ContactCard
+import app.autplay.application.social.SocialRuntime
+import app.autplay.application.social.SocialRuntimeState
+import app.autplay.application.statistics.OwnerProfileStatistics
+import app.autplay.application.statistics.ProfileStatisticsRepository
 import app.autplay.data.local.RoomM5LocalIntentMaterializer
 import app.autplay.data.security.AndroidKeystoreCredentialStore
 import app.autplay.data.security.AndroidM5DeviceKeyStore
@@ -107,6 +118,7 @@ import app.autplay.data.settings.CURRENT_ONBOARDING_REVISION
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
 import app.autplay.playback.PlaybackSessionOwner
+import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackRuntimeState
 import app.autplay.playback.ServicePlaybackSessionOwner
 import app.autplay.playback.presentation.PlaybackInteractionRouter
@@ -128,6 +140,10 @@ import app.autplay.ui.AppLanguage
 import app.autplay.ui.UiDestination
 import app.autplay.ui.WelcomeOnboardingScreen
 import app.autplay.ui.player.PlaybackPreferenceUiState
+import app.autplay.ui.playlist.ManualPlaylistUi
+import app.autplay.ui.queue.QueueEditorUiActions
+import app.autplay.ui.queue.QueueEditorUiEntry
+import app.autplay.ui.queue.QueueEditorUiState
 import app.autplay.ui.settings.SettingsProductScreen
 import app.autplay.ui.core.SearchGenerationGuard
 import app.autplay.ui.core.SearchResultStore
@@ -155,6 +171,7 @@ import app.autplay.ui.HomeProblemUiItem
 import app.autplay.ui.LegacyImportRouteActions
 import app.autplay.ui.LegacyImportRouteState
 import app.autplay.ui.profilepairing.ProfilePairingUiState
+import app.autplay.ui.social.SocialActions
 import app.autplay.ui.SearchScreenUiState
 import app.autplay.ui.rememberAutPlayNavigationState
 import java.io.ByteArrayOutputStream
@@ -165,6 +182,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import java.util.concurrent.ConcurrentHashMap
 
 internal const val BOOTSTRAP_LABEL = "AutPlay"
@@ -289,9 +307,57 @@ internal fun AutPlayBootstrap(
                 )
             }
             val pairingRuntimeState by pairingRuntime.state.collectAsState()
+            val admissionRuntime = remember(context, settingsStore, pairingOrigins) {
+                app.autplay.application.profilepairing.AdmissionRuntime(
+                    scope = pairingScope,
+                    keys = AndroidM5DeviceKeyStore(),
+                    port = app.autplay.application.profilepairing.OkHttpAdmissionPort(originForProfile = { profile: app.autplay.domain.ServerProfileId ->
+                        pairingOrigins[profile.value] ?: settings.serverBaseUrl
+                    }),
+                    persistCheckpoint = { checkpoint -> settingsStore.mutate { current ->
+                        current.copy(m5AdmissionCheckpoint = checkpoint?.let(app.autplay.application.profilepairing.AdmissionCheckpointCodec::encode))
+                    } },
+                    persistEnrollment = { checkpoint, account, bindingCommitId, session ->
+                        pairingRuntime.completeAdmissionEnrollment(checkpoint, account, bindingCommitId, session)
+                    },
+                    persistTrustedReenrollment = { checkpoint, account, bindingCommitId, session ->
+                        pairingRuntime.completeTrustedReenrollment(checkpoint, account, bindingCommitId, session)
+                    },
+                )
+            }
+            val admissionState by admissionRuntime.state.collectAsState()
+            val admissionRecoveryBootstrap = remember(admissionRuntime) {
+                app.autplay.application.profilepairing.AdmissionRecoveryBootstrap(
+                    settings.m5AdmissionCheckpoint,
+                    preferExistingBinding = settings.m5Binding != null,
+                )
+            }
             val onboardingComplete = settings.onboardingRevision >= ONBOARDING_REVISION
-            LaunchedEffect(pairingRuntime, onboardingComplete) {
-                if (onboardingComplete) pairingRuntime.recoverAndRefresh()
+            LaunchedEffect(
+                admissionRuntime,
+                pairingRuntime,
+                admissionRecoveryBootstrap,
+                onboardingComplete,
+            ) {
+                if (!onboardingComplete) return@LaunchedEffect
+                val restoredBinding = admissionRecoveryBootstrap.restoreExistingBindingIfPresent(
+                    pairingRuntime,
+                ) {
+                    settingsStore.mutate { current ->
+                        if (current.m5Binding == null) current else {
+                            current.copy(m5AdmissionCheckpoint = null)
+                        }
+                    }
+                }
+                if (!restoredBinding && admissionRecoveryBootstrap.checkpoint == null) {
+                    pairingRuntime.recoverAndRefresh()
+                } else if (!restoredBinding) {
+                    admissionRecoveryBootstrap.checkpoint?.let { checkpoint ->
+                        if (pairingRuntime.recoverAdmissionTrust(checkpoint)) {
+                            admissionRuntime.recover(checkpoint).join()
+                        }
+                    }
+                }
             }
             var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
             LaunchedEffect(binding, onboardingComplete) {
@@ -335,6 +401,8 @@ internal fun AutPlayBootstrap(
                                 waveCoordinator,
                                 pairingRuntime,
                                 pairingRuntimeState,
+                                admissionRuntime,
+                                admissionState,
                                 pairingSafeError,
                                 initialDestination = initialDestination,
                                 clearPairingSafeError = { pairingSafeError = null },
@@ -414,19 +482,53 @@ private fun OfflineLibraryScreen(
     waveCoordinator: WaveCoordinator?,
     pairingRuntime: ProfilePairingRuntime,
     pairingRuntimeState: app.autplay.application.profilepairing.ProfilePairingRuntimeState,
+    admissionRuntime: app.autplay.application.profilepairing.AdmissionRuntime,
+    admissionState: app.autplay.application.profilepairing.AdmissionState,
     pairingSafeError: String?,
     initialDestination: UiDestination = UiDestination.Home,
     clearPairingSafeError: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var socialRuntime by remember(binding?.serverProfileId?.value, settings.serverBaseUrl, waveCoordinator) {
+        mutableStateOf<SocialRuntime?>(null)
+    }
+    LaunchedEffect(binding, settings.serverBaseUrl, waveCoordinator) {
+        socialRuntime = if (binding == null || settings.serverBaseUrl == null) null else runCatching {
+            AutPlayRuntime.socialRuntime(context, binding, scope) { roomId ->
+                scope.launch { waveCoordinator?.join(roomId) }
+            }
+        }.getOrNull()
+    }
+    val emptySocialState = remember { flowOf(SocialRuntimeState()) }
+    val socialState by (socialRuntime?.state ?: emptySocialState).collectAsState(
+        initial = SocialRuntimeState(),
+    )
+    LaunchedEffect(socialRuntime, lifecycleOwner) {
+        val runtime = socialRuntime ?: return@LaunchedEffect
+        runtime.load()
+        runtime.loadProfileStatisticsSettings()
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                runtime.heartbeatWhileActive()
+                delay(60_000L)
+            }
+        }
+    }
     val resources = LocalResources.current
     val coreProductRepository = remember(context) { CoreProductRepository(AutPlayRuntime.database(context)) }
+    val profileStatisticsRepository = remember(context) {
+        ProfileStatisticsRepository(AutPlayRuntime.database(context))
+    }
+    val ownerStatistics by remember(profileStatisticsRepository, binding?.serverProfileId?.value) {
+        profileStatisticsRepository.observe(binding?.serverProfileId?.value)
+            .map<OwnerProfileStatistics, OwnerProfileStatistics?> { it }
+    }.collectAsState(initial = null)
     val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
     val libraryEntries by remember(coreProductRepository, binding?.serverProfileId?.value) {
         coreProductRepository.libraryEntries(binding?.serverProfileId?.value)
     }.collectAsState(initial = emptyList())
-    val lifecycleOwner = LocalLifecycleOwner.current
     val activeQueueContextRepository = remember(context, scope) {
         ActiveQueueContextRepository.fromDatabase(AutPlayRuntime.database(context), scope)
     }
@@ -443,8 +545,17 @@ private fun OfflineLibraryScreen(
         onDispose { playerAdapter.close() }
     }
     val playerState by playerAdapter.state.collectAsState()
+    val queueEditorRepository = remember(context, playbackOwner) {
+        QueueEditorRepository(AutPlayRuntime.database(context), playbackOwner)
+    }
+    val queueProjection by remember(queueEditorRepository, binding?.serverProfileId?.value) {
+        queueEditorRepository.observeActive(binding?.serverProfileId?.value)
+    }.collectAsState(initial = null)
     val navigation = rememberAutPlayNavigationState(initialDestination)
     val destination = navigation.current
+    LaunchedEffect(destination, socialRuntime) {
+        if (destination != UiDestination.Profile) socialRuntime?.clearFriendProfileStatistics()
+    }
     val view = legacyView(destination)
     val coreProductState = rememberCoreProductUiState(binding?.serverProfileId?.value)
     val coreActionGate = remember { SingleFlightActionGate() }
@@ -509,6 +620,17 @@ private fun OfflineLibraryScreen(
         binding?.deviceId?.value,
     ) { mutableStateMapOf<String, RecommendationPresentationResult>() }
     val coreBindingKey = binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID
+    var playlistMutationNonce by remember(coreBindingKey) { mutableIntStateOf(0) }
+    val detailContextKey = "$coreBindingKey:$playlistMutationNonce"
+    val playlistMutationActions = remember(scope, sliceRepository, coreBindingKey) {
+        buildManualPlaylistActions(
+            scope = scope,
+            binding = { binding },
+            sliceRepository = sliceRepository,
+            reportError = { stableError = it },
+            onChanged = { playlistMutationNonce += 1 },
+        )
+    }
     var selectedTrackRefId by remember(coreBindingKey) {
         mutableStateOf(
             coreProductState.selectedDetail
@@ -521,7 +643,7 @@ private fun OfflineLibraryScreen(
         artistCatalogPort = artistCatalogPort,
         target = coreProductState.selectedDetail,
         profileId = binding?.serverProfileId?.value,
-        contextKey = coreBindingKey,
+        contextKey = detailContextKey,
         reportError = { stableError = it },
     )
     fun closeCoreDetail() {
@@ -733,9 +855,12 @@ private fun OfflineLibraryScreen(
         closeCoreDetail = ::closeCoreDetail,
         coreProductRepository = coreProductRepository,
         setTrackDetail = { coreDetailState.track = it },
-        bindingContextKey = { coreBindingKey },
+        bindingContextKey = { detailContextKey },
         setLoadedDetailContextKey = { coreDetailState.loadedContextKey = it },
         downloadRepository = downloadRepository,
+    )
+    val manualPlaylistActions = playlistMutationActions.copy(
+        playEntry = coreCommandActions.startPlaylistEntry,
     )
     val searchCommandActions = buildSearchCommandActions(
         scope = scope,
@@ -797,6 +922,91 @@ private fun OfflineLibraryScreen(
         binding?.serverProfileId?.value,
     )
     val untitledTrack = stringResource(R.string.player_nothing_playing)
+    val queueEditorState = QueueEditorUiState(
+        entries = queueProjection?.entries.orEmpty().map { entry ->
+            QueueEditorUiEntry(
+                queueEntryId = entry.queueEntryId.value,
+                title = entry.title ?: untitledTrack,
+                artist = entry.artist,
+                isCurrent = entry.isCurrent,
+                isUpcoming = entry.isUpcoming,
+            )
+        },
+        editable = queueProjection?.queueType in setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST"),
+        canPrevious = queueProjection?.canPrevious == true,
+        canNext = queueProjection?.canNext == true,
+    )
+    fun launchQueueEdit(operation: suspend () -> Unit) {
+        scope.launch {
+            runCatching { operation() }.onFailure { failure ->
+                stableError = (failure as? QueueEditFailure)?.code ?: "QUEUE_EDIT_UNAVAILABLE"
+            }
+        }
+    }
+    fun addTrackToQueue(trackRefId: String, playNext: Boolean) {
+        launchQueueEdit {
+            val entry = NewPlaybackQueueEntry(
+                queueEntryId = LocalId.random(),
+                trackRefId = LocalId(trackRefId),
+                sourceOrigin = "ORGANIC",
+                sourceAudioPolicy = "LOCAL_THEN_VAULT",
+            )
+            val expectedSnapshotId = queueProjection?.snapshotId
+            val result = if (playNext) {
+                queueEditorRepository.addNext(entry, binding?.serverProfileId?.value, expectedSnapshotId)
+            } else {
+                queueEditorRepository.addToEnd(entry, binding?.serverProfileId?.value, expectedSnapshotId)
+            }
+            if (result.created) {
+                playbackOwner.dispatch(
+                    if (playNext) PlaybackCommand.StartQueue(result.snapshotId)
+                    else PlaybackCommand.PrepareQueue(result.snapshotId),
+                )
+            }
+        }
+    }
+    val queueEditorActions = QueueEditorUiActions(
+        moveUp = { entryId ->
+            queueProjection?.let { projection ->
+                val upcoming = projection.entries.filter { it.isUpcoming }
+                val index = upcoming.indexOfFirst { it.queueEntryId.value == entryId }
+                val before = upcoming.getOrNull(index - 1)?.queueEntryId
+                if (index > 0 && before != null) launchQueueEdit {
+                    queueEditorRepository.moveUpcoming(
+                        LocalId(entryId), before, binding?.serverProfileId?.value, projection.snapshotId,
+                    )
+                }
+            }
+        },
+        moveDown = { entryId ->
+            queueProjection?.let { projection ->
+                val upcoming = projection.entries.filter { it.isUpcoming }
+                val index = upcoming.indexOfFirst { it.queueEntryId.value == entryId }
+                if (index in 0 until upcoming.lastIndex) launchQueueEdit {
+                    queueEditorRepository.moveUpcoming(
+                        LocalId(entryId), upcoming.getOrNull(index + 2)?.queueEntryId,
+                        binding?.serverProfileId?.value, projection.snapshotId,
+                    )
+                }
+            }
+        },
+        remove = { entryId ->
+            queueProjection?.let { projection ->
+                launchQueueEdit {
+                    queueEditorRepository.removeUpcoming(
+                        LocalId(entryId), binding?.serverProfileId?.value, projection.snapshotId,
+                    )
+                }
+            }
+        },
+        clearUpcoming = {
+            queueProjection?.let { projection ->
+                launchQueueEdit {
+                    queueEditorRepository.clearUpcoming(binding?.serverProfileId?.value, projection.snapshotId)
+                }
+            }
+        },
+    )
     val allLibraryTrackSummaries = buildLibraryTrackSummaries(
         entries = libraryEntries,
         audioStates = localAudioStates,
@@ -865,7 +1075,7 @@ private fun OfflineLibraryScreen(
         lastImportedTitle = lastImportedTitle,
         error = libraryError,
     )
-    val detailRequestIsCurrent = coreDetailState.matches(coreBindingKey, coreProductState.selectedDetail)
+    val detailRequestIsCurrent = coreDetailState.matches(detailContextKey, coreProductState.selectedDetail)
     val presentedTrackDetail = coreDetailState.track.takeIf { detailRequestIsCurrent }
     val presentedReleaseDetail = coreDetailState.release.takeIf { detailRequestIsCurrent }
     val presentedPlaylistDetail = coreDetailState.playlist.takeIf { detailRequestIsCurrent }
@@ -936,6 +1146,10 @@ private fun OfflineLibraryScreen(
         playPlaylistEntry = coreCommandActions.startPlaylistEntry,
         downloadTrack = coreCommandActions.downloadTrack,
         repairAccess = { activityLaunchers.chooseLibraryRoot.launch(null) },
+        playNext = { addTrackToQueue(it, true) },
+        addToQueue = { addTrackToQueue(it, false) },
+        manualPlaylists = playlists.map { ManualPlaylistUi(it.stableId, it.title, it.description) },
+        manualPlaylistActions = manualPlaylistActions,
     )
     val nowPlayingRouteActions = buildNowPlayingRouteActions(
         playbackActions = playbackActions,
@@ -947,6 +1161,7 @@ private fun OfflineLibraryScreen(
         sliceRepository = sliceRepository,
         binding = { binding },
         reportError = { stableError = it },
+        queueActions = queueEditorActions,
     )
     val currentTrackPreference = playbackState.localUserTrackRefId?.let { trackRefId ->
         libraryPreferences.firstOrNull { it.stableId == trackRefId }
@@ -993,6 +1208,35 @@ private fun OfflineLibraryScreen(
                 }
             }
         },
+    )
+    val socialActions = SocialActions(
+        refresh = { socialRuntime?.load() },
+        createContactCard = { socialRuntime?.loadContactCard() },
+        shareContactCard = { card: ContactCard ->
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(Intent.EXTRA_TEXT, card.asJson().toString())
+            }
+            context.startActivity(Intent.createChooser(share, "Share AutPlay contact card"))
+        },
+        importContactCard = { socialRuntime?.importContactCard(it) },
+        acceptFriend = { socialRuntime?.acceptFriend(it) },
+        declineFriend = { socialRuntime?.declineFriend(it) },
+        cancelFriendRequest = { socialRuntime?.cancelFriendRequest(it) },
+        removeFriend = { socialRuntime?.removeFriend(it) },
+        block = { socialRuntime?.block(it) },
+        unblock = { socialRuntime?.unblock(it) },
+        setPresence = { socialRuntime?.setPresence(it) },
+        setProfileStatisticsVisibility = { socialRuntime?.setProfileStatisticsVisibility(it) },
+        viewFriendStatistics = { socialRuntime?.loadFriendProfileStatistics(it) },
+        closeFriendStatistics = { socialRuntime?.clearFriendProfileStatistics() },
+        inviteFriend = { accountId ->
+            val roomId = waveCoordinator?.uiState?.value?.roomId
+            if (roomId == null) stableError = "WAVE_ROOM_REQUIRED"
+            else socialRuntime?.createRoomInvitation(roomId, accountId)
+        },
+        acceptInvitation = { socialRuntime?.acceptRoomInvitation(it) },
+        cancelInvitation = { socialRuntime?.cancelRoomInvitation(it) },
     )
     val legacySecondaryState = LegacySecondaryRouteState(
         destination = destination,
@@ -1055,7 +1299,13 @@ private fun OfflineLibraryScreen(
                     app.autplay.application.profilepairing.RuntimeLifecycleAction.DISCONNECT_LOCAL -> app.autplay.ui.profilepairing.ProfileRemoteAction.DISCONNECT_LOCAL
                 }
             },
+            admission = if (pairingRuntimeState.pairing is PairingState.AwaitingTrust && pairingRuntimeState.trustConfirmed || admissionState !is app.autplay.application.profilepairing.AdmissionState.RequestReady) {
+                app.autplay.ui.profilepairing.AdmissionUiState(admissionState)
+            } else null,
         ),
+        ownerStatistics = ownerStatistics,
+        social = socialState,
+        socialAvailable = socialRuntime != null,
         stableError = stableError,
     )
     val legacySecondaryActions = buildLegacySecondaryRouteActions(
@@ -1079,12 +1329,21 @@ private fun OfflineLibraryScreen(
         settingsStore = settingsStore,
         context = context,
         profilePairingRuntime = pairingRuntime,
+        admissionRuntime = admissionRuntime,
+        admissionSnapshot = when (val pairing = pairingRuntimeState.pairing) {
+            is PairingState.AwaitingTrust -> pairing.snapshot
+            is PairingState.Connected -> pairing.snapshot
+            else -> null
+        },
         importProfileId = importProfileId,
         importRepository = importRepository,
         importActions = legacyImportActions,
         chooseLibraryRoot = { activityLaunchers.chooseLibraryRoot.launch(null) },
         exportSettings = { activityLaunchers.exportSettings.launch("autplay-settings.json") },
         importSettings = { activityLaunchers.importSettings.launch(arrayOf("application/json", "text/json")) },
+        social = socialActions,
+        manualPlaylists = manualPlaylistActions,
+        openPlaylist = { openCoreDetail(DetailTarget(DetailKind.Playlist, it)) },
     )
     MainAdaptiveShell(
         state = MainAdaptiveShellState(
@@ -1105,6 +1364,7 @@ private fun OfflineLibraryScreen(
             searchListAnchor = coreProductState.searchListAnchor,
             libraryListAnchor = coreProductState.libraryListAnchor,
             coreRouteActions = coreRouteActions,
+            queueState = queueEditorState,
             nowPlayingFeedbackEnabled = playbackState.localUserTrackRefId != null,
             nowPlayingPreference = when {
                 currentTrackPreference?.loved == true -> PlaybackPreferenceUiState.Liked
@@ -1448,6 +1708,9 @@ internal fun SettingsFrontendScreen(
     onRescanLibraryRoot: () -> Unit,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
+    statisticsSettings: app.autplay.application.social.ProfileStatisticsSettingsState,
+    statisticsSettingsErrorCode: String?,
+    onStatisticsVisibilityChange: (Boolean) -> Unit,
     onNavigate: (UiDestination) -> Unit,
 ) {
     SettingsProductScreen(
@@ -1458,6 +1721,9 @@ internal fun SettingsFrontendScreen(
         onRescanLibraryRoot = onRescanLibraryRoot,
         onExportSettings = onExportSettings,
         onImportSettings = onImportSettings,
+        statisticsSettings = statisticsSettings,
+        statisticsSettingsErrorCode = statisticsSettingsErrorCode,
+        onStatisticsVisibilityChange = onStatisticsVisibilityChange,
         onNavigate = onNavigate,
     )
 }

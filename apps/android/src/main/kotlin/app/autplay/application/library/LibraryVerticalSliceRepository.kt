@@ -114,11 +114,11 @@ class LibraryVerticalSliceRepository(
     }
 
     suspend fun createPlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult {
-        require(name.isNotBlank() && name.length <= 500)
-        return mutate(binding, changeId, "PLAYLIST_CREATED", "PLAYLIST", playlistId, now, "{\"description\":${description?.let(::q) ?: "null"},\"name\":${q(name)}}") { sequence, bound ->
+        val metadata = validatedPlaylistMetadata(name, description)
+        return mutate(binding, changeId, "PLAYLIST_CREATED", "PLAYLIST", playlistId, now, "{\"description\":${metadata.description?.let(::q) ?: "null"},\"name\":${q(metadata.name)}}") { sequence, bound ->
             database.playlistDao().insertPlaylist(
                 PlaylistEntity(
-                    playlistId.value, null, name, description, "PRIVATE", "MANUAL", null, null,
+                    playlistId.value, null, metadata.name, metadata.description, "PRIVATE", "MANUAL", null, null,
                     sync(bound), null, sequence, now, now, null,
                     binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
                 ),
@@ -126,13 +126,14 @@ class LibraryVerticalSliceRepository(
         }
     }
 
-    suspend fun updatePlaylistMetadata(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult =
-        mutate(binding, changeId, "PLAYLIST_METADATA_PATCHED", "PLAYLIST", playlistId, now, "{\"description\":${description?.let(::q) ?: "null"},\"name\":${q(name)}}") { sequence, bound ->
-            require(name.isNotBlank() && name.length <= 500)
+    suspend fun updatePlaylistMetadata(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult {
+        val metadata = validatedPlaylistMetadata(name, description)
+        return mutate(binding, changeId, "PLAYLIST_METADATA_PATCHED", "PLAYLIST", playlistId, now, "{\"description\":${metadata.description?.let(::q) ?: "null"},\"name\":${q(metadata.name)}}") { sequence, bound ->
             val row = database.playlistDao().playlist(playlistId.value) ?: missing()
             ensureOwned(binding, row.serverProfileId)
-            database.playlistDao().upsertPlaylist(row.copy(name = name, description = description, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
+            database.playlistDao().upsertPlaylist(row.copy(name = metadata.name, description = metadata.description, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
+    }
 
     suspend fun deletePlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, now: Long): SliceMutationResult =
         mutate(binding, changeId, "AGGREGATE_DELETED", "PLAYLIST", playlistId, now, "{}") { sequence, bound ->
@@ -414,6 +415,17 @@ class LibraryVerticalSliceRepository(
         syncScheduler?.enqueue(DeferredWorkRequest(DeferredWorkKind.SYNC, DeferredWorkSubject.Device(binding.deviceId), binding.serverProfileId))
     }
     private fun q(value: String): String = kotlinx.serialization.json.JsonPrimitive(value).toString()
+    /** Manual playlist metadata is normalized at the application boundary before journaling. */
+    private fun validatedPlaylistMetadata(name: String, description: String?): PlaylistMetadata {
+        val normalizedName = name.trim()
+        require(normalizedName.length in 1..120) { "PLAYLIST_NAME_INVALID" }
+        val normalizedDescription = description?.trim()?.takeIf(String::isNotEmpty)
+        require(normalizedDescription == null || normalizedDescription.length <= 500) {
+            "PLAYLIST_DESCRIPTION_INVALID"
+        }
+        return PlaylistMetadata(normalizedName, normalizedDescription)
+    }
+    private data class PlaylistMetadata(val name: String, val description: String?)
     private fun missing(): Nothing = throw LocalSliceException(LocalSliceErrorCode.NOT_FOUND)
     private fun removed(): Nothing = throw LocalSliceException(LocalSliceErrorCode.REMOVED)
     private fun tooMany(): Nothing = throw LocalSliceException(LocalSliceErrorCode.TOO_MANY_ENTRIES)

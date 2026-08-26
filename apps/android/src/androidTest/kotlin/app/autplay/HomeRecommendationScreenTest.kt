@@ -26,6 +26,7 @@ import app.autplay.data.local.entity.ReleaseProjectionEntity
 import app.autplay.data.local.entity.ReleaseTrackProjectionEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.settings.NonSecretSettings
+import app.autplay.data.settings.CURRENT_ONBOARDING_REVISION
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
@@ -59,6 +60,7 @@ class HomeRecommendationScreenTest {
                 activeUserId = UserId(USER),
                 deviceId = DeviceId(DEVICE),
                 serverBaseUrl = "https://offline.test",
+                onboardingRevision = CURRENT_ONBOARDING_REVISION,
             ),
         )
         val db = AutPlayDatabase.open(context)
@@ -107,6 +109,7 @@ class HomeRecommendationScreenTest {
                 activeUserId = UserId(OTHER_USER),
                 deviceId = DeviceId(OTHER_DEVICE),
                 serverBaseUrl = "https://offline.test",
+                onboardingRevision = CURRENT_ONBOARDING_REVISION,
             ),
         )
         scrollHomeTo(hasText(context.getString(R.string.home_empty_recommendations)))

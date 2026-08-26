@@ -21,6 +21,7 @@ import java.time.Instant
 import java.util.Base64
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
@@ -31,6 +32,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -87,6 +89,140 @@ class ProfilePairingRuntimeTest {
         assertEquals(1, fixture.port.exchangeCalls)
         assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
         assertEquals("KEEP_LOCAL", fixture.settings.value.m5LocalDataDecision)
+    }
+
+    @Test
+    fun coldAdmissionRecoveryReestablishesTrustAndPersistsOrdinaryM5Binding() = runBlocking {
+        val fixture = Fixture()
+        val checkpoint = AdmissionCheckpoint(
+            requestId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            requestSha256 = "c".repeat(64),
+            serverProfileId = PROFILE,
+            serverInstanceId = SERVER_INSTANCE_ID,
+            identityEpoch = 1,
+            identityThumbprintSha256 = IDENTITY_THUMBPRINT,
+            deviceKeyThumbprintSha256 = DEVICE_THUMBPRINT,
+            generationId = GENERATION_ID,
+            apiOrigin = API_ORIGIN,
+            streamOrigin = STREAM_ORIGIN,
+        )
+
+        assertTrue(fixture.runtime.recoverAdmissionTrust(checkpoint))
+        assertTrue(fixture.port.identitySeeded)
+        assertTrue(fixture.runtime.state.value.trustConfirmed)
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.AwaitingTrust)
+
+        val stored = fixture.runtime.completeAdmissionEnrollment(
+            checkpoint,
+            AdmissionAccount(USER, "Owner"),
+            BINDING_COMMIT_ID,
+            EnrollmentSession(
+                DEVICE,
+                SESSION_ID,
+                SESSION_FAMILY_ID,
+                0,
+                "access".toByteArray(StandardCharsets.US_ASCII),
+                REFRESH_TOKEN.copyOf(),
+            ),
+        )
+
+        assertTrue(stored)
+        assertEquals(PROFILE, fixture.settings.value.activeServerProfileId)
+        assertEquals(USER, fixture.settings.value.activeUserId)
+        assertEquals(DEVICE, fixture.settings.value.deviceId)
+        assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
+        assertEquals(
+            Base64.getEncoder().encodeToString(IDENTITY_SPKI),
+            fixture.settings.value.m5TrustEvidence?.identityPublicKeySpkiB64,
+        )
+    }
+
+    @Test
+    fun cancellingDelayedColdAdmissionTrustRecoveryCannotRestorePairing() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val fixture = Fixture(FakePort(discoveryGate = gate))
+        val checkpoint = admissionCheckpoint()
+
+        val recovery = async(start = CoroutineStart.UNDISPATCHED) {
+            fixture.runtime.recoverAdmissionTrust(checkpoint)
+        }
+        fixture.runtime.cancel()
+        gate.complete(Unit)
+
+        assertFalse(recovery.await())
+        assertEquals(PairingState.Cancelled, fixture.runtime.state.value.pairing)
+    }
+
+    @Test
+    fun profileCancellationClearsAdmissionCheckpointAndDeletesItsExactKey() = runBlocking {
+        val checkpoint = admissionCheckpoint()
+        val fixture = Fixture(
+            initialSettings = NonSecretSettings(
+                m5AdmissionCheckpoint = AdmissionCheckpointCodec.encode(checkpoint),
+            ),
+        )
+
+        fixture.runtime.cancel()
+
+        assertNull(fixture.settings.value.m5AdmissionCheckpoint)
+        assertTrue(KEY_ALIAS in fixture.keys.deletedAliases)
+    }
+
+    @Test
+    fun committedBindingWinsOverCrashStaleAdmissionCheckpointOnRestart() = runBlocking {
+        val checkpoint = admissionCheckpoint()
+        val encoded = AdmissionCheckpointCodec.encode(checkpoint)
+        val binding = M5BindingCheckpoint(
+            BINDING_COMMIT_ID,
+            SERVER_INSTANCE_ID,
+            1,
+            IDENTITY_THUMBPRINT,
+            KEY_ALIAS,
+            SESSION_ID,
+            SESSION_FAMILY_ID,
+            0,
+        )
+        val fixture = Fixture(
+            initialSettings = NonSecretSettings(
+                activeServerProfileId = PROFILE,
+                activeUserId = USER,
+                deviceId = DEVICE,
+                serverBaseUrl = API_ORIGIN,
+                streamBaseUrl = STREAM_ORIGIN,
+                m5Binding = binding,
+                m5TrustEvidence = M5TrustEvidence(
+                    identityPublicKeySpkiB64 = Base64.getEncoder().encodeToString(IDENTITY_SPKI),
+                    serverLabelHint = "Test server",
+                ),
+                m5LocalDataDecision = "KEEP_LOCAL",
+                m5AdmissionCheckpoint = encoded,
+            ),
+        )
+        fixture.credentials.write(
+            PROFILE,
+            SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope(
+                    accessToken = "access",
+                    refreshToken = REFRESH_TOKEN.toString(StandardCharsets.US_ASCII),
+                    generation = 0,
+                    bindingCommitId = BINDING_COMMIT_ID,
+                    sessionId = SESSION_ID,
+                    sessionFamilyId = SESSION_FAMILY_ID,
+                    sessionGeneration = 0,
+                ),
+            ),
+        )
+        val bootstrap = AdmissionRecoveryBootstrap(encoded, preferExistingBinding = true)
+
+        assertTrue(
+            bootstrap.restoreExistingBindingIfPresent(fixture.runtime) {
+                fixture.settings.update(fixture.settings.value.copy(m5AdmissionCheckpoint = null))
+            },
+        )
+
+        assertNull(fixture.settings.value.m5AdmissionCheckpoint)
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
+        assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
     }
 
     @Test
@@ -487,6 +623,19 @@ class ProfilePairingRuntimeTest {
         "stream_origin":"$STREAM_ORIGIN","user_id":"${USER.value}","account_display_name":"Owner",
         "expires_at":"$expiresAt","secret_handling":"DISPLAY_ONCE_NO_CLIPBOARD_NO_LOG_NO_EXPORT"}
     """.trimIndent()
+
+    private fun admissionCheckpoint() = AdmissionCheckpoint(
+        requestId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        requestSha256 = "c".repeat(64),
+        serverProfileId = PROFILE,
+        serverInstanceId = SERVER_INSTANCE_ID,
+        identityEpoch = 1,
+        identityThumbprintSha256 = IDENTITY_THUMBPRINT,
+        deviceKeyThumbprintSha256 = DEVICE_THUMBPRINT,
+        generationId = GENERATION_ID,
+        apiOrigin = API_ORIGIN,
+        streamOrigin = STREAM_ORIGIN,
+    )
 
     private fun materializationMarker() = buildJsonObject {
         put("marker_version", 1)

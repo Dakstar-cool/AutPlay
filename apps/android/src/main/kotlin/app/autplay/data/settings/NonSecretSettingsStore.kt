@@ -68,6 +68,8 @@ data class NonSecretSettings(
     val m5PendingExchangeCheckpoint: String? = null,
     /** Durable cancellation tombstone that prevents a racing exchange from publishing a checkpoint. */
     val m5CancelledPairingGenerationId: String? = null,
+    /** Redacted S1B recovery facts only; poll and review bearers are forbidden here. */
+    val m5AdmissionCheckpoint: String? = null,
 )
 
 /** Sensitive non-secret local evidence for a single M5 binding; it is never an authority token. */
@@ -198,6 +200,8 @@ class DataStoreNonSecretSettingsStore(
             ?: preferences.remove(M5_PENDING_EXCHANGE)
         settings.m5CancelledPairingGenerationId?.let { preferences[M5_CANCELLED_GENERATION] = it }
             ?: preferences.remove(M5_CANCELLED_GENERATION)
+        settings.m5AdmissionCheckpoint?.let { preferences[M5_ADMISSION_CHECKPOINT] = it }
+            ?: preferences.remove(M5_ADMISSION_CHECKPOINT)
     }
 
     private fun toSettings(preferences: Preferences): NonSecretSettings {
@@ -221,6 +225,7 @@ class DataStoreNonSecretSettingsStore(
         m5LocalDataDecision = preferences[M5_LOCAL_DATA_DECISION],
         m5PendingExchangeCheckpoint = preferences[M5_PENDING_EXCHANGE],
         m5CancelledPairingGenerationId = preferences[M5_CANCELLED_GENERATION],
+        m5AdmissionCheckpoint = preferences[M5_ADMISSION_CHECKPOINT],
         )
     }
 
@@ -271,6 +276,7 @@ class DataStoreNonSecretSettingsStore(
         require(settings.m5LocalDataDecision == null || settings.m5LocalDataDecision in setOf("KEEP_LOCAL", "REVIEW_SELECTED"))
         if (settings.m5LocalDataDecision != null) require(settings.m5Binding != null)
         require(settings.m5PendingExchangeCheckpoint == null || settings.m5PendingExchangeCheckpoint.length <= 4096)
+        require(settings.m5AdmissionCheckpoint == null || settings.m5AdmissionCheckpoint.length <= 1024)
         require(
             settings.m5CancelledPairingGenerationId == null ||
                 runCatching {
@@ -330,6 +336,7 @@ class DataStoreNonSecretSettingsStore(
         val M5_LOCAL_DATA_DECISION = stringPreferencesKey("m5_local_data_decision")
         val M5_PENDING_EXCHANGE = stringPreferencesKey("m5_pending_exchange_checkpoint")
         val M5_CANCELLED_GENERATION = stringPreferencesKey("m5_cancelled_pairing_generation_id")
+        val M5_ADMISSION_CHECKPOINT = stringPreferencesKey("m5_admission_checkpoint_redacted")
         val M5_KEYS = listOf(M5_BINDING_COMMIT_ID, M5_SERVER_INSTANCE_ID, M5_IDENTITY_EPOCH, M5_IDENTITY_THUMBPRINT, M5_DEVICE_KEY_ALIAS, M5_SESSION_ID, M5_SESSION_FAMILY_ID, M5_SESSION_GENERATION)
         val M5_TRUST_KEYS = listOf(M5_IDENTITY_SPKI, M5_SERVER_LABEL_HINT, M5_CAPABILITY_PAYLOAD, M5_CAPABILITY_HASH, M5_CAPABILITY_REVISION)
     }

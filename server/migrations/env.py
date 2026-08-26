@@ -26,6 +26,7 @@ REFERENCE_SCHEMAS = frozenset(
         "library",
         "ml",
         "playlist",
+        "social",
         "sync",
         "vault",
         "wave",
@@ -92,7 +93,7 @@ def _include_name(
     type_: str,
     parent_names: dict[str, str | None],
 ) -> bool:
-    """Limit reflection to the twelve reference data schemas."""
+    """Limit reflection to the accepted product data schemas."""
     if type_ == "schema":
         return name in REFERENCE_SCHEMAS
     schema_name = parent_names.get("schema_name")

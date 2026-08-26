@@ -268,6 +268,7 @@ def test_language_neutral_examples_validate_against_every_public_schema() -> Non
         "listening-event-recorded-payload.schema.json",
         "recommendation-impression-recorded-payload.schema.json",
         "recommendation-feedback-recorded-payload.schema.json",
+        "social-envelope.schema.json",
         "user-interaction-event.schema.json",
         "wave-envelope.schema.json",
     }

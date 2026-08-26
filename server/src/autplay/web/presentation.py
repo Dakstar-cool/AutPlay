@@ -35,6 +35,8 @@ _NAVIGATION: Final = (
     ("/admin/devices", "nav_devices", "devices"),
     ("/admin/sessions", "nav_sessions", "sessions"),
     ("/admin/invitations", "nav_invitations", "invitations"),
+    ("/admin/connection-requests", "nav_connection_requests", "connection-requests"),
+    ("/admin/trusted-devices", "nav_trusted_devices", "trusted-devices"),
     ("/admin/vault", "nav_vault", "vault"),
     ("/admin/jobs", "nav_jobs", "jobs"),
     ("/admin/review", "nav_review", "review"),

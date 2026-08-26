@@ -18,6 +18,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.data.settings.NonSecretSettings
+import app.autplay.data.settings.CURRENT_ONBOARDING_REVISION
 import app.autplay.application.importing.CreateLocalImportCommand
 import app.autplay.application.importing.ImportResolverState
 import app.autplay.application.importing.ImportRowInput
@@ -57,6 +58,7 @@ class OfflineLibraryScreenTest {
                 activeUserId = UserId("31111111-1111-4111-8111-111111111111"),
                 deviceId = DeviceId("41111111-1111-4111-8111-111111111111"),
                 serverBaseUrl = "https://offline.test",
+                onboardingRevision = CURRENT_ONBOARDING_REVISION,
             ),
         )
     }
@@ -66,7 +68,9 @@ class OfflineLibraryScreenTest {
         scenario?.close()
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
-        applicationNonSecretSettingsStore(context).update(NonSecretSettings())
+        applicationNonSecretSettingsStore(context).update(
+            NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION),
+        )
     }
 
     @Test
@@ -87,7 +91,9 @@ class OfflineLibraryScreenTest {
 
     @Test
     fun freshLaunchWithoutServerConfigurationPersistsStandaloneChangeAcrossRecreation() = runBlocking {
-        applicationNonSecretSettingsStore(context).update(NonSecretSettings())
+        applicationNonSecretSettingsStore(context).update(
+            NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION),
+        )
         scenario = ActivityScenario.launch(MainActivity::class.java)
 
         composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()

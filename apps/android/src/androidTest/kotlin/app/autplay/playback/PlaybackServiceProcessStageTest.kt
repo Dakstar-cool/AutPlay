@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.AutPlayRuntime
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
+import app.autplay.application.playback.QueueEditorRepository
 import app.autplay.data.local.entity.LocalAudioStateEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.domain.LocalId
@@ -17,7 +18,9 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runners.MethodSorters
@@ -25,7 +28,7 @@ import org.junit.runner.RunWith
 
 /**
  * Run stage1, force-stop app.autplay with adb, then run stage2 for the true process-death gate.
- * The fixed order also keeps the complete connected suite independently green.
+ * The wrapper-only argument keeps these externally orchestrated stages out of the normal suite.
  */
 @UnstableApi
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -36,6 +39,7 @@ class PlaybackServiceProcessStageTest {
     private val testPackageName = instrumentation.context.packageName
 
     @Test fun stage1_seedServiceAndWaitForPeriodicCheckpoint() = runBlocking {
+        requireExternalProcessStage()
         context.stopService(android.content.Intent(context, AutPlayPlaybackService::class.java))
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase(app.autplay.data.local.AutPlayDatabase.DATABASE_NAME)
@@ -43,11 +47,23 @@ class PlaybackServiceProcessStageTest {
         val trackId = id(71)
         val entryId = id(72)
         val snapshotId = id(73)
+        val secondTrackId = id(75)
+        val thirdTrackId = id(76)
+        val secondEntryId = id(77)
+        val thirdEntryId = id(78)
         database.libraryDao().upsertTrackRef(track(trackId))
-        database.localAudioDao().upsertState(audio(trackId))
+        database.libraryDao().upsertTrackRef(track(secondTrackId))
+        database.libraryDao().upsertTrackRef(track(thirdTrackId))
+        database.localAudioDao().upsertState(audio(trackId, 74))
+        database.localAudioDao().upsertState(audio(secondTrackId, 79))
+        database.localAudioDao().upsertState(audio(thirdTrackId, 80))
         PlaybackPersistenceRepository(database).activateQueue(
             snapshotId,
-            listOf(NewPlaybackQueueEntry(entryId, trackId, "ORGANIC", "LOCAL_THEN_VAULT")),
+            listOf(
+                NewPlaybackQueueEntry(entryId, trackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+                NewPlaybackQueueEntry(secondEntryId, secondTrackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+                NewPlaybackQueueEntry(thirdEntryId, thirdTrackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+            ),
             "USER",
             null,
             null,
@@ -58,27 +74,97 @@ class PlaybackServiceProcessStageTest {
         val controller = connect()
         try {
             await("service queue") { onMain { controller.currentMediaItem?.mediaId } == entryId.value }
-            await("periodic checkpoint", 25_000) {
+            await("ready playback state") { onMain { controller.playbackState == Player.STATE_READY } }
+            onMain { controller.play() }
+            await("active playback") { onMain { controller.isPlaying } }
+            await("logical session") {
+                runBlocking { database.queueDao().activeSnapshotOnce()?.activeListeningEventId } != null
+            }
+            onMain {
+                controller.repeatMode = Player.REPEAT_MODE_ALL
+                controller.shuffleModeEnabled = true
+            }
+            await("initial playback modes") {
                 onMain {
-                    if (controller.playbackState == Player.STATE_READY && !controller.isPlaying) {
-                        controller.play()
-                    }
+                    controller.shuffleModeEnabled && controller.repeatMode == Player.REPEAT_MODE_ALL
                 }
+            }
+            await("persisted playback modes") {
+                runBlocking {
+                    database.queueDao().activeSnapshotOnce()?.let { snapshot ->
+                        snapshot.shuffleMode == "SEEDED" &&
+                            snapshot.repeatMode == "ALL" &&
+                            snapshot.seed != null
+                    } == true
+                }
+            }
+            await("initial playback position") { onMain { controller.currentPosition } >= 1_000 }
+            await("play intent before refresh") { onMain { controller.playWhenReady } }
+            val beforeRefreshPosition = onMain { controller.currentPosition }
+            val listeningEventId = requireNotNull(database.queueDao().activeSnapshotOnce()).activeListeningEventId
+
+            QueueEditorRepository(database, ServicePlaybackSessionOwner(context)).moveUpcoming(
+                entryId = thirdEntryId,
+                beforeEntryId = secondEntryId,
+                expectedProfileId = null,
+                expectedSnapshotId = snapshotId,
+            )
+            await("refreshed edited order") {
+                onMain { (0 until controller.mediaItemCount).map(controller::getMediaItemAt).map { it.mediaId } } ==
+                    listOf(entryId.value, thirdEntryId.value, secondEntryId.value)
+            }
+            assertEquals(entryId.value, onMain { controller.currentMediaItem?.mediaId })
+            assertTrue(onMain { controller.currentPosition } >= beforeRefreshPosition - 500)
+            await("play intent preserved after refresh") { onMain { controller.playWhenReady } }
+            await("play state preserved after refresh") { onMain { controller.isPlaying } }
+            await("shuffle preserved after refresh") { onMain { controller.shuffleModeEnabled } }
+            await("repeat preserved after refresh") { onMain { controller.repeatMode == Player.REPEAT_MODE_ALL } }
+            assertEquals(listeningEventId, requireNotNull(database.queueDao().activeSnapshotOnce()).activeListeningEventId)
+
+            onMain { controller.shuffleModeEnabled = false; controller.pause() }
+            await("paused before navigation") { !onMain { controller.isPlaying } }
+            ServicePlaybackSessionOwner(context).dispatch(PlaybackCommand.Next)
+            await("next service command") { onMain { controller.currentMediaItem?.mediaId } == thirdEntryId.value }
+            await("next Room checkpoint") {
+                runBlocking { database.queueDao().activeSnapshotOnce()?.currentEntryId } == thirdEntryId.value
+            }
+            ServicePlaybackSessionOwner(context).dispatch(PlaybackCommand.Previous)
+            await("previous service command") { onMain { controller.currentMediaItem?.mediaId } == entryId.value }
+            await("previous Room checkpoint") {
+                runBlocking { database.queueDao().activeSnapshotOnce()?.currentEntryId } == entryId.value
+            }
+            onMain { controller.seekTo(12_000) }
+            await("paused seek") { onMain { controller.currentPosition } >= 10_000 }
+            await("paused seek checkpoint") {
                 runBlocking { database.queueDao().activeSnapshotOnce()?.currentPositionMs ?: 0 } >= 10_000
             }
+            assertFalse(onMain { controller.isPlaying })
             assertTrue(requireNotNull(database.queueDao().activeSnapshotOnce()).currentPositionMs >= 10_000)
+            onMain { controller.play() }
+            await("foreground playback before forced process death") { onMain { controller.isPlaying } }
         } finally {
             onMain { controller.release() }
         }
     }
 
     @Test fun stage2_verifyServiceRestoresPersistedQueueAfterFreshConnection() = runBlocking {
+        requireExternalProcessStage()
         val database = AutPlayRuntime.database(context)
+        val persistedPositionMs = requireNotNull(database.queueDao().activeSnapshotOnce()).currentPositionMs
+        assertTrue("Room position before service restore was $persistedPositionMs", persistedPositionMs >= 10_000)
         val controller = connect()
         try {
             await("restored queue") { onMain { controller.currentMediaItem?.mediaId } == id(72).value }
             assertEquals(id(72).value, onMain { controller.currentMediaItem?.mediaId })
-            assertTrue(onMain { controller.currentPosition } >= 10_000)
+            assertEquals(
+                listOf(id(72).value, id(78).value, id(77).value),
+                onMain { (0 until controller.mediaItemCount).map(controller::getMediaItemAt).map { it.mediaId } },
+            )
+            await("restored playback position from Room=$persistedPositionMs") {
+                onMain { controller.currentPosition } >= 10_000
+            }
+            await("restored repeat mode") { onMain { controller.repeatMode == Player.REPEAT_MODE_ALL } }
+            assertFalse(onMain { controller.shuffleModeEnabled })
             assertTrue(requireNotNull(database.queueDao().activeSnapshotOnce()).currentPositionMs >= 10_000)
         } finally {
             onMain { controller.release() }
@@ -90,6 +176,13 @@ class PlaybackServiceProcessStageTest {
         context,
         SessionToken(context, ComponentName(context, AutPlayPlaybackService::class.java)),
     ).buildAsync().get(10, TimeUnit.SECONDS)
+
+    private fun requireExternalProcessStage() {
+        assumeTrue(
+            "Run through scripts/test-l1-process-death.ps1",
+            InstrumentationRegistry.getArguments().getString("l1ProcessStage") == "true",
+        )
+    }
 
     private fun await(label: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
@@ -124,8 +217,8 @@ class PlaybackServiceProcessStageTest {
         deletedAtMs = null,
     )
 
-    private fun audio(trackId: LocalId) = LocalAudioStateEntity(
-        localAudioStateId = id(74).value,
+    private fun audio(trackId: LocalId, stateSeed: Int) = LocalAudioStateEntity(
+        localAudioStateId = id(stateSeed).value,
         localUserTrackRefId = trackId.value,
         localRecordingId = null,
         serverAudioVariantId = null,

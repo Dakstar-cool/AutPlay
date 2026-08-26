@@ -1,66 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
-  <title id="title">AutPlay — локальная музыка с возможностями личного сервера</title>
-  <desc id="desc">Название AutPlay рядом с локальной медиатекой Android: музыка продолжает играть без сети, а личный сервер по желанию добавляет синхронизацию и неизменяемый музыкальный Vault.</desc>
-
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">AutPlay — музыка принадлежит устройству, сервер остаётся выбором</title>
+  <desc id="desc">Локальная Android-медиатека, ручные плейлисты и управляемая очередь соединены с приватными друзьями, статистикой по выбору и необязательным личным сервером.</desc>
   <defs>
-    <clipPath id="frame">
-      <rect width="1200" height="400" rx="28"/>
-    </clipPath>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#8FCBFF"/>
+    </marker>
   </defs>
+  <rect width="1200" height="420" rx="28" fill="#08090B"/>
+  <path d="M0 350H1200M682 0V420" stroke="#34353D" stroke-width="1"/>
 
-  <g clip-path="url(#frame)">
-    <rect width="1200" height="400" fill="#141111"/>
-    <path d="M0 322H1200" stroke="#514341" stroke-width="1"/>
-    <path d="M710 0V400" stroke="#332B2A" stroke-width="1"/>
-
-    <g transform="translate(58 48)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
-      <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="2.2" fill="#E4BDB7">
-        <text x="0" y="18">ANDROID · ЛОКАЛЬНО ПО УМОЛЧАНИЮ</text>
-      </g>
-
-      <g transform="translate(0 52)">
-        <rect x="0" y="0" width="72" height="72" rx="18" fill="#B42318"/>
-        <path d="M27 18L55 36L27 54Z" fill="#FFF8F7"/>
-        <text x="92" y="59" fill="#FFF8F7" font-size="78" font-weight="750" letter-spacing="-3">AutPlay</text>
-      </g>
-
-      <text x="0" y="190" fill="#FFF8F7" font-size="30" font-weight="600">Медиатека играет локально.</text>
-      <text x="0" y="228" fill="#E4BDB7" font-size="30">Сервер расширяет возможности.</text>
-
-      <g transform="translate(0 262)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="650">
-        <rect width="138" height="42" rx="21" fill="#FFF8F7"/>
-        <text x="69" y="27" text-anchor="middle" fill="#410001">БЕЗ СЕРВЕРА</text>
-        <rect x="150" width="194" height="42" rx="21" fill="#2A2423" stroke="#765653"/>
-        <text x="247" y="27" text-anchor="middle" fill="#FFDAD5">СЕРВЕР ПО ЖЕЛАНИЮ</text>
-        <rect x="356" width="130" height="42" rx="21" fill="#2A2423" stroke="#00639B"/>
-        <text x="421" y="27" text-anchor="middle" fill="#A8D8FF">CPU-ЯДРО</text>
-      </g>
+  <g transform="translate(56 44)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="0" y="20" fill="#FF8A6D" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">ANDROID · LOCAL-FIRST MUSIC SYSTEM</text>
+    <g transform="translate(0 48)">
+      <rect width="68" height="68" rx="18" fill="#FF5B35"/>
+      <path d="M26 17L53 34L26 51Z" fill="#FFF7F3"/>
+      <text x="88" y="57" fill="#F6F4F1" font-size="76" font-weight="760" letter-spacing="-3">AutPlay</text>
     </g>
-
-    <g transform="translate(742 38)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
-      <rect x="0" y="0" width="212" height="324" rx="30" fill="#1C1919" stroke="#765653" stroke-width="2"/>
-      <rect x="18" y="22" width="176" height="280" rx="20" fill="#FFF8F7"/>
-      <rect x="76" y="10" width="60" height="6" rx="3" fill="#765653"/>
-
-      <text x="36" y="62" fill="#765653" font-size="17" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">МОЯ МЕДИАТЕКА</text>
-      <circle cx="106" cy="131" r="46" fill="#FFDAD5"/>
-      <path d="M94 105L132 131L94 157Z" fill="#B42318"/>
-      <path d="M38 211C55 211 55 181 72 181C89 181 89 236 106 236C123 236 123 194 140 194C157 194 157 211 174 211" fill="none" stroke="#B42318" stroke-width="6" stroke-linecap="round"/>
-      <text x="106" y="270" text-anchor="middle" fill="#410001" font-size="21" font-weight="700">Room + Media3</text>
-      <text x="106" y="292" text-anchor="middle" fill="#765653" font-size="16">работает без сети</text>
-
-      <g transform="translate(246 44)">
-        <path d="M-18 92H28" fill="none" stroke="#A8D8FF" stroke-width="3" stroke-dasharray="8 8"/>
-        <path d="M20 84L32 92L20 100" fill="none" stroke="#A8D8FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <text x="6" y="74" text-anchor="middle" fill="#A8D8FF" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ПОЗЖЕ</text>
-
-        <rect x="42" y="0" width="150" height="178" rx="24" fill="#172733" stroke="#00639B" stroke-width="2"/>
-        <path d="M72 46H162M72 72H162M72 98H142" stroke="#A8D8FF" stroke-width="5" stroke-linecap="round"/>
-        <rect x="66" y="126" width="102" height="30" rx="15" fill="#00639B"/>
-        <text x="117" y="147" text-anchor="middle" fill="#F4FAFF" font-size="16" font-weight="700">VAULT</text>
-        <text x="117" y="205" text-anchor="middle" fill="#A8D8FF" font-size="18" font-weight="700">ЛИЧНЫЙ СЕРВЕР</text>
-        <text x="117" y="228" text-anchor="middle" fill="#B6CCDB" font-size="16">по желанию</text>
-      </g>
+    <text x="0" y="184" fill="#F6F4F1" font-size="31" font-weight="680">Музыка принадлежит устройству.</text>
+    <text x="0" y="224" fill="#A7A5AB" font-size="29">Сервер остаётся вашим выбором.</text>
+    <g transform="translate(0 262)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="650">
+      <rect width="132" height="42" rx="21" fill="#3C211B" stroke="#FF5B35"/>
+      <text x="66" y="27" text-anchor="middle" fill="#FFD2C5">OFFLINE</text>
+      <rect x="144" width="196" height="42" rx="21" fill="#1A1B20" stroke="#45464E"/>
+      <text x="242" y="27" text-anchor="middle" fill="#F6F4F1">PRIVATE DEFAULT</text>
+      <rect x="352" width="218" height="42" rx="21" fill="#172733" stroke="#00639B"/>
+      <text x="461" y="27" text-anchor="middle" fill="#A8D8FF">OPTIONAL SERVER</text>
     </g>
+  </g>
+
+  <g transform="translate(716 34)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect width="430" height="318" rx="26" fill="#111216" stroke="#34353D" stroke-width="2"/>
+    <text x="28" y="42" fill="#A7A5AB" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">LOCAL QUEUE · NOW</text>
+    <g transform="translate(28 64)">
+      <rect width="252" height="60" rx="16" fill="#242126" stroke="#FF5B35"/>
+      <circle cx="30" cy="30" r="14" fill="#FF5B35"/>
+      <path d="M26 22L38 30L26 38Z" fill="#FFF7F3"/>
+      <text x="58" y="27" fill="#F6F4F1" font-size="21" font-weight="700">Текущий трек</text>
+      <text x="58" y="48" fill="#A7A5AB" font-size="18">Media3 · локальный URI</text>
+      <path d="M274 30H326" stroke="#8FCBFF" stroke-width="3" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
+      <circle cx="354" cy="30" r="25" fill="#172733" stroke="#00639B"/>
+      <circle cx="347" cy="27" r="6" fill="#A8D8FF"/>
+      <circle cx="362" cy="27" r="6" fill="#A8D8FF"/>
+      <path d="M338 42C344 34 365 34 371 42" fill="none" stroke="#A8D8FF" stroke-width="3"/>
+    </g>
+    <g transform="translate(28 140)">
+      <rect width="374" height="54" rx="15" fill="#1A1B20"/>
+      <text x="22" y="34" fill="#F6F4F1" font-size="20">Далее: выбранный вами порядок</text>
+      <path d="M330 18H350M330 27H350M330 36H350" stroke="#FF8A6D" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(28 210)">
+      <rect width="180" height="76" rx="17" fill="#172733" stroke="#00639B"/>
+      <text x="18" y="29" fill="#A8D8FF" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">FRIENDS → WAVE</text>
+      <text x="18" y="55" fill="#F6F4F1" font-size="20" font-weight="650">Быстро позвать</text>
+      <rect x="194" width="180" height="76" rx="17" fill="#242126" stroke="#FF5B35"/>
+      <text x="212" y="29" fill="#FFB5A2" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">STATS PRIVACY</text>
+      <text x="212" y="55" fill="#F6F4F1" font-size="20" font-weight="650">OFF по умолч.</text>
+    </g>
+  </g>
+
+  <g transform="translate(56 384)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
+    <circle cx="7" cy="-6" r="7" fill="#78D79A"/>
+    <text x="24" y="0" fill="#A7A5AB">Room + Journal · Media3 · FastAPI + PostgreSQL · immutable Vault</text>
+    <text x="1088" y="0" text-anchor="end" fill="#8FCBFF">160 DEVICE TESTS · 0 FAILURES</text>
   </g>
 </svg>

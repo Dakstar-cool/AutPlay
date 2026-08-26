@@ -38,6 +38,21 @@ def public_key_thumbprint(spki: bytes) -> bytes:
     return hashlib.sha256(spki).digest()
 
 
+def p256_jwk_to_spki(jwk: Mapping[str, Any]) -> bytes:
+    """Decode the only Android admission key representation accepted by S1B."""
+    if set(jwk) != {"kty", "crv", "x", "y"} or jwk.get("kty") != "EC" or jwk.get("crv") != "P-256":
+        raise ProfilePairingError("admission_request_unavailable")
+    try:
+        x = int.from_bytes(_b64url_decode(str(jwk["x"])), "big")
+        y = int.from_bytes(_b64url_decode(str(jwk["y"])), "big")
+        key = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key()
+    except (KeyError, TypeError, ValueError) as error:
+        raise ProfilePairingError("admission_request_unavailable") from error
+    return key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+
 def verify_p1363(spki: bytes, domain: str, request_hash: bytes, signature_b64url: str) -> None:
     """Verify an exact P-256/SHA-256 P1363 proof without JSON reserialization."""
     signature = _b64url_decode(signature_b64url)
@@ -112,6 +127,7 @@ __all__ = (
     "canonical_sha256",
     "iso8601",
     "load_private_key",
+    "p256_jwk_to_spki",
     "public_key_thumbprint",
     "public_spki",
     "sign_p1363",

@@ -64,6 +64,9 @@ import app.autplay.playback.presentation.canSeek
 import app.autplay.ui.AutPlayArtwork
 import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayIconButton
+import app.autplay.ui.queue.QueueEditorPanel
+import app.autplay.ui.queue.QueueEditorUiActions
+import app.autplay.ui.queue.QueueEditorUiState
 import app.autplay.ui.AutPlayPlatformIcon
 import app.autplay.ui.AutPlayPlaybackHalo
 import app.autplay.ui.AutPlayStateKind
@@ -147,6 +150,8 @@ public fun NowPlayingScreen(
     feedbackEnabled: Boolean,
     onObservingChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onPrevious: () -> Unit = {},
+    onNext: () -> Unit = {},
     preference: PlaybackPreferenceUiState = PlaybackPreferenceUiState.Neutral,
     onClearPreference: () -> Unit = {},
     sleepTimerRemainingMinutes: Int? = null,
@@ -154,6 +159,8 @@ public fun NowPlayingScreen(
     onSetSleepTimer: (Long) -> Unit = {},
     onStopAfterCurrentTrack: () -> Unit = {},
     onCancelSleepTimer: () -> Unit = {},
+    queueState: QueueEditorUiState = QueueEditorUiState(),
+    queueActions: QueueEditorUiActions = QueueEditorUiActions(),
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -291,14 +298,24 @@ public fun NowPlayingScreen(
                     onToggleShuffle,
                     enabled = state.shuffleEnabled,
                 )
-                AutPlayIconButton(AutPlayIcon.Previous, R.string.action_previous, {}, enabled = false)
+                AutPlayIconButton(
+                    AutPlayIcon.Previous,
+                    R.string.action_previous,
+                    onPrevious,
+                    enabled = queueState.canPrevious && state.controls is PlaybackControlGate.Allowed,
+                )
                 PrimaryTransportButton(
                     icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
                     labelRes = if (state.isPlaying) R.string.action_pause else R.string.action_play,
                     onClick = onTogglePlayPause,
                     enabled = state.controls is PlaybackControlGate.Allowed,
                 )
-                AutPlayIconButton(AutPlayIcon.Next, R.string.action_next, {}, enabled = false)
+                AutPlayIconButton(
+                    AutPlayIcon.Next,
+                    R.string.action_next,
+                    onNext,
+                    enabled = queueState.canNext && state.controls is PlaybackControlGate.Allowed,
+                )
                 AutPlayIconButton(
                     AutPlayIcon.Repeat,
                     repeatLabel(state.repeatMode),
@@ -322,13 +339,8 @@ public fun NowPlayingScreen(
                 enabled = state.controls is PlaybackControlGate.Allowed,
                 modifier = Modifier.testTag("player-sleep-timer"),
             )
+            QueueEditorPanel(queueState, queueActions)
             FutureWaveByTrackCard()
-            Text(
-                stringResource(R.string.player_queue_transition_unavailable),
-                style = MaterialTheme.typography.bodySmall,
-                color = AutPlayTokens.colors.mutedText,
-                textAlign = TextAlign.Center,
-            )
             Spacer(Modifier.height(12.dp))
         }
     }

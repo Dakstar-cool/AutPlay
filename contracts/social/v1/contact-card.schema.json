@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/contact-card.schema.json",
+  "title": "S1C signed same-server contact card",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "x-autplay-signature-domain": "autplay:s1c:social-contact-card:v1\\n",
+  "x-autplay-server-derived": ["issued_at", "expires_at", "signature_b64url"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["server_instance_id", "account_id", "display_name_hint", "issued_at", "expires_at", "signature_b64url"],
+  "properties": {
+    "server_instance_id": {"type": "string", "format": "uuid"},
+    "account_id": {"type": "string", "format": "uuid"},
+    "display_name_hint": {"type": "string", "minLength": 1, "maxLength": 120},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "signature_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+  }
+}

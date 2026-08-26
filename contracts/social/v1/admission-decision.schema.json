@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/admission-decision.schema.json",
+  "title": "S1B exact-key Web admission decision",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1B",
+  "type": "object", "additionalProperties": false,
+  "required": ["operation_id", "request_id", "action", "request_sha256"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"},
+    "action": {"enum": ["APPROVE_ONCE", "TRUST_DEVICE", "REJECT", "BLOCK_DEVICE"]},
+    "request_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

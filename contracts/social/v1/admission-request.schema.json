@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/admission-request.schema.json",
+  "title": "S1B Android admission request",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1B",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "expected_server_instance_id", "expected_identity_epoch", "expected_identity_thumbprint_sha256", "client_nonce_b64url", "api_major", "device_key_thumbprint_sha256", "device_public_key_jwk", "proof_b64url", "nickname", "platform", "app_version", "requested_at"],
+  "properties": {
+    "request_id": {"type": "string", "format": "uuid"},
+    "expected_server_instance_id": {"type": "string", "format": "uuid"},
+    "expected_identity_epoch": {"type": "integer", "minimum": 1},
+    "expected_identity_thumbprint_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "client_nonce_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "api_major": {"type": "integer", "minimum": 1, "maximum": 1},
+    "device_key_thumbprint_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "device_public_key_jwk": {"type": "object", "additionalProperties": false, "required": ["kty", "crv", "x", "y"], "properties": {"kty": {"const": "EC"}, "crv": {"const": "P-256"}, "x": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}, "y": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}}},
+    "proof_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"},
+    "nickname": {"type": "string", "minLength": 1, "maxLength": 120},
+    "device_model_hint": {"type": "string", "maxLength": 96},
+    "platform": {"const": "ANDROID"},
+    "app_version": {"type": "string", "minLength": 1, "maxLength": 32},
+    "requested_at": {"type": "string", "format": "date-time"}
+  }
+}

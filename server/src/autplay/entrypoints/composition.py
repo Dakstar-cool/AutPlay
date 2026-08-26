@@ -34,6 +34,7 @@ from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
 )
+from autplay.application.social import SocialService
 from autplay.application.sync import SyncService
 from autplay.application.vault_uploads import (
     CreateUploadCommand,
@@ -337,6 +338,13 @@ def build_recommendation_service(engine: Engine) -> RecommendationService:
 def build_wave_service(engine: Engine) -> SqlAlchemyWaveService:
     """Assemble the P13 durable Wave repository with per-operation sessions."""
     return SqlAlchemyWaveService(sessionmaker(engine, class_=Session, expire_on_commit=False))
+
+
+def build_social_service(settings: ApiSettings, engine: Engine) -> SocialService:
+    """Assemble S1C only with the same server identity used for contact cards."""
+    pem = settings.profile_identity_private_key_pem
+    key = None if pem is None else load_private_key(pem.get_secret_value().encode("utf-8"))
+    return SocialService(sessionmaker(engine, class_=Session, expire_on_commit=False), key)
 
 
 class _StreamLookup:

@@ -45,7 +45,11 @@ from autplay.application.job_worker import (
     JobWorkerSettings,
 )
 from autplay.application.manual_discovery import ManualDiscoveryService
-from autplay.application.profile_pairing import cleanup_expired_pairing_receipts
+from autplay.application.profile_pairing import (
+    cleanup_expired_device_admissions,
+    cleanup_expired_pairing_receipts,
+)
+from autplay.application.social import SocialService
 from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
 from autplay.domain.vault import VaultLimits
@@ -286,7 +290,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
         try:
 
             def cleanup() -> int:
-                return cleanup_expired_pairing_receipts(sessions, limit=10_000)
+                return cleanup_expired_pairing_receipts(
+                    sessions, limit=10_000
+                ) + cleanup_expired_device_admissions(sessions, limit=10_000)
 
             def web_cleanup() -> int:
                 with sessions.begin() as session:
@@ -295,10 +301,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     )
 
             def discovery_cleanup() -> int:
-                return BulkDiscoveryService(sessions).cleanup_expired(
-                    now=datetime.now(UTC),
-                    limit=10_000,
+                return (
+                    BulkDiscoveryService(sessions).cleanup_expired(
+                        now=datetime.now(UTC),
+                        limit=10_000,
+                    )
+                    + social_cleanup()
                 )
+
+            def social_cleanup() -> int:
+                return SocialService(sessions, None).cleanup(datetime.now(UTC), limit=10_000)
 
             if namespace.once:
                 cleanup()

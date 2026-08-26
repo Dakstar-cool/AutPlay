@@ -8,6 +8,8 @@ import app.autplay.ui.core.LibraryFilter
 import app.autplay.ui.core.LibrarySection
 import app.autplay.ui.core.LibrarySort
 import app.autplay.ui.core.ListAnchor
+import app.autplay.ui.playlist.ManualPlaylistActions
+import app.autplay.ui.playlist.ManualPlaylistUi
 
 internal data class CoreProductRouteActions(
     val openListenTogether: () -> Unit,
@@ -39,6 +41,10 @@ internal data class CoreProductRouteActions(
     val playPlaylistEntry: (String) -> Unit,
     val downloadTrack: (String) -> Unit,
     val repairAccess: () -> Unit,
+    val playNext: (String) -> Unit = {},
+    val addToQueue: (String) -> Unit = {},
+    val manualPlaylists: List<ManualPlaylistUi> = emptyList(),
+    val manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
 )
 
 @Composable
@@ -97,6 +103,10 @@ internal fun CoreProductRouteRenderer(
                 contentPadding = contentPadding,
                 onPlayTrack = actions.playTrack,
                 onPlayPlaylistEntry = actions.playPlaylistEntry,
+                onPlayNext = actions.playNext,
+                onAddToQueue = actions.addToQueue,
+                manualPlaylists = actions.manualPlaylists,
+                manualPlaylistActions = actions.manualPlaylistActions,
                 onRemoveOrRestore = actions.removeOrRestore,
                 onLike = actions.likeTrack,
                 onDownload = actions.downloadTrack,

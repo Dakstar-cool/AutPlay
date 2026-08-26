@@ -26,9 +26,12 @@ import app.autplay.ui.UiDestination
 import app.autplay.ui.profilepairing.ExistingLocalDataChoice
 import app.autplay.ui.profilepairing.ProfilePairingActions
 import app.autplay.ui.profilepairing.ProfileRemoteAction
+import app.autplay.ui.social.SocialActions
+import app.autplay.ui.playlist.ManualPlaylistActions
 import app.autplay.application.profilepairing.ProfilePairingRuntime
 import app.autplay.application.profilepairing.RuntimeLifecycleAction
 import app.autplay.ui.player.NowPlayingRouteActions
+import app.autplay.ui.queue.QueueEditorUiActions
 import androidx.media3.common.util.UnstableApi
 import app.autplay.work.DeferredWorkKind
 import app.autplay.work.DeferredWorkRequest
@@ -50,10 +53,23 @@ internal fun buildNowPlayingRouteActions(
     sliceRepository: LibraryVerticalSliceRepository,
     binding: () -> ClientEventBinding?,
     reportError: (String) -> Unit,
+    queueActions: QueueEditorUiActions,
 ): NowPlayingRouteActions = NowPlayingRouteActions(
     togglePlayPause = playbackActions::toggleDirectPlayPause,
     toggleShuffle = playbackActions::toggleDirectShuffle,
     cycleRepeat = playbackActions::cycleDirectRepeatMode,
+    previous = {
+        scope.launch {
+            runCatching { playbackOwner.dispatch(PlaybackCommand.Previous) }
+                .onFailure { reportError("QUEUE_NAVIGATION_UNAVAILABLE") }
+        }
+    },
+    next = {
+        scope.launch {
+            runCatching { playbackOwner.dispatch(PlaybackCommand.Next) }
+                .onFailure { reportError("QUEUE_NAVIGATION_UNAVAILABLE") }
+        }
+    },
     seekBegin = playerAdapter::beginSeek,
     seekUpdate = playerAdapter::updateSeek,
     seekCommit = playbackActions::commitDirectSeek,
@@ -80,6 +96,7 @@ internal fun buildNowPlayingRouteActions(
         }
     },
     observingChanged = { playerAdapter.setSurfaceObserving("full", it) },
+    queue = queueActions,
 )
 
 private fun recordPlaybackPreference(
@@ -255,6 +272,68 @@ internal fun buildServerFeaturesActions(
     },
 )
 
+internal fun buildManualPlaylistActions(
+    scope: CoroutineScope,
+    binding: () -> ClientEventBinding?,
+    sliceRepository: LibraryVerticalSliceRepository,
+    reportError: (String) -> Unit,
+    onChanged: () -> Unit = {},
+    playEntry: (String) -> Unit = {},
+): ManualPlaylistActions = ManualPlaylistActions(
+    create = { name, description ->
+        scope.launch {
+            runCatching {
+                sliceRepository.createPlaylist(
+                    binding(), LocalId.random(), LocalId.random(), name, description, System.currentTimeMillis(),
+                )
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_CREATE_UNAVAILABLE") }
+        }
+    },
+    rename = { playlistId, name, description ->
+        scope.launch {
+            runCatching {
+                sliceRepository.updatePlaylistMetadata(
+                    binding(), LocalId(playlistId), LocalId.random(), name, description, System.currentTimeMillis(),
+                )
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_UPDATE_UNAVAILABLE") }
+        }
+    },
+    delete = { playlistId ->
+        scope.launch {
+            runCatching {
+                sliceRepository.deletePlaylist(binding(), LocalId(playlistId), LocalId.random(), System.currentTimeMillis())
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_DELETE_UNAVAILABLE") }
+        }
+    },
+    addTrack = { playlistId, trackRefId ->
+        scope.launch {
+            runCatching {
+                sliceRepository.addPlaylistEntry(
+                    binding(), LocalId(playlistId), LocalId.random(), LocalId(trackRefId), LocalId.random(), null, null,
+                    System.currentTimeMillis(),
+                )
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_ENTRY_UNAVAILABLE") }
+        }
+    },
+    removeEntry = { entryId ->
+        scope.launch {
+            runCatching {
+                sliceRepository.removePlaylistEntry(binding(), LocalId(entryId), LocalId.random(), System.currentTimeMillis())
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_ENTRY_UNAVAILABLE") }
+        }
+    },
+    moveEntryBefore = { entryId, beforeEntryId ->
+        scope.launch {
+            runCatching {
+                sliceRepository.reorderPlaylistEntry(
+                    binding(), LocalId(entryId), beforeEntryId?.let(::LocalId), LocalId.random(), System.currentTimeMillis(),
+                )
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_ENTRY_UNAVAILABLE") }
+        }
+    },
+    playEntry = playEntry,
+)
+
 @UnstableApi
 internal fun buildLegacySecondaryRouteActions(
     scope: CoroutineScope,
@@ -275,45 +354,20 @@ internal fun buildLegacySecondaryRouteActions(
     settingsStore: NonSecretSettingsStore,
     context: Context,
     profilePairingRuntime: ProfilePairingRuntime,
+    admissionRuntime: app.autplay.application.profilepairing.AdmissionRuntime,
+    admissionSnapshot: app.autplay.application.profilepairing.PairingFlowSnapshot?,
     importProfileId: String,
     importRepository: LocalImportReviewRepository,
     importActions: app.autplay.ui.LegacyImportRouteActions,
     chooseLibraryRoot: () -> Unit,
     exportSettings: () -> Unit,
     importSettings: () -> Unit,
+    social: SocialActions,
+    manualPlaylists: ManualPlaylistActions,
+    openPlaylist: (String) -> Unit,
 ): LegacySecondaryRouteActions = LegacySecondaryRouteActions(
-    createPlaylist = {
-        scope.launch {
-            runCatching {
-                sliceRepository.createPlaylist(
-                    binding(),
-                    LocalId.random(),
-                    LocalId.random(),
-                    "Offline playlist ${playlists().size + 1}",
-                    null,
-                    System.currentTimeMillis(),
-                )
-            }.onFailure { reportError("PLAYLIST_CREATE_UNAVAILABLE") }
-        }
-    },
-    addSelectedTrackToPlaylist = {
-        val playlist = playlists().firstOrNull()
-        val entry = libraryEntries().firstOrNull { it.localUserTrackRefId == selectedTrackRefId() }
-        if (playlist != null && entry != null) scope.launch {
-            runCatching {
-                sliceRepository.addPlaylistEntry(
-                    binding(),
-                    LocalId(playlist.stableId),
-                    LocalId.random(),
-                    LocalId(entry.localUserTrackRefId),
-                    LocalId.random(),
-                    null,
-                    null,
-                    System.currentTimeMillis(),
-                )
-            }.onFailure { reportError("PLAYLIST_ENTRY_UNAVAILABLE") }
-        }
-    },
+    manualPlaylists = manualPlaylists,
+    openPlaylist = openPlaylist,
     importActions = importActions,
     downloadSelectedTrack = {
         val entry = libraryEntries().firstOrNull { it.localUserTrackRefId == selectedTrackRefId() }
@@ -377,7 +431,10 @@ internal fun buildLegacySecondaryRouteActions(
     profilePairing = ProfilePairingActions(
         startDiscovery = profilePairingRuntime::startDiscovery,
         confirmTrust = profilePairingRuntime::confirmTrust,
-        cancelPairing = profilePairingRuntime::cancel,
+        cancelPairing = {
+            admissionRuntime.cancel()
+            profilePairingRuntime.cancel()
+        },
         exchangeInvitation = profilePairingRuntime::exchangeInvitation,
         chooseLocalData = { choice ->
             when (choice) {
@@ -402,6 +459,18 @@ internal fun buildLegacySecondaryRouteActions(
                 ProfileRemoteAction.DISCONNECT_LOCAL -> RuntimeLifecycleAction.DISCONNECT_LOCAL
             },
         ) },
+        reenrollTrustedDevice = { admissionSnapshot?.let(admissionRuntime::reenrollTrusted) },
+        admission = app.autplay.ui.profilepairing.AdmissionActions(
+            request = { admissionSnapshot?.let(admissionRuntime::request) },
+            confirmComparison = admissionRuntime::confirmComparison,
+            poll = admissionRuntime::poll,
+            confirmAccount = admissionRuntime::confirmAccount,
+            cancel = {
+                admissionRuntime.cancel()
+                profilePairingRuntime.cancel()
+            },
+            retry = { admissionSnapshot?.let(admissionRuntime::retry) },
+        ),
     ),
     updateSettings = { transform ->
         scope.launch {
@@ -435,5 +504,6 @@ internal fun buildLegacySecondaryRouteActions(
     },
     exportSettings = exportSettings,
     importSettings = importSettings,
+    social = social,
     navigate = navigate,
 )

@@ -133,6 +133,34 @@ class PlaybackPersistenceRepositoryTest {
     }
 
     @Test
+    fun pausedSelectionPersistsExactEntryWithoutInventingListeningSession() = runBlocking {
+        val trackId = id(81)
+        database.libraryDao().upsertTrackRef(track(trackId, uuid(82)))
+        val snapshotId = id(83)
+        val firstEntry = id(84)
+        val secondEntry = id(85)
+        val repository = PlaybackPersistenceRepository(database)
+        repository.activateQueue(
+            snapshotId,
+            listOf(
+                NewPlaybackQueueEntry(firstEntry, trackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+                NewPlaybackQueueEntry(secondEntry, trackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+            ),
+            "USER", null, null, "GENERAL", 100,
+        )
+
+        repository.selectIdleEntry(snapshotId, secondEntry, 222, "OFF", "ALL", null, 101)
+
+        val snapshot = requireNotNull(database.queueDao().activeSnapshotOnce())
+        assertEquals(secondEntry.value, snapshot.currentEntryId)
+        assertEquals(222L, snapshot.currentPositionMs)
+        assertEquals("ALL", snapshot.repeatMode)
+        assertNull(snapshot.activeListeningEventId)
+        assertEquals(1, requireNotNull(repository.restoreActive()).media.currentIndex)
+        Unit
+    }
+
+    @Test
     fun replacedQueueFinalizesAgainstCapturedOwnerAndOriginalSnapshot() = runBlocking {
         val trackId = id(31)
         database.libraryDao().upsertTrackRef(track(trackId, uuid(32), uuid(37)))

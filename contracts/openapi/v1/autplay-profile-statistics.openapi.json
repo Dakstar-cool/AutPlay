@@ -1,0 +1,67 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "AutPlay S2 Profile Statistics API", "version": "1.0.0-s2-contract"},
+  "servers": [{"url": "/api/v1"}],
+  "security": [{"bearerAuth": []}],
+  "x-autplay-implementation-status": "IMPLEMENTED_S2",
+  "paths": {
+    "/social/profile-statistics/settings": {
+      "get": {
+        "operationId": "getProfileStatisticsSettings",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT_ONLY",
+        "x-autplay-rate-limit": "60/account/15m",
+        "responses": {
+          "200": {"description": "Caller-owned default-private policy", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControl"}, "Pragma": {"$ref": "#/components/headers/Pragma"}, "Vary": {"$ref": "#/components/headers/Vary"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SettingsView"}}}},
+          "401": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"}
+        }
+      },
+      "put": {
+        "operationId": "setProfileStatisticsSettings",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_ACCOUNT_EXACT_REVISION_OR_PRIVACY_OFF",
+        "x-autplay-rate-limit": "10/account/15m",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SettingsCommand"}}}},
+        "responses": {
+          "200": {"description": "Exact idempotent server-confirmed policy receipt", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControl"}, "Pragma": {"$ref": "#/components/headers/Pragma"}, "Vary": {"$ref": "#/components/headers/Vary"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SettingsReceipt"}}}},
+          "401": {"$ref": "#/components/responses/Error"},
+          "409": {"$ref": "#/components/responses/Error"},
+          "422": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/social/friends/{account_id}/profile-statistics": {
+      "get": {
+        "operationId": "getFriendProfileStatistics",
+        "x-autplay-authorization": "ACTIVE_SESSION_ACCEPTED_FRIEND_NO_BLOCK_TARGET_OPT_IN",
+        "x-autplay-rate-limit": "30/viewer/15m; 10/pair/15m",
+        "parameters": [{"$ref": "#/components/parameters/AccountId"}],
+        "responses": {
+          "200": {"description": "Fixed completed-day aggregate with no media identity or activity timeline", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControl"}, "Pragma": {"$ref": "#/components/headers/Pragma"}, "Vary": {"$ref": "#/components/headers/Vary"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProfileStatistics"}}}},
+          "401": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"},
+          "429": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+    "parameters": {"AccountId": {"name": "account_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}},
+    "headers": {
+      "CacheControl": {"schema": {"type": "string", "const": "private, no-store, max-age=0"}},
+      "Pragma": {"schema": {"type": "string", "const": "no-cache"}},
+      "Vary": {"schema": {"type": "string", "const": "Authorization"}}
+    },
+    "schemas": {
+      "SettingsCommand": {"$ref": "../../profile-statistics/v1/settings-command.schema.json"},
+      "SettingsView": {"$ref": "../../profile-statistics/v1/settings-view.schema.json"},
+      "SettingsReceipt": {"$ref": "../../profile-statistics/v1/settings-receipt.schema.json"},
+      "ProfileStatistics": {"$ref": "../../profile-statistics/v1/profile-statistics.schema.json"},
+      "Error": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": true, "required": ["code"], "properties": {"code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}}}
+    },
+    "responses": {
+      "Error": {"description": "Stable non-disclosing error", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControl"}, "Pragma": {"$ref": "#/components/headers/Pragma"}, "Vary": {"$ref": "#/components/headers/Vary"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+    }
+  }
+}

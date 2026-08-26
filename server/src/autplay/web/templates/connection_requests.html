@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-card" aria-labelledby="connection-requests-title">
+  <p class="eyebrow">AutPlay Admin</p><h1 id="connection-requests-title">{{ t("connection_requests_title") }}</h1>
+  <p>{{ t("connection_requests_intro") }}</p>
+  <p class="notice" role="note">{{ t("connection_requests_private_notice") }}</p>
+  <form method="post" action="/admin/connection-requests/resolve">
+    <label for="review-locator">{{ t("review_locator") }}</label>
+    <input id="review-locator" name="review_locator" type="password" autocomplete="off" required>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ operation_id }}">
+    <button type="submit">{{ t("review_connection_request") }}</button>
+  </form>
+</section>
+{% endblock %}

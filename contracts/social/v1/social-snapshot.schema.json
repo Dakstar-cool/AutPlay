@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/social-snapshot.schema.json",
+  "title": "S1C caller-owned bounded social recovery snapshot",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C", "x-autplay-no-directory": true,
+  "type": "object", "additionalProperties": false,
+  "required": ["friends", "incoming_requests", "outgoing_requests", "blocked", "sent_room_invitations", "received_room_invitations", "presence_settings"],
+  "properties": {
+    "friends": {"$ref": "#/$defs/accounts"}, "incoming_requests": {"$ref": "#/$defs/accounts"}, "outgoing_requests": {"$ref": "#/$defs/accounts"}, "blocked": {"$ref": "#/$defs/accounts"},
+    "sent_room_invitations": {"$ref": "#/$defs/invitations"}, "received_room_invitations": {"$ref": "#/$defs/invitations"},
+    "presence_settings": {"type": "object", "additionalProperties": false, "required": ["friend_presence_visibility_enabled", "room_activity_sharing_enabled", "invite_availability_enabled"], "properties": {"friend_presence_visibility_enabled": {"type": "boolean"}, "room_activity_sharing_enabled": {"type": "boolean"}, "invite_availability_enabled": {"type": "boolean"}}}
+  },
+  "$defs": {
+    "accounts": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "display_name_hint", "presence"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "display_name_hint": {"type": "string", "minLength": 1, "maxLength": 120}, "presence": {"enum": ["OFFLINE", "ONLINE", "AVAILABLE_TO_INVITE", "IN_ROOM"]}}}},
+    "invitations": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": false, "required": ["invitation_id", "state", "room_id", "room_epoch", "expires_at"], "properties": {"invitation_id": {"type": "string", "format": "uuid"}, "state": {"enum": ["PENDING", "ACCEPTED", "CANCELLED", "EXPIRED", "FULL", "UNAVAILABLE"]}, "room_id": {"type": "string", "format": "uuid"}, "room_epoch": {"type": "integer", "minimum": 0}, "expires_at": {"type": "string", "format": "date-time"}}}}
+  }
+}

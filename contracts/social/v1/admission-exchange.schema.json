@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/admission-exchange.schema.json",
+  "title": "S1B approved admission exact-key exchange",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1B",
+  "x-autplay-sensitive": true,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "request_sha256", "exchange_id", "binding_commit_id", "poll_bearer_sha256", "expected_server_instance_id", "expected_identity_epoch", "expected_identity_thumbprint_sha256", "expected_api_origin", "expected_stream_origin", "approved_account_id", "device_key_thumbprint_sha256", "device_public_key_jwk", "next_refresh_token_sha256", "client_nonce_b64url", "proof_b64url"],
+  "properties": {
+    "request_id": {"type": "string", "format": "uuid"},
+    "request_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "exchange_id": {"type": "string", "format": "uuid"},
+    "binding_commit_id": {"type": "string", "format": "uuid"},
+    "poll_bearer_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "expected_server_instance_id": {"type": "string", "format": "uuid"},
+    "expected_identity_epoch": {"type": "integer", "minimum": 1},
+    "expected_identity_thumbprint_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "expected_api_origin": {"type": "string", "format": "uri", "maxLength": 2048},
+    "expected_stream_origin": {"type": "string", "format": "uri", "maxLength": 2048},
+    "approved_account_id": {"type": "string", "format": "uuid"},
+    "device_key_thumbprint_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "device_public_key_jwk": {"type": "object", "additionalProperties": false, "required": ["kty", "crv", "x", "y"], "properties": {"kty": {"const": "EC"}, "crv": {"const": "P-256"}, "x": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}, "y": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}}},
+    "next_refresh_token_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "client_nonce_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "proof_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+  },
+  "x-autplay-proof": "ES256-P1363 over SHA256(RFC8785(document without proof_b64url)), domain autplay:s1b:admission-exchange:v1\\n",
+  "x-autplay-poll-bearer": "Raw bearer is required only in X-AutPlay-Admission-Poll; its SHA-256 is signed as poll_bearer_sha256. Plaintext is forbidden in body, path, query, logs, exports and persisted Android state."
+}

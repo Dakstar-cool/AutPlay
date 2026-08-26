@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -105,6 +106,69 @@ class WebAdminHttp(Protocol):
     ) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceAdmissionReview:
+    """Bounded, non-secret review data bound to one M6 browser session."""
+
+    request_id: UUID
+    device_label: str
+    platform: str
+    app_version: str
+    device_model_hint: str | None
+    api_major: int
+    requested_at: datetime
+    expires_at: datetime
+    sas_3x4: tuple[str, str, str]
+
+    def __post_init__(self) -> None:
+        if len(self.sas_3x4) != 3 or any(
+            len(group) != 4 or not group.isascii() or not group.isdecimal()
+            for group in self.sas_3x4
+        ):
+            raise ValueError("admission SAS must contain exactly three four-digit groups")
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedDeviceWebItem:
+    """Safe exact-key metadata for one owner-scoped device lifecycle control."""
+
+    key_reference: UUID
+    device_label: str
+    platform: str
+    trust_state: str
+    active_session_count: int
+
+
+class DeviceAdmissionWebHttp(Protocol):
+    """S1B presentation seam; implementations enforce account and binding ownership."""
+
+    def resolve_review_locator(
+        self, actor: WebActor, locator: str, operation_id: UUID, request_sha256: bytes
+    ) -> None: ...
+
+    def review(self, actor: WebActor) -> DeviceAdmissionReview: ...
+
+    def decide_review(
+        self,
+        actor: WebActor,
+        request_id: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None: ...
+
+    def trusted_devices(self, actor: WebActor) -> tuple[TrustedDeviceWebItem, ...]: ...
+
+    def manage_trusted_device(
+        self,
+        actor: WebActor,
+        key_reference: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None: ...
+
+
 def create_admin_web_router(
     *,
     web: WebAdminHttp,
@@ -114,6 +178,7 @@ def create_admin_web_router(
     origin: str,
     source_secret: bytes,
     discovery_enabled: bool = False,
+    device_admission: DeviceAdmissionWebHttp | None = None,
 ) -> APIRouter:
     if len(source_secret) < 32:
         raise ValueError("admin Web source secret must be at least 32 bytes")
@@ -436,6 +501,217 @@ def create_admin_web_router(
         if action == "logout-all":
             cookies.clear_session(value)
         return value
+
+    def admission_unavailable() -> Response:
+        return error("admin_surface_unavailable", 404)
+
+    def admission_safe_get(request: Request) -> AuthenticatedWebSession | Response:
+        try:
+            return web.authenticate_safe_get(request.cookies.get(cookies.session_name, "").encode())
+        except WebAdminError:
+            value = apply_admin_security_headers(RedirectResponse("/admin/login", status_code=303))
+            cookies.clear_session(value)
+            return value
+
+    @router.get("/connection-requests")
+    def connection_requests(request: Request) -> Response:
+        if device_admission is None:
+            return admission_unavailable()
+        authenticated = admission_safe_get(request)
+        if isinstance(authenticated, Response):
+            return authenticated
+        value = response(
+            render(
+                "connection_requests.html",
+                request,
+                authenticated=True,
+                navigation=navigation("connection-requests", discovery_enabled=discovery_enabled),
+                csrf_token=encode_request_integrity_token(authenticated.csrf),
+                operation_id=str(uuid4()),
+            )
+        )
+        if authenticated.rotated_bearer is not None:
+            cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
+        return value
+
+    @router.post("/connection-requests/resolve")
+    async def connection_requests_resolve(request: Request) -> Response:
+        if device_admission is None:
+            return admission_unavailable()
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id", "review_locator"}),
+            )
+            operation_id = UUID(form["operation_id"])
+            if not 1 <= len(form["review_locator"]) <= 512:
+                raise ValueError("invalid review locator")
+            request_hash = canonical_form_request_hash("POST", request.url.path, form)
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor,
+                decode_request_integrity_token(form["csrf_token"]),
+                operation_id,
+            )
+            device_admission.resolve_review_locator(
+                authenticated.actor, form["review_locator"], operation_id, request_hash
+            )
+        except ValueError, WebAdminError:
+            return error("connection_request_unavailable", 403)
+        return apply_admin_security_headers(
+            RedirectResponse("/admin/connection-requests/review", status_code=303)
+        )
+
+    @router.get("/connection-requests/review")
+    def connection_requests_review(request: Request) -> Response:
+        if device_admission is None:
+            return admission_unavailable()
+        authenticated = admission_safe_get(request)
+        if isinstance(authenticated, Response):
+            return authenticated
+        try:
+            review = device_admission.review(authenticated.actor)
+        except WebAdminError:
+            return error("connection_request_unavailable", 403)
+        value = response(
+            render(
+                "connection_request_review.html",
+                request,
+                authenticated=True,
+                navigation=navigation("connection-requests", discovery_enabled=discovery_enabled),
+                review=review,
+                csrf_token=encode_request_integrity_token(authenticated.csrf),
+                operations={
+                    action: str(uuid4()) for action in ("approve-once", "trust", "reject", "block")
+                },
+            )
+        )
+        if authenticated.rotated_bearer is not None:
+            cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
+        return value
+
+    @router.post("/connection-requests/decision/{action}")
+    async def connection_requests_decision(action: str, request: Request) -> Response:
+        if device_admission is None or action not in {"approve-once", "trust", "reject", "block"}:
+            return admission_unavailable()
+        actions = {
+            "approve-once": "APPROVE_ONCE",
+            "trust": "TRUST_DEVICE",
+            "reject": "REJECT",
+            "block": "BLOCK_DEVICE",
+        }
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id", "request_id"}),
+            )
+            operation_id, request_id = UUID(form["operation_id"]), UUID(form["request_id"])
+            request_hash = canonical_form_request_hash("POST", request.url.path, form)
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor,
+                decode_request_integrity_token(form["csrf_token"]),
+                operation_id,
+            )
+            device_admission.decide_review(
+                authenticated.actor, request_id, actions[action], operation_id, request_hash
+            )
+        except ValueError, WebAdminError:
+            return error("connection_request_unavailable", 403)
+        return apply_admin_security_headers(
+            RedirectResponse("/admin/connection-requests", status_code=303)
+        )
+
+    @router.get("/trusted-devices")
+    def trusted_devices(request: Request) -> Response:
+        if device_admission is None:
+            return admission_unavailable()
+        authenticated = admission_safe_get(request)
+        if isinstance(authenticated, Response):
+            return authenticated
+        try:
+            items = device_admission.trusted_devices(authenticated.actor)
+        except WebAdminError:
+            return error("trusted_device_unavailable", 403)
+        value = response(
+            render(
+                "trusted_devices.html",
+                request,
+                authenticated=True,
+                navigation=navigation("trusted-devices", discovery_enabled=discovery_enabled),
+                items=items,
+                csrf_token=encode_request_integrity_token(authenticated.csrf),
+                operations={
+                    str(item.key_reference): {
+                        action: str(uuid4())
+                        for action in (
+                            "remove-trust",
+                            "block",
+                            "unblock",
+                            "revoke-access",
+                            "revoke-and-remove",
+                        )
+                    }
+                    for item in items
+                },
+            )
+        )
+        if authenticated.rotated_bearer is not None:
+            cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
+        return value
+
+    @router.post("/trusted-devices/{key_reference}/{action}")
+    async def trusted_devices_action(
+        key_reference: UUID, action: str, request: Request
+    ) -> Response:
+        if device_admission is None or action not in {
+            "remove-trust",
+            "block",
+            "unblock",
+            "revoke-access",
+            "revoke-and-remove",
+        }:
+            return admission_unavailable()
+        actions = {
+            "remove-trust": "REMOVE_TRUST",
+            "block": "BLOCK_FUTURE_ADMISSION",
+            "unblock": "UNBLOCK_FUTURE_ADMISSION",
+            "revoke-access": "REVOKE_ACCESS",
+            "revoke-and-remove": "REVOKE_AND_REMOVE",
+        }
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id"}),
+            )
+            operation_id = UUID(form["operation_id"])
+            request_hash = canonical_form_request_hash("POST", request.url.path, form)
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor,
+                decode_request_integrity_token(form["csrf_token"]),
+                operation_id,
+            )
+            device_admission.manage_trusted_device(
+                authenticated.actor, key_reference, actions[action], operation_id, request_hash
+            )
+        except ValueError, WebAdminError:
+            return error("trusted_device_unavailable", 403)
+        return apply_admin_security_headers(
+            RedirectResponse("/admin/trusted-devices", status_code=303)
+        )
 
     @router.get("/{surface}")
     def page(surface: str, request: Request) -> Response:

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/room-invitation.schema.json",
+  "title": "S1C friend Room invitation receipt",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "type": "object", "additionalProperties": false,
+  "required": ["invitation_id", "operation_id", "kind", "state", "creator_account_id", "target_account_id", "room_id", "room_epoch", "expires_at"],
+  "properties": {
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "kind": {"const": "FRIEND"},
+    "state": {"enum": ["PENDING", "ACCEPTED", "CANCELLED", "EXPIRED", "FULL", "UNAVAILABLE"]},
+    "creator_account_id": {"type": "string", "format": "uuid"},
+    "target_account_id": {"type": "string", "format": "uuid"},
+    "room_id": {"type": "string", "format": "uuid"},
+    "room_epoch": {"type": "integer", "minimum": 0},
+    "expires_at": {"type": "string", "format": "date-time"}
+  }
+}

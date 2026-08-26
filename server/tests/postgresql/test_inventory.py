@@ -26,6 +26,57 @@ A1B_INDEXES = frozenset(
         "ix_discovery_candidate_owner_state",
     }
 )
+S1B_TABLES = frozenset(
+    {
+        ("account", "device_admission"),
+        ("account", "device_admission_nonce"),
+        ("account", "device_admission_exchange_receipt"),
+        ("account", "device_admission_rate_window"),
+        ("account", "device_admission_web_operation_receipt"),
+        ("account", "device_key_block"),
+        ("account", "trusted_device_key"),
+        ("account", "trusted_device_reenrollment_challenge"),
+    }
+)
+S1B_INDEXES = frozenset(
+    {
+        "ix_device_admission_cleanup",
+        "ix_device_admission_poll_expiry",
+        "uq_device_admission_locator",
+        "uq_device_admission_pending_key",
+        "ix_device_key_block_active",
+        "ix_trusted_reenrollment_challenge_expiry",
+        "ix_device_admission_receipt_expiry",
+        "ix_device_admission_web_operation_receipt_expiry",
+        "ix_device_admission_rate_window_expiry",
+    }
+)
+S1C_TABLES = frozenset(
+    {
+        ("social", "friend_request"),
+        ("social", "friendship"),
+        ("social", "user_block"),
+        ("social", "presence_settings"),
+        ("social", "presence_heartbeat"),
+        ("social", "friend_room_invitation"),
+        ("social", "operation_receipt"),
+        ("social", "rate_window"),
+    }
+)
+S1C_INDEXES = frozenset(
+    {
+        "uq_social_pending_friend_request",
+        "ix_social_friend_request_target",
+        "ix_social_user_block_active",
+        "ix_social_presence_fresh",
+        "ix_social_room_invitation_target",
+        "uq_social_pending_room_target",
+        "ix_social_operation_receipt_expiry",
+        "ix_social_rate_window_expiry",
+    }
+)
+S1C_TRIGGERS = frozenset({"trg_social_account_retire"})
+S2_TABLES = frozenset({("social", "profile_statistics_settings")})
 
 
 def test_migrated_database_has_exact_named_inventory(
@@ -70,10 +121,10 @@ def test_migrated_database_has_exact_named_inventory(
     assert len(index_names) == EXPECTED_EXPLICIT_INDEX_COUNT
     assert len(function_names) == EXPECTED_FUNCTION_COUNT
     assert len(trigger_names) == EXPECTED_TRIGGER_COUNT
-    assert table_names == expected.tables | A1B_TABLES
-    assert index_names == expected.indexes | A1B_INDEXES
+    assert table_names == expected.tables | A1B_TABLES | S1B_TABLES | S1C_TABLES | S2_TABLES
+    assert index_names == expected.indexes | A1B_INDEXES | S1B_INDEXES | S1C_INDEXES
     assert function_names == expected.functions
-    assert trigger_names == expected.triggers
+    assert trigger_names == expected.triggers | S1C_TRIGGERS
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0
     assert extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}

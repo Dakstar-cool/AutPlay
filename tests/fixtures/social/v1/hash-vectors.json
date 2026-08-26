@@ -1,0 +1,6 @@
+{"algorithm":"RFC8785_SHA256","cases":[
+{"case_id":"admission-request","example_index":0,"expected_sha256":"24b3a2d00a4906b71c5419361eb4ac4710bd29fe78f2766f5eb89a2189e78ae8"},
+{"case_id":"admission-exchange","example_index":17,"expected_sha256":"f54d081203fa79a465a456c22b0ff8c80e2e713fc94976d5c673b2043870b2a5"},
+{"case_id":"trusted-reenrollment","example_index":20,"expected_sha256":"e73966d9a91b1b2db25838dedbef6e17426ec5b3da7d0281e9a4589d19c2f88e"},
+{"case_id":"friend-contact-card","example_index":9,"path":"contact_card","expected_sha256":"6a17258d572f184e7157813c6f020803e036fda58c4ee3347a5aff14507938d8"}
+]}

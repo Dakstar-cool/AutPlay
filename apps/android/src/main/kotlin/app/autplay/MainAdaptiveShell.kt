@@ -1,14 +1,8 @@
 package app.autplay
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.ui.AutPlayAdaptiveShell
 import app.autplay.ui.CoreProductDetailScreen
@@ -25,6 +19,8 @@ import app.autplay.ui.player.NowPlayingRouteActions
 import app.autplay.ui.player.NowPlayingRouteRenderer
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.PlaybackPreferenceUiState
+import app.autplay.ui.queue.QueueEditorPanel
+import app.autplay.ui.queue.QueueEditorUiState
 
 internal data class MainAdaptiveShellState(
     val destination: UiDestination,
@@ -42,6 +38,7 @@ internal data class MainAdaptiveShellState(
     val searchListAnchor: ListAnchor?,
     val libraryListAnchor: ListAnchor?,
     val coreRouteActions: CoreProductRouteActions,
+    val queueState: QueueEditorUiState,
     val nowPlayingFeedbackEnabled: Boolean,
     val nowPlayingPreference: PlaybackPreferenceUiState,
     val sleepTimerRemainingMinutes: Int?,
@@ -103,6 +100,10 @@ internal fun MainAdaptiveShell(
                     state = state.coreDetailState,
                     onPlayTrack = actions.playTrack,
                     onPlayPlaylistEntry = actions.playPlaylistEntry,
+                    onPlayNext = state.coreRouteActions.playNext,
+                    onAddToQueue = state.coreRouteActions.addToQueue,
+                    manualPlaylists = state.coreRouteActions.manualPlaylists,
+                    manualPlaylistActions = state.coreRouteActions.manualPlaylistActions,
                     onRemoveOrRestore = actions.removeOrRestore,
                     onLike = actions.likeTrack,
                     onDownload = actions.downloadTrack,
@@ -111,16 +112,7 @@ internal fun MainAdaptiveShell(
                     onOpenDetail = actions.openDetail,
                 )
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(stringResource(R.string.expanded_queue_title), style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        stringResource(R.string.expanded_queue_body),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    state.playerState.title?.let { title ->
-                        Text(title, style = MaterialTheme.typography.titleMedium)
-                    }
-                }
+                QueueEditorPanel(state.queueState, state.nowPlayingActions.queue)
             }
         },
     ) { _, contentPadding, widthClass ->
@@ -149,6 +141,7 @@ internal fun MainAdaptiveShell(
                 preference = state.nowPlayingPreference,
                 sleepTimerRemainingMinutes = state.sleepTimerRemainingMinutes,
                 stopAfterCurrentTrackActive = state.stopAfterCurrentTrackActive,
+                queueState = state.queueState,
                 actions = state.nowPlayingActions,
                 modifier = Modifier.padding(contentPadding),
             )

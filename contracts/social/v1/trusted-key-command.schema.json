@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/trusted-key-command.schema.json",
+  "title": "S1B trusted-key lifecycle command separate from sessions",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1B",
+  "type": "object", "additionalProperties": false,
+  "required": ["operation_id", "action", "device_key_thumbprint_sha256", "consequence"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"}, "action": {"enum": ["REMOVE_TRUST", "UNBLOCK_DEVICE", "BLOCK_DEVICE", "REVOKE_ACCESS", "REVOKE_AND_REMOVE"]},
+    "device_key_thumbprint_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "device_id": {"type": "string", "format": "uuid"},
+    "consequence": {"enum": ["TRUST_ONLY_SESSION_UNCHANGED", "UNBLOCK_ONLY_SESSION_UNCHANGED", "BLOCK_FUTURE_ADMISSION_ONLY", "REVOKE_ACTIVE_DEVICE_SESSIONS", "REVOKE_ACTIVE_DEVICE_SESSIONS_AND_REMOVE_TRUST"]}
+  },
+  "allOf": [
+    {"if": {"properties": {"action": {"const": "REMOVE_TRUST"}}}, "then": {"properties": {"consequence": {"const": "TRUST_ONLY_SESSION_UNCHANGED"}}}},
+    {"if": {"properties": {"action": {"const": "UNBLOCK_DEVICE"}}}, "then": {"properties": {"consequence": {"const": "UNBLOCK_ONLY_SESSION_UNCHANGED"}}}},
+    {"if": {"properties": {"action": {"const": "BLOCK_DEVICE"}}}, "then": {"properties": {"consequence": {"const": "BLOCK_FUTURE_ADMISSION_ONLY"}}}},
+    {"if": {"properties": {"action": {"const": "REVOKE_ACCESS"}}}, "then": {"required": ["device_id"], "properties": {"consequence": {"const": "REVOKE_ACTIVE_DEVICE_SESSIONS"}}}},
+    {"if": {"properties": {"action": {"const": "REVOKE_AND_REMOVE"}}}, "then": {"required": ["device_id"], "properties": {"consequence": {"const": "REVOKE_ACTIVE_DEVICE_SESSIONS_AND_REMOVE_TRUST"}}}}
+  ]
+}

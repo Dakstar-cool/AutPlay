@@ -187,7 +187,13 @@ public fun HomeProductScreen(
     )
     val listState = rememberLazyListState()
     val showStickyPlayback by remember(listState, heroState.hasActivePlayback) {
-        derivedStateOf { heroState.hasActivePlayback && listState.firstVisibleItemIndex > 0 }
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val hero = layout.visibleItemsInfo.firstOrNull { it.key == "home:playback-hero" }
+            heroState.hasActivePlayback &&
+                layout.totalItemsCount > 0 &&
+                (hero == null || hero.offset + hero.size <= layout.viewportStartOffset)
+        }
     }
     Box(Modifier.fillMaxWidth()) {
         LazyColumn(

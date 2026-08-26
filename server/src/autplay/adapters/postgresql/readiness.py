@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0020_a1b_discovery_runtime"
+EXPECTED_MIGRATION_HEAD: Final = "0023_s2_profile_stats"
 
 
 @dataclass(frozen=True, slots=True)

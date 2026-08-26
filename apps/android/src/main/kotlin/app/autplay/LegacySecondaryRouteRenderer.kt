@@ -33,6 +33,15 @@ import app.autplay.ui.ServerFeaturesUiState
 import app.autplay.ui.UiDestination
 import app.autplay.ui.profilepairing.ProfilePairingActions
 import app.autplay.ui.profilepairing.ProfilePairingUiState
+import app.autplay.application.social.SocialRuntimeState
+import app.autplay.application.statistics.OwnerProfileStatistics
+import app.autplay.ui.social.SocialActions
+import app.autplay.ui.social.SocialPanel
+import app.autplay.ui.statistics.OwnerProfileStatisticsCard
+import app.autplay.ui.playlist.ManualPlaylistActions
+import app.autplay.ui.playlist.ManualPlaylistHub
+import app.autplay.ui.playlist.ManualPlaylistText
+import app.autplay.ui.playlist.ManualPlaylistUi
 
 internal data class LegacySecondaryRouteState(
     val destination: UiDestination,
@@ -51,12 +60,15 @@ internal data class LegacySecondaryRouteState(
     val selectedTrackUploadEligible: Boolean,
     val settings: NonSecretSettings,
     val profilePairing: ProfilePairingUiState,
+    val ownerStatistics: OwnerProfileStatistics?,
+    val social: SocialRuntimeState,
+    val socialAvailable: Boolean,
     val stableError: String?,
 )
 
 internal data class LegacySecondaryRouteActions(
-    val createPlaylist: () -> Unit,
-    val addSelectedTrackToPlaylist: () -> Unit,
+    val manualPlaylists: ManualPlaylistActions = ManualPlaylistActions(),
+    val openPlaylist: (String) -> Unit,
     val importActions: LegacyImportRouteActions,
     val downloadSelectedTrack: () -> Unit,
     val retrySync: () -> Unit,
@@ -78,6 +90,7 @@ internal data class LegacySecondaryRouteActions(
     val rescanLibraryRoot: () -> Unit,
     val exportSettings: () -> Unit,
     val importSettings: () -> Unit,
+    val social: SocialActions,
     val navigate: (UiDestination) -> Unit,
 )
 
@@ -99,16 +112,29 @@ internal fun LegacySecondaryRouteRenderer(
         when (state.view) {
             "Playlists" -> {
                 Text(stringResource(R.string.playlists_count, state.playlists.size))
-                Button(onClick = actions.createPlaylist) { Text(stringResource(R.string.playlist_create)) }
-                val playlist = state.playlists.firstOrNull()
-                val entry = state.libraryEntries.firstOrNull {
-                    it.localUserTrackRefId == state.selectedTrackRefId
-                }
-                if (playlist != null && entry != null) {
-                    Button(onClick = actions.addSelectedTrackToPlaylist) {
-                        Text(stringResource(R.string.playlist_add_selected))
-                    }
-                }
+                ManualPlaylistHub(
+                    playlists = state.playlists.map { ManualPlaylistUi(it.stableId, it.title, it.description) },
+                    selectedTrackRefId = state.selectedTrackRefId,
+                    actions = actions.manualPlaylists,
+                    onOpenPlaylist = actions.openPlaylist,
+                    text = ManualPlaylistText(
+                        create = stringResource(R.string.playlist_create),
+                        add = stringResource(R.string.playlist_add_selected),
+                        cancel = stringResource(R.string.action_cancel),
+                        remove = stringResource(R.string.action_remove),
+                        save = stringResource(R.string.action_save),
+                        rename = stringResource(R.string.playlist_rename),
+                        delete = stringResource(R.string.playlist_delete),
+                        name = stringResource(R.string.playlist_name),
+                        description = stringResource(R.string.playlist_description),
+                        selectPlaylist = stringResource(R.string.playlist_select_target),
+                        moveUp = stringResource(R.string.playlist_move_up),
+                        moveDown = stringResource(R.string.playlist_move_down),
+                        confirmDelete = stringResource(R.string.playlist_confirm_delete),
+                        empty = stringResource(R.string.playlist_empty),
+                        play = stringResource(R.string.action_play),
+                    ),
+                )
             }
             "History" -> Text(stringResource(R.string.history_count, state.historyCount))
             "Import" -> LegacyImportRoute(state.importState, actions.importActions)
@@ -153,10 +179,15 @@ internal fun LegacySecondaryRouteRenderer(
                 state = state.serverUiState,
                 actions = actions.serverFeatures,
             )
-            "Profile" -> ProfileFrontendScreen(
-                state = state.profilePairing,
-                actions = actions.profilePairing,
-            )
+            "Profile" -> {
+                ProfileFrontendScreen(
+                    state = state.profilePairing,
+                    actions = actions.profilePairing,
+                )
+                OwnerProfileStatisticsCard(state.ownerStatistics, Modifier.padding(top = 12.dp))
+                if (state.socialAvailable) SocialPanel(state.social, actions.social)
+                else Text(stringResource(R.string.sync_requires_server))
+            }
             "Settings" -> SettingsFrontendScreen(
                 settings = state.settings,
                 onUpdate = actions.updateSettings,
@@ -165,6 +196,9 @@ internal fun LegacySecondaryRouteRenderer(
                 onRescanLibraryRoot = actions.rescanLibraryRoot,
                 onExportSettings = actions.exportSettings,
                 onImportSettings = actions.importSettings,
+                statisticsSettings = state.social.statisticsSettings,
+                statisticsSettingsErrorCode = state.social.statisticsSettingsErrorCode,
+                onStatisticsVisibilityChange = actions.social.setProfileStatisticsVisibility,
                 onNavigate = actions.navigate,
             )
             else -> Text(stringResource(R.string.state_unavailable_body))

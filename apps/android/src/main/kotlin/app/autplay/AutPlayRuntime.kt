@@ -16,6 +16,8 @@ import app.autplay.application.recommendation.DecodedOfflinePack
 import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.recommendation.OkHttpRecommendationPackTransport
 import app.autplay.application.server.ServerFeatureRepository
+import app.autplay.application.social.OkHttpSocialPort
+import app.autplay.application.social.SocialRuntime
 import app.autplay.data.security.AndroidKeystoreCredentialStore
 import app.autplay.data.security.AndroidM5DeviceKeyStore
 import app.autplay.data.security.M5RotationContext
@@ -24,6 +26,7 @@ import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.data.local.AutPlayDatabase
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineScope
 
 /** Process-scoped graph shared by the Activity and Media3 services. */
 object AutPlayRuntime {
@@ -102,6 +105,29 @@ object AutPlayRuntime {
             binding.serverProfileId,
             AndroidKeystoreCredentialStore(context.applicationContext),
             m5Rotation = m5Rotation(context),
+        )
+    }
+
+    /** Creates volatile S1C social state for the active profile; PostgreSQL remains authoritative. */
+    suspend fun socialRuntime(
+        context: Context,
+        binding: ClientEventBinding,
+        scope: CoroutineScope,
+        onAcceptedRoom: (String) -> Unit,
+    ): SocialRuntime {
+        val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
+        check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) {
+            "SOCIAL_PROFILE_NOT_ACTIVE"
+        }
+        return SocialRuntime(
+            binding.serverProfileId,
+            OkHttpSocialPort(
+                apiV1BaseUrl(settings.serverBaseUrl),
+                AndroidKeystoreCredentialStore(context.applicationContext),
+                m5Rotation = m5Rotation(context),
+            ),
+            scope,
+            onAcceptedRoom = onAcceptedRoom,
         )
     }
 

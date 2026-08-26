@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/operation-command.schema.json",
+  "title": "S1C idempotent operation command",
+  "x-autplay-implementation-status": "IMPLEMENTED_S1C",
+  "type": "object", "additionalProperties": false,
+  "required": ["operation_id"],
+  "properties": {"operation_id": {"type": "string", "format": "uuid"}}
+}

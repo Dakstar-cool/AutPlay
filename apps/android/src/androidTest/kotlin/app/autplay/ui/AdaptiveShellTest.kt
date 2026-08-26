@@ -18,14 +18,18 @@ import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.application.artist.ArtistAppearance
 import app.autplay.application.artist.ArtistCredit
@@ -118,8 +122,8 @@ class AdaptiveShellTest {
             }
         }
 
-        composeRule.onNodeWithText(context.getString(R.string.action_like)).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.action_dislike)).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_dislike)).performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -188,10 +192,8 @@ class AdaptiveShellTest {
             }
         }
 
-        composeRule.onNodeWithTag("home-product-list")
-            .performScrollToNode(hasText(context.getString(R.string.home_recommendations)))
-        composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
-        composeRule.onNodeWithText("Active track").assertIsDisplayed()
+        scrollPastHomeHeroAndAwaitStickyPlayback()
+        composeRule.onNode(hasText("Active track") and hasAnyAncestor(hasTestTag("home-sticky-playback"))).assertIsDisplayed()
     }
 
     @Test
@@ -230,11 +232,28 @@ class AdaptiveShellTest {
             }
         }
 
-        composeRule.onNodeWithTag("home-product-list")
-            .performScrollToNode(hasText(context.getString(R.string.home_recommendations)))
+        scrollHomeWithUserGestures()
         composeRule.runOnIdle { checkNotNull(startPlayback).invoke() }
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("home-sticky-playback").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
-        composeRule.onNodeWithText("Late playback").assertIsDisplayed()
+        composeRule.onNode(hasText("Late playback") and hasAnyAncestor(hasTestTag("home-sticky-playback"))).assertIsDisplayed()
+    }
+
+    private fun scrollPastHomeHeroAndAwaitStickyPlayback() {
+        scrollHomeWithUserGestures()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("home-sticky-playback").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
+    }
+
+    private fun scrollHomeWithUserGestures() {
+        repeat(3) {
+            composeRule.onNodeWithTag("home-product-list").performTouchInput { swipeUp() }
+            composeRule.waitForIdle()
+        }
     }
 
     @Test

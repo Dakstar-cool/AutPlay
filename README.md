@@ -1,124 +1,107 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="AutPlay — локальная музыкальная платформа для Android с подключаемым личным сервером">
+  <img src="./assets/readme/hero.svg" width="100%" alt="AutPlay — локальная Android-музыка, управляемая очередь, друзья и приватная статистика с необязательным личным сервером">
 </p>
 
 <p align="center">
-  <strong>Слушайте музыку без сети. Подключите собственный сервер, когда понадобятся надёжная синхронизация, неизменяемый музыкальный Vault и совместное воспроизведение.</strong>
+  <strong>Локальная медиатека и воспроизведение не ждут сеть. Личный сервер добавляет синхронизацию, Vault, друзей, статистику по выбору и совместную Wave.</strong>
 </p>
 
 <p align="center">
-  <a href="#what-works-today">Что работает</a> ·
-  <a href="#the-android-experience">Интерфейс Android</a> ·
-  <a href="#how-autplay-works">Как всё устроено</a> ·
-  <a href="#run-the-repository">Запуск репозитория</a> ·
-  <a href="#release-boundary">Границы релиза</a>
+  <a href="#product">Что готово</a> ·
+  <a href="#evidence">Доказательства</a> ·
+  <a href="#android">Android</a> ·
+  <a href="#architecture">Архитектура</a> ·
+  <a href="#quick-start">Запуск</a> ·
+  <a href="#release-boundary">Границы</a>
 </p>
 
-## Музыка, которая не ждёт сервер
+AutPlay — Android-first, local-first музыкальная система с необязательным личным сервером. Действия в медиатеке, плейлистах и очереди сначала фиксируются на устройстве; Media3 продолжает воспроизведение из доступного локального источника. Сервер не находится в синхронном пути локального действия.
 
-AutPlay — музыкальная платформа, ориентированная прежде всего на Android и локальную работу. Приложение на устройстве управляет медиатекой, плейлистами, очередью, состоянием воспроизведения, загрузками и ожидающими изменениями. Локальное действие сохраняется сразу, а потеря сети не откатывает его.
+Подключённый CPU-сервер добавляет авторизованную синхронизацию устройств, PostgreSQL-проекции, неизменяемый файловый Vault, HTTP Range-стриминг, импорт, рекомендации и Hybrid Wave. Для базового контура не нужны CUDA, облачная учётная запись, Redis, Kafka или внешняя аналитика.
 
-Личный сервер подключается по желанию и добавляет синхронизацию устройств, неизменяемый файловый Vault, авторизованную потоковую передачу с HTTP Range, возобновляемый импорт, детерминированные рекомендации и комнаты Hybrid Wave в доверенной локальной сети. Полный CPU‑контур работает без CUDA, облачной учётной записи и внешней аналитики.
+<a id="product"></a>
 
-| Автономный Android | С личным сервером |
+## Что уже работает
+
+<p align="center">
+  <img src="./assets/readme/product-proof.svg" width="100%" alt="Работающие контуры AutPlay: офлайн-музыка, ручные плейлисты и очередь, друзья для Wave и приватная статистика">
+</p>
+
+- **Медиатека без сети.** Room хранит локальную истину и Journal/outbox; FTS ищет по кириллице и латинице; Media3 владеет воспроизведением и загрузками.
+- **Ручные плейлисты.** Создание, открытие, переименование, удаление и точное изменение порядка сохраняют дубликаты как отдельные записи.
+- **Своя очередь.** `Play next`, добавление в конец, удаление и перестановка будущих треков, очистка upcoming и обычные previous/next; текущий трек остаётся стабильным.
+- **Друзья и Wave.** Подтверждённые друзья, опциональное coarse presence и быстрые приглашения в текущую совместную комнату без передачи клиенту серверной власти над Wave-очередью.
+- **Статистика по выбору.** Владелец видит собственные агрегаты в профиле. Публикация выключена по умолчанию и открывается в настройках только для подтверждённых, не заблокированных друзей — не для всего интернета.
+- **Личный сервер и Vault.** Идемпотентная синхронизация, возобновляемый импорт, проверяемые immutable-байты, авторизованный стриминг, детерминированные рекомендации и резервное восстановление.
+
+<a id="evidence"></a>
+
+## Проверено, а не заявлено
+
+AutPlay остаётся локальным кандидатом в релиз, а не опубликованным production-продуктом. Текущее подтверждённое состояние:
+
+| Контур | Последний зафиксированный результат |
 | --- | --- |
-| Медиатека, ранжированный локальный поиск, плейлисты с дубликатами, история, очередь, воспроизведение, загрузки и проверка импорта | Синхронизация устройств, общее состояние в PostgreSQL, неизменяемый Vault, стриминг, резервное копирование и восстановление, рекомендации и координация Wave |
-| Room — локальный источник истины | PostgreSQL — серверный источник истины для метаданных, событий и задач |
-| Media3 отвечает за воспроизведение и выполнение загрузок | Сервер необязателен и никогда не находится в синхронном пути локального действия |
+| Android host | `lintDebug`, все JVM unit tests, debug APK и minified release/R8 — PASS |
+| Samsung Galaxy M52 / API 33 | Полный QA side-by-side connected gate: **160 тестов, 0 failures, 3 ожидаемых skips** |
+| Очередь после process death | Отдельный stage1 → PID → `adb force-stop` → отсутствие PID → stage2: порядок, current item, позиция и режимы восстановлены |
+| Server / PostgreSQL | **600 серверных тестов** на PostgreSQL 18.4 + pgvector 0.8.6 для последнего серверного среза S2 |
+| Contracts / release policy | **111 root tests**; OpenAPI/JSON Schema, release inventory и privacy/security assertions |
+| Производительность RC | PostgreSQL 100k search p95 **6.403 ms**; Android FTS 10k p95 **12.555 ms** |
 
-<a id="what-works-today"></a>
+Подробности: [release notes 0.2.0](docs/release/RELEASE_NOTES_0.2.0.md), [RC test evidence](docs/release/TEST_EVIDENCE.md), [security review](docs/release/SECURITY_REVIEW.md) и [performance report](docs/release/PERFORMANCE_REPORT.md).
 
-## Что работает сегодня
+<a id="android"></a>
 
-AutPlay находится на уровне **локального кандидата RC1 с подтверждающими доказательствами**, а не опубликованного рабочего релиза. Репозиторий содержит исполняемые подтверждения CPU‑контура и локальной работы:
-
-| Проверка | Подтверждённый результат |
-| --- | --- |
-| Android‑контур | RC‑проверка: 82/82 на API 26. Проверка интерфейса и серверных экранов после RC: 89/89 на физическом Samsung SM-A556E; QA‑сборка установлена рядом с существующим приложением без очистки его данных |
-| Сервер и хранение | 425 серверных тестов и один документированный пропуск из-за прав Windows на символические ссылки; PostgreSQL 18.4 и pgvector 0.8.6 |
-| Сквозной переход из офлайна в онлайн | Файловая Room → рабочий транспорт OkHttp → авторизованный FastAPI → PostgreSQL → вторая база Room, включая потерю ACK после коммита и однократное повторное применение |
-| Поиск на крупных наборах | Поиск PostgreSQL по 100 000 строк: p95 **6,403 мс**; Android FTS по 10 000 строк: p95 **12,555 мс** |
-| Восстановление и безопасность | Изолированная проверка восстановления PostgreSQL/Vault, аудит авторизации объектов, сканирование рабочих исходников без найденных секретов, зафиксированные инвентари и SBOM CycloneDX |
-
-Начните с [доказательств тестирования RC1](docs/release/TEST_EVIDENCE.md), [обзора безопасности](docs/release/SECURITY_REVIEW.md) и [отчёта о производительности](docs/release/PERFORMANCE_REPORT.md).
-
-<a id="the-android-experience"></a>
-
-## Интерфейс Android
+## Android-интерфейс
 
 <p align="center">
-  <img src="./assets/readme/adaptive-frontend.svg" width="100%" alt="AutPlay адаптируется от нижней навигации телефона до боковой панели на планшетах и складных устройствах, сохраняя доступ к плееру">
+  <img src="./assets/readme/adaptive-frontend.svg" width="100%" alt="Адаптивный Compose-интерфейс AutPlay для телефона, складного устройства и широкого окна">
 </p>
 
-Этапы интерфейса после P14 объединяют реализованные возможности в одну адаптивную поверхность Compose:
+Один Compose-контур адаптируется от нижней навигации телефона до общей боковой панели на складных устройствах и планшетах. Мини-плеер и Now Playing остаются доступными, а Home, Search, Library, Wave, Profile и Settings используют owner-scoped локальные проекции.
 
-- **Компактные телефоны:** Главная, Поиск, Медиатека, Wave и Ещё остаются в нижней навигации, а мини‑плеер доступен над ней.
-- **Складные устройства и телефоны в альбомной ориентации:** начиная с `600dp`, навигация переходит на боковую панель и освобождает больше горизонтального пространства.
-- **Планшеты и широкие окна:** начиная с `840dp`, тот же рендерер боковой панели получает более широкую область контента; отдельный многопанельный режим остаётся следующей задачей.
-- **Постоянно доступные действия:** результаты поиска запускают долговечные очереди; плеер поддерживает перемотку, перемешивание, повтор, лайк и дизлайк; Wave предоставляет привязанные к контрактам создание, вход, отправку кода, предварительную проверку, действия ведущего и выход.
-- **Оформление под контролем пользователя:** системная, светлая и тёмная темы с акцентами Coral, Violet, Green и Blue; несекретные настройки остаются на устройстве и экспортируются без учётных данных и приватных серверных сведений.
-- **Необязательные серверные экраны:** раздельные адреса API и стриминга, онлайн‑снимки медиатеки, долговечные удалённые импорты и намерения загрузки в Vault, онлайн‑рекомендации и повтор результатов, а также явное управление сессиями — без сетевой зависимости локального воспроизведения.
+В профиле находятся собственная статистика и друзья. В настройках профиля владелец явно включает или выключает доступ друзей к статистике; default — private. Плейлисты открываются как полноценные редактируемые коллекции, а очередь управляется из Now Playing и релевантных track/detail-поверхностей.
 
-Полный набор модульных тестов Android на хосте, lint/debug‑сборка, компиляция Android‑тестов и 89/89 подключённых тестов проходят на физическом Samsung SM-A556E. Проверка живого локального сервера охватывает состояние API и стриминга, снимок медиатеки, онлайн‑рекомендации и долговечный импорт с перезапуском приложения.
+Темы: system/light/dark и акценты Coral, Violet, Green, Blue. Секреты, приватные server origins, raw paths и персональные payloads не входят в обычные логи или экспорт настроек.
 
-<a id="how-autplay-works"></a>
+<a id="architecture"></a>
 
-## Как устроен AutPlay
+## Как это устроено
 
 <p align="center">
-  <img src="./assets/readme/system-map.svg" width="100%" alt="AutPlay локально сохраняет состояние Android и событие автономного журнала, а при подключении синхронизируется с необязательным сервером">
+  <img src="./assets/readme/system-map.svg" width="100%" alt="Локальное действие AutPlay сохраняется в Room и Journal, а необязательный сервер синхронизирует PostgreSQL, Vault, друзей, статистику и Wave">
 </p>
 
-Одна Android‑транзакция сохраняет доменное изменение и связанное с ним долговечное намерение в автономном журнале. Media3 продолжает воспроизведение из доступного локального источника, пока WorkManager повторяет отложенную синхронизацию. После подключения сервер идемпотентно применяет события, возвращает ограниченные проекции и независимо авторизует каждое чтение Vault: знание SHA-256 никогда не является разрешением.
+Одна Android-транзакция сохраняет доменное изменение и его Journal/outbox-факт. WorkManager повторяет отложенную синхронизацию, а Media3 независимо владеет исполнением playback/download. На сервере PostgreSQL хранит метаданные, события и jobs; filesystem/NAS хранит bytes Vault.
 
-Система намеренно разделяет пять понятий:
+Ключевые границы:
 
-- **Recording** — проверяемая музыкальная сущность.
-- **ReleaseTrack** — запись на определённой позиции релиза.
-- **UserTrackRef** — намерение конкретного пользователя и его связь с этой сущностью.
-- **AudioVariant** — конкретное кодированное представление аудио.
-- **VaultObject** — неизменяемые проверенные байты, адресуемые по SHA-256.
+- `VaultObject`, `AudioVariant`, `Recording`, `ReleaseTrack` и `UserTrackRef` остаются разными сущностями.
+- Знание SHA-256 никогда не является разрешением на чтение Vault.
+- Неуверенная идентичность не приводит к тихому auto-merge.
+- Обычная очередь редактируется локально; Wave-очередь остаётся server-authoritative и fail-closed.
+- Статистика private by default; дружба и отсутствие block повторно проверяются на каждом friend-read.
+- CPU-путь не импортирует GPU/CUDA-код. Опциональный GPU-проект физически изолирован.
 
-Неуверенные доказательства идентичности остаются неразрешёнными или отправляются на явную проверку. AutPlay не объединяет две записи молча только потому, что их метаданные или отпечатки похожи.
-
-## Возможности
-
-### Локальная медиатека и воспроизведение
-
-- Автономные изменения медиатеки, поиск FTS5 по кириллице и латинице, плейлисты с дубликатами и стабильным порядком, история и восстанавливаемые ссылки MediaStore/SAF.
-- Сессия Media3, восстановление очереди после завершения процесса, приоритет локального источника, авторизованный резервный источник Vault и долговечные автономные загрузки.
-- Кэшированные пакеты рекомендаций перед показом проверяются по точным байтам, владельцу, версии и сроку действия.
-
-### Личный сервер и Vault
-
-- CPU‑контур FastAPI с сессиями владельца и устройства, очищенными структурированными журналами, endpoint‑ами состояния и готовности и ограниченными задачами PostgreSQL.
-- Возобновляемая загрузка, полная проверка декодирования, версионированные доказательства отпечатков, неизменяемое файловое CAS‑хранилище, карантин, сверка и авторизованный владельцем HTTP Range‑стриминг.
-- Идемпотентная синхронизация push/ACK/pull с непрозрачными курсорами, tombstone‑записями, видимыми конфликтами, начальной загрузкой/сбросом и сохранением ожидающих намерений.
-
-### Импорт, рекомендации и Wave
-
-- Ограниченный импорт CSV/JSON/HTML с контрольными точками, отчётами, теневыми доказательствами кандидатов и явной автономной проверкой.
-- Заменяемый детерминированный CPU‑конвейер рекомендаций с неизменяемым происхождением входов и конвейера, точным повтором, обязательными фильтрами доступности/ACL и проверенными автономными пакетами.
-- Комнаты Hybrid Wave в доверенной локальной сети с долговечной истиной команд в PostgreSQL, предварительной проверкой источников на каждом устройстве, восстановлением сначала из снимка и запланированным выполнением Media3.
-
-<a id="run-the-repository"></a>
+<a id="quick-start"></a>
 
 ## Запуск репозитория
 
-Сейчас AutPlay поставляется как воспроизводимый репозиторий разработки и локальный кандидат в релиз. Публичного установщика, рабочего реестра контейнеров и готовой топологии развёртывания пока нет.
+AutPlay поставляется как воспроизводимый development repository и локальный release candidate. Публичного установщика, production signing key, рабочего container registry и готовой публичной TLS-топологии пока нет.
 
-### Зафиксированные зависимости
+### Требования
 
-- `uv 0.12.3`; он устанавливает зафиксированный CPython `3.14.7`.
-- Microsoft OpenJDK `17.0.20+8-LTS` с заданной переменной `JAVA_HOME`.
-- Платформа Android SDK `36.1`, Build Tools `36.1.0` и заданная переменная `ANDROID_HOME`.
-- Docker Engine и Docker Compose с поддержкой `up --wait` (на проверенном хосте зафиксирован Compose `5.2.0`).
+- `uv 0.12.3` и зафиксированный CPython `3.14.7`;
+- Microsoft OpenJDK `17.0.20+8-LTS` в `JAVA_HOME`;
+- Android SDK Platform `36.1`, Build Tools `36.1.0` и `ANDROID_HOME`;
+- Docker Engine + Compose с поддержкой `up --wait`.
 
-Добавленный в репозиторий Gradle Wrapper загружает Gradle `9.3.1` и проверяет контрольную сумму дистрибутива.
+Gradle Wrapper загружает Gradle `9.3.1` и проверяет checksum дистрибутива.
 
 ### Канонические команды
 
-Запускайте их из корня репозитория. Эти скрипты — единый источник истины для порядка начальной настройки и проверок.
+Запускайте из корня репозитория. README — источник истины для порядка bootstrap и проверок.
 
 Windows PowerShell:
 
@@ -128,7 +111,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1 -ServerOnly
 ```
 
-Linux, macOS или настроенная среда WSL:
+Linux, macOS или настроенная WSL:
 
 ```bash
 bash scripts/bootstrap.sh
@@ -136,22 +119,40 @@ bash scripts/check.sh
 bash scripts/check.sh --server-only
 ```
 
-`bootstrap` отдельно синхронизирует зафиксированные окружения контрактных инструментов и CPU‑сервера, разрешает Gradle Wrapper и проверяет конфигурацию Compose. `check` повторяет фиксированную настройку, проверяет контракты и качество сервера, аудирует граф CPU‑зависимостей, выполняет Android‑проверки на хосте, если не указан режим только сервера, и создаёт одноразовый проект PostgreSQL с уникальным именем. Одноразовая база публикуется только на случайном loopback‑порту и после выполнения удаляется вместе со своей сетью и томом.
+`bootstrap` синхронизирует frozen Python-окружения, разрешает Gradle Wrapper и проверяет Compose. `check` выполняет contract/release, server, dependency-policy и Android host gates и поднимает одноразовый PostgreSQL только на случайном loopback-порту.
 
-Для подключённой Android‑проверки нужен запущенный эмулятор или устройство с API 26 и выше:
+Точечные команды:
 
 ```powershell
 uv run --frozen pytest tests/contract tests/release
-$gradleJavaHomeArgument = "-Dorg.gradle.java.home=$env:JAVA_HOME"
-.\gradlew.bat $gradleJavaHomeArgument --no-daemon --console=plain :apps:android:connectedDebugAndroidTest
+.\gradlew.bat --no-daemon --console=plain --max-workers=1 `
+  :apps:android:lintDebug `
+  :apps:android:testDebugUnitTest `
+  :apps:android:assembleDebug `
+  :apps:android:assembleRelease
 ```
 
-GitHub Actions запускает отдельные Linux‑проверки сервера, Android host и изолированного GPU‑проекта. Тег версии или ручной выбор существующего тега также собирает краткоживущий кандидатный bundle: unsigned APK, CPU OCI‑архив, свежий SBOM и SHA‑256‑манифест. Этот bundle не создаёт публичный GitHub Release, не отправляет образ в registry, не подписывает APK production‑ключом и не выполняет deployment. Точная матрица описана в [руководстве по CI и релизам](docs/operations/CI_RELEASE.md), а граница production‑развёртывания — в [руководстве по deployment](docs/operations/DEPLOYMENT.md).
+Для connected gate нужен авторизованный Android API 26+:
+
+```powershell
+.\gradlew.bat --no-daemon --console=plain --max-workers=1 `
+  :apps:android:connectedDebugAndroidTest
+```
+
+L1 process-death gate запускается отдельно, потому что две стадии должны быть разделены внешним `force-stop`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\test-l1-process-death.ps1 `
+  -AndroidHome $env:ANDROID_HOME `
+  -DeviceSerial <adb-serial> `
+  -QaSideBySide
+```
 
 <details>
-<summary><strong>Запустить одноразовый CPU‑контур</strong></summary>
+<summary><strong>Одноразовый CPU runtime</strong></summary>
 
-Дополнительная runtime‑конфигурация Compose запускает миграцию, API, CPU‑воркер и изолированный процесс прямого стриминга из одного CPU‑образа. Передайте файл с секретом подписи для разработки длиной не менее 32 случайных символов и храните его вне репозитория. По умолчанию порты API и стриминга привязываются только к локальному loopback‑интерфейсу.
+Создайте secret-файл минимум из 32 случайных символов вне репозитория. Runtime-профиль запускает migration, API, CPU-worker и direct streaming; API/streaming по умолчанию доступны только через loopback.
 
 ```powershell
 $env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE = 'C:\path\outside\repo\autplay-auth-secret.txt'
@@ -165,20 +166,14 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime down --volumes
 ```
 
-Детерминированная приёмочная команда для медиаинструментов собирает зафиксированный образ, отключает сеть контейнера, проверяет созданный FLAC, отклоняет вредоносные и повреждённые фикстуры и подтверждает восстанавливаемый карантин:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p06-media-runtime.ps1
-```
-
-Перед использованием профиля прочитайте [руководство по runtime Compose](deploy/compose/README.md).
+Перед использованием прочитайте [runtime Compose guide](deploy/compose/README.md).
 
 </details>
 
 <details>
-<summary><strong>Проверить необязательный GPU‑проект</strong></summary>
+<summary><strong>Изолированный GPU-проект</strong></summary>
 
-У `gpu/` собственные lock‑файл и образ. Канонические CPU‑команды не устанавливают, не собирают, не загружают и не запускают его. Добавленный в репозиторий воркер завершает работу безопасно до получения задачи, пока не настроены проверенный адресуемый по хешу артефакт модели и подходящая запись реестра.
+У `gpu/` отдельные lock, image и worker. Канонический CPU-контур его не устанавливает и не импортирует. Ни одна GPU-модель в текущем RC не упакована и не активирована.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.ps1
@@ -186,7 +181,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.p
   -DeviceSelector 'uuid:GPU-...'
 ```
 
-Допустимые селекторы: `auto`, `uuid:<GPU UUID>`, `pci:<PCI bus ID>` и `index:<n>`. Для устойчивого ручного выбора используйте UUID или PCI. В RC1 ни одна GPU‑модель не упакована и не активирована; авторитетным остаётся детерминированный базовый CPU‑алгоритм рекомендаций. Подробности — в [ADR-025](docs/adr/ADR-025-p12-isolated-gpu-enrichment-and-model-rollout.md).
+См. [ADR-025](docs/adr/ADR-025-p12-isolated-gpu-enrichment-and-model-rollout.md) и [ADR-027](docs/adr/ADR-027-p14-conditional-phase-reachability.md).
 
 </details>
 
@@ -194,31 +189,28 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.p
 
 | Путь | Ответственность |
 | --- | --- |
-| `apps/android` | Адаптивный интерфейс Compose, проекции Room v11 и журнал, воспроизведение и загрузки Media3, синхронизация, проверка импорта, рекомендации, серверные экраны и восстановление Wave |
-| `server/src/autplay` | Границы домена, приложения и портов; композиция CPU‑API/воркера/стриминга, адаптеры PostgreSQL, Vault, синхронизация, импорт, рекомендации и Wave |
-| `server/migrations` | Линейные ревизии Alembic от `0001` до `0015`; без разрушительного резервного сценария миграции |
-| `gpu` | Физически отделённый необязательный воркер обогащения NVIDIA/ONNX и точный граф зависимостей |
-| `contracts` | Контракты OpenAPI 3.1 и Draft 2020-12 для событий синхронизации, взаимодействий и Wave |
-| `deploy/compose` | Зафиксированная по digest база PostgreSQL и одноразовые runtime‑профили только для loopback |
-| `tests` | Независимые от языка векторы контрактов, фикстуры импорта и каркас сквозных доказательств |
-| `docs/design` | Продуктовые, системные, API и persistence‑контракты |
-| `docs/adr` | Принятые архитектурные решения и их границы |
-| `docs/operations` | Руководства по deployment, восстановлению и наблюдаемости |
-| `docs/release` | Контрольный список RC, доказательства тестов, обзор безопасности, отчёт о производительности, SBOM и примечания к релизу |
-
-Сервер построен как модульный монолит. PostgreSQL управляет общими метаданными, синхронизацией и состоянием задач; файловая система или NAS управляет байтами Vault. Redis, RabbitMQ, Kafka, S3 и отдельная векторная база не являются скрытыми зависимостями.
+| `apps/android` | Compose UI, Room v12, Journal, Media3 playback/download, sync, friends, statistics privacy, playlists, queue and Wave recovery |
+| `server/src/autplay` | Modular-monolith CPU API, workers, streaming, PostgreSQL/Vault adapters, sync, social, statistics, import, recommendations and Wave |
+| `server/migrations` | Linear Alembic revisions `0001`–`0023`; без destructive fallback |
+| `contracts` | OpenAPI 3.1, Draft 2020-12 schemas and cross-language vectors |
+| `deploy/compose` | Digest-pinned PostgreSQL and loopback-only runtime profiles |
+| `gpu` | Physically isolated optional NVIDIA/ONNX enrichment project |
+| `tests` | Contract, release-policy and end-to-end evidence fixtures |
+| `docs/design` | Product, system, API, privacy and persistence contracts |
+| `docs/adr` | Accepted architectural decisions and boundaries |
+| `docs/operations` | CI/release, deployment, recovery and observability guides |
+| `docs/release` | RC checklist, evidence, security, performance, SBOM and release notes |
 
 <a id="release-boundary"></a>
 
 ## Границы релиза
 
-RC1 и этап интерфейса после RC честно перечисляют то, на что они **не претендуют**:
+- Это проверенный локальный RC, но не опубликованный GitHub Release и не production deployment.
+- Production signing, registry push, public domain/TLS topology, backup target and registration/legal policy intentionally remain operator decisions.
+- Friend-visible statistics are not Internet-public; collaborative playlists and cross-device active-queue sync are not delivered.
+- Wave evidence covers the declared trusted-local single-API-process topology; public-internet multi-instance fan-out remains deferred.
+- Automatic probabilistic Recording merge remains disabled; ambiguous evidence requires review.
+- Lyrics, Party Mode/member voting and guest queue editing are outside the delivered scope.
+- P12 real RTX/model evidence remains `DEFERRED_WITH_APPROVAL`; the deterministic CPU baseline stays authoritative.
 
-- Не выбраны рабочая подпись, публикация, отправленный образ, развёртывание, публичная топология домена/TLS и рабочее хранилище резервных копий.
-- Реальные доказательства P12 для CUDA OOM, пропускной способности RTX, времени задач, VRAM и качества проверенной модели имеют статус `DEFERRED_WITH_APPROVAL` согласно [ADR-027](docs/adr/ADR-027-p14-conditional-phase-reachability.md). Ни одна GPU‑модель не активна.
-- Доказательства Wave ограничены заявленной доверенной локальной топологией с одним процессом API. Проверка для публичного интернета и live‑рассылка между экземплярами отложены.
-- Автоматическое вероятностное сопоставление Recording отключено. Неоднозначные доказательства требуют проверки.
-- Смена пароля, полный экспорт профиля и медиа, Party Mode, тексты песен, статистика и рабочее управление учётной записью не представлены интерфейсом как доступные операции.
-- Перед публикацией всё ещё требуются зафиксированные проверки уведомлений и перелинковки LGPL/MPL, а также условий распространения NVIDIA.
-
-Прежде чем считать репозиторий чем-то большим, чем локальный кандидат, прочитайте полные [примечания к релизу RC1](docs/release/RELEASE_NOTES_RC1.md) и [инструкцию по резервному копированию и восстановлению](docs/operations/BACKUP_RESTORE.md).
+Перед эксплуатацией прочитайте [release notes 0.2.0](docs/release/RELEASE_NOTES_0.2.0.md), [CI/release guide](docs/operations/CI_RELEASE.md), [deployment boundary](docs/operations/DEPLOYMENT.md) и [backup/restore guide](docs/operations/BACKUP_RESTORE.md).
