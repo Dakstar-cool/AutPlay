@@ -11,6 +11,20 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime down --volumes
 ```
 
+To run a loaded release archive instead of rebuilding from the checkout, set the exact image tag
+and add `compose.release.yaml`. This overlay removes every server `build` section; `--no-build`
+fails closed if the loaded image is unavailable. The PostgreSQL and Vault volumes remain disposable
+and project-scoped. The override uses Compose `!reset` and therefore requires Docker Compose 2.24.4
+or newer:
+
+```text
+docker load --input autplay-server-v0.2.0.docker.tar.gz
+AUTPLAY_SERVER_IMAGE=autplay-server:v0.2.0
+AUTPLAY_RUNTIME_AUTH_SECRET_FILE=<local secret file outside the repository>
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime up --no-build --wait
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime down --volumes
+```
+
 For an explicitly trusted LAN, set `AUTPLAY_RUNTIME_BIND_HOST` to the laptop's concrete LAN IPv4
 address before running the same Compose command. Do not use `0.0.0.0`: binding a specific address
 keeps VPN and other host interfaces out of scope. Restrict the host firewall rule to the two

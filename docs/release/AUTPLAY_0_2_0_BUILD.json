@@ -1,34 +1,36 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-08-26T03:31:10.8162676Z",
+  "schema_version": 2,
   "status": "PASS",
-  "version": {
+  "release": {
+    "tag": "v0.2.0",
+    "repository_visibility": "private",
+    "distribution_class": "DEVELOPMENT_RELEASE",
+    "production_deployment": false
+  },
+  "android": {
     "application_id": "app.autplay",
     "version_code": 2,
     "version_name": "0.2.0",
-    "variant": "release"
+    "installable_asset": "autplay-0.2.0-dev-signed.apk",
+    "installable_signature": "RETAINED_LOCAL_DEVELOPMENT_KEY",
+    "signing_certificate_asset": "autplay-0.2.0-development-signing-cert.der",
+    "minified_asset": "autplay-0.2.0-unsigned.apk",
+    "minified_signature": "UNSIGNED",
+    "production_signed": false
   },
-  "artifact": {
-    "path": "apps/android/build/outputs/apk/release/android-release-unsigned.apk",
-    "filename": "android-release-unsigned.apk",
-    "size_bytes": 9066505,
-    "sha256": "3faa31771460a5c8167055931fc03a2905756d7c8a001a6f0c6ec9687a9e13c1",
-    "production_signed": false,
-    "published": false
+  "server": {
+    "asset": "autplay-server-v0.2.0.docker.tar.gz",
+    "format": "DOCKER_IMAGE_ARCHIVE_GZIP",
+    "platform": "linux/amd64",
+    "runtime": "CPU_ONLY",
+    "registry_pushed": false
   },
-  "verification": {
-    "android_lint_debug": "PASS",
-    "android_unit_tests": "PASS",
-    "android_assemble_debug": "PASS",
-    "android_release_r8": "PASS",
-    "samsung_sm_m526b_focused": "10/10 PASS",
-    "samsung_sm_m526b_process_death": "PASS",
-    "samsung_sm_m526b_connected": "160 tests, 0 failures, 3 expected skips"
-  },
-  "external_actions": {
-    "ci": false,
-    "github_release": false,
-    "deployment": false,
-    "production_signing": false
+  "evidence": {
+    "canonical_contract_release_tests": "119 PASS",
+    "android_host_gate": "PASS",
+    "server_gate": "662 PASS, 1 EXPECTED HOST-POLICY SKIP",
+    "artifact_hashes": "GitHub Release asset SHA256SUMS",
+    "source_binding": "GitHub Release asset release-manifest.json",
+    "assembly_command": "scripts/package-release.ps1 -ReleaseTag v0.2.0"
   }
 }

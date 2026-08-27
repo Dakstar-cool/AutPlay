@@ -7,7 +7,7 @@
 | `ci-server.yml` | Pull request, `master`, manual, weekly cold run | Canonical Linux server/database gate with disposable PostgreSQL cleanup |
 | `ci-android.yml` | Pull request, `master`, manual | Canonical Linux Android host gate and seven-day APK/test evidence |
 | `ci-gpu-static.yml` | GPU/server-path pull request/`master`, manual | Isolated GPU lock/lint/format/type/unit checks on a CPU runner |
-| `release-candidate.yml` | Version tag or manual selection of an existing tag | Unsigned APK, CPU OCI archive, fresh SBOMs, release evidence and SHA-256 manifest retained for 14 days |
+| `release-candidate.yml` | Version tag or manual selection of an existing tag | Unsigned APK, CPU Docker image archive, fresh SBOMs, release evidence and SHA-256 manifest retained for 14 days |
 
 Normal CI and candidate delivery use only `contents: read`. Checkout credentials are not persisted.
 Manual candidate delivery checks out the named existing tag, verifies that it resolves to the
@@ -55,3 +55,12 @@ proposals still require exact-pin review and the affected gates.
 The candidate bundle is delivery evidence, not a production release. It is intentionally unsigned
 and private to the workflow run. Production signing, GitHub Release/registry publication and live
 deployment require the explicit decisions and approval in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+The private repository's first GitHub release, `v0.2.0`, is a manually approved development
+distribution assembled by `scripts/package-release.ps1` from an immutable local tag. The script
+runs the canonical gates, signs the minified APK with the retained local development key, exports
+its public certificate, creates a CPU-only Docker image archive, reloads and smokes the archive,
+and generates SBOMs, `release-manifest.json` and `SHA256SUMS`. Manual `gh release create` uploads
+those generated files only after the bundle passes. This path does not alter the candidate
+workflow's read-only permissions, push an image to a registry, perform production signing, or
+deploy/migrate a persistent target.

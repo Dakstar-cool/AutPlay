@@ -90,7 +90,7 @@ Post-RC evidence ведут milestone handoff в [implementation plan](docs/impl
 
 ## Запуск репозитория
 
-AutPlay поставляется как воспроизводимый development repository и локальный release candidate. Публичного установщика, production signing key, рабочего container registry и готовой публичной TLS-топологии пока нет.
+AutPlay поставляется как воспроизводимый development repository. Первый GitHub-релиз `v0.2.0` содержит development-signed Android APK, unsigned/R8 APK и CPU Docker image archive сервера; production signing key, рабочего container registry и готовой публичной TLS-топологии пока нет.
 
 ### Требования
 
@@ -224,7 +224,7 @@ P00–P14 закрыты как локальный CPU release candidate. Бол
 
 ## Границы релиза
 
-- `0.2.0` — проверенный локальный P14 RC baseline; текущая ветка содержит более новые post-RC milestone, но не является новым опубликованным GitHub Release или production deployment.
+- `0.2.0` — первый GitHub-релиз текущей development-линии: устанавливаемый development-signed APK, minified unsigned APK и CPU-only Docker image archive; это не production deployment и не store-ready Android distribution.
 - Production signing, registry push, public domain/TLS topology, backup target and registration/legal policy intentionally remain operator decisions.
 - Friend-visible statistics are not Internet-public; collaborative playlists and cross-device active-queue sync are not delivered.
 - Wave evidence covers the declared trusted-local single-API-process topology; public-internet multi-instance fan-out remains deferred.

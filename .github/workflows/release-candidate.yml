@@ -122,7 +122,7 @@ jobs:
           cp apps/android/build/outputs/apk/release/android-release-unsigned.apk \
             "$bundle_dir/autplay-${RELEASE_VERSION}-unsigned.apk"
           docker save "autplay-server:${RELEASE_VERSION}" | gzip -9 -n \
-            > "$bundle_dir/autplay-server-${RELEASE_VERSION}.oci.tar.gz"
+            > "$bundle_dir/autplay-server-${RELEASE_VERSION}.docker.tar.gz"
           uv export --frozen --format cyclonedx1.5 \
             --output-file "$bundle_dir/sbom/python-root.cdx.json"
           uv export --project server --frozen --format cyclonedx1.5 \
@@ -133,13 +133,19 @@ jobs:
             --configuration releaseRuntimeClasspath \
             > "$bundle_dir/ANDROID_RELEASE_DEPENDENCIES.txt"
           cp docs/release/RC1_CHECKLIST.md "$bundle_dir/"
-          cp docs/release/RELEASE_NOTES_RC1.md "$bundle_dir/"
+          release_notes="docs/release/RELEASE_NOTES_${RELEASE_VERSION#v}.md"
+          if [[ ! -f "$release_notes" && "$RELEASE_VERSION" == "v0.1.0-rc.1" ]]; then
+            release_notes="docs/release/RELEASE_NOTES_RC1.md"
+          fi
+          test -f "$release_notes"
+          cp "$release_notes" "$bundle_dir/RELEASE_NOTES.md"
           cp docs/release/SECURITY_REVIEW.md "$bundle_dir/"
           {
             echo "release_version=$RELEASE_VERSION"
             echo "git_commit=$SOURCE_COMMIT"
             echo "server_image_id=$(docker image inspect --format '{{.Id}}' "autplay-server:${RELEASE_VERSION}")"
             echo "android_signature=UNSIGNED"
+            echo "container_archive_format=DOCKER_IMAGE_ARCHIVE_GZIP"
             echo "container_distribution=WORKFLOW_ARTIFACT_ONLY"
             echo "production_deployment=NOT_CONFIGURED"
           } > "$bundle_dir/manifest.txt"
