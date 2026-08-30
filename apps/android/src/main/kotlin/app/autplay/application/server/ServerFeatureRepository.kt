@@ -113,6 +113,56 @@ data class ServerRecommendationResult(
     val items: List<ServerRecommendationItem>,
 )
 
+data class RemoteDiscoveryPolicy(
+    val policyId: String,
+    val canonicalArtistId: String,
+    val providerArtistId: String,
+    val discoveryMode: String,
+    val importMode: String,
+    val automationEnabled: Boolean,
+    val revision: Int,
+    val lastCheckedAt: String?,
+    val nextEligibleAt: String?,
+)
+
+data class RemoteDiscoveryRun(
+    val runId: String,
+    val policyId: String,
+    val policyRevision: Int,
+    val state: String,
+    val observedCount: Int,
+    val selectedCount: Int,
+    val pageCount: Int,
+    val createdAt: String,
+    val completedAt: String?,
+    val errorCode: String?,
+)
+
+data class RemoteDiscoveryCandidate(
+    val candidateId: String,
+    val runId: String,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val releasedAt: String?,
+    val disposition: String,
+    val acquisitionState: String,
+    val selectedAutomatically: Boolean,
+)
+
+data class RemoteDiscoverySnapshot(
+    val policies: List<RemoteDiscoveryPolicy>,
+    val runs: List<RemoteDiscoveryRun>,
+)
+
+data class DiscoveryPolicyCommand(
+    val canonicalArtistId: String,
+    val providerArtistId: String,
+    val discoveryMode: String,
+    val importMode: String,
+    val expectedRevision: Int?,
+)
+
 /**
  * Typed access to the already-delivered server surfaces that are not owned by Sync or Wave.
  * Local Room projections remain authoritative for normal Android rendering and mutation.
@@ -189,6 +239,23 @@ class ServerFeatureRepository(
                     rowVersion = value.requiredLong("row_version"),
                 )
             }
+    }
+
+    /** Resolves only an owner-authorized stable Variant ID; URLs and credentials stay runtime-only. */
+    suspend fun playbackVariantId(serverUserTrackRefId: String): String? {
+        requireUuidLike(serverUserTrackRefId)
+        val root = try {
+            authorized(
+                Request.Builder()
+                    .url("$apiBaseUrl/vault/user-tracks/$serverUserTrackRefId/playback-variant")
+                    .get()
+                    .build(),
+            ).jsonObject
+        } catch (error: IllegalStateException) {
+            if (error.message == "SERVER_HTTP_404") return null
+            throw error
+        }
+        return root.requiredString("audio_variant_id", UUID_TEXT_LENGTH).also(::requireUuidLike)
     }
 
     suspend fun startImport(
@@ -337,6 +404,90 @@ class ServerFeatureRepository(
         return decodeRecommendationResult(authorized(emptyPost("/recommendations/$requestId/replay")).jsonObject)
     }
 
+    suspend fun discoveryAutomationSnapshot(): RemoteDiscoverySnapshot {
+        val root = authorized(
+            Request.Builder().url("$apiBaseUrl/discovery/automation/snapshot").get().build(),
+        ).jsonObject
+        root.requireDiscoveryContract()
+        return RemoteDiscoverySnapshot(
+            policies = root.requiredArray("policies", MAX_DISCOVERY_POLICIES).map(::decodeDiscoveryPolicy),
+            runs = root.requiredArray("runs", MAX_DISCOVERY_RUNS).map(::decodeDiscoveryRun),
+        )
+    }
+
+    suspend fun discoveryCandidates(runId: String): List<RemoteDiscoveryCandidate> {
+        requireUuidLike(runId)
+        val root = authorized(
+            Request.Builder()
+                .url("$apiBaseUrl/discovery/automation/runs/$runId/candidates")
+                .get()
+                .build(),
+        ).jsonObject
+        root.requireDiscoveryContract()
+        return root.requiredArray("candidates", MAX_DISCOVERY_CANDIDATES).map(::decodeDiscoveryCandidate)
+    }
+
+    suspend fun setDiscoveryPolicy(command: DiscoveryPolicyCommand, operationId: String) {
+        requireUuidLike(command.canonicalArtistId)
+        requireUuidLike(operationId)
+        require(command.providerArtistId.matches(Regex("[0-9]{1,20}")))
+        require(command.discoveryMode in setOf("DISABLED", "MANUAL_ONLY", "SCHEDULED"))
+        require(command.importMode in setOf("REVIEW_REQUIRED", "AUTO_IMPORT"))
+        require(command.expectedRevision == null || command.expectedRevision >= 1)
+        val body = buildJsonObject {
+            put("contract_version", DISCOVERY_CONTRACT_VERSION)
+            put("schema_version", 1)
+            put("operation_id", operationId)
+            put("action", "SET_ARTIST_POLICY")
+            put("canonical_artist_id", command.canonicalArtistId)
+            put("provider_artist_id", command.providerArtistId)
+            put("discovery_mode", command.discoveryMode)
+            put("import_mode", command.importMode)
+            put("automation_enabled", command.discoveryMode == "SCHEDULED")
+            put("expected_policy_revision", command.expectedRevision?.let(::JsonPrimitive) ?: JsonNull)
+            put(
+                "consequence_confirmation",
+                if (command.importMode == "AUTO_IMPORT") JsonPrimitive(AUTO_IMPORT_CONFIRMATION) else JsonNull,
+            )
+        }.toString()
+        discoveryCommand(body)
+    }
+
+    suspend fun startDiscovery(policyId: String, operationId: String) {
+        requireUuidLike(policyId)
+        requireUuidLike(operationId)
+        discoveryCommand(
+            buildJsonObject {
+                put("contract_version", DISCOVERY_CONTRACT_VERSION)
+                put("schema_version", 1)
+                put(
+                    "operation_id",
+                    operationId,
+                )
+                put("action", "START_DISCOVERY")
+                put("policy_id", policyId)
+            }.toString(),
+        )
+    }
+
+    suspend fun actOnDiscoveryCandidate(candidateId: String, action: String, operationId: String) {
+        requireUuidLike(candidateId)
+        requireUuidLike(operationId)
+        require(action in setOf("SELECT_CANDIDATE", "RETRY_CANDIDATE", "IGNORE_CANDIDATE"))
+        discoveryCommand(
+            buildJsonObject {
+                put("contract_version", DISCOVERY_CONTRACT_VERSION)
+                put("schema_version", 1)
+                put(
+                    "operation_id",
+                    operationId,
+                )
+                put("action", action)
+                put("candidate_id", candidateId)
+            }.toString(),
+        )
+    }
+
     suspend fun logout() {
         sessionAction(emptyPost("/auth/logout"))
     }
@@ -402,6 +553,59 @@ class ServerFeatureRepository(
         score = value.requiredDouble("score"),
         reasonCode = value.requiredString("reason_code", MAX_SHORT_TEXT),
         section = value.requiredString("section", MAX_SHORT_TEXT),
+    )
+
+    private suspend fun discoveryCommand(body: String) {
+        authorized(
+            Request.Builder()
+                .url("$apiBaseUrl/discovery/automation/commands")
+                .post(body.toRequestBody(JSON_MEDIA_TYPE))
+                .build(),
+        ).jsonObject.requireDiscoveryContract()
+    }
+
+    private fun JsonObject.requireDiscoveryContract() {
+        require(requiredString("contract_version", MAX_SHORT_TEXT) == DISCOVERY_CONTRACT_VERSION) {
+            "SERVER_RESPONSE_INVALID"
+        }
+        require(requiredInt("schema_version") == 1) { "SERVER_RESPONSE_INVALID" }
+    }
+
+    private fun decodeDiscoveryPolicy(value: JsonObject) = RemoteDiscoveryPolicy(
+        policyId = value.requiredString("policy_id", UUID_TEXT_LENGTH),
+        canonicalArtistId = value.requiredString("canonical_artist_id", UUID_TEXT_LENGTH),
+        providerArtistId = value.requiredString("provider_artist_id", 20),
+        discoveryMode = value.requiredString("discovery_mode", MAX_SHORT_TEXT),
+        importMode = value.requiredString("import_mode", MAX_SHORT_TEXT),
+        automationEnabled = value.requiredBoolean("automation_enabled"),
+        revision = value.requiredInt("revision"),
+        lastCheckedAt = value.optionalString("last_checked_at", MAX_TIMESTAMP_TEXT),
+        nextEligibleAt = value.optionalString("next_eligible_at", MAX_TIMESTAMP_TEXT),
+    )
+
+    private fun decodeDiscoveryRun(value: JsonObject) = RemoteDiscoveryRun(
+        runId = value.requiredString("run_id", UUID_TEXT_LENGTH),
+        policyId = value.requiredString("policy_id", UUID_TEXT_LENGTH),
+        policyRevision = value.requiredInt("policy_revision"),
+        state = value.requiredString("state", MAX_SHORT_TEXT),
+        observedCount = value.requiredInt("observed_count"),
+        selectedCount = value.requiredInt("selected_count"),
+        pageCount = value.requiredInt("page_count"),
+        createdAt = value.requiredString("created_at", MAX_TIMESTAMP_TEXT),
+        completedAt = value.optionalString("completed_at", MAX_TIMESTAMP_TEXT),
+        errorCode = value.optionalString("error_code", MAX_SHORT_TEXT),
+    )
+
+    private fun decodeDiscoveryCandidate(value: JsonObject) = RemoteDiscoveryCandidate(
+        candidateId = value.requiredString("candidate_id", UUID_TEXT_LENGTH),
+        runId = value.requiredString("run_id", UUID_TEXT_LENGTH),
+        title = value.requiredString("title", MAX_DISPLAY_TEXT),
+        artist = value.requiredString("artist", MAX_DISPLAY_TEXT),
+        album = value.optionalString("album", MAX_DISPLAY_TEXT),
+        releasedAt = value.optionalString("released_at", MAX_TIMESTAMP_TEXT),
+        disposition = value.requiredString("disposition", MAX_SHORT_TEXT),
+        acquisitionState = value.requiredString("acquisition_state", MAX_SHORT_TEXT),
+        selectedAutomatically = value.requiredBoolean("selected_automatically"),
     )
 
     private fun decodeImportReport(root: JsonObject): RemoteImportReport = RemoteImportReport(
@@ -602,7 +806,7 @@ class ServerFeatureRepository(
     private companion object {
         val JSON_MEDIA_TYPE = "application/json".toMediaType()
         val OFFSET_MEDIA_TYPE = "application/offset+octet-stream".toMediaType()
-        val UUID_REGEX = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
+        val UUID_REGEX = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
         val SHA256_REGEX = Regex("[0-9a-f]{64}")
         const val UUID_TEXT_LENGTH = 36
         const val MAX_SHORT_TEXT = 200
@@ -614,5 +818,12 @@ class ServerFeatureRepository(
         const val MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024
         const val MAX_RECOMMENDATION_ITEMS = 100
         const val MAX_RECOMMENDATION_SECTIONS = 20
+        const val MAX_DISCOVERY_POLICIES = 100
+        const val MAX_DISCOVERY_RUNS = 50
+        const val MAX_DISCOVERY_CANDIDATES = 50
+        const val MAX_TIMESTAMP_TEXT = 64
+        const val DISCOVERY_CONTRACT_VERSION = "release-discovery-v1"
+        const val AUTO_IMPORT_CONFIRMATION =
+            "AUTO_IMPORT_ADDS_AUTHORIZED_TRACKS_WITHOUT_PER_TRACK_REVIEW_V1"
     }
 }

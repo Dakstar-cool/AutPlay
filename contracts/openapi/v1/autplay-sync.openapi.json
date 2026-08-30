@@ -53,6 +53,18 @@
       "delete": {"operationId": "cancelVaultUpload", "responses": {"204": {"description": "Upload cancelled"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}}
     },
     "/vault/uploads/{upload_id}/complete": {"parameters": [{"name": "upload_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Uuid"}}], "post": {"operationId": "completeVaultUpload", "responses": {"202": {"$ref": "#/components/responses/Upload"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}}},
+    "/vault/user-tracks/{user_track_ref_id}/playback-variant": {
+      "parameters": [{"name": "user_track_ref_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Uuid"}}],
+      "get": {
+        "operationId": "resolveVaultPlaybackVariant",
+        "summary": "Resolve one owned active library Track to its canonical servable audio Variant",
+        "responses": {
+          "200": {"description": "Stable Variant identity; stream URLs and credentials are never returned", "headers": {"Cache-Control": {"schema": {"const": "no-store"}}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["audio_variant_id"], "properties": {"audio_variant_id": {"$ref": "#/components/schemas/Uuid"}}}}}},
+          "401": {"$ref": "#/components/responses/Error"},
+          "404": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
     "/stream/audio-variants/{audio_variant_id}": {
       "parameters": [{"name": "audio_variant_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/Uuid"}}],
       "get": {"operationId": "streamAudioVariant", "parameters": [{"name": "Range", "in": "header", "required": false, "schema": {"type": "string"}}, {"name": "If-Range", "in": "header", "required": false, "schema": {"type": "string"}}], "responses": {"200": {"$ref": "#/components/responses/AudioStream"}, "206": {"$ref": "#/components/responses/AudioStream"}, "401": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "416": {"$ref": "#/components/responses/Error"}}},

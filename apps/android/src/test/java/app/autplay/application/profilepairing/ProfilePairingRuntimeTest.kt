@@ -39,6 +39,21 @@ import org.junit.Test
 
 class ProfilePairingRuntimeTest {
     @Test
+    fun explicitTrustRegistersDiscoveryOriginForAdmission() = runBlocking {
+        val fixture = Fixture()
+
+        fixture.runtime.startDiscovery(API_ORIGIN).join()
+
+        assertTrue(fixture.registeredOrigins.isEmpty())
+        fixture.runtime.confirmTrust()
+        val snapshot = fixture.runtime.state.value.pairing as PairingState.AwaitingTrust
+        assertEquals(
+            listOf(snapshot.snapshot.serverProfileId to API_ORIGIN),
+            fixture.registeredOrigins,
+        )
+    }
+
+    @Test
     fun exchangeIsDeniedBeforeExplicitTrust() = runBlocking {
         val fixture = Fixture()
         fixture.runtime.startDiscovery(API_ORIGIN).join()
@@ -93,7 +108,7 @@ class ProfilePairingRuntimeTest {
 
     @Test
     fun coldAdmissionRecoveryReestablishesTrustAndPersistsOrdinaryM5Binding() = runBlocking {
-        val fixture = Fixture()
+        val fixture = Fixture(FakePort(wipeSeedInput = true))
         val checkpoint = AdmissionCheckpoint(
             requestId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             requestSha256 = "c".repeat(64),
@@ -131,6 +146,7 @@ class ProfilePairingRuntimeTest {
         assertEquals(USER, fixture.settings.value.activeUserId)
         assertEquals(DEVICE, fixture.settings.value.deviceId)
         assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
         assertEquals(
             Base64.getEncoder().encodeToString(IDENTITY_SPKI),
             fixture.settings.value.m5TrustEvidence?.identityPublicKeySpkiB64,
@@ -370,6 +386,72 @@ class ProfilePairingRuntimeTest {
     }
 
     @Test
+    fun coldRecoveryRotatesRejectedAccessTokenAndRetriesCapabilitiesOnce() = runBlocking {
+        val binding = M5BindingCheckpoint(
+            BINDING_COMMIT_ID,
+            SERVER_INSTANCE_ID,
+            1,
+            IDENTITY_THUMBPRINT,
+            KEY_ALIAS,
+            SESSION_ID,
+            SESSION_FAMILY_ID,
+            0,
+        )
+        val port = FakePort(
+            initialCapabilitiesFailure = "authentication_required",
+            rotationSession = EnrollmentSession(
+                DEVICE,
+                SUCCESSOR_SESSION_ID,
+                SESSION_FAMILY_ID,
+                1,
+                "rotated-access-token".toByteArray(StandardCharsets.US_ASCII),
+                REFRESH_TOKEN.copyOf(),
+            ),
+        )
+        val fixture = Fixture(
+            port = port,
+            initialSettings = NonSecretSettings(
+                activeServerProfileId = PROFILE,
+                activeUserId = USER,
+                deviceId = DEVICE,
+                serverBaseUrl = API_ORIGIN,
+                streamBaseUrl = STREAM_ORIGIN,
+                m5Binding = binding,
+                m5TrustEvidence = M5TrustEvidence(
+                    identityPublicKeySpkiB64 = Base64.getEncoder().encodeToString(IDENTITY_SPKI),
+                    serverLabelHint = "Test server",
+                    capabilitySignedPayloadB64 = Base64.getEncoder().encodeToString("old".toByteArray()),
+                    capabilityPayloadSha256 = "0".repeat(64),
+                    capabilityRevisionHighWater = 1,
+                ),
+                m5LocalDataDecision = "KEEP_LOCAL",
+            ),
+        )
+        fixture.credentials.write(
+            PROFILE,
+            SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope(
+                    accessToken = "expired-access-token",
+                    refreshToken = REFRESH_TOKEN.toString(StandardCharsets.US_ASCII),
+                    generation = 0,
+                    bindingCommitId = BINDING_COMMIT_ID,
+                    sessionId = SESSION_ID,
+                    sessionFamilyId = SESSION_FAMILY_ID,
+                    sessionGeneration = 0,
+                ),
+            ),
+        )
+
+        fixture.runtime.recoverAndRefresh()
+
+        assertEquals(1, port.rotateCalls)
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
+        assertEquals(SUCCESSOR_SESSION_ID, fixture.settings.value.m5Binding?.sessionId)
+        assertEquals(1L, fixture.settings.value.m5Binding?.sessionGeneration)
+        assertEquals(1L, fixture.settings.value.m5TrustEvidence?.capabilityRevisionHighWater)
+    }
+
+    @Test
     fun pendingReviewSelectionIsMaterializedAfterProcessDeathThenMarkerClears() = runBlocking {
         val materializer = RecordingMaterializer()
         val binding = M5BindingCheckpoint(
@@ -435,6 +517,7 @@ class ProfilePairingRuntimeTest {
     ) {
         val settings = FakeSettings(initialSettings)
         val keys = FakeKeys()
+        val registeredOrigins = mutableListOf<Pair<ServerProfileId, String>>()
         val runtime = ProfilePairingRuntime(
             scope = CoroutineScope(Dispatchers.Unconfined),
             settings = settings,
@@ -444,6 +527,7 @@ class ProfilePairingRuntimeTest {
             materialization = M5BindingMaterializationCoordinator(settings, credentials, keys, materializer),
             deviceName = "Test device",
             reportSafeError = {},
+            registerOrigin = { profile, origin -> registeredOrigins += profile to origin },
         )
     }
 
@@ -517,14 +601,20 @@ class ProfilePairingRuntimeTest {
     private class FakePort(
         private val discoveryGate: CompletableDeferred<Unit>? = null,
         private val capabilitiesGate: CompletableDeferred<Unit>? = null,
+        private val wipeSeedInput: Boolean = false,
+        initialCapabilitiesFailure: String? = null,
+        private val rotationSession: EnrollmentSession? = null,
     ) : ProfilePairingPort {
         var exchangeCalls = 0
+        var rotateCalls = 0
         var lastExchange: EnrollmentExchangeCommand? = null
         var identitySeeded = false
+        private var capabilitiesFailure = initialCapabilitiesFailure
         val capabilitiesStarted = CompletableDeferred<Unit>()
 
         override fun seedTrustedIdentity(identity: TrustedServerIdentity, publicKeySpki: ByteArray) {
             identitySeeded = identity == IDENTITY && publicKeySpki.contentEquals(IDENTITY_SPKI)
+            if (wipeSeedInput) publicKeySpki.fill(0)
         }
         override suspend fun discovery(apiOrigin: String): PairingNetworkResult<DiscoveryDocument> {
             discoveryGate?.await()
@@ -543,6 +633,10 @@ class ProfilePairingRuntimeTest {
         override suspend fun capabilities(profileId: ServerProfileId, snapshot: PairingFlowSnapshot): PairingNetworkResult<CapabilityDocument> {
             capabilitiesStarted.complete(Unit)
             capabilitiesGate?.await()
+            capabilitiesFailure?.let { code ->
+                capabilitiesFailure = null
+                return PairingNetworkResult.Failure(code)
+            }
             return PairingNetworkResult.Success(
                 CapabilityDocument(
                     CapabilityState(
@@ -578,7 +672,17 @@ class ProfilePairingRuntimeTest {
         }
         override suspend fun createInvitation(profileId: ServerProfileId, operationId: String, expiresInSeconds: Int) = PairingNetworkResult.Failure("server_unavailable")
         override suspend fun cancelInvitation(profileId: ServerProfileId, invitationId: String, operationId: String) = PairingNetworkResult.Failure("server_unavailable")
-        override suspend fun rotate(request: SessionRotationCommand) = PairingNetworkResult.Failure("server_unavailable")
+        override suspend fun rotate(request: SessionRotationCommand): PairingNetworkResult<EnrollmentSession> {
+            rotateCalls += 1
+            return rotationSession?.let { session ->
+                PairingNetworkResult.Success(
+                    session.copy(
+                        accessToken = session.accessToken.copyOf(),
+                        refreshToken = request.nextRefreshToken.copyOf(),
+                    ),
+                )
+            } ?: PairingNetworkResult.Failure("server_unavailable")
+        }
         override suspend fun devices(profileId: ServerProfileId) = PairingNetworkResult.Success(emptyList<DeviceSummary>())
         override suspend fun sessions(profileId: ServerProfileId) = PairingNetworkResult.Success(emptyList<SessionSummary>())
         override suspend fun lifecycle(profileId: ServerProfileId, command: LifecycleCommand) = PairingNetworkResult.Failure("server_unavailable")

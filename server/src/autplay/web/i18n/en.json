@@ -14,6 +14,7 @@
   "nav_diagnostics": "Diagnostics",
   "nav_audit": "Audit",
   "nav_discovery": "Music discovery",
+  "nav_discovery_automation": "Discovery automation",
   "sign_out": "Sign out",
   "development_warning": "Development mode: browser authentication is limited to this loopback computer.",
   "login_title": "Administrative sign in",

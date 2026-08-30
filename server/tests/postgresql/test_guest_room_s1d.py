@@ -235,7 +235,9 @@ def test_guest_revoke_and_room_close_fail_closed(database_url: str) -> None:
 def test_guest_cleanup_removes_terminal_evidence_after_retention(database_url: str) -> None:
     engine = create_engine(database_url)
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
-    now = datetime(2026, 8, 26, 14, tzinfo=UTC)
+    # PostgreSQL retirement triggers intentionally use statement_timestamp(). Keep the fixture
+    # aligned with that authoritative clock so the 30-day retention assertion never ages out.
+    now = datetime.now(UTC).replace(microsecond=0)
     try:
         with sessions.begin() as session:
             host = _principal(session, "s1d-cleanup-host")

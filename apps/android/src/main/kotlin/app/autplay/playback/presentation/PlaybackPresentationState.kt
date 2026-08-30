@@ -49,6 +49,7 @@ enum class PlaybackControlLockReason {
     QUEUE_ENTRY_MISSING,
     MEDIA_ITEM_MISSING,
     QUEUE_MEDIA_MISMATCH,
+    SOURCE_UNAVAILABLE,
     COMMAND_UNAVAILABLE,
     NOT_SEEKABLE,
 }
@@ -61,6 +62,7 @@ object PlaybackCommandGate {
         context: ActiveQueueContext,
         mediaId: String?,
         commandAvailable: Boolean,
+        sourceAvailable: Boolean = true,
         seekable: Boolean? = null,
     ): PlaybackControlGate {
         val base = when (context) {
@@ -73,6 +75,7 @@ object PlaybackCommandGate {
                 context.currentEntryId == null -> PlaybackControlLockReason.QUEUE_ENTRY_MISSING
                 mediaId == null -> PlaybackControlLockReason.MEDIA_ITEM_MISSING
                 context.currentEntryId != mediaId -> PlaybackControlLockReason.QUEUE_MEDIA_MISMATCH
+                !sourceAvailable -> PlaybackControlLockReason.SOURCE_UNAVAILABLE
                 !commandAvailable -> PlaybackControlLockReason.COMMAND_UNAVAILABLE
                 seekable == false -> PlaybackControlLockReason.NOT_SEEKABLE
                 else -> null

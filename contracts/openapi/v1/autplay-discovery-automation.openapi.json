@@ -1,0 +1,39 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "AutPlay A1C Android Discovery Automation API", "version": "1.0.0-post-a1c-android"},
+  "servers": [{"url": "/api/v1"}],
+  "security": [{"bearerAuth": []}],
+  "x-autplay-implementation-status": "IMPLEMENTED_POST_A1C_ANDROID",
+  "x-autplay-operator-gate": "DISCOVERY_AUTOMATION_ENABLED_DEFAULT_FALSE",
+  "paths": {
+    "/discovery/automation/snapshot": {
+      "get": {
+        "operationId": "getDiscoveryAutomationSnapshot",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_OWNER_PROJECTION_ONLY",
+        "responses": {"200": {"description": "Bounded owner policy and run projection", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "../../discovery/v1/automation-mobile-snapshot.schema.json"}}}}}
+      }
+    },
+    "/discovery/automation/runs/{run_id}/candidates": {
+      "get": {
+        "operationId": "getDiscoveryAutomationCandidates",
+        "x-autplay-authorization": "ACTIVE_SESSION_EXACT_OWNER_RUN_ONLY",
+        "parameters": [{"name": "run_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {"200": {"description": "At most 50 owner-visible candidates", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "../../discovery/v1/automation-mobile-candidates.schema.json"}}}}, "404": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/discovery/automation/commands": {
+      "post": {
+        "operationId": "commandDiscoveryAutomation",
+        "x-autplay-authorization": "ACTIVE_SESSION_SELF_OWNER_COMMAND_ONLY",
+        "x-autplay-idempotency": "OWNER_USER_ID_PLUS_OPERATION_ID_SHARED_ACROSS_ACTIONS",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "../../discovery/v1/automation-command.schema.json"}}}},
+        "responses": {"200": {"description": "Server-authoritative command receipt; no optimistic client state"}, "409": {"$ref": "#/components/responses/Error"}, "422": {"$ref": "#/components/responses/Error"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+    "headers": {"NoStore": {"schema": {"type": "string", "const": "private, no-store, max-age=0"}}},
+    "responses": {"Error": {"description": "Stable non-disclosing error"}}
+  }
+}

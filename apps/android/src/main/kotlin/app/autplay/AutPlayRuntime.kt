@@ -150,6 +150,24 @@ object AutPlayRuntime {
         )
     }
 
+    /** Resolves a server-only Track to a stable Vault Variant without persisting a URL or token. */
+    suspend fun serverPlaybackVariantId(
+        context: Context,
+        profileId: app.autplay.domain.ServerProfileId,
+        serverUserTrackRefId: String,
+    ): String? {
+        val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
+        check(
+            settings.activeServerProfileId == profileId &&
+                settings.activeUserId != null &&
+                settings.deviceId != null,
+        ) { "SERVER_PROFILE_NOT_ACTIVE" }
+        return serverFeatures(
+            context,
+            ClientEventBinding(settings.activeUserId, settings.deviceId, profileId),
+        ).playbackVariantId(serverUserTrackRefId)
+    }
+
     /** Creates volatile S1C social state for the active profile; PostgreSQL remains authoritative. */
     suspend fun socialRuntime(
         context: Context,

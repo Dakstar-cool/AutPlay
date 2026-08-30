@@ -132,6 +132,7 @@ def create_discovery_admin_router(
     renderer: Renderer,
     origin: str,
     token_secret: bytes,
+    discovery_automation_enabled: bool = False,
 ) -> APIRouter:
     """Create a separate manual-only surface; no Android/public API route is added."""
 
@@ -181,7 +182,11 @@ def create_discovery_admin_router(
             context={
                 "page_title": "Discovery",
                 "authenticated": True,
-                "navigation": navigation("discovery", discovery_enabled=True),
+                "navigation": navigation(
+                    "discovery",
+                    discovery_enabled=True,
+                    discovery_automation_enabled=discovery_automation_enabled,
+                ),
                 "flash": None,
                 "development_mode": not cookies.secure,
                 "language_url": f"/admin/discovery?lang={'ru' if locale == 'en' else 'en'}",

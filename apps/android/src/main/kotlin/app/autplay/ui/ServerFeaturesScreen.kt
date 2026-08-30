@@ -15,10 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.application.artist.ArtistSummary
 import app.autplay.application.server.RemoteImportEntry
 import app.autplay.application.server.RemoteImportReport
 import app.autplay.application.server.RemoteLibraryEntry
@@ -35,6 +37,28 @@ data class ServerFeaturesUiState(
     val recommendation: ServerRecommendationResult? = null,
     val uploadStatus: String? = null,
     val stableMessage: String? = null,
+    val discovery: DiscoveryAutomationUiState = DiscoveryAutomationUiState(),
+)
+
+val ServerFeaturesUiStateSaver = mapSaver(
+    save = { state ->
+        state.discovery.pendingOperation?.let { pending ->
+            mapOf("pending_key" to pending.key, "pending_operation_id" to pending.operationId)
+        }.orEmpty()
+    },
+    restore = { saved ->
+        val key = saved["pending_key"] as? String
+        val operationId = saved["pending_operation_id"] as? String
+        ServerFeaturesUiState(
+            discovery = DiscoveryAutomationUiState(
+                pendingOperation = if (key != null && operationId != null) {
+                    PendingDiscoveryOperation(key, operationId)
+                } else {
+                    null
+                },
+            ),
+        )
+    },
 )
 
 data class ServerFeaturesActions(
@@ -52,6 +76,7 @@ data class ServerFeaturesActions(
     val recommendations: (Boolean) -> Unit,
     val exactReplay: () -> Unit,
     val algorithmicReplay: () -> Unit,
+    val discovery: DiscoveryAutomationActions = DiscoveryAutomationActions(),
 )
 
 /** Online diagnostics/actions. The primary library and player remain Room/local-first. */
@@ -60,6 +85,7 @@ fun ServerFeaturesScreen(
     isBound: Boolean,
     selectedTrackLabel: String?,
     selectedTrackUploadEligible: Boolean,
+    localArtists: List<ArtistSummary> = emptyList(),
     state: ServerFeaturesUiState,
     actions: ServerFeaturesActions,
 ) {
@@ -186,6 +212,16 @@ fun ServerFeaturesScreen(
                 }
             }
         }
+    }
+
+    Section(stringResource(R.string.discovery_automation_title)) {
+        DiscoveryAutomationPanel(
+            isBound = isBound,
+            busy = state.busyAction != null,
+            localArtists = localArtists,
+            state = state.discovery,
+            actions = actions.discovery,
+        )
     }
 }
 

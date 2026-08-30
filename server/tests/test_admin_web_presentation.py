@@ -116,3 +116,19 @@ def test_dashboard_names_all_bounded_health_components() -> None:
         "dashboard.html", locale="en", context=_base("dashboard", "en") | context
     )
     assert "PostgreSQL" in html and "CPU worker" in html and "Vault" in html
+
+
+def test_discovery_navigation_exposes_only_enabled_surfaces() -> None:
+    default_hrefs = {item.href for item in navigation("dashboard")}
+    manual_hrefs = {item.href for item in navigation("discovery", discovery_enabled=True)}
+    enabled = navigation(
+        "discovery-automation",
+        discovery_enabled=True,
+        discovery_automation_enabled=True,
+    )
+
+    assert "/admin/discovery" not in default_hrefs
+    assert "/admin/discovery/automation" not in default_hrefs
+    assert "/admin/discovery" in manual_hrefs
+    assert "/admin/discovery/automation" not in manual_hrefs
+    assert [item.href for item in enabled if item.current] == ["/admin/discovery/automation"]

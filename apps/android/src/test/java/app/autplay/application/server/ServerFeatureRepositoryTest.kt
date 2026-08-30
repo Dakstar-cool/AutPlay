@@ -119,6 +119,112 @@ class ServerFeatureRepositoryTest {
         }
     }
 
+    @Test
+    fun playbackVariantResolutionReturnsOnlyStableIdAndMasksMissingTrack() = runBlocking {
+        val server = MockWebServer()
+        val variant = "16161616-1616-4616-8616-161616161616"
+        server.enqueue(MockResponse().setBody("""{"audio_variant_id":"$variant"}"""))
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.start()
+        try {
+            val repository = repository(server, MutableStore("access".toByteArray()))
+            assertEquals(variant, repository.playbackVariantId(TRACK))
+            assertNull(repository.playbackVariantId(RECORDING))
+            assertEquals(
+                "/api/v1/vault/user-tracks/$TRACK/playback-variant",
+                server.takeRequest().path,
+            )
+            assertEquals(
+                "/api/v1/vault/user-tracks/$RECORDING/playback-variant",
+                server.takeRequest().path,
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun playbackVariantResolutionAcceptsCanonicalPersistedUuidWithoutVersionBits() = runBlocking {
+        val server = MockWebServer()
+        val track = "00000000-0000-0000-0000-000000000011"
+        val variant = "00000000-0000-0000-0000-000000000012"
+        server.enqueue(MockResponse().setBody("""{"audio_variant_id":"$variant"}"""))
+        server.start()
+        try {
+            val repository = repository(server, MutableStore("access".toByteArray()))
+            assertEquals(variant, repository.playbackVariantId(track))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun discoveryAutomationUsesFrozenCommandsAndBoundedServerProjections() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody(discoverySnapshotJson()))
+        server.enqueue(MockResponse().setBody(discoveryCandidatesJson()))
+        repeat(4) {
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"contract_version":"release-discovery-v1","schema_version":1,"action":"OK","replayed":false}""",
+                ),
+            )
+        }
+        server.start()
+        try {
+            val repository = repository(server, MutableStore("access".toByteArray()))
+            val snapshot = repository.discoveryAutomationSnapshot()
+            assertEquals("SCHEDULED", snapshot.policies.single().discoveryMode)
+            assertEquals("COMPLETED", snapshot.runs.single().state)
+            assertEquals("Release", repository.discoveryCandidates(DISCOVERY_RUN).single().title)
+
+            val command = DiscoveryPolicyCommand(
+                canonicalArtistId = DISCOVERY_ARTIST,
+                providerArtistId = "20",
+                discoveryMode = "SCHEDULED",
+                importMode = "AUTO_IMPORT",
+                expectedRevision = 3,
+            )
+            val policyOperation = "13131313-1313-4313-8313-131313131313"
+            repository.setDiscoveryPolicy(command, policyOperation)
+            repository.setDiscoveryPolicy(command, policyOperation)
+            repository.startDiscovery(
+                snapshot.policies.single().policyId,
+                "14141414-1414-4414-8414-141414141414",
+            )
+            repository.actOnDiscoveryCandidate(
+                DISCOVERY_CANDIDATE,
+                "IGNORE_CANDIDATE",
+                "15151515-1515-4515-8515-151515151515",
+            )
+
+            assertEquals("/api/v1/discovery/automation/snapshot", server.takeRequest().path)
+            assertEquals(
+                "/api/v1/discovery/automation/runs/$DISCOVERY_RUN/candidates",
+                server.takeRequest().path,
+            )
+            val policy = server.takeRequest()
+            assertEquals("/api/v1/discovery/automation/commands", policy.path)
+            val policyBody = policy.body.readUtf8()
+            assertTrue(policyBody.contains("\"action\":\"SET_ARTIST_POLICY\""))
+            assertTrue(
+                policyBody.contains(
+                    "AUTO_IMPORT_ADDS_AUTHORIZED_TRACKS_WITHOUT_PER_TRACK_REVIEW_V1",
+                ),
+            )
+            val policyRetryBody = server.takeRequest().body.readUtf8()
+            val operationPattern = Regex("\\\"operation_id\\\":\\\"([^\\\"]+)\\\"")
+            assertEquals(
+                operationPattern.find(policyBody)?.groupValues?.get(1),
+                operationPattern.find(policyRetryBody)?.groupValues?.get(1),
+            )
+            assertTrue(server.takeRequest().body.readUtf8().contains("\"action\":\"START_DISCOVERY\""))
+            assertTrue(server.takeRequest().body.readUtf8().contains("\"action\":\"IGNORE_CANDIDATE\""))
+        } finally {
+            server.shutdown()
+        }
+    }
+
     private fun repository(server: MockWebServer, store: CredentialStore) = ServerFeatureRepository(
         server.url("/").toString(),
         server.url("/").toString(),
@@ -131,6 +237,8 @@ class ServerFeatureRepositoryTest {
     private fun historyJson() = """{"items":[{"listening_event_id":"$HISTORY","user_track_ref_id":"$TRACK","recording_id":"$RECORDING","started_at":"2026-01-01T00:00:00+00:00","played_ms":3,"event_origin":"ORGANIC"}],"next_cursor":null}"""
     private fun importReportJson() = """{"import_job_id":"$IMPORT","delivery_job_id":"$DELIVERY","state":"RUNNING","progress_current":1,"progress_total":2,"adapter_id":"json","adapter_version":"1","input_schema_version":"1","counts":{"PENDING":1},"entries":[{"source_row_key":"row-1","import_entry_id":"$IMPORT_ENTRY","status":"PENDING","resolver_state":null,"decision_id":null,"candidate_count":0,"unknown_field_count":0,"error_code":null}],"next_after":null}"""
     private fun recommendationJson() = """{"recommendation_request_id":"$REQUEST","surface":"RECOMMENDATIONS","context":"GENERAL","pipeline":{"key":"cpu-baseline","version":"1","manifest_sha256":"${"b".repeat(64)}"},"request_sha256":"${"c".repeat(64)}","input_snapshot_sha256":"${"d".repeat(64)}","replay":"served","shadow":false,"items":[{"recommendation_request_id":"$REQUEST","recording_id":"$RECORDING","source_rank":1,"score":0.5,"score_kind":"heuristic","reason_code":"RECENT","reason_codes":["RECENT"],"section":"FOR_YOU","contributions":[]}]}"""
+    private fun discoverySnapshotJson() = """{"contract_version":"release-discovery-v1","schema_version":1,"policies":[{"policy_id":"$DISCOVERY_POLICY","canonical_artist_id":"$DISCOVERY_ARTIST","provider_artist_id":"20","discovery_mode":"SCHEDULED","import_mode":"REVIEW_REQUIRED","automation_enabled":true,"revision":3,"last_checked_at":null,"next_eligible_at":"2026-08-31T12:00:00+00:00"}],"runs":[{"run_id":"$DISCOVERY_RUN","policy_id":"$DISCOVERY_POLICY","policy_revision":3,"state":"COMPLETED","observed_count":1,"selected_count":0,"page_count":1,"created_at":"2026-08-30T12:00:00+00:00","completed_at":"2026-08-30T12:01:00+00:00","error_code":null}]}"""
+    private fun discoveryCandidatesJson() = """{"contract_version":"release-discovery-v1","schema_version":1,"run_id":"$DISCOVERY_RUN","candidates":[{"candidate_id":"$DISCOVERY_CANDIDATE","run_id":"$DISCOVERY_RUN","title":"Release","artist":"Artist","album":null,"released_at":null,"disposition":"PENDING_REVIEW","acquisition_state":"NOT_REQUESTED","selected_automatically":false}]}"""
 
     private class MutableStore(initial: ByteArray) : CredentialStore {
         private var value: ByteArray? = initial.copyOf()
@@ -153,5 +261,9 @@ class ServerFeatureRepositoryTest {
         const val DECISION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         const val UPLOAD = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const val REQUEST = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        const val DISCOVERY_ARTIST = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const val DISCOVERY_POLICY = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        const val DISCOVERY_RUN = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+        const val DISCOVERY_CANDIDATE = "12121212-1212-4212-8212-121212121212"
     }
 }

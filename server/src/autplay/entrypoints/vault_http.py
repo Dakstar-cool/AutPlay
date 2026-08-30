@@ -70,6 +70,8 @@ class UploadService(Protocol):
 
     def cancel(self, principal: Principal, upload_id: UUID) -> None: ...
 
+    def resolve_playback_variant(self, principal: Principal, user_track_ref_id: UUID) -> UUID: ...
+
 
 def create_vault_router(
     service: UploadService, *, authenticated: Callable[[Request], None]
@@ -95,6 +97,16 @@ def create_vault_router(
         return JSONResponse(
             _view_document(view), status_code=201 if created else 200, headers=_no_store()
         )
+
+    @router.get("/user-tracks/{user_track_ref_id}/playback-variant", response_model=None)
+    def playback_variant(user_track_ref_id: UUID, request: Request) -> JSONResponse:
+        try:
+            audio_variant_id = service.resolve_playback_variant(
+                _principal(request), user_track_ref_id
+            )
+        except Exception as error:
+            _raise_upload_error(error)
+        return JSONResponse({"audio_variant_id": str(audio_variant_id)}, headers=_no_store())
 
     @router.head("/uploads/{upload_id}", response_model=None)
     def head_upload(upload_id: UUID, request: Request) -> Response:

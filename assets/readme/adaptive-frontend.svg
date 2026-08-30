@@ -1,68 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
-  <title id="title">Адаптивный Android-интерфейс AutPlay</title>
-  <desc id="desc">Одни и те же разделы AutPlay используют нижнюю навигацию на телефонах шириной менее 600dp и общую боковую панель в более широких окнах; плеер и Wave остаются доступными.</desc>
-
-  <rect width="1200" height="540" rx="28" fill="#141111"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="550" viewBox="0 0 1200 550" role="img" aria-labelledby="title desc">
+  <title id="title">Адаптивный Compose-интерфейс AutPlay</title>
+  <desc id="desc">Compact, medium и expanded компоновки используют один playback state, постоянный мини-плеер и подходящую ширине навигацию без создания нового player session.</desc>
+  <rect width="1200" height="550" rx="28" fill="#F7F3ED"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
-    <text x="54" y="58" fill="#FFB4AB" font-size="20" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">АДАПТИВНЫЙ COMPOSE-ИНТЕРФЕЙС</text>
-    <text x="54" y="104" fill="#FFF8F7" font-size="38" font-weight="750">Один интерфейс, два режима навигации.</text>
+    <text x="54" y="54" fill="#B84226" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">ADAPTIVE COMPOSE · ONE PLAYBACK STATE</text>
+    <text x="54" y="102" fill="#171419" font-size="40" font-weight="770">Интерфейс меняет форму, не контекст</text>
 
-    <g transform="translate(54 142)">
-      <text x="110" y="0" text-anchor="middle" fill="#E4BDB7" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">КОМПАКТНЫЙ · &lt;600dp</text>
-      <rect x="0" y="22" width="220" height="322" rx="28" fill="#FFF8F7"/>
-      <text x="22" y="58" fill="#141111" font-size="21" font-weight="750">AutPlay</text>
-      <circle cx="190" cy="50" r="11" fill="#FFDAD5"/>
-      <rect x="18" y="78" width="184" height="76" rx="18" fill="#FFDAD5"/>
-      <text x="34" y="108" fill="#410001" font-size="18" font-weight="700">Главная</text>
-      <path d="M34 128H156" stroke="#B42318" stroke-width="5" stroke-linecap="round"/>
-      <rect x="18" y="168" width="184" height="35" rx="12" fill="#F6DDDA"/>
-      <rect x="18" y="214" width="184" height="35" rx="12" fill="#F6DDDA"/>
-      <rect x="10" y="260" width="200" height="38" rx="13" fill="#211E1D"/>
-      <circle cx="31" cy="279" r="12" fill="#B42318"/>
-      <text x="51" y="284" fill="#FFF8F7" font-size="15">Сейчас играет</text>
-      <g transform="translate(18 312)" fill="#765653" font-size="12" text-anchor="middle">
-        <text x="12" y="0">⌂</text><text x="52" y="0">⌕</text><text x="92" y="0">♫</text><text x="132" y="0">〰</text><text x="172" y="0">•••</text>
-      </g>
+    <g transform="translate(54 138)">
+      <text x="108" y="0" text-anchor="middle" fill="#6E6973" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">COMPACT · &lt;600dp</text>
+      <rect y="22" width="216" height="338" rx="30" fill="#17161D"/>
+      <rect x="12" y="36" width="192" height="310" rx="22" fill="#FFFFFF"/>
+      <text x="30" y="72" fill="#171419" font-size="21" font-weight="760">AutPlay</text>
+      <rect x="28" y="92" width="160" height="82" rx="18" fill="#FBE0D8"/>
+      <text x="44" y="124" fill="#8B321E" font-size="19" font-weight="720">Главная</text>
+      <path d="M44 146H154" stroke="#FF6B45" stroke-width="6" stroke-linecap="round"/>
+      <rect x="28" y="190" width="160" height="38" rx="12" fill="#EEEAE5"/>
+      <rect x="20" y="250" width="176" height="54" rx="16" fill="#17161D"/>
+      <circle cx="48" cy="277" r="14" fill="#FF6B45"/>
+      <text x="72" y="283" fill="#F7F3ED" font-size="17">мини-плеер</text>
+      <path d="M38 326H178" stroke="#D9D3CC" stroke-width="3"/>
     </g>
 
-    <g transform="translate(326 142)">
-      <text x="170" y="0" text-anchor="middle" fill="#DCCEFF" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">СРЕДНИЙ · 600–839dp</text>
-      <rect x="0" y="22" width="340" height="322" rx="24" fill="#FFF8F7"/>
-      <rect x="0" y="22" width="68" height="322" rx="24" fill="#2A2423"/>
-      <rect x="52" y="22" width="16" height="322" fill="#2A2423"/>
-      <g fill="#E4BDB7" font-size="20" text-anchor="middle">
-        <text x="34" y="68">⌂</text><text x="34" y="110">♫</text><text x="34" y="152">⌕</text><text x="34" y="194">≡</text><text x="34" y="236">〰</text><text x="34" y="278">•••</text>
-      </g>
-      <text x="92" y="61" fill="#141111" font-size="22" font-weight="750">Медиатека</text>
-      <rect x="92" y="80" width="220" height="46" rx="14" fill="#E8DEFF"/>
-      <text x="110" y="109" fill="#4B3A73" font-size="17">Поиск по 10 000 треков</text>
-      <rect x="92" y="142" width="220" height="42" rx="12" fill="#F6DDDA"/>
-      <rect x="92" y="196" width="220" height="42" rx="12" fill="#F6DDDA"/>
-      <rect x="84" y="276" width="238" height="48" rx="14" fill="#211E1D"/>
-      <circle cx="110" cy="300" r="14" fill="#6246A8"/>
-      <text x="134" y="305" fill="#FFF8F7" font-size="16">Постоянный мини-плеер</text>
+    <g transform="translate(322 138)">
+      <text x="176" y="0" text-anchor="middle" fill="#6E6973" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">MEDIUM · 600–839dp</text>
+      <rect y="22" width="352" height="338" rx="28" fill="#17161D"/>
+      <rect x="14" y="36" width="324" height="310" rx="20" fill="#FFFFFF"/>
+      <rect x="14" y="36" width="70" height="310" rx="20" fill="#24222B"/>
+      <rect x="68" y="36" width="16" height="310" fill="#24222B"/>
+      <g fill="#BDEAFF" font-size="23" text-anchor="middle"><text x="49" y="82">⌂</text><text x="49" y="130">⌕</text><text x="49" y="178">♫</text><text x="49" y="226">≋</text></g>
+      <text x="110" y="76" fill="#171419" font-size="22" font-weight="760">Медиатека</text>
+      <rect x="110" y="98" width="196" height="52" rx="15" fill="#E7F5FC"/>
+      <text x="128" y="130" fill="#17617F" font-size="18">поиск и фильтры</text>
+      <rect x="110" y="168" width="196" height="42" rx="13" fill="#EEEAE5"/>
+      <rect x="110" y="224" width="196" height="42" rx="13" fill="#EEEAE5"/>
+      <rect x="98" y="286" width="222" height="48" rx="15" fill="#17161D"/>
+      <circle cx="124" cy="310" r="13" fill="#83D6FF"/>
+      <text x="148" y="316" fill="#F7F3ED" font-size="17">тот же мини-плеер</text>
     </g>
 
-    <g transform="translate(716 142)">
-      <text x="215" y="0" text-anchor="middle" fill="#A8D8FF" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ШИРОКИЙ · ТА ЖЕ ПАНЕЛЬ</text>
-      <rect x="0" y="22" width="430" height="322" rx="24" fill="#FFF8F7"/>
-      <rect x="0" y="22" width="78" height="322" rx="24" fill="#172733"/>
-      <rect x="60" y="22" width="18" height="322" fill="#172733"/>
-      <g fill="#A8D8FF" font-size="20" text-anchor="middle">
-        <text x="39" y="68">⌂</text><text x="39" y="110">♫</text><text x="39" y="152">⌕</text><text x="39" y="194">≡</text><text x="39" y="236">〰</text><text x="39" y="278">•••</text>
-      </g>
-      <text x="104" y="61" fill="#141111" font-size="22" font-weight="750">Слушать вместе</text>
-      <rect x="104" y="82" width="298" height="136" rx="18" fill="#CDE5FF"/>
-      <path d="M128 126C166 96 204 96 242 126C280 156 318 156 356 126" fill="none" stroke="#00639B" stroke-width="6" stroke-linecap="round"/>
-      <text x="123" y="184" fill="#174A68" font-size="17" font-weight="700">Широкая область контента</text>
-      <rect x="96" y="276" width="306" height="48" rx="14" fill="#211E1D"/>
-      <circle cx="122" cy="300" r="14" fill="#00639B"/>
-      <text x="146" y="305" fill="#FFF8F7" font-size="16">Плеер всегда доступен</text>
+    <g transform="translate(726 138)">
+      <text x="210" y="0" text-anchor="middle" fill="#6E6973" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">EXPANDED · ≥840dp</text>
+      <rect y="22" width="420" height="338" rx="28" fill="#17161D"/>
+      <rect x="14" y="36" width="392" height="310" rx="20" fill="#FFFFFF"/>
+      <rect x="14" y="36" width="78" height="310" rx="20" fill="#24222B"/>
+      <rect x="74" y="36" width="18" height="310" fill="#24222B"/>
+      <g fill="#FF9A82" font-size="23" text-anchor="middle"><text x="53" y="82">⌂</text><text x="53" y="130">⌕</text><text x="53" y="178">♫</text><text x="53" y="226">≋</text></g>
+      <rect x="114" y="64" width="122" height="188" rx="18" fill="#FBE0D8"/>
+      <text x="132" y="98" fill="#8B321E" font-size="19" font-weight="720">Список</text>
+      <rect x="256" y="64" width="126" height="188" rx="18" fill="#E7F5FC"/>
+      <text x="274" y="98" fill="#17617F" font-size="19" font-weight="720">Деталь</text>
+      <path d="M132 126H216M132 156H216M274 126H362M274 156H362" stroke="#BEB8B1" stroke-width="5" stroke-linecap="round"/>
+      <rect x="104" y="286" width="288" height="48" rx="15" fill="#17161D"/>
+      <circle cx="132" cy="310" r="13" fill="#FF6B45"/>
+      <text x="156" y="316" fill="#F7F3ED" font-size="17">playback остаётся доступным</text>
     </g>
 
-    <g transform="translate(54 506)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#E4BDB7">
-      <text x="0" y="0">ГЛАВНАЯ · ПОИСК · МЕДИАТЕКА · WAVE · ЕЩЁ</text>
-      <text x="1092" y="0" text-anchor="end">320dp+ · 160 тестов · 0 ошибок на M52</text>
+    <g transform="translate(54 520)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
+      <text x="0" y="0" fill="#6E6973">RESIZE · ROTATION · FOLD → NO NEW PLAYER SESSION</text>
+      <text x="1092" y="0" text-anchor="end" fill="#B84226">HOME · SEARCH · LIBRARY · WAVE · PROFILE</text>
     </g>
   </g>
 </svg>

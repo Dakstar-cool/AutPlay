@@ -158,6 +158,8 @@ def test_policy_run_and_candidate_views_are_owner_scoped_and_redacted() -> None:
 
     assert page.status_code == 200
     assert "Discovery automation" in page.text
+    assert 'href="/admin/discovery/automation?lang=en" aria-current="page"' in page.text
+    assert 'href="/admin/discovery?lang=en"' in page.text
     assert "No raw provider payload" not in page.text
     assert "no-store" in page.headers["cache-control"]
     assert "content-security-policy" in page.headers

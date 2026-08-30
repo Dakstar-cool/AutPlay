@@ -1,5 +1,7 @@
 package app.autplay.ui.core
 
+import app.autplay.application.library.CoreHomeTrackSummary
+import app.autplay.application.library.CoreResumeQueueSummary
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import org.junit.Assert.assertEquals
@@ -149,6 +151,50 @@ class CoreProductStateTest {
             listOf("missing"),
             filterAndSortTracks(tracks, LibraryFilter.Unavailable, LibrarySort.RecentlyAdded).map { it.stableId },
         )
+    }
+
+    @Test
+    fun homePlaybackTargetsExcludeMetadataOnlyTracks() {
+        val playable = track("playable", "Playable", 1, loved = false, downloaded = false)
+        val metadataOnly = track(
+            "metadata",
+            "Metadata",
+            2,
+            loved = false,
+            downloaded = false,
+            availability = TrackAvailability.MetadataOnly,
+        )
+        val recent = listOf(
+            CoreHomeTrackSummary("metadata", "Metadata", "Artist", 2),
+            CoreHomeTrackSummary("playable", "Playable", "Artist", 1),
+        )
+
+        val state = buildHomeScreenUiState(
+            localMode = true,
+            recommendationLoading = false,
+            offlineFallback = false,
+            releases = emptyList(),
+            recommendations = emptyList(),
+            continueListening = CoreResumeQueueSummary(
+                "snapshot",
+                "metadata",
+                "Metadata",
+                "Artist",
+                0,
+                "USER",
+            ),
+            recentlyPlayed = recent,
+            recentlyAdded = recent,
+            playlists = emptyList(),
+            libraryTracks = listOf(playable, metadataOnly),
+            problems = emptyList(),
+            recommendationError = false,
+            untitledTrack = "Untitled",
+        )
+
+        assertNull(state.continueListening)
+        assertEquals(listOf("playable"), state.recentlyPlayed.map { it.id })
+        assertEquals(listOf("playable"), state.recentlyAdded.map { it.id })
     }
 
     @Test

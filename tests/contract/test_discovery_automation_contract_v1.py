@@ -19,6 +19,13 @@ PROMPT = (
 )
 ADR = ROOT / "docs" / "adr" / "ADR-042-a1c-scheduled-discovery-auto-import.md"
 COMMAND_SCHEMA = ROOT / "contracts" / "discovery" / "v1" / "automation-command.schema.json"
+MOBILE_SNAPSHOT_SCHEMA = (
+    ROOT / "contracts" / "discovery" / "v1" / "automation-mobile-snapshot.schema.json"
+)
+MOBILE_CANDIDATES_SCHEMA = (
+    ROOT / "contracts" / "discovery" / "v1" / "automation-mobile-candidates.schema.json"
+)
+MOBILE_OPENAPI = ROOT / "contracts" / "openapi" / "v1" / "autplay-discovery-automation.openapi.json"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -174,3 +181,26 @@ def test_fixture_is_bounded_redacted_and_complete() -> None:
     fixture = SCENARIOS.read_text(encoding="utf-8").lower()
     for forbidden in ("bearer ", "access_token", "refresh_token", "source_url", "c:\\users\\"):
         assert forbidden not in fixture
+
+
+def test_android_contract_is_additive_bearer_owner_scoped_and_bounded() -> None:
+    snapshot = _load(MOBILE_SNAPSHOT_SCHEMA)
+    candidates = _load(MOBILE_CANDIDATES_SCHEMA)
+    openapi = _load(MOBILE_OPENAPI)
+    Draft202012Validator.check_schema(snapshot)
+    Draft202012Validator.check_schema(candidates)
+
+    assert openapi["security"] == [{"bearerAuth": []}]
+    assert openapi["x-autplay-operator-gate"] == ("DISCOVERY_AUTOMATION_ENABLED_DEFAULT_FALSE")
+    paths = openapi["paths"]
+    assert set(paths) == {
+        "/discovery/automation/snapshot",
+        "/discovery/automation/runs/{run_id}/candidates",
+        "/discovery/automation/commands",
+    }
+    assert paths["/discovery/automation/commands"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["$ref"].endswith("automation-command.schema.json")
+    assert snapshot["properties"]["policies"]["maxItems"] == 100
+    assert snapshot["properties"]["runs"]["maxItems"] == 50
+    assert candidates["properties"]["candidates"]["maxItems"] == 50

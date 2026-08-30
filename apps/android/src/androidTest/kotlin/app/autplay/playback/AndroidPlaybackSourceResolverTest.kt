@@ -12,6 +12,7 @@ import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -26,8 +27,10 @@ class AndroidPlaybackSourceResolverTest {
     private val testPackageName = InstrumentationRegistry.getInstrumentation().context.packageName
     private val name = "autplay-p08-source.db"
     private lateinit var database: AutPlayDatabase
+    private lateinit var originalSettings: NonSecretSettings
 
     @Before fun setUp() {
+        originalSettings = runBlocking { applicationNonSecretSettingsStore(context).settings.first() }
         context.deleteDatabase(name)
         database = AutPlayDatabase.open(context, name)
     }
@@ -35,7 +38,7 @@ class AndroidPlaybackSourceResolverTest {
     @After fun tearDown() = runBlocking {
         database.close()
         context.deleteDatabase(name)
-        applicationNonSecretSettingsStore(context).update(NonSecretSettings())
+        applicationNonSecretSettingsStore(context).update(originalSettings)
     }
 
     @Test fun readableLocalWinsBeforeConfiguredVault() = runBlocking {
@@ -69,6 +72,44 @@ class AndroidPlaybackSourceResolverTest {
         assertEquals(AndroidPlaybackSourceResolver.VAULT_SCHEME, result.value.runtimeUri.scheme)
         assertEquals("PERMISSION_REVOKED", database.localAudioDao().state(state.localAudioStateId)?.status)
         assertNotNull(database.libraryDao().trackRef(track.localUserTrackRefId))
+    }
+
+    @Test fun serverOnlyTrackResolvesCanonicalVariantAtPlaybackTime() = runBlocking {
+        val profile = ServerProfileId(uuid(8))
+        applicationNonSecretSettingsStore(context).update(
+            NonSecretSettings(
+                activeServerProfileId = profile,
+                activeUserId = UserId(uuid(9)),
+                deviceId = DeviceId(uuid(10)),
+                serverBaseUrl = "https://api.test",
+                streamBaseUrl = "https://vault.test",
+            ),
+        )
+        val serverTrackRefId = uuid(11)
+        val variantId = uuid(12)
+        val track = track(3).copy(
+            serverUserTrackRefId = serverTrackRefId,
+            serverProfileId = uuid(99),
+        )
+        database.libraryDao().upsertTrackRef(track)
+        val resolver = AndroidPlaybackSourceResolver(
+            context,
+            database,
+            applicationNonSecretSettingsStore(context),
+        ) { requestedProfile, requestedTrackRefId ->
+            assertEquals(profile, requestedProfile)
+            assertEquals(serverTrackRefId, requestedTrackRefId)
+            variantId
+        }
+
+        val result = resolver.resolve(
+            LocalId(track.localUserTrackRefId),
+            30,
+        ) as AndroidSourceResolution.Available
+
+        assertEquals(SelectedAudioSource.VAULT_STREAM, result.value.source)
+        assertEquals(profile.value, result.value.runtimeUri.authority)
+        assertEquals(listOf("audio-variants", variantId), result.value.runtimeUri.pathSegments)
     }
 
     private fun track(seed: Int) = UserTrackRefEntity(

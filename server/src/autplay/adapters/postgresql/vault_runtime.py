@@ -28,6 +28,7 @@ from autplay.adapters.postgresql.models.vault import (
     AcquisitionRecordRow,
     AudioFingerprintRow,
     AudioVariantRow,
+    RecordingCanonicalVariantRow,
     UploadChunkRow,
     UploadSessionRow,
     VaultObjectRow,
@@ -561,6 +562,36 @@ class PostgresVaultRuntime(UploadRepository):
         return AuthorizedStream(
             OpaqueStorageKey(row[0]), Sha256Digest(row[1]), row[2], row[3], row[4]
         )
+
+    def resolve_playback_variant(self, principal: VaultPrincipal, user_track_ref_id: UUID) -> UUID:
+        """Return the canonical servable Variant for one owned active library Track."""
+
+        audio_variant_id = self._session.scalar(
+            select(RecordingCanonicalVariantRow.audio_variant_id)
+            .join(
+                UserTrackRefRow,
+                UserTrackRefRow.recording_id == RecordingCanonicalVariantRow.recording_id,
+            )
+            .join(
+                LibraryEntryRow,
+                LibraryEntryRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+            )
+            .where(
+                UserTrackRefRow.user_track_ref_id == user_track_ref_id,
+                UserTrackRefRow.user_id == principal.user_id,
+                UserTrackRefRow.resolution_status == "RESOLVED",
+                UserTrackRefRow.deleted_at.is_(None),
+                LibraryEntryRow.user_id == principal.user_id,
+                LibraryEntryRow.removed_at.is_(None),
+            )
+            .limit(1)
+        )
+        if audio_variant_id is None:
+            raise VaultNotFoundError()
+        # Reuse the exact stream authorization predicate so discovery never advertises
+        # a corrupt, unverified, redirected, deleted, or otherwise unservable Variant.
+        self.resolve_stream(principal, audio_variant_id)
+        return audio_variant_id
 
     def _recording_is_active(self, recording_id: UUID) -> bool:
         return (

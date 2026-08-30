@@ -27,6 +27,7 @@ internal fun buildLibraryTrackSummaries(
     audioStates: List<CoreLocalAudioSummary>,
     preferences: List<CoreTrackPreferenceSummary>,
     downloadedTrackIds: Set<String>,
+    serverConnected: Boolean,
     untitledTrack: String,
 ): List<CoreTrackSummary> {
     val audioByTrack = audioStates.groupBy(CoreLocalAudioSummary::stableId)
@@ -43,7 +44,12 @@ internal fun buildLibraryTrackSummaries(
             sourceOrder = index,
             loved = entry.localUserTrackRefId in lovedTrackIds,
             downloaded = downloaded,
-            availability = resolveTrackAvailability(entry.availabilityStatus, audio, downloaded),
+            availability = resolveTrackAvailability(
+                entry.availabilityStatus,
+                audio,
+                downloaded,
+                serverConnected && entry.serverPlaybackCandidate,
+            ),
         )
     }.toList()
 }
@@ -52,8 +58,9 @@ private fun resolveTrackAvailability(
     libraryAvailability: String,
     audioStates: List<CoreLocalAudioSummary>,
     downloaded: Boolean,
+    serverPlaybackCandidate: Boolean,
 ): TrackAvailability = when {
-    downloaded || libraryAvailability == "LOCAL" ||
+    downloaded || serverPlaybackCandidate || libraryAvailability == "LOCAL" ||
         audioStates.any { it.status == "AVAILABLE" && it.persistedUriPermission } -> TrackAvailability.Available
     audioStates.any { it.status == "PERMISSION_REVOKED" || !it.persistedUriPermission } ->
         TrackAvailability.PermissionRevoked
@@ -91,13 +98,18 @@ internal fun buildHomeScreenUiState(
     problems: List<HomeProblemUiItem>,
     recommendationError: Boolean,
     untitledTrack: String,
-): HomeScreenUiState = HomeScreenUiState(
+): HomeScreenUiState {
+    val playableTrackIds = libraryTracks.asSequence()
+        .filter { it.availability == TrackAvailability.Available }
+        .map(CoreTrackSummary::stableId)
+        .toSet()
+    return HomeScreenUiState(
     localMode = localMode,
     recommendationLoading = recommendationLoading,
     offlineFallback = offlineFallback,
     releases = releases.map { HomeReleaseUiItem(it.stableId, it.title, it.artistName, null) },
     recommendations = recommendations,
-    continueListening = continueListening?.let { queue ->
+    continueListening = continueListening?.takeIf { it.localUserTrackRefId in playableTrackIds }?.let { queue ->
         HomeContinueUiItem(
             trackId = queue.localUserTrackRefId,
             title = queue.title ?: untitledTrack,
@@ -105,14 +117,17 @@ internal fun buildHomeScreenUiState(
             positionText = DateUtils.formatElapsedTime(queue.positionMs.coerceAtLeast(0) / 1_000),
         )
     },
-    recentlyPlayed = recentlyPlayed.map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
-    recentlyAdded = recentlyAdded.map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
+    recentlyPlayed = recentlyPlayed.filter { it.stableId in playableTrackIds }
+        .map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
+    recentlyAdded = recentlyAdded.filter { it.stableId in playableTrackIds }
+        .map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
     playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description) },
     offlineReady = libraryTracks.filter(CoreTrackSummary::downloaded).take(8)
         .map { HomeTrackUiItem(it.stableId, it.title, it.artist) },
     problems = problems,
     recommendationError = recommendationError,
 )
+}
 
 internal fun buildLibraryScreenUiState(
     localMode: Boolean,

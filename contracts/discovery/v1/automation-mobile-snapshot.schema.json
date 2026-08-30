@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/discovery/v1/automation-mobile-snapshot.schema.json",
+  "title": "A1C Android automation snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "schema_version", "policies", "runs"],
+  "properties": {
+    "contract_version": {"const": "release-discovery-v1"},
+    "schema_version": {"const": 1},
+    "policies": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/policy"}},
+    "runs": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/run"}}
+  },
+  "$defs": {
+    "nullableTimestamp": {"type": ["string", "null"], "format": "date-time"},
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "canonical_artist_id", "provider_artist_id", "discovery_mode", "import_mode", "automation_enabled", "revision", "last_checked_at", "next_eligible_at"],
+      "properties": {
+        "policy_id": {"type": "string", "format": "uuid"},
+        "canonical_artist_id": {"type": "string", "format": "uuid"},
+        "provider_artist_id": {"type": "string", "pattern": "^[0-9]{1,20}$"},
+        "discovery_mode": {"enum": ["DISABLED", "MANUAL_ONLY", "SCHEDULED"]},
+        "import_mode": {"enum": ["REVIEW_REQUIRED", "AUTO_IMPORT"]},
+        "automation_enabled": {"type": "boolean"},
+        "revision": {"type": "integer", "minimum": 1},
+        "last_checked_at": {"$ref": "#/$defs/nullableTimestamp"},
+        "next_eligible_at": {"$ref": "#/$defs/nullableTimestamp"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "policy_id", "policy_revision", "state", "observed_count", "selected_count", "page_count", "created_at", "completed_at", "error_code"],
+      "properties": {
+        "run_id": {"type": "string", "format": "uuid"},
+        "policy_id": {"type": "string", "format": "uuid"},
+        "policy_revision": {"type": "integer", "minimum": 1},
+        "state": {"type": "string", "minLength": 1, "maxLength": 64},
+        "observed_count": {"type": "integer", "minimum": 0},
+        "selected_count": {"type": "integer", "minimum": 0},
+        "page_count": {"type": "integer", "minimum": 0, "maximum": 2},
+        "created_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"$ref": "#/$defs/nullableTimestamp"},
+        "error_code": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_]{0,63}$"}
+      }
+    }
+  },
+  "x-autplay-implementation-status": "IMPLEMENTED_POST_A1C_ANDROID"
+}

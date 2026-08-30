@@ -631,6 +631,7 @@ private fun DirectControlMessage(state: PlaybackPresentationState) {
     val reason = (state.controls as? PlaybackControlGate.Locked)?.reason
     val message = when {
         reason == PlaybackControlLockReason.WAVE_QUEUE -> R.string.player_timeline_locked_wave
+        reason == PlaybackControlLockReason.SOURCE_UNAVAILABLE -> R.string.player_source_unavailable
         reason in setOf(
             PlaybackControlLockReason.CONTEXT_LOADING,
             PlaybackControlLockReason.CONTEXT_UNAVAILABLE,

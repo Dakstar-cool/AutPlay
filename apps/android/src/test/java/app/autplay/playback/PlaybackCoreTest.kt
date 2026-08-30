@@ -8,6 +8,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlaybackCoreTest {
+    @Test fun internalQueueMarkersAreNeverPlayableMediaSources() {
+        assertFalse(isResolvedPlaybackSource("autplay-unavailable", "NO_AUDIO_SOURCE"))
+        assertFalse(isResolvedPlaybackSource("autplay-unresolved", null))
+        assertFalse(isResolvedPlaybackSource(null, null))
+        assertTrue(isResolvedPlaybackSource("content", null))
+    }
+
     @Test fun localSourceIsPreferredWithoutRequestingVault() {
         var requested = false
         val selected = PlaybackSourceResolver.select(LocalSourceProbe.Readable(ReadableLocalSource("content://music/1"))) {

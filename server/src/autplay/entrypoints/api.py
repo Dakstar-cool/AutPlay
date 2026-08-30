@@ -56,6 +56,9 @@ from autplay.entrypoints.discovery_admin_http import (
     ManualDiscoveryHttp,
     create_discovery_admin_router,
 )
+from autplay.entrypoints.discovery_automation_api import (
+    create_discovery_automation_api_router,
+)
 from autplay.entrypoints.discovery_automation_http import create_discovery_automation_router
 from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
@@ -125,6 +128,11 @@ def create_app(
         profile_pairing_service
         if profile_pairing_service is not None
         else build_profile_pairing_service(resolved_settings, engine)
+    )
+    discovery_automation = (
+        discovery_automation_service or build_discovery_automation_service(engine)
+        if resolved_settings.discovery_automation_enabled
+        else None
     )
 
     @asynccontextmanager
@@ -198,6 +206,13 @@ def create_app(
     api_router.include_router(
         create_social_router(social, authenticated=bearer_authentication(authentication))
     )
+    if discovery_automation is not None:
+        api_router.include_router(
+            create_discovery_automation_api_router(
+                discovery_automation,
+                authenticated=bearer_authentication(authentication),
+            )
+        )
     app.include_router(api_router)
     if resolved_settings.admin_web_enabled:
         app.add_middleware(AdminWebSecurityMiddleware)
@@ -219,16 +234,14 @@ def create_app(
                     renderer=admin_renderer or AdminTemplateRenderer(),
                     origin=origin,
                     token_secret=source_secret.get_secret_value().encode("utf-8"),
+                    discovery_automation_enabled=(resolved_settings.discovery_automation_enabled),
                 )
             )
-            if resolved_settings.discovery_automation_enabled:
+            if resolved_settings.discovery_automation_enabled and discovery_automation is not None:
                 app.include_router(
                     create_discovery_automation_router(
                         web=web,
-                        automation=(
-                            discovery_automation_service
-                            or build_discovery_automation_service(engine)
-                        ),
+                        automation=discovery_automation,
                         renderer=admin_renderer or AdminTemplateRenderer(),
                         origin=origin,
                     )
@@ -242,6 +255,9 @@ def create_app(
                 origin=origin,
                 source_secret=source_secret.get_secret_value().encode("utf-8"),
                 discovery_enabled=discovery is not None,
+                discovery_automation_enabled=(
+                    discovery is not None and resolved_settings.discovery_automation_enabled
+                ),
                 device_admission=(
                     DeviceAdmissionWebAdapter(pairing) if pairing is not None else None
                 ),

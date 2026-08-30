@@ -193,6 +193,9 @@ class DataStoreNonSecretSettingsStore(
                 ?: preferences.remove(M5_CAPABILITY_HASH)
             evidence.capabilityRevisionHighWater?.let { preferences[M5_CAPABILITY_REVISION] = it.toString() }
                 ?: preferences.remove(M5_CAPABILITY_REVISION)
+            // Keep this block non-null even when the optional capability tuple is absent; otherwise
+            // the outer Elvis would erase the identity evidence that was just persisted.
+            Unit
         } ?: M5_TRUST_KEYS.forEach(preferences::remove)
         settings.m5LocalDataDecision?.let { preferences[M5_LOCAL_DATA_DECISION] = it }
             ?: preferences.remove(M5_LOCAL_DATA_DECISION)

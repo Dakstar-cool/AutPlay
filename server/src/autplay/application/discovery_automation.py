@@ -22,7 +22,6 @@ from autplay.domain.jobs import (
     RetryableJobError,
     TerminalJobError,
 )
-from autplay.domain.web_admin import WebActor
 from autplay.ports.discovery import ReleaseDiscoveryProvider
 
 AUTO_IMPORT_CONFIRMATION = "AUTO_IMPORT_ADDS_AUTHORIZED_TRACKS_WITHOUT_PER_TRACK_REVIEW_V1"
@@ -54,6 +53,13 @@ class DiscoveryAutomationError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class DiscoveryAutomationActor(Protocol):
+    """Minimal owner identity accepted from either Web or bearer authentication."""
+
+    @property
+    def user_id(self) -> UUID: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,13 +238,13 @@ class DiscoveryAutomationRepository(Protocol):
 
 
 class DiscoveryAutomationService:
-    """Owner-bound Web commands and bounded scheduler dispatch."""
+    """Owner-bound commands and bounded scheduler dispatch."""
 
     def __init__(self, repository: DiscoveryAutomationRepository) -> None:
         self._repository = repository
 
     def set_policy(
-        self, actor: WebActor, command: PolicyMutation, *, now: datetime
+        self, actor: DiscoveryAutomationActor, command: PolicyMutation, *, now: datetime
     ) -> PolicyMutationResult:
         return self._repository.set_policy(
             owner_user_id=actor.user_id,
@@ -247,16 +253,20 @@ class DiscoveryAutomationService:
             now=now,
         )
 
-    def policies(self, actor: WebActor, *, limit: int = 100) -> tuple[PolicyView, ...]:
+    def policies(
+        self, actor: DiscoveryAutomationActor, *, limit: int = 100
+    ) -> tuple[PolicyView, ...]:
         _require_limit(limit, maximum=100)
         return self._repository.list_policies(owner_user_id=actor.user_id, limit=limit)
 
-    def runs(self, actor: WebActor, *, limit: int = 50) -> tuple[DiscoveryRunView, ...]:
+    def runs(
+        self, actor: DiscoveryAutomationActor, *, limit: int = 50
+    ) -> tuple[DiscoveryRunView, ...]:
         _require_limit(limit, maximum=100)
         return self._repository.list_runs(owner_user_id=actor.user_id, limit=limit)
 
     def candidates(
-        self, actor: WebActor, run_id: UUID, *, limit: int = 50
+        self, actor: DiscoveryAutomationActor, run_id: UUID, *, limit: int = 50
     ) -> tuple[ReleaseCandidateView, ...]:
         _require_limit(limit, maximum=50)
         return self._repository.list_candidates(
@@ -264,7 +274,12 @@ class DiscoveryAutomationService:
         )
 
     def run_now(
-        self, actor: WebActor, policy_id: UUID, operation_id: UUID, *, now: datetime
+        self,
+        actor: DiscoveryAutomationActor,
+        policy_id: UUID,
+        operation_id: UUID,
+        *,
+        now: datetime,
     ) -> DiscoveryRunView:
         payload: dict[str, JsonValue] = {
             "action": "START_DISCOVERY",
@@ -282,23 +297,38 @@ class DiscoveryAutomationService:
         )
 
     def select_candidate(
-        self, actor: WebActor, candidate_id: UUID, operation_id: UUID, *, now: datetime
+        self,
+        actor: DiscoveryAutomationActor,
+        candidate_id: UUID,
+        operation_id: UUID,
+        *,
+        now: datetime,
     ) -> CandidateActionResult:
         return self._candidate_action(actor, candidate_id, operation_id, action="SELECT", now=now)
 
     def retry_candidate(
-        self, actor: WebActor, candidate_id: UUID, operation_id: UUID, *, now: datetime
+        self,
+        actor: DiscoveryAutomationActor,
+        candidate_id: UUID,
+        operation_id: UUID,
+        *,
+        now: datetime,
     ) -> CandidateActionResult:
         return self._candidate_action(actor, candidate_id, operation_id, action="RETRY", now=now)
 
     def ignore_candidate(
-        self, actor: WebActor, candidate_id: UUID, operation_id: UUID, *, now: datetime
+        self,
+        actor: DiscoveryAutomationActor,
+        candidate_id: UUID,
+        operation_id: UUID,
+        *,
+        now: datetime,
     ) -> CandidateActionResult:
         return self._candidate_action(actor, candidate_id, operation_id, action="IGNORE", now=now)
 
     def _candidate_action(
         self,
-        actor: WebActor,
+        actor: DiscoveryAutomationActor,
         candidate_id: UUID,
         operation_id: UUID,
         *,
@@ -482,6 +512,7 @@ __all__ = (
     "DISCOVERY_CONTRACT_VERSION",
     "DISCOVERY_SCAN_JOB",
     "CandidateActionResult",
+    "DiscoveryAutomationActor",
     "DiscoveryAutomationError",
     "DiscoveryAutomationRepository",
     "DiscoveryAutomationService",

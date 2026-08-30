@@ -95,6 +95,7 @@ class ProfilePairingRuntime(
     /** Trust confirmation only advances the ceremony; the invitation is parsed at exchange time. */
     fun confirmTrust() {
         val current = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return
+        registerOrigin(current.snapshot.serverProfileId, current.snapshot.apiOrigin)
         mutableState.value = mutableState.value.copy(pairing = current, trustConfirmed = true)
     }
 
@@ -144,7 +145,7 @@ class ProfilePairingRuntime(
             return false
         }
         if (runCatching {
-                port.seedTrustedIdentity(document.identity, document.identityPublicKeySpki)
+                port.seedTrustedIdentity(document.identity, document.identityPublicKeySpki.copyOf())
             }.isFailure
         ) {
             document.identityPublicKeySpki.fill(0)
@@ -187,7 +188,16 @@ class ProfilePairingRuntime(
             expectedDeviceName = deviceName.take(120),
         )
         mutableState.value = mutableState.value.copy(pairing = PairingState.ExchangingInvitation(snapshot))
-        return persistBinding(snapshot, keyAlias(checkpoint.serverProfileId), session, mutableState.value.identityPublicKeySpki, "KEEP_LOCAL")
+        val sessionId = session.sessionId
+        val stored = persistBinding(
+            snapshot,
+            keyAlias(checkpoint.serverProfileId),
+            session,
+            mutableState.value.identityPublicKeySpki,
+            "KEEP_LOCAL",
+        )
+        if (stored) refreshCapabilities(snapshot, sessionId, false)
+        return stored
     }
 
     /** Replaces a local trusted-key session using the same account and existing M5 binding. */
@@ -207,7 +217,16 @@ class ProfilePairingRuntime(
             runCatching { Base64.getDecoder().decode(it) }.getOrNull()
         } ?: return false
         mutableState.value = mutableState.value.copy(pairing = PairingState.ExchangingInvitation(snapshot))
-        return persistBinding(snapshot, keyAlias(checkpoint.serverProfileId), session, evidence, "KEEP_LOCAL")
+        val sessionId = session.sessionId
+        val stored = persistBinding(
+            snapshot,
+            keyAlias(checkpoint.serverProfileId),
+            session,
+            evidence,
+            "KEEP_LOCAL",
+        )
+        if (stored) refreshCapabilities(snapshot, sessionId, false)
+        return stored
     }
 
     fun exchangeInvitation(rawEnvelope: String) = scope.launch {
@@ -626,7 +645,10 @@ class ProfilePairingRuntime(
                             session.sessionFamilyId,
                             session.sessionGeneration,
                         ),
-                        m5TrustEvidence = M5TrustEvidence(
+                        m5TrustEvidence = current.m5TrustEvidence?.let { existing -> existing.copy(
+                            identityPublicKeySpkiB64 = Base64.getEncoder().encodeToString(spki),
+                            serverLabelHint = mutableState.value.serverLabel ?: existing.serverLabelHint,
+                        ) } ?: M5TrustEvidence(
                             identityPublicKeySpkiB64 = Base64.getEncoder().encodeToString(spki),
                             serverLabelHint = mutableState.value.serverLabel,
                         ),
@@ -668,10 +690,28 @@ class ProfilePairingRuntime(
         )
     }
 
-    private suspend fun refreshCapabilities(snapshot: PairingFlowSnapshot, sessionId: String, requireLocalDataChoice: Boolean = true) {
+    private suspend fun refreshCapabilities(
+        snapshot: PairingFlowSnapshot,
+        sessionId: String,
+        requireLocalDataChoice: Boolean = true,
+        allowRejectedSessionRotation: Boolean = true,
+    ) {
         registerOrigin(snapshot.serverProfileId, snapshot.apiOrigin)
         when (val response = port.capabilities(snapshot.serverProfileId, snapshot)) {
-            is PairingNetworkResult.Failure -> if (isCurrentExchange(snapshot)) blocked(response.code.failure())
+            is PairingNetworkResult.Failure -> {
+                if (response.code == "authentication_required" && allowRejectedSessionRotation) {
+                    rotateRejectedSession(snapshot, sessionId)?.let { rotated ->
+                        refreshCapabilities(
+                            rotated.snapshot,
+                            rotated.sessionId,
+                            requireLocalDataChoice,
+                            allowRejectedSessionRotation = false,
+                        )
+                    }
+                } else if (isCurrentExchange(snapshot)) {
+                    blocked(response.code.failure())
+                }
+            }
             is PairingNetworkResult.Success -> {
                 if (!isCurrentExchange(snapshot)) {
                     response.value.signedPayload.fill(0)
@@ -704,6 +744,96 @@ class ProfilePairingRuntime(
             }
         }
     }
+
+    private suspend fun rotateRejectedSession(
+        snapshot: PairingFlowSnapshot,
+        rejectedSessionId: String,
+    ): RotatedSession? {
+        val current = settings.settings.first()
+        val binding = current.m5Binding
+        if (
+            current.activeServerProfileId != snapshot.serverProfileId ||
+            binding == null ||
+            binding.bindingCommitId != snapshot.bindingCommitId ||
+            binding.sessionId != rejectedSessionId
+        ) {
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return null
+        }
+        val evidence = current.m5TrustEvidence ?: run {
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return null
+        }
+        val identitySpki = runCatching {
+            Base64.getDecoder().decode(evidence.identityPublicKeySpkiB64)
+        }.getOrElse {
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return null
+        }
+        val nextRefreshToken = Base64.getUrlEncoder().withoutPadding().encode(
+            ByteArray(32).also(SecureRandom()::nextBytes),
+        )
+        val rotatedSnapshot = snapshot.copy(
+            generationId = uuid(),
+            operationId = uuid(),
+            bindingCommitId = binding.bindingCommitId,
+        )
+        mutableState.value = mutableState.value.copy(
+            pairing = PairingState.ExchangingInvitation(rotatedSnapshot),
+            serverLabel = evidence.serverLabelHint,
+        )
+        return try {
+            when (
+                val result = port.rotate(
+                    SessionRotationCommand(
+                        snapshot = rotatedSnapshot,
+                        parentSessionId = binding.sessionId,
+                        parentGeneration = binding.sessionGeneration,
+                        nextRefreshToken = nextRefreshToken,
+                        nextRefreshTokenSha256 = sha256(nextRefreshToken),
+                    ),
+                )
+            ) {
+                is PairingNetworkResult.Failure -> {
+                    blocked(result.code.failure())
+                    null
+                }
+                is PairingNetworkResult.Success -> {
+                    val session = result.value
+                    if (
+                        session.deviceId != snapshot.expectedDeviceId ||
+                        session.sessionFamilyId != binding.sessionFamilyId ||
+                        session.sessionGeneration != binding.sessionGeneration + 1
+                    ) {
+                        session.accessToken.fill(0)
+                        session.refreshToken.fill(0)
+                        blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+                        null
+                    } else if (
+                        persistBinding(
+                            rotatedSnapshot,
+                            binding.deviceKeyAlias,
+                            session,
+                            identitySpki,
+                            requireNotNull(current.m5LocalDataDecision),
+                        )
+                    ) {
+                        RotatedSession(rotatedSnapshot, session.sessionId)
+                    } else {
+                        null
+                    }
+                }
+            }
+        } finally {
+            nextRefreshToken.fill(0)
+            identitySpki.fill(0)
+        }
+    }
+
+    private data class RotatedSession(
+        val snapshot: PairingFlowSnapshot,
+        val sessionId: String,
+    )
 
     private suspend fun clearLocal(profile: ServerProfileId) {
         credentials.clear(profile)
@@ -1004,7 +1134,7 @@ class ProfilePairingRuntime(
         "server_identity_changed" -> PairingFailure.SERVER_IDENTITY_CHANGED
         "incompatible_api_major" -> PairingFailure.INCOMPATIBLE_API_MAJOR
         "capability_rollback_detected" -> PairingFailure.CAPABILITY_ROLLBACK_DETECTED
-        "auth_attention_required", "device_revoked", "session_revoked" -> PairingFailure.AUTH_ATTENTION_REQUIRED
+        "authentication_required", "auth_attention_required", "device_revoked", "session_revoked" -> PairingFailure.AUTH_ATTENTION_REQUIRED
         else -> PairingFailure.SERVER_UNAVAILABLE
     }
 

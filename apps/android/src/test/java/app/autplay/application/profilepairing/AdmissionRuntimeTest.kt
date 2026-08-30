@@ -37,6 +37,11 @@ class AdmissionRuntimeTest {
         assertEquals(0, port.exchangeCalls)
         runtime.confirmAccount().join()
         assertEquals(1, port.exchangeCalls); assertEquals(AdmissionState.Connected, runtime.state.value)
+        assertTrue(
+            requireNotNull(port.lastExchangeRefreshToken)
+                .toString(Charsets.US_ASCII)
+                .matches(Regex("[A-Za-z0-9_-]{43}")),
+        )
         assertEquals(null, persisted.value)
         assertTrue(comparing.sas.matches(Regex("\\d{12}")))
     }
@@ -116,6 +121,7 @@ class AdmissionRuntimeTest {
     }
     private class FakePort : AdmissionPort {
         var exchangeCalls = 0
+        var lastExchangeRefreshToken: ByteArray? = null
         var lastRecoveryWire: String? = null
         var pollGate: CompletableDeferred<Unit>? = null
         var pollFailure: String? = null
@@ -124,8 +130,8 @@ class AdmissionRuntimeTest {
         override suspend fun request(request: AdmissionRequest) = PairingNetworkResult.Success(AdmissionCreated("review", "poll-secret".encodeToByteArray(), "000000000001"))
         override suspend fun recover(request: AdmissionRequest): PairingNetworkResult<AdmissionRecovery> { lastRecoveryWire = request.wireJson; return PairingNetworkResult.Success(AdmissionRecovery("review2", "new-poll-secret".encodeToByteArray(), "000000000002")) }
         override suspend fun poll(request: AdmissionRequest, pollBearer: ByteArray): PairingNetworkResult<AdmissionPoll> { pollGate?.await(); return pollFailure?.let { PairingNetworkResult.Failure(it) } ?: PairingNetworkResult.Success(AdmissionPoll.Approved(AdmissionAccount(UserId("44444444-4444-4444-8444-444444444444"), "Account"))) }
-        override suspend fun exchange(command: AdmissionExchangeCommand): PairingNetworkResult<EnrollmentSession> { exchangeCalls++; exchangeGate?.await(); return exchangeFailure?.let { PairingNetworkResult.Failure(it) } ?: PairingNetworkResult.Success(EnrollmentSession(app.autplay.domain.DeviceId("55555555-5555-4555-8555-555555555555"), "66666666-6666-4666-8666-666666666666", "66666666-6666-4666-8666-666666666666", 0, ByteArray(32), ByteArray(32))) }
+        override suspend fun exchange(command: AdmissionExchangeCommand): PairingNetworkResult<EnrollmentSession> { exchangeCalls++; lastExchangeRefreshToken = command.nextRefreshToken.copyOf(); exchangeGate?.await(); return exchangeFailure?.let { PairingNetworkResult.Failure(it) } ?: PairingNetworkResult.Success(EnrollmentSession(app.autplay.domain.DeviceId("55555555-5555-4555-8555-555555555555"), "66666666-6666-4666-8666-666666666666", "66666666-6666-4666-8666-666666666666", 0, ByteArray(32), command.nextRefreshToken.copyOf())) }
         override suspend fun trustedReenrollmentChallenge(request: AdmissionRequest) = PairingNetworkResult.Success(TrustedReenrollmentChallenge("77777777-7777-4777-8777-777777777777", "abcdefghijklmnopqrstuv".encodeToByteArray()))
-        override suspend fun trustedReenrollmentExchange(command: TrustedReenrollmentCommand) = PairingNetworkResult.Success(EnrollmentSession(app.autplay.domain.DeviceId("55555555-5555-4555-8555-555555555555"), "66666666-6666-4666-8666-666666666666", "66666666-6666-4666-8666-666666666666", 0, ByteArray(32), ByteArray(32)))
+        override suspend fun trustedReenrollmentExchange(command: TrustedReenrollmentCommand) = PairingNetworkResult.Success(EnrollmentSession(app.autplay.domain.DeviceId("55555555-5555-4555-8555-555555555555"), "66666666-6666-4666-8666-666666666666", "66666666-6666-4666-8666-666666666666", 0, ByteArray(32), command.nextRefreshToken.copyOf()))
     }
 }

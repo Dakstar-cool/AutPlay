@@ -37,6 +37,7 @@
 - добавлены job leases/checkpoints, API versioning и HTTP Range streaming;
 - введены SLO, observability, backup RPO/RTO, security и test strategy;
 - добавлены product-функции из review практик Spotify, Яндекс Музыки и self-hosted ecosystem.
+- добавлено post-MVP продуктовое направление AutPlay Face без запуска реализации.
 
 ---
 
@@ -3994,3 +3995,25 @@ gpu: scheduled/on-demand on RTX 3060
 10. измеримую наблюдаемость, безопасность и критерии приемки.
 
 Wave, Social, LLM и полный Web UI развиваются после стабилизации этих оснований.
+
+---
+
+# 132. AutPlay Face
+
+Следующая визуальная линия плеера — [AutPlay Face](AutPlay_Face_Product_Concept_v1.md): пара
+выразительных глаз, которая передаёт характер текущей музыки, мягко реагирует на её текущую динамику
+и вторично показывает состояния приложения.
+
+Продуктовая семантика непрерывна и допускает смешанные состояния по направлениям calm/energetic,
+positive/melancholic, soft/aggressive, light/dark, relaxed/tense и direct/atmospheric. Она описывает
+музыку, а не психологическое состояние пользователя. Визуальная тема отделена от смысла, чтобы
+несколько будущих designs одинаково интерпретировали один Track.
+
+MVP требует одну законченную тему в реальном Now Playing, пять различимых mood-сцен, плавные
+переходы, реакцию на текущую playback dynamics, idle и реакции play/pause/Like/Dislike-or-skip.
+Face не заменяет artwork, controls, текстовые состояния или accessibility semantics и не зависит
+для основной работоспособности от сервера, GPU или готового embedding.
+
+Детальные технологии, rendering, модели, API, schema и persistence здесь намеренно не выбираются.
+Их можно определить только в отдельно активированном implementation milestone после принятия
+продуктовой границы.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
 from autplay.domain.auth import AccountRole, OwnedObjectNotFoundError, Principal
@@ -35,6 +35,7 @@ class Uploads:
     offset_error: bool = False
     denied: bool = False
     create_error: Exception | None = None
+    playback_variant_id: UUID = field(default_factory=uuid4)
 
     def create(self, principal: Principal, **_: object) -> tuple[UploadView, bool]:
         assert principal == OWNER
@@ -61,6 +62,12 @@ class Uploads:
 
     def cancel(self, principal: Principal, upload_id: UUID) -> None:
         self.status(principal, upload_id)
+
+    def resolve_playback_variant(self, principal: Principal, user_track_ref_id: UUID) -> UUID:
+        del user_track_ref_id
+        if self.denied or principal != OWNER:
+            raise OwnedObjectNotFoundError()
+        return self.playback_variant_id
 
 
 def _client(uploads: Uploads) -> TestClient:
@@ -94,6 +101,30 @@ def test_create_new_replay_and_conflict_envelopes_are_no_store() -> None:
             json={"recording_id": str(uuid4()), "expected_size": 3},
         )
     assert response.status_code == 200
+
+
+def test_playback_variant_resolution_is_authenticated_owner_scoped_and_no_store() -> None:
+    view = UploadView(uuid4(), 0, 3, "OPEN")
+    track_ref_id = uuid4()
+    uploads = Uploads(view)
+    with _client(uploads) as client:
+        resolved = client.get(
+            f"/api/v1/vault/user-tracks/{track_ref_id}/playback-variant",
+            headers=_headers(),
+        )
+        unauthenticated = client.get(f"/api/v1/vault/user-tracks/{track_ref_id}/playback-variant")
+    assert resolved.status_code == 200
+    assert resolved.headers["cache-control"] == "no-store"
+    assert resolved.json() == {"audio_variant_id": str(uploads.playback_variant_id)}
+    assert unauthenticated.status_code == 401
+
+    with _client(Uploads(view, denied=True)) as client:
+        denied = client.get(
+            f"/api/v1/vault/user-tracks/{track_ref_id}/playback-variant",
+            headers=_headers(),
+        )
+    assert denied.status_code == 404
+    assert denied.json()["error"]["code"] == "not_found"
 
 
 def test_upload_head_patch_complete_status_cancel_and_bad_chunk_contract() -> None:

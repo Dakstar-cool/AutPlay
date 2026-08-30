@@ -1,57 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
-  <title id="title">Четыре работающих контура AutPlay</title>
-  <desc id="desc">Локальная медиатека, ручные плейлисты и очередь, друзья для Wave и приватная статистика показаны как четыре реализованных продуктовых контура.</desc>
-  <rect width="1200" height="600" rx="28" fill="#F6F3ED"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Проверенные продуктовые контуры AutPlay</title>
+  <desc id="desc">Четыре доставленных контура: локальное воспроизведение, долговечный профиль сервера, ручная очередь и приватные возможности личного сервера.</desc>
+  <rect width="1200" height="620" rx="28" fill="#F7F3ED"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
-    <text x="54" y="54" fill="#B23B20" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">DELIVERED PRODUCT LOOPS</text>
-    <text x="54" y="100" fill="#181818" font-size="40" font-weight="760">Четыре контура. Один локальный источник истины.</text>
+    <text x="54" y="54" fill="#B84226" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">DELIVERED · TESTED · LOCAL-FIRST</text>
+    <text x="54" y="102" fill="#171419" font-size="42" font-weight="770">Работающие контуры, а не обещания</text>
 
-    <g transform="translate(54 138)">
-      <rect width="526" height="184" rx="24" fill="#FFFFFF" stroke="#E5E0D8" stroke-width="2"/>
-      <rect x="24" y="24" width="58" height="58" rx="16" fill="#FFE2D7"/>
-      <path d="M45 39L67 53L45 67Z" fill="#FF5B35"/>
-      <text x="104" y="52" fill="#181818" font-size="28" font-weight="740">Слушать без сети</text>
-      <text x="104" y="80" fill="#706D68" font-size="20">Room хранит намерение, Media3 играет.</text>
-      <path d="M28 116C62 92 96 92 130 116C164 140 198 140 232 116C266 92 300 92 334 116C368 140 402 140 436 116C466 95 486 98 500 108" fill="none" stroke="#FF5B35" stroke-width="5" stroke-linecap="round"/>
-      <text x="28" y="158" fill="#B23B20" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">LOCAL URI → VAULT FALLBACK WHEN AUTHORIZED</text>
+    <g transform="translate(54 140)">
+      <rect width="526" height="190" rx="24" fill="#FFFFFF" stroke="#D9D3CC" stroke-width="2"/>
+      <text x="26" y="40" fill="#B84226" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">01 · LOCAL PLAYBACK</text>
+      <text x="26" y="78" fill="#171419" font-size="29" font-weight="740">Играть без сети</text>
+      <path d="M28 124C61 96 94 96 127 124C160 152 193 152 226 124C259 96 292 96 325 124C358 152 391 152 424 124C452 101 478 101 498 117" fill="none" stroke="#FF6B45" stroke-width="6" stroke-linecap="round"/>
+      <text x="26" y="168" fill="#6E6973" font-size="20">Room фиксирует очередь · Media3 играет bytes</text>
     </g>
 
-    <g transform="translate(620 138)">
-      <rect width="526" height="184" rx="24" fill="#111216" stroke="#34353D" stroke-width="2"/>
-      <text x="26" y="45" fill="#FF8A6D" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">PLAYLISTS + USER QUEUE</text>
-      <text x="26" y="82" fill="#F6F4F1" font-size="28" font-weight="740">Собрать порядок самому</text>
-      <g transform="translate(26 104)" font-size="20">
-        <circle cx="10" cy="10" r="10" fill="#FF5B35"/><text x="34" y="17" fill="#F6F4F1">Текущий трек зафиксирован</text>
-        <circle cx="10" cy="46" r="10" fill="#45464E"/><text x="34" y="53" fill="#A7A5AB">Дубликаты сохраняют точную запись</text>
+    <g transform="translate(620 140)">
+      <rect width="526" height="190" rx="24" fill="#15141B" stroke="#35323D" stroke-width="2"/>
+      <text x="26" y="40" fill="#83D6FF" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">02 · SERVER PROFILE</text>
+      <text x="26" y="78" fill="#F7F3ED" font-size="29" font-weight="740">Подключить один раз</text>
+      <g transform="translate(26 102)">
+        <rect width="136" height="50" rx="16" fill="#1D3340" stroke="#83D6FF" stroke-width="2"/>
+        <text x="68" y="32" text-anchor="middle" fill="#BDEAFF" font-size="20" font-weight="700">PROFILE</text>
+        <path d="M154 25H205" stroke="#73707C" stroke-width="3"/>
+        <path d="M193 17L205 25L193 33" fill="none" stroke="#73707C" stroke-width="3"/>
+        <rect x="220" width="238" height="50" rx="16" fill="#24222B" stroke="#514E5A" stroke-width="2"/>
+        <text x="339" y="32" text-anchor="middle" fill="#F7F3ED" font-size="20">process restart · restored</text>
       </g>
+      <text x="26" y="174" fill="#9A97A0" font-size="18">origin + binding + trust evidence · secrets in Keystore</text>
     </g>
 
-    <g transform="translate(54 350)">
-      <rect width="526" height="184" rx="24" fill="#EAF5FF" stroke="#8FCBFF" stroke-width="2"/>
-      <text x="26" y="45" fill="#00639B" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ACCEPTED FRIENDS · COARSE PRESENCE</text>
-      <text x="26" y="82" fill="#181818" font-size="28" font-weight="740">Друг → приглашение в Wave</text>
-      <g transform="translate(26 107)">
-        <circle cx="18" cy="18" r="18" fill="#00639B"/>
-        <circle cx="72" cy="18" r="18" fill="#247447"/>
-        <circle cx="126" cy="18" r="18" fill="#6246A8"/>
-        <path d="M39 18H50M93 18H104" stroke="#174A68" stroke-width="3" stroke-dasharray="5 5"/>
-        <rect x="164" y="0" width="300" height="42" rx="21" fill="#FFFFFF" stroke="#8FCBFF"/>
-        <text x="314" y="28" text-anchor="middle" fill="#174A68" font-size="20" font-weight="680">до 7 быстрых приглашений</text>
+    <g transform="translate(54 356)">
+      <rect width="526" height="190" rx="24" fill="#171419" stroke="#35323D" stroke-width="2"/>
+      <text x="26" y="40" fill="#FF8B70" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">03 · PLAYLISTS + USER QUEUE</text>
+      <text x="26" y="78" fill="#F7F3ED" font-size="29" font-weight="740">Сохранить свой порядок</text>
+      <g transform="translate(26 100)" font-size="20">
+        <rect width="474" height="52" rx="16" fill="#24222B"/>
+        <circle cx="28" cy="26" r="12" fill="#FF6B45"/>
+        <path d="M24 19L34 26L24 33Z" fill="#F7F3ED"/>
+        <text x="54" y="33" fill="#F7F3ED">current item · next · reorder · process recovery</text>
       </g>
+      <text x="26" y="176" fill="#9A97A0" font-size="18">дубликаты сохраняют точную выбранную запись</text>
     </g>
 
-    <g transform="translate(620 350)">
-      <rect width="526" height="184" rx="24" fill="#FFFFFF" stroke="#E5E0D8" stroke-width="2"/>
-      <text x="26" y="45" fill="#B23B20" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">PROFILE STATS · OWNER CONTROLLED</text>
-      <text x="26" y="82" fill="#181818" font-size="28" font-weight="740">Открыть приватность самому</text>
-      <rect x="26" y="105" width="168" height="48" rx="24" fill="#E5E0D8"/>
-      <circle cx="52" cy="129" r="18" fill="#706D68"/>
-      <text x="116" y="136" text-anchor="middle" fill="#706D68" font-size="20" font-weight="700">OFF</text>
-      <path d="M216 129H252" stroke="#FF5B35" stroke-width="3"/>
-      <rect x="270" y="105" width="226" height="48" rx="24" fill="#FFE2D7"/>
-      <text x="383" y="136" text-anchor="middle" fill="#B23B20" font-size="20" font-weight="700">только подтверждённым</text>
+    <g transform="translate(620 356)">
+      <rect width="526" height="190" rx="24" fill="#E7F5FC" stroke="#83D6FF" stroke-width="2"/>
+      <text x="26" y="40" fill="#17617F" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">04 · OPTIONAL PRIVATE SERVER</text>
+      <text x="26" y="78" fill="#171419" font-size="29" font-weight="740">Расширить, не привязать</text>
+      <g transform="translate(26 100)" font-size="19" font-weight="680">
+        <rect width="112" height="44" rx="22" fill="#FFFFFF"/><text x="56" y="28" text-anchor="middle" fill="#17617F">SYNC</text>
+        <rect x="122" width="112" height="44" rx="22" fill="#FFFFFF"/><text x="178" y="28" text-anchor="middle" fill="#17617F">VAULT</text>
+        <rect x="244" width="112" height="44" rx="22" fill="#FFFFFF"/><text x="300" y="28" text-anchor="middle" fill="#17617F">WAVE</text>
+        <rect x="366" width="112" height="44" rx="22" fill="#FFFFFF"/><text x="422" y="28" text-anchor="middle" fill="#17617F">FRIENDS</text>
+      </g>
+      <text x="26" y="176" fill="#4F6F7C" font-size="18">private by default · unavailable features fail honestly</text>
     </g>
 
-    <text x="54" y="572" fill="#706D68" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">SERVER OPTIONAL · BLOCKS FAIL CLOSED · NO INTERNET-PUBLIC PROFILE</text>
+    <text x="54" y="588" fill="#6E6973" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">LOCAL LIBRARY SURVIVES SERVER LOSS · HASH KNOWLEDGE IS NEVER AUTHORIZATION</text>
   </g>
 </svg>

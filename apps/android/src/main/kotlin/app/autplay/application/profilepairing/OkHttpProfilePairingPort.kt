@@ -111,7 +111,9 @@ class OkHttpProfilePairingPort(
         return try {
             val refresh = SessionCredentialEnvelopeCodec.decode(material).refreshToken?.toByteArray(StandardCharsets.US_ASCII) ?: return PairingNetworkResult.Failure("auth_attention_required")
             try {
-                val fields = linkedMapOf<String, Any>("contract_version" to "v1", "schema_version" to 1, "rotation_id" to requireNotNull(s.operationId), "expected_server_instance_id" to s.expectedServerInstanceId, "expected_identity_epoch" to s.expectedIdentityEpoch, "device_id" to requireNotNull(s.expectedDeviceId).value, "parent_session_id" to request.parentSessionId, "current_generation" to request.parentGeneration, "current_refresh_token" to b64(refresh, true), "next_refresh_token_sha256" to request.nextRefreshTokenSha256)
+                val currentRefreshToken = refresh.toString(StandardCharsets.US_ASCII)
+                require(Regex("^[A-Za-z0-9_-]{43}$").matches(currentRefreshToken))
+                val fields = linkedMapOf<String, Any>("contract_version" to "v1", "schema_version" to 1, "rotation_id" to requireNotNull(s.operationId), "expected_server_instance_id" to s.expectedServerInstanceId, "expected_identity_epoch" to s.expectedIdentityEpoch, "device_id" to requireNotNull(s.expectedDeviceId).value, "parent_session_id" to request.parentSessionId, "current_generation" to request.parentGeneration, "current_refresh_token" to currentRefreshToken, "next_refresh_token_sha256" to request.nextRefreshTokenSha256)
                 signedJson(fields, alias, ROTATION_DOMAIN).use { body -> secretRequest(s.apiOrigin, "/account/sessions/rotate", body.bytes, MAX_SECRET_RESPONSE_BYTES) { response -> rotationSession(response, s, request.nextRefreshToken.copyOf(), request.nextRefreshTokenSha256) } }
             } finally { refresh.fill(0) }
         } catch (e: Protocol) { PairingNetworkResult.Failure(e.code, e.retryAfterMs) } catch (_: Exception) { PairingNetworkResult.Failure("server_unavailable") } finally { material.fill(0); request.nextRefreshToken.fill(0) }

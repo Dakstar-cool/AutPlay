@@ -178,12 +178,20 @@ def create_admin_web_router(
     origin: str,
     source_secret: bytes,
     discovery_enabled: bool = False,
+    discovery_automation_enabled: bool = False,
     device_admission: DeviceAdmissionWebHttp | None = None,
 ) -> APIRouter:
     if len(source_secret) < 32:
         raise ValueError("admin Web source secret must be at least 32 bytes")
     cookies = WebCookieProfile.for_origin(origin)
     router = APIRouter(prefix="/admin")
+
+    def admin_navigation(surface: str) -> tuple[object, ...]:
+        return navigation(
+            surface,
+            discovery_enabled=discovery_enabled,
+            discovery_automation_enabled=discovery_automation_enabled,
+        )
 
     def render(template: str, request: Request | None = None, **context: object) -> str:
         locale = resolve_locale(
@@ -343,7 +351,7 @@ def create_admin_web_router(
                 "dashboard.html",
                 request,
                 authenticated=True,
-                navigation=navigation("dashboard", discovery_enabled=discovery_enabled),
+                navigation=admin_navigation("dashboard"),
                 **dashboard_context(dashboard_value, actor, locale=locale),
             )
         )
@@ -400,7 +408,7 @@ def create_admin_web_router(
                 "confirm.html",
                 request,
                 authenticated=True,
-                navigation=navigation("sessions", discovery_enabled=discovery_enabled),
+                navigation=admin_navigation("sessions"),
                 consequence_key=(
                     "confirm_cancel"
                     if action == "invitation"
@@ -525,7 +533,7 @@ def create_admin_web_router(
                 "connection_requests.html",
                 request,
                 authenticated=True,
-                navigation=navigation("connection-requests", discovery_enabled=discovery_enabled),
+                navigation=admin_navigation("connection-requests"),
                 csrf_token=encode_request_integrity_token(authenticated.csrf),
                 operation_id=str(uuid4()),
             )
@@ -582,7 +590,7 @@ def create_admin_web_router(
                 "connection_request_review.html",
                 request,
                 authenticated=True,
-                navigation=navigation("connection-requests", discovery_enabled=discovery_enabled),
+                navigation=admin_navigation("connection-requests"),
                 review=review,
                 csrf_token=encode_request_integrity_token(authenticated.csrf),
                 operations={
@@ -646,7 +654,7 @@ def create_admin_web_router(
                 "trusted_devices.html",
                 request,
                 authenticated=True,
-                navigation=navigation("trusted-devices", discovery_enabled=discovery_enabled),
+                navigation=admin_navigation("trusted-devices"),
                 items=items,
                 csrf_token=encode_request_integrity_token(authenticated.csrf),
                 operations={
@@ -742,7 +750,7 @@ def create_admin_web_router(
                 template,
                 request,
                 authenticated=True,
-                navigation=navigation(surface, discovery_enabled=discovery_enabled),
+                navigation=admin_navigation(surface),
                 **context,
             )
         )

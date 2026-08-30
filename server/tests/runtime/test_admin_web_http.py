@@ -276,7 +276,11 @@ class _Admission:
 
 
 def _client(
-    renderer: Renderer | None = None, admission: _Admission | None = None
+    renderer: Renderer | None = None,
+    admission: _Admission | None = None,
+    *,
+    discovery_enabled: bool = False,
+    discovery_automation_enabled: bool = False,
 ) -> tuple[TestClient, _Web]:
     web = _Web()
     commands = _Commands()
@@ -290,6 +294,8 @@ def _client(
             renderer=renderer or _Renderer(),
             origin="https://admin.test",
             source_secret=b"s" * 32,
+            discovery_enabled=discovery_enabled,
+            discovery_automation_enabled=discovery_automation_enabled,
             device_admission=admission,
         )
     )
@@ -470,6 +476,21 @@ def test_actual_renderer_renders_dashboard_table_and_status() -> None:
     ):
         response = client.get(path)
         assert response.status_code == 200 and text in response.text
+
+
+def test_dashboard_navigation_discovers_enabled_automation() -> None:
+    client, _ = _client(
+        AdminTemplateRenderer(),
+        discovery_enabled=True,
+        discovery_automation_enabled=True,
+    )
+    client.cookies.set("__Host-autplay_admin", "session")
+
+    page = client.get("/admin/?lang=ru")
+
+    assert page.status_code == 200
+    assert "Автопоиск музыки" in page.text
+    assert 'href="/admin/discovery/automation?lang=ru"' in page.text
 
 
 def test_router_rejects_short_source_secret() -> None:

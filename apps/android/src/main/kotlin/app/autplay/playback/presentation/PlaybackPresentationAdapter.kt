@@ -13,6 +13,7 @@ import androidx.media3.session.SessionToken
 import app.autplay.application.playback.ActiveQueueContext
 import app.autplay.application.playback.ActiveQueueContextRepository
 import app.autplay.playback.AutPlayPlaybackService
+import app.autplay.playback.isResolvedPlaybackSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -218,6 +219,7 @@ class PlaybackPresentationAdapter(
             context = context,
             mediaId = controller.currentMediaItem?.mediaId,
             commandAvailable = controller.isCommandAvailable(command),
+            sourceAvailable = controller.currentMediaItem.isResolvedPlaybackSource(),
             seekable = seekable,
         )
 

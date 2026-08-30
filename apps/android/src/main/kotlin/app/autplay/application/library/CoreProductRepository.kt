@@ -34,6 +34,10 @@ class CoreProductRepository(
                     addedAtMs = entry.addedAtMs,
                     availabilityStatus = entry.availabilityStatus,
                     removed = entry.removedAtMs != null,
+                    serverPlaybackCandidate = track?.serverUserTrackRefId != null &&
+                        track.serverRecordingId != null &&
+                        track.resolutionStatus == "RESOLVED" &&
+                        track.deletedAtMs == null,
                 )
             }
         }
@@ -177,6 +181,11 @@ class CoreProductRepository(
         val audioStates = database.localAudioDao().statesForPlayback(localUserTrackRefId, MAX_AUDIO_STATES)
         val downloads = database.localAudioDao().downloadIntentsForTrack(localUserTrackRefId, MAX_DOWNLOAD_INTENTS)
         val audioCapabilityStates = audioStates.map { CoreAudioCapabilityState(it.status, it.persistedUriPermission) }
+        val hasServerPlaybackCandidate = profileId != null &&
+            track.serverUserTrackRefId != null &&
+            track.serverRecordingId != null &&
+            track.resolutionStatus == "RESOLVED" &&
+            track.deletedAtMs == null
         return CoreTrackDetail(
             localUserTrackRefId = track.localUserTrackRefId,
             localRecordingId = track.localRecordingId,
@@ -190,7 +199,10 @@ class CoreProductRepository(
                 preference = preference?.preference ?: "NEUTRAL",
                 excludedFromTaste = preference?.excludedFromTaste ?: false,
             ),
-            availability = CoreProductDetailPolicy.availability(audioCapabilityStates),
+            availability = CoreProductDetailPolicy.availability(
+                audioCapabilityStates,
+                hasServerPlaybackCandidate,
+            ),
             capabilities = CoreProductDetailPolicy.capabilities(
                 CoreTrackCapabilityInput(
                     libraryMembership = libraryEntry?.let { CoreLibraryMembership(it.removedAtMs != null) },
@@ -198,6 +210,7 @@ class CoreProductRepository(
                     hasDownloadableVariant = profileId != null && downloads.any {
                         it.serverProfileId == profileId && it.serverAudioVariantId != null
                     },
+                    hasServerPlaybackCandidate = hasServerPlaybackCandidate,
                     resolutionStatus = track.resolutionStatus,
                 ),
             ),
@@ -313,6 +326,7 @@ data class CoreLibraryEntrySummary(
     val addedAtMs: Long,
     val availabilityStatus: String,
     val removed: Boolean,
+    val serverPlaybackCandidate: Boolean,
 )
 data class CoreHomeTrackSummary(
     val stableId: String,
@@ -414,7 +428,7 @@ data class CoreTechnicalDetails(
     val versionText: String?,
 )
 
-enum class CoreTrackAvailability { PLAYABLE_LOCAL, PERMISSION_REVOKED, UNAVAILABLE, NO_LOCAL_SOURCE }
+enum class CoreTrackAvailability { PLAYABLE_LOCAL, PLAYABLE_SERVER, PERMISSION_REVOKED, UNAVAILABLE, NO_LOCAL_SOURCE }
 
 enum class CoreTrackDetailCapability {
     PLAY,
@@ -430,6 +444,7 @@ data class CoreTrackCapabilityInput(
     val libraryMembership: CoreLibraryMembership?,
     val audioStates: List<CoreAudioCapabilityState>,
     val hasDownloadableVariant: Boolean,
+    val hasServerPlaybackCandidate: Boolean,
     val resolutionStatus: String,
 )
 
@@ -442,15 +457,24 @@ data class CoreAudioCapabilityState(
 
 /** Pure policy seam: test it without Room or Android runtime. */
 object CoreProductDetailPolicy {
-    fun availability(audioStates: List<CoreAudioCapabilityState>): CoreTrackAvailability = when {
+    fun availability(
+        audioStates: List<CoreAudioCapabilityState>,
+        hasServerPlaybackCandidate: Boolean = false,
+    ): CoreTrackAvailability = when {
         audioStates.any { it.status == "AVAILABLE" && it.persistedUriPermission } -> CoreTrackAvailability.PLAYABLE_LOCAL
+        hasServerPlaybackCandidate -> CoreTrackAvailability.PLAYABLE_SERVER
         audioStates.any { it.status == "PERMISSION_REVOKED" || !it.persistedUriPermission } -> CoreTrackAvailability.PERMISSION_REVOKED
         audioStates.isNotEmpty() -> CoreTrackAvailability.UNAVAILABLE
         else -> CoreTrackAvailability.NO_LOCAL_SOURCE
     }
 
     fun capabilities(input: CoreTrackCapabilityInput): Set<CoreTrackDetailCapability> = buildSet {
-        if (availability(input.audioStates) == CoreTrackAvailability.PLAYABLE_LOCAL) add(CoreTrackDetailCapability.PLAY)
+        if (
+            availability(input.audioStates, input.hasServerPlaybackCandidate) in
+            setOf(CoreTrackAvailability.PLAYABLE_LOCAL, CoreTrackAvailability.PLAYABLE_SERVER)
+        ) {
+            add(CoreTrackDetailCapability.PLAY)
+        }
         when {
             input.libraryMembership?.isRemoved == false -> add(CoreTrackDetailCapability.REMOVE_FROM_LIBRARY)
             input.libraryMembership?.isRemoved == true -> add(CoreTrackDetailCapability.RESTORE_TO_LIBRARY)
@@ -459,7 +483,7 @@ object CoreProductDetailPolicy {
         add(CoreTrackDetailCapability.LIKE)
         // A server audio variant is an existing DownloadIntentRepository input; no URL is exposed.
         if (input.hasDownloadableVariant) add(CoreTrackDetailCapability.DOWNLOAD)
-        if (availability(input.audioStates) == CoreTrackAvailability.PERMISSION_REVOKED) {
+        if (availability(input.audioStates, input.hasServerPlaybackCandidate) == CoreTrackAvailability.PERMISSION_REVOKED) {
             add(CoreTrackDetailCapability.REAUTHORIZE_LIBRARY_ROOT)
         }
         if (input.resolutionStatus in REVIEWABLE_RESOLUTION_STATUSES) add(CoreTrackDetailCapability.OPEN_IDENTITY_REVIEW)

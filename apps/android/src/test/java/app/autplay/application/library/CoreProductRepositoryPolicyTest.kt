@@ -45,15 +45,29 @@ class CoreProductRepositoryPolicyTest {
         )
     }
 
+    @Test
+    fun `resolved server playback candidate can play without a local source`() {
+        assertEquals(
+            CoreTrackAvailability.PLAYABLE_SERVER,
+            CoreProductDetailPolicy.availability(emptyList(), hasServerPlaybackCandidate = true),
+        )
+        assertTrue(
+            CoreProductDetailPolicy.capabilities(input(hasServerPlaybackCandidate = true))
+                .contains(CoreTrackDetailCapability.PLAY),
+        )
+    }
+
     private fun input(
         libraryEntry: CoreLibraryMembership? = null,
         audioStates: List<CoreAudioCapabilityState> = emptyList(),
         resolutionStatus: String = "RESOLVED",
         hasDownloadableVariant: Boolean = false,
+        hasServerPlaybackCandidate: Boolean = false,
     ) = CoreTrackCapabilityInput(
         libraryMembership = libraryEntry,
         audioStates = audioStates,
         hasDownloadableVariant = hasDownloadableVariant,
+        hasServerPlaybackCandidate = hasServerPlaybackCandidate,
         resolutionStatus = resolutionStatus,
     )
 

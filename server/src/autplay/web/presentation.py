@@ -44,14 +44,25 @@ _NAVIGATION: Final = (
     ("/admin/diagnostics", "nav_diagnostics", "diagnostics"),
     ("/admin/audit", "nav_audit", "audit"),
     ("/admin/discovery", "nav_discovery", "discovery"),
+    (
+        "/admin/discovery/automation",
+        "nav_discovery_automation",
+        "discovery-automation",
+    ),
 )
 
 
-def navigation(surface: str, *, discovery_enabled: bool = False) -> tuple[NavigationItem, ...]:
+def navigation(
+    surface: str,
+    *,
+    discovery_enabled: bool = False,
+    discovery_automation_enabled: bool = False,
+) -> tuple[NavigationItem, ...]:
     return tuple(
         NavigationItem(href, label, current=surface == candidate)
         for href, label, candidate in _NAVIGATION
-        if discovery_enabled or candidate != "discovery"
+        if (discovery_enabled or candidate != "discovery")
+        and (discovery_automation_enabled or candidate != "discovery-automation")
     )
 
 

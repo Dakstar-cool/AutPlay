@@ -60,7 +60,13 @@ class AutPlayPlaybackService : MediaSessionService() {
             applicationContext,
             database,
             applicationNonSecretSettingsStore(applicationContext),
-        )
+        ) { profileId, serverUserTrackRefId ->
+            AutPlayRuntime.serverPlaybackVariantId(
+                applicationContext,
+                profileId,
+                serverUserTrackRefId,
+            )
+        }
         player = ExoPlayer.Builder(this, ReactivePlaybackRenderersFactory(this, audioContourSink))
             .setMediaSourceFactory(PlaybackMediaSourceFactory.create(this))
             .setAudioAttributes(
@@ -124,7 +130,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             ACTION_NEXT -> moveWithinOrdinaryQueue(next = true)
             ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
-            ACTION_RESUME -> player.play()
+            ACTION_RESUME -> if (player.currentMediaItem.isResolvedPlaybackSource()) player.play()
             ACTION_PAUSE -> player.pause()
             ACTION_STOP -> scope.launch { finalizeCurrent(); player.stop(); stopSelf() }
             ACTION_SEEK -> player.seekTo(intent.getLongExtra(EXTRA_POSITION_MS, 0).coerceAtLeast(0))
@@ -134,7 +140,10 @@ class AutPlayPlaybackService : MediaSessionService() {
                 scheduledPlayJob?.cancel()
                 // Wave timing is monotonic: wall-clock changes must not shift an accepted start.
                 val delayMs = (intent.getLongExtra(EXTRA_SCHEDULED_AT_MS, 0) - SystemClock.elapsedRealtime()).coerceAtLeast(0)
-                scheduledPlayJob = scope.launch { delay(delayMs); player.play() }
+                scheduledPlayJob = scope.launch {
+                    delay(delayMs)
+                    if (player.currentMediaItem.isResolvedPlaybackSource()) player.play()
+                }
             }
             ACTION_SCHEDULE_SLEEP_TIMER -> scheduleSleepTimer(
                 intent.getLongExtra(EXTRA_SLEEP_TIMER_DURATION_MS, 0),
@@ -204,9 +213,11 @@ class AutPlayPlaybackService : MediaSessionService() {
                 player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(placeholders.size, seed))
             }
             player.shuffleModeEnabled = queue.snapshot.shuffleMode != "OFF"
-            player.prepare()
-            if (autoplay) player.play()
-            publishRuntimeState(unavailableReason = null)
+            if (player.currentMediaItem.isResolvedPlaybackSource()) {
+                player.prepare()
+                if (autoplay) player.play()
+            }
+            publishRuntimeState(unavailableReason = currentUnavailableReason())
         }
 
     /** Reloads a committed ordinary queue while preserving the active stable entry and player mode. */
@@ -239,9 +250,11 @@ class AutPlayPlaybackService : MediaSessionService() {
             )
         }
         player.shuffleModeEnabled = preservedShuffleEnabled
-        player.prepare()
-        if (shouldPlay) player.play()
-        publishRuntimeState(unavailableReason = null)
+        if (player.currentMediaItem.isResolvedPlaybackSource()) {
+            player.prepare()
+            if (shouldPlay) player.play()
+        }
+        publishRuntimeState(unavailableReason = currentUnavailableReason())
     }
 
     /** Wave movement is room-authoritative; only ordinary queues may invoke local navigation. */
@@ -257,15 +270,20 @@ class AutPlayPlaybackService : MediaSessionService() {
     private suspend fun resolveIndex(queue: RestoredPlaybackQueue, index: Int) {
         if (index !in queue.entries.indices) return
         val entry = queue.entries[index]
+        val track = AutPlayRuntime.database(applicationContext).libraryDao().trackRef(entry.localUserTrackRefId)
         val resolved = sourceResolver.resolve(LocalId(entry.localUserTrackRefId), System.currentTimeMillis())
         if (resolved is AndroidSourceResolution.Unavailable) {
             val reason = resolved.reason.name
-            player.replaceMediaItem(index, unavailableItem(entry.queueEntryId, reason))
-            if (index == player.currentMediaItemIndex) publishRuntimeState(unavailableReason = reason)
+            player.replaceMediaItem(
+                index,
+                unavailableItem(entry.queueEntryId, reason, track?.rawTitle, track?.rawArtist),
+            )
+            if (index == player.currentMediaItemIndex) {
+                publishRuntimeState(unavailableReason = reason, title = track?.rawTitle)
+            }
             return
         }
         resolved as AndroidSourceResolution.Available
-        val track = AutPlayRuntime.database(applicationContext).libraryDao().trackRef(entry.localUserTrackRefId)
         val item = MediaItem.Builder()
             .setMediaId(entry.queueEntryId)
             .setUri(resolved.value.runtimeUri)
@@ -292,13 +310,25 @@ class AutPlayPlaybackService : MediaSessionService() {
         .setUri("autplay-unresolved://queue/$queueEntryId".toUri())
         .build()
 
-    private fun unavailableItem(queueEntryId: String, reason: String): MediaItem = MediaItem.Builder()
+    private fun unavailableItem(
+        queueEntryId: String,
+        reason: String,
+        title: String?,
+        artist: String?,
+    ): MediaItem = MediaItem.Builder()
         .setMediaId(queueEntryId)
         .setUri("autplay-unavailable://$reason/$queueEntryId".toUri())
-        .setMediaMetadata(MediaMetadata.Builder().setExtras(Bundle().apply {
-            putString("unavailable_reason", reason)
-        }).build())
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setExtras(Bundle().apply { putString("unavailable_reason", reason) })
+                .build(),
+        )
         .build()
+
+    private fun currentUnavailableReason(): String? =
+        player.currentMediaItem?.mediaMetadata?.extras?.getString("unavailable_reason")
 
     private suspend fun ensureSession(): LogicalListeningCheckpoint? {
         logicalSession?.let { return it }

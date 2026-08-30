@@ -11,6 +11,8 @@ import app.autplay.data.local.entity.LocalAudioStateEntity
 import app.autplay.data.settings.NonSecretSettingsStore
 import app.autplay.download.MediaDownloadComponents
 import app.autplay.domain.LocalId
+import app.autplay.domain.ServerProfileId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 enum class SelectedAudioSource { LOCAL_URI, MEDIA3_DOWNLOAD, VAULT_STREAM }
@@ -33,6 +35,7 @@ class AndroidPlaybackSourceResolver(
     context: Context,
     private val database: AutPlayDatabase,
     private val settings: NonSecretSettingsStore,
+    private val remoteVariantLookup: suspend (ServerProfileId, String) -> String? = { _, _ -> null },
 ) {
     private val applicationContext = context.applicationContext
     private val inspector = ContentUriInspector(applicationContext.contentResolver)
@@ -79,11 +82,36 @@ class AndroidPlaybackSourceResolver(
             )
         }
 
-        val variantId = (localStates.mapNotNull { it.serverAudioVariantId } +
-            intents.mapNotNull { it.serverAudioVariantId }).firstOrNull()
-            ?: return AndroidSourceResolution.Unavailable(localFailure ?: PlaybackUnavailableReason.NO_AUDIO_SOURCE)
         val active = settings.settings.first()
-        val profileId = active.activeServerProfileId?.value
+        val profile = active.activeServerProfileId
+        val knownVariantId = (localStates.mapNotNull { it.serverAudioVariantId } +
+            intents.mapNotNull { it.serverAudioVariantId }).firstOrNull()
+        val track = if (knownVariantId == null) database.libraryDao().trackRef(trackRefId.value) else null
+        val serverTrackRefId = track?.takeIf { it.deletedAtMs == null }?.serverUserTrackRefId
+        if (knownVariantId == null && serverTrackRefId != null && profile == null) {
+            return AndroidSourceResolution.Unavailable(PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)
+        }
+        val remoteVariantId = if (
+            knownVariantId == null &&
+            serverTrackRefId != null &&
+            profile != null
+        ) {
+            // A re-paired device can retain a track's former profile namespace. Resolve only
+            // through the active authenticated server; that endpoint still enforces ownership.
+            try {
+                remoteVariantLookup(profile, serverTrackRefId)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                return AndroidSourceResolution.Unavailable(
+                    localFailure ?: PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE,
+                )
+            }
+        } else {
+            null
+        }
+        val variantId = knownVariantId ?: remoteVariantId
+            ?: return AndroidSourceResolution.Unavailable(localFailure ?: PlaybackUnavailableReason.NO_AUDIO_SOURCE)
+        val profileId = profile?.value
             ?: return AndroidSourceResolution.Unavailable(PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)
         if (active.serverBaseUrl == null || active.streamBaseUrl == null) {
             return AndroidSourceResolution.Unavailable(PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)

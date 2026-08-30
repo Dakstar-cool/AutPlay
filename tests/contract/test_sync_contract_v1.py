@@ -204,6 +204,7 @@ def test_openapi_contract_is_valid_and_declares_required_sync_operations() -> No
         "/vault/uploads",
         "/vault/uploads/{upload_id}",
         "/vault/uploads/{upload_id}/complete",
+        "/vault/user-tracks/{user_track_ref_id}/playback-variant",
         "/stream/audio-variants/{audio_variant_id}",
     }
     assert sync_paths <= set(document["paths"])

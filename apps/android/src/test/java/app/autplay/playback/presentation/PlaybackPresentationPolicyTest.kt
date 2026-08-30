@@ -59,6 +59,15 @@ class PlaybackPresentationPolicyTest {
             PlaybackControlGate.Locked(PlaybackControlLockReason.COMMAND_UNAVAILABLE),
             PlaybackCommandGate.evaluate(ordinary, "entry-1", false),
         )
+        assertEquals(
+            PlaybackControlGate.Locked(PlaybackControlLockReason.SOURCE_UNAVAILABLE),
+            PlaybackCommandGate.evaluate(
+                ordinary,
+                "entry-1",
+                commandAvailable = true,
+                sourceAvailable = false,
+            ),
+        )
     }
 
     @Test
@@ -167,6 +176,14 @@ class PlaybackPresentationPolicyTest {
         assertEquals(Player.REPEAT_MODE_ALL, port.repeatMode)
     }
 
+    @Test
+    fun unavailableMarkerCannotReachTheMedia3PlayCommand() {
+        val port = FakePlaybackCommandPort(sourceAvailable = false)
+
+        assertFalse(PlaybackCommandBoundary.togglePlayPause(port, ordinary))
+        assertEquals(0, port.totalLocalCalls)
+    }
+
     private fun seekableState(
         mediaId: String = "entry-1",
         durationMs: Long = 1_000,
@@ -205,7 +222,9 @@ class PlaybackPresentationPolicyTest {
         }
     }
 
-    private class FakePlaybackCommandPort : PlaybackCommandPort {
+    private class FakePlaybackCommandPort(
+        override val sourceAvailable: Boolean = true,
+    ) : PlaybackCommandPort {
         override val mediaId: String = "entry-1"
         override var isPlaying: Boolean = false
         override var shuffleModeEnabled: Boolean = false

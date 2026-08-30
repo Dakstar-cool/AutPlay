@@ -205,6 +205,14 @@ class _VaultHttpService:
             unit.commit()
         return _upload_view(info), created
 
+    def resolve_playback_variant(self, principal: Principal, user_track_ref_id: UUID) -> UUID:
+        with self._uows() as unit:
+            audio_variant_id = unit.vault.resolve_playback_variant(
+                _vault_principal(principal), user_track_ref_id
+            )
+            unit.commit()
+        return audio_variant_id
+
     def status(self, principal: Principal, upload_id: UUID) -> UploadView:
         expired: tuple[UploadInfo, OpaqueStorageKey] | None
         with self._uows() as unit:

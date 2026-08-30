@@ -3,11 +3,12 @@
 </p>
 
 <p align="center">
-  <strong>Слушайте и управляйте медиатекой без сети. Подключайте личный сервер только для синхронизации, Vault и совместных функций.</strong>
+  <strong>Полноценный Android-плеер без обязательного облака. Личный сервер добавляет sync, Vault и совместные функции, но не становится условием воспроизведения.</strong>
 </p>
 
 <p align="center">
   <a href="#product">Продукт</a> ·
+  <a href="#face">AutPlay Face</a> ·
   <a href="#evidence">Доказательства</a> ·
   <a href="#architecture">Архитектура</a> ·
   <a href="#android">Android</a> ·
@@ -16,23 +17,35 @@
   <a href="#release-boundary">Границы</a>
 </p>
 
-AutPlay — Android-first, local-first музыкальная система. Изменения медиатеки, плейлистов и обычной очереди сначала фиксируются на устройстве, а Media3 воспроизводит доступный локальный источник без синхронного обращения к серверу. Необязательный CPU-сервер добавляет авторизованную синхронизацию, неизменяемый файловый Vault, импорт, рекомендации, друзей и Hybrid Wave — без обязательного облачного аккаунта, CUDA, Redis, Kafka или внешней аналитики.
+AutPlay — Android-first, local-first музыкальная система для людей, которые хотят владеть библиотекой и продолжать слушать при любой сетевой недоступности. Изменения медиатеки, плейлистов и обычной очереди атомарно фиксируются на устройстве, а Media3 воспроизводит доступный источник без синхронного обращения к серверу. Необязательный CPU-сервер добавляет авторизованную синхронизацию, неизменяемый файловый Vault, импорт, рекомендации, друзей и Hybrid Wave — без обязательного облачного аккаунта, CUDA, Redis, Kafka или внешней аналитики.
 
 <a id="product"></a>
 
-## Музыка работает локально. Сервер расширяет возможности.
+## Что уже работает
 
 <p align="center">
-  <img src="./assets/readme/product-proof.svg" width="100%" alt="Работающие контуры AutPlay: офлайн-музыка, ручные плейлисты и очередь, друзья для Wave и приватная статистика">
+  <img src="./assets/readme/product-proof.svg" width="100%" alt="Проверенные контуры AutPlay: локальное воспроизведение, долговечный профиль сервера, ручная очередь и приватные возможности личного сервера">
 </p>
 
 - **Слушать без сети.** Room хранит локальную истину, FTS ищет по кириллице и латинице, а Media3 управляет воспроизведением и загрузками.
 - **Собирать плейлисты и очередь вручную.** Дубликаты остаются отдельными записями; `Play next`, перестановка и очистка будущих треков не меняют текущий трек.
-- **Подключать только свои устройства.** Android создаёт запрос, владелец подтверждает его в локальном Web-admin, а точное доказательство ключа завершает привязку.
+- **Подключить личный сервер один раз.** Android создаёт запрос, владелец подтверждает его в локальном Web-admin, а точное доказательство ключа завершает привязку. Profile ID, service origins, binding и trust evidence переживают process restart; секреты остаются в Android Keystore, а несовпадение authority закрывается fail-closed без удаления локальной музыки.
 - **Слушать вместе.** Подтверждённых друзей можно быстро пригласить в Wave. Гость без аккаунта получает ограниченный доступ ровно к одной комнате, но не к чужой медиатеке или Vault.
 - **Делиться статистикой по выбору.** Профиль закрыт по умолчанию; агрегаты доступны только явно разрешённым, подтверждённым и не заблокированным друзьям.
 - **Находить и импортировать музыку.** Ручной TXT/Jamendo flow и выключенная по умолчанию 24-часовая автоматика используют один проверяемый Vault/Identity/Library pipeline. Автоимпорт включается отдельно.
 - **Управлять и восстанавливать личный сервер.** Web-admin показывает устройства, сессии, Vault, задания и импорт; опасно выглядящие команды требуют явного подтверждения, а backup/restore изолирован и проверяем.
+
+<a id="face"></a>
+
+## Следующий визуальный язык: AutPlay Face
+
+<p align="center">
+  <img src="./assets/readme/autplay-face.svg" width="100%" alt="Специфицированная, но ещё не реализованная концепция AutPlay Face: пять музыкальных настроений, текущая динамика и реакции приложения">
+</p>
+
+AutPlay Face заменяет идею безличного динамического кольца на пару выразительных глаз. Выражение складывается из характера Track, текущей музыкальной динамики и короткой вторичной реакции приложения. Состояния непрерывны: спокойное может одновременно быть тёмным, немного атмосферным и умеренно напряжённым; разные будущие темы сохраняют один музыкальный смысл.
+
+Это **принятое продуктовое направление, а не реализованная функция**. MVP отдельно потребует одну законченную тему в реальном Now Playing, пять различимых mood-сцен, плавные переходы, idle/play/pause/Like/Dislike-or-skip, reduced-motion и честный fallback без optional analysis. Полная граница находится в [AutPlay Face Product Concept v1](docs/design/AutPlay_Face_Product_Concept_v1.md); implementation milestone, rendering, models, API и persistence пока не выбраны.
 
 <a id="evidence"></a>
 
@@ -42,22 +55,22 @@ AutPlay остаётся локальной development-веткой повер�
 
 | Контур | Последний зафиксированный результат |
 | --- | --- |
-| Root contracts / release | **119 passed**; OpenAPI, JSON Schema, release inventory и security/privacy assertions |
-| Server / PostgreSQL | **662 passed + 1 ожидаемый host-policy skip** на PostgreSQL 18.4 + pgvector 0.8.6; Ruff, format и strict mypy по 232 source files |
-| Android host | **199 JVM tests**, `lintDebug`, debug APK и minified release/R8 — PASS |
+| Root contracts / release | **120 passed**; OpenAPI, JSON Schema, release inventory и security/privacy assertions |
+| Server / PostgreSQL | **668 passed + 1 ожидаемый host-policy skip** на PostgreSQL 18.4 + pgvector 0.8.6; Ruff, format и strict mypy по 234 source files |
+| Android host | **215 JVM tests**, `lintDebug`, debug APK и minified release/R8 — PASS |
 | Android migration | Реальная Room 12→13 migration и collision regression на API 26 — **1/1** |
 | Samsung Galaxy M52 / API 33 | Полный QA side-by-side connected gate более раннего общего frontend-среза: **160 тестов, 0 failures, 3 ожидаемых skips** |
 | Очередь после process death | Отдельный stage1 → PID → `adb force-stop` → отсутствие PID → stage2: порядок, current item, позиция и режимы восстановлены |
 | Производительность RC | PostgreSQL 100k search p95 **6.403 ms**; Android FTS 10k p95 **12.555 ms** |
 
-Post-RC evidence ведут milestone handoff в [implementation plan](docs/implementation/PLAN.md). Базовый P14 RC зафиксирован отдельно: [release notes 0.2.0](docs/release/RELEASE_NOTES_0.2.0.md), [RC test evidence](docs/release/TEST_EVIDENCE.md), [security review](docs/release/SECURITY_REVIEW.md) и [performance report](docs/release/PERFORMANCE_REPORT.md).
+Базовый P14 RC зафиксирован в отслеживаемых документах: [release notes 0.2.0](docs/release/RELEASE_NOTES_0.2.0.md), [RC test evidence](docs/release/TEST_EVIDENCE.md), [security review](docs/release/SECURITY_REVIEW.md) и [performance report](docs/release/PERFORMANCE_REPORT.md). Post-RC границы выражены соответствующими ADR и текущим проверяемым кодом, не ретроспективным изменением RC.
 
 <a id="architecture"></a>
 
 ## Как это устроено
 
 <p align="center">
-  <img src="./assets/readme/system-map.svg" width="100%" alt="Локальное действие AutPlay сохраняется в Room и Journal, а необязательный сервер синхронизирует PostgreSQL, Vault, друзей, статистику и Wave">
+  <img src="./assets/readme/system-map.svg" width="100%" alt="Android локально фиксирует действие в Room и Journal, Media3 воспроизводит доступный источник, а необязательный сервер добавляет PostgreSQL, Vault, друзей, рекомендации и Wave">
 </p>
 
 Одна Android-транзакция сохраняет доменное изменение вместе с Journal/outbox-фактом. WorkManager повторяет отложенную синхронизацию, а Media3 независимо управляет воспроизведением и загрузками. На сервере PostgreSQL хранит метаданные, права, события и задания; filesystem/NAS — байты Vault. Необязательный server-rendered Web-admin использует отдельную browser-session authority, а не Android credentials.
@@ -77,7 +90,7 @@ Post-RC evidence ведут milestone handoff в [implementation plan](docs/impl
 ## Android-интерфейс
 
 <p align="center">
-  <img src="./assets/readme/adaptive-frontend.svg" width="100%" alt="Адаптивный Compose-интерфейс AutPlay для телефона, складного устройства и широкого окна">
+  <img src="./assets/readme/adaptive-frontend.svg" width="100%" alt="Compact, medium и expanded Compose-компоновки AutPlay используют один playback state и постоянный мини-плеер">
 </p>
 
 Один Compose-контур адаптируется от нижней навигации телефона до общей боковой панели на складных устройствах и планшетах. Мини-плеер и Now Playing остаются доступными, а Home, Search, Library, Wave, Profile и Settings работают с локальными owner-scoped проекциями.
@@ -218,7 +231,7 @@ P00–P14 закрыты как локальный CPU release candidate. Бол
 | Library L1 | **PASS** | Ручные duplicate-preserving плейлисты и долговечная локальная очередь с process-death recovery |
 | Discovery A1B / A1C | **PASS** | Ручной TXT/Jamendo flow и default-off 24-hour discovery с отдельно подтверждаемым `AUTO_IMPORT` |
 
-Детальный статус и стоп-границы находятся в [implementation plan](docs/implementation/PLAN.md). Последний закрытый продуктовый срез — [S1D handoff](docs/implementation/HANDOFF_POST_MVP_S1D_GUEST_ROOM_ACCESS.md). Discovery-автоматика по-прежнему выключена по умолчанию.
+Последний квалифицированный follow-up — Android control для opt-in discovery automation под границей [ADR-044](docs/adr/ADR-044-post-a1c-android-discovery-automation-control.md); он не открывает новую phase. Discovery-автоматика по-прежнему выключена по умолчанию, а AutPlay Face остаётся `NOT_STARTED`.
 
 <a id="release-boundary"></a>
 

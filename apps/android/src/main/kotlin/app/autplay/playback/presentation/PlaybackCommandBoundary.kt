@@ -3,10 +3,12 @@ package app.autplay.playback.presentation
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import app.autplay.application.playback.ActiveQueueContext
+import app.autplay.playback.isResolvedPlaybackSource
 
 /** Narrow command port used to prove that fail-closed policy reaches the Media3 boundary. */
 internal interface PlaybackCommandPort {
     val mediaId: String?
+    val sourceAvailable: Boolean
     val isPlaying: Boolean
     var shuffleModeEnabled: Boolean
     var repeatMode: Int
@@ -23,6 +25,8 @@ internal class MediaControllerCommandPort(
 ) : PlaybackCommandPort {
     override val mediaId: String?
         get() = controller.currentMediaItem?.mediaId
+    override val sourceAvailable: Boolean
+        get() = controller.currentMediaItem.isResolvedPlaybackSource()
     override val isPlaying: Boolean
         get() = controller.isPlaying
     override var shuffleModeEnabled: Boolean
@@ -62,6 +66,7 @@ internal object PlaybackCommandBoundary {
             context = context,
             mediaId = port.mediaId,
             commandAvailable = port.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM),
+            sourceAvailable = port.sourceAvailable,
             seekable = seekable,
         ) is PlaybackControlGate.Allowed
         if (!allowed || port.mediaId != commit.mediaId) return false
@@ -99,5 +104,6 @@ internal object PlaybackCommandBoundary {
         context = context,
         mediaId = port.mediaId,
         commandAvailable = port.isCommandAvailable(command),
+        sourceAvailable = port.sourceAvailable,
     ) is PlaybackControlGate.Allowed
 }

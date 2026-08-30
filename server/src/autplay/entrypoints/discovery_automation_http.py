@@ -64,7 +64,11 @@ def create_discovery_automation_router(
             context={
                 "page_title": "Discovery automation",
                 "authenticated": True,
-                "navigation": navigation("discovery", discovery_enabled=True),
+                "navigation": navigation(
+                    "discovery-automation",
+                    discovery_enabled=True,
+                    discovery_automation_enabled=True,
+                ),
                 "flash": None,
                 "development_mode": not cookies.secure,
                 "language_url": (

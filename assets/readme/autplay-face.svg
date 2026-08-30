@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="title desc">
+  <title id="title">AutPlay Face — продуктовая концепция эмоционального языка плеера</title>
+  <desc id="desc">Пять референсных музыкальных настроений, три слоя выражения и базовые состояния будущего AutPlay Face. Концепция специфицирована, но ещё не реализована.</desc>
+  <rect width="1200" height="650" rx="28" fill="#0B0B10"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="54" y="56" fill="#83D6FF" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">SPECIFIED PRODUCT DIRECTION · IMPLEMENTATION NOT STARTED</text>
+    <text x="54" y="110" fill="#F7F3ED" font-size="46" font-weight="770">AutPlay Face</text>
+    <text x="348" y="108" fill="#9A97A0" font-size="27">музыка получает выражение, а не спектр</text>
+    <g transform="translate(54 148)">
+      <g>
+        <rect width="204" height="188" rx="24" fill="#17161D" stroke="#35323D" stroke-width="2"/>
+        <text x="22" y="34" fill="#BDEAFF" font-size="20" font-weight="720">CALM</text>
+        <g transform="translate(22 62)">
+          <rect width="72" height="58" rx="26" fill="#23212A" stroke="#83D6FF" stroke-width="2"/>
+          <rect x="88" width="72" height="58" rx="26" fill="#23212A" stroke="#83D6FF" stroke-width="2"/>
+          <path d="M10 23C26 15 46 15 62 23M98 23C114 15 134 15 150 23" fill="none" stroke="#BDEAFF" stroke-width="4" stroke-linecap="round"/>
+          <ellipse cx="38" cy="33" rx="8" ry="13" fill="#F7F3ED"/><ellipse cx="122" cy="33" rx="8" ry="13" fill="#F7F3ED"/>
+        </g>
+        <text x="22" y="156" fill="#9A97A0" font-size="18">soft · relaxed</text>
+      </g>
+      <g transform="translate(222)">
+        <rect width="204" height="188" rx="24" fill="#211A18" stroke="#FF6B45" stroke-width="2"/>
+        <text x="22" y="34" fill="#FFD3C7" font-size="20" font-weight="720">POSITIVE</text>
+        <g transform="translate(22 62)">
+          <rect width="72" height="58" rx="29" fill="#35211C" stroke="#FF6B45" stroke-width="2"/>
+          <rect x="88" width="72" height="58" rx="29" fill="#35211C" stroke="#FF6B45" stroke-width="2"/>
+          <path d="M10 34C26 16 46 16 62 34M98 34C114 16 134 16 150 34" fill="none" stroke="#FF9A82" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="38" cy="31" r="8" fill="#F7F3ED"/><circle cx="122" cy="31" r="8" fill="#F7F3ED"/>
+        </g>
+        <text x="22" y="156" fill="#C5A8A0" font-size="18">light · open</text>
+      </g>
+      <g transform="translate(444)">
+        <rect width="204" height="188" rx="24" fill="#17161D" stroke="#595569" stroke-width="2"/>
+        <text x="22" y="34" fill="#D7D2E8" font-size="20" font-weight="720">DARK</text>
+        <g transform="translate(22 62)">
+          <rect width="72" height="58" rx="24" fill="#23212A" stroke="#595569" stroke-width="2"/>
+          <rect x="88" width="72" height="58" rx="24" fill="#23212A" stroke="#595569" stroke-width="2"/>
+          <path d="M10 17L62 28M98 28L150 17" fill="none" stroke="#A8A3B8" stroke-width="5" stroke-linecap="round"/>
+          <ellipse cx="42" cy="36" rx="8" ry="12" fill="#E4DFEE"/><ellipse cx="118" cy="36" rx="8" ry="12" fill="#E4DFEE"/>
+        </g>
+        <text x="22" y="156" fill="#9A97A0" font-size="18">melancholic · deep</text>
+      </g>
+      <g transform="translate(666)">
+        <rect width="204" height="188" rx="24" fill="#132633" stroke="#83D6FF" stroke-width="2"/>
+        <text x="22" y="34" fill="#BDEAFF" font-size="20" font-weight="720">ENERGETIC</text>
+        <g transform="translate(22 62)">
+          <path d="M0 32L18 10L34 46L52 8L72 32Z" fill="#1E4255" stroke="#83D6FF" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M88 32L108 8L126 46L142 10L160 32Z" fill="#1E4255" stroke="#83D6FF" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="42" cy="29" r="9" fill="#F7F3ED"/><circle cx="118" cy="29" r="9" fill="#F7F3ED"/>
+        </g>
+        <text x="22" y="156" fill="#9FC9DB" font-size="18">bright · moving</text>
+      </g>
+      <g transform="translate(888)">
+        <rect width="204" height="188" rx="24" fill="#251714" stroke="#FF6B45" stroke-width="2"/>
+        <text x="22" y="34" fill="#FFD3C7" font-size="20" font-weight="720">INTENSE</text>
+        <g transform="translate(22 62)">
+          <path d="M0 14L72 34V58H0Z" fill="#3B201B" stroke="#FF6B45" stroke-width="2"/>
+          <path d="M88 34L160 14V58H88Z" fill="#3B201B" stroke="#FF6B45" stroke-width="2"/>
+          <ellipse cx="46" cy="39" rx="8" ry="13" fill="#F7F3ED"/><ellipse cx="114" cy="39" rx="8" ry="13" fill="#F7F3ED"/>
+        </g>
+        <text x="22" y="156" fill="#C5A8A0" font-size="18">aggressive · tense</text>
+      </g>
+    </g>
+    <g transform="translate(54 366)">
+      <text x="0" y="0" fill="#F7F3ED" font-size="25" font-weight="720">Выражение складывается из трёх слоёв</text>
+      <g transform="translate(0 26)">
+        <rect width="326" height="100" rx="22" fill="#17161D" stroke="#FF6B45" stroke-width="2"/>
+        <text x="24" y="36" fill="#FF9A82" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">01 · TRACK CHARACTER</text>
+        <text x="24" y="70" fill="#F7F3ED" font-size="22" font-weight="680">базовый музыкальный характер</text>
+        <path d="M326 50H382" stroke="#6A6673" stroke-width="3"/>
+        <path d="M370 42L382 50L370 58" fill="none" stroke="#6A6673" stroke-width="3"/>
+        <rect x="390" width="326" height="100" rx="22" fill="#17161D" stroke="#83D6FF" stroke-width="2"/>
+        <text x="414" y="36" fill="#BDEAFF" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">02 · CURRENT DYNAMICS</text>
+        <text x="414" y="70" fill="#F7F3ED" font-size="22" font-weight="680">ритм · пауза · переход · drop</text>
+        <path d="M716 50H772" stroke="#6A6673" stroke-width="3"/>
+        <path d="M760 42L772 50L760 58" fill="none" stroke="#6A6673" stroke-width="3"/>
+        <rect x="780" width="312" height="100" rx="22" fill="#17161D" stroke="#595569" stroke-width="2"/>
+        <text x="804" y="36" fill="#D7D2E8" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">03 · APP REACTION</text>
+        <text x="804" y="70" fill="#F7F3ED" font-size="22" font-weight="680">play · pause · Like · skip</text>
+      </g>
+    </g>
+    <g transform="translate(54 548)">
+      <rect width="1092" height="58" rx="20" fill="#15141B" stroke="#35323D" stroke-width="2"/>
+      <text x="24" y="36" fill="#9A97A0" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">IDLE · PLAYING · PAUSED · LOADING · OFFLINE · WAVE</text>
+      <text x="1068" y="36" text-anchor="end" fill="#83D6FF" font-size="19" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">REDUCED MOTION · CONTROLS STAY PRIMARY</text>
+    </g>
+  </g>
+</svg>

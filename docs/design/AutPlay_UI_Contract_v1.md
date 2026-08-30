@@ -75,6 +75,14 @@ security, persistence, architecture or accepted affected-area requirement.
 
 The UI MUST NOT simulate success for a capability missing from the current application contract.
 
+### 2.3. Additive future visual direction
+
+[`AutPlay_Face_Product_Concept_v1.md`](AutPlay_Face_Product_Concept_v1.md) records the user-approved
+post-MVP visual direction for an expressive pair of eyes in Now Playing. It is additive product
+scope, not evidence that the accepted v1.0 UI baseline or current player implements the feature.
+Any implementation requires an explicitly activated milestone, updated representative frames and
+the accessibility/behavior evidence named by that concept.
+
 ---
 
 ## 3. Product invariants visible in the UI

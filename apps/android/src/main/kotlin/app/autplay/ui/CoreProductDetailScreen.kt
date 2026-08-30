@@ -433,6 +433,7 @@ private fun humanize(value: String): String = value.replace('_', ' ').lowercase(
 private fun availabilityLabel(availability: CoreTrackAvailability): String = stringResource(
     when (availability) {
         CoreTrackAvailability.PLAYABLE_LOCAL -> R.string.detail_availability_local
+        CoreTrackAvailability.PLAYABLE_SERVER -> R.string.detail_availability_server
         CoreTrackAvailability.PERMISSION_REVOKED -> R.string.detail_availability_permission
         CoreTrackAvailability.UNAVAILABLE -> R.string.detail_availability_unavailable
         CoreTrackAvailability.NO_LOCAL_SOURCE -> R.string.detail_availability_metadata

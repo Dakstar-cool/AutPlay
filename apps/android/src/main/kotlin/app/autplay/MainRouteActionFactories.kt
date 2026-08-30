@@ -20,6 +20,8 @@ import app.autplay.playback.presentation.PlaybackPresentationAdapter
 import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackSessionOwner
 import app.autplay.ui.AppLanguage
+import app.autplay.ui.DiscoveryAutomationActions
+import app.autplay.ui.PendingDiscoveryOperation
 import app.autplay.ui.ServerFeaturesActions
 import app.autplay.ui.ServerFeaturesUiState
 import app.autplay.ui.UiDestination
@@ -41,6 +43,10 @@ import app.autplay.work.RemoteImportWorkScheduler
 import app.autplay.work.VaultUploadWorkScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.UUID
+import app.autplay.ui.discoveryCandidateOperationKey
+import app.autplay.ui.discoveryPolicyOperationKey
+import app.autplay.ui.discoveryRunOperationKey
 
 @UnstableApi
 internal fun buildNowPlayingRouteActions(
@@ -270,7 +276,107 @@ internal fun buildServerFeaturesActions(
             }
         }
     },
+    discovery = DiscoveryAutomationActions(
+        refresh = {
+            launchServerAction("DISCOVERY_AUTOMATION_REFRESH") { server ->
+                setState(
+                    state().copy(
+                        discovery = state().discovery.copy(
+                            snapshot = server.discoveryAutomationSnapshot(),
+                            pendingOperation = null,
+                        ),
+                    ),
+                )
+            }
+        },
+        savePolicy = { command ->
+            val key = discoveryPolicyOperationKey(command)
+            resolvePendingDiscoveryOperation(
+                state().discovery.pendingOperation,
+                key,
+                UUID.randomUUID().toString(),
+            )?.let { operation ->
+                setState(state().copy(discovery = state().discovery.copy(pendingOperation = operation)))
+                launchServerAction("DISCOVERY_AUTOMATION_POLICY") { server ->
+                    server.setDiscoveryPolicy(command, operation.operationId)
+                    setState(
+                        state().copy(
+                            discovery = state().discovery.copy(
+                                snapshot = server.discoveryAutomationSnapshot(),
+                                pendingOperation = null,
+                            ),
+                        ),
+                    )
+                }
+            }
+        },
+        runNow = { policy ->
+            val key = discoveryRunOperationKey(policy.policyId)
+            resolvePendingDiscoveryOperation(
+                state().discovery.pendingOperation,
+                key,
+                UUID.randomUUID().toString(),
+            )?.let { operation ->
+                setState(state().copy(discovery = state().discovery.copy(pendingOperation = operation)))
+                launchServerAction("DISCOVERY_AUTOMATION_RUN") { server ->
+                    server.startDiscovery(policy.policyId, operation.operationId)
+                    setState(
+                        state().copy(
+                            discovery = state().discovery.copy(
+                                snapshot = server.discoveryAutomationSnapshot(),
+                                pendingOperation = null,
+                            ),
+                        ),
+                    )
+                }
+            }
+        },
+        openRun = { run ->
+            launchServerAction("DISCOVERY_AUTOMATION_CANDIDATES") { server ->
+                setState(
+                    state().copy(
+                        discovery = state().discovery.copy(
+                            selectedRunId = run.runId,
+                            candidates = server.discoveryCandidates(run.runId),
+                        ),
+                    ),
+                )
+            }
+        },
+        candidateAction = { candidate, action ->
+            val key = discoveryCandidateOperationKey(candidate.candidateId, action)
+            resolvePendingDiscoveryOperation(
+                state().discovery.pendingOperation,
+                key,
+                UUID.randomUUID().toString(),
+            )?.let { operation ->
+                setState(state().copy(discovery = state().discovery.copy(pendingOperation = operation)))
+                launchServerAction("DISCOVERY_AUTOMATION_CANDIDATE_ACTION") { server ->
+                    server.actOnDiscoveryCandidate(candidate.candidateId, action, operation.operationId)
+                    setState(
+                        state().copy(
+                            discovery = state().discovery.copy(
+                                selectedRunId = candidate.runId,
+                                candidates = server.discoveryCandidates(candidate.runId),
+                                pendingOperation = null,
+                            ),
+                        ),
+                    )
+                }
+            }
+        },
+    ),
 )
+
+internal fun resolvePendingDiscoveryOperation(
+    existing: PendingDiscoveryOperation?,
+    key: String,
+    newOperationId: String,
+): PendingDiscoveryOperation? = when {
+    existing == null -> PendingDiscoveryOperation(key, newOperationId)
+    existing.key == key -> existing
+    else -> null
+}
 
 internal fun buildManualPlaylistActions(
     scope: CoroutineScope,

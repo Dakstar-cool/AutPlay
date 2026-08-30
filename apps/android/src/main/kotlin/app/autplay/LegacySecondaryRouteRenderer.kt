@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
 import app.autplay.application.download.DownloadIntentPresentation
+import app.autplay.application.artist.ArtistSummary
 import app.autplay.application.library.CoreHomePlaylistSummary
 import app.autplay.application.library.CoreLibraryEntrySummary
 import app.autplay.application.sync.SyncStatus
@@ -48,6 +49,7 @@ internal data class LegacySecondaryRouteState(
     val view: String,
     val playlists: List<CoreHomePlaylistSummary>,
     val libraryEntries: List<CoreLibraryEntrySummary>,
+    val artists: List<ArtistSummary>,
     val selectedTrackRefId: String?,
     val historyCount: Int,
     val importState: LegacyImportRouteState,
@@ -177,6 +179,7 @@ internal fun LegacySecondaryRouteRenderer(
                 isBound = state.isProfileBound,
                 selectedTrackLabel = state.selectedTrackLabel,
                 selectedTrackUploadEligible = state.selectedTrackUploadEligible,
+                localArtists = state.artists,
                 state = state.serverUiState,
                 actions = actions.serverFeatures,
             )

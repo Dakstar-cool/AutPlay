@@ -110,7 +110,10 @@ class TrustedReenrollmentRuntime(
             is PairingNetworkResult.Success -> result.value
             is PairingNetworkResult.Failure -> { stateFlow.value = if (result.code == "server_identity_changed") TrustedReenrollmentState.IdentityChanged else TrustedReenrollmentState.Unavailable; return@launch }
         }
-        val refresh = ByteArray(32).also(SecureRandom()::nextBytes); val commit = UUID.randomUUID().toString()
+        val refresh = Base64.getUrlEncoder().withoutPadding().encode(
+            ByteArray(32).also(SecureRandom()::nextBytes),
+        )
+        val commit = UUID.randomUUID().toString()
         try {
             stateFlow.value = TrustedReenrollmentState.Exchanging
             val exchange = AdmissionProof.signedJson(keys, alias, AdmissionProof.REENROLLMENT_DOMAIN, mapOf(
@@ -217,7 +220,9 @@ class AdmissionRuntime(
         val current = stateFlow.value as? AdmissionState.Approved ?: return@launch
         val bearer = pollBearer?.copyOf() ?: run { recover(current.checkpoint); return@launch }
         val alias = keyAlias(current.checkpoint.serverProfileId)
-        val refresh = ByteArray(32).also(SecureRandom()::nextBytes)
+        val refresh = Base64.getUrlEncoder().withoutPadding().encode(
+            ByteArray(32).also(SecureRandom()::nextBytes),
+        )
         val commit = UUID.randomUUID().toString()
         val wire = signed(current.checkpoint, AdmissionProof.EXCHANGE_DOMAIN, mapOf(
             "request_id" to JsonPrimitive(current.checkpoint.requestId),
