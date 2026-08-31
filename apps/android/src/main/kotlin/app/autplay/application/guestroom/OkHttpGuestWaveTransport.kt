@@ -7,6 +7,7 @@ import app.autplay.application.wave.WaveSnapshot
 import app.autplay.application.wave.WaveSnapshotEntry
 import app.autplay.application.wave.WaveTimingReport
 import app.autplay.application.wave.WaveTransport
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import app.autplay.domain.wave.WaveAvailability
 import app.autplay.domain.wave.WaveCommand
 import java.util.Base64
@@ -38,9 +39,10 @@ class OkHttpGuestWaveTransport private constructor(
     private val scopedRoomId: String,
     private val snapshotProfileId: String,
     private val sessionBearer: ByteArray,
-    private val client: OkHttpClient,
+    client: OkHttpClient,
     private val onAuthorityLost: (String) -> Unit,
 ) : WaveTransport, AutoCloseable {
+    private val client = client.withAutPlayRedirectPolicy()
     private val guestBase = serverOrigin.trimEnd('/') + "/api/v1/wave/guest"
 
     override suspend fun snapshot(roomId: String): WaveSnapshot {
@@ -255,6 +257,7 @@ class OkHttpGuestWaveTransport private constructor(
             require(normalizedName.length in 1..40) { "GUEST_NAME_INVALID" }
             val sessionBearer = GuestRoomDocumentCodec.generateBearer()
             try {
+                val failClosedClient = client.withAutPlayRedirectPolicy()
                 val request = Request.Builder()
                     .url(document.serverOrigin.trimEnd('/') + "/api/v1/wave/guest/redeem")
                     .header("Cache-Control", "no-store")
@@ -272,7 +275,7 @@ class OkHttpGuestWaveTransport private constructor(
                         }.toString().toRequestBody(JSON_MEDIA_TYPE),
                     )
                     .build()
-                val root = client.newCall(request).execute().use { response ->
+                val root = failClosedClient.newCall(request).execute().use { response ->
                     val payload = response.body.string()
                     check(payload.length <= MAX_RESPONSE_CHARS) { "GUEST_RESPONSE_TOO_LARGE" }
                     if (!response.isSuccessful) {
@@ -299,7 +302,7 @@ class OkHttpGuestWaveTransport private constructor(
                     scopedRoomId = document.roomId,
                     snapshotProfileId = profileId,
                     sessionBearer = sessionBearer,
-                    client = client,
+                    client = failClosedClient,
                     onAuthorityLost = onAuthorityLost,
                 )
             } catch (error: Throwable) {

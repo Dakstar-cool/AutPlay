@@ -1,0 +1,11 @@
+Use case: stylized-concept
+Asset type: transparent cutout subject for a GitHub README hybrid hero
+Primary request: derive one project-native Resonance Lens subject from the reference concept board: a single wide pair of expressive optical eyes made from dark glass apertures, concentric cyan and coral spectral iris arcs, and one thin audio-resonance filament connecting both eyes
+Input images: Image 1 is the visual-language reference only; preserve the binocular optical identity but do not copy its typography or five-card layout
+Scene/backdrop: genuinely transparent background
+Style/medium: cinematic black glass, subtle volumetric glow, precise premium product visualization
+Composition/framing: one isolated pair, straight-on, wide horizontal crop, centered, generous transparent padding; designed to sit behind a phone mockup in the right half of a 1440x720 hero
+Lighting/mood: restrained cyan light from the left, coral rim light from the right, deep dark core, soft reflections
+Color palette: #0b0b10 black glass, #7ddcff ice blue, #ff5b35 coral, faint violet; preserve high contrast
+Constraints: actual alpha transparency; one pair of eyes only; no face, no head, no mascot body; no text, letters, numbers, logo, UI, cards, frame, watermark, floor, background, or shadow outside the subject; keep the filament thin and non-essential
+Avoid: emoji/cartoon eyes, photoreal human eyes, duplicated pairs, green chroma key, bright white background, accidental symbols

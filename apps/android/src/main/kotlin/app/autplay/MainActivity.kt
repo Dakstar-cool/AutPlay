@@ -318,6 +318,7 @@ internal fun AutPlayBootstrap(
                     originForProfile = { profile -> pairingOrigins[profile.value] },
                     credentials = credentialStore,
                     deviceKeys = deviceKeys,
+                    appVersion = BuildConfig.VERSION_NAME,
                     allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
                 )
                 ProfilePairingRuntime(
@@ -349,7 +350,7 @@ internal fun AutPlayBootstrap(
                     keys = AndroidM5DeviceKeyStore(),
                     port = app.autplay.application.profilepairing.OkHttpAdmissionPort(originForProfile = { profile: app.autplay.domain.ServerProfileId ->
                         pairingOrigins[profile.value] ?: settings.serverBaseUrl
-                    }),
+                    }, allowUnsafeDevelopmentHttp = allowUnsafePairingHttp),
                     persistCheckpoint = { checkpoint -> settingsStore.mutate { current ->
                         current.copy(m5AdmissionCheckpoint = checkpoint?.let(app.autplay.application.profilepairing.AdmissionCheckpointCodec::encode))
                     } },
@@ -359,6 +360,7 @@ internal fun AutPlayBootstrap(
                     persistTrustedReenrollment = { checkpoint, account, bindingCommitId, session ->
                         pairingRuntime.completeTrustedReenrollment(checkpoint, account, bindingCommitId, session)
                     },
+                    appVersion = BuildConfig.VERSION_NAME,
                 )
             }
             val admissionState by admissionRuntime.state.collectAsState()

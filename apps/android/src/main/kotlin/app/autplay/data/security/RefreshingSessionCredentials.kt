@@ -1,6 +1,7 @@
 package app.autplay.data.security
 
 import app.autplay.domain.ServerProfileId
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import java.io.Closeable
 import java.nio.charset.StandardCharsets
 import java.time.Duration
@@ -42,12 +43,13 @@ data class SessionAccess(
 class RefreshingSessionCredentials(
     private val authBaseUrl: String,
     private val credentials: CredentialStore,
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    client: OkHttpClient = OkHttpClient.Builder()
         .callTimeout(Duration.ofSeconds(30))
         .build(),
     private val now: () -> Instant = Instant::now,
     private val m5Rotation: M5SessionRotationClient? = null,
 ) {
+    private val client = client.withAutPlayRedirectPolicy()
     suspend fun access(profileId: ServerProfileId): SessionAccess {
         val current = readEnvelope(profileId) ?: throw SessionRequiredException()
         if (current.bindingCommitId != null) {

@@ -5,6 +5,7 @@ import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.RefreshingSessionCredentials
 import app.autplay.data.security.SessionAccess
 import app.autplay.data.security.SessionRequiredException
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import app.autplay.domain.ServerProfileId
 import java.nio.charset.StandardCharsets
 import kotlinx.serialization.json.Json
@@ -27,9 +28,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class OkHttpSocialPort(
     private val apiBaseUrl: String,
     private val credentials: CredentialStore,
-    private val client: OkHttpClient = OkHttpClient(),
+    client: OkHttpClient = OkHttpClient(),
     private val m5Rotation: M5SessionRotationClient? = null,
 ) : SocialPort {
+    private val client = client.withAutPlayRedirectPolicy()
     private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl.trimEnd('/'), credentials, client, m5Rotation = m5Rotation)
 
     override suspend fun contactCard(profileId: ServerProfileId) = request(profileId, "GET", "/social/contact-card", null) { card(it) }

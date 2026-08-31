@@ -5,6 +5,7 @@ import app.autplay.data.security.RefreshingSessionCredentials
 import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import app.autplay.data.security.SessionRequiredException
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import app.autplay.domain.ServerProfileId
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
@@ -172,11 +173,12 @@ class ServerFeatureRepository(
     streamBaseUrl: String,
     private val profileId: ServerProfileId,
     private val credentials: CredentialStore,
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    client: OkHttpClient = OkHttpClient.Builder()
         .callTimeout(Duration.ofSeconds(45))
         .build(),
     private val m5Rotation: M5SessionRotationClient? = null,
 ) {
+    private val client = client.withAutPlayRedirectPolicy()
     private val serverRoot = serverBaseUrl.trimEnd('/')
     private val streamRoot = streamBaseUrl.trimEnd('/')
     private val apiBaseUrl = "$serverRoot/api/v1"

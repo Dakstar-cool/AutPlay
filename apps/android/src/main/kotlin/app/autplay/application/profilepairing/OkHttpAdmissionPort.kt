@@ -2,6 +2,7 @@ package app.autplay.application.profilepairing
 
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -15,8 +16,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /** S1B no-store adapter. Poll authority is accepted only as a header and never interpolated into a URL. */
 class OkHttpAdmissionPort(
     private val originForProfile: (app.autplay.domain.ServerProfileId) -> String?,
-    private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
+    client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
+    private val allowUnsafeDevelopmentHttp: Boolean = false,
 ) : AdmissionPort {
+    private val client = client.withAutPlayRedirectPolicy()
     override suspend fun request(request: AdmissionRequest) = call(request.checkpoint, "/social/admission-requests", request.wireJson) { root ->
         AdmissionCreated(root.string("review_locator"), root.string("poll_bearer").encodeToByteArray(), "")
     }
@@ -42,8 +45,9 @@ class OkHttpAdmissionPort(
     }
 
     private suspend fun <T> call(checkpoint: AdmissionCheckpoint, path: String, body: String?, bearer: ByteArray? = null, parse: (kotlinx.serialization.json.JsonObject) -> T): PairingNetworkResult<T> = withContext(Dispatchers.IO) {
-        val origin = originForProfile(checkpoint.serverProfileId) ?: return@withContext PairingNetworkResult.Failure("admission_request_unavailable")
+        val rawOrigin = originForProfile(checkpoint.serverProfileId) ?: return@withContext PairingNetworkResult.Failure("admission_request_unavailable")
         try {
+            val origin = OriginNormalizer.normalize(rawOrigin, allowUnsafeDevelopmentHttp)
             val builder = Request.Builder().url(origin.trimEnd('/') + "/api/v1" + path).header("Accept", "application/json").header("Cache-Control", "no-store").header("Pragma", "no-cache")
             if (bearer != null) builder.header("X-AutPlay-Admission-Poll", bearer.toString(StandardCharsets.US_ASCII))
             if (body == null) builder.get() else builder.post(body.toRequestBody(JSON))

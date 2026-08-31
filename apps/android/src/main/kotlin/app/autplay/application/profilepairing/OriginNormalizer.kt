@@ -36,8 +36,16 @@ object OriginNormalizer {
 
     private fun isDevelopmentHost(host: String?): Boolean {
         val value = host?.lowercase() ?: return false
-        return value == "localhost" || value == "127.0.0.1" || value == "::1" ||
-            value.startsWith("10.") || value.matches(Regex("192\\.168\\.\\d{1,3}\\.\\d{1,3}")) ||
-            value.matches(Regex("172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}"))
+        if (value == "localhost" || value == "::1") return true
+        val octets = value.split('.').map { part ->
+            part.takeIf { it.matches(Regex("0|[1-9][0-9]{0,2}")) }?.toIntOrNull()
+                ?.takeIf { it in 0..255 }
+                ?: return false
+        }
+        if (octets.size != 4) return false
+        return octets[0] == 10 ||
+            (octets[0] == 192 && octets[1] == 168) ||
+            (octets[0] == 172 && octets[1] in 16..31) ||
+            octets == listOf(127, 0, 0, 1)
     }
 }

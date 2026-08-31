@@ -30,6 +30,7 @@ if (Test-Path -LiteralPath $outputRoot) {
 
 $zipalign = Join-Path $AndroidHome "build-tools\36.1.0\zipalign.exe"
 $apksigner = Join-Path $AndroidHome "build-tools\36.1.0\apksigner.bat"
+$aapt2 = Join-Path $AndroidHome "build-tools\36.1.0\aapt2.exe"
 $keytool = Join-Path $JavaHome "bin\keytool.exe"
 $gzipCandidates = @(
     (Join-Path $env:ProgramFiles "Git\usr\bin\gzip.exe"),
@@ -37,11 +38,17 @@ $gzipCandidates = @(
 )
 $gzip = $gzipCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 $unsignedSource = Join-Path $repoRoot "apps\android\build\outputs\apk\release\android-release-unsigned.apk"
+$trustedLanSource = Join-Path $repoRoot "apps\android\build\outputs\apk\trustedLan\android-trustedLan.apk"
 $gradle = Join-Path $repoRoot "gradlew.bat"
 $checkScript = Join-Path $repoRoot "scripts\check.ps1"
 $composeBase = Join-Path $repoRoot "deploy\compose\compose.yaml"
 $composeRuntime = Join-Path $repoRoot "deploy\compose\compose.runtime.yaml"
 $composeRelease = Join-Path $repoRoot "deploy\compose\compose.release.yaml"
+$composeAdminLocal = Join-Path $repoRoot "deploy\compose\compose.admin-local.yaml"
+$releaseNotes = Join-Path $repoRoot "docs\release\RELEASE_NOTES_$releaseVersion.md"
+$installGuide = Join-Path $repoRoot "docs\operations\INSTALL_AND_PAIR.md"
+$installerSource = Join-Path $repoRoot "deploy\installer"
+$baselineSignedApk = Join-Path $repoRoot "docs\release\artifacts\autplay-rc1-dev-signed.apk"
 
 foreach ($requiredPath in @(
     $JavaHome,
@@ -49,13 +56,19 @@ foreach ($requiredPath in @(
     $DevelopmentKeystore,
     $zipalign,
     $apksigner,
+    $aapt2,
     $keytool,
     $gzip,
     $gradle,
     $checkScript,
     $composeBase,
     $composeRuntime,
-    $composeRelease
+    $composeRelease,
+    $composeAdminLocal,
+    $releaseNotes,
+    $installGuide,
+    $installerSource,
+    $baselineSignedApk
 )) {
     if (-not $requiredPath -or -not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required release input is missing: $requiredPath"
@@ -75,6 +88,18 @@ try {
     $worktreeStatus = (& git status --porcelain=v1 --untracked-files=all | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $worktreeStatus) {
         throw "Release packaging requires a clean worktree"
+    }
+
+    $androidBuildFile = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "apps\android\build.gradle.kts")
+    $versionCodeMatch = [regex]::Match($androidBuildFile, 'versionCode\s*=\s*([0-9]+)')
+    $versionNameMatch = [regex]::Match($androidBuildFile, 'versionName\s*=\s*"([^"]+)"')
+    if (-not $versionCodeMatch.Success -or -not $versionNameMatch.Success) {
+        throw "Unable to resolve the Android version from build.gradle.kts"
+    }
+    $androidVersionCode = [int]$versionCodeMatch.Groups[1].Value
+    $androidVersionName = $versionNameMatch.Groups[1].Value
+    if ($androidVersionName -ne $releaseVersion) {
+        throw "Android versionName $androidVersionName does not match release tag $ReleaseTag"
     }
 
     $existingImageIds = @(& docker image ls --quiet --filter "reference=autplay-server:$ReleaseTag")
@@ -99,18 +124,39 @@ try {
         "--console=plain",
         "--max-workers=1",
         ":apps:android:assembleDebug",
-        ":apps:android:assembleRelease"
+        ":apps:android:assembleRelease",
+        ":apps:android:assembleTrustedLan"
     )
     & $gradle @gradleArguments
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $unsignedSource)) {
+    if (
+        $LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $unsignedSource) -or
+        -not (Test-Path -LiteralPath $trustedLanSource)
+    ) {
         throw "Android release build failed"
+    }
+    $trustedLanBadging = (& $aapt2 dump badging $trustedLanSource | Out-String)
+    $trustedLanManifest = (& $aapt2 dump xmltree $trustedLanSource --file AndroidManifest.xml | Out-String)
+    $hardenedManifest = (& $aapt2 dump xmltree $unsignedSource --file AndroidManifest.xml | Out-String)
+    if (
+        $trustedLanBadging -notmatch "package: name='app\.autplay\.lan' versionCode='$androidVersionCode' versionName='$([regex]::Escape($releaseVersion))'" -or
+        $trustedLanBadging -notmatch "application-label:'AutPlay LAN'" -or
+        $trustedLanBadging -notmatch "application-label-ru:'AutPlay LAN'" -or
+        $trustedLanManifest -notmatch 'debuggable\(0x[0-9a-f]+\)=true' -or
+        $trustedLanManifest -notmatch 'usesCleartextTraffic\(0x[0-9a-f]+\)=true' -or
+        $hardenedManifest -match 'debuggable\(0x[0-9a-f]+\)=true' -or
+        $hardenedManifest -match 'usesCleartextTraffic\(0x[0-9a-f]+\)=true'
+    ) {
+        throw "Android hardened/trusted-LAN variant boundary is invalid"
     }
 
     $unsignedAsset = Join-Path $outputRoot "autplay-$releaseVersion-unsigned.apk"
     $alignedAsset = Join-Path $outputRoot "autplay-$releaseVersion-dev-aligned.apk"
     $signedAsset = Join-Path $outputRoot "autplay-$releaseVersion-dev-signed.apk"
     $certificateAsset = Join-Path $outputRoot "autplay-$releaseVersion-development-signing-cert.der"
+    $trustedLanAsset = Join-Path $outputRoot "autplay-$releaseVersion-trusted-lan.apk"
     Copy-Item -LiteralPath $unsignedSource -Destination $unsignedAsset
+    Copy-Item -LiteralPath $trustedLanSource -Destination $trustedLanAsset
     & $zipalign -f -p 4 $unsignedSource $alignedAsset
     if ($LASTEXITCODE -ne 0) {
         throw "Release APK zipalign failed"
@@ -141,9 +187,24 @@ try {
         Remove-Item Env:AUTPLAY_RELEASE_DEV_KEY_PASSWORD -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $alignedAsset
-    & $apksigner verify --verbose --print-certs $signedAsset
+    $signedVerification = (& $apksigner verify --verbose --print-certs $signedAsset | Out-String)
     if ($LASTEXITCODE -ne 0) {
         throw "Development-signed APK verification failed"
+    }
+    $trustedLanVerification = (& $apksigner verify --verbose --print-certs $trustedLanAsset | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Trusted-LAN APK signature verification failed"
+    }
+    $baselineVerification = (& $apksigner verify --verbose --print-certs $baselineSignedApk | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Baseline development signer verification failed"
+    }
+    $certificateDigestPattern = 'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)'
+    $signedDigest = [regex]::Match($signedVerification, $certificateDigestPattern).Groups[1].Value
+    $trustedLanDigest = [regex]::Match($trustedLanVerification, $certificateDigestPattern).Groups[1].Value
+    $baselineDigest = [regex]::Match($baselineVerification, $certificateDigestPattern).Groups[1].Value
+    if (-not $signedDigest -or $signedDigest -ne $baselineDigest -or $trustedLanDigest -ne $baselineDigest) {
+        throw "Development signer continuity check failed"
     }
 
     $imageTag = "autplay-server:$ReleaseTag"
@@ -201,6 +262,63 @@ try {
         throw "Reloaded server image does not match the built image"
     }
 
+    $installerStaging = Join-Path $outputRoot "autplay-server-$ReleaseTag-installer"
+    New-Item -ItemType Directory -Path $installerStaging | Out-Null
+    foreach ($composeInput in @($composeBase, $composeRuntime, $composeRelease, $composeAdminLocal)) {
+        Copy-Item -LiteralPath $composeInput -Destination (Join-Path $installerStaging (Split-Path -Leaf $composeInput))
+    }
+    Get-ChildItem -LiteralPath $installerSource -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $installerStaging $_.Name)
+    }
+    Copy-Item -LiteralPath $installGuide -Destination (Join-Path $installerStaging "INSTALL_AND_PAIR.md")
+    Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $installerStaging "RELEASE_NOTES.md")
+    Copy-Item -LiteralPath $serverArchive -Destination (Join-Path $installerStaging (Split-Path -Leaf $serverArchive))
+    $installerManifest = [ordered]@{
+        schema_version = 1
+        release_tag = $ReleaseTag
+        release_version = $releaseVersion
+        source_commit = $sourceCommit
+        image_tag = $imageTag
+        platform = "linux/amd64"
+        distribution_class = "TRUSTED_LAN_DEVELOPMENT"
+        server_archive = [ordered]@{
+            filename = Split-Path -Leaf $serverArchive
+            size_bytes = (Get-Item -LiteralPath $serverArchive).Length
+            sha256 = (Get-FileHash -LiteralPath $serverArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    [IO.File]::WriteAllText(
+        (Join-Path $installerStaging "server-installer-manifest.json"),
+        "$(($installerManifest | ConvertTo-Json -Depth 6))`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllLines(
+        (Join-Path $installerStaging "server-installer.env"),
+        @(
+            "RELEASE_TAG=$ReleaseTag",
+            "RELEASE_VERSION=$releaseVersion",
+            "SOURCE_COMMIT=$sourceCommit",
+            "IMAGE_TAG=$imageTag",
+            "SERVER_ARCHIVE=$(Split-Path -Leaf $serverArchive)",
+            "SERVER_ARCHIVE_SHA256=$((Get-FileHash -LiteralPath $serverArchive -Algorithm SHA256).Hash.ToLowerInvariant())"
+        ),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $installerChecksumPath = Join-Path $installerStaging "SHA256SUMS"
+    $installerChecksumLines = Get-ChildItem -LiteralPath $installerStaging -File |
+        Where-Object { $_.FullName -ne $installerChecksumPath } |
+        Sort-Object Name |
+        ForEach-Object {
+            "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+        }
+    [IO.File]::WriteAllLines($installerChecksumPath, $installerChecksumLines, [Text.UTF8Encoding]::new($false))
+    $installerAsset = Join-Path $outputRoot "autplay-server-$ReleaseTag-installer.zip"
+    Compress-Archive -Path (Join-Path $installerStaging "*") -DestinationPath $installerAsset -CompressionLevel NoCompression
+    Remove-Item -LiteralPath $installerStaging -Recurse -Force
+    if (-not (Test-Path -LiteralPath $installerAsset)) {
+        throw "Server installer bundle creation failed"
+    }
+
     $databaseUrl = "postgresql+psycopg://runtime:synthetic@127.0.0.1:1/autplay"
     $authSecret = "release-smoke-synthetic-secret-at-least-32-bytes"
     & docker run --rm --network none --read-only --tmpfs "/tmp:size=32m,mode=1777" `
@@ -232,68 +350,125 @@ try {
         throw "Reloaded media-tool smoke failed"
     }
 
-    function Get-FreeTcpPort {
-        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    function Get-FreeTcpPorts([int]$Count) {
+        $listeners = @()
         try {
-            $listener.Start()
-            return ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+            for ($index = 0; $index -lt $Count; $index++) {
+                $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+                $listener.Start()
+                $listeners += $listener
+            }
+            return @($listeners | ForEach-Object { ([Net.IPEndPoint]$_.LocalEndpoint).Port })
         }
         finally {
-            $listener.Stop()
+            $listeners | ForEach-Object { $_.Stop() }
         }
     }
 
     $runtimeProject = ("autplay-release-$releaseVersion-$PID" -replace "[^a-zA-Z0-9_-]", "-").ToLowerInvariant()
-    $runtimeSecretFile = [IO.Path]::GetTempFileName()
+    $runtimeSecretDirectory = Join-Path ([IO.Path]::GetTempPath()) "autplay-release-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $runtimeSecretDirectory | Out-Null
+    $runtimeSecretFile = Join-Path $runtimeSecretDirectory "auth.txt"
+    $runtimeAdminSourceSecretFile = Join-Path $runtimeSecretDirectory "admin-source.txt"
+    $runtimeAdminCsrfSecretFile = Join-Path $runtimeSecretDirectory "admin-csrf.txt"
+    $runtimeIdentityFile = Join-Path $runtimeSecretDirectory "identity.pem"
     $runtimeComposeArguments = @(
         "compose",
         "--project-name", $runtimeProject,
         "--file", $composeBase,
         "--file", $composeRuntime,
+        "--file", $composeAdminLocal,
         "--file", $composeRelease,
         "--profile", "runtime"
     )
-    $runtimeApiPort = Get-FreeTcpPort
-    $runtimeStreamPort = Get-FreeTcpPort
+    $runtimePorts = @(Get-FreeTcpPorts 3)
+    $runtimeApiPort = $runtimePorts[0]
+    $runtimeMobileApiPort = $runtimePorts[1]
+    $runtimeMobileStreamPort = $runtimePorts[2]
     try {
         $runtimeSecret = "release-smoke-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
-        [IO.File]::WriteAllText(
-            $runtimeSecretFile,
-            "$runtimeSecret`n",
-            [Text.UTF8Encoding]::new($false)
-        )
+        $runtimeAdminSourceSecret = "release-admin-source-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
+        $runtimeAdminCsrfSecret = "release-admin-csrf-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
+        [IO.File]::WriteAllText($runtimeSecretFile, "$runtimeSecret`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($runtimeAdminSourceSecretFile, "$runtimeAdminSourceSecret`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($runtimeAdminCsrfSecretFile, "$runtimeAdminCsrfSecret`n", [Text.UTF8Encoding]::new($false))
+        $runtimeIdentityPem = & docker run --rm --network none --entrypoint python $imageTag -c "from cryptography.hazmat.primitives import serialization; from cryptography.hazmat.primitives.asymmetric import ec; print(ec.generate_private_key(ec.SECP256R1()).private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode('ascii'), end='')"
+        if ($LASTEXITCODE -ne 0 -or -not $runtimeIdentityPem) {
+            throw "Release runtime identity generation failed"
+        }
+        [IO.File]::WriteAllText($runtimeIdentityFile, (($runtimeIdentityPem -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
         $env:AUTPLAY_SERVER_IMAGE = $imageTag
         $env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE = $runtimeSecretFile
+        $env:AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE = $runtimeAdminSourceSecretFile
+        $env:AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE = $runtimeAdminCsrfSecretFile
+        $env:AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE = $runtimeIdentityFile
         $env:AUTPLAY_RUNTIME_BIND_HOST = "127.0.0.1"
+        $env:AUTPLAY_MOBILE_BIND_HOST = "127.0.0.1"
         $env:AUTPLAY_API_PORT = [string]$runtimeApiPort
-        $env:AUTPLAY_STREAM_PORT = [string]$runtimeStreamPort
+        $env:AUTPLAY_MOBILE_API_PORT = [string]$runtimeMobileApiPort
+        $env:AUTPLAY_MOBILE_STREAM_PORT = [string]$runtimeMobileStreamPort
 
         & docker @runtimeComposeArguments up --no-build --wait
         if ($LASTEXITCODE -ne 0) {
             & docker @runtimeComposeArguments logs --no-color --tail 200 `
-                migrate api worker-cpu stream
+                migrate api worker-cpu stream mobile-api admin-init
             throw "Reloaded release image Compose runtime gate failed"
         }
         $apiReady = Invoke-WebRequest `
             -UseBasicParsing `
             -Uri "http://127.0.0.1:$runtimeApiPort/health/ready" `
             -TimeoutSec 5
+        $adminLogin = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$runtimeApiPort/admin/login" `
+            -TimeoutSec 5
+        $mobileDiscovery = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$runtimeMobileApiPort/api/v1/pairing/discovery" `
+            -TimeoutSec 5
         $streamLive = Invoke-WebRequest `
             -UseBasicParsing `
-            -Uri "http://127.0.0.1:$runtimeStreamPort/health/live" `
+            -Uri "http://127.0.0.1:$runtimeMobileStreamPort/health/live" `
             -TimeoutSec 5
-        if ($apiReady.StatusCode -ne 200 -or $streamLive.StatusCode -ne 200) {
+        $mobileAdminStatus = $null
+        try {
+            $mobileAdmin = Invoke-WebRequest `
+                -UseBasicParsing `
+                -Uri "http://127.0.0.1:$runtimeMobileApiPort/admin/login" `
+                -TimeoutSec 5
+            $mobileAdminStatus = $mobileAdmin.StatusCode
+        }
+        catch {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $mobileAdminStatus = [int]$_.Exception.Response.StatusCode
+            }
+            else {
+                throw
+            }
+        }
+        if (
+            $apiReady.StatusCode -ne 200 -or
+            $adminLogin.StatusCode -ne 200 -or
+            $mobileDiscovery.StatusCode -ne 200 -or
+            $streamLive.StatusCode -ne 200 -or
+            $mobileAdminStatus -ne 404
+        ) {
             throw "Reloaded release image runtime health endpoints failed"
         }
     }
     finally {
         & docker @runtimeComposeArguments down --volumes --remove-orphans | Out-Null
-        Remove-Item -LiteralPath $runtimeSecretFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $runtimeSecretDirectory -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_SERVER_IMAGE -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_RUNTIME_BIND_HOST -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_MOBILE_BIND_HOST -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_API_PORT -ErrorAction SilentlyContinue
-        Remove-Item Env:AUTPLAY_STREAM_PORT -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_MOBILE_API_PORT -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_MOBILE_STREAM_PORT -ErrorAction SilentlyContinue
     }
 
     & uv export --frozen --format cyclonedx1.5 `
@@ -318,8 +493,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Android release dependency report failed"
     }
-    Copy-Item -LiteralPath docs/release/RELEASE_NOTES_0.2.0.md `
+    Copy-Item -LiteralPath $releaseNotes `
         -Destination (Join-Path $outputRoot "RELEASE_NOTES.md")
+    Copy-Item -LiteralPath $installGuide `
+        -Destination (Join-Path $outputRoot "INSTALL_AND_PAIR.md")
     Copy-Item -LiteralPath docs/release/SECURITY_REVIEW.md `
         -Destination (Join-Path $outputRoot "SECURITY_REVIEW.md")
 
@@ -343,10 +520,14 @@ try {
         production_deployed = $false
         android = [ordered]@{
             application_id = "app.autplay"
-            version_code = 2
+            version_code = $androidVersionCode
             version_name = $releaseVersion
             unsigned = Get-ArtifactRecord $unsignedAsset
             development_signed = Get-ArtifactRecord $signedAsset
+            trusted_lan = Get-ArtifactRecord $trustedLanAsset
+            trusted_lan_application_id = "app.autplay.lan"
+            trusted_lan_debuggable = $true
+            trusted_lan_cleartext_rfc1918_only = $true
             development_signer_certificate = Get-ArtifactRecord $certificateAsset
         }
         server = [ordered]@{
@@ -356,6 +537,8 @@ try {
             platform = "linux/amd64"
             runtime = "CPU_ONLY"
             archive = Get-ArtifactRecord $serverArchive
+            installer = Get-ArtifactRecord $installerAsset
+            installer_topology = "TRUSTED_LAN_DEVELOPMENT"
             archive_reload = "PASS"
             configuration_smoke = "PASS"
             media_smoke = "PASS"

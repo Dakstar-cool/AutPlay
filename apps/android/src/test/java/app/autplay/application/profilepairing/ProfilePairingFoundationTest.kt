@@ -16,6 +16,8 @@ class ProfilePairingFoundationTest {
         assertFails { OriginNormalizer.normalize("http://example.test") }
         assertEquals("http://192.168.1.10:8080", OriginNormalizer.normalize("http://192.168.1.10:8080", true))
         assertFails { OriginNormalizer.normalize("http://public.example", true) }
+        assertFails { OriginNormalizer.normalize("http://192.168.999.1", true) }
+        assertFails { OriginNormalizer.normalize("http://10.example", true) }
     }
     @Test fun delayedCapabilitiesCannotChangeNewerFlow() {
         val snapshot = snapshot()

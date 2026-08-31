@@ -5,6 +5,7 @@ import app.autplay.data.security.RefreshingSessionCredentials
 import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import app.autplay.domain.ServerProfileId
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,9 +30,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 class OkHttpSyncTransport(
     private val baseUrl: String,
     private val credentials: CredentialStore,
-    private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(30)).build(),
+    client: OkHttpClient = OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(30)).build(),
     private val m5Rotation: M5SessionRotationClient? = null,
 ) : SyncTransport {
+    private val client = client.withAutPlayRedirectPolicy()
     private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client, m5Rotation = m5Rotation)
 
     override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {

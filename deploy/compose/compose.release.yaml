@@ -18,3 +18,11 @@ services:
   stream:
     image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
     build: !reset null
+
+  mobile-api:
+    image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
+    build: !reset null
+
+  admin-init:
+    image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
+    build: !reset null

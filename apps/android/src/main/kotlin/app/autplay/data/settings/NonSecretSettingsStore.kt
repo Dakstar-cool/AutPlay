@@ -1,5 +1,7 @@
 package app.autplay.data.settings
 
+import app.autplay.application.profilepairing.OriginNormalizer
+
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.DataMigration
 import androidx.datastore.preferences.core.Preferences
@@ -301,12 +303,8 @@ class DataStoreNonSecretSettingsStore(
     }
 
     private fun validateServiceOrigin(value: String, label: String) {
-        val uri = runCatching { URI(value) }.getOrNull()
-        require(uri != null && uri.isAbsolute && uri.host != null && uri.scheme in setOf("http", "https")) {
-            "$label service origin must be an absolute HTTP(S) URL with a host."
-        }
-        require(uri.userInfo == null && uri.query == null && uri.fragment == null && uri.path in setOf("", "/")) {
-            "$label service origin must not contain credentials, a path, query, or fragment."
+        require(runCatching { OriginNormalizer.normalize(value, allowUnsafeDevelopmentHttp = true) }.isSuccess) {
+            "$label service origin must be HTTPS or private-development HTTP without credentials, path, query, or fragment."
         }
     }
 

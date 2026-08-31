@@ -18,12 +18,19 @@ and project-scoped. The override uses Compose `!reset` and therefore requires Do
 or newer:
 
 ```text
-docker load --input autplay-server-v0.2.0.docker.tar.gz
-AUTPLAY_SERVER_IMAGE=autplay-server:v0.2.0
+docker load --input autplay-server-v0.3.0.docker.tar.gz
+AUTPLAY_SERVER_IMAGE=autplay-server:v0.3.0
 AUTPLAY_RUNTIME_AUTH_SECRET_FILE=<local secret file outside the repository>
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime up --no-build --wait
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime down --volumes
 ```
+
+For the `v0.3.0` trusted-LAN development release, prefer the packaged server installer instead of
+assembling this command by hand. It verifies the image archive, platform, revision and exact image
+tag, creates persistent secrets and the P-256 identity outside the extracted bundle, and always
+applies `compose.release.yaml` last. See
+[`docs/operations/INSTALL_AND_PAIR.md`](../../docs/operations/INSTALL_AND_PAIR.md). The installer
+does not configure TLS, public exposure, backups or production credentials.
 
 For an explicitly trusted LAN, set `AUTPLAY_RUNTIME_BIND_HOST` to the laptop's concrete LAN IPv4
 address before running the same Compose command. Do not use `0.0.0.0`: binding a specific address

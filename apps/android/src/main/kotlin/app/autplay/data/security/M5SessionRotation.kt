@@ -2,6 +2,7 @@ package app.autplay.data.security
 
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Duration
@@ -38,8 +39,9 @@ interface M5RotationContextResolver {
 class M5SessionRotationClient(
     private val contexts: M5RotationContextResolver,
     private val keys: M5DeviceKeyStore,
-    private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
+    client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
 ) {
+    private val client = client.withAutPlayRedirectPolicy()
     suspend fun persistSuccessor(
         profileId: ServerProfileId,
         successor: SessionCredentialEnvelope,

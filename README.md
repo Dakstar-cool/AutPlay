@@ -1,122 +1,146 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="AutPlay — локальная Android-медиатека, очередь и воспроизведение с приватными социальными функциями и необязательным личным сервером">
+  <img src="./assets/readme/hero-hybrid.png" width="100%" alt="AutPlay — local-first Android-плеер: слушать сразу, синхронизировать потом; справа показан реальный экран приложения, Resonance Lens обозначен как визуальное направление">
 </p>
 
 <p align="center">
-  <strong>Полноценный Android-плеер без обязательного облака. Личный сервер добавляет sync, Vault и совместные функции, но не становится условием воспроизведения.</strong>
+  <strong>Android-плеер, который не перестаёт быть вашим без сети. Личный сервер добавляет синхронизацию, Vault и совместные функции — по желанию.</strong>
 </p>
 
 <p align="center">
-  <a href="#product">Продукт</a> ·
-  <a href="#face">AutPlay Face</a> ·
-  <a href="#evidence">Доказательства</a> ·
+  <a href="https://github.com/Dakstar-cool/AutPlay/releases/tag/v0.3.0"><strong>Скачать v0.3.0</strong></a> ·
+  <a href="./docs/operations/INSTALL_AND_PAIR.md">Установка и связывание</a> ·
+  <a href="#proof">Реальные экраны</a> ·
   <a href="#architecture">Архитектура</a> ·
-  <a href="#android">Android</a> ·
-  <a href="#quick-start">Запуск</a> ·
-  <a href="#progress">Статус</a> ·
-  <a href="#release-boundary">Границы</a>
+  <a href="#development">Сборка и тесты</a>
 </p>
 
-AutPlay — Android-first, local-first музыкальная система для людей, которые хотят владеть библиотекой и продолжать слушать при любой сетевой недоступности. Изменения медиатеки, плейлистов и обычной очереди атомарно фиксируются на устройстве, а Media3 воспроизводит доступный источник без синхронного обращения к серверу. Необязательный CPU-сервер добавляет авторизованную синхронизацию, неизменяемый файловый Vault, импорт, рекомендации, друзей и Hybrid Wave — без обязательного облачного аккаунта, CUDA, Redis, Kafka или внешней аналитики.
+> [!IMPORTANT]
+> `v0.3.0` — development pre-release. APK подписаны сохранённым development key, а готовый серверный installer рассчитан только на доверенную домашнюю RFC1918-сеть. Это не store-ready Android distribution и не public-Internet production deployment.
 
-<a id="product"></a>
+AutPlay — Android-first, local-first музыкальная система для владельцев личной библиотеки. Room
+хранит локальную истину, Media3 воспроизводит доступный источник, а изменения медиатеки, плейлистов
+и очереди не требуют синхронного ответа сервера. Необязательный CPU-сервер добавляет PostgreSQL,
+неизменяемый файловый Vault, синхронизацию, импорт, рекомендации, друзей и Wave — без обязательного
+облачного аккаунта, CUDA, Redis, Kafka или внешней аналитики.
 
-## Что уже работает
+## Быстрый выбор
+
+| Нужно | Артефакт | Важная граница |
+| --- | --- | --- |
+| Слушать локальную музыку | [`autplay-0.3.0-dev-signed.apk`](https://github.com/Dakstar-cool/AutPlay/releases/download/v0.3.0/autplay-0.3.0-dev-signed.apk) | Hardened `app.autplay`; HTTP запрещён, сервер требует отдельно настроенный HTTPS |
+| Проверить личный сервер дома | [`autplay-0.3.0-trusted-lan.apk`](https://github.com/Dakstar-cool/AutPlay/releases/download/v0.3.0/autplay-0.3.0-trusted-lan.apk) | Отдельный `app.autplay.lan`; debuggable, HTTP только для loopback/RFC1918 |
+| Поднять CPU-сервер | [`autplay-server-v0.3.0-installer.zip`](https://github.com/Dakstar-cool/AutPlay/releases/download/v0.3.0/autplay-server-v0.3.0-installer.zip) | `linux/amd64`, Docker Compose 2.24.4+, trusted LAN, без production backup/TLS |
+
+Проверьте скачанные файлы по `SHA256SUMS`. Два Android-варианта изолированы разными application
+id и могут стоять рядом; их локальные базы автоматически не объединяются.
+
+<a id="proof"></a>
+
+## Продукт, а не макет
 
 <p align="center">
-  <img src="./assets/readme/product-proof.svg" width="100%" alt="Проверенные контуры AutPlay: локальное воспроизведение, долговечный профиль сервера, ручная очередь и приватные возможности личного сервера">
+  <img src="./assets/readme/product-board.png" width="100%" alt="Реальные экраны AutPlay: Android Home с локальным воспроизведением, offline Vault search, локальная библиотека и loopback Web Admin личного сервера">
 </p>
 
-- **Слушать без сети.** Room хранит локальную истину, FTS ищет по кириллице и латинице, а Media3 управляет воспроизведением и загрузками.
-- **Собирать плейлисты и очередь вручную.** Дубликаты остаются отдельными записями; `Play next`, перестановка и очистка будущих треков не меняют текущий трек.
-- **Подключить личный сервер один раз.** Android создаёт запрос, владелец подтверждает его в локальном Web-admin, а точное доказательство ключа завершает привязку. Profile ID, service origins, binding и trust evidence переживают process restart; секреты остаются в Android Keystore, а несовпадение authority закрывается fail-closed без удаления локальной музыки.
-- **Слушать вместе.** Подтверждённых друзей можно быстро пригласить в Wave. Гость без аккаунта получает ограниченный доступ ровно к одной комнате, но не к чужой медиатеке или Vault.
-- **Делиться статистикой по выбору.** Профиль закрыт по умолчанию; агрегаты доступны только явно разрешённым, подтверждённым и не заблокированным друзьям.
-- **Находить и импортировать музыку.** Ручной TXT/Jamendo flow и выключенная по умолчанию 24-часовая автоматика используют один проверяемый Vault/Identity/Library pipeline. Автоимпорт включается отдельно.
-- **Управлять и восстанавливать личный сервер.** Web-admin показывает устройства, сессии, Vault, задания и импорт; опасно выглядящие команды требуют явного подтверждения, а backup/restore изолирован и проверяем.
+- **Слушать без сети.** Локальная библиотека, поиск, плейлисты, очередь и playback остаются доступны без сервера.
+- **Продолжать после process death.** Media3 и Room восстанавливают текущий элемент, позицию и будущую очередь.
+- **Подключать сервер осознанно.** Android сверяет owner-controlled identity fingerprint, затем владелец подтверждает exact device key в loopback Web Admin.
+- **Сохранять неоднозначность.** Неуверенная identity evidence уходит на review; probabilistic auto-merge остаётся выключен.
+- **Расширять приватно.** Sync, Vault, импорт, рекомендации, друзья, статистика и Wave добавляются отдельными полномочиями, а не одним «доступом ко всему».
 
-<a id="face"></a>
+## Первый успешный запуск
 
-## Следующий визуальный язык: AutPlay Face
+### Только Android
 
-<p align="center">
-  <img src="./assets/readme/autplay-face.svg" width="100%" alt="Специфицированная, но ещё не реализованная концепция AutPlay Face: пять музыкальных настроений, текущая динамика и реакции приложения">
-</p>
+1. Скачайте hardened APK и сравните SHA-256 с релизным `SHA256SUMS`.
+2. Установите APK, откройте AutPlay и выберите папку с музыкой через системный Android picker.
+3. Начните воспроизведение. Учётная запись и сервер для этого не нужны.
 
-AutPlay Face заменяет идею безличного динамического кольца на пару выразительных глаз. Выражение складывается из характера Track, текущей музыкальной динамики и короткой вторичной реакции приложения. Состояния непрерывны: спокойное может одновременно быть тёмным, немного атмосферным и умеренно напряжённым; разные будущие темы сохраняют один музыкальный смысл.
+### Android + личный сервер
 
-Это **принятое продуктовое направление, а не реализованная функция**. MVP отдельно потребует одну законченную тему в реальном Now Playing, пять различимых mood-сцен, плавные переходы, idle/play/pause/Like/Dislike-or-skip, reduced-motion и честный fallback без optional analysis. Полная граница находится в [AutPlay Face Product Concept v1](docs/design/AutPlay_Face_Product_Concept_v1.md); implementation milestone, rendering, models, API и persistence пока не выбраны.
+1. Установите Docker Engine/Linux containers и Docker Compose `2.24.4+` на `linux/amd64` компьютере.
+2. Распакуйте server installer и запустите `install-server.ps1 -BindHost <LAN IPv4>` или `install-server.sh --bind-host <LAN IPv4>`.
+3. Получите fingerprint локальной командой `server-control … fingerprint`, один раз создайте OWNER и войдите в Web Admin только через `127.0.0.1`.
+4. Установите `AutPlay LAN`, введите адрес mobile API, целиком сравните fingerprint и 12-значный admission code.
+5. Одобрите устройство в Web Admin и дождитесь состояния `Подключено` на Android.
 
-<a id="evidence"></a>
-
-## Проверено, а не заявлено
-
-AutPlay остаётся локальной development-веткой поверх проверенного RC, а не опубликованным production-продуктом. Ниже — зафиксированное evidence для соответствующих срезов, без смешивания host-, device- и migration-проверок:
-
-| Контур | Последний зафиксированный результат |
-| --- | --- |
-| Root contracts / release | **120 passed**; OpenAPI, JSON Schema, release inventory и security/privacy assertions |
-| Server / PostgreSQL | **668 passed + 1 ожидаемый host-policy skip** на PostgreSQL 18.4 + pgvector 0.8.6; Ruff, format и strict mypy по 234 source files |
-| Android host | **215 JVM tests**, `lintDebug`, debug APK и minified release/R8 — PASS |
-| Android migration | Реальная Room 12→13 migration и collision regression на API 26 — **1/1** |
-| Samsung Galaxy M52 / API 33 | Полный QA side-by-side connected gate более раннего общего frontend-среза: **160 тестов, 0 failures, 3 ожидаемых skips** |
-| Очередь после process death | Отдельный stage1 → PID → `adb force-stop` → отсутствие PID → stage2: порядок, current item, позиция и режимы восстановлены |
-| Производительность RC | PostgreSQL 100k search p95 **6.403 ms**; Android FTS 10k p95 **12.555 ms** |
-
-Базовый P14 RC зафиксирован в отслеживаемых документах: [release notes 0.2.0](docs/release/RELEASE_NOTES_0.2.0.md), [RC test evidence](docs/release/TEST_EVIDENCE.md), [security review](docs/release/SECURITY_REVIEW.md) и [performance report](docs/release/PERFORMANCE_REPORT.md). Post-RC границы выражены соответствующими ADR и текущим проверяемым кодом, не ретроспективным изменением RC.
+Полные команды для Windows/Linux, firewall scope, bootstrap, browser invite, pairing и диагностика:
+**[Установка AutPlay и подключение личного сервера](docs/operations/INSTALL_AND_PAIR.md)**.
 
 <a id="architecture"></a>
 
 ## Как это устроено
 
 <p align="center">
-  <img src="./assets/readme/system-map.svg" width="100%" alt="Android локально фиксирует действие в Room и Journal, Media3 воспроизводит доступный источник, а необязательный сервер добавляет PostgreSQL, Vault, друзей, рекомендации и Wave">
+  <img src="./assets/readme/system-map.svg" width="100%" alt="Android фиксирует локальное действие в Room и Journal, Media3 воспроизводит доступный источник, а необязательный сервер добавляет PostgreSQL, Vault, синхронизацию, рекомендации и Wave">
 </p>
 
-Одна Android-транзакция сохраняет доменное изменение вместе с Journal/outbox-фактом. WorkManager повторяет отложенную синхронизацию, а Media3 независимо управляет воспроизведением и загрузками. На сервере PostgreSQL хранит метаданные, права, события и задания; filesystem/NAS — байты Vault. Необязательный server-rendered Web-admin использует отдельную browser-session authority, а не Android credentials.
+Одна Android-транзакция сохраняет доменное изменение вместе с Journal/outbox-фактом. WorkManager
+повторяет отложенную синхронизацию, а Media3 независимо владеет воспроизведением и загрузками. На
+сервере PostgreSQL хранит метаданные, права, события и задания; filesystem/NAS — байты Vault.
+Server-rendered Web Admin использует отдельную browser-session authority и остаётся на loopback.
 
-Ключевые границы:
+Ключевые инварианты:
 
-- `VaultObject`, `AudioVariant`, `Recording`, `ReleaseTrack` и `UserTrackRef` остаются разными сущностями.
-- Знание SHA-256 никогда не является разрешением на чтение Vault.
-- Неуверенная идентичность не приводит к тихому auto-merge.
-- Обычная очередь редактируется локально; Wave-очередь остаётся server-authoritative и fail-closed. Гостевые Wave-проекции отделены от account-bound `wave_*` по `guest_session_id`.
-- Friendship не выдаёт доступ к account, device, library, Vault, media или Wave Room; каждое право проверяется отдельно.
-- Статистика private by default; дружба и отсутствие block повторно проверяются на каждом friend-read.
-- CPU-путь не импортирует GPU/CUDA-код. Опциональный GPU-проект физически изолирован.
+- Android local actions не требуют синхронного server trip.
+- `VaultObject`, `AudioVariant`, `Recording`, `ReleaseTrack` и `UserTrackRef` — разные сущности; знание SHA-256 не является разрешением.
+- Profile, device, library, Vault, media, friendship и Wave проверяют полномочия независимо.
+- Private-by-default статистика доступна другу только по явному opt-in и повторной проверке friendship/block.
+- CPU-путь не импортирует и не устанавливает GPU/CUDA-код; optional GPU project физически изолирован.
+- Неизвестные persisted/API values сохраняются; destructive Room/Alembic fallback запрещён.
 
-<a id="android"></a>
+## Что входит
 
-## Android-интерфейс
+| Контур | Реализовано |
+| --- | --- |
+| Android | Home, Search, Library, Track/Release/Playlist/Artist details, Media3 playback/downloads, ручные плейлисты и очередь, import review, Profile, statistics, sync status |
+| Pairing | Signed discovery, owner-controlled fingerprint, exact-key enrollment, Web-approved admission, recovery/reenrollment без plaintext credential persistence |
+| Server | CPU modular monolith, PostgreSQL metadata/jobs/sync, immutable filesystem Vault, Range streaming, imports, deterministic recommendations |
+| Admin | Loopback SSR Web Admin: devices, sessions, trust, Vault, jobs/imports, review, recovery, diagnostics and audit |
+| Social | Same-server friends, private coarse presence, Wave invitations and capability-limited Android guest access |
+| Discovery | Manual TXT/Jamendo flow и default-off 24-hour automation с отдельным подтверждением `AUTO_IMPORT` |
 
-<p align="center">
-  <img src="./assets/readme/adaptive-frontend.svg" width="100%" alt="Compact, medium и expanded Compose-компоновки AutPlay используют один playback state и постоянный мини-плеер">
-</p>
+## Проверяемая граница
 
-Один Compose-контур адаптируется от нижней навигации телефона до общей боковой панели на складных устройствах и планшетах. Мини-плеер и Now Playing остаются доступными, а Home, Search, Library, Wave, Profile и Settings работают с локальными owner-scoped проекциями.
+P00–P14 закрыты как локальный CPU release candidate. Frontend M1–M4, Product M5, Server M6,
+Discovery A1, Social S1, Privacy S2 и Library L1 ведутся как отдельная post-RC линия и не создают
+P15. Текущий release gate проверяет оба Android APK, подписи, installer contract, CPU image identity,
+archive reload, media/config smoke и disposable combined Compose runtime.
 
-В профиле находятся собственная статистика, друзья и подключение устройств. Владелец подтверждает account/server context до обмена ключами; recovery и reenrollment не сохраняют bearer-секреты в обычном UI-state. Доступ друзей к статистике включается явно. Плейлисты открываются как редактируемые коллекции, а очередь управляется из Now Playing и контекстных track/detail-поверхностей.
+Основные evidence-документы:
 
-Интерфейс поддерживает system/light/dark темы и акценты Coral, Violet, Green и Blue. Секреты, приватные server origins, raw paths и персональные payloads не входят в обычные логи или экспорт настроек.
+- [v0.3.0 release notes](docs/release/RELEASE_NOTES_0.3.0.md)
+- [RC test evidence](docs/release/TEST_EVIDENCE.md)
+- [security review](docs/release/SECURITY_REVIEW.md)
+- [performance report](docs/release/PERFORMANCE_REPORT.md)
+- [P14 handoff](docs/implementation/HANDOFF_P14.md)
 
-<a id="quick-start"></a>
+## Resonance Lens
 
-## Запуск репозитория
+Resonance Lens в hero — **визуальное направление, а не реализованная функция**. Концепция описывает
+пару оптических «глаз», continuous mood и тонкий resonance filament для будущего Now Playing. Она
+не доказывает наличие Face runtime, модели или музыкального анализа в `v0.3.0`; реальное состояние
+продукта показано Android/Web screenshots выше.
 
-AutPlay поставляется как воспроизводимый development repository. Первый GitHub-релиз `v0.2.0` содержит development-signed Android APK, unsigned/R8 APK и CPU Docker image archive сервера; production signing key, рабочего container registry и готовой публичной TLS-топологии пока нет.
+См. [Resonance Lens exploration](docs/design/explorations/AutPlay_Face_Resonance_Lens_Exploration_v1.md)
+и [reviewed implementation plan](docs/design/explorations/AutPlay_Face_Resonance_Lens_Plan.md).
+
+<a id="development"></a>
+
+## Сборка и тесты
 
 ### Требования
 
 - `uv 0.12.3` и зафиксированный CPython `3.14.7`;
 - Microsoft OpenJDK `17.0.20+8-LTS` в `JAVA_HOME`;
 - Android SDK Platform `36.1`, Build Tools `36.1.0` и `ANDROID_HOME`;
-- Docker Engine + Compose с поддержкой `up --wait`.
+- Docker Engine + Docker Compose `2.24.4+`.
 
 Gradle Wrapper загружает Gradle `9.3.1` и проверяет checksum дистрибутива.
 
 ### Канонические команды
 
-Запускайте из корня репозитория. README — источник истины для порядка bootstrap и проверок.
+Запускайте из корня репозитория. Этот README — источник истины для bootstrap/check порядка.
 
 Windows PowerShell:
 
@@ -134,9 +158,7 @@ bash scripts/check.sh
 bash scripts/check.sh --server-only
 ```
 
-`bootstrap` синхронизирует frozen Python-окружения, разрешает Gradle Wrapper и проверяет Compose. `check` выполняет contract/release, server, dependency-policy и Android host gates и поднимает одноразовый PostgreSQL только на случайном loopback-порту.
-
-Точечные команды:
+Точечные host-команды:
 
 ```powershell
 uv run --frozen pytest tests/contract tests/release
@@ -144,127 +166,51 @@ uv run --frozen pytest tests/contract tests/release
   :apps:android:lintDebug `
   :apps:android:testDebugUnitTest `
   :apps:android:assembleDebug `
+  :apps:android:assembleTrustedLan `
   :apps:android:assembleRelease
 ```
 
-Для connected gate нужен авторизованный Android API 26+:
+Для connected gate нужен явно выбранный Android API 26+:
 
 ```powershell
 .\gradlew.bat --no-daemon --console=plain --max-workers=1 `
   :apps:android:connectedDebugAndroidTest
 ```
 
-L1 process-death gate запускается отдельно, потому что две стадии должны быть разделены внешним `force-stop`:
+Release bundle создаётся только из clean tagged `HEAD` и сам запускает полный gate:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\test-l1-process-death.ps1 `
-  -AndroidHome $env:ANDROID_HOME `
-  -DeviceSerial <adb-serial> `
-  -QaSideBySide
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 `
+  -ReleaseTag v0.3.0 `
+  -JavaHome $env:JAVA_HOME `
+  -AndroidHome $env:ANDROID_HOME
 ```
-
-Нумерованный TXT-экспорт можно проверить и преобразовать в новый UTF-8 файл без изменения
-исходника. Режим удаляет ведущие `N.`/`N)` и строки-маркеры вида `=== ... ===`, сохраняет прочие
-ненумерованные строки и никогда не перезаписывает существующий output. Команда не использует сеть
-и не скачивает музыку:
-
-```powershell
-uv run --project server --frozen python -X utf8 scripts/txt_track_import.py `
-  C:\path\playlist.txt `
-  --normalized-output C:\path\playlist.normalized.txt
-```
-
-По умолчанию JSON содержит только агрегаты. Имена исполнителей добавляются лишь по явному
-`--include-artists`, чтобы routine diagnostics не раскрывали содержимое личной коллекции.
-
-<details>
-<summary><strong>Одноразовый CPU runtime</strong></summary>
-
-Создайте secret-файл минимум из 32 случайных символов вне репозитория. Runtime-профиль запускает migration, API, CPU-worker и direct streaming; API/streaming по умолчанию доступны только через loopback.
-
-```powershell
-$env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE = 'C:\path\outside\repo\autplay-auth-secret.txt'
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime down --volumes
-```
-
-```bash
-export AUTPLAY_RUNTIME_AUTH_SECRET_FILE=/path/outside/repo/autplay-auth-secret.txt
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime down --volumes
-```
-
-Перед использованием прочитайте [runtime Compose guide](deploy/compose/README.md).
-
-</details>
-
-<details>
-<summary><strong>Изолированный GPU-проект</strong></summary>
-
-У `gpu/` отдельные lock, image и worker. Канонический CPU-контур его не устанавливает и не импортирует. Ни одна GPU-модель в текущем RC не упакована и не активирована.
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.ps1 `
-  -DeviceSelector 'uuid:GPU-...'
-```
-
-Linux NVIDIA host with Docker and NVIDIA Container Toolkit:
-
-```bash
-bash scripts/test-p12-gpu.sh
-bash scripts/test-p12-gpu.sh 'pci:00000000:01:00.0'
-```
-
-См. [ADR-025](docs/adr/ADR-025-p12-isolated-gpu-enrichment-and-model-rollout.md) и [ADR-027](docs/adr/ADR-027-p14-conditional-phase-reachability.md).
-
-</details>
 
 ## Карта репозитория
 
 | Путь | Ответственность |
 | --- | --- |
-| `apps/android` | Compose UI, Room v13, Journal, Media3 playback/download, sync, pairing/admission, friends/guest Room access, statistics privacy, playlists, queue and Wave recovery |
-| `server/src/autplay` | Modular-monolith CPU API, optional SSR admin, workers, streaming, PostgreSQL/Vault adapters, sync, discovery/import, social, statistics, recommendations and Wave |
-| `server/migrations` | Linear Alembic revisions `0001`–`0026`; без destructive fallback |
-| `contracts` | OpenAPI 3.1, Draft 2020-12 schemas and cross-language vectors |
-| `deploy/compose` | Digest-pinned PostgreSQL and loopback-only runtime profiles |
-| `gpu` | Physically isolated optional NVIDIA/ONNX enrichment project |
-| `tests` | Contract, release-policy and end-to-end evidence fixtures |
-| `docs/design` | Product, system, API, privacy and persistence contracts |
-| `docs/adr` | Accepted architectural decisions and boundaries |
-| `docs/operations` | CI/release, deployment, recovery and observability guides |
-| `docs/release` | RC checklist, evidence, security, performance, SBOM and release notes |
+| `apps/android` | Compose UI, Room, Journal, Media3, sync, pairing/admission, social, statistics, import, playlists and queue |
+| `server/src/autplay` | CPU API, optional SSR admin, workers, stream, PostgreSQL/Vault, sync, discovery, social, recommendations and Wave |
+| `server/migrations` | Линейные Alembic migrations; без destructive fallback |
+| `contracts` | OpenAPI 3.1, JSON Schema и cross-language vectors |
+| `deploy/compose` | Digest-pinned PostgreSQL и runtime/admin overlays |
+| `deploy/installer` | Проверяемый server installer/control scripts для Windows/Linux |
+| `gpu` | Изолированный optional NVIDIA/ONNX enrichment project; моделей в релизе нет |
+| `tests` | Contract, release-policy и end-to-end evidence fixtures |
+| `docs` | Design contracts, ADR, handoffs, operations and release evidence |
 
-<a id="progress"></a>
+## Границы v0.3.0
 
-## Состояние разработки
+- Development signing only; production signing key и store policy не выбраны.
+- Bundled server — CPU `linux/amd64`, single-operator, trusted-LAN development topology.
+- Public domain/TLS/reverse proxy, registry push, production secret delivery, backup destination/retention и rollout policy остаются отдельными решениями.
+- Web Admin доступен только на literal loopback; password login и public registration отсутствуют.
+- Automatic probabilistic Recording merge выключен; ambiguous evidence требует review.
+- P12 model activation и production Face/Resonance Lens runtime отсутствуют; deterministic CPU baseline остаётся authoritative.
+- Не используйте `docker compose down --volumes` для данных, которые нужно сохранить: bundled installer не является системой резервного копирования.
 
-P00–P14 закрыты как локальный CPU release candidate. Более новые frontend, pairing, Web-admin, social/privacy, library и discovery milestone ведутся отдельной post-RC линией: они не создают P15 и не меняют границы исходного RC задним числом.
-
-| Линия | Состояние | Подтверждённый результат |
-| --- | --- | --- |
-| P00–P14 · local RC | **PASS** | Android local-first, sync, Vault, import, CPU recommendations, Wave, hardening и release evidence |
-| Frontend M1–M4 | **PASS** | Адаптивный Compose shell, Media3 player, Home/Search/Library и типизированные Track/Release/Playlist/Artist surfaces |
-| Product M5A/M5B · Server M6 | **PASS** | Защищённое подключение профиля и устройств, optional CPU-only административный Web-интерфейс |
-| Social S1A–S1D · Privacy S2 | **PASS** | Device admission, друзья, private coarse presence, Wave invites, capability-limited guest join и friend-only статистика по явному opt-in |
-| Library L1 | **PASS** | Ручные duplicate-preserving плейлисты и долговечная локальная очередь с process-death recovery |
-| Discovery A1B / A1C | **PASS** | Ручной TXT/Jamendo flow и default-off 24-hour discovery с отдельно подтверждаемым `AUTO_IMPORT` |
-
-Последний квалифицированный follow-up — Android control для opt-in discovery automation под границей [ADR-044](docs/adr/ADR-044-post-a1c-android-discovery-automation-control.md); он не открывает новую phase. Discovery-автоматика по-прежнему выключена по умолчанию, а AutPlay Face остаётся `NOT_STARTED`.
-
-<a id="release-boundary"></a>
-
-## Границы релиза
-
-- `0.2.0` — первый GitHub-релиз текущей development-линии: устанавливаемый development-signed APK, minified unsigned APK и CPU-only Docker image archive; это не production deployment и не store-ready Android distribution.
-- Production signing, registry push, public domain/TLS topology, backup target and registration/legal policy intentionally remain operator decisions.
-- Friend-visible statistics are not Internet-public; collaborative playlists and cross-device active-queue sync are not delivered.
-- Wave evidence covers the declared trusted-local single-API-process topology; public-internet multi-instance fan-out remains deferred.
-- Automatic probabilistic Recording merge remains disabled; ambiguous evidence requires review.
-- Lyrics, Party Mode/member voting and guest queue editing are outside the delivered scope.
-- A1B manual discovery, A1C opt-in automation и Android-only S1D guest Room access закрыты со статусом `PASS`.
-- P12 real RTX/model evidence remains `DEFERRED_WITH_APPROVAL`; the deterministic CPU baseline stays authoritative.
-
-Перед эксплуатацией прочитайте [release notes 0.2.0](docs/release/RELEASE_NOTES_0.2.0.md), [CI/release guide](docs/operations/CI_RELEASE.md), [deployment boundary](docs/operations/DEPLOYMENT.md) и [backup/restore guide](docs/operations/BACKUP_RESTORE.md).
+Перед эксплуатацией прочитайте [release notes](docs/release/RELEASE_NOTES_0.3.0.md),
+[installation guide](docs/operations/INSTALL_AND_PAIR.md),
+[deployment boundary](docs/operations/DEPLOYMENT.md) и
+[backup/restore guide](docs/operations/BACKUP_RESTORE.md).

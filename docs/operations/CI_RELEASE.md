@@ -34,8 +34,8 @@ proposals still require exact-pin review and the affected gates.
 ## Validation state
 
 - YAML syntax, full-SHA action references and read-only workflow permissions: PASS.
-- Canonical Windows gate: PASS; Android lint/unit/debug/release-R8, 79 contract/release tests and
-  523 server tests against PostgreSQL 18.4/pgvector 0.8.6, with one expected Windows symlink skip
+- Canonical Windows gate: PASS; Android lint/unit/debug/release-R8, 128 contract/release tests and
+  668 server tests against PostgreSQL 18.4/pgvector 0.8.6, with one expected Windows symlink skip
   and exact cleanup.
 - Isolated GPU static gate: PASS; lint/format/mypy and 21 tests, with two expected Windows symlink
   skips. No accelerator/model claim is made.
@@ -56,11 +56,13 @@ The candidate bundle is delivery evidence, not a production release. It is inten
 and private to the workflow run. Production signing, GitHub Release/registry publication and live
 deployment require the explicit decisions and approval in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-The private repository's first GitHub release, `v0.2.0`, is a manually approved development
-distribution assembled by `scripts/package-release.ps1` from an immutable local tag. The script
-runs the canonical gates, signs the minified APK with the retained local development key, exports
-its public certificate, creates a CPU-only Docker image archive, reloads and smokes the archive,
-and generates SBOMs, `release-manifest.json` and `SHA256SUMS`. Manual `gh release create` uploads
-those generated files only after the bundle passes. This path does not alter the candidate
-workflow's read-only permissions, push an image to a registry, perform production signing, or
-deploy/migrate a persistent target.
+The private repository's manually approved development distributions are assembled by
+`scripts/package-release.ps1` from an immutable local tag. The `v0.3.0` path produces a hardened
+APK, a separately identified trusted-LAN APK, and a CPU-only `linux/amd64` server-installer ZIP.
+The script runs the canonical gates, verifies both APK manifests and the retained development
+signer, exports the public certificate, creates and reloads the Docker image archive, runs the
+combined admin/mobile runtime smoke, and generates SBOMs, `release-manifest.json` and
+`SHA256SUMS`. Manual `gh release create --prerelease` uploads only the verified generated files.
+This local path is also the supported fallback when hosted CI minutes are unavailable. It does
+not push an image to a registry, perform production signing, or deploy/migrate a persistent
+target. Installation and pairing are documented in [`INSTALL_AND_PAIR.md`](INSTALL_AND_PAIR.md).

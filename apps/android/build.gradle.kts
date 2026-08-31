@@ -20,8 +20,8 @@ android {
         applicationId = if (qaSideBySide) "app.autplay.qa" else "app.autplay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -33,10 +33,21 @@ android {
                 "proguard-rules.pro",
             )
         }
+        create("trustedLan") {
+            initWith(getByName("release"))
+            // The packaged personal-server topology is deliberately limited to a trusted
+            // RFC1918 LAN and plain HTTP. Keep that exception opt-in and machine-visible.
+            applicationIdSuffix = ".lan"
+            isDebuggable = true
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     bundle {

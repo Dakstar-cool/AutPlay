@@ -18,7 +18,10 @@ class OkHttpAdmissionPortTest {
             server.enqueue(noStore("""{"review_locator":"review-rotated-value-1","poll_bearer":"poll-rotated-value-001"}"""))
             server.enqueue(noStore("""{"request_id":"$REQUEST_ID","state":"APPROVED","expires_at":"2026-08-25T12:15:00Z","approved_account_id":"$USER_ID","approved_account_label":"Owner"}"""))
             val checkpoint = checkpoint()
-            val port = OkHttpAdmissionPort({ server.url("/").toString().trimEnd('/') })
+            val port = OkHttpAdmissionPort(
+                { server.url("/").toString().trimEnd('/') },
+                allowUnsafeDevelopmentHttp = true,
+            )
             val recoveryWire = """{"request_id":"$REQUEST_ID","request_sha256":"${"a".repeat(64)}","expected_server_instance_id":"$SERVER_ID","expected_identity_epoch":1,"expected_identity_thumbprint_sha256":"${"b".repeat(64)}","device_key_thumbprint_sha256":"${"c".repeat(64)}","recovery_nonce_b64url":"${"N".repeat(43)}","proof_b64url":"${"P".repeat(86)}"}"""
 
             val recovered = port.recover(AdmissionRequest(checkpoint, recoveryWire))
@@ -51,13 +54,45 @@ class OkHttpAdmissionPortTest {
         server.start()
         try {
             server.enqueue(MockResponse().setResponseCode(202).setBody("""{"review_locator":"leaked-locator-value","poll_bearer":"leaked-poll-value-01"}"""))
-            val port = OkHttpAdmissionPort({ server.url("/").toString().trimEnd('/') })
+            val port = OkHttpAdmissionPort(
+                { server.url("/").toString().trimEnd('/') },
+                allowUnsafeDevelopmentHttp = true,
+            )
             assertEquals(
                 PairingNetworkResult.Failure("admission_request_unavailable"),
                 port.request(AdmissionRequest(checkpoint(), "{}")),
             )
         } finally {
             server.close()
+        }
+    }
+
+    @Test fun admissionRedirectDoesNotForwardRequestMaterial() = runBlocking {
+        val trustedServer = MockWebServer()
+        val untrustedServer = MockWebServer()
+        trustedServer.start()
+        untrustedServer.start()
+        try {
+            trustedServer.enqueue(
+                MockResponse()
+                    .setResponseCode(307)
+                    .setHeader("Cache-Control", "no-store")
+                    .setHeader("Location", untrustedServer.url("/capture")),
+            )
+            val port = OkHttpAdmissionPort(
+                { trustedServer.url("/").toString().trimEnd('/') },
+                allowUnsafeDevelopmentHttp = true,
+            )
+
+            assertEquals(
+                PairingNetworkResult.Failure("admission_request_unavailable"),
+                port.request(AdmissionRequest(checkpoint(), "{\"private\":\"material\"}")),
+            )
+            assertEquals(1, trustedServer.requestCount)
+            assertEquals(0, untrustedServer.requestCount)
+        } finally {
+            trustedServer.close()
+            untrustedServer.close()
         }
     }
 

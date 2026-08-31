@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="760" viewBox="0 0 1440 760" role="img" aria-labelledby="title description">
+  <title id="title">Real AutPlay product captures</title>
+  <desc id="description">Android Home, offline Vault search, local Library, and the loopback administrative Web interface.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7f3ed"/>
+      <stop offset="1" stop-color="#eee7de"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#2d2320" flood-opacity="0.18"/>
+    </filter>
+    <clipPath id="home"><rect x="44" y="128" width="216" height="480" rx="28"/></clipPath>
+    <clipPath id="search"><rect x="298" y="128" width="216" height="480" rx="28"/></clipPath>
+    <clipPath id="library"><rect x="552" y="128" width="216" height="480" rx="28"/></clipPath>
+    <clipPath id="admin"><rect x="820" y="128" width="572" height="480" rx="24"/></clipPath>
+  </defs>
+  <rect width="1440" height="760" rx="32" fill="url(#bg)"/>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif">
+    <text x="44" y="58" fill="#ff5b35" font-size="14" font-weight="800" letter-spacing="2.2">PRODUCT PROOF · REAL CAPTURES</text>
+    <text x="44" y="96" fill="#171419" font-size="25" font-weight="720">Android работает локально. Сервер добавляется отдельно.</text>
+
+    <g filter="url(#shadow)">
+      <rect x="32" y="112" width="240" height="512" rx="42" fill="#111217"/>
+      <image href="../../../docs/implementation/evidence/frontend_m4/physical_samsung_m52/home_ru_light.png" x="44" y="128" width="216" height="480" preserveAspectRatio="xMidYMid slice" clip-path="url(#home)"/>
+      <rect x="286" y="112" width="240" height="512" rx="42" fill="#111217"/>
+      <image href="../../../docs/implementation/evidence/frontend_m4/physical_samsung_m52/search_vault_offline_ru_dark.png" x="298" y="128" width="216" height="480" preserveAspectRatio="xMidYMid slice" clip-path="url(#search)"/>
+      <rect x="540" y="112" width="240" height="512" rx="42" fill="#111217"/>
+      <image href="../../../docs/implementation/evidence/frontend_m4/physical_samsung_m52/library_populated_ru_light.png" x="552" y="128" width="216" height="480" preserveAspectRatio="xMidYMid slice" clip-path="url(#library)"/>
+      <rect x="804" y="112" width="604" height="512" rx="34" fill="#101116"/>
+      <image href="../../../docs/implementation/evidence/m6-admin-web/desktop-dashboard-en.png" x="820" y="128" width="572" height="533" preserveAspectRatio="xMidYMin slice" clip-path="url(#admin)"/>
+    </g>
+
+    <g font-size="14" font-weight="750" fill="#171419">
+      <circle cx="48" cy="672" r="6" fill="#ff5b35"/><text x="64" y="678">HOME · PLAYBACK</text>
+      <circle cx="302" cy="672" r="6" fill="#7a67ff"/><text x="318" y="678">OFFLINE VAULT SEARCH</text>
+      <circle cx="556" cy="672" r="6" fill="#55b77b"/><text x="572" y="678">LOCAL LIBRARY</text>
+      <circle cx="820" cy="672" r="6" fill="#37aee2"/><text x="836" y="678">LOOPBACK WEB ADMIN</text>
+    </g>
+    <text x="44" y="724" fill="#756e68" font-size="14">Samsung Galaxy M52 captures · Compose + Media3 + Room · server UI remains optional</text>
+  </g>
+</svg>

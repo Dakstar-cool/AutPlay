@@ -6,6 +6,7 @@ import app.autplay.data.security.M5DeviceKeyStore
 import app.autplay.data.security.M5RequestSigner
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.security.readAccessToken
+import app.autplay.data.network.withAutPlayRedirectPolicy
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
@@ -45,8 +46,9 @@ class OkHttpProfilePairingPort(
     private val keyAliasForProfile: (ServerProfileId) -> String = { "autplay.m5.${it.value}" },
     private val appVersion: String = "0.1.0",
     private val allowUnsafeDevelopmentHttp: Boolean = false,
-    private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
+    client: OkHttpClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
 ) : ProfilePairingPort {
+    private val client = client.withAutPlayRedirectPolicy()
     override suspend fun discovery(apiOrigin: String) = requestPublic(apiOrigin, "/pairing/discovery", MAX_DISCOVERY_BYTES) { root ->
         val envelope = signedEnvelope(root, DISCOVERY_DOMAIN, MAX_DISCOVERY_BYTES)
         val payload = envelope.payload
