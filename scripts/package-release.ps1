@@ -156,7 +156,6 @@ try {
     $certificateAsset = Join-Path $outputRoot "autplay-$releaseVersion-development-signing-cert.der"
     $trustedLanAsset = Join-Path $outputRoot "autplay-$releaseVersion-trusted-lan.apk"
     Copy-Item -LiteralPath $unsignedSource -Destination $unsignedAsset
-    Copy-Item -LiteralPath $trustedLanSource -Destination $trustedLanAsset
     & $zipalign -f -p 4 $unsignedSource $alignedAsset
     if ($LASTEXITCODE -ne 0) {
         throw "Release APK zipalign failed"
@@ -173,6 +172,16 @@ try {
             $alignedAsset
         if ($LASTEXITCODE -ne 0) {
             throw "Development APK signing failed"
+        }
+        & $apksigner sign `
+            --ks $DevelopmentKeystore `
+            --ks-key-alias androiddebugkey `
+            --ks-pass env:AUTPLAY_RELEASE_DEV_KEY_PASSWORD `
+            --key-pass env:AUTPLAY_RELEASE_DEV_KEY_PASSWORD `
+            --out $trustedLanAsset `
+            $trustedLanSource
+        if ($LASTEXITCODE -ne 0) {
+            throw "Trusted-LAN APK development signing failed"
         }
         & $keytool -exportcert `
             -alias androiddebugkey `

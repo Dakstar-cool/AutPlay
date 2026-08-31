@@ -190,6 +190,8 @@ def test_release_packager_emits_both_apks_and_the_server_installer() -> None:
     ).read_text(encoding="utf-8").count("AutPlay LAN") == 1
     assert "assembleTrustedLan" in packager
     assert "trusted-lan.apk" in packager
+    assert "--out $trustedLanAsset" in packager
+    assert "Trusted-LAN APK development signing failed" in packager
     assert "server-installer-manifest.json" in packager
     assert "installer.zip" in packager
     assert "RELEASE_NOTES_$releaseVersion.md" in packager
