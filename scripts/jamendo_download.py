@@ -1,8 +1,8 @@
 """Search Jamendo and download one artist-authorized track for personal use.
 
 The workflow is deliberately sequential: search the official API, reject
-tracks whose authors disabled downloads, rank the eligible results, download
-through the official file endpoint, verify the MP3, and publish it together
+tracks whose authors disabled downloads, rank the eligible results, refresh
+permission, download from the allowlisted storage URL, verify the MP3, and publish it together
 with an attribution/license sidecar. This standalone CLI does not call the
 AutPlay server. The server has a separate disabled-by-default adapter with the
 same permission boundary; neither path claims Vault or READY state.
@@ -19,22 +19,23 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Protocol
+from typing import Never, Protocol
 from urllib.parse import urlsplit
 
 JAMENDO_API_VERSION = "3.0"
 JAMENDO_TRACKS_URL = "https://api.jamendo.com/v3.0/tracks/"
-JAMENDO_TRACK_FILE_URL = "https://api.jamendo.com/v3.0/tracks/file/"
 MAX_QUERY_LENGTH = 200
 MAX_RESULTS = 50
 MAX_SEARCH_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_DOWNLOAD_BYTES = 150 * 1024 * 1024
-DEFAULT_TIMEOUT_SECONDS = 30
+DEFAULT_TIMEOUT_SECONDS = 15
+MIN_PROVIDER_INTERVAL_SECONDS = 1.0
 USER_AGENT = "AutPlay-Authorized-Jamendo-Tool/1.0"
 _AUDIO_CONTENT_TYPES = frozenset(
     {"application/octet-stream", "audio/mp3", "audio/mpeg", "binary/octet-stream"}
@@ -64,6 +65,11 @@ _RESERVED_WINDOWS_NAMES = {
     "nul",
     "prn",
 }
+_PROVIDER_FAILURE_CODES = {
+    5: "provider_client_id_invalid",
+    6: "provider_rate_limit_exceeded",
+    11: "provider_application_suspended",
+}
 
 
 class JamendoToolError(RuntimeError):
@@ -72,6 +78,13 @@ class JamendoToolError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+class StableArgumentParser(argparse.ArgumentParser):
+    """Convert argparse validation failures to one stable machine error."""
+
+    def error(self, _message: str) -> Never:
+        raise JamendoToolError("arguments_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +98,7 @@ class TrackCandidate:
     duration_seconds: int
     license_url: str
     share_url: str
+    download_url: str
 
     @property
     def duration(self) -> str:
@@ -129,9 +143,11 @@ class SearchTransport(Protocol):
 class DownloadTransport(Protocol):
     """Minimal injected boundary for an authorized Jamendo file request."""
 
+    def fetch_track_response(self, track_id: str) -> bytes: ...
+
     def download_audio(
         self,
-        track_id: str,
+        download_url: str,
         destination: Path,
         *,
         max_bytes: int,
@@ -139,7 +155,7 @@ class DownloadTransport(Protocol):
 
 
 class CurlTransport:
-    """Sequential HTTPS-only Jamendo transport with bounded transient retries."""
+    """Sequential HTTPS-only Jamendo transport with redirects disabled."""
 
     def __init__(
         self,
@@ -147,8 +163,8 @@ class CurlTransport:
         *,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        if not 5 <= timeout_seconds <= 60:
-            raise ValueError("timeout_seconds must be between 5 and 60")
+        if not 5 <= timeout_seconds <= 15:
+            raise JamendoToolError("timeout_invalid")
         curl_name = "curl.exe" if os.name == "nt" else "curl"
         curl_path = shutil.which(curl_name) or shutil.which("curl")
         if curl_path is None:
@@ -156,6 +172,7 @@ class CurlTransport:
         self._client_id = load_client_id(client_id_file)
         self._curl = curl_path
         self._timeout_seconds = timeout_seconds
+        self._last_request_started_at: float | None = None
 
     def fetch_search_response(self, query: str, *, limit: int) -> bytes:
         """Request one relevance-ordered page from the official tracks API."""
@@ -183,28 +200,53 @@ class CurlTransport:
             except OSError as error:
                 raise JamendoToolError("search_response_invalid") from error
 
+    def fetch_track_response(self, track_id: str) -> bytes:
+        """Refresh one exact track immediately before acquisition."""
+
+        if re.fullmatch(r"\d{1,20}", track_id) is None:
+            raise JamendoToolError("track_id_invalid")
+        with tempfile.TemporaryDirectory(prefix="autplay-jamendo-refresh-") as directory:
+            response_path = Path(directory) / "response.json"
+            self._request_to_file(
+                JAMENDO_TRACKS_URL,
+                response_path,
+                parameters=(
+                    ("format", "json"),
+                    ("limit", "1"),
+                    ("id", track_id),
+                    ("include", "licenses"),
+                    ("audiodlformat", "mp32"),
+                    ("type", "single albumtrack"),
+                ),
+                accept="application/json",
+                max_bytes=MAX_SEARCH_BYTES,
+                failure_code="permission_recheck_failed",
+                include_client_id=True,
+            )
+            try:
+                return response_path.read_bytes()
+            except OSError as error:
+                raise JamendoToolError("permission_recheck_failed") from error
+
     def download_audio(
         self,
-        track_id: str,
+        download_url: str,
         destination: Path,
         *,
         max_bytes: int,
     ) -> TransferReceipt:
-        """Download one track through Jamendo's official file redirect endpoint."""
+        """Download from one validated Jamendo storage URL without redirects."""
 
-        if re.fullmatch(r"\d{1,20}", track_id) is None:
-            raise JamendoToolError("track_id_invalid")
+        if not _is_jamendo_download_url(download_url):
+            raise JamendoToolError("download_url_invalid")
         return self._request_to_file(
-            JAMENDO_TRACK_FILE_URL,
+            download_url,
             destination,
-            parameters=(
-                ("id", track_id),
-                ("action", "download"),
-                ("audioformat", "mp32"),
-            ),
+            parameters=(),
             accept="audio/mpeg,application/octet-stream;q=0.9,*/*;q=0.1",
             max_bytes=max_bytes,
             failure_code="download_failed",
+            include_client_id=False,
         )
 
     def _request_to_file(
@@ -216,28 +258,21 @@ class CurlTransport:
         accept: str,
         max_bytes: int,
         failure_code: str,
+        include_client_id: bool = True,
     ) -> TransferReceipt:
+        self._wait_for_request_slot()
         arguments = [
             self._curl,
             "--silent",
             "--show-error",
             "--fail",
-            "--location",
             "--proto",
             "=https",
-            "--proto-redir",
-            "=https",
             "--max-redirs",
-            "5",
+            "0",
             "--connect-timeout",
             "10",
             "--max-time",
-            str(self._timeout_seconds),
-            "--retry",
-            "2",
-            "--retry-delay",
-            "1",
-            "--retry-max-time",
             str(self._timeout_seconds),
             "--max-filesize",
             str(max_bytes),
@@ -245,10 +280,11 @@ class CurlTransport:
             USER_AGENT,
             "--header",
             f"Accept: {accept}",
-            "--get",
-            "--data-urlencode",
-            "client_id@-",
         ]
+        if include_client_id or parameters:
+            arguments.append("--get")
+        if include_client_id:
+            arguments.extend(("--data-urlencode", "client_id@-"))
         for name, value in parameters:
             arguments.extend(("--data-urlencode", f"{name}={value}"))
         arguments.extend(
@@ -263,7 +299,7 @@ class CurlTransport:
         try:
             completed = subprocess.run(
                 arguments,
-                input=self._client_id,
+                input=self._client_id if include_client_id else None,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -286,6 +322,14 @@ class CurlTransport:
             raise JamendoToolError("response_too_large")
         content_type = metadata[0].partition(";")[0].strip().casefold()
         return TransferReceipt(content_type, byte_count)
+
+    def _wait_for_request_slot(self) -> None:
+        now = time.monotonic()
+        if self._last_request_started_at is not None:
+            remaining = MIN_PROVIDER_INTERVAL_SECONDS - (now - self._last_request_started_at)
+            if remaining > 0:
+                time.sleep(remaining)
+        self._last_request_started_at = time.monotonic()
 
 
 def load_client_id(path: Path) -> str:
@@ -314,7 +358,12 @@ def parse_search_response(payload: bytes, *, limit: int) -> tuple[TrackCandidate
     headers = document.get("headers")
     if not isinstance(headers, dict):
         raise JamendoToolError("search_response_invalid")
-    if headers.get("status") != "success" or headers.get("code") != 0:
+    provider_code = headers.get("code")
+    if headers.get("status") != "success" or provider_code != 0:
+        if isinstance(provider_code, int) and not isinstance(provider_code, bool):
+            failure_code = _PROVIDER_FAILURE_CODES.get(provider_code)
+            if failure_code is not None:
+                raise JamendoToolError(failure_code)
         raise JamendoToolError("provider_response_failed")
     results = document.get("results")
     if not isinstance(results, list) or len(results) > limit:
@@ -350,7 +399,7 @@ def search_tracks(
     if not normalized_query or len(normalized_query) > MAX_QUERY_LENGTH:
         raise JamendoToolError("query_invalid")
     if not 1 <= limit <= MAX_RESULTS:
-        raise ValueError(f"limit must be between 1 and {MAX_RESULTS}")
+        raise JamendoToolError("limit_invalid")
     return parse_search_response(
         transport.fetch_search_response(normalized_query, limit=limit),
         limit=limit,
@@ -386,7 +435,7 @@ def select_track(
             raise JamendoToolError("track_index_invalid")
         return ranked[index - 1]
     if not 0.0 <= minimum_score <= 1.0:
-        raise ValueError("minimum_score must be between zero and one")
+        raise JamendoToolError("minimum_score_invalid")
     if ranked[0].score < minimum_score:
         raise JamendoToolError("match_too_weak")
     return ranked[0]
@@ -402,7 +451,7 @@ def download_track(
     """Download, verify, attribute, and publish one permitted Jamendo track."""
 
     if not 1024 <= max_bytes <= 1024 * 1024 * 1024:
-        raise ValueError("max_bytes must be between 1 KiB and 1 GiB")
+        raise JamendoToolError("max_bytes_invalid")
     try:
         output_directory.mkdir(parents=True, exist_ok=True)
     except OSError as error:
@@ -410,9 +459,8 @@ def download_track(
     if not output_directory.is_dir():
         raise JamendoToolError("output_directory_unavailable")
 
-    file_stem = sanitize_filename(
-        f"{ranked_track.candidate.artist} - {ranked_track.candidate.title}"
-    )
+    refreshed = refresh_track_permission(ranked_track.candidate.track_id, transport=transport)
+    file_stem = sanitize_filename(f"{refreshed.artist} - {refreshed.title}")
     audio_descriptor, audio_name = tempfile.mkstemp(
         prefix=".autplay-jamendo-",
         suffix=".mp3.part",
@@ -429,12 +477,12 @@ def download_track(
     attribution_temporary_path = Path(attribution_name)
     try:
         receipt = transport.download_audio(
-            ranked_track.candidate.track_id,
+            refreshed.download_url,
             audio_temporary_path,
             max_bytes=max_bytes,
         )
         _validate_download(audio_temporary_path, receipt)
-        _write_attribution(attribution_temporary_path, ranked_track.candidate)
+        _write_attribution(attribution_temporary_path, refreshed)
         audio_path, attribution_path = _publish_pair(
             audio_temporary_path,
             attribution_temporary_path,
@@ -445,7 +493,7 @@ def download_track(
             audio_path,
             attribution_path,
             receipt.byte_count,
-            ranked_track.candidate,
+            refreshed,
         )
     finally:
         audio_temporary_path.unlink(missing_ok=True)
@@ -485,7 +533,17 @@ def _parse_candidate(value: Mapping[str, object]) -> TrackCandidate:
         duration_seconds,
         license_url,
         share_url,
+        _required_download_url(value, track_id),
     )
+
+
+def refresh_track_permission(track_id: str, *, transport: DownloadTransport) -> TrackCandidate:
+    """Require fresh, exact, downloadable provider evidence before audio bytes."""
+
+    candidates = parse_search_response(transport.fetch_track_response(track_id), limit=1)
+    if len(candidates) != 1 or candidates[0].track_id != track_id:
+        raise JamendoToolError("download_permission_revoked")
+    return candidates[0]
 
 
 def _required_digits(value: Mapping[str, object], key: str) -> str:
@@ -546,6 +604,29 @@ def _is_jamendo_share_url(url: str) -> bool:
         parsed.scheme == "https"
         and (hostname in {"jamendo.com", "jamen.do"} or hostname.endswith(".jamendo.com"))
         and parsed.username is None
+    )
+
+
+def _required_download_url(value: Mapping[str, object], track_id: str) -> str:
+    url = _required_text(value, "audiodownload", 2_048)
+    if not _is_jamendo_download_url(url, track_id=track_id):
+        raise JamendoToolError("download_url_invalid")
+    return url
+
+
+def _is_jamendo_download_url(url: str, *, track_id: str | None = None) -> bool:
+    parsed = urlsplit(url)
+    hostname = (parsed.hostname or "").casefold()
+    if track_id is None:
+        path_allowed = re.match(r"^/download/track/\d{1,20}/", parsed.path) is not None
+    else:
+        path_allowed = parsed.path.startswith(f"/download/track/{track_id}/")
+    return (
+        parsed.scheme == "https"
+        and re.fullmatch(r"prod-\d+\.storage\.jamendo\.com", hostname) is not None
+        and path_allowed
+        and parsed.username is None
+        and parsed.port in {None, 443}
     )
 
 
@@ -629,24 +710,14 @@ def _publish_pair(
         attribution_destination = directory / f"{stem}{qualifier}.jamendo.json"
         if audio_destination.exists() or attribution_destination.exists():
             continue
-        attribution_published = False
-        audio_published = False
         try:
             _publish_one(attribution_source, attribution_destination)
-            attribution_published = True
             _publish_one(audio_source, audio_destination)
-            audio_published = True
         except FileExistsError:
-            if audio_published:
-                audio_destination.unlink(missing_ok=True)
-            if attribution_published:
-                attribution_destination.unlink(missing_ok=True)
+            # Never unlink a published path: another process can replace it between publication
+            # and cleanup. A rare orphan is safer than deleting a foreign file.
             continue
         except OSError as error:
-            if audio_published:
-                audio_destination.unlink(missing_ok=True)
-            if attribution_published:
-                attribution_destination.unlink(missing_ok=True)
             raise JamendoToolError("download_publish_failed") from error
         audio_source.unlink(missing_ok=True)
         attribution_source.unlink(missing_ok=True)
@@ -662,16 +733,14 @@ def _publish_one(source: Path, destination: Path) -> None:
             raise
         if error.errno not in {errno.EPERM, errno.EXDEV, errno.ENOTSUP}:
             raise
-        try:
-            with source.open("rb") as input_file, destination.open("xb") as output_file:
-                shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
-        except OSError:
-            destination.unlink(missing_ok=True)
-            raise
+        # Leave a partial/orphan destination on failure. Deleting by pathname is unsafe because
+        # another process can replace that path before cleanup and would then lose its own file.
+        with source.open("rb") as input_file, destination.open("xb") as output_file:
+            shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = StableArgumentParser(
         description=(
             "Search Jamendo API v3.0 and download one track whose artist enabled downloads. "
             "Use only for authorized non-commercial personal use and follow the saved license."
@@ -702,9 +771,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(arguments: Sequence[str] | None = None) -> int:
     """Run the standalone CLI and return a stable process status."""
 
-    parser = _build_parser()
-    options = parser.parse_args(arguments)
     try:
+        options = _build_parser().parse_args(arguments)
         transport = CurlTransport(options.client_id_file, timeout_seconds=options.timeout)
         candidates = search_tracks(options.query, transport=transport, limit=options.limit)
         ranked = rank_tracks(options.query, candidates)
@@ -741,8 +809,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     except JamendoToolError as error:
         print(f"Error: {error.code}", file=sys.stderr)
         return 2
-    except ValueError as error:
-        print(f"Error: {error}", file=sys.stderr)
+    except ValueError:
+        print("Error: arguments_invalid", file=sys.stderr)
         return 2
 
 

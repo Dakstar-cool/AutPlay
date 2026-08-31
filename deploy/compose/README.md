@@ -4,7 +4,7 @@ The base Compose file runs exactly one PostgreSQL 18 service with pgvector and p
 
 `compose.runtime.yaml` adds the `runtime` profile: one-shot Alembic migration followed by separate API, CPU-worker, and direct-stream processes built from the same non-root CPU image whose base is digest-pinned. The worker image pins FFmpeg/FFprobe and Chromaprint/fpcalc, but the isolated stream process imports no worker or media-tool code and receives the Vault volume read-only. API and worker share the same writable Vault volume so staging and final publication remain in one filesystem atomicity domain. Healthchecks and ingest require no GPU or external Internet access. Both published ports default to loopback-only. The root allowlist `.dockerignore` limits the build context to the server lock, package source, and migration inputs so workspace secrets and caches are never uploaded to the builder.
 
-Before parsing the runtime overlay, set `AUTPLAY_RUNTIME_AUTH_SECRET_FILE` to a local file outside the repository containing at least 32 random characters. Compose mounts it read-only; do not place a real credential in YAML, source control, shell history, or logs.
+Before parsing the runtime overlay, set `AUTPLAY_RUNTIME_AUTH_SECRET_FILE` to a local file outside the repository containing at least 32 random characters. Compose mounts it read-only; do not place a real credential in YAML, source control, shell history, or logs. Native Linux Compose implements a `file:` secret as a bind mount and cannot remap its UID/GID. Keep the parent directory owner-only (`0700`) and make the secret readable by the non-root container UID (for a single-operator disposable host, `0444` inside that closed directory); production secret delivery remains a separate deployment decision.
 
 ```text
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait
@@ -102,7 +102,8 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 ```
 
 `AUTPLAY_GPU_DEVICE_SELECTOR` accepts `auto`, `uuid:<GPU UUID>`, `pci:<PCI bus ID>` or `index:<n>`.
-Use `scripts/test-p12-gpu.ps1` to list and exercise the selection before starting the service. P12
+Use `scripts/test-p12-gpu.ps1` or the isolated Linux Docker gate
+`scripts/test-p12-gpu.sh` to list and exercise the selection before starting the service. P12
 contains the pinned ONNX Runtime CUDA process but no approved weights. It therefore exits
 fail-closed with a stable configuration/artifact error before claiming work until an eligible
 registry model and hash-addressed artifact are supplied. Process restart is bounded to three

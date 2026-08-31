@@ -14,9 +14,6 @@ from jsonschema import Draft202012Validator, FormatChecker
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "contracts" / "discovery" / "v1" / "automation-policy.json"
 SCENARIOS = ROOT / "tests" / "fixtures" / "discovery" / "v1" / "automation-scenarios.json"
-PROMPT = (
-    ROOT / "docs" / "build-pack" / "prompts" / "POST_MVP_A1C_SCHEDULED_DISCOVERY_AUTO_IMPORT.md"
-)
 ADR = ROOT / "docs" / "adr" / "ADR-042-a1c-scheduled-discovery-auto-import.md"
 COMMAND_SCHEMA = ROOT / "contracts" / "discovery" / "v1" / "automation-command.schema.json"
 MOBILE_SNAPSHOT_SCHEMA = (
@@ -42,7 +39,8 @@ def test_a1c_artifacts_freeze_one_default_off_policy() -> None:
     assert policy["automation_policy_version"] == 1
     assert policy["operator_gate_default"] is False
     assert policy["safe_product_default"] == ["MANUAL_ONLY", "REVIEW_REQUIRED"]
-    assert PROMPT.is_file() and ADR.is_file()
+    assert ADR.is_file()
+    assert "Status: Accepted for A1C implementation" in ADR.read_text(encoding="utf-8")
     assert COMMAND_SCHEMA.is_file()
     assert policy["command_schema"] == COMMAND_SCHEMA.name
     assert policy["web_operation_namespace"] == {

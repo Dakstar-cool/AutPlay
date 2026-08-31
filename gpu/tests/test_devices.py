@@ -10,7 +10,7 @@ from autplay_gpu.devices import (
 
 INVENTORY = "\n".join(
     (
-        "0, GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee, 0000:01:00.0, "
+        "0, GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee, 00000000:01:00.0, "
         "NVIDIA RTX 3060, 12288, 9000, 8.6, 600.1",
         "1, GPU-11111111-2222-3333-4444-555555555555, 0000:02:00.0, "
         "NVIDIA RTX Future, 24576, 18000, 9.0, 600.1",
@@ -34,6 +34,7 @@ def test_auto_selects_highest_compatible_device_and_records_reason() -> None:
     ("selector", "index"),
     (
         ("uuid:GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", 0),
+        ("pci:00000000:01:00.0", 0),
         ("pci:0000:02:00.0", 1),
         ("index:0", 0),
     ),

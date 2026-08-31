@@ -9,6 +9,10 @@ from autplay_gpu.settings import load_gpu_settings
 
 def test_gpu_settings_support_auto_and_stable_manual_selection() -> None:
     assert load_gpu_settings({}).device_selector == "auto"
+    assert (
+        load_gpu_settings({"AUTPLAY_GPU_DEVICE_SELECTOR": "pci:00000000:01:00.0"}).device_selector
+        == "pci:00000000:01:00.0"
+    )
     model_cache_root = (Path.cwd() / "fixture-model-cache").resolve()
     explicit = load_gpu_settings(
         {

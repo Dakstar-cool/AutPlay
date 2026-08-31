@@ -128,8 +128,6 @@ def test_openapi_freezes_friend_only_no_store_surface() -> None:
 
 
 def test_accepted_s2_documents_exist() -> None:
-    for path in (
-        ROOT / "docs" / "adr" / "ADR-040-s2-profile-statistics-privacy.md",
-        ROOT / "docs" / "build-pack" / "prompts" / "POST_MVP_S2_PROFILE_STATISTICS_PRIVACY.md",
-    ):
-        assert path.is_file()
+    adr = ROOT / "docs" / "adr" / "ADR-040-s2-profile-statistics-privacy.md"
+    assert adr.is_file()
+    assert "Status: Accepted for implementation" in adr.read_text(encoding="utf-8")

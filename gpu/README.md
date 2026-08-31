@@ -27,3 +27,9 @@ The worker verifies registry eligibility, artifact path/size/SHA-256 and CUDA pr
 before claiming a job. Missing hardware, configuration or reviewed bytes fails only this optional
 process. `--check-readiness` intentionally checks accelerator and database infrastructure without
 loading a large model; use `--once` for one real durable worker tick.
+
+Use `scripts/test-p12-gpu.ps1` for a host-installed `uv` workflow or
+`scripts/test-p12-gpu.sh` on a Linux Docker/NVIDIA Container Toolkit host. The Docker gate builds
+the isolated image and runs list, deterministic selection and configuration checks with no network,
+no volumes, a read-only root filesystem and exact-name cleanup. PCI selectors accept both NVML's
+legacy four-digit and current eight-digit domain forms.

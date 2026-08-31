@@ -1,5 +1,5 @@
 param(
-    [ValidatePattern('^(auto|uuid:GPU-[A-Za-z0-9-]{8,100}|pci:(?:[0-9A-Fa-f]{4}:)?[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}\.[0-7]|index:[0-9]{1,3})$')]
+    [ValidatePattern('^(auto|uuid:GPU-[A-Za-z0-9-]{8,100}|pci:(?:(?:[0-9A-Fa-f]{4}|[0-9A-Fa-f]{8}):)?[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}\.[0-7]|index:[0-9]{1,3})$')]
     [string]$DeviceSelector = "auto"
 )
 

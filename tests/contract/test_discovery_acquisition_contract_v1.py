@@ -17,7 +17,6 @@ FIXTURES = ROOT / "tests" / "fixtures" / "discovery" / "v1"
 POLICY = SCHEMAS / "contract-policy.json"
 CONTRACT = ROOT / "docs" / "design" / "AutPlay_Discovery_Acquisition_Contract_v1.md"
 ADR = ROOT / "docs" / "adr" / "ADR-033-post-mvp-a1a-discovery-acquisition-boundary.md"
-PROMPT = ROOT / "docs" / "build-pack" / "prompts" / "POST_MVP_A1A_DISCOVERY_ACQUISITION_CONTRACT.md"
 
 REQUIRED_SCHEMAS = {
     "adapter-manifest.schema.json",
@@ -181,10 +180,11 @@ def scenarios() -> dict[str, dict[str, Any]]:
 
 def test_contract_is_accepted_but_runtime_is_explicitly_not_implemented() -> None:
     policy = load_json(POLICY)
+    contract = CONTRACT.read_text(encoding="utf-8")
     assert policy["status"] == "ACCEPTED_CONTRACT_RUNTIME_NOT_IMPLEMENTED"
-    assert "ACCEPTED CONTRACT; RUNTIME NOT IMPLEMENTED" in CONTRACT.read_text(encoding="utf-8")
+    assert "ACCEPTED CONTRACT; RUNTIME NOT IMPLEMENTED" in contract
+    assert "A1A adds contract artifacts only" in contract
     assert "Status: Accepted" in ADR.read_text(encoding="utf-8")
-    assert "Implementation effect | Contract artifacts only" in PROMPT.read_text(encoding="utf-8")
 
 
 def test_all_a1a_json_schemas_are_valid_versioned_and_runtime_inactive() -> None:
@@ -527,12 +527,12 @@ def test_rfc8785_hash_vectors_are_deterministic() -> None:
 
 
 def test_contract_records_exact_a1b_blocker_and_no_provider_choice() -> None:
-    text = "\n".join(path.read_text(encoding="utf-8") for path in (CONTRACT, ADR, PROMPT))
+    text = "\n".join(path.read_text(encoding="utf-8") for path in (CONTRACT, ADR))
     for required in {
         "Exact A1B prerequisite",
         "RELEASE_DISCOVERY",
         "PLAYABLE_ACQUISITION",
-        "no provider",
+        "before a provider is selected",
         "A1C",
         "F-016",
         "ADR-019",

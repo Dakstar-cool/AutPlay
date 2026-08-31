@@ -15,7 +15,7 @@ from autplay.domain.enrichment import AcceleratorDevice, AcceleratorSelection
 
 MAX_NVIDIA_SMI_OUTPUT_BYTES: Final = 64 * 1024
 _UUID = re.compile(r"^GPU-[A-Za-z0-9-]{8,100}$")
-_PCI = re.compile(r"^(?:[0-9A-Fa-f]{4}:)?[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}\.[0-7]$")
+_PCI = re.compile(r"^(?:(?:[0-9A-Fa-f]{4}|[0-9A-Fa-f]{8}):)?[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}\.[0-7]$")
 
 
 class AcceleratorUnavailable(RuntimeError):

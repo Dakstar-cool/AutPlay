@@ -164,6 +164,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -QaSideBySide
 ```
 
+Нумерованный TXT-экспорт можно проверить и преобразовать в новый UTF-8 файл без изменения
+исходника. Режим удаляет ведущие `N.`/`N)` и строки-маркеры вида `=== ... ===`, сохраняет прочие
+ненумерованные строки и никогда не перезаписывает существующий output. Команда не использует сеть
+и не скачивает музыку:
+
+```powershell
+uv run --project server --frozen python -X utf8 scripts/txt_track_import.py `
+  C:\path\playlist.txt `
+  --normalized-output C:\path\playlist.normalized.txt
+```
+
+По умолчанию JSON содержит только агрегаты. Имена исполнителей добавляются лишь по явному
+`--include-artists`, чтобы routine diagnostics не раскрывали содержимое личной коллекции.
+
 <details>
 <summary><strong>Одноразовый CPU runtime</strong></summary>
 
@@ -194,6 +208,13 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-p12-gpu.ps1 `
   -DeviceSelector 'uuid:GPU-...'
+```
+
+Linux NVIDIA host with Docker and NVIDIA Container Toolkit:
+
+```bash
+bash scripts/test-p12-gpu.sh
+bash scripts/test-p12-gpu.sh 'pci:00000000:01:00.0'
 ```
 
 См. [ADR-025](docs/adr/ADR-025-p12-isolated-gpu-enrichment-and-model-rollout.md) и [ADR-027](docs/adr/ADR-027-p14-conditional-phase-reachability.md).
