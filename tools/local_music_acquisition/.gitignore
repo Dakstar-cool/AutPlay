@@ -1,0 +1,7 @@
+.venv/
+.pytest_cache/
+__pycache__/
+downloads/
+final_runs/
+screenshots/
+*.part

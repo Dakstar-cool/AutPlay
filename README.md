@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>Android-плеер, который не перестаёт быть вашим без сети. Личный сервер добавляет синхронизацию, Vault и совместные функции — по желанию.</strong>
+  <strong>Слушайте свою медиатеку на Android без сети. Подключайте личный Linux-сервер только когда нужны синхронизация, Vault, импорт и совместные функции.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Dakstar-cool/AutPlay/releases/tag/v0.3.0"><strong>Скачать v0.3.0</strong></a> ·
+  <a href="https://github.com/Dakstar-cool/AutPlay/releases/tag/v0.3.0"><strong>Скачать Android v0.3.0</strong></a> ·
   <a href="./docs/operations/INSTALL_AND_PAIR.md">Установка и связывание</a> ·
   <a href="#proof">Реальные экраны</a> ·
   <a href="#architecture">Архитектура</a> ·
@@ -17,11 +17,11 @@
 > [!IMPORTANT]
 > `v0.3.0` — development pre-release. APK подписаны сохранённым development key, а готовый серверный installer рассчитан только на доверенную домашнюю RFC1918-сеть. Это не store-ready Android distribution и не public-Internet production deployment.
 
-AutPlay — Android-first, local-first музыкальная система для владельцев личной библиотеки. Room
-хранит локальную истину, Media3 воспроизводит доступный источник, а изменения медиатеки, плейлистов
-и очереди не требуют синхронного ответа сервера. Необязательный CPU-сервер добавляет PostgreSQL,
-неизменяемый файловый Vault, синхронизацию, импорт, рекомендации, друзей и Wave — без обязательного
-облачного аккаунта, CUDA, Redis, Kafka или внешней аналитики.
+AutPlay — local-first Android-плеер для личной музыкальной коллекции. Воспроизведение, поиск,
+медиатека, плейлисты, очередь и загрузки остаются на устройстве и не ждут ответа сервера.
+Необязательный личный Linux-сервер добавляет синхронизацию, неизменяемый файловый Vault, импорт,
+рекомендации, друзей и Wave. PostgreSQL хранит метаданные и задания, а обязательного облачного
+аккаунта, GPU/CUDA, Redis, Kafka и внешней аналитики нет.
 
 ## Быстрый выбор
 
@@ -99,6 +99,7 @@ Server-rendered Web Admin использует отдельную browser-sessio
 | Admin | Loopback SSR Web Admin: devices, sessions, trust, Vault, jobs/imports, review, recovery, diagnostics and audit |
 | Social | Same-server friends, private coarse presence, Wave invitations and capability-limited Android guest access |
 | Discovery | Manual TXT/Jamendo flow и default-off 24-hour automation с отдельным подтверждением `AUTO_IMPORT` |
+| Local tools | Переносимый последовательный acquisition-модуль для явно разрешённых пользователем Jamendo, Hitmo и yt-dlp загрузок; он изолирован от server runtime и Vault authority |
 
 ## Проверяемая граница
 
@@ -196,6 +197,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-releas
 | `contracts` | OpenAPI 3.1, JSON Schema и cross-language vectors |
 | `deploy/compose` | Digest-pinned PostgreSQL и runtime/admin overlays |
 | `deploy/installer` | Проверяемый server installer/control scripts для Windows/Linux |
+| `tools/local_music_acquisition` | Локальный portable acquisition-модуль с точным сопоставлением, явным подтверждением прав и fail-closed provider fallback |
 | `gpu` | Изолированный optional NVIDIA/ONNX enrichment project; моделей в релизе нет |
 | `tests` | Contract, release-policy и end-to-end evidence fixtures |
 | `docs` | Design contracts, ADR, handoffs, operations and release evidence |
