@@ -370,6 +370,9 @@ def test_http_terminal_lifecycle_exact_retry_uses_only_original_revoked_jwt_rece
         profile=RuntimeProfile.TEST,
         database_url=SecretStr(database_url),
         auth_signing_secret=SecretStr(HTTP_AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(
+            "public-access-source-hmac-secret-at-least-32-bytes"
+        ),
         auth_issuer="autplay-m5b-http-test",
         auth_audience="autplay-m5b-http-client",
         access_token_ttl_seconds=600,

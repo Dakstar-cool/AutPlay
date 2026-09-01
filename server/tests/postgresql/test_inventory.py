@@ -137,6 +137,22 @@ S1D_TRIGGERS = frozenset(
         "trg_social_guest_user_session_retire",
     }
 )
+PA2_TABLES = frozenset(
+    {
+        ("account", "account_invitation"),
+        ("account", "account_registration_receipt"),
+        ("account", "account_provisioning_link"),
+        ("account", "account_provisioning_operation_receipt"),
+        ("account", "account_provisioning_rate_window"),
+    }
+)
+PA2_INDEXES = frozenset(
+    {
+        "ix_account_invitation_expiry",
+        "ix_account_registration_receipt_expiry",
+        "ix_account_provisioning_rate_expiry",
+    }
+)
 
 
 def test_migrated_database_has_exact_named_inventory(
@@ -182,10 +198,23 @@ def test_migrated_database_has_exact_named_inventory(
     assert len(function_names) == EXPECTED_FUNCTION_COUNT
     assert len(trigger_names) == EXPECTED_TRIGGER_COUNT
     assert table_names == (
-        expected.tables | A1B_TABLES | A1C_TABLES | S1B_TABLES | S1C_TABLES | S2_TABLES | S1D_TABLES
+        expected.tables
+        | A1B_TABLES
+        | A1C_TABLES
+        | S1B_TABLES
+        | S1C_TABLES
+        | S2_TABLES
+        | S1D_TABLES
+        | PA2_TABLES
     )
     assert index_names == (
-        expected.indexes | A1B_INDEXES | A1C_INDEXES | S1B_INDEXES | S1C_INDEXES | S1D_INDEXES
+        expected.indexes
+        | A1B_INDEXES
+        | A1C_INDEXES
+        | S1B_INDEXES
+        | S1C_INDEXES
+        | S1D_INDEXES
+        | PA2_INDEXES
     )
     assert function_names == expected.functions | A1C_FUNCTIONS
     assert trigger_names == expected.triggers | S1C_TRIGGERS | A1C_TRIGGERS | S1D_TRIGGERS

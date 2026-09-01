@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/account-invitation-document.schema.json",
+  "title": "AccountInvitationDocument",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "invitation_id", "server_instance_id", "identity_epoch", "identity_thumbprint_sha256", "api_origin", "stream_origin", "account_display_name", "account_role", "issued_at", "expires_at", "invitation_secret", "secret_handling"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "server_instance_id": {"type": "string", "format": "uuid"},
+    "identity_epoch": {"type": "integer", "minimum": 1},
+    "identity_thumbprint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "api_origin": {"type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048},
+    "stream_origin": {"type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048},
+    "account_display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "account_role": {"const": "USER"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "invitation_secret": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+    "secret_handling": {"const": "DISPLAY_ONCE_QR_OR_AUTPLAYINVITE_NO_URL_NO_CLIPBOARD_NO_LOG"}
+  },
+  "additionalProperties": false,
+  "x-autplay-sensitive": true,
+  "x-autplay-default-ttl-seconds": 600,
+  "x-autplay-max-ttl-seconds": 1800,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

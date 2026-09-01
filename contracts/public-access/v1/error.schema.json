@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/error.schema.json",
+  "title": "PublicAccessError",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "error_code", "safe_message", "request_id", "retryable"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "error_code": {"enum": ["account_invitation_unavailable", "account_invitation_secret_lost", "account_registration_rate_limited", "account_capacity_reached", "operation_conflict", "transport_trust_required", "server_identity_changed", "stale_flow_generation", "auth_attention_required", "device_revoked", "session_revoked", "remote_outcome_unknown", "unauthorized"]},
+    "safe_message": {"type": "string", "minLength": 1, "maxLength": 240},
+    "request_id": {"type": "string", "format": "uuid"},
+    "retryable": {"type": "boolean"},
+    "retry_after_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

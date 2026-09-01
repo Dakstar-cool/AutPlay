@@ -199,6 +199,9 @@ def run(*, java_home: Path, android_home: Path, serial: str, output: Path) -> di
             settings = ApiSettings(
                 database_url=SecretStr(sqlalchemy_url),
                 auth_signing_secret=SecretStr(AUTH_SECRET),
+                public_access_source_hmac_secret=SecretStr(
+                    "public-access-source-hmac-secret-at-least-32-bytes"
+                ),
                 host="127.0.0.1",
                 port=port,
                 vault_root=Path(temporary) / "vault",

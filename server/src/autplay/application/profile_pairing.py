@@ -114,6 +114,22 @@ class ProfilePairingService:
         now = _now()
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
+            device = s.get(DeviceRow, principal.device_id)
+            trusted_key_available = False
+            if device is not None and device.user_id == principal.user_id:
+                trust = s.get(
+                    TrustedDeviceKeyRow,
+                    (principal.user_id, device.public_key_thumbprint_sha256),
+                )
+                block = s.get(
+                    DeviceKeyBlockRow,
+                    (principal.user_id, device.public_key_thumbprint_sha256),
+                )
+                trusted_key_available = (
+                    trust is not None
+                    and trust.removed_at is None
+                    and (block is None or block.unblocked_at is not None)
+                )
             payload: dict[str, object] = {
                 "server_instance_id": str(instance.server_instance_id),
                 "identity_epoch": instance.identity_epoch,
@@ -122,7 +138,7 @@ class ProfilePairingService:
                 "product_version": "0.0.0",
                 "api_major": 1,
                 "capability_revision": instance.capability_revision,
-                "operations": _capability_operations(principal.role),
+                "operations": _capability_operations(principal.role, trusted_key_available),
                 "limits": {
                     "device_list_max": 100,
                     "session_list_max": 200,
@@ -2469,7 +2485,7 @@ def cleanup_expired_device_admissions(
         return len(expired) + len(stale)
 
 
-def _capability_operations(role: AccountRole) -> list[str]:
+def _capability_operations(role: AccountRole, trusted_key_available: bool = False) -> list[str]:
     """Advertise only executable API operations for this authenticated role."""
     operations = [
         "getCapabilities",
@@ -2482,6 +2498,8 @@ def _capability_operations(role: AccountRole) -> list[str]:
     ]
     if role in {AccountRole.OWNER, AccountRole.ADMIN}:
         operations.extend(("createEnrollmentInvitation", "cancelEnrollmentInvitation"))
+    if trusted_key_available:
+        operations.append("reenrollTrustedDevice")
     return operations
 
 

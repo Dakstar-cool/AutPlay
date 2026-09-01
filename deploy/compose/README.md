@@ -4,7 +4,15 @@ The base Compose file runs exactly one PostgreSQL 18 service with pgvector and p
 
 `compose.runtime.yaml` adds the `runtime` profile: one-shot Alembic migration followed by separate API, CPU-worker, and direct-stream processes built from the same non-root CPU image whose base is digest-pinned. The worker image pins FFmpeg/FFprobe and Chromaprint/fpcalc, but the isolated stream process imports no worker or media-tool code and receives the Vault volume read-only. API and worker share the same writable Vault volume so staging and final publication remain in one filesystem atomicity domain. Healthchecks and ingest require no GPU or external Internet access. Both published ports default to loopback-only. The root allowlist `.dockerignore` limits the build context to the server lock, package source, and migration inputs so workspace secrets and caches are never uploaded to the builder.
 
-Before parsing the runtime overlay, set `AUTPLAY_RUNTIME_AUTH_SECRET_FILE` to a local file outside the repository containing at least 32 random characters. Compose mounts it read-only; do not place a real credential in YAML, source control, shell history, or logs. Native Linux Compose implements a `file:` secret as a bind mount and cannot remap its UID/GID. Keep the parent directory owner-only (`0700`) and make the secret readable by the non-root container UID (for a single-operator disposable host, `0444` inside that closed directory); production secret delivery remains a separate deployment decision.
+Before parsing the runtime overlay, set `AUTPLAY_RUNTIME_AUTH_SECRET_FILE` and
+`AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE` to two different local files outside the
+repository, each containing at least 32 random characters. The second key is dedicated to PA2
+source-token HMACs and must never equal the access-token signing key. Compose mounts both read-only;
+do not place a real credential in YAML, source control, shell history, or logs. Native Linux Compose
+implements a `file:` secret as a bind mount and cannot remap its UID/GID. Keep the parent directory
+owner-only (`0700`) and make the secrets readable by the non-root container UID (for a
+single-operator disposable host, `0444` inside that closed directory); production secret delivery
+remains a separate deployment decision.
 
 ```text
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait
@@ -21,6 +29,7 @@ or newer:
 docker load --input autplay-server-v0.3.0.docker.tar.gz
 AUTPLAY_SERVER_IMAGE=autplay-server:v0.3.0
 AUTPLAY_RUNTIME_AUTH_SECRET_FILE=<local secret file outside the repository>
+AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=<different local source-HMAC secret file>
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime up --no-build --wait
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime down --volumes
 ```
@@ -40,6 +49,42 @@ not be exposed to an untrusted Wi-Fi network or the public Internet; those topol
 production TLS edge and deployment decisions.
 
 `autplay_dev_only` is a fixed disposable development credential, not a deployable secret. These files are not production manifests and must never be pointed at real/user data. Production database roles, TLS/domain topology, secret delivery, backup/restore, and public networking require their owning later phase and explicit deployment approval.
+
+## PA3 public-edge candidate (blocked from WAN)
+
+`compose.public-edge.yaml` is the locally qualified PA3 production-topology candidate. It must be
+layered after `compose.admin-local.yaml` and before `compose.release.yaml`. The overlay replaces the
+development PostgreSQL credential with two file-backed inputs, disables Admin Web, removes raw
+mobile API/stream host ports and publishes only IPv4 TCP 443 through the digest-pinned Caddy edge.
+The two database files contain the same generated password in their respective PostgreSQL and
+SQLAlchemy formats; keep them outside the repository under an owner-only directory.
+
+Required inputs:
+
+```text
+AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE=<private PostgreSQL password file>
+AUTPLAY_RUNTIME_DATABASE_URL_FILE=<private postgresql+psycopg URL file>
+AUTPLAY_RUNTIME_AUTH_SECRET_FILE=<private access-token secret file>
+AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=<different source-HMAC secret file>
+AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE=<different local Admin source secret file>
+AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE=<different local Admin CSRF secret file>
+AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE=<persistent P-256 identity PEM>
+AUTPLAY_ACME_EMAIL=<operator certificate-expiry contact>
+```
+
+Render and validate before any host mutation:
+
+```text
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.admin-local.yaml -f deploy/compose/compose.public-edge.yaml -f deploy/compose/compose.release.yaml --profile runtime --profile public-edge config --quiet
+docker run --rm --network none --read-only --tmpfs /config --tmpfs /data -e AUTPLAY_ACME_EMAIL=operator@example.test -v ./deploy/compose/Caddyfile.public-edge:/etc/caddy/Caddyfile:ro caddy:2.11.4-alpine@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+This candidate is not authorization to start Caddy or expose TCP 443. PA3 remains blocked until an
+encrypted off-host generation is restored in isolation and a stable Android signer/update path is
+accepted and proven. WAN Wave stays blocked at the edge. The activation, evidence and rollback
+procedure is in [`docs/operations/PUBLIC_EDGE_PA3.md`](../../docs/operations/PUBLIC_EDGE_PA3.md);
+Android key custody is defined separately in
+[`docs/operations/ANDROID_SIGNING_CUSTODY.md`](../../docs/operations/ANDROID_SIGNING_CUSTODY.md).
 
 ## Optional loopback administrative Web
 

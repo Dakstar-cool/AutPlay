@@ -4,6 +4,7 @@ import android.app.LocaleManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -104,6 +105,17 @@ import app.autplay.application.profilepairing.PairingState
 import app.autplay.application.profilepairing.OkHttpProfilePairingPort
 import app.autplay.application.profilepairing.ProfilePairingRuntime
 import app.autplay.application.profilebinding.M5BindingMaterializationCoordinator
+import app.autplay.application.publicaccess.AccountRegistrationRuntime
+import app.autplay.application.publicaccess.ActiveProfileGate
+import app.autplay.application.publicaccess.ApprovedRegistrationContextGate
+import app.autplay.application.publicaccess.M5AccountRegistrationDiscoveryProducer
+import app.autplay.application.publicaccess.OkHttpAccountRegistrationPort
+import app.autplay.application.publicaccess.OkHttpOwnerProvisioningPort
+import app.autplay.application.publicaccess.OwnerProvisioningCoordinator
+import app.autplay.application.publicaccess.OwnerProvisioningUiState
+import app.autplay.application.publicaccess.ProfilePairingAccountRegistrationBindingCommitter
+import app.autplay.application.publicaccess.PublicAccountRegistrationCoordinator
+import app.autplay.application.publicaccess.PublicAccountRegistrationState
 import app.autplay.application.social.ContactCard
 import app.autplay.application.social.SocialRuntime
 import app.autplay.application.social.SocialRuntimeState
@@ -187,8 +199,15 @@ import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import java.util.concurrent.ConcurrentHashMap
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
 
 internal const val BOOTSTRAP_LABEL = "AutPlay"
 internal const val ONBOARDING_REVISION = CURRENT_ONBOARDING_REVISION
@@ -203,6 +222,8 @@ internal suspend fun completeOnboarding(
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
+    private val pendingPublicAccountInvitation = MutableStateFlow<ByteArray?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -215,7 +236,7 @@ class MainActivity : ComponentActivity() {
         val syncScheduler = WorkManagerDeferredWorkScheduler(WorkManager.getInstance(applicationContext), SyncWorker::class.java)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
-        consumeGuestDocument(intent)
+        consumeSharedDocument(intent)
         setContent {
             AutPlayBootstrap(
                 settingsStore,
@@ -228,22 +249,35 @@ class MainActivity : ComponentActivity() {
                 syncScheduler,
                 importRepository,
                 recommendationRepository,
+                pendingPublicAccountInvitation,
             )
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        consumeGuestDocument(intent)
+        consumeSharedDocument(intent)
     }
 
-    private fun consumeGuestDocument(source: Intent?) {
-        if (source?.action != Intent.ACTION_SEND || source.type != GUEST_DOCUMENT_MIME_TYPE) return
+    private fun consumeSharedDocument(source: Intent?) {
+        if (source?.action != Intent.ACTION_SEND) return
         val raw = source.getStringExtra(Intent.EXTRA_TEXT)
         source.removeExtra(Intent.EXTRA_TEXT)
         source.action = Intent.ACTION_MAIN
+        val mime = source.type
         source.type = null
         if (raw == null) return
+        if (mime == app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE) {
+            val bytes = raw.toByteArray(Charsets.UTF_8)
+            if (bytes.size !in 2..16_384) {
+                bytes.fill(0)
+                return
+            }
+            pendingPublicAccountInvitation.value?.fill(0)
+            pendingPublicAccountInvitation.value = bytes
+            return
+        }
+        if (mime != GUEST_DOCUMENT_MIME_TYPE) return
         val allowUnsafeDevelopmentHttp =
             (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         AutPlayRuntime.guestRoomRuntime(applicationContext).acceptDocument(
@@ -267,6 +301,7 @@ internal fun AutPlayBootstrap(
     syncScheduler: DeferredWorkScheduler? = null,
     importRepository: LocalImportReviewRepository? = null,
     recommendationRepository: OfflineRecommendationRepository? = null,
+    pendingPublicAccountInvitation: MutableStateFlow<ByteArray?>? = null,
 ) {
     if (settingsStore == null || searchRepository == null || sliceRepository == null ||
         playbackRepository == null || playbackOwner == null || downloadRepository == null || syncStatusRepository == null || syncScheduler == null || importRepository == null || recommendationRepository == null
@@ -311,26 +346,46 @@ internal fun AutPlayBootstrap(
             val pairingOrigins = remember { ConcurrentHashMap<String, String>() }
             val allowUnsafePairingHttp =
                 (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-            val pairingRuntime = remember(context, settingsStore, sliceRepository, syncScheduler) {
-                val credentialStore = AndroidKeystoreCredentialStore(context.applicationContext)
-                val deviceKeys = AndroidM5DeviceKeyStore()
-                val port = OkHttpProfilePairingPort(
+            val pairingCredentialStore = remember(context) {
+                AndroidKeystoreCredentialStore(context.applicationContext)
+            }
+            val pairingDeviceKeys = remember { AndroidM5DeviceKeyStore() }
+            val firstBindCeremonyGate = remember {
+                app.autplay.application.profilepairing.FirstBindCeremonyGate()
+            }
+            val pairingPort = remember(
+                pairingCredentialStore,
+                pairingDeviceKeys,
+                allowUnsafePairingHttp,
+            ) {
+                OkHttpProfilePairingPort(
                     originForProfile = { profile -> pairingOrigins[profile.value] },
-                    credentials = credentialStore,
-                    deviceKeys = deviceKeys,
+                    credentials = pairingCredentialStore,
+                    deviceKeys = pairingDeviceKeys,
                     appVersion = BuildConfig.VERSION_NAME,
                     allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
                 )
+            }
+            val pairingRuntime = remember(
+                context,
+                settingsStore,
+                sliceRepository,
+                syncScheduler,
+                pairingCredentialStore,
+                pairingDeviceKeys,
+                pairingPort,
+                firstBindCeremonyGate,
+            ) {
                 ProfilePairingRuntime(
                     scope = pairingScope,
                     settings = settingsStore,
-                    credentials = credentialStore,
-                    deviceKeys = deviceKeys,
-                    port = port,
+                    credentials = pairingCredentialStore,
+                    deviceKeys = pairingDeviceKeys,
+                    port = pairingPort,
                     materialization = M5BindingMaterializationCoordinator(
                         settingsStore,
-                        credentialStore,
-                        deviceKeys,
+                        pairingCredentialStore,
+                        pairingDeviceKeys,
                         RoomM5LocalIntentMaterializer(
                             AutPlayRuntime.database(context),
                             sliceRepository,
@@ -341,9 +396,70 @@ internal fun AutPlayBootstrap(
                     reportSafeError = { pairingSafeError = it },
                     registerOrigin = { profile, origin -> pairingOrigins[profile.value] = origin },
                     allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
+                    firstBindGate = firstBindCeremonyGate,
                 )
             }
             val pairingRuntimeState by pairingRuntime.state.collectAsState()
+            val publicApprovalGate = remember { ApprovedRegistrationContextGate() }
+            val publicRegistrationCoordinator = remember(
+                pairingScope,
+                pairingPort,
+                pairingRuntime,
+                pairingCredentialStore,
+                pairingDeviceKeys,
+                publicApprovalGate,
+                settingsStore,
+            ) {
+                val activeProfileGate = ActiveProfileGate {
+                    settingsStore.settings.first().let { current ->
+                        current.activeServerProfileId != null ||
+                            current.activeUserId != null ||
+                            current.deviceId != null ||
+                            current.m5Binding != null ||
+                            current.m5PendingExchangeCheckpoint != null ||
+                            current.m5AdmissionCheckpoint != null
+                    }
+                }
+                val registrationRuntime = AccountRegistrationRuntime(
+                    credentials = pairingCredentialStore,
+                    port = OkHttpAccountRegistrationPort(
+                        allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
+                    ),
+                    binding = ProfilePairingAccountRegistrationBindingCommitter(
+                        pairingRuntime,
+                        pairingDeviceKeys,
+                    ),
+                    activeProfileGate = activeProfileGate,
+                    discoveryGate = publicApprovalGate,
+                    firstBindGate = firstBindCeremonyGate,
+                )
+                PublicAccountRegistrationCoordinator(
+                    scope = pairingScope,
+                    gate = publicApprovalGate,
+                    discovery = M5AccountRegistrationDiscoveryProducer(pairingPort),
+                    runtime = registrationRuntime,
+                    activeProfileGate = activeProfileGate,
+                    keys = pairingDeviceKeys,
+                    deviceName = android.os.Build.MODEL ?: "Android device",
+                    appVersion = BuildConfig.VERSION_NAME,
+                    firstBindGate = firstBindCeremonyGate,
+                )
+            }
+            val publicRegistrationState by publicRegistrationCoordinator.state.collectAsState()
+            LaunchedEffect(publicRegistrationCoordinator, pendingPublicAccountInvitation) {
+                pendingPublicAccountInvitation?.collect { bytes ->
+                    if (bytes != null && pendingPublicAccountInvitation.compareAndSet(bytes, null)) {
+                        try {
+                            publicRegistrationCoordinator.importDocument(
+                                app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE,
+                                bytes,
+                            )
+                        } finally {
+                            bytes.fill(0)
+                        }
+                    }
+                }
+            }
             val admissionRuntime = remember(context, settingsStore, pairingOrigins) {
                 app.autplay.application.profilepairing.AdmissionRuntime(
                     scope = pairingScope,
@@ -441,6 +557,8 @@ internal fun AutPlayBootstrap(
                                 pairingRuntimeState,
                                 admissionRuntime,
                                 admissionState,
+                                publicRegistrationCoordinator,
+                                publicRegistrationState,
                                 pairingSafeError,
                                 initialDestination = initialDestination,
                                 clearPairingSafeError = { pairingSafeError = null },
@@ -522,12 +640,80 @@ private fun OfflineLibraryScreen(
     pairingRuntimeState: app.autplay.application.profilepairing.ProfilePairingRuntimeState,
     admissionRuntime: app.autplay.application.profilepairing.AdmissionRuntime,
     admissionState: app.autplay.application.profilepairing.AdmissionState,
+    publicRegistrationCoordinator: PublicAccountRegistrationCoordinator,
+    publicRegistrationState: PublicAccountRegistrationState,
     pairingSafeError: String?,
     initialDestination: UiDestination = UiDestination.Home,
     clearPairingSafeError: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val ownerProvisioningCoordinator = remember(
+        binding?.serverProfileId?.value,
+        settings.serverBaseUrl,
+        context,
+    ) {
+        val activeBinding = binding
+        val origin = settings.serverBaseUrl
+        if (activeBinding == null || origin == null) {
+            null
+        } else {
+            OwnerProvisioningCoordinator(
+                scope,
+                OkHttpOwnerProvisioningPort(
+                    origin,
+                    activeBinding.serverProfileId,
+                    AndroidKeystoreCredentialStore(context.applicationContext),
+                    allowUnsafeDevelopmentHttp =
+                        (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+                ),
+            )
+        }
+    }
+    val emptyOwnerProvisioningState = remember { flowOf(OwnerProvisioningUiState()) }
+    val ownerProvisioningState by (
+        ownerProvisioningCoordinator?.state ?: emptyOwnerProvisioningState
+    ).collectAsState(initial = OwnerProvisioningUiState())
+    LaunchedEffect(ownerProvisioningCoordinator) {
+        ownerProvisioningCoordinator?.refresh()
+    }
+    DisposableEffect(ownerProvisioningCoordinator) {
+        onDispose { ownerProvisioningCoordinator?.dismissShownInvitation() }
+    }
+    val publicInvitationPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use(::readBoundedPublicInvitationBytes)
+                    ?: error("ACCOUNT_INVITATION_DOCUMENT_UNAVAILABLE")
+            }.onSuccess { bytes ->
+                try {
+                    publicRegistrationCoordinator.importDocument(
+                        app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE,
+                        bytes,
+                    )
+                } finally {
+                    bytes.fill(0)
+                }
+            }
+        }
+    }
+    val publicInvitationQrScanner = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicturePreview(),
+    ) { bitmap ->
+        if (bitmap != null) {
+            val bytes = runCatching { decodePublicInvitationQr(bitmap) }.getOrElse { ByteArray(0) }
+            try {
+                publicRegistrationCoordinator.importDocument(
+                    app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE,
+                    bytes,
+                )
+            } finally {
+                bytes.fill(0)
+            }
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     var socialRuntime by remember(binding?.serverProfileId?.value, settings.serverBaseUrl, waveCoordinator) {
         mutableStateOf<SocialRuntime?>(null)
@@ -1310,6 +1496,9 @@ private fun OfflineLibraryScreen(
         settings = settings,
         profilePairing = ProfilePairingUiState(
             pairing = pairingRuntimeState.pairing,
+            publicAccountRegistration = publicRegistrationState.takeIf { binding == null },
+            ownerProvisioning = ownerProvisioningState.takeIf { ownerProvisioningCoordinator != null },
+            canReenrollTrustedDevice = pairingRuntimeState.canReenrollTrustedDevice,
             serverLabel = pairingRuntimeState.serverLabel,
             trustConfirmed = pairingRuntimeState.trustConfirmed,
             accountLabel = pairingRuntimeState.accountLabel,
@@ -1372,6 +1561,21 @@ private fun OfflineLibraryScreen(
         settingsStore = settingsStore,
         context = context,
         profilePairingRuntime = pairingRuntime,
+        publicRegistrationCoordinator = publicRegistrationCoordinator,
+        ownerProvisioningCoordinator = ownerProvisioningCoordinator,
+        pickPublicAccountInvitation = {
+            publicInvitationPicker.launch(
+                arrayOf(app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE),
+            )
+        },
+        scanPublicAccountInvitation = { publicInvitationQrScanner.launch(null) },
+        shareOwnerAccountInvitation = { invitation ->
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE
+                putExtra(Intent.EXTRA_TEXT, invitation.toDocumentJson())
+            }
+            context.startActivity(Intent.createChooser(share, "Share AutPlay account invitation"))
+        },
         admissionRuntime = admissionRuntime,
         admissionSnapshot = when (val pairing = pairingRuntimeState.pairing) {
             is PairingState.AwaitingTrust -> pairing.snapshot
@@ -1880,6 +2084,31 @@ private fun readBoundedSettingsBytes(input: InputStream): ByteArray {
         output.write(buffer, 0, read)
     }
     return output.toByteArray()
+}
+
+private fun readBoundedPublicInvitationBytes(input: InputStream): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(4 * 1_024)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        require(output.size() + count <= 16 * 1_024) { "ACCOUNT_INVITATION_TOO_LARGE" }
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray().also {
+        require(it.isNotEmpty()) { "ACCOUNT_INVITATION_EMPTY" }
+    }
+}
+
+private fun decodePublicInvitationQr(bitmap: Bitmap): ByteArray {
+    require(bitmap.width in 1..4_096 && bitmap.height in 1..4_096) { "ACCOUNT_INVITATION_QR_SIZE_INVALID" }
+    val pixels = IntArray(bitmap.width * bitmap.height)
+    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    val result = QRCodeReader().decode(
+        BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width, bitmap.height, pixels))),
+    ).text.toByteArray(Charsets.UTF_8)
+    require(result.size in 2..16_384) { "ACCOUNT_INVITATION_QR_PAYLOAD_INVALID" }
+    return result
 }
 
 private fun readBoundedServerImportBytes(input: InputStream): ByteArray {

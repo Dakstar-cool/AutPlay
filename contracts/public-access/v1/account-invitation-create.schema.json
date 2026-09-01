@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/account-invitation-create.schema.json",
+  "title": "AccountInvitationCreate",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "operation_id", "account_display_name", "expires_in_seconds"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "account_display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "expires_in_seconds": {"type": "integer", "minimum": 60, "maximum": 1800}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

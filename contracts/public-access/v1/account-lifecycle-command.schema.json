@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/account-lifecycle-command.schema.json",
+  "title": "AccountLifecycleCommand",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "operation_id", "reason_code"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "reason_code": {"enum": ["USER_REQUESTED", "SECURITY", "ACCESS_ENDED"]}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

@@ -32,6 +32,10 @@ import app.autplay.ui.social.SocialActions
 import app.autplay.ui.playlist.ManualPlaylistActions
 import app.autplay.application.profilepairing.ProfilePairingRuntime
 import app.autplay.application.profilepairing.RuntimeLifecycleAction
+import app.autplay.application.publicaccess.AccountInvitationParser
+import app.autplay.application.publicaccess.PublicAccountRegistrationCoordinator
+import app.autplay.application.publicaccess.AccountInvitation
+import app.autplay.application.publicaccess.OwnerProvisioningCoordinator
 import app.autplay.ui.player.NowPlayingRouteActions
 import app.autplay.ui.queue.QueueEditorUiActions
 import androidx.media3.common.util.UnstableApi
@@ -460,6 +464,11 @@ internal fun buildLegacySecondaryRouteActions(
     settingsStore: NonSecretSettingsStore,
     context: Context,
     profilePairingRuntime: ProfilePairingRuntime,
+    publicRegistrationCoordinator: PublicAccountRegistrationCoordinator,
+    ownerProvisioningCoordinator: OwnerProvisioningCoordinator?,
+    pickPublicAccountInvitation: () -> Unit,
+    scanPublicAccountInvitation: () -> Unit,
+    shareOwnerAccountInvitation: (AccountInvitation) -> Unit,
     admissionRuntime: app.autplay.application.profilepairing.AdmissionRuntime,
     admissionSnapshot: app.autplay.application.profilepairing.PairingFlowSnapshot?,
     importProfileId: String,
@@ -566,6 +575,29 @@ internal fun buildLegacySecondaryRouteActions(
             },
         ) },
         reenrollTrustedDevice = { admissionSnapshot?.let(admissionRuntime::reenrollTrusted) },
+        redeemPublicAccountInvitation = { document ->
+            publicRegistrationCoordinator.importDocument(
+                AccountInvitationParser.MIME_TYPE,
+                document.toByteArray(Charsets.UTF_8),
+            )
+        },
+        pickPublicAccountInvitation = pickPublicAccountInvitation,
+        scanPublicAccountInvitation = scanPublicAccountInvitation,
+        confirmPublicAccountTrust = publicRegistrationCoordinator::confirmTrust,
+        confirmPublicAccountRegistration = publicRegistrationCoordinator::confirmAndRedeem,
+        cancelPublicAccountRegistration = publicRegistrationCoordinator::cancel,
+        refreshOwnerProvisioning = { ownerProvisioningCoordinator?.refresh() },
+        createOwnerAccountInvitation = { displayName, expiresInSeconds ->
+            ownerProvisioningCoordinator?.create(displayName, expiresInSeconds)
+        },
+        cancelOwnerAccountInvitation = { invitationId ->
+            ownerProvisioningCoordinator?.cancelInvitation(invitationId)
+        },
+        disableProvisionedAccount = { userId ->
+            ownerProvisioningCoordinator?.disableAccount(userId)
+        },
+        dismissOwnerAccountInvitation = { ownerProvisioningCoordinator?.dismissShownInvitation() },
+        shareOwnerAccountInvitation = shareOwnerAccountInvitation,
         admission = app.autplay.ui.profilepairing.AdmissionActions(
             request = { admissionSnapshot?.let(admissionRuntime::request) },
             confirmComparison = admissionRuntime::confirmComparison,

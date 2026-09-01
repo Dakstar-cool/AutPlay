@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "case_id": "account-registration-request-v1",
+      "schema_example_index": 4,
+      "removed_fields": ["request_sha256", "device_signature_b64url"],
+      "proof_domain": "AutPlay account registration v1\n",
+      "expected_request_sha256": "adad8b265077f2485f82e36b678d74389476d4e5bf718594c7f967fbad6e13d9"
+    }
+  ]
+}

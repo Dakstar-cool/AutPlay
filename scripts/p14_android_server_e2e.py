@@ -74,6 +74,9 @@ def _insert_second_session(
         ApiSettings(
             database_url=SecretStr(sqlalchemy_url),
             auth_signing_secret=SecretStr(AUTH_SECRET),
+            public_access_source_hmac_secret=SecretStr(
+                "public-access-source-hmac-secret-at-least-32-bytes"
+            ),
             vault_root=REPOSITORY_ROOT / "var" / "p14-e2e-unused",
             vault_low_disk_bytes=0,
         )
@@ -184,6 +187,9 @@ def run(
             settings = ApiSettings(
                 database_url=SecretStr(sqlalchemy_url),
                 auth_signing_secret=SecretStr(AUTH_SECRET),
+                public_access_source_hmac_secret=SecretStr(
+                    "public-access-source-hmac-secret-at-least-32-bytes"
+                ),
                 host="127.0.0.1",
                 port=port,
                 vault_root=Path(temporary) / "vault",

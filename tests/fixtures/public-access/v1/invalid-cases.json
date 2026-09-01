@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {"case_id": "create-role-injection", "example_index": 0, "path": "role", "value": "ADMIN"},
+    {"case_id": "create-ttl-too-long", "example_index": 0, "path": "expires_in_seconds", "value": 1801},
+    {"case_id": "document-http-api", "example_index": 1, "path": "api_origin", "value": "http://api.autplay.example.test"},
+    {"case_id": "document-admin-role", "example_index": 1, "path": "account_role", "value": "ADMIN"},
+    {"case_id": "document-short-secret", "example_index": 1, "path": "invitation_secret", "value": "short"},
+    {"case_id": "view-secret-injection", "example_index": 2, "path": "invitation_secret", "value": "TEST_ONLY_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+    {"case_id": "registration-role-injection", "example_index": 4, "path": "account_role", "value": "ADMIN"},
+    {"case_id": "registration-http-stream", "example_index": 4, "path": "expected_stream_origin", "value": "http://stream.autplay.example.test"},
+    {"case_id": "registration-missing-proof", "example_index": 4, "path": "device_signature_b64url", "delete": true},
+    {"case_id": "response-admin-role", "example_index": 5, "path": "account_role", "value": "ADMIN"},
+    {"case_id": "account-device-leak", "example_index": 6, "path": "device_id", "value": "77777777-7777-4777-8777-777777777777", "nested_item": 0},
+    {"case_id": "lifecycle-unknown-reason", "example_index": 7, "path": "reason_code", "value": "OTHER"},
+    {"case_id": "result-reactivated-state", "example_index": 8, "path": "terminal_state", "value": "ACTIVE"},
+    {"case_id": "error-unknown-code", "example_index": 9, "path": "error_code", "value": "account_exists"}
+  ]
+}

@@ -45,6 +45,8 @@ $composeBase = Join-Path $repoRoot "deploy\compose\compose.yaml"
 $composeRuntime = Join-Path $repoRoot "deploy\compose\compose.runtime.yaml"
 $composeRelease = Join-Path $repoRoot "deploy\compose\compose.release.yaml"
 $composeAdminLocal = Join-Path $repoRoot "deploy\compose\compose.admin-local.yaml"
+$composePublicEdge = Join-Path $repoRoot "deploy\compose\compose.public-edge.yaml"
+$caddyfilePublicEdge = Join-Path $repoRoot "deploy\compose\Caddyfile.public-edge"
 $releaseNotes = Join-Path $repoRoot "docs\release\RELEASE_NOTES_$releaseVersion.md"
 $installGuide = Join-Path $repoRoot "docs\operations\INSTALL_AND_PAIR.md"
 $installerSource = Join-Path $repoRoot "deploy\installer"
@@ -65,6 +67,8 @@ foreach ($requiredPath in @(
     $composeRuntime,
     $composeRelease,
     $composeAdminLocal,
+    $composePublicEdge,
+    $caddyfilePublicEdge,
     $releaseNotes,
     $installGuide,
     $installerSource,
@@ -273,7 +277,14 @@ try {
 
     $installerStaging = Join-Path $outputRoot "autplay-server-$ReleaseTag-installer"
     New-Item -ItemType Directory -Path $installerStaging | Out-Null
-    foreach ($composeInput in @($composeBase, $composeRuntime, $composeRelease, $composeAdminLocal)) {
+    foreach ($composeInput in @(
+        $composeBase,
+        $composeRuntime,
+        $composeRelease,
+        $composeAdminLocal,
+        $composePublicEdge,
+        $caddyfilePublicEdge
+    )) {
         Copy-Item -LiteralPath $composeInput -Destination (Join-Path $installerStaging (Split-Path -Leaf $composeInput))
     }
     Get-ChildItem -LiteralPath $installerSource -File | ForEach-Object {
@@ -330,9 +341,11 @@ try {
 
     $databaseUrl = "postgresql+psycopg://runtime:synthetic@127.0.0.1:1/autplay"
     $authSecret = "release-smoke-synthetic-secret-at-least-32-bytes"
+    $publicAccessSourceSecret = "release-public-source-synthetic-secret-at-least-32-bytes"
     & docker run --rm --network none --read-only --tmpfs "/tmp:size=32m,mode=1777" `
         --env "AUTPLAY_DATABASE_URL=$databaseUrl" `
         --env "AUTPLAY_AUTH_SIGNING_SECRET=$authSecret" `
+        --env "AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET=$publicAccessSourceSecret" `
         --env "AUTPLAY_PROFILE=test" `
         $imageTag autplay-api --check-config
     if ($LASTEXITCODE -ne 0) {
@@ -378,6 +391,7 @@ try {
     $runtimeSecretDirectory = Join-Path ([IO.Path]::GetTempPath()) "autplay-release-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $runtimeSecretDirectory | Out-Null
     $runtimeSecretFile = Join-Path $runtimeSecretDirectory "auth.txt"
+    $runtimePublicAccessSourceSecretFile = Join-Path $runtimeSecretDirectory "public-source.txt"
     $runtimeAdminSourceSecretFile = Join-Path $runtimeSecretDirectory "admin-source.txt"
     $runtimeAdminCsrfSecretFile = Join-Path $runtimeSecretDirectory "admin-csrf.txt"
     $runtimeIdentityFile = Join-Path $runtimeSecretDirectory "identity.pem"
@@ -396,9 +410,11 @@ try {
     $runtimeMobileStreamPort = $runtimePorts[2]
     try {
         $runtimeSecret = "release-smoke-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
+        $runtimePublicAccessSourceSecret = "release-public-source-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
         $runtimeAdminSourceSecret = "release-admin-source-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
         $runtimeAdminCsrfSecret = "release-admin-csrf-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
         [IO.File]::WriteAllText($runtimeSecretFile, "$runtimeSecret`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($runtimePublicAccessSourceSecretFile, "$runtimePublicAccessSourceSecret`n", [Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText($runtimeAdminSourceSecretFile, "$runtimeAdminSourceSecret`n", [Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText($runtimeAdminCsrfSecretFile, "$runtimeAdminCsrfSecret`n", [Text.UTF8Encoding]::new($false))
         $runtimeIdentityPem = & docker run --rm --network none --entrypoint python $imageTag -c "from cryptography.hazmat.primitives import serialization; from cryptography.hazmat.primitives.asymmetric import ec; print(ec.generate_private_key(ec.SECP256R1()).private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode('ascii'), end='')"
@@ -408,6 +424,7 @@ try {
         [IO.File]::WriteAllText($runtimeIdentityFile, (($runtimeIdentityPem -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
         $env:AUTPLAY_SERVER_IMAGE = $imageTag
         $env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE = $runtimeSecretFile
+        $env:AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE = $runtimePublicAccessSourceSecretFile
         $env:AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE = $runtimeAdminSourceSecretFile
         $env:AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE = $runtimeAdminCsrfSecretFile
         $env:AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE = $runtimeIdentityFile
@@ -470,6 +487,7 @@ try {
         Remove-Item -LiteralPath $runtimeSecretDirectory -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_SERVER_IMAGE -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE -ErrorAction SilentlyContinue

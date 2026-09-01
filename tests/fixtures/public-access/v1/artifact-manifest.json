@@ -1,0 +1,21 @@
+{
+  "contract": "public-access-v1",
+  "implementation_status": "IMPLEMENTED_PA2",
+  "artifacts": [
+    {"path": "contracts/openapi/v1/autplay-public-access.openapi.json", "sha256": "99f212c9b856d16517654a08305dac83d08aa6a843723bd446124b2858076971"},
+    {"path": "contracts/public-access/v1/account-invitation-create.schema.json", "sha256": "9a12c7b032ba9e8b944a76dc9017bc321514853768554e7700fc9d16fe2358f4"},
+    {"path": "contracts/public-access/v1/account-invitation-document.schema.json", "sha256": "00ad9eff7f5e28f9502d742db994082d778b5e27d7cae715eeacebedeb924e27"},
+    {"path": "contracts/public-access/v1/account-invitation-page.schema.json", "sha256": "510f0d6dc6aef8d07d83fd02b04cc019eb47b6744705e9057742c708a15b2ace"},
+    {"path": "contracts/public-access/v1/account-invitation-view.schema.json", "sha256": "6579e8123c9204859bd3d3493702274a90b530a55e93fe986ad1467ff9ee8db0"},
+    {"path": "contracts/public-access/v1/account-lifecycle-command.schema.json", "sha256": "49eb9b276027ea366e69618735dfad36247c3f174724dad3d41a82880d397ef9"},
+    {"path": "contracts/public-access/v1/account-lifecycle-result.schema.json", "sha256": "b104e35218b0fdca8df05b095f3537ae9367cbb578e4ae1db1eacc7c0ba455b2"},
+    {"path": "contracts/public-access/v1/account-registration-request.schema.json", "sha256": "0741d6c3c7e01f42aee26966b04485ff748f3b5547497937a38a5c251bc1d022"},
+    {"path": "contracts/public-access/v1/account-registration-response.schema.json", "sha256": "c0a5e37cc77ca800e55002a3ee21d33cd9ebbcfd5c4a7d62449889a4057ac5cf"},
+    {"path": "contracts/public-access/v1/error.schema.json", "sha256": "b1bf0573306369aaa3a95ea831822c9decca77e6d9f7e6f1b38d931b18c7ffbc"},
+    {"path": "contracts/public-access/v1/invited-account-page.schema.json", "sha256": "3cee07fee12a891712e29c7e928d2cc2718747abb38e01d064237312b2b0a70b"},
+    {"path": "tests/fixtures/public-access/v1/hash-vectors.json", "sha256": "2d99d98cf3ffef2e9fe6da5352eabfd7d95dd3472ae8275c5b826c2f1e3a6753"},
+    {"path": "tests/fixtures/public-access/v1/invalid-cases.json", "sha256": "cf628c7e733d77b2768374a895f4049ba1b33f5b9e845128adf52328119bdb34"},
+    {"path": "tests/fixtures/public-access/v1/scenario-vectors.json", "sha256": "25869a2c9641e80faf8ecc250f82c7004977cdd58b7bd19cce171508a764cdae"},
+    {"path": "tests/fixtures/public-access/v1/schema-examples.json", "sha256": "1e4385d0e241ee52c2dd350e1ff99f65c8d088a9a8055a82e73b514ed822c7f9"}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/account-lifecycle-result.schema.json",
+  "title": "AccountLifecycleResult",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "operation_id", "target_type", "target_id", "outcome", "terminal_state", "occurred_at"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "format": "uuid"},
+    "target_type": {"enum": ["ACCOUNT_INVITATION", "INVITED_ACCOUNT"]},
+    "target_id": {"type": "string", "format": "uuid"},
+    "outcome": {"enum": ["APPLIED", "ALREADY_TERMINAL"]},
+    "terminal_state": {"enum": ["CANCELLED", "DISABLED"]},
+    "occurred_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

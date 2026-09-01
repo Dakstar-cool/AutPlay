@@ -17,6 +17,7 @@ from pydantic import SecretStr
 
 DATABASE_URL = "postgresql+psycopg://runtime_user:database-password@127.0.0.1:5432/autplay"
 AUTH_SECRET = "api-signing-secret-with-at-least-thirty-two-bytes"
+PUBLIC_SOURCE_SECRET = "public-access-source-hmac-secret-at-least-thirty-two-bytes"
 
 
 def test_missing_required_settings_raise_one_sanitized_error() -> None:
@@ -30,8 +31,10 @@ def test_missing_required_settings_raise_one_sanitized_error() -> None:
 def test_explicit_precedence_and_secret_files(tmp_path: Path) -> None:
     database_secret = tmp_path / "database.secret"
     auth_secret = tmp_path / "auth.secret"
+    public_source_secret = tmp_path / "public-source.secret"
     database_secret.write_text(DATABASE_URL + "\n", encoding="utf-8")
     auth_secret.write_text(AUTH_SECRET + "\n", encoding="utf-8")
+    public_source_secret.write_text(PUBLIC_SOURCE_SECRET + "\n", encoding="utf-8")
     config_file = tmp_path / "autplay.toml"
     config_file.write_text(
         """
@@ -43,6 +46,7 @@ log_level = "warning"
 
 [api]
 auth_signing_secret_file = "auth.secret"
+public_access_source_hmac_secret_file = "public-source.secret"
 port = 8000
 
 [profiles.test.common]
@@ -69,6 +73,7 @@ port = 8001
     assert settings.log_level == "ERROR"
     assert "env-password" in settings.database_url.get_secret_value()
     assert settings.auth_signing_secret.get_secret_value() == AUTH_SECRET
+    assert settings.public_access_source_hmac_secret.get_secret_value() == PUBLIC_SOURCE_SECRET
 
 
 def test_direct_secret_precedence_discards_lower_file_key(tmp_path: Path) -> None:
@@ -89,24 +94,47 @@ auth_signing_secret_file = "missing-auth.secret"
         environ={
             "AUTPLAY_DATABASE_URL": DATABASE_URL,
             "AUTPLAY_AUTH_SIGNING_SECRET": AUTH_SECRET,
+            "AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET": PUBLIC_SOURCE_SECRET,
         },
     )
 
     assert settings.database_url.get_secret_value() == DATABASE_URL
     assert settings.auth_signing_secret.get_secret_value() == AUTH_SECRET
+    assert settings.public_access_source_hmac_secret.get_secret_value() == PUBLIC_SOURCE_SECRET
 
 
 def test_secret_values_are_redacted_from_model_representations() -> None:
     settings = ApiSettings(
         database_url=SecretStr(DATABASE_URL),
         auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
     )
 
     rendered = f"{settings!r}\n{settings.model_dump()}\n{settings.model_dump_json()}"
 
     assert "database-password" not in rendered
     assert AUTH_SECRET not in rendered
+    assert PUBLIC_SOURCE_SECRET not in rendered
     assert "**********" in rendered
+
+
+@pytest.mark.parametrize("shared_field", ("auth", "admin_source", "admin_csrf"))
+def test_public_access_source_hmac_secret_must_be_dedicated(shared_field: str) -> None:
+    shared = "shared-public-authority-secret-at-least-thirty-two-bytes"
+    auth = shared if shared_field == "auth" else AUTH_SECRET
+    public = shared
+    admin_source = shared if shared_field == "admin_source" else "b" * 32
+    admin_csrf = shared if shared_field == "admin_csrf" else "c" * 32
+    with pytest.raises(ValueError, match="must differ"):
+        ApiSettings(
+            database_url=SecretStr(DATABASE_URL),
+            auth_signing_secret=SecretStr(auth),
+            public_access_source_hmac_secret=SecretStr(public),
+            admin_web_enabled=True,
+            admin_web_origin="http://127.0.0.1:8787",
+            admin_web_source_hmac_secret=SecretStr(admin_source),
+            admin_web_csrf_hmac_secret=SecretStr(admin_csrf),
+        )
 
 
 def test_password_login_cannot_be_enabled_without_persistence_contract() -> None:
@@ -115,6 +143,7 @@ def test_password_login_cannot_be_enabled_without_persistence_contract() -> None
             environ={
                 "AUTPLAY_DATABASE_URL": DATABASE_URL,
                 "AUTPLAY_AUTH_SIGNING_SECRET": AUTH_SECRET,
+                "AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET": PUBLIC_SOURCE_SECRET,
                 "AUTPLAY_PASSWORD_LOGIN_ENABLED": "true",
             }
         )
@@ -126,6 +155,7 @@ def test_admin_web_requires_exact_origin_and_separate_secret() -> None:
     base = {
         "database_url": DATABASE_URL,
         "auth_signing_secret": AUTH_SECRET,
+        "public_access_source_hmac_secret": PUBLIC_SOURCE_SECRET,
         "admin_web_enabled": True,
     }
     with pytest.raises(SettingsLoadError):
@@ -161,6 +191,7 @@ def test_admin_web_rejects_ambiguous_or_unsafe_origin(origin: str, profile: Runt
             profile=profile,
             database_url=SecretStr(DATABASE_URL),
             auth_signing_secret=SecretStr(AUTH_SECRET),
+            public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
             admin_web_enabled=True,
             admin_web_origin=origin,
             admin_web_source_hmac_secret=SecretStr("b" * 32),
@@ -173,6 +204,7 @@ def test_admin_web_requires_distinct_source_and_csrf_hmac_secrets() -> None:
         ApiSettings(
             database_url=SecretStr(DATABASE_URL),
             auth_signing_secret=SecretStr(AUTH_SECRET),
+            public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
             admin_web_enabled=True,
             admin_web_origin="http://127.0.0.1:8787",
             admin_web_source_hmac_secret=SecretStr("b" * 32),
@@ -197,12 +229,48 @@ def test_profile_origins_are_normalized_by_transport_contract(
         profile=profile,
         database_url=SecretStr(DATABASE_URL),
         auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
         profile_api_origin=origin,
         profile_stream_origin=origin,
     )
 
     assert settings.profile_api_origin == expected
     assert settings.profile_stream_origin == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("172.30.77.2", "172.30.77.2"),
+        ("2001:db8::2", "2001:db8::2"),
+        (None, None),
+    ),
+)
+def test_public_access_trusted_proxy_requires_one_canonical_ip(
+    value: str | None, expected: str | None
+) -> None:
+    settings = ApiSettings(
+        database_url=SecretStr(DATABASE_URL),
+        auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
+        public_access_trusted_proxy_ip=value,
+    )
+
+    assert settings.public_access_trusted_proxy_ip == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ("proxy", "172.030.077.002", "2001:0db8::2", "172.30.77.0/24", "172.30.77.2:443"),
+)
+def test_public_access_trusted_proxy_rejects_ambiguous_values(value: str) -> None:
+    with pytest.raises(ValueError, match="trusted proxy"):
+        ApiSettings(
+            database_url=SecretStr(DATABASE_URL),
+            auth_signing_secret=SecretStr(AUTH_SECRET),
+            public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
+            public_access_trusted_proxy_ip=value,
+        )
 
 
 @pytest.mark.parametrize(
@@ -228,6 +296,7 @@ def test_profile_origins_reject_unsafe_transport_or_authority(
             profile=profile,
             database_url=SecretStr(DATABASE_URL),
             auth_signing_secret=SecretStr(AUTH_SECRET),
+            public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
             profile_api_origin=origin,
             profile_stream_origin="https://stream.example.test",
         )
@@ -237,6 +306,7 @@ def test_jamendo_is_disabled_by_default_and_requires_non_vault_staging(tmp_path:
     base = {
         "database_url": SecretStr(DATABASE_URL),
         "auth_signing_secret": SecretStr(AUTH_SECRET),
+        "public_access_source_hmac_secret": SecretStr(PUBLIC_SOURCE_SECRET),
         "admin_web_enabled": True,
         "admin_web_origin": "http://127.0.0.1:8787",
         "admin_web_source_hmac_secret": SecretStr("b" * 32),

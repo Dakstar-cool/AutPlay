@@ -9,6 +9,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 def test_admin_local_overlay_forces_the_api_to_literal_loopback(tmp_path: Path) -> None:
     secret_paths = {
         "AUTPLAY_RUNTIME_AUTH_SECRET_FILE": tmp_path / "auth.txt",
+        "AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE": tmp_path / "public-access-source.txt",
         "AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE": tmp_path / "admin-source.txt",
         "AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE": tmp_path / "admin-csrf.txt",
         "AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE": tmp_path / "profile-key.pem",
@@ -64,6 +65,7 @@ def test_admin_local_overlay_forces_the_api_to_literal_loopback(tmp_path: Path) 
         "autplay-admin-csrf-hmac",
         "autplay-admin-source-hmac",
         "autplay-auth-signing-secret",
+        "autplay-public-access-source-hmac",
         "autplay-profile-identity-key",
     }
     assert mobile_api["environment"]["AUTPLAY_PROFILE_API_ORIGIN"] == ("http://192.0.2.10:18787")
@@ -71,6 +73,7 @@ def test_admin_local_overlay_forces_the_api_to_literal_loopback(tmp_path: Path) 
     assert "AUTPLAY_ADMIN_WEB_ENABLED" not in mobile_api["environment"]
     assert {secret["target"] for secret in mobile_api["secrets"]} == {
         "autplay-auth-signing-secret",
+        "autplay-public-access-source-hmac",
         "autplay-profile-identity-key",
     }
     assert config["services"]["admin-init"]["depends_on"]["mobile-api"]["condition"] == (

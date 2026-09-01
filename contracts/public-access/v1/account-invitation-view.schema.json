@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/account-invitation-view.schema.json",
+  "title": "AccountInvitationView",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "invitation_id", "account_display_name", "account_role", "state", "issued_at", "expires_at"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "invitation_id": {"type": "string", "format": "uuid"},
+    "account_display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "account_role": {"const": "USER"},
+    "state": {"enum": ["ACTIVE", "CONSUMED", "CANCELLED", "EXPIRED"]},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "terminal_at": {"type": ["string", "null"], "format": "date-time"},
+    "invited_user_id": {"type": ["string", "null"], "format": "uuid"}
+  },
+  "additionalProperties": false,
+  "x-autplay-secret-free": true,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

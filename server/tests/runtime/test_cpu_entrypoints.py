@@ -33,6 +33,9 @@ def _runtime_environment(*, port: int | None = None) -> dict[str, str]:
         {
             "AUTPLAY_DATABASE_URL": DATABASE_URL,
             "AUTPLAY_AUTH_SIGNING_SECRET": AUTH_SECRET,
+            "AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET": (
+                "public-access-source-hmac-secret-at-least-32-bytes"
+            ),
             "AUTPLAY_PROFILE": "test",
         }
     )

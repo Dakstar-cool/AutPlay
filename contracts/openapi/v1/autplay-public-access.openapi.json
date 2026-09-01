@@ -1,0 +1,134 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay Public Invite-only Account API",
+    "version": "1.0.0",
+    "description": "Accepted PA1 contract implemented and locally qualified by PA2. PA3 public deployment remains excluded."
+  },
+  "servers": [{"url": "/api/v1"}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/public-access/account-invitations": {
+      "post": {
+        "operationId": "createAccountInvitation",
+        "x-autplay-authorization": "ACTIVE_BOOTSTRAP_OWNER_PROVISIONING_ONLY",
+        "x-autplay-idempotency": "ACTOR_OPERATION_ACTION_TARGET_SERVER_RFC8785_SHA256_EXACT_OR_OPERATION_CONFLICT",
+        "x-autplay-rate-limit": "10/owner/1h; 5/active/server",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountInvitationCreate"}}}},
+        "responses": {
+          "201": {"description": "Secret invitation document emitted once", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/vnd.autplay.account-invitation+json": {"schema": {"$ref": "#/components/schemas/AccountInvitationDocument"}}}},
+          "200": {"description": "Exact operation replay without secret re-emission", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountInvitationView"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"},
+          "409": {"$ref": "#/components/responses/ErrorResponse"},
+          "429": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      },
+      "get": {
+        "operationId": "listAccountInvitations",
+        "x-autplay-authorization": "ACTIVE_BOOTSTRAP_OWNER_PROVISIONING_ONLY",
+        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {
+          "200": {"description": "Bounded secret-free invitation page", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountInvitationPage"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/public-access/account-invitations/{invitation_id}/cancel": {
+      "post": {
+        "operationId": "cancelAccountInvitation",
+        "x-autplay-authorization": "ACTIVE_BOOTSTRAP_OWNER_EXACT_ISSUED_INVITATION",
+        "x-autplay-idempotency": "ACTOR_OPERATION_ACTION_TARGET_SERVER_RFC8785_SHA256_EXACT_OR_OPERATION_CONFLICT",
+        "parameters": [{"$ref": "#/components/parameters/InvitationId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountLifecycleCommand"}}}},
+        "responses": {
+          "200": {"description": "Invitation is cancelled or already terminal", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountLifecycleResult"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"},
+          "404": {"$ref": "#/components/responses/ErrorResponse"},
+          "409": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/public-access/account-invitations/redeem": {
+      "post": {
+        "operationId": "redeemAccountInvitation",
+        "security": [],
+        "x-autplay-authorization": "INVITATION_BEARER_EXACT_SERVER_BINDING_AND_DEVICE_POP",
+        "x-autplay-authenticated-caller": "REJECT_VALID_AUTHORIZATION_OR_RECOGNIZED_AUTPLAY_SESSION",
+        "x-autplay-proof-domain": "AutPlay account registration v1\n",
+        "x-autplay-rate-limit": "5/invitation/15m; 10/source-token/15m; 30/server/15m",
+        "x-autplay-secret-boundary": "BODY_ONLY_NO_URL_NO_COOKIE_NO_LOG",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountRegistrationRequest"}}}},
+        "responses": {
+          "201": {"description": "USER account, first device and session atomically created", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountRegistrationResponse"}}}},
+          "200": {"description": "Exact live-receipt replay for the same device key", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountRegistrationResponse"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "409": {"$ref": "#/components/responses/ErrorResponse"},
+          "429": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/public-access/accounts": {
+      "get": {
+        "operationId": "listInvitedAccounts",
+        "x-autplay-authorization": "ACTIVE_BOOTSTRAP_OWNER_PROVISIONING_METADATA_ONLY",
+        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {
+          "200": {"description": "Bounded invited-account provisioning metadata", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InvitedAccountPage"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    },
+    "/public-access/accounts/{user_id}/disable": {
+      "post": {
+        "operationId": "disableInvitedAccount",
+        "x-autplay-authorization": "ACTIVE_BOOTSTRAP_OWNER_EXACT_PROVISIONING_LINK_LIFECYCLE_ONLY",
+        "x-autplay-idempotency": "ACTOR_OPERATION_ACTION_TARGET_SERVER_RFC8785_SHA256_EXACT_OR_OPERATION_CONFLICT",
+        "parameters": [{"$ref": "#/components/parameters/UserId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountLifecycleCommand"}}}},
+        "responses": {
+          "200": {"description": "Invited account disabled or already terminal", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AccountLifecycleResult"}}}},
+          "401": {"$ref": "#/components/responses/ErrorResponse"},
+          "403": {"$ref": "#/components/responses/ErrorResponse"},
+          "404": {"$ref": "#/components/responses/ErrorResponse"},
+          "409": {"$ref": "#/components/responses/ErrorResponse"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    },
+    "parameters": {
+      "InvitationId": {"name": "invitation_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "UserId": {"name": "user_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "Limit": {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+      "Cursor": {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "minLength": 1, "maxLength": 512}}
+    },
+    "headers": {
+      "CacheControlNoStore": {"description": "Caching is forbidden", "schema": {"type": "string", "const": "no-store"}},
+      "PragmaNoCache": {"description": "Legacy intermediary caching is forbidden", "schema": {"type": "string", "const": "no-cache"}}
+    },
+    "responses": {
+      "ErrorResponse": {"description": "Stable non-disclosing error", "headers": {"Cache-Control": {"$ref": "#/components/headers/CacheControlNoStore"}, "Pragma": {"$ref": "#/components/headers/PragmaNoCache"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublicAccessError"}}}}
+    },
+    "schemas": {
+      "AccountInvitationCreate": {"$ref": "../../public-access/v1/account-invitation-create.schema.json"},
+      "AccountInvitationDocument": {"$ref": "../../public-access/v1/account-invitation-document.schema.json"},
+      "AccountInvitationView": {"$ref": "../../public-access/v1/account-invitation-view.schema.json"},
+      "AccountInvitationPage": {"$ref": "../../public-access/v1/account-invitation-page.schema.json"},
+      "AccountRegistrationRequest": {"$ref": "../../public-access/v1/account-registration-request.schema.json"},
+      "AccountRegistrationResponse": {"$ref": "../../public-access/v1/account-registration-response.schema.json"},
+      "InvitedAccountPage": {"$ref": "../../public-access/v1/invited-account-page.schema.json"},
+      "AccountLifecycleCommand": {"$ref": "../../public-access/v1/account-lifecycle-command.schema.json"},
+      "AccountLifecycleResult": {"$ref": "../../public-access/v1/account-lifecycle-result.schema.json"},
+      "PublicAccessError": {"$ref": "../../public-access/v1/error.schema.json"}
+    }
+  },
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2",
+  "x-autplay-contract-version": "v1"
+}

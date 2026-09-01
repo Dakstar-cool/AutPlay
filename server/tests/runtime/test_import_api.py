@@ -21,6 +21,9 @@ from starlette.testclient import TestClient
 _SETTINGS = ApiSettings(
     database_url=SecretStr("postgresql+psycopg://runtime:runtime@127.0.0.1:1/autplay"),
     auth_signing_secret=SecretStr("runtime-test-signing-secret-at-least-32-bytes"),
+    public_access_source_hmac_secret=SecretStr(
+        "public-access-source-hmac-secret-at-least-32-bytes"
+    ),
 )
 _OWNER = Principal(uuid4(), uuid4(), uuid4(), AccountRole.OWNER)
 _IMPORT_ID = uuid4()

@@ -49,12 +49,14 @@ class ProfilePairingRuntime(
     private val reportSafeError: (String) -> Unit,
     private val registerOrigin: (ServerProfileId, String) -> Unit = { _, _ -> },
     private val allowUnsafeDevelopmentHttp: Boolean = false,
+    private val firstBindGate: FirstBindCeremonyGate = FirstBindCeremonyGate(),
 ) {
     private val mutableState = MutableStateFlow(ProfilePairingRuntimeState())
     private var pendingEnrollment: PendingEnrollment? = null
     val state: StateFlow<ProfilePairingRuntimeState> = mutableState.asStateFlow()
 
     fun startDiscovery(rawOrigin: String) = scope.launch {
+        if (!reserveM5FirstBind()) return@launch
         val origin = runCatching { OriginNormalizer.normalize(rawOrigin, allowUnsafeDevelopmentHttp) }.getOrElse {
             blocked(PairingFailure.SERVER_UNAVAILABLE); return@launch
         }
@@ -94,6 +96,7 @@ class ProfilePairingRuntime(
 
     /** Trust confirmation only advances the ceremony; the invitation is parsed at exchange time. */
     fun confirmTrust() {
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.M5)) return
         val current = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return
         registerOrigin(current.snapshot.serverProfileId, current.snapshot.apiOrigin)
         mutableState.value = mutableState.value.copy(pairing = current, trustConfirmed = true)
@@ -105,6 +108,7 @@ class ProfilePairingRuntime(
      * still has to match every persisted identity/origin field before admission recovery continues.
      */
     suspend fun recoverAdmissionTrust(checkpoint: AdmissionCheckpoint): Boolean {
+        if (!reserveM5FirstBind()) return false
         val pending = PairingFlowSnapshot(
             generationId = checkpoint.generationId,
             apiOrigin = checkpoint.apiOrigin,
@@ -172,6 +176,7 @@ class ProfilePairingRuntime(
         bindingCommitId: String,
         session: EnrollmentSession,
     ): Boolean {
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.M5)) return false
         val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return false
         if (!mutableState.value.trustConfirmed || awaiting.snapshot.serverProfileId != checkpoint.serverProfileId ||
             awaiting.snapshot.expectedServerInstanceId != checkpoint.serverInstanceId ||
@@ -230,6 +235,7 @@ class ProfilePairingRuntime(
     }
 
     fun exchangeInvitation(rawEnvelope: String) = scope.launch {
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.M5)) return@launch
         val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return@launch
         if (!mutableState.value.trustConfirmed) return@launch
         val invitation = runCatching { parseInvitation(rawEnvelope) }.getOrElse {
@@ -341,7 +347,13 @@ class ProfilePairingRuntime(
     fun retry() = scope.launch { recoverAndRefresh() }
 
     suspend fun recoverAndRefresh() {
-        val current = settings.settings.first()
+        var current = settings.settings.first()
+        if (!clearPublicPendingAfterDurableBinding(current)) return
+        current = settings.settings.first()
+        if (
+            current.m5PendingExchangeCheckpoint != null &&
+            !reserveM5FirstBind()
+        ) return
         current.m5PendingExchangeCheckpoint?.let { checkpoint ->
             if (recoverPendingExchange(current, checkpoint)) return
         }
@@ -394,7 +406,10 @@ class ProfilePairingRuntime(
                     )
                 }
             }
-            BindingRecoveryResult.NoM5Binding, BindingRecoveryResult.ClearedPartialBinding -> mutableState.value = ProfilePairingRuntimeState()
+            BindingRecoveryResult.NoM5Binding, BindingRecoveryResult.ClearedPartialBinding -> {
+                firstBindGate.release(FirstBindCeremonyOwner.M5)
+                mutableState.value = ProfilePairingRuntimeState()
+            }
         }
     }
 
@@ -542,6 +557,7 @@ class ProfilePairingRuntime(
     }
 
     fun cancel() {
+        firstBindGate.release(FirstBindCeremonyOwner.M5)
         val priorState = mutableState.value
         val cancellingSnapshot = when (val pairing = priorState.pairing) {
             is PairingState.CheckingDiscovery -> pairing.snapshot
@@ -592,31 +608,91 @@ class ProfilePairingRuntime(
         }
     }
 
+    /**
+     * PA2's only binding seam. It reuses this class's credential-first commit and never creates
+     * an S1 trust record or an M5 enrollment invitation.
+     */
+    suspend fun completePublicAccountRegistration(
+        snapshot: PairingFlowSnapshot,
+        keyAlias: String,
+        session: EnrollmentSession,
+        verifiedIdentitySpki: ByteArray,
+    ): Boolean {
+        requireNotNull(snapshot.expectedUserId); requireNotNull(snapshot.expectedDeviceId); requireNotNull(snapshot.bindingCommitId)
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.PUBLIC_ACCESS)) return false
+        registerOrigin(snapshot.serverProfileId, snapshot.apiOrigin)
+        mutableState.value = ProfilePairingRuntimeState(pairing = PairingState.ExchangingInvitation(snapshot))
+        val sessionId = session.sessionId
+        val stored = persistBinding(
+            snapshot,
+            keyAlias,
+            session,
+            verifiedIdentitySpki,
+            "KEEP_LOCAL",
+            preservePublicRegistration = true,
+        )
+        if (stored) refreshCapabilities(snapshot, sessionId, false)
+        val bindingIsDurable = settings.settings.first().m5Binding?.bindingCommitId == snapshot.bindingCommitId
+        if (bindingIsDurable) firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
+        return stored
+    }
+
     private suspend fun persistBinding(
         snapshot: PairingFlowSnapshot,
         alias: String,
         session: EnrollmentSession,
         identitySpki: ByteArray?,
         localDecision: String,
+        preservePublicRegistration: Boolean = false,
     ): Boolean {
         val commit = requireNotNull(snapshot.bindingCommitId)
-        val envelope = SessionCredentialEnvelope(
-            accessToken = session.accessToken.toString(StandardCharsets.UTF_8),
-            refreshToken = session.refreshToken.toString(StandardCharsets.UTF_8), generation = session.sessionGeneration,
-            bindingCommitId = commit, sessionId = session.sessionId, sessionFamilyId = session.sessionFamilyId,
-            sessionGeneration = session.sessionGeneration,
-            m5PendingMaterializationRequest = if (localDecision == "REVIEW_SELECTED") {
-                materializationRequest(snapshot, session)
+        return try {
+            val publicPending = if (preservePublicRegistration) {
+                val encrypted = requireNotNull(credentials.read(snapshot.serverProfileId)) {
+                    "ACCOUNT_REGISTRATION_PENDING_MISSING"
+                }
+                try {
+                    SessionCredentialEnvelopeCodec.decode(encrypted).also { pending ->
+                        require(pending.refreshPending)
+                        requireNotNull(pending.publicAccessPendingRegistrationId)
+                        requireNotNull(pending.publicAccessPendingCanonicalRequest)
+                        requireNotNull(pending.publicAccessPendingSuccessorRefreshToken)
+                    }
+                } finally {
+                    encrypted.fill(0)
+                }
             } else {
                 null
-            },
-        )
-        return try {
+            }
+            val envelope = SessionCredentialEnvelope(
+                accessToken = session.accessToken.toString(StandardCharsets.UTF_8),
+                refreshToken = session.refreshToken.toString(StandardCharsets.UTF_8),
+                generation = session.sessionGeneration,
+                refreshPending = publicPending != null,
+                bindingCommitId = commit,
+                sessionId = session.sessionId,
+                sessionFamilyId = session.sessionFamilyId,
+                sessionGeneration = session.sessionGeneration,
+                m5PendingMaterializationRequest = if (localDecision == "REVIEW_SELECTED") {
+                    materializationRequest(snapshot, session)
+                } else {
+                    null
+                },
+                publicAccessPendingRegistrationId = publicPending?.publicAccessPendingRegistrationId,
+                publicAccessPendingCanonicalRequest = publicPending?.publicAccessPendingCanonicalRequest,
+                publicAccessPendingSuccessorRefreshToken = publicPending?.publicAccessPendingSuccessorRefreshToken,
+            )
             if (!isCurrentExchange(snapshot)) return false
-            // This is the required cross-store order. Recovery clears a secret-only partial write.
-            credentials.write(snapshot.serverProfileId, SessionCredentialEnvelopeCodec.encode(envelope))
+            // Secret/session state is durable first. PA2 replay evidence stays in the same envelope
+            // until the non-secret binding is durably committed below.
+            val encodedEnvelope = SessionCredentialEnvelopeCodec.encode(envelope)
+            try {
+                credentials.write(snapshot.serverProfileId, encodedEnvelope)
+            } finally {
+                encodedEnvelope.fill(0)
+            }
             if (!isCurrentExchange(snapshot)) {
-                credentials.clear(snapshot.serverProfileId)
+                if (!preservePublicRegistration) credentials.clear(snapshot.serverProfileId)
                 return false
             }
             val spki = requireNotNull(identitySpki) { "M5_IDENTITY_EVIDENCE_MISSING" }
@@ -657,16 +733,33 @@ class ProfilePairingRuntime(
                     )
                 }
             }
-            if (!stored) credentials.clear(snapshot.serverProfileId)
+            if (!stored && !preservePublicRegistration) credentials.clear(snapshot.serverProfileId)
             if (stored && !isCurrentExchange(snapshot)) {
+                if (preservePublicRegistration) return false
                 settings.mutate { current -> current.clearBinding(snapshot) }
                 credentials.clear(snapshot.serverProfileId)
                 runCatching { deviceKeys.delete(alias) }
                 return false
             }
+            if (stored && preservePublicRegistration) {
+                val cleanEnvelope = envelope.copy(
+                    refreshPending = false,
+                    publicAccessPendingRegistrationId = null,
+                    publicAccessPendingCanonicalRequest = null,
+                    publicAccessPendingSuccessorRefreshToken = null,
+                )
+                val encodedClean = SessionCredentialEnvelopeCodec.encode(cleanEnvelope)
+                try {
+                    credentials.write(snapshot.serverProfileId, encodedClean)
+                } finally {
+                    encodedClean.fill(0)
+                }
+            }
             stored
         } catch (_: Exception) {
-            runCatching { credentials.clear(snapshot.serverProfileId) }
+            if (!preservePublicRegistration) {
+                runCatching { credentials.clear(snapshot.serverProfileId) }
+            }
             blocked(PairingFailure.SERVER_UNAVAILABLE)
             false
         } finally {
@@ -737,11 +830,77 @@ class ProfilePairingRuntime(
                     sessions = sessions.mapNotNull { deviceLabels[it.deviceId] },
                     localDataChoiceRequired = requireLocalDataChoice,
                     canCreateInvitation = "createEnrollmentInvitation" in response.value.state.supportedOperations,
+                    canReenrollTrustedDevice = "reenrollTrustedDevice" in response.value.state.supportedOperations,
                     serverLabel = current.m5TrustEvidence?.serverLabelHint,
                     accountLabel = accountLabel,
                     deviceLabel = devices.firstOrNull { it.deviceId == snapshot.expectedDeviceId }?.label,
                 )
+                firstBindGate.release(FirstBindCeremonyOwner.M5)
+                firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
             }
+        }
+    }
+
+    /** A process-local owner is insufficient: uncertain PA2 evidence must exclude M5 after restart. */
+    private suspend fun reserveM5FirstBind(): Boolean {
+        if (!firstBindGate.reserve(FirstBindCeremonyOwner.M5)) return false
+        val publicPending = runCatching {
+            credentials.hasPublicAccessPendingRegistration()
+        }.getOrElse {
+            firstBindGate.release(FirstBindCeremonyOwner.M5)
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return false
+        }
+        if (publicPending) {
+            firstBindGate.release(FirstBindCeremonyOwner.M5)
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return false
+        }
+        return true
+    }
+
+    /** Retry the secret-erasure write when PA2 binding committed before the prior process died. */
+    private suspend fun clearPublicPendingAfterDurableBinding(current: NonSecretSettings): Boolean {
+        val binding = current.m5Binding ?: return true
+        val profile = current.activeServerProfileId ?: run {
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return false
+        }
+        val material = runCatching { credentials.read(profile) }.getOrElse {
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return false
+        } ?: return true
+        return try {
+            val envelope = SessionCredentialEnvelopeCodec.decode(material)
+            if (envelope.publicAccessPendingRegistrationId == null) return true
+            if (
+                envelope.bindingCommitId != binding.bindingCommitId ||
+                envelope.sessionId != binding.sessionId ||
+                envelope.sessionFamilyId != binding.sessionFamilyId ||
+                envelope.sessionGeneration != binding.sessionGeneration ||
+                envelope.refreshToken == null
+            ) {
+                blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+                return false
+            }
+            val clean = envelope.copy(
+                refreshPending = false,
+                publicAccessPendingRegistrationId = null,
+                publicAccessPendingCanonicalRequest = null,
+                publicAccessPendingSuccessorRefreshToken = null,
+            )
+            val encoded = SessionCredentialEnvelopeCodec.encode(clean)
+            try {
+                credentials.write(profile, encoded)
+                true
+            } finally {
+                encoded.fill(0)
+            }
+        } catch (_: Exception) {
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            false
+        } finally {
+            material.fill(0)
         }
     }
 
@@ -1194,6 +1353,7 @@ data class ProfilePairingRuntimeState(
     val localReview: List<RuntimeLocalDataSummary>? = null,
     val applyingLocalReview: Boolean = false,
     val canCreateInvitation: Boolean = false,
+    val canReenrollTrustedDevice: Boolean = false,
     val invitationPending: Boolean = false,
     val createdInvitationId: String? = null,
     /** Volatile display-once secret envelope; never persist, log, or save. */

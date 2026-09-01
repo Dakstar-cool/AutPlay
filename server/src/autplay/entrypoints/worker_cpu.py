@@ -58,6 +58,7 @@ from autplay.application.profile_pairing import (
     cleanup_expired_device_admissions,
     cleanup_expired_pairing_receipts,
 )
+from autplay.application.public_access import cleanup_expired_public_access
 from autplay.application.social import SocialService
 from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
@@ -345,9 +346,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
         try:
 
             def cleanup() -> int:
-                return cleanup_expired_pairing_receipts(
-                    sessions, limit=10_000
-                ) + cleanup_expired_device_admissions(sessions, limit=10_000)
+                return (
+                    cleanup_expired_pairing_receipts(sessions, limit=10_000)
+                    + cleanup_expired_device_admissions(sessions, limit=10_000)
+                    + cleanup_expired_public_access(sessions, limit=10_000)
+                )
 
             def web_cleanup() -> int:
                 with sessions.begin() as session:

@@ -2,23 +2,27 @@
 
 ## Current state
 
-AutPlay has reproducible local runtime Compose files and GitHub Actions for CI plus restricted
-release-candidate bundles. It does not yet have a safe production deployment topology. The existing
-`deploy/compose` files are loopback-first development/runtime evidence and must not be exposed to
-the public Internet or pointed at personal/production data.
+AutPlay has reproducible local runtime Compose files, GitHub Actions for CI plus restricted
+release-candidate bundles, and a locally qualified PA3 production-edge candidate. The candidate is
+blocked from live deployment by off-host restore and Android signing/update gates. The normal
+runtime and trusted-LAN files remain development evidence and must not be exposed to the public
+Internet or pointed at personal/production data. See `PUBLIC_EDGE_PA3.md` for the exact candidate
+and stop boundary.
 
 No checked-in workflow currently deploys, pushes an OCI image, creates a GitHub Release, signs an
 APK with a production key or runs a migration against a persistent target. This is an intentional
 fail-closed boundary, not a missing success claim.
 
-## Decisions required before a production manifest
+## Decisions required before a live production deployment
 
 The operator must explicitly choose and record all of the following:
 
 1. Linux x86_64 target and access model (for example, an on-host self-hosted runner or a reviewed
    SSH transport with pinned host identity).
 2. Container registry and immutable image naming/retention policy.
-3. Public or trusted-LAN network boundary, domain and TLS/reverse-proxy topology.
+3. Public or trusted-LAN network boundary, domain and TLS/reverse-proxy topology. PA3 fixes the
+   current candidate to DNS-only IPv4 `api.autplay.win`/`stream.autplay.win`, Caddy and TCP 443;
+   changing that topology requires a new decision.
 4. Production PostgreSQL roles, storage lifecycle and non-destructive migration authority.
 5. Secret delivery mechanism for database and auth material; values must never enter GitHub logs,
    workflow artifacts, Compose YAML or repository files.

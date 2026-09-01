@@ -35,6 +35,7 @@ from autplay.application.imports import ImportService
 from autplay.application.library import LibraryService
 from autplay.application.manual_discovery import ManualDiscoveryService
 from autplay.application.profile_pairing import ProfilePairingService
+from autplay.application.public_access import PublicAccessService
 from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
@@ -98,6 +99,23 @@ def build_profile_pairing_service(
             max_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
         ),
         access_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
+    )
+
+
+def build_public_access_service(settings: ApiSettings, engine: Engine) -> PublicAccessService:
+    """Assemble PA2 without modifying M5 enrollment authority."""
+    return PublicAccessService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        access_tokens=Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
+        ),
+        access_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
+        source_hmac_secret=settings.public_access_source_hmac_secret.get_secret_value().encode(
+            "utf-8"
+        ),
     )
 
 
@@ -448,6 +466,7 @@ __all__ = (
     "build_library_service",
     "build_manual_discovery_service",
     "build_profile_pairing_service",
+    "build_public_access_service",
     "build_recommendation_service",
     "build_stream_auth_service",
     "build_stream_lookup",
