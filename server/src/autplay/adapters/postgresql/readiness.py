@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0026_s1d_guest_room_access"
+EXPECTED_MIGRATION_HEAD: Final = "0027_public_access_invite_only"
 
 
 @dataclass(frozen=True, slots=True)

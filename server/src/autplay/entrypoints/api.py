@@ -23,6 +23,7 @@ from autplay.application.auth import AuthService
 from autplay.application.discovery_automation import DiscoveryAutomationService
 from autplay.application.guest_room import GuestRoomService
 from autplay.application.profile_pairing import ProfilePairingService
+from autplay.application.public_access import PublicAccessService
 from autplay.application.web_admin import WebAdminService
 from autplay.entrypoints.admin_web_http import (
     AdminCommandsHttp,
@@ -42,6 +43,7 @@ from autplay.entrypoints.composition import (
     build_library_service,
     build_manual_discovery_service,
     build_profile_pairing_service,
+    build_public_access_service,
     build_recommendation_service,
     build_social_service,
     build_stream_lookup,
@@ -64,6 +66,10 @@ from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
+from autplay.entrypoints.public_access_http import (
+    build_exact_proxy_source_resolver,
+    create_public_access_router,
+)
 from autplay.entrypoints.recommendation_http import (
     RecommendationHttpService,
     create_recommendation_router,
@@ -102,6 +108,7 @@ def create_app(
     guest_room_service: GuestRoomService | None = None,
     social_service: Any | None = None,
     profile_pairing_service: ProfilePairingService | None = None,
+    public_access_service: PublicAccessService | None = None,
     admin_web_service: WebAdminService | None = None,
     admin_view_service: AdminViewsHttp | None = None,
     admin_command_service: AdminCommandsHttp | None = None,
@@ -129,6 +136,7 @@ def create_app(
         if profile_pairing_service is not None
         else build_profile_pairing_service(resolved_settings, engine)
     )
+    public_access = public_access_service or build_public_access_service(resolved_settings, engine)
     discovery_automation = (
         discovery_automation_service or build_discovery_automation_service(engine)
         if resolved_settings.discovery_automation_enabled
@@ -167,6 +175,15 @@ def create_app(
         )
     )
     api_router.include_router(create_device_admission_router(pairing))
+    api_router.include_router(
+        create_public_access_router(
+            public_access,
+            authenticated=bearer_authentication(authentication),
+            canonical_source=build_exact_proxy_source_resolver(
+                resolved_settings.public_access_trusted_proxy_ip
+            ),
+        )
+    )
     api_router.include_router(
         create_vault_router(uploads, authenticated=bearer_authentication(authentication))
     )

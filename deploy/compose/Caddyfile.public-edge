@@ -1,0 +1,69 @@
+{
+	admin off
+	auto_https disable_redirects
+	email {$AUTPLAY_ACME_EMAIL}
+	servers {
+		protocols h1 h2
+	}
+}
+
+(autplay_tls) {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+}
+
+(autplay_proxy_headers) {
+	header_up X-AutPlay-Client-IP {remote_host}
+	header_up X-Forwarded-For {remote_host}
+	header_up X-Real-IP {remote_host}
+	header_up X-Forwarded-Proto https
+	header_up X-Forwarded-Host {host}
+	header_up -Forwarded
+}
+
+api.autplay.win {
+	import autplay_tls
+
+	route {
+		@private path /admin* /health* /metrics /api/v1/wave*
+		handle @private {
+			respond 404
+		}
+
+		@api path /api/v1/*
+		handle @api {
+			reverse_proxy mobile-api:8787 {
+				import autplay_proxy_headers
+			}
+		}
+
+		handle {
+			respond 404
+		}
+	}
+}
+
+stream.autplay.win {
+	import autplay_tls
+
+	route {
+		@stream path /api/v1/stream/*
+		handle @stream {
+			reverse_proxy stream:8788 {
+				import autplay_proxy_headers
+			}
+		}
+
+		handle {
+			respond 404
+		}
+	}
+}

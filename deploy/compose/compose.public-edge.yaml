@@ -1,0 +1,167 @@
+x-autplay-production-database-environment: &autplay-production-database-environment
+  AUTPLAY_DATABASE_URL_FILE: /run/secrets/autplay-database-url
+  AUTPLAY_DATABASE_CONNECT_TIMEOUT_SECONDS: "2"
+  AUTPLAY_DATABASE_STATEMENT_TIMEOUT_MS: "5000"
+  AUTPLAY_PROFILE: production
+  AUTPLAY_VAULT_ROOT: /var/lib/autplay/vault
+  AUTPLAY_VAULT_MAX_OBJECT_BYTES: "2147483648"
+  AUTPLAY_VAULT_MAX_CHUNK_BYTES: "1048576"
+  AUTPLAY_VAULT_LOW_DISK_BYTES: "1073741824"
+  AUTPLAY_VAULT_TOOL_TIMEOUT_SECONDS: "120"
+  AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "1048576"
+
+services:
+  postgres:
+    environment: !override
+      POSTGRES_DB: autplay
+      POSTGRES_USER: autplay
+      POSTGRES_PASSWORD_FILE: /run/secrets/autplay-postgres-password
+    secrets: !override
+      - source: autplay-postgres-password
+        target: autplay-postgres-password
+    restart: unless-stopped
+
+  migrate:
+    environment: !override
+      <<: *autplay-production-database-environment
+    secrets: !override
+      - source: autplay-database-url
+        target: autplay-database-url
+
+  api:
+    environment: !override
+      <<: *autplay-production-database-environment
+      AUTPLAY_API_HOST: 0.0.0.0
+      AUTPLAY_API_PORT: "8787"
+      AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+      AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET_FILE: /run/secrets/autplay-public-access-source-hmac
+      AUTPLAY_ADMIN_WEB_ENABLED: "false"
+      AUTPLAY_PROFILE_API_ORIGIN: https://api.autplay.win
+      AUTPLAY_PROFILE_STREAM_ORIGIN: https://stream.autplay.win
+    secrets: !override
+      - source: autplay-auth-signing-secret
+        target: autplay-auth-signing-secret
+      - source: autplay-public-access-source-hmac
+        target: autplay-public-access-source-hmac
+      - source: autplay-database-url
+        target: autplay-database-url
+
+  worker-cpu:
+    environment: !override
+      <<: *autplay-production-database-environment
+      AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
+      AUTPLAY_WORKER_LEASE_SECONDS: "120"
+      AUTPLAY_WORKER_MAX_ATTEMPTS: "5"
+      AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
+    secrets: !override
+      - source: autplay-database-url
+        target: autplay-database-url
+
+  mobile-api:
+    environment: !override
+      <<: *autplay-production-database-environment
+      AUTPLAY_API_HOST: 0.0.0.0
+      AUTPLAY_API_PORT: "8787"
+      AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+      AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET_FILE: /run/secrets/autplay-public-access-source-hmac
+      AUTPLAY_PROFILE_IDENTITY_PRIVATE_KEY_PEM_FILE: /run/secrets/autplay-profile-identity-key
+      AUTPLAY_PROFILE_LABEL_HINT: "${AUTPLAY_PROFILE_LABEL_HINT:-AutPlay personal server}"
+      AUTPLAY_PROFILE_API_ORIGIN: https://api.autplay.win
+      AUTPLAY_PROFILE_STREAM_ORIGIN: https://stream.autplay.win
+      AUTPLAY_PUBLIC_ACCESS_TRUSTED_PROXY_IP: 172.30.77.2
+    secrets: !override
+      - source: autplay-auth-signing-secret
+        target: autplay-auth-signing-secret
+      - source: autplay-public-access-source-hmac
+        target: autplay-public-access-source-hmac
+      - source: autplay-profile-identity-key
+        target: autplay-profile-identity-key
+      - source: autplay-database-url
+        target: autplay-database-url
+    ports: !reset []
+    networks:
+      default: null
+      public-edge: null
+
+  stream:
+    environment: !override
+      <<: *autplay-production-database-environment
+      AUTPLAY_STREAM_HOST: 0.0.0.0
+      AUTPLAY_STREAM_PORT: "8788"
+      AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+    secrets: !override
+      - source: autplay-auth-signing-secret
+        target: autplay-auth-signing-secret
+      - source: autplay-database-url
+        target: autplay-database-url
+    ports: !reset []
+    networks:
+      default: null
+      public-edge: null
+
+  edge:
+    image: caddy:2.11.4-alpine@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a
+    profiles: [public-edge]
+    environment:
+      AUTPLAY_ACME_EMAIL: "${AUTPLAY_ACME_EMAIL:?set AUTPLAY_ACME_EMAIL for certificate expiry notices}"
+    command: [caddy, run, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+    read_only: true
+    tmpfs:
+      - /config:size=8m,mode=0700
+      - /tmp:size=8m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 15s
+    ports:
+      - name: public-https
+        target: 443
+        host_ip: 0.0.0.0
+        published: "443"
+        protocol: tcp
+    volumes:
+      - ./Caddyfile.public-edge:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      public-edge:
+        ipv4_address: 172.30.77.2
+    depends_on:
+      mobile-api:
+        condition: service_healthy
+      stream:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, caddy, validate, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+
+networks:
+  public-edge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.77.0/29
+
+volumes:
+  postgres-data:
+    labels:
+      app.autplay.purpose: persistent-production-postgresql
+  vault-data:
+    labels:
+      app.autplay.purpose: persistent-production-vault
+  caddy-data:
+    labels:
+      app.autplay.purpose: persistent-public-tls
+
+secrets:
+  autplay-postgres-password:
+    file: "${AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE:?set AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE to a private local file}"
+  autplay-database-url:
+    file: "${AUTPLAY_RUNTIME_DATABASE_URL_FILE:?set AUTPLAY_RUNTIME_DATABASE_URL_FILE to a private local file}"

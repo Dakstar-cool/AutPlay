@@ -102,6 +102,13 @@ from .profile_pairing import (
     TrustedDeviceKeyRow,
     TrustedDeviceReenrollmentChallengeRow,
 )
+from .public_access import (
+    AccountInvitationRow,
+    AccountProvisioningLinkRow,
+    AccountProvisioningOperationReceiptRow,
+    AccountProvisioningRateWindowRow,
+    AccountRegistrationReceiptRow,
+)
 from .social import (
     FriendRequestRow,
     FriendRoomInvitationRow,
@@ -189,6 +196,11 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     TrustedDeviceKeyRow,
     TrustedDeviceReenrollmentChallengeRow,
     DeviceKeyBlockRow,
+    AccountInvitationRow,
+    AccountRegistrationReceiptRow,
+    AccountProvisioningLinkRow,
+    AccountProvisioningOperationReceiptRow,
+    AccountProvisioningRateWindowRow,
     WebSessionInvitationRow,
     WebLoginChallengeRow,
     WebSessionRow,
@@ -283,6 +295,11 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
 
 __all__ = (
     "MAPPED_ROWS",
+    "AccountInvitationRow",
+    "AccountProvisioningLinkRow",
+    "AccountProvisioningOperationReceiptRow",
+    "AccountProvisioningRateWindowRow",
+    "AccountRegistrationReceiptRow",
     "AcquisitionAttemptRow",
     "AcquisitionRecordRow",
     "ArtistCreditNameRow",

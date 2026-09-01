@@ -22,6 +22,7 @@ x-autplay-mobile-environment: &autplay-mobile-environment
   AUTPLAY_API_HOST: 0.0.0.0
   AUTPLAY_API_PORT: "8787"
   AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+  AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET_FILE: /run/secrets/autplay-public-access-source-hmac
   AUTPLAY_PROFILE_IDENTITY_PRIVATE_KEY_PEM_FILE: /run/secrets/autplay-profile-identity-key
   AUTPLAY_PROFILE_LABEL_HINT: "${AUTPLAY_PROFILE_LABEL_HINT:-AutPlay local server}"
   AUTPLAY_PROFILE_API_ORIGIN: "http://${AUTPLAY_MOBILE_BIND_HOST:-127.0.0.1}:${AUTPLAY_MOBILE_API_PORT:-18787}"
@@ -65,6 +66,8 @@ services:
     secrets:
       - source: autplay-auth-signing-secret
         target: autplay-auth-signing-secret
+      - source: autplay-public-access-source-hmac
+        target: autplay-public-access-source-hmac
       - source: autplay-profile-identity-key
         target: autplay-profile-identity-key
     depends_on:

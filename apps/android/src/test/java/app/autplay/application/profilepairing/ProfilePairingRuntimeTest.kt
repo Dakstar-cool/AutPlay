@@ -39,6 +39,36 @@ import org.junit.Test
 
 class ProfilePairingRuntimeTest {
     @Test
+    fun publicReservationPreventsOrdinaryM5DiscoveryFromStarting() = runBlocking {
+        val fixture = Fixture()
+        assertTrue(fixture.firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS))
+
+        fixture.runtime.startDiscovery(API_ORIGIN).join()
+
+        assertEquals(0, fixture.port.discoveryCalls)
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.NotConnected)
+    }
+
+    @Test
+    fun processDeathPublicPendingPreventsOrdinaryM5AndPreservesExactReplayEnvelope() = runBlocking {
+        val credentials = FakeCredentials()
+        credentials.write(PROFILE, publicPendingEnvelope())
+        val before = requireNotNull(credentials.read(PROFILE))
+        val restarted = Fixture(credentials = credentials)
+
+        restarted.runtime.startDiscovery(API_ORIGIN).join()
+
+        assertEquals(0, restarted.port.discoveryCalls)
+        assertTrue(restarted.runtime.state.value.pairing is PairingState.Blocked)
+        val after = requireNotNull(credentials.read(PROFILE))
+        try {
+            assertArrayEquals(before, after)
+        } finally {
+            before.fill(0)
+            after.fill(0)
+        }
+    }
+    @Test
     fun explicitTrustRegistersDiscoveryOriginForAdmission() = runBlocking {
         val fixture = Fixture()
 
@@ -509,6 +539,109 @@ class ProfilePairingRuntimeTest {
         assertNull(decoded.m5PendingMaterializationRequest)
     }
 
+    @Test
+    fun publicRegistrationEvidenceClearsOnlyAfterDurableBinding() = runBlocking {
+        val fixture = Fixture()
+        assertTrue(fixture.firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS))
+        fixture.credentials.write(PROFILE, publicPendingEnvelope())
+
+        assertTrue(
+            fixture.runtime.completePublicAccountRegistration(
+                publicSnapshot(),
+                KEY_ALIAS,
+                publicSession(),
+                IDENTITY_SPKI.copyOf(),
+            ),
+        )
+
+        assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
+        val material = requireNotNull(fixture.credentials.read(PROFILE))
+        val stored = try { SessionCredentialEnvelopeCodec.decode(material) } finally { material.fill(0) }
+        assertFalse(stored.refreshPending)
+        assertNull(stored.publicAccessPendingRegistrationId)
+        assertNull(stored.publicAccessPendingCanonicalRequest)
+        assertNull(stored.publicAccessPendingSuccessorRefreshToken)
+    }
+
+    @Test
+    fun failedPostBindingCleanupKeepsReplayEvidenceAndDurableBinding() = runBlocking {
+        val credentials = FailOnThirdWriteCredentials()
+        val fixture = Fixture(credentials = credentials)
+        assertTrue(fixture.firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS))
+        fixture.credentials.write(PROFILE, publicPendingEnvelope())
+
+        assertFalse(
+            fixture.runtime.completePublicAccountRegistration(
+                publicSnapshot(),
+                KEY_ALIAS,
+                publicSession(),
+                IDENTITY_SPKI.copyOf(),
+            ),
+        )
+
+        assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
+        val material = requireNotNull(fixture.credentials.read(PROFILE))
+        val stored = try { SessionCredentialEnvelopeCodec.decode(material) } finally { material.fill(0) }
+        assertTrue(stored.refreshPending)
+        assertEquals(INVITATION_ID, stored.publicAccessPendingRegistrationId)
+        assertTrue(KEY_ALIAS !in fixture.keys.deletedAliases)
+
+        val restarted = Fixture(
+            initialSettings = fixture.settings.value,
+            credentials = credentials,
+        )
+        restarted.runtime.recoverAndRefresh()
+
+        assertTrue(restarted.runtime.state.value.pairing is PairingState.Connected)
+        val cleanedMaterial = requireNotNull(credentials.read(PROFILE))
+        val cleaned = try {
+            SessionCredentialEnvelopeCodec.decode(cleanedMaterial)
+        } finally {
+            cleanedMaterial.fill(0)
+        }
+        assertFalse(cleaned.refreshPending)
+        assertNull(cleaned.publicAccessPendingRegistrationId)
+        assertNull(cleaned.publicAccessPendingCanonicalRequest)
+        assertNull(cleaned.publicAccessPendingSuccessorRefreshToken)
+    }
+
+    private fun publicPendingEnvelope() = SessionCredentialEnvelopeCodec.encode(
+        SessionCredentialEnvelope(
+            accessToken = "pending-account-registration",
+            refreshToken = null,
+            generation = 0,
+            refreshPending = true,
+            publicAccessPendingRegistrationId = INVITATION_ID,
+            publicAccessPendingCanonicalRequest = "e30",
+            publicAccessPendingSuccessorRefreshToken = "r".repeat(43),
+        ),
+    )
+
+    private fun publicSnapshot() = PairingFlowSnapshot(
+        GENERATION_ID,
+        API_ORIGIN,
+        STREAM_ORIGIN,
+        PROFILE,
+        SERVER_INSTANCE_ID,
+        1,
+        IDENTITY_THUMBPRINT,
+        USER,
+        DEVICE,
+        DEVICE_THUMBPRINT,
+        null,
+        BINDING_COMMIT_ID,
+    )
+
+    private fun publicSession() = EnrollmentSession(
+        DEVICE,
+        SESSION_ID,
+        SESSION_FAMILY_ID,
+        0,
+        "access".toByteArray(),
+        REFRESH_TOKEN.copyOf(),
+    )
+
     private class Fixture(
         val port: FakePort = FakePort(),
         initialSettings: NonSecretSettings = NonSecretSettings(),
@@ -518,6 +651,7 @@ class ProfilePairingRuntimeTest {
         val settings = FakeSettings(initialSettings)
         val keys = FakeKeys()
         val registeredOrigins = mutableListOf<Pair<ServerProfileId, String>>()
+        val firstBindGate = FirstBindCeremonyGate()
         val runtime = ProfilePairingRuntime(
             scope = CoroutineScope(Dispatchers.Unconfined),
             settings = settings,
@@ -528,6 +662,7 @@ class ProfilePairingRuntimeTest {
             deviceName = "Test device",
             reportSafeError = {},
             registerOrigin = { profile, origin -> registeredOrigins += profile to origin },
+            firstBindGate = firstBindGate,
         )
     }
 
@@ -569,6 +704,9 @@ class ProfilePairingRuntimeTest {
             values[profileId] = material.copyOf()
         }
         override suspend fun clear(profileId: ServerProfileId) { values.remove(profileId)?.fill(0) }
+        override suspend fun hasPublicAccessPendingRegistration(): Boolean = values.values.any {
+            SessionCredentialEnvelopeCodec.decode(it).publicAccessPendingRegistrationId != null
+        }
     }
 
     private class GatedCredentials : CredentialStore {
@@ -587,6 +725,28 @@ class ProfilePairingRuntimeTest {
         override suspend fun clear(profileId: ServerProfileId) {
             values.remove(profileId)?.fill(0)
         }
+        override suspend fun hasPublicAccessPendingRegistration(): Boolean = values.values.any {
+            SessionCredentialEnvelopeCodec.decode(it).publicAccessPendingRegistrationId != null
+        }
+    }
+
+    private class FailOnThirdWriteCredentials : CredentialStore {
+        private var value: ByteArray? = null
+        private var writes = 0
+        override suspend fun read(profileId: ServerProfileId) = value?.copyOf()
+        override suspend fun write(profileId: ServerProfileId, material: ByteArray) {
+            writes += 1
+            if (writes == 3) error("simulated process death after binding")
+            value?.fill(0)
+            value = material.copyOf()
+        }
+        override suspend fun clear(profileId: ServerProfileId) {
+            value?.fill(0)
+            value = null
+        }
+        override suspend fun hasPublicAccessPendingRegistration(): Boolean = value?.let {
+            SessionCredentialEnvelopeCodec.decode(it).publicAccessPendingRegistrationId != null
+        } ?: false
     }
 
     private class FakeKeys : M5DeviceKeyStore {
@@ -606,6 +766,7 @@ class ProfilePairingRuntimeTest {
         private val rotationSession: EnrollmentSession? = null,
     ) : ProfilePairingPort {
         var exchangeCalls = 0
+        var discoveryCalls = 0
         var rotateCalls = 0
         var lastExchange: EnrollmentExchangeCommand? = null
         var identitySeeded = false
@@ -617,6 +778,7 @@ class ProfilePairingRuntimeTest {
             if (wipeSeedInput) publicKeySpki.fill(0)
         }
         override suspend fun discovery(apiOrigin: String): PairingNetworkResult<DiscoveryDocument> {
+            discoveryCalls += 1
             discoveryGate?.await()
             return PairingNetworkResult.Success(
                 DiscoveryDocument(

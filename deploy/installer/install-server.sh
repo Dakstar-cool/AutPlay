@@ -126,6 +126,7 @@ docker load --input "$archive" >/dev/null
 image_identity="$(docker image inspect --format '{{.Os}}|{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_tag")"
 [[ "$image_identity" == "linux|amd64|autplay:autplay|$source_commit" ]] || { echo "IMAGE_IDENTITY_MISMATCH" >&2; exit 1; }
 new_secret "$state_dir/secrets/auth-signing.txt"
+new_secret "$state_dir/secrets/public-access-source-hmac.txt"
 new_secret "$state_dir/secrets/admin-source-hmac.txt"
 new_secret "$state_dir/secrets/admin-csrf-hmac.txt"
 identity_key="$state_dir/secrets/profile-identity-p256.pem"
@@ -136,10 +137,10 @@ fi
 # Compose bind-mounted file secrets cannot remap UID/GID on native Linux. The closed 0700 parent
 # prevents host traversal while 0444 lets the non-root container UID read the mounted files.
 chmod 0444 "$state_dir/secrets/"*
-mapfile -t secret_values < <(for file in "$state_dir/secrets/auth-signing.txt" "$state_dir/secrets/admin-source-hmac.txt" "$state_dir/secrets/admin-csrf-hmac.txt"; do tr -d '\r\n' <"$file"; echo; done)
-[[ "${#secret_values[@]}" -eq 3 ]] || { echo "SECRET_STATE_INVALID" >&2; exit 1; }
+mapfile -t secret_values < <(for file in "$state_dir/secrets/auth-signing.txt" "$state_dir/secrets/public-access-source-hmac.txt" "$state_dir/secrets/admin-source-hmac.txt" "$state_dir/secrets/admin-csrf-hmac.txt"; do tr -d '\r\n' <"$file"; echo; done)
+[[ "${#secret_values[@]}" -eq 4 ]] || { echo "SECRET_STATE_INVALID" >&2; exit 1; }
 for value in "${secret_values[@]}"; do [[ "${#value}" -ge 32 ]] || { echo "SECRET_STATE_INVALID" >&2; exit 1; }; done
-[[ "${secret_values[0]}" != "${secret_values[1]}" && "${secret_values[0]}" != "${secret_values[2]}" && "${secret_values[1]}" != "${secret_values[2]}" ]] || { echo "SECRET_STATE_INVALID" >&2; exit 1; }
+[[ "$(printf '%s\n' "${secret_values[@]}" | sort -u | wc -l)" -eq 4 ]] || { echo "SECRET_STATE_INVALID" >&2; exit 1; }
 identity_fingerprint="$(docker run --rm --network none --mount "type=bind,src=$identity_key,dst=/identity.pem,readonly" --entrypoint python "$image_tag" -c 'from cryptography.hazmat.primitives import serialization; from cryptography.hazmat.primitives.asymmetric import ec; import hashlib; key=serialization.load_pem_private_key(open("/identity.pem","rb").read(),password=None); assert isinstance(key,ec.EllipticCurvePrivateKey) and isinstance(key.curve,ec.SECP256R1); print(hashlib.sha256(key.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest())')"
 [[ "$identity_fingerprint" =~ ^[0-9a-f]{64}$ ]] || { echo "IDENTITY_STATE_INVALID" >&2; exit 1; }
 
@@ -149,6 +150,7 @@ AUTPLAY_SERVER_IMAGE=$image_tag
 AUTPLAY_RELEASE_TAG=${image_tag#autplay-server:}
 AUTPLAY_SOURCE_COMMIT=$source_commit
 AUTPLAY_RUNTIME_AUTH_SECRET_FILE=$state_dir/secrets/auth-signing.txt
+AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=$state_dir/secrets/public-access-source-hmac.txt
 AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE=$state_dir/secrets/admin-source-hmac.txt
 AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE=$state_dir/secrets/admin-csrf-hmac.txt
 AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE=$identity_key

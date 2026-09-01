@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/invited-account-page.schema.json",
+  "title": "InvitedAccountPage",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "items", "next_cursor"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["user_id", "provisioning_invitation_id", "display_name", "role", "status", "created_at"],
+        "properties": {
+          "user_id": {"type": "string", "format": "uuid"},
+          "provisioning_invitation_id": {"type": "string", "format": "uuid"},
+          "display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+          "role": {"const": "USER"},
+          "status": {"enum": ["ACTIVE", "DISABLED"]},
+          "created_at": {"type": "string", "format": "date-time"},
+          "disabled_at": {"type": ["string", "null"], "format": "date-time"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "next_cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 512}
+  },
+  "additionalProperties": false,
+  "x-autplay-projection": "PROVISIONING_METADATA_ONLY_NO_ACCOUNT_DATA",
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

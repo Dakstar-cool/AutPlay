@@ -72,7 +72,11 @@ class Uploads:
 
 def _client(uploads: Uploads) -> TestClient:
     settings = ApiSettings(
-        database_url=SecretStr(DATABASE_URL), auth_signing_secret=SecretStr(AUTH_SECRET)
+        database_url=SecretStr(DATABASE_URL),
+        auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(
+            "public-access-source-hmac-secret-at-least-32-bytes"
+        ),
     )
     return TestClient(create_app(settings, auth_service=Auth(), upload_service=uploads))  # type: ignore[arg-type]
 

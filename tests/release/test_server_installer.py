@@ -17,6 +17,13 @@ def bash_executable() -> str:
     return bash
 
 
+def powershell_executable() -> str:
+    executable = "powershell.exe" if sys.platform == "win32" else "pwsh"
+    resolved = shutil.which(executable)
+    assert resolved is not None, f"{executable} is required by the release gate"
+    return resolved
+
+
 def bash_path(path: Path) -> str:
     if sys.platform != "win32":
         return str(path)
@@ -107,7 +114,7 @@ def test_installer_scripts_have_valid_powershell_syntax() -> None:
         )
         result = subprocess.run(
             [
-                "powershell.exe",
+                powershell_executable(),
                 "-NoProfile",
                 "-Command",
                 parser_command,
@@ -194,6 +201,8 @@ def test_release_packager_emits_both_apks_and_the_server_installer() -> None:
     assert "Trusted-LAN APK development signing failed" in packager
     assert "server-installer-manifest.json" in packager
     assert "installer.zip" in packager
+    assert "compose.public-edge.yaml" in packager
+    assert "Caddyfile.public-edge" in packager
     assert "RELEASE_NOTES_$releaseVersion.md" in packager
     assert "version_code = $androidVersionCode" in packager
     assert "BuildConfig.VERSION_NAME" in (

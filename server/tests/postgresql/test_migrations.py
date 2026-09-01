@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from alembic import command
 from alembic.script import ScriptDirectory
 from sqlalchemy.exc import DBAPIError
 
@@ -49,11 +52,11 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0026_s1d_guest_room_access"]
+    assert heads == ["0027_public_access_invite_only"]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 121
+    assert _object_count(database_harness, empty_database_name) == 126
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -61,7 +64,45 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 121
+    assert _object_count(database_harness, empty_database_name) == 126
+
+
+def test_upgrade_accepts_file_only_database_url(
+    database_harness: DatabaseHarness,
+    empty_database_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    url_file = tmp_path / "database-url"
+    url_file.write_text(database_harness.database_url(empty_database_name) + "\n", encoding="utf-8")
+    monkeypatch.delenv("AUTPLAY_DATABASE_URL", raising=False)
+    monkeypatch.delenv("AUTPLAY_TEST_DATABASE_URL", raising=False)
+    monkeypatch.setenv("AUTPLAY_DATABASE_URL_FILE", str(url_file))
+
+    command.upgrade(database_harness.alembic_config(empty_database_name), "head")
+
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0027_public_access_invite_only"
+    )
+
+
+def test_upgrade_rejects_ambiguous_database_url_sources(
+    database_harness: DatabaseHarness,
+    empty_database_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    url = database_harness.database_url(empty_database_name)
+    url_file = tmp_path / "database-url"
+    url_file.write_text(url, encoding="utf-8")
+    monkeypatch.setenv("AUTPLAY_DATABASE_URL", url)
+    monkeypatch.delenv("AUTPLAY_TEST_DATABASE_URL", raising=False)
+    monkeypatch.setenv("AUTPLAY_DATABASE_URL_FILE", str(url_file))
+
+    with pytest.raises(RuntimeError, match="mutually exclusive"):
+        command.upgrade(database_harness.alembic_config(empty_database_name), "head")
+
+    assert _current_revision(database_harness, empty_database_name) is None
 
 
 def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHarness) -> None:
@@ -97,6 +138,7 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0024_a1b_auth_closure",
         "0025_a1c_automation_runtime",
         "0026_s1d_guest_room_access",
+        "0027_public_access_invite_only",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 
@@ -125,7 +167,9 @@ def test_artist_sync_downgrade_refuses_durable_catalog_events(
         database_harness.downgrade(empty_database_name, "0015_wave_runtime")
     # Alembic executes the attempted multi-revision downgrade atomically; the
     # M5B contract remains present when the predecessor refuses its rollback.
-    assert _current_revision(database_harness, empty_database_name) == "0026_s1d_guest_room_access"
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
 
     with database_harness.connect(empty_database_name) as connection:
         connection.execute("DELETE FROM sync.sync_event")
@@ -158,7 +202,9 @@ def test_s1b_downgrade_refuses_durable_admission_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1B downgrade"):
         database_harness.downgrade(empty_database_name, "0020_a1b_discovery_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0026_s1d_guest_room_access"
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
 
 
 def test_s1b_downgrade_refuses_rate_only_evidence(
@@ -179,7 +225,9 @@ def test_s1b_downgrade_refuses_rate_only_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1B downgrade"):
         database_harness.downgrade(empty_database_name, "0020_a1b_discovery_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0026_s1d_guest_room_access"
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
 
 
 def test_s1b_downgrade_guard_names_every_owned_table() -> None:
@@ -218,7 +266,9 @@ def test_s1c_downgrade_refuses_rate_only_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1C downgrade"):
         database_harness.downgrade(empty_database_name, "0021_s1b_device_admission")
-    assert _current_revision(database_harness, empty_database_name) == "0026_s1d_guest_room_access"
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
 
 
 def test_s1c_downgrade_guard_names_every_owned_table() -> None:
@@ -275,7 +325,9 @@ def test_s2_downgrade_refuses_profile_statistics_policy(
 
     with pytest.raises(DBAPIError, match="refusing S2 downgrade"):
         database_harness.downgrade(empty_database_name, "0022_s1c_social_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0026_s1d_guest_room_access"
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
 
 
 def test_s2_downgrade_guard_names_owned_policy_table() -> None:
@@ -303,7 +355,9 @@ def test_s1d_downgrade_refuses_rate_only_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1D downgrade"):
         database_harness.downgrade(empty_database_name, "0025_a1c_automation_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0026_s1d_guest_room_access"
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
 
 
 def test_s1d_downgrade_guard_names_every_owned_table() -> None:
@@ -317,5 +371,41 @@ def test_s1d_downgrade_guard_names_every_owned_table() -> None:
         "social.guest_preflight",
         "social.guest_timing_report",
         "social.guest_rate_window",
+    ):
+        assert f"EXISTS(SELECT 1 FROM {table})" in migration
+
+
+def test_pa2_downgrade_refuses_rate_only_evidence(
+    database_harness: DatabaseHarness, empty_database_name: str
+) -> None:
+    """PA2 throttle evidence is security-relevant and cannot be silently discarded."""
+    database_harness.upgrade(empty_database_name)
+    with database_harness.connect(empty_database_name) as connection:
+        connection.execute(
+            """
+            INSERT INTO account.account_provisioning_rate_window
+              (rate_key_sha256,scope,window_started_at,expires_at,attempt_count)
+            VALUES (%s,'REDEEM_SERVER',now(),now()+interval '15 minutes',1)
+            """,
+            (b"p" * 32,),
+        )
+        connection.commit()
+    with pytest.raises(DBAPIError, match="refusing PA2 downgrade"):
+        database_harness.downgrade(empty_database_name, "0026_s1d_guest_room_access")
+    assert (
+        _current_revision(database_harness, empty_database_name) == "0027_public_access_invite_only"
+    )
+
+
+def test_pa2_downgrade_guard_names_every_owned_table() -> None:
+    migration = (
+        SERVER_ROOT / "migrations" / "versions" / "0027_public_access_invite_only.py"
+    ).read_text(encoding="utf-8")
+    for table in (
+        "account.account_invitation",
+        "account.account_provisioning_link",
+        "account.account_registration_receipt",
+        "account.account_provisioning_operation_receipt",
+        "account.account_provisioning_rate_window",
     ):
         assert f"EXISTS(SELECT 1 FROM {table})" in migration

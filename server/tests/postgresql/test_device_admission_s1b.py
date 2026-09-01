@@ -22,7 +22,7 @@ from autplay.application.profile_pairing import (
     cleanup_expired_pairing_receipts,
 )
 from autplay.application.web_admin import WebAdminService
-from autplay.domain.auth import AccountRole
+from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.profile_pairing import (
     ProfilePairingError,
     canonical_sha256,
@@ -635,6 +635,16 @@ def test_exchange_replay_trust_removal_and_revocation_remain_distinct(
         (UUID(str(request["request_id"])),),
     ).fetchone() == (1,)
 
+    device_principal = Principal(
+        owner.user_id,
+        UUID(str(enrolled["device_id"])),
+        UUID(str(enrolled["session_id"])),
+        AccountRole.OWNER,
+    )
+    trusted_capabilities = admission_runtime.service.capabilities(device_principal)["payload"]
+    assert isinstance(trusted_capabilities, dict)
+    assert "reenrollTrustedDevice" in trusted_capabilities["operations"]
+
     thumb = bytes.fromhex(str(request["device_key_thumbprint_sha256"]))
     admission_runtime.service.manage_trusted_key(
         principal=owner,
@@ -643,6 +653,9 @@ def test_exchange_replay_trust_removal_and_revocation_remain_distinct(
         operation_id=uuid4(),
         request_sha256=b"m" * 32,
     )
+    untrusted_capabilities = admission_runtime.service.capabilities(device_principal)["payload"]
+    assert isinstance(untrusted_capabilities, dict)
+    assert "reenrollTrustedDevice" not in untrusted_capabilities["operations"]
     assert database_connection.execute(
         "SELECT revoked_at IS NULL FROM account.user_session WHERE session_id=%s",
         (UUID(str(enrolled["session_id"])),),

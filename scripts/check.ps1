@@ -13,6 +13,9 @@ $composeProject = "autplay-p06-$PID"
 $composeTouched = $false
 $previousTestDatabaseUrl = [Environment]::GetEnvironmentVariable("AUTPLAY_TEST_DATABASE_URL")
 $previousRuntimeSecretFile = [Environment]::GetEnvironmentVariable("AUTPLAY_RUNTIME_AUTH_SECRET_FILE")
+$previousPublicAccessSourceSecretFile = [Environment]::GetEnvironmentVariable(
+    "AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE"
+)
 
 Push-Location $repoRoot
 
@@ -66,6 +69,10 @@ try {
     [Environment]::SetEnvironmentVariable(
         "AUTPLAY_RUNTIME_AUTH_SECRET_FILE",
         (Join-Path $repoRoot "server\pyproject.toml")
+    )
+    [Environment]::SetEnvironmentVariable(
+        "AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE",
+        (Join-Path $repoRoot "pyproject.toml")
     )
     & docker compose -p $composeProject -f $composeFile -f $composeRuntimeFile --profile runtime config --quiet
     if ($LASTEXITCODE -ne 0) { throw "Runtime Docker Compose configuration validation failed" }
@@ -142,6 +149,10 @@ try {
 finally {
     [Environment]::SetEnvironmentVariable("AUTPLAY_TEST_DATABASE_URL", $previousTestDatabaseUrl)
     [Environment]::SetEnvironmentVariable("AUTPLAY_RUNTIME_AUTH_SECRET_FILE", $previousRuntimeSecretFile)
+    [Environment]::SetEnvironmentVariable(
+        "AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE",
+        $previousPublicAccessSourceSecretFile
+    )
     if ($composeTouched) {
         & docker compose -p $composeProject -f $composeFile -f $composeTestFile down --volumes --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Disposable Compose cleanup failed" }

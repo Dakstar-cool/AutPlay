@@ -46,6 +46,8 @@ _API_ENV_FIELDS: Final = {
     "host": "API_HOST",
     "port": "API_PORT",
     "auth_signing_secret": "AUTH_SIGNING_SECRET",
+    "public_access_source_hmac_secret": "PUBLIC_ACCESS_SOURCE_HMAC_SECRET",
+    "public_access_trusted_proxy_ip": "PUBLIC_ACCESS_TRUSTED_PROXY_IP",
     "auth_issuer": "AUTH_ISSUER",
     "auth_audience": "AUTH_AUDIENCE",
     "access_token_ttl_seconds": "ACCESS_TOKEN_TTL_SECONDS",
@@ -95,6 +97,7 @@ _SECRET_FIELDS: Final = frozenset(
     {
         "database_url",
         "auth_signing_secret",
+        "public_access_source_hmac_secret",
         "profile_identity_private_key_pem",
         "admin_web_source_hmac_secret",
         "admin_web_csrf_hmac_secret",
@@ -205,6 +208,8 @@ class ApiSettings(_ExplicitSettings):
     host: str = "127.0.0.1"
     port: int = Field(default=8787, ge=1, le=65_535)
     auth_signing_secret: SecretStr = Field(repr=False, min_length=32, max_length=4_096)
+    public_access_source_hmac_secret: SecretStr = Field(repr=False, min_length=32, max_length=4_096)
+    public_access_trusted_proxy_ip: str | None = Field(default=None, min_length=2, max_length=45)
     auth_issuer: str = Field(default="autplay", min_length=1, max_length=200)
     auth_audience: str = Field(default="autplay-android", min_length=1, max_length=200)
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=900)
@@ -255,8 +260,36 @@ class ApiSettings(_ExplicitSettings):
             profile = RuntimeProfile(profile)
         return _normalize_profile_origin(value, profile=profile)
 
+    @field_validator("public_access_trusted_proxy_ip")
+    @classmethod
+    def _normalize_public_access_trusted_proxy_ip(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            address = ip_address(value)
+        except ValueError as error:
+            raise ValueError("public access trusted proxy must be one exact IP address") from error
+        canonical = address.compressed.lower()
+        if value != canonical:
+            raise ValueError("public access trusted proxy must use canonical IP syntax")
+        return canonical
+
     @model_validator(mode="after")
     def _validate_auth_contract(self) -> Self:
+        public_source_secret = self.public_access_source_hmac_secret.get_secret_value()
+        reserved_secrets = [self.auth_signing_secret.get_secret_value()]
+        reserved_secrets.extend(
+            secret.get_secret_value()
+            for secret in (
+                self.admin_web_source_hmac_secret,
+                self.admin_web_csrf_hmac_secret,
+            )
+            if secret is not None
+        )
+        if public_source_secret in reserved_secrets:
+            raise ValueError(
+                "public access source HMAC secret must differ from every other authority secret"
+            )
         if self.password_login_enabled:
             raise ValueError("password login requires an approved credential persistence contract")
         if self.refresh_token_ttl_seconds <= self.access_token_ttl_seconds:

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/public-access/v1/account-registration-response.schema.json",
+  "title": "AccountRegistrationResponse",
+  "type": "object",
+  "required": ["contract_version", "schema_version", "registration_id", "binding_commit_id", "server_instance_id", "user_id", "account_display_name", "account_role", "device_id", "session_id", "refresh_generation", "refresh_absolute_expires_at", "receipt_expires_at", "access_token", "access_expires_at", "replayed"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "schema_version": {"const": 1},
+    "registration_id": {"type": "string", "format": "uuid"},
+    "binding_commit_id": {"type": "string", "format": "uuid"},
+    "server_instance_id": {"type": "string", "format": "uuid"},
+    "user_id": {"type": "string", "format": "uuid"},
+    "account_display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "account_role": {"const": "USER"},
+    "device_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"},
+    "refresh_generation": {"type": "integer", "const": 0},
+    "refresh_absolute_expires_at": {"type": "string", "format": "date-time"},
+    "receipt_expires_at": {"type": "string", "format": "date-time"},
+    "access_token": {"type": "string", "minLength": 32, "maxLength": 8192},
+    "access_expires_at": {"type": "string", "format": "date-time"},
+    "replayed": {"type": "boolean"}
+  },
+  "additionalProperties": false,
+  "x-autplay-sensitive": true,
+  "x-autplay-implementation-status": "IMPLEMENTED_PA2"
+}

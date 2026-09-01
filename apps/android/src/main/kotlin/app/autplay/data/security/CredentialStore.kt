@@ -31,6 +31,13 @@ interface CredentialStore {
     suspend fun write(profileId: ServerProfileId, material: ByteArray)
 
     suspend fun clear(profileId: ServerProfileId)
+
+    /**
+     * Returns whether any encrypted profile still owns an uncertain PA2 first registration.
+     * Implementations that cannot enumerate their private credential namespace must fail closed.
+     */
+    suspend fun hasPublicAccessPendingRegistration(): Boolean =
+        throw UnsupportedOperationException("CREDENTIAL_PENDING_ENUMERATION_UNAVAILABLE")
 }
 
 /** Versioned access/refresh material encrypted as one profile-scoped Keystore value. */
@@ -53,6 +60,10 @@ data class SessionCredentialEnvelope(
     val m5PendingExchangeSuccessorRefreshToken: String? = null,
     /** Encrypted F-018 consent snapshot retained until idempotent Room materialization succeeds. */
     val m5PendingMaterializationRequest: String? = null,
+    /** PA2-only replay material. Deliberately separate from M5 pending exchange fields. */
+    val publicAccessPendingRegistrationId: String? = null,
+    val publicAccessPendingCanonicalRequest: String? = null,
+    val publicAccessPendingSuccessorRefreshToken: String? = null,
 ) {
     init {
         require(accessToken.isNotBlank() && accessToken.length <= MAX_TOKEN_CHARS)
@@ -72,6 +83,12 @@ data class SessionCredentialEnvelope(
             m5PendingMaterializationRequest == null ||
                 (m5.all { it != null } && m5PendingMaterializationRequest.length in 2..MAX_MATERIALIZATION_CHARS),
         ) { "M5 pending materialization requires complete active lineage." }
+        val publicAccess = listOf(publicAccessPendingRegistrationId, publicAccessPendingCanonicalRequest, publicAccessPendingSuccessorRefreshToken)
+        require(publicAccess.all { it == null } || publicAccess.all { it != null }) { "Public access pending registration must be complete." }
+        require(publicAccessPendingRegistrationId == null || (refreshPending && m5PendingExchangeId == null && m5PendingRotationId == null)) { "Public access pending registration requires isolated pending state." }
+        publicAccessPendingRegistrationId?.let { require(java.util.UUID.fromString(it).toString() == it) }
+        require(publicAccessPendingCanonicalRequest == null || publicAccessPendingCanonicalRequest.length in 2..32_768) { "Public access pending request is bounded." }
+        require(publicAccessPendingSuccessorRefreshToken == null || publicAccessPendingSuccessorRefreshToken.length in 43..128) { "Public access pending successor is bounded." }
     }
 
     private companion object {
@@ -104,6 +121,9 @@ object SessionCredentialEnvelopeCodec {
             m5PendingExchangeRequest = value["m5_pending_exchange_request"]?.jsonPrimitive?.content,
             m5PendingExchangeSuccessorRefreshToken = value["m5_pending_exchange_successor_refresh_token"]?.jsonPrimitive?.content,
             m5PendingMaterializationRequest = value["m5_pending_materialization_request"]?.jsonPrimitive?.content,
+            publicAccessPendingRegistrationId = value["public_access_pending_registration_id"]?.jsonPrimitive?.content,
+            publicAccessPendingCanonicalRequest = value["public_access_pending_canonical_request"]?.jsonPrimitive?.content,
+            publicAccessPendingSuccessorRefreshToken = value["public_access_pending_successor_refresh_token"]?.jsonPrimitive?.content,
         )
     }
 
@@ -123,6 +143,9 @@ object SessionCredentialEnvelopeCodec {
         value.m5PendingExchangeRequest?.let { put("m5_pending_exchange_request", it) }
         value.m5PendingExchangeSuccessorRefreshToken?.let { put("m5_pending_exchange_successor_refresh_token", it) }
         value.m5PendingMaterializationRequest?.let { put("m5_pending_materialization_request", it) }
+        value.publicAccessPendingRegistrationId?.let { put("public_access_pending_registration_id", it) }
+        value.publicAccessPendingCanonicalRequest?.let { put("public_access_pending_canonical_request", it) }
+        value.publicAccessPendingSuccessorRefreshToken?.let { put("public_access_pending_successor_refresh_token", it) }
     }.toString().toByteArray(StandardCharsets.UTF_8)
 
     private fun JsonObject.requiredString(name: String): String =
@@ -149,11 +172,7 @@ class AndroidKeystoreCredentialStore(context: Context) : CredentialStore {
 
     override suspend fun read(profileId: ServerProfileId): ByteArray? {
         val encoded = preferences.getString(preferenceKey(profileId), null) ?: return null
-        val packed = Base64.decode(encoded, Base64.NO_WRAP)
-        require(packed.size > IV_SIZE_BYTES) { "Stored credential material is malformed." }
-        val iv = packed.copyOfRange(0, IV_SIZE_BYTES)
-        val cipherText = packed.copyOfRange(IV_SIZE_BYTES, packed.size)
-        return cipher(Cipher.DECRYPT_MODE, iv).doFinal(cipherText)
+        return decrypt(encoded)
     }
 
     @SuppressLint("UseKtx") // The KTX edit helper discards commit()'s failure signal.
@@ -172,6 +191,31 @@ class AndroidKeystoreCredentialStore(context: Context) : CredentialStore {
         check(preferences.edit().remove(preferenceKey(profileId)).commit()) {
             "Credential material could not be cleared."
         }
+    }
+
+    override suspend fun hasPublicAccessPendingRegistration(): Boolean {
+        for (stored in preferences.all.values) {
+            val encoded = stored as? String
+                ?: throw IllegalStateException("Credential material is malformed.")
+            val material = decrypt(encoded)
+            try {
+                if (
+                    SessionCredentialEnvelopeCodec.decode(material)
+                        .publicAccessPendingRegistrationId != null
+                ) return true
+            } finally {
+                material.fill(0)
+            }
+        }
+        return false
+    }
+
+    private fun decrypt(encoded: String): ByteArray {
+        val packed = Base64.decode(encoded, Base64.NO_WRAP)
+        require(packed.size > IV_SIZE_BYTES) { "Stored credential material is malformed." }
+        val iv = packed.copyOfRange(0, IV_SIZE_BYTES)
+        val cipherText = packed.copyOfRange(IV_SIZE_BYTES, packed.size)
+        return cipher(Cipher.DECRYPT_MODE, iv).doFinal(cipherText)
     }
 
     private fun cipher(mode: Int, iv: ByteArray? = null): Cipher =

@@ -50,6 +50,11 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "account.web_session_rotation_evidence",
     "account.web_terminal_receipt",
     "account.web_login_rate_window",
+    "account.account_invitation",
+    "account.account_registration_receipt",
+    "account.account_provisioning_link",
+    "account.account_provisioning_operation_receipt",
+    "account.account_provisioning_rate_window",
     "discovery.bulk_operation",
     "discovery.source_authorization",
     "discovery.artist_policy",
@@ -173,6 +178,11 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "account.web_session_rotation_evidence": 4,
     "account.web_terminal_receipt": 17,
     "account.web_login_rate_window": 4,
+    "account.account_invitation": 8,
+    "account.account_registration_receipt": 11,
+    "account.account_provisioning_link": 4,
+    "account.account_provisioning_operation_receipt": 8,
+    "account.account_provisioning_rate_window": 5,
     "discovery.bulk_operation": 18,
     "discovery.source_authorization": 18,
     "discovery.artist_policy": 14,
@@ -297,6 +307,9 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_web_session_rotation_evidence_expiry",
         "ix_web_terminal_receipt_expiry",
         "ix_web_login_rate_window_expiry",
+        "ix_account_invitation_expiry",
+        "ix_account_registration_receipt_expiry",
+        "ix_account_provisioning_rate_expiry",
         "ix_bulk_operation_owner_time",
         "ix_discovery_candidate_owner_state",
         "ix_source_authorization_owner_expiry",
@@ -391,7 +404,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 1325
+EXPECTED_COLUMN_COUNT = 1361
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

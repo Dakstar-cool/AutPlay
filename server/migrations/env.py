@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from autplay.adapters.postgresql.metadata import metadata
@@ -79,9 +80,26 @@ def _include_object(
 def _database_url() -> str:
     """Return the explicitly supplied disposable/deployment database URL."""
     url = os.getenv("AUTPLAY_DATABASE_URL") or os.getenv("AUTPLAY_TEST_DATABASE_URL")
+    url_file = os.getenv("AUTPLAY_DATABASE_URL_FILE")
+    if url and url_file:
+        raise RuntimeError("database URL value and file are mutually exclusive")
+    if url_file:
+        try:
+            payload = Path(url_file).read_bytes()
+        except OSError as error:
+            raise RuntimeError("database URL file is unavailable") from error
+        if not payload or len(payload) > 4096 or b"\x00" in payload:
+            raise RuntimeError("database URL file is invalid")
+        try:
+            url = payload.decode("utf-8").strip()
+        except UnicodeDecodeError as error:
+            raise RuntimeError("database URL file is invalid") from error
+        if not url or "\n" in url or "\r" in url:
+            raise RuntimeError("database URL file is invalid")
     if not url:
         message = (
-            "AUTPLAY_DATABASE_URL or AUTPLAY_TEST_DATABASE_URL is required; "
+            "AUTPLAY_DATABASE_URL, AUTPLAY_DATABASE_URL_FILE or "
+            "AUTPLAY_TEST_DATABASE_URL is required; "
             "no database URL is stored in alembic.ini"
         )
         raise RuntimeError(message)

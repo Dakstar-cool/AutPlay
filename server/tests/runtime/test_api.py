@@ -11,10 +11,12 @@ from uuid import UUID
 
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.entrypoints.api import create_app
+from autplay.entrypoints.composition import build_public_access_service
 from autplay.runtime.http import MAX_REQUEST_BODY_BYTES, MAX_REQUEST_BODY_FRAMES
 from autplay.runtime.settings import ApiSettings
 from fastapi import FastAPI
 from pydantic import SecretStr
+from sqlalchemy import create_engine
 from starlette.testclient import TestClient
 from starlette.types import Message, Scope
 
@@ -34,6 +36,9 @@ def _settings() -> ApiSettings:
     return ApiSettings(
         database_url=SecretStr(DATABASE_URL),
         auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(
+            "public-access-source-hmac-secret-at-least-32-bytes"
+        ),
     )
 
 
@@ -41,6 +46,9 @@ def _admin_settings() -> ApiSettings:
     return ApiSettings(
         database_url=SecretStr(DATABASE_URL),
         auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(
+            "public-access-source-hmac-secret-at-least-32-bytes"
+        ),
         admin_web_enabled=True,
         admin_web_origin="https://admin.test",
         admin_web_source_hmac_secret=SecretStr("source-secret-is-distinct-and-at-least-32-bytes"),
@@ -50,6 +58,21 @@ def _admin_settings() -> ApiSettings:
 
 def _app(result: ReadinessResult) -> FastAPI:
     return create_app(_settings(), readiness_probe=StaticProbe(result))
+
+
+def test_public_access_composition_uses_the_dedicated_source_hmac_secret() -> None:
+    settings = _settings()
+    engine = create_engine(DATABASE_URL)
+    try:
+        service = build_public_access_service(settings, engine)
+        assert service.source_hmac_secret == (
+            settings.public_access_source_hmac_secret.get_secret_value().encode("utf-8")
+        )
+        assert service.source_hmac_secret != settings.auth_signing_secret.get_secret_value().encode(
+            "utf-8"
+        )
+    finally:
+        engine.dispose()
 
 
 def test_liveness_does_not_touch_failed_database_readiness() -> None:

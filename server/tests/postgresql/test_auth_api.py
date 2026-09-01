@@ -39,6 +39,9 @@ def auth_http_runtime(database_url: str) -> Iterator[tuple[FastAPI, AuthService]
         profile=RuntimeProfile.TEST,
         database_url=SecretStr(database_url),
         auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(
+            "public-access-source-hmac-secret-at-least-32-bytes"
+        ),
         auth_issuer="autplay-p03-test",
         auth_audience="autplay-p03-client",
         access_token_ttl_seconds=600,
@@ -197,6 +200,9 @@ def test_admin_module_bootstraps_through_real_runtime_composition(
         {
             "AUTPLAY_DATABASE_URL": database_url,
             "AUTPLAY_AUTH_SIGNING_SECRET": AUTH_SECRET,
+            "AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET": (
+                "public-access-source-hmac-secret-at-least-32-bytes"
+            ),
             "AUTPLAY_PROFILE": "test",
         }
     )

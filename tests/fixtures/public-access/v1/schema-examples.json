@@ -1,0 +1,170 @@
+{
+  "examples": [
+    {
+      "schema": "account-invitation-create.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "operation_id": "11111111-1111-4111-8111-111111111111",
+        "account_display_name": "Test Friend",
+        "expires_in_seconds": 600
+      }
+    },
+    {
+      "schema": "account-invitation-document.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "invitation_id": "22222222-2222-4222-8222-222222222222",
+        "server_instance_id": "33333333-3333-4333-8333-333333333333",
+        "identity_epoch": 1,
+        "identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "api_origin": "https://api.autplay.example.test",
+        "stream_origin": "https://stream.autplay.example.test",
+        "account_display_name": "Test Friend",
+        "account_role": "USER",
+        "issued_at": "2026-08-31T12:00:00Z",
+        "expires_at": "2026-08-31T12:10:00Z",
+        "invitation_secret": "TEST_ONLY_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "secret_handling": "DISPLAY_ONCE_QR_OR_AUTPLAYINVITE_NO_URL_NO_CLIPBOARD_NO_LOG"
+      }
+    },
+    {
+      "schema": "account-invitation-view.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "invitation_id": "22222222-2222-4222-8222-222222222222",
+        "account_display_name": "Test Friend",
+        "account_role": "USER",
+        "state": "ACTIVE",
+        "issued_at": "2026-08-31T12:00:00Z",
+        "expires_at": "2026-08-31T12:10:00Z",
+        "terminal_at": null,
+        "invited_user_id": null
+      }
+    },
+    {
+      "schema": "account-invitation-page.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "items": [
+          {
+            "contract_version": "v1",
+            "schema_version": 1,
+            "invitation_id": "22222222-2222-4222-8222-222222222222",
+            "account_display_name": "Test Friend",
+            "account_role": "USER",
+            "state": "ACTIVE",
+            "issued_at": "2026-08-31T12:00:00Z",
+            "expires_at": "2026-08-31T12:10:00Z",
+            "terminal_at": null,
+            "invited_user_id": null
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "schema": "account-registration-request.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "registration_id": "44444444-4444-4444-8444-444444444444",
+        "binding_commit_id": "55555555-5555-4555-8555-555555555555",
+        "invitation_id": "22222222-2222-4222-8222-222222222222",
+        "invitation_secret": "TEST_ONLY_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expected_server_instance_id": "33333333-3333-4333-8333-333333333333",
+        "expected_identity_epoch": 1,
+        "expected_identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_api_origin": "https://api.autplay.example.test",
+        "expected_stream_origin": "https://stream.autplay.example.test",
+        "expected_account_display_name": "Test Friend",
+        "device_name": "Test Android",
+        "platform": "ANDROID",
+        "app_version": "0.4.0",
+        "device_public_key_spki_b64": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "device_key_thumbprint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "next_refresh_token_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "client_nonce_b64url": "NNNNNNNNNNNNNNNNNNNNNN",
+        "request_sha256": "adad8b265077f2485f82e36b678d74389476d4e5bf718594c7f967fbad6e13d9",
+        "signature_algorithm": "ES256-P1363",
+        "device_signature_b64url": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+      }
+    },
+    {
+      "schema": "account-registration-response.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "registration_id": "44444444-4444-4444-8444-444444444444",
+        "binding_commit_id": "55555555-5555-4555-8555-555555555555",
+        "server_instance_id": "33333333-3333-4333-8333-333333333333",
+        "user_id": "66666666-6666-4666-8666-666666666666",
+        "account_display_name": "Test Friend",
+        "account_role": "USER",
+        "device_id": "77777777-7777-4777-8777-777777777777",
+        "session_id": "88888888-8888-4888-8888-888888888888",
+        "refresh_generation": 0,
+        "refresh_absolute_expires_at": "2026-11-29T12:00:00Z",
+        "receipt_expires_at": "2026-11-29T12:05:00Z",
+        "access_token": "TEST_ONLY_ACCESS_TOKEN_AAAAAAAAAAAAAAAAAAAAAAAA",
+        "access_expires_at": "2026-08-31T12:15:00Z",
+        "replayed": false
+      }
+    },
+    {
+      "schema": "invited-account-page.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "items": [
+          {
+            "user_id": "66666666-6666-4666-8666-666666666666",
+            "provisioning_invitation_id": "22222222-2222-4222-8222-222222222222",
+            "display_name": "Test Friend",
+            "role": "USER",
+            "status": "ACTIVE",
+            "created_at": "2026-08-31T12:00:00Z",
+            "disabled_at": null
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "schema": "account-lifecycle-command.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "operation_id": "99999999-9999-4999-8999-999999999999",
+        "reason_code": "ACCESS_ENDED"
+      }
+    },
+    {
+      "schema": "account-lifecycle-result.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "operation_id": "99999999-9999-4999-8999-999999999999",
+        "target_type": "INVITED_ACCOUNT",
+        "target_id": "66666666-6666-4666-8666-666666666666",
+        "outcome": "APPLIED",
+        "terminal_state": "DISABLED",
+        "occurred_at": "2026-08-31T13:00:00Z"
+      }
+    },
+    {
+      "schema": "error.schema.json",
+      "instance": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "error_code": "account_invitation_unavailable",
+        "safe_message": "The account invitation is unavailable.",
+        "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "retryable": false
+      }
+    }
+  ]
+}

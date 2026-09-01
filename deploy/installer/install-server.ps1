@@ -171,10 +171,12 @@ else {
 }
 
 $authSecret = Join-Path $secretRoot "auth-signing.txt"
+$publicAccessSourceSecret = Join-Path $secretRoot "public-access-source-hmac.txt"
 $adminSourceSecret = Join-Path $secretRoot "admin-source-hmac.txt"
 $adminCsrfSecret = Join-Path $secretRoot "admin-csrf-hmac.txt"
 $identityKey = Join-Path $secretRoot "profile-identity-p256.pem"
 New-SecretFile $authSecret
+New-SecretFile $publicAccessSourceSecret
 New-SecretFile $adminSourceSecret
 New-SecretFile $adminCsrfSecret
 
@@ -203,10 +205,10 @@ if (-not (Test-Path -LiteralPath $identityKey)) {
     }
     [IO.File]::WriteAllText($identityKey, (($identityPem -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
 }
-$secretValues = @($authSecret, $adminSourceSecret, $adminCsrfSecret) | ForEach-Object {
+$secretValues = @($authSecret, $publicAccessSourceSecret, $adminSourceSecret, $adminCsrfSecret) | ForEach-Object {
     (Get-Content -Raw -LiteralPath $_).Trim()
 }
-if (($secretValues | Where-Object { $_.Length -lt 32 }).Count -gt 0 -or ($secretValues | Sort-Object -Unique).Count -ne 3) {
+if (($secretValues | Where-Object { $_.Length -lt 32 }).Count -gt 0 -or ($secretValues | Sort-Object -Unique).Count -ne 4) {
     throw "SECRET_STATE_INVALID"
 }
 $identityFingerprint = (& docker run --rm --network none --mount "type=bind,src=$identityKey,dst=/identity.pem,readonly" --entrypoint python $imageTag -c "from cryptography.hazmat.primitives import serialization; from cryptography.hazmat.primitives.asymmetric import ec; import hashlib; key=serialization.load_pem_private_key(open('/identity.pem','rb').read(),password=None); assert isinstance(key,ec.EllipticCurvePrivateKey) and isinstance(key.curve,ec.SECP256R1); print(hashlib.sha256(key.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest())" | Out-String).Trim()
@@ -224,6 +226,7 @@ $environmentLines = @(
     "AUTPLAY_RELEASE_TAG=$([string]$manifest.release_tag)",
     "AUTPLAY_SOURCE_COMMIT=$([string]$manifest.source_commit)",
     "AUTPLAY_RUNTIME_AUTH_SECRET_FILE=$(To-ComposePath $authSecret)",
+    "AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=$(To-ComposePath $publicAccessSourceSecret)",
     "AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE=$(To-ComposePath $adminSourceSecret)",
     "AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE=$(To-ComposePath $adminCsrfSecret)",
     "AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE=$(To-ComposePath $identityKey)",

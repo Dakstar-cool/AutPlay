@@ -45,9 +45,12 @@ services:
       AUTPLAY_API_HOST: 0.0.0.0
       AUTPLAY_API_PORT: "8787"
       AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
+      AUTPLAY_PUBLIC_ACCESS_SOURCE_HMAC_SECRET_FILE: /run/secrets/autplay-public-access-source-hmac
     secrets:
       - source: autplay-auth-signing-secret
         target: autplay-auth-signing-secret
+      - source: autplay-public-access-source-hmac
+        target: autplay-public-access-source-hmac
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -187,6 +190,8 @@ services:
 secrets:
   autplay-auth-signing-secret:
     file: "${AUTPLAY_RUNTIME_AUTH_SECRET_FILE:?set AUTPLAY_RUNTIME_AUTH_SECRET_FILE to a local secret file}"
+  autplay-public-access-source-hmac:
+    file: "${AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE:?set AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE to a different local secret file}"
 
 volumes:
   vault-data:
