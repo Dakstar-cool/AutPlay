@@ -21,9 +21,7 @@ OPENAPI = ROOT / "contracts" / "openapi" / "v1" / "autplay-public-access.openapi
 CONTRACT = ROOT / "docs" / "design" / "AutPlay_Public_Invite_Only_Account_Contract_v1.md"
 THREAT_MODEL = ROOT / "docs" / "design" / "AutPlay_Public_Invite_Only_Account_Threat_Model_v1.md"
 ADR = ROOT / "docs" / "adr" / "ADR-045-pa1-invite-only-account-provisioning.md"
-PROMPT = (
-    ROOT / "docs" / "build-pack" / "prompts" / "PUBLIC_ACCESS_PA1_INVITE_ONLY_ACCOUNT_CONTRACT.md"
-)
+RUNBOOK = ROOT / "docs" / "operations" / "PUBLIC_EDGE_PA3.md"
 
 REQUIRED_SCHEMAS = {
     "account-invitation-create.schema.json",
@@ -253,11 +251,12 @@ def test_secret_fixtures_are_synthetic_https_only_and_never_urls() -> None:
 
 def test_contract_documents_are_accepted_but_runtime_remains_separately_gated() -> None:
     combined = "\n".join(
-        path.read_text(encoding="utf-8") for path in (CONTRACT, THREAT_MODEL, ADR, PROMPT)
+        path.read_text(encoding="utf-8") for path in (CONTRACT, THREAT_MODEL, ADR, RUNBOOK)
     )
     for required in {
         "ACCEPTED",
-        "DRAFT_NOT_IMPLEMENTED",
+        "IMPLEMENTED_PA2",
+        "PA3_EDGE_CANDIDATE_BLOCKED",
         "20 active accounts",
         "AutPlay account registration v1",
         "Admin Web",
