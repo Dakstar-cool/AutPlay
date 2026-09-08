@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -64,11 +65,13 @@ import app.autplay.playback.presentation.canSeek
 import app.autplay.ui.AutPlayArtwork
 import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayIconButton
+import app.autplay.ui.face.AutPlayResonanceLens
+import app.autplay.ui.face.FacePlaybackMode
+import app.autplay.ui.face.FacePreferenceMode
 import app.autplay.ui.queue.QueueEditorPanel
 import app.autplay.ui.queue.QueueEditorUiActions
 import app.autplay.ui.queue.QueueEditorUiState
 import app.autplay.ui.AutPlayPlatformIcon
-import app.autplay.ui.AutPlayPlaybackHalo
 import app.autplay.ui.AutPlayStateKind
 import app.autplay.ui.AutPlayStateSurface
 import app.autplay.ui.AutPlayTokens
@@ -167,14 +170,33 @@ public fun NowPlayingScreen(
         onDispose { onObservingChanged(false) }
     }
     if (state.mediaId == null) {
-        Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            AutPlayStateSurface(
-                AutPlayStateKind.PlaybackUnavailable,
-                stringResource(R.string.player_nothing_playing),
-            )
+        BoxWithConstraints(modifier.fillMaxSize()) {
+            val idleFaceWidth = (maxWidth - 48.dp).coerceAtLeast(1.dp).coerceAtMost(420.dp)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                AutPlayResonanceLens(
+                    trackSeed = "autplay-idle",
+                    playbackMode = FacePlaybackMode.Idle,
+                    preference = FacePreferenceMode.Neutral,
+                    accessibilitySummary = stringResource(R.string.face_description_idle),
+                    modifier = Modifier.width(idleFaceWidth),
+                )
+                Spacer(Modifier.height(18.dp))
+                AutPlayStateSurface(
+                    AutPlayStateKind.PlaybackUnavailable,
+                    stringResource(R.string.player_nothing_playing),
+                )
+            }
         }
         return
     }
+    val facePlaybackMode = facePlaybackMode(state.playbackStatus, state.isPlaying)
     val visualSeed = state.title ?: state.mediaId
     val palette = remember(visualSeed) { playbackVisualPalette(visualSeed) }
     var showSleepTimer by rememberSaveable { mutableStateOf(false) }
@@ -216,8 +238,8 @@ public fun NowPlayingScreen(
                 ),
             ),
     ) {
-        val haloSize = (maxWidth - 36.dp).coerceAtMost(390.dp)
-        val artworkSize = haloSize * 0.76f
+        val faceWidth = (maxWidth - 40.dp).coerceAtLeast(1.dp).coerceAtMost(420.dp)
+        val artworkSize = (maxWidth * 0.18f).coerceIn(56.dp, 72.dp)
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -235,23 +257,26 @@ public fun NowPlayingScreen(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
                 )
             }
-            Box(modifier = Modifier.size(haloSize), contentAlignment = Alignment.Center) {
-                    AutPlayPlaybackHalo(
-                        seed = state.title ?: state.mediaId,
-                        isPlaying = state.isPlaying,
-                        surfaceId = "now-playing-halo",
-                    modifier = Modifier.fillMaxSize(),
-                )
-                AutPlayArtwork(
-                    title = state.title ?: stringResource(R.string.player_nothing_playing),
-                    size = artworkSize,
-                )
-            }
+            AutPlayResonanceLens(
+                trackSeed = state.mediaId,
+                playbackMode = facePlaybackMode,
+                preference = when (preference) {
+                    PlaybackPreferenceUiState.Neutral -> FacePreferenceMode.Neutral
+                    PlaybackPreferenceUiState.Liked -> FacePreferenceMode.Liked
+                    PlaybackPreferenceUiState.Disliked -> FacePreferenceMode.Disliked
+                },
+                accessibilitySummary = stringResource(faceDescriptionResource(facePlaybackMode)),
+                modifier = Modifier.width(faceWidth),
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                AutPlayArtwork(
+                    title = state.title ?: stringResource(R.string.player_nothing_playing),
+                    size = artworkSize,
+                )
                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
                     Text(
                         state.title ?: stringResource(R.string.player_nothing_playing),
@@ -650,6 +675,20 @@ private fun repeatLabel(mode: RepeatModePresentation): Int = when (mode) {
     RepeatModePresentation.Off -> R.string.player_repeat_off
     RepeatModePresentation.One -> R.string.player_repeat_one
     RepeatModePresentation.All -> R.string.player_repeat_all
+}
+
+internal fun facePlaybackMode(status: PlaybackStatus, isPlaying: Boolean): FacePlaybackMode = when (status) {
+    PlaybackStatus.Buffering -> FacePlaybackMode.Buffering
+    PlaybackStatus.Ready -> if (isPlaying) FacePlaybackMode.Playing else FacePlaybackMode.Paused
+    PlaybackStatus.Idle,
+    PlaybackStatus.Ended -> FacePlaybackMode.Idle
+}
+
+internal fun faceDescriptionResource(mode: FacePlaybackMode): Int = when (mode) {
+    FacePlaybackMode.Idle -> R.string.face_description_idle
+    FacePlaybackMode.Playing -> R.string.face_description_playing
+    FacePlaybackMode.Paused -> R.string.face_description_paused
+    FacePlaybackMode.Buffering -> R.string.face_description_buffering
 }
 
 private fun sourceLabel(source: PlaybackSourcePresentation): Int = when (source) {

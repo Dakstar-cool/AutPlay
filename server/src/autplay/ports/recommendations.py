@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
+from autplay.domain.adaptive_recommendations import AdaptiveProfile
 from autplay.domain.recommendations import (
     Candidate,
     PipelineDefinition,
@@ -16,6 +17,13 @@ from autplay.domain.recommendations import (
     RecommendationRequestTrace,
     RecommendationResponse,
     ScoredCandidate,
+)
+from autplay.domain.sona import (
+    SonaInferenceOutput,
+    SonaInferenceRequest,
+    SonaSemanticId,
+    SonaShadowEvidence,
+    SonaTemporalSnapshot,
 )
 
 
@@ -93,6 +101,49 @@ class UserRepresentationProvider(Protocol):
     ) -> PreparedUserRepresentation: ...
 
 
+class AdaptiveProfileReader(Protocol):
+    """Load an immutable R1 profile bound to the P11 input snapshot."""
+
+    def load(self, user_id: UUID, baseline_snapshot_id: UUID) -> AdaptiveProfile | None: ...
+
+
+class SonaSemanticIdReader(Protocol):
+    """Resolve learned three-level IDs from one immutable tokenizer version."""
+
+    @property
+    def tokenizer_manifest_sha256(self) -> str: ...
+
+    def load(
+        self, recording_ids: Sequence[UUID], *, tokenizer_sha256: str
+    ) -> Mapping[UUID, SonaSemanticId]: ...
+
+    def expand(
+        self, semantic_ids: Sequence[SonaSemanticId], *, tokenizer_sha256: str
+    ) -> Mapping[SonaSemanticId, tuple[UUID, ...]]: ...
+
+
+class SonaInferenceGateway(Protocol):
+    """Run the isolated shared-encoder generation-and-ranking model."""
+
+    def infer(self, request: SonaInferenceRequest) -> SonaInferenceOutput: ...
+
+
+class SonaTemporalSnapshotReader(Protocol):
+    """Reload one complete retained R1 snapshot for exact model replay."""
+
+    def load_sona_snapshot(
+        self, user_id: UUID, temporal_snapshot_id: UUID
+    ) -> SonaTemporalSnapshot | None: ...
+
+
+class SonaShadowEvidenceRepository(Protocol):
+    """Attach and reload one immutable model-shadow result for a served P11 request."""
+
+    def save(self, evidence: SonaShadowEvidence) -> None: ...
+
+    def load(self, user_id: UUID, recommendation_request_id: UUID) -> SonaShadowEvidence | None: ...
+
+
 class RecommendationVersionRegistry(Protocol):
     """Resolve an immutable pipeline manifest."""
 
@@ -158,6 +209,7 @@ class OfflineRecommendationEvaluator(Protocol):
 
 
 __all__ = (
+    "AdaptiveProfileReader",
     "CandidateGenerator",
     "CandidatePoolComposer",
     "OfflinePackRepository",
@@ -169,6 +221,10 @@ __all__ = (
     "RecommendationTraceRepository",
     "RecommendationVersionRegistry",
     "Reranker",
+    "SonaInferenceGateway",
+    "SonaSemanticIdReader",
+    "SonaShadowEvidenceRepository",
+    "SonaTemporalSnapshotReader",
     "TrackEmbeddingReader",
     "UserRepresentationProvider",
 )

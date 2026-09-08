@@ -3,8 +3,11 @@ package app.autplay.ui.player
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -17,7 +20,9 @@ import app.autplay.application.playback.ActiveQueueContext
 import app.autplay.playback.presentation.PlaybackControlGate
 import app.autplay.playback.presentation.PlaybackControlLockReason
 import app.autplay.playback.presentation.PlaybackPresentationState
+import app.autplay.playback.presentation.PlaybackStatus
 import app.autplay.ui.AutPlayTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -42,6 +47,83 @@ class PlaybackPlayerSurfacesTest {
         composeRule.onNodeWithText("Fixture track").assertIsDisplayed()
         composeRule.onNodeWithText("Fixture artist").assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)).assertIsEnabled()
+    }
+
+    @Test
+    fun nowPlayingShowsAccessibleResonanceLensWithoutReplacingArtwork() {
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState(),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("autplay-face").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Fixture track").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.face_description_paused))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun resonanceLensKeepsItsRigAspectRatio() {
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState(),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                )
+            }
+        }
+
+        val bounds = composeRule.onNodeWithTag("autplay-face").getUnclippedBoundsInRoot()
+        val measuredRatio = (bounds.right - bounds.left) / (bounds.bottom - bounds.top)
+        assertEquals(1.84f, measuredRatio, 0.02f)
+    }
+
+    @Test
+    fun endedMediaIsIdleRatherThanFalselyPaused() {
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState().copy(playbackStatus = PlaybackStatus.Ended),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription(context.getString(R.string.face_description_idle))
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithContentDescription(context.getString(R.string.face_description_paused))
+            .assertCountEquals(0)
     }
 
     @Test
@@ -152,5 +234,6 @@ class PlaybackPlayerSurfacesTest {
         seekEnabled = true,
         shuffleEnabled = true,
         repeatEnabled = true,
+        playbackStatus = PlaybackStatus.Ready,
     )
 }

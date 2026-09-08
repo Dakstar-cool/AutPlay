@@ -266,6 +266,7 @@ class CurlTransport:
             "--silent",
             "--show-error",
             "--fail",
+            "--http1.1",
             "--proto",
             "=https",
             "--max-redirs",
@@ -274,6 +275,12 @@ class CurlTransport:
             "10",
             "--max-time",
             str(self._timeout_seconds),
+            "--retry",
+            "1",
+            "--retry-delay",
+            "1",
+            "--retry-max-time",
+            str(self._timeout_seconds * 2 + 1),
             "--max-filesize",
             str(max_bytes),
             "--user-agent",
@@ -303,7 +310,7 @@ class CurlTransport:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=self._timeout_seconds + 5,
+                timeout=self._timeout_seconds * 2 + 4,
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise JamendoToolError(failure_code) from error
@@ -344,8 +351,16 @@ def load_client_id(path: Path) -> str:
     return value
 
 
-def parse_search_response(payload: bytes, *, limit: int) -> tuple[TrackCandidate, ...]:
-    """Parse a bounded Jamendo response and retain only downloadable tracks."""
+def parse_search_response(
+    payload: bytes, *, limit: int, strict_candidates: bool = False
+) -> tuple[TrackCandidate, ...]:
+    """Parse a bounded response and ignore malformed search candidates.
+
+    Search pages are provider-controlled collections: one malformed or
+    non-downloadable result must not poison every otherwise valid candidate.
+    Permission refreshes opt into strict parsing because they are the final
+    authorization check for one exact track.
+    """
 
     if len(payload) > MAX_SEARCH_BYTES:
         raise JamendoToolError("search_response_too_large")
@@ -373,13 +388,22 @@ def parse_search_response(payload: bytes, *, limit: int) -> tuple[TrackCandidate
     seen: set[str] = set()
     for raw_result in results:
         if not isinstance(raw_result, dict):
-            raise JamendoToolError("search_response_invalid")
+            if strict_candidates:
+                raise JamendoToolError("search_response_invalid")
+            continue
         allowed = raw_result.get("audiodownload_allowed")
         if not isinstance(allowed, bool):
-            raise JamendoToolError("download_permission_missing")
+            if strict_candidates:
+                raise JamendoToolError("download_permission_missing")
+            continue
         if not allowed:
             continue
-        candidate = _parse_candidate(raw_result)
+        try:
+            candidate = _parse_candidate(raw_result)
+        except JamendoToolError:
+            if strict_candidates:
+                raise
+            continue
         if candidate.track_id in seen:
             continue
         seen.add(candidate.track_id)
@@ -540,7 +564,9 @@ def _parse_candidate(value: Mapping[str, object]) -> TrackCandidate:
 def refresh_track_permission(track_id: str, *, transport: DownloadTransport) -> TrackCandidate:
     """Require fresh, exact, downloadable provider evidence before audio bytes."""
 
-    candidates = parse_search_response(transport.fetch_track_response(track_id), limit=1)
+    candidates = parse_search_response(
+        transport.fetch_track_response(track_id), limit=1, strict_candidates=True
+    )
     if len(candidates) != 1 or candidates[0].track_id != track_id:
         raise JamendoToolError("download_permission_revoked")
     return candidates[0]

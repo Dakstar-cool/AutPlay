@@ -20,7 +20,7 @@ from autplay.domain.admin_views import (
 )
 from autplay.domain.web_admin import WebActor
 
-from .renderer import format_bytes, format_datetime
+from .renderer import format_bytes, format_count, format_datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +132,57 @@ def page_context(page: AdminPage, surface: str, *, locale: str) -> dict[str, obj
         "previous_url": None,
         "next_url": (
             f"/admin/{surface}?after={page.next_after}&lang={locale}"
+            if page.next_after is not None
+            else None
+        ),
+    }
+
+
+def jobs_context(page: AdminPage, *, locale: str, live: bool = False) -> dict[str, object]:
+    """Build a bounded, owner-scoped job dashboard from the current page."""
+
+    items: list[AdminJobItem] = []
+    for item in page.items:
+        if not isinstance(item, AdminJobItem):
+            raise ValueError("unsupported item for jobs")
+        items.append(item)
+    rows = tuple(_job_row(item, locale=locale) for item in items)
+    states = [item.state.upper() for item in items]
+    summary = (
+        {
+            "label": "jobs_active",
+            "value": format_count(states.count("RUNNING"), locale),
+            "tone": "active",
+        },
+        {
+            "label": "music_downloads",
+            "value": format_count(sum(item.kind == "discovery.acquire" for item in items), locale),
+            "tone": "download",
+        },
+        {
+            "label": "jobs_completed",
+            "value": format_count(states.count("COMPLETED"), locale),
+            "tone": "good",
+        },
+        {
+            "label": "jobs_attention",
+            "value": format_count(
+                sum(state in {"FAILED", "RETRY_WAIT", "PAUSED"} for state in states), locale
+            ),
+            "tone": "warn",
+        },
+    )
+    return {
+        "page_title_key": "jobs_title",
+        "page_intro_key": "jobs_intro",
+        "rows": rows,
+        "summary": summary,
+        "live": live,
+        "live_refresh_seconds": 10 if live else None,
+        "refresh_url": f"/admin/jobs?lang={locale}" + ("&live=1" if live else ""),
+        "live_toggle_url": f"/admin/jobs?lang={locale}&live={'0' if live else '1'}",
+        "next_url": (
+            f"/admin/jobs?after={page.next_after}&lang={locale}"
             if page.next_after is not None
             else None
         ),
@@ -268,4 +319,57 @@ def _row(item: object, surface: str, *, locale: str) -> dict[str, object]:
     return values | {"actions": actions}
 
 
-__all__ = ("dashboard_context", "navigation", "page_context", "status_context")
+def _job_row(item: AdminJobItem, *, locale: str) -> dict[str, object]:
+    state = item.state.upper()
+    state_key = {
+        "QUEUED": "job_state_queued",
+        "RUNNING": "job_state_running",
+        "RETRY_WAIT": "job_state_retry_wait",
+        "PAUSED": "job_state_paused",
+        "COMPLETED": "job_state_completed",
+        "FAILED": "job_state_failed",
+        "CANCELLED": "job_state_cancelled",
+    }.get(state, "status_unknown")
+    tone = {
+        "RUNNING": "active",
+        "COMPLETED": "good",
+        "FAILED": "bad",
+        "CANCELLED": "bad",
+        "RETRY_WAIT": "warn",
+        "PAUSED": "warn",
+    }.get(state, "neutral")
+    progress_value: int | None = None
+    progress_max: int | None = None
+    progress_percent: int | None = None
+    progress_text = "—"
+    if item.progress_current is not None:
+        progress_text = format_count(item.progress_current, locale)
+        if item.progress_total is not None:
+            progress_text = f"{progress_text} / {format_count(item.progress_total, locale)}"
+            if item.progress_total > 0:
+                progress_value = min(item.progress_current, item.progress_total)
+                progress_max = item.progress_total
+                progress_percent = min(
+                    100, round((item.progress_current / item.progress_total) * 100)
+                )
+                progress_text = f"{progress_text} · {progress_percent}%"
+    return {
+        "kind": item.kind,
+        "state_key": state_key,
+        "tone": tone,
+        "created": format_datetime(item.created_at, locale),
+        "is_music_download": item.kind == "discovery.acquire",
+        "progress_value": progress_value,
+        "progress_max": progress_max,
+        "progress_percent": progress_percent,
+        "progress_text": progress_text,
+    }
+
+
+__all__ = (
+    "dashboard_context",
+    "jobs_context",
+    "navigation",
+    "page_context",
+    "status_context",
+)

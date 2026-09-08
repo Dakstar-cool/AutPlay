@@ -176,6 +176,10 @@
     <string name="detail_release_date">Дата выпуска</string>
 
     <string name="player_nothing_playing">Ничего не играет</string>
+    <string name="face_description_idle">Resonance Lens нейтрален и ожидает воспроизведения</string>
+    <string name="face_description_playing">Resonance Lens нейтрально реагирует на локальное воспроизведение</string>
+    <string name="face_description_paused">Resonance Lens нейтрален; воспроизведение приостановлено</string>
+    <string name="face_description_buffering">Resonance Lens нейтрален; идёт буферизация</string>
     <string name="player_unknown_artist">Неизвестный исполнитель</string>
     <string name="player_queue_context">Текущая очередь</string>
     <string name="player_buffering">Буферизация</string>

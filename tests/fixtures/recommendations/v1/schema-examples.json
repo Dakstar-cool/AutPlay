@@ -1,0 +1,286 @@
+{
+  "schema_version": 1,
+  "examples": [
+    {
+      "schema": "feature-policy.schema.json",
+      "instance": {
+        "schema_version": 1,
+        "policy_key": "adaptive-taste",
+        "version": "1",
+        "status": "EVALUATION_CANDIDATE",
+        "canonicalization_version": 1,
+        "content_sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db",
+        "episode_inactivity_gap_ms": 1800000,
+        "future_clock_tolerance_ms": 300000,
+        "maximum_recent_backfill_ms": 2592000000,
+        "completion_threshold": 0.8,
+        "skip_completion_threshold": 0.2,
+        "skip_played_ms_threshold": 30000,
+        "active_view_weights": {"EPISODE": 0.3, "H12": 0.25, "H24": 0.2, "D3": 0.15, "D7": 0.1},
+        "signal_weights": {
+          "EXPLICIT_LIKE": 1.0,
+          "FINALIZED_ORGANIC_LISTEN": 0.4,
+          "FINALIZED_RECOMMENDATION_LISTEN": 0.2,
+          "RECOMMENDATION_SELECTED": 0.25,
+          "RECOMMENDATION_DISMISSED": -0.35,
+          "FINALIZED_COMPLETION": 0.3,
+          "FINALIZED_SHORT_LISTEN_SKIP": -0.45
+        },
+        "origin_weights": {"EXPLICIT": 1.0, "ORGANIC": 0.8, "SOURCE_QUEUE": 0.6, "RECOMMENDATION": 0.35},
+        "algorithm_parameters": {
+          "horizon_fusion": "NORMALIZED_ACTIVE_VIEW_WEIGHTS_V1",
+          "causal_fusion": "NORMALIZED_SIGNED_CAUSAL_GROUP_V1",
+          "outcome_classifier": "EXCLUSION_THEN_SKIP_ELSE_COMPLETION_ELSE_NEUTRAL_V1",
+          "outcome_null_completion_ratio_rule": "RATIO_PREDICATES_FALSE_PLAYED_MS_SKIP_STILL_APPLIES_V1",
+          "plasticity": "LINEAR_BOUNDED_MATURITY_V1",
+          "momentum": "EPISODE_MINUS_D7_CLAMPED_V1",
+          "fatigue": {
+            "formula": "DECAY_PLUS_SKIP_MINUS_COMPLETION_CLAMPED_V1",
+            "daily_decay_factor": 0.75,
+            "skip_gain": 0.2,
+            "completion_recovery": 0.1
+          },
+          "contradiction_confidence": "BASE_TIMES_ONE_MINUS_CONTRADICTION_RATIO_V1"
+        },
+        "maturity": {
+          "formula": "WEIGHTED_SIX_TERM_SATURATION_V1",
+          "recency_formula": "POW_HALF_AGE_OVER_HALF_LIFE_V1",
+          "term_weights": {
+            "EFFECTIVE_SIGNAL_MASS": 0.25,
+            "TRACK_AND_ARTIST_COVERAGE": 0.2,
+            "OBSERVATION_SPAN": 0.15,
+            "RECENCY": 0.15,
+            "CONSISTENCY": 0.15,
+            "ORGANIC_SHARE": 0.1
+          },
+          "effective_mass_saturation": 200.0,
+          "track_coverage_saturation": 100,
+          "artist_coverage_saturation": 30,
+          "observation_span_saturation_ms": 7776000000,
+          "recency_half_life_ms": 1209600000,
+          "minimum_plasticity": 0.5,
+          "maximum_plasticity": 2.0
+        },
+        "adjustment_caps": {"recent_interest": 0.35, "momentum": 0.15, "fatigue": 0.4, "exploration": 0.2, "total_absolute": 0.75}
+      }
+    },
+    {
+      "schema": "temporal-evidence.schema.json",
+      "instance": {
+        "schema_version": 1,
+        "evidence_id": "00000000-0000-7000-8000-000000000102",
+        "source_event_id": "00000000-0000-7000-8000-000000000101",
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "server_profile_id": "00000000-0000-7000-8000-000000000011",
+        "device_id": "00000000-0000-7000-8000-000000000201",
+        "device_sequence": 41,
+        "server_sequence": 9001,
+        "source_event_type": "LISTENING_EVENT_RECORDED",
+        "signal_key": "FINALIZED_COMPLETION",
+        "derivation_key": "OUTCOME_CLASSIFIER_V1",
+        "recording_id": "00000000-0000-7000-8000-000000000301",
+        "dimensions": [
+          {"kind": "CANONICAL_ARTIST_ID", "key": "00000000-0000-7000-8000-000000000401"},
+          {"kind": "BOUNDED_METADATA_TOKEN", "key": "rap"}
+        ],
+        "occurred_at_ms": 1788372000000,
+        "received_at_ms": 1788372060000,
+        "effective_at_ms": 1788372000000,
+        "time_classification": "TRUSTED_EVENT_TIME",
+        "origin_lane": "ORGANIC",
+        "signed_strength": 0.3,
+        "quality_weight": 0.8,
+        "excluded_from_taste": false,
+        "source_request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalized_evidence_sha256": "1c3908ffb0cd6b62d03b87de82dc5973a50fc37c3aadbc5be2834593d3fb0392"
+      }
+    },
+    {
+      "schema": "adaptive-profile.schema.json",
+      "instance": {
+        "schema_version": 1,
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "cutoff_at_ms": 1788375600000,
+        "interaction_watermark": 9001,
+        "feature_policy": {"key": "adaptive-taste", "version": "1", "content_sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db"},
+        "maturity": {
+          "score": 0.37595833333333334,
+          "effective_signal_mass": 34.5,
+          "track_coverage": 22,
+          "artist_coverage": 9,
+          "observation_span_ms": 1209600000,
+          "recency_age_ms": 1209600000,
+          "recency": 0.5,
+          "consistency": 0.75,
+          "organic_share": 0.7,
+          "plasticity_multiplier": 1.4360625
+        },
+        "dimensions": [
+          {
+            "kind": "CANONICAL_ARTIST_ID",
+            "key": "00000000-0000-7000-8000-000000000401",
+            "long_term": {"score": 0.4, "confidence": 0.7, "evidence_mass": 20.0},
+            "recent": {
+              "EPISODE": {"score": 0.9, "confidence": 0.8, "evidence_mass": 3.0},
+              "H12": {"score": 0.8, "confidence": 0.75, "evidence_mass": 5.0},
+              "H24": {"score": 0.7, "confidence": 0.7, "evidence_mass": 7.0},
+              "D3": {"score": 0.55, "confidence": 0.65, "evidence_mass": 11.0},
+              "D7": {"score": 0.45, "confidence": 0.6, "evidence_mass": 15.0}
+            },
+            "persistence": 0.8,
+            "momentum": 0.3,
+            "fatigue": 0.1,
+            "recent_adjustment": 0.28,
+            "source_event_ids": ["00000000-0000-7000-8000-000000000101"]
+          }
+        ],
+        "profile_sha256": "982f79cb7ac26e37be4de8875edd933958296edc9d71b0f42caf1b44b42c5a09"
+      }
+    },
+    {
+      "schema": "temporal-snapshot.schema.json",
+      "instance": {
+        "schema_version": 2,
+        "snapshot_kind": "RECOMMENDATION_TEMPORAL_SNAPSHOT_V2",
+        "snapshot_id": "00000000-0000-7000-8000-000000000501",
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "cutoff_at_ms": 1788375600000,
+        "interaction_watermark": 9001,
+        "catalog_snapshot": 1788370000000,
+        "availability_snapshot_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "baseline_input_snapshot_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "feature_policy": {"key": "adaptive-taste", "version": "1", "content_sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db"},
+        "event_time_policy_sha256": "f5d0a778659ad343d86c2466a5eba3c98b784610b4a138606aaedc8e37c19757",
+        "source_evidence": [
+          {
+            "schema_version": 1,
+            "evidence_id": "00000000-0000-7000-8000-000000000102",
+            "source_event_id": "00000000-0000-7000-8000-000000000101",
+            "owner_user_id": "00000000-0000-7000-8000-000000000001",
+            "server_profile_id": "00000000-0000-7000-8000-000000000011",
+            "device_id": "00000000-0000-7000-8000-000000000201",
+            "device_sequence": 41,
+            "server_sequence": 9001,
+            "source_event_type": "LISTENING_EVENT_RECORDED",
+            "signal_key": "FINALIZED_COMPLETION",
+            "derivation_key": "OUTCOME_CLASSIFIER_V1",
+            "recording_id": "00000000-0000-7000-8000-000000000301",
+            "dimensions": [
+              {"kind": "CANONICAL_ARTIST_ID", "key": "00000000-0000-7000-8000-000000000401"},
+              {"kind": "BOUNDED_METADATA_TOKEN", "key": "rap"}
+            ],
+            "occurred_at_ms": 1788372000000,
+            "received_at_ms": 1788372060000,
+            "effective_at_ms": 1788372000000,
+            "time_classification": "TRUSTED_EVENT_TIME",
+            "origin_lane": "ORGANIC",
+            "signed_strength": 0.3,
+            "quality_weight": 0.8,
+            "excluded_from_taste": false,
+            "source_request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "normalized_evidence_sha256": "1c3908ffb0cd6b62d03b87de82dc5973a50fc37c3aadbc5be2834593d3fb0392"
+          }
+        ],
+        "adaptive_profile": {
+          "schema_version": 1,
+          "owner_user_id": "00000000-0000-7000-8000-000000000001",
+          "cutoff_at_ms": 1788375600000,
+          "interaction_watermark": 9001,
+          "feature_policy": {"key": "adaptive-taste", "version": "1", "content_sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db"},
+          "maturity": {"score": 0.40558333333333335, "effective_signal_mass": 1.0, "track_coverage": 1, "artist_coverage": 1, "observation_span_ms": 0, "recency_age_ms": 0, "recency": 1.0, "consistency": 1.0, "organic_share": 1.0, "plasticity_multiplier": 1.391625},
+          "dimensions": [],
+          "profile_sha256": "3606f1e3f89d37b8a8677aae39c9e753c9b8629ed5c4792687e74ba885a7f7a5"
+        },
+        "derived_features_sha256": "b9626cb0c7c74acbd0b29d4b565af2f07d40e01b5c4ea41f75eb6a14f4cd648d",
+        "source_evidence_sha256": "63aec1cd9d21e23c3135e6c009ee6c3188ffc8808c976bacd5cc26184f96ea3e",
+        "snapshot_sha256": "817ffafe4c2cc79af817360af85d70d3f6500d35a5d75af7ff27d3786ed88d84",
+        "retained_until_ms": 1790967600000
+      }
+    },
+    {
+      "schema": "offline-temporal-delta.schema.json",
+      "instance": {
+        "schema_version": 1,
+        "delta_id": "00000000-0000-7000-8000-000000000601",
+        "server_profile_id": "00000000-0000-7000-8000-000000000011",
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "device_id": "00000000-0000-7000-8000-000000000201",
+        "offline_pack_id": "00000000-0000-7000-8000-000000000701",
+        "parent_pack_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "parent_items_sha256": "f96b649d552b93976f49c32bb87914f125b056ea7470a862248dd2a08c9b03c1",
+        "parent_expires_at_ms": 1788980400000,
+        "parent_items": [
+          {"recording_id": "00000000-0000-7000-8000-000000000301", "source_rank": 4}
+        ],
+        "recommendation_request_id": "00000000-0000-7000-8000-000000000801",
+        "feature_policy": {"key": "adaptive-taste", "version": "1", "content_sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db"},
+        "cutoff_at_ms": 1788375600000,
+        "local_events": [],
+        "adjustments": [
+          {
+            "recording_id": "00000000-0000-7000-8000-000000000301",
+            "source_rank": 4,
+            "display_position": 2,
+            "bounded_delta": 0.2,
+            "mandatory_filter_passed": true,
+            "impression_event_id": "00000000-0000-7000-8000-000000000901",
+            "impression_key_sha256": "d6ebda61574ec2c49725856cbe41a23bae20370993c9c8f0a18b136b1d3dd56a"
+          }
+        ],
+        "created_at_ms": 1788375600000,
+        "expires_at_ms": 1788980400000,
+        "delta_sha256": "dc7657a2023ed42fdac1720ce259c490f5d143aa06501513ab1a2c153220b95e"
+      }
+    },
+    {
+      "schema": "owner-export.schema.json",
+      "instance": {
+        "schema_version": 1,
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "exported_at_ms": 1788375600000,
+        "page": {
+          "export_id": "00000000-0000-7000-8000-000000001001",
+          "page_index": 1,
+          "page_count": 1,
+          "complete": true,
+          "item_count": 2
+        },
+        "policy_versions": [{"key": "adaptive-taste", "version": "1", "content_sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db"}],
+        "profiles": [],
+        "snapshot_lineage": [
+          {
+            "snapshot_id": "00000000-0000-7000-8000-000000000501",
+            "cutoff_at_ms": 1788375600000,
+            "interaction_watermark": 9001,
+            "snapshot_sha256": "817ffafe4c2cc79af817360af85d70d3f6500d35a5d75af7ff27d3786ed88d84",
+            "bounded_event_lineage": [
+              {
+                "evidence_id": "00000000-0000-7000-8000-000000000102",
+                "source_event_id": "00000000-0000-7000-8000-000000000101",
+                "source_request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "normalized_evidence_sha256": "1c3908ffb0cd6b62d03b87de82dc5973a50fc37c3aadbc5be2834593d3fb0392",
+                "time_classification": "TRUSTED_EVENT_TIME"
+              }
+            ]
+          }
+        ],
+        "redactions": ["SECRETS", "PRIVATE_URLS", "RAW_PATHS", "RAW_SEARCH_QUERIES", "MODEL_TENSORS", "OTHER_OWNER_DATA"],
+        "export_sha256": "c20dd368bcee4cfbbd00984d15b1afd128f5ec7e7e17fd8e276707d7676cd66c"
+      }
+    },
+    {
+      "schema": "owner-export-manifest.schema.json",
+      "instance": {
+        "schema_version": 1,
+        "export_id": "00000000-0000-7000-8000-000000001001",
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "page_count": 1,
+        "complete": true,
+        "ordered_page_sha256": [
+          "c20dd368bcee4cfbbd00984d15b1afd128f5ec7e7e17fd8e276707d7676cd66c"
+        ],
+        "manifest_sha256": "d762e56065a2666669e2b3863edfb7a832e3d3dc9a13c61244d7720c871cd962"
+      }
+    }
+  ]
+}

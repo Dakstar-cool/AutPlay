@@ -9,13 +9,14 @@
 ## 1. Scope
 
 This specification defines the stable recommendation-domain boundaries, interaction data contract,
-versioning and evaluation seams required before the first recommender is implemented. It preserves a
-path from the P11 deterministic/content baseline to hybrid ranking, sequential candidate generation
-and a later lightweight SONA-inspired generate-and-rank experiment.
+versioning and evaluation seams used by the P11 deterministic recommender and later shadow models.
+It preserves a path from the served P11 deterministic/content baseline to hybrid ranking,
+sequential candidate generation and the R1B Sona-Lite generate-and-rank experiment.
 
-It does not select or implement a final model, SONA-Lite, semantic IDs, a transformer, distributed
-training, continuous online training, a separate vector database or a mandatory GPU serving path.
-The public recommendation API MUST NOT expose tensors, model-framework types or a concrete model.
+It does not select or activate a final served model, distributed training, continuous online
+training, a separate vector database or a mandatory GPU serving path. R1B implements Sona-Lite,
+Semantic IDs and isolated GPU inference only as a shadow experiment behind these boundaries. The
+public recommendation API MUST NOT expose tensors, model-framework types or a concrete model.
 
 ## 2. Invariants
 
@@ -87,12 +88,13 @@ The initial backend uses explicit preferences, logical listening history, artist
 affinity, freshness, forgotten favorites and controlled exploration. Compatible persisted
 embeddings may be another source; they are not required for service availability.
 
-Future components plug into the same ports:
+R1B shadow components use the same model-independent seams without replacing the served pipeline:
 
 - `SequentialCandidateGenerator` implements `CandidateGenerator`.
 - `SonaLiteUserRepresentationProvider` prepares one shared representation.
 - `SonaLiteCandidateGenerator` and `SonaLiteRanker` consume that representation.
-- A new immutable pipeline manifest activates them without changing the public API.
+- A future R1C immutable pipeline manifest may activate an approved version without changing the
+  public API; R1B itself has no activation path.
 
 ## 5. Canonical interaction and attribution
 
@@ -188,7 +190,8 @@ listens as organic observations.
 | P09 | Specialized-schema dispatch, idempotent sync and atomic canonical interaction projection with ownership plus presentation-uniqueness checks |
 | P11 | Domain interfaces, composable CPU candidate sources, filters/rankers, immutable pipeline registry, model-independent API, durable presentation/impression mapping, replay and offline evaluation |
 | P12 | Isolated GPU embedding extraction, approved artifacts, parallel embedding versions, exact retrieval and RTX 3060/OOM evidence |
-| Later explicit phase | Sequential training/inference, SONA-Lite, semantic IDs and shared-encoder model implementation |
+| R1B | Shadow-only Sona-Lite training/inference, learned semantic IDs and a shared encoder for generation plus ranking; P11 remains the serving fallback |
+| R1C | Explicit controlled activation of an approved immutable model pipeline with rollback evidence |
 
 ## 10. Required compatibility evidence
 

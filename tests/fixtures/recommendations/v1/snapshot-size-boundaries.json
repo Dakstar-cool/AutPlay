@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "maximum_snapshot_bytes": 4194304,
+  "cases": [
+    {"case_id": "exact-limit-accepted", "canonical_utf8_length": 4194304, "expected_accepted": true},
+    {"case_id": "limit-plus-one-rejected", "canonical_utf8_length": 4194305, "expected_accepted": false}
+  ]
+}

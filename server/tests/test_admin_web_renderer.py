@@ -90,4 +90,4 @@ def test_catalogs_have_exact_key_parity_and_static_asset_is_integrity_checked() 
     assert set(catalogs["en"]) == set(catalogs["ru"])
     payload, digest = read_static_asset("admin-v1.css")
     assert b"prefers-reduced-motion" in payload
-    assert digest == "10e85268761bb7635618153b49f823c2b99349dca5d407cb920ffce79b3a2d39"
+    assert digest == "b3c13018b1db8ec4c083b6f708ce473b1bf18aec620f73df81f7cbfc27d6b9ec"

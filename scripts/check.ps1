@@ -49,7 +49,9 @@ try {
     & uv run --project server --frozen ruff format --check --config server/pyproject.toml server
     if ($LASTEXITCODE -ne 0) { throw "Ruff format check failed" }
 
-    & uv run --project server --frozen mypy --config-file server/pyproject.toml server/src server/tests
+    # Bypass Windows console-script trampolines so relocated/non-ASCII workspaces
+    # use the interpreter from the locked project environment deterministically.
+    & uv run --project server --frozen python -m mypy --config-file server/pyproject.toml server/src server/tests
     if ($LASTEXITCODE -ne 0) { throw "mypy failed" }
 
     $dependencyTreeJson = (& uv tree --project server --frozen --universal --format json --preview-features json-output | Out-String)
@@ -143,7 +145,7 @@ try {
         "postgresql+psycopg://autplay:autplay_dev_only@127.0.0.1:$publishedPort/autplay"
     )
 
-    & uv run --project server --frozen pytest -c server/pyproject.toml server/tests
+    & uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests
     if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 }
 finally {

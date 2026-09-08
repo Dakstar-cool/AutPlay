@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<header class="page-heading"><div><p class="eyebrow">AutPlay Admin</p><h1>{{ t(page_title_key) }}</h1><p>{{ t(page_intro_key) }}</p></div></header>
+<header class="page-heading"><div><h1>{{ t(page_title_key) }}</h1><p class="page-summary">{{ t(page_intro_key) }}</p></div></header>
 {% if notice_key %}<p class="notice" role="note">{{ t(notice_key) }}</p>{% endif %}
 {% if rows %}
 <div class="table-scroll" tabindex="0" role="region" aria-label="{{ page_title }}">

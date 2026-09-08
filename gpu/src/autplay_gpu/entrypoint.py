@@ -7,6 +7,7 @@ import json
 import sys
 from collections.abc import Sequence
 
+import uvicorn
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.enrichment import AcceleratorOutOfMemory
@@ -23,6 +24,8 @@ from .devices import (
 )
 from .embedding import ModelArtifactError
 from .settings import load_gpu_settings
+from .sona_http import create_sona_shadow_app
+from .sona_worker import SonaWorkerCompositionError, compose_sona_shadow_worker
 from .worker import GpuWorkerCompositionError, compose_gpu_worker, run_gpu_worker
 
 SERVICE_NAME = "autplay-ml-gpu"
@@ -38,6 +41,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     mode.add_argument("--select-device", action="store_true")
     mode.add_argument("--check-readiness", action="store_true")
     mode.add_argument("--once", action="store_true")
+    mode.add_argument("--serve-sona-shadow", action="store_true")
     namespace = parser.parse_args(arguments)
     try:
         gpu = load_gpu_settings()
@@ -75,6 +79,25 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 "status": "selected",
             }
         )
+
+    if namespace.serve_sona_shadow:
+        configure_json_logging(service=SERVICE_NAME, level="INFO")
+        try:
+            sona = compose_sona_shadow_worker(gpu, selection)
+        except SonaWorkerCompositionError as error:
+            return _error(error.code, 4)
+        except ModelArtifactError:
+            return _error("gpu_sona_artifact_invalid", 4)
+        except AcceleratorOutOfMemory:
+            return _error("gpu_accelerator_out_of_memory", 4)
+        uvicorn.run(
+            create_sona_shadow_app(sona.runtime, sona.artifact),
+            host="127.0.0.1",
+            port=gpu.sona_bind_port,
+            workers=1,
+            access_log=False,
+        )
+        return 0
 
     try:
         worker_settings = load_worker_settings()

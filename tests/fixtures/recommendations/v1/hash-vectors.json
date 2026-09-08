@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "algorithm": "RFC8785_SHA256",
+  "vectors": [
+    {
+      "case_id": "contract-policy-canonical-hash",
+      "source": "contract-policy.json#/",
+      "exclude_fields": [],
+      "canonical_utf8_length": 14730,
+      "sha256": "c21308922e78fc58a1f5b7297f52e120ac5893662f165767f0f24921bdc4ea22"
+    },
+    {
+      "case_id": "feature-policy-canonical-hash",
+      "source": "schema-examples.json#/examples/0/instance",
+      "exclude_fields": ["content_sha256"],
+      "canonical_utf8_length": 1916,
+      "sha256": "6fc6c3348475618696eec0ad171515d50e6f586ebf515f67f5add4ef245179db"
+    },
+    {
+      "case_id": "normalized-evidence-canonical-hash",
+      "source": "schema-examples.json#/examples/1/instance",
+      "exclude_fields": ["normalized_evidence_sha256"],
+      "canonical_utf8_length": 977,
+      "sha256": "1c3908ffb0cd6b62d03b87de82dc5973a50fc37c3aadbc5be2834593d3fb0392"
+    },
+    {
+      "case_id": "adaptive-profile-canonical-hash",
+      "source": "schema-examples.json#/examples/2/instance",
+      "exclude_fields": ["profile_sha256"],
+      "canonical_utf8_length": 1110,
+      "sha256": "982f79cb7ac26e37be4de8875edd933958296edc9d71b0f42caf1b44b42c5a09"
+    },
+    {
+      "case_id": "source-evidence-list-canonical-hash",
+      "source": "schema-examples.json#/examples/3/instance/source_evidence",
+      "exclude_fields": [],
+      "canonical_utf8_length": 1075,
+      "sha256": "63aec1cd9d21e23c3135e6c009ee6c3188ffc8808c976bacd5cc26184f96ea3e"
+    },
+    {
+      "case_id": "derived-features-canonical-hash",
+      "source": "schema-examples.json#/examples/3/instance/adaptive_profile",
+      "exclude_fields": [],
+      "canonical_utf8_length": 601,
+      "sha256": "b9626cb0c7c74acbd0b29d4b565af2f07d40e01b5c4ea41f75eb6a14f4cd648d"
+    },
+    {
+      "case_id": "event-time-policy-canonical-hash",
+      "source": "contract-policy.json#/event_time",
+      "exclude_fields": [],
+      "canonical_utf8_length": 856,
+      "sha256": "f5d0a778659ad343d86c2466a5eba3c98b784610b4a138606aaedc8e37c19757"
+    },
+    {
+      "case_id": "temporal-snapshot-canonical-hash",
+      "source": "schema-examples.json#/examples/3/instance",
+      "exclude_fields": ["snapshot_sha256"],
+      "canonical_utf8_length": 2639,
+      "sha256": "817ffafe4c2cc79af817360af85d70d3f6500d35a5d75af7ff27d3786ed88d84"
+    },
+    {
+      "case_id": "parent-items-canonical-hash",
+      "source": "schema-examples.json#/examples/4/instance/parent_items",
+      "exclude_fields": [],
+      "canonical_utf8_length": 73,
+      "sha256": "f96b649d552b93976f49c32bb87914f125b056ea7470a862248dd2a08c9b03c1"
+    },
+    {
+      "case_id": "impression-key-canonical-hash",
+      "source": "impression-key-vectors.json#/vectors/0/material",
+      "exclude_fields": [],
+      "canonical_utf8_length": 244,
+      "sha256": "d6ebda61574ec2c49725856cbe41a23bae20370993c9c8f0a18b136b1d3dd56a"
+    },
+    {
+      "case_id": "offline-delta-canonical-hash",
+      "source": "schema-examples.json#/examples/4/instance",
+      "exclude_fields": ["delta_sha256"],
+      "canonical_utf8_length": 1221,
+      "sha256": "dc7657a2023ed42fdac1720ce259c490f5d143aa06501513ab1a2c153220b95e"
+    },
+    {
+      "case_id": "owner-export-canonical-hash",
+      "source": "schema-examples.json#/examples/5/instance",
+      "exclude_fields": ["export_sha256"],
+      "canonical_utf8_length": 1079,
+      "sha256": "c20dd368bcee4cfbbd00984d15b1afd128f5ec7e7e17fd8e276707d7676cd66c"
+    },
+    {
+      "case_id": "owner-export-manifest-canonical-hash",
+      "source": "schema-examples.json#/examples/6/instance",
+      "exclude_fields": ["manifest_sha256"],
+      "canonical_utf8_length": 248,
+      "sha256": "d762e56065a2666669e2b3863edfb7a832e3d3dc9a13c61244d7720c871cd962"
+    }
+  ]
+}

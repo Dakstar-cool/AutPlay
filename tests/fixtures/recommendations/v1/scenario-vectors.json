@@ -1,0 +1,405 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "cold-start-high-bounded-plasticity",
+      "concern": "PROFILE_MATURITY",
+      "input": {
+        "effective_signal_mass": 1.0,
+        "track_coverage": 1,
+        "artist_coverage": 1,
+        "observation_span_ms": 0,
+        "recency_age_ms": 2419200000,
+        "consistency": 0.2,
+        "organic_share": 0.2
+      },
+      "expected": {
+        "maturity_formula": "WEIGHTED_SIX_TERM_SATURATION_V1",
+        "maturity": 0.09308333333333334,
+        "plasticity_formula": "MAX_MINUS_MATURITY_TIMES_RANGE",
+        "plasticity_multiplier": 1.860375,
+        "bounded": true,
+        "registration_age_used": false
+      }
+    },
+    {
+      "case_id": "maturity-growth-reduces-single-event-influence",
+      "concern": "PROFILE_MATURITY",
+      "input": {
+        "before_maturity": 0.2,
+        "after_maturity": 0.8,
+        "minimum_plasticity": 0.5,
+        "maximum_plasticity": 2.0
+      },
+      "expected": {
+        "before_plasticity": 1.7,
+        "after_plasticity": 0.8,
+        "relation": "AFTER_LESS_THAN_BEFORE",
+        "recent_context_still_enabled": true
+      }
+    },
+    {
+      "case_id": "rising-interest-positive-momentum",
+      "concern": "TEMPORAL_DIRECTION",
+      "input": {
+        "horizon_scores_oldest_to_newest": [0.25, 0.4, 0.6, 0.8, 0.9],
+        "long_term_score": 0.2,
+        "confidence": 0.75
+      },
+      "expected": {
+        "momentum_sign": "POSITIVE",
+        "momentum_value": 0.65,
+        "recent_adjustment_sign": "POSITIVE",
+        "long_term_score_mutated": false
+      }
+    },
+    {
+      "case_id": "fading-interest-negative-momentum",
+      "concern": "TEMPORAL_DIRECTION",
+      "input": {
+        "horizon_scores_oldest_to_newest": [0.85, 0.7, 0.5, 0.3, 0.1],
+        "long_term_score": 0.65,
+        "confidence": 0.8
+      },
+      "expected": {
+        "momentum_sign": "NEGATIVE",
+        "momentum_value": -0.75,
+        "recent_adjustment_sign": "NEGATIVE",
+        "mandatory_filter_created": false
+      }
+    },
+    {
+      "case_id": "short-listens-raise-temporary-fatigue",
+      "concern": "FATIGUE",
+      "input": {
+        "finalized_skip_count": 3,
+        "prior_fatigue": 0.2,
+        "elapsed_days": 1,
+        "completion_mass": 0.0,
+        "explicit_dislike": false,
+        "prior_long_term_score": 0.7
+      },
+      "expected": {
+        "fatigue_relation": "INCREASES",
+        "fatigue_value": 0.75,
+        "long_term_score_erased": false,
+        "mandatory_filter_created": false,
+        "maximum_penalty": 0.4
+      }
+    },
+    {
+      "case_id": "fatigue-recovers-with-expiry-and-completion",
+      "concern": "FATIGUE",
+      "input": {
+        "prior_fatigue": 0.6,
+        "elapsed_days": 1,
+        "skip_mass": 0.0,
+        "recent_completed_listens": 2,
+        "negative_evidence_expired": true
+      },
+      "expected": {
+        "fatigue_relation": "DECREASES",
+        "fatigue_value": 0.25,
+        "durable_affinity_restored_from_snapshot": false,
+        "recomputed_from_retained_evidence": true
+      }
+    },
+    {
+      "case_id": "contradictory-evidence-lowers-confidence-first",
+      "concern": "CONFIDENCE",
+      "input": {
+        "positive_mass": 4.0,
+        "negative_mass": 3.5,
+        "previous_confidence": 0.8,
+        "previous_score": 0.45
+      },
+      "expected": {
+        "confidence_relation": "DECREASES",
+        "contradiction_ratio": 0.9333333333333333,
+        "confidence_value": 0.05333333333333334,
+        "score_forced_to_extreme": false,
+        "personalized_adjustment_shrinks_toward_baseline": true
+      }
+    },
+    {
+      "case_id": "overlapping-horizons-conserve-event-mass",
+      "concern": "HORIZON_FUSION",
+      "input": {
+        "event_base_mass": 0.8,
+        "active_view_weights": {
+          "EPISODE": 0.3,
+          "H12": 0.25,
+          "H24": 0.2,
+          "D3": 0.15,
+          "D7": 0.1
+        },
+        "active_views": ["EPISODE", "H12", "H24", "D3", "D7"]
+      },
+      "expected": {
+        "normalized_coefficients": {
+          "EPISODE": 0.3,
+          "H12": 0.25,
+          "H24": 0.2,
+          "D3": 0.15,
+          "D7": 0.1
+        },
+        "total_fused_event_mass": 0.8,
+        "raw_window_sum_forbidden": true
+      }
+    },
+    {
+      "case_id": "partial-active-horizons-renormalize-mass",
+      "concern": "HORIZON_FUSION",
+      "input": {
+        "event_base_mass": 0.6,
+        "active_view_weights": {
+          "EPISODE": 0.3,
+          "H12": 0.25,
+          "H24": 0.2,
+          "D3": 0.15,
+          "D7": 0.1
+        },
+        "active_views": ["D3", "D7"]
+      },
+      "expected": {
+        "normalized_coefficients": {
+          "D3": 0.6,
+          "D7": 0.4
+        },
+        "total_fused_event_mass": 0.6,
+        "raw_window_sum_forbidden": true
+      }
+    },
+    {
+      "case_id": "delayed-sync-does-not-rewrite-snapshot",
+      "concern": "EVENT_TIME_AND_REPLAY",
+      "input": {
+        "snapshot_cutoff_at_ms": 1788375600000,
+        "snapshot_watermark": 9001,
+        "late_event_received_at_ms": 1788379200000,
+        "late_event_sequence": 9002
+      },
+      "expected": {
+        "existing_snapshot_changes": false,
+        "later_snapshot_may_include": true,
+        "earlier_exact_replay_changes": false
+      }
+    },
+    {
+      "case_id": "future-clock-skew-clamps-and-reduces-confidence",
+      "concern": "EVENT_TIME_AND_REPLAY",
+      "input": {
+        "occurred_at_ms": 1788382800000,
+        "received_at_ms": 1788375600000,
+        "future_clock_tolerance_ms": 300000
+      },
+      "expected": {
+        "effective_at_ms": 1788375600000,
+        "time_classification": "FUTURE_SKEW_CLAMPED",
+        "confidence_relation": "DECREASES"
+      }
+    },
+    {
+      "case_id": "past-clock-skew-disables-recent-only",
+      "concern": "EVENT_TIME_AND_REPLAY",
+      "input": {
+        "occurred_at_ms": 1785000000000,
+        "received_at_ms": 1788375600000,
+        "maximum_recent_backfill_ms": 2592000000
+      },
+      "expected": {
+        "time_classification": "PAST_SKEW_RECENT_DISABLED",
+        "recent_eligible": false,
+        "durable_evidence_may_remain": true
+      }
+    },
+    {
+      "case_id": "retention-expiry-blocks-algorithmic-replay",
+      "concern": "RETENTION_AND_REPLAY",
+      "input": {
+        "snapshot_retained": false,
+        "request_items_retained": true,
+        "privacy_deleted": false
+      },
+      "expected": {
+        "exact_response_replay": "AVAILABLE_FROM_PERSISTED_ITEMS",
+        "algorithmic_replay": "REPLAY_INPUT_UNAVAILABLE",
+        "current_state_substitution": false
+      }
+    },
+    {
+      "case_id": "bounded-owner-export",
+      "concern": "PRIVACY_EXPORT",
+      "input": {
+        "actor_is_owner": true,
+        "bounded_lineage_count": 1
+      },
+      "expected": {
+        "includes_score_confidence_maturity_and_policy": true,
+        "includes_other_owner_data": false,
+        "includes_secrets_or_raw_paths": false
+      }
+    },
+    {
+      "case_id": "device-unbinding-purges-local-context-only",
+      "concern": "PRIVACY_UNBINDING",
+      "input": {
+        "device_unbound": true,
+        "owner_delete_requested": false
+      },
+      "expected": {
+        "local_pack_and_delta": "PURGED",
+        "remote_owner_state": "UNCHANGED",
+        "remote_deletion_claimed": false,
+        "next_profile_inherits_context": false,
+        "same_owner_reconnect_requires_fresh_snapshot": true
+      }
+    },
+    {
+      "case_id": "privacy-deletion-cascades-and-denies-replay",
+      "concern": "PRIVACY_DELETE",
+      "input": {
+        "owner_delete_accepted": true
+      },
+      "expected": {
+        "normalized_events": "PURGED",
+        "profiles": "PURGED",
+        "snapshots": "PURGED",
+        "request_items_and_traces": "PURGED",
+        "server_offline_packs": "PURGED",
+        "exact_replay": "RECOMMENDATION_NOT_FOUND",
+        "algorithmic_replay": "RECOMMENDATION_NOT_FOUND",
+        "non_personal_receipt_only": true
+      }
+    },
+    {
+      "case_id": "explicit-dislike-remains-mandatory-filter",
+      "concern": "SAFETY_FILTER",
+      "input": {
+        "explicit_dislike": true,
+        "long_term_score": 0.9,
+        "recent_interest": 0.35,
+        "exploration": 0.2
+      },
+      "expected": {
+        "candidate_eligible": false,
+        "score_composition_evaluated": false,
+        "filter_can_be_offset": false
+      }
+    },
+    {
+      "case_id": "recommendation-feedback-never-becomes-organic",
+      "concern": "SELF_EXPOSURE",
+      "input": {
+        "signal_key": "RECOMMENDATION_SELECTED",
+        "origin_lane": "RECOMMENDATION",
+        "causal_impression_present": true,
+        "source_rank_present": true
+      },
+      "expected": {
+        "organic_share_increment": 0.0,
+        "origin_weight_maximum": 0.35,
+        "causal_attribution_required": true,
+        "source_rank_required": true
+      }
+    },
+    {
+      "case_id": "privacy-delete-offline-device-awaits-receipt-or-local-erasure",
+      "concern": "PRIVACY_DELETE_DEVICE",
+      "input": {
+        "device_online": false,
+        "authoritative_delete_receipt_delivered": false,
+        "local_reset_or_uninstall": false
+      },
+      "expected": {
+        "server_delete_completes": true,
+        "server_claims_local_purge": false,
+        "remote_wipe_guaranteed": false,
+        "local_recommendation_context_may_remain_sealed": true
+      }
+    },
+    {
+      "case_id": "privacy-delete-dead-device-does-not-claim-wipe",
+      "concern": "PRIVACY_DELETE_DEVICE",
+      "input": {
+        "device_reconnects": false,
+        "device_is_recoverable": false
+      },
+      "expected": {
+        "server_claims_local_purge": false,
+        "remote_wipe_guaranteed": false,
+        "local_erasure_paths": ["OS_ERASURE", "UNINSTALL", "PHYSICAL_DEVICE_DESTRUCTION"]
+      }
+    },
+    {
+      "case_id": "privacy-restore-reapplies-active-deletion-tombstone",
+      "concern": "PRIVACY_BACKUP_RESTORE",
+      "input": {
+        "backup_predates_delete": true,
+        "deletion_tombstone_protect_until_active": true
+      },
+      "expected": {
+        "production_routing_before_redelete": false,
+        "delete_reapplied_in_isolation": true,
+        "zero_owner_rows_verified": true
+      }
+    },
+    {
+      "case_id": "truncated-export-remains-open",
+      "concern": "PRIVACY_EXPORT",
+      "input": {
+        "complete": false,
+        "next_cursor_present": true,
+        "all_manifest_pages_verified": false
+      },
+      "expected": {
+        "request_status": "OPEN",
+        "completion_claim_allowed": false
+      }
+    },
+    {
+      "case_id": "recommendation-causal-chain-conserves-intent-mass",
+      "concern": "CAUSAL_FUSION",
+      "input": {
+        "causal_group": "owner/request/impression/source-rank/recording",
+        "signed_active_signal_weights": {
+          "RECOMMENDATION_SELECTED": 0.25,
+          "FINALIZED_RECOMMENDATION_LISTEN": 0.2,
+          "FINALIZED_COMPLETION": 0.3
+        }
+      },
+      "expected": {
+        "normalized_signed_weights": {
+          "RECOMMENDATION_SELECTED": 0.25,
+          "FINALIZED_RECOMMENDATION_LISTEN": 0.2,
+          "FINALIZED_COMPLETION": 0.3
+        },
+        "absolute_group_mass": 0.75,
+        "independent_intention_count": 1,
+        "completion_and_skip_both_active": false
+      }
+    },
+    {
+      "case_id": "recommendation-causal-chain-normalizes-over-budget-mass",
+      "concern": "CAUSAL_FUSION",
+      "input": {
+        "causal_group": "owner/request/impression/source-rank/recording",
+        "signed_active_signal_weights": {
+          "RECOMMENDATION_SELECTED": 0.8,
+          "FINALIZED_RECOMMENDATION_LISTEN": 0.6,
+          "FINALIZED_COMPLETION": 0.4
+        }
+      },
+      "expected": {
+        "normalized_signed_weights": {
+          "RECOMMENDATION_SELECTED": 0.4444444444444444,
+          "FINALIZED_RECOMMENDATION_LISTEN": 0.3333333333333333,
+          "FINALIZED_COMPLETION": 0.2222222222222222
+        },
+        "absolute_group_mass": 1.0,
+        "independent_intention_count": 1,
+        "completion_and_skip_both_active": false
+      }
+    }
+  ]
+}

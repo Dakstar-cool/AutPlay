@@ -132,7 +132,7 @@ public fun AutPlayPlaybackHalo(
 }
 
 @Composable
-private fun rememberSystemAnimationsEnabled(): Boolean {
+internal fun rememberSystemAnimationsEnabled(): Boolean {
     val context = LocalContext.current
     var enabled by remember(context) { mutableStateOf(ValueAnimator.areAnimatorsEnabled()) }
     DisposableEffect(context) {

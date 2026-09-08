@@ -155,9 +155,5 @@ def test_provider_maps_timeout_tree_termination_failure(
         fail_termination,
     )
 
-    with pytest.raises(
-        ProviderFailure, match=r"yt_dlp\.process_tree_termination_failed"
-    ):
-        YtDlpProvider(timeout_seconds=10).acquire(
-            PlaylistItem(1, "Artist", "Title"), tmp_path
-        )
+    with pytest.raises(ProviderFailure, match=r"yt_dlp\.process_tree_termination_failed"):
+        YtDlpProvider(timeout_seconds=10).acquire(PlaylistItem(1, "Artist", "Title"), tmp_path)

@@ -12,6 +12,8 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0029_sona_shadow_binding", "0028_adaptive_recommend_shadow"),
+    ("0028_adaptive_recommend_shadow", "0027_public_access_invite_only"),
     ("0027_public_access_invite_only", "0026_s1d_guest_room_access"),
     ("0026_s1d_guest_room_access", "0025_a1c_automation_runtime"),
     ("0025_a1c_automation_runtime", "0024_a1b_auth_closure"),
@@ -160,7 +162,7 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == "0027_public_access_invite_only"
+    assert _current_revision(database_harness, database_name) == "0029_sona_shadow_binding"
 
 
 def test_p12_downgrade_refuses_after_blocking_legacy_active_model(

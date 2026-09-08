@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/contract-policy.schema.json",
+  "title": "AutPlay R1 Adaptive Recommendation Contract Policy v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_id",
+    "status",
+    "implementation_effect",
+    "serving_pipeline_unchanged",
+    "public_recommendation_dto_unchanged",
+    "cpu_baseline_required",
+    "gpu_required",
+    "owner_source",
+    "bounds",
+    "dimensions",
+    "horizons",
+    "event_time",
+    "evidence_fusion",
+    "signals",
+    "profile",
+    "score_composition",
+    "mandatory_pre_score_filters",
+    "replay",
+    "offline_delta",
+    "retention_days",
+    "privacy",
+    "semantic_invariants",
+    "evaluation",
+    "proposed_not_implemented"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_id": {"const": "adaptive-recommendations-r1-v1"},
+    "status": {"const": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED"},
+    "implementation_effect": {"const": "NONE"},
+    "serving_pipeline_unchanged": {"const": true},
+    "public_recommendation_dto_unchanged": {"const": true},
+    "cpu_baseline_required": {"const": true},
+    "gpu_required": {"const": false},
+    "owner_source": {"const": "AUTHENTICATED_PRINCIPAL_USER_ID"},
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximum_source_events_per_snapshot",
+        "maximum_dimensions_per_snapshot",
+        "maximum_snapshot_bytes",
+        "maximum_export_page_bytes",
+        "maximum_source_references_per_dimension",
+        "maximum_offline_delta_events"
+      ],
+      "properties": {
+        "maximum_source_events_per_snapshot": {"const": 10000},
+        "maximum_dimensions_per_snapshot": {"const": 512},
+        "maximum_snapshot_bytes": {"const": 4194304},
+        "maximum_export_page_bytes": {"const": 1048576},
+        "maximum_source_references_per_dimension": {"const": 64},
+        "maximum_offline_delta_events": {"const": 256}
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implemented_by_r1b_candidate",
+        "deferred",
+        "display_text_is_identity",
+        "unknown_dimension_values_are_preserved_but_not_scored"
+      ],
+      "properties": {
+        "implemented_by_r1b_candidate": {"const": ["CANONICAL_ARTIST_ID", "CANONICAL_RELEASE_ID", "BOUNDED_METADATA_TOKEN"]},
+        "deferred": {"const": ["VERSIONED_EMBEDDING_NEIGHBORHOOD"]},
+        "display_text_is_identity": {"const": false},
+        "unknown_dimension_values_are_preserved_but_not_scored": {"const": true}
+      }
+    },
+    "horizons": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordered", "fixed_window_ms", "episode", "fusion"],
+      "properties": {
+        "ordered": {"const": ["EPISODE", "H12", "H24", "D3", "D7", "LONG_TERM"]},
+        "fixed_window_ms": {"const": {"H12": 43200000, "H24": 86400000, "D3": 259200000, "D7": 604800000}},
+        "episode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["definition", "authentication_session_is_episode", "gap_is_feature_policy_value"],
+          "properties": {
+            "definition": {"const": "OWNER_EVENT_SEQUENCE_AFTER_VERSIONED_INACTIVITY_GAP"},
+            "authentication_session_is_episode": {"const": false},
+            "gap_is_feature_policy_value": {"const": true}
+          }
+        },
+        "fusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["raw_window_counts_are_summed", "event_mass_budget", "rule", "description"],
+          "properties": {
+            "raw_window_counts_are_summed": {"const": false},
+            "event_mass_budget": {"const": 1.0},
+            "rule": {"const": "NORMALIZED_ACTIVE_VIEW_WEIGHTS"},
+            "description": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "event_time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capture_cutoff_source",
+        "watermark_rule",
+        "stable_order",
+        "future_clock_rule",
+        "past_clock_rule",
+        "delayed_sync_rule",
+        "missing_time_rule",
+        "required_stored_times",
+        "client_occurred_at_controls_inclusion_or_watermark",
+        "accepted_event_effective_time_orders_feature_projection",
+        "source_selection_rule"
+      ],
+      "properties": {
+        "capture_cutoff_source": {"const": "SERVER_DATABASE_TIME"},
+        "watermark_rule": {"const": "RECEIVED_AND_APPLIED_AT_OR_BEFORE_CUTOFF_AND_SERVER_SEQUENCE_AT_OR_BELOW_WATERMARK"},
+        "stable_order": {"const": ["effective_at_ms", "received_at_ms", "server_sequence", "evidence_id"]},
+        "future_clock_rule": {"const": "CLAMP_TO_RECEIVED_TIME_AND_REDUCE_CONFIDENCE"},
+        "past_clock_rule": {"const": "KEEP_OCCURRED_TIME_BUT_REMOVE_FROM_RECENT_WINDOWS_WHEN_POLICY_BACKFILL_LIMIT_IS_EXCEEDED"},
+        "delayed_sync_rule": {"const": "A_LATER_REQUEST_MAY_INCLUDE_THE_EVENT_BUT_AN_EXISTING_SNAPSHOT_NEVER_CHANGES"},
+        "missing_time_rule": {"const": "RECEIPT_TIME_ONLY_WITH_REDUCED_CONFIDENCE"},
+        "required_stored_times": {"const": ["occurred_at_ms", "received_at_ms", "effective_at_ms"]},
+        "client_occurred_at_controls_inclusion_or_watermark": {"const": false},
+        "accepted_event_effective_time_orders_feature_projection": {"const": true},
+        "source_selection_rule": {"const": "OWNER_EVENT_BOUND_INDEPENDENT_OF_P11_CATALOG_TRACK_LIMIT"}
+      }
+    },
+    "evidence_fusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport_duplicate_key",
+        "transport_hash_mismatch",
+        "normalized_evidence_identity",
+        "source_event_can_expand_to_multiple_evidence",
+        "normalized_signal_discriminator",
+        "recommendation_causal_group",
+        "listening_causal_group",
+        "derived_completion_and_skip_are_mutually_exclusive",
+        "group_mass_budget",
+        "group_rule",
+        "description"
+      ],
+      "properties": {
+        "transport_duplicate_key": {"const": ["OWNER_USER_ID", "SOURCE_EVENT_ID", "SOURCE_REQUEST_SHA256"]},
+        "transport_hash_mismatch": {"const": "REJECT"},
+        "normalized_evidence_identity": {"const": ["OWNER_USER_ID", "EVIDENCE_ID"]},
+        "source_event_can_expand_to_multiple_evidence": {"const": true},
+        "normalized_signal_discriminator": {"const": ["SIGNAL_KEY", "DERIVATION_KEY"]},
+        "recommendation_causal_group": {"const": ["OWNER_USER_ID", "RECOMMENDATION_REQUEST_ID", "IMPRESSION_EVENT_ID", "SOURCE_RANK", "RECORDING_ID"]},
+        "listening_causal_group": {"const": ["OWNER_USER_ID", "LISTENING_EVENT_ID"]},
+        "derived_completion_and_skip_are_mutually_exclusive": {"const": true},
+        "group_mass_budget": {"const": 1.0},
+        "group_rule": {"const": "SIGNED_SIGNAL_WEIGHTS_NORMALIZED_BY_MAX_ONE_OR_SUM_ABSOLUTE_ACTIVE_WEIGHTS"},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "signals": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "allOf": [{
+        "prefixItems": [
+          {"properties": {"signal_key": {"const": "EXPLICIT_LIKE"}}},
+          {"properties": {"signal_key": {"const": "EXPLICIT_DISLIKE"}}},
+          {"properties": {"signal_key": {"const": "EXCLUDE_FROM_TASTE"}}},
+          {"properties": {"signal_key": {"const": "FINALIZED_ORGANIC_LISTEN"}}},
+          {"properties": {"signal_key": {"const": "FINALIZED_RECOMMENDATION_LISTEN"}}},
+          {"properties": {"signal_key": {"const": "RECOMMENDATION_SELECTED"}}},
+          {"properties": {"signal_key": {"const": "RECOMMENDATION_DISMISSED"}}},
+          {"properties": {"signal_key": {"const": "FINALIZED_COMPLETION"}}},
+          {"properties": {"signal_key": {"const": "FINALIZED_SHORT_LISTEN_SKIP"}}},
+          {"properties": {"signal_key": {"const": "VOLUNTARY_REPEAT"}}},
+          {"properties": {"signal_key": {"const": "VOLUNTARY_SURFACE_SELECTION"}}}
+        ]
+      }],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal_key", "source_event_types", "capture_status", "origin_lane", "recent_eligible", "durable_effect", "notes"],
+        "properties": {
+          "signal_key": {"type": "string", "minLength": 1},
+          "source_event_types": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "capture_status": {"type": "string", "minLength": 1},
+          "origin_lane": {"type": "string", "minLength": 1},
+          "recent_eligible": {"type": "boolean"},
+          "durable_effect": {"type": "string", "minLength": 1},
+          "notes": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score_range", "confidence_range", "maturity_range", "score_is_probability", "confidence_is_encoded_by_extreme_score", "maturity_uses_registration_age", "maturity_terms", "plasticity_rule", "recent_context_remains_available_after_maturity", "contradiction_rule"],
+      "properties": {
+        "score_range": {"$ref": "#/$defs/numberPair"},
+        "confidence_range": {"$ref": "#/$defs/numberPair"},
+        "maturity_range": {"$ref": "#/$defs/numberPair"},
+        "score_is_probability": {"const": false},
+        "confidence_is_encoded_by_extreme_score": {"const": false},
+        "maturity_uses_registration_age": {"const": false},
+        "maturity_terms": {"$ref": "#/$defs/nonEmptyStringArray"},
+        "plasticity_rule": {"const": "BOUNDED_MONOTONIC_DECREASE_WITH_MATURITY"},
+        "recent_context_remains_available_after_maturity": {"const": true},
+        "contradiction_rule": {"const": "OPPOSING_WEIGHTED_MASS_REDUCES_CONFIDENCE_BEFORE_SCORE_MAGNITUDE_CHANGES"}
+      }
+    },
+    "score_composition": {"const": ["P11_BASELINE_LONG_TERM_SCORE", "CONFIDENCE_GATED_RECENT_INTEREST_BOOST", "BOUNDED_MOMENTUM_ADJUSTMENT", "BOUNDED_TEMPORARY_FATIGUE_PENALTY", "BOUNDED_EXPLORATION_ADJUSTMENT"]},
+    "mandatory_pre_score_filters": {"const": ["OWNER_AUTHORIZATION", "AVAILABILITY", "ACTIVE_IDENTITY", "EXPLICIT_DISLIKE", "EXCLUDE_FROM_TASTE"]},
+    "replay": {"$ref": "#/$defs/replay"},
+    "offline_delta": {"$ref": "#/$defs/offlineDelta"},
+    "retention_days": {"$ref": "#/$defs/retention"},
+    "privacy": {"$ref": "#/$defs/privacy"},
+    "semantic_invariants": {"$ref": "#/$defs/semanticInvariants"},
+    "evaluation": {"$ref": "#/$defs/evaluation"},
+    "proposed_not_implemented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["postgresql", "room", "api"],
+      "properties": {
+        "postgresql": {"$ref": "#/$defs/nonEmptyStringArray"},
+        "room": {"$ref": "#/$defs/nonEmptyStringArray"},
+        "api": {"$ref": "#/$defs/nonEmptyStringArray"}
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyStringArray": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "numberPair": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}},
+    "stringIntegerMap": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "minProperties": 1},
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_response_replay", "algorithmic_replay", "current_state_substitution_allowed", "missing_temporal_input_error", "privacy_deleted_request_error", "snapshot_is_immutable_after_delayed_sync"],
+      "properties": {
+        "exact_response_replay": {"const": "PERSISTED_REQUEST_AND_ITEMS_ONLY"},
+        "algorithmic_replay": {"const": "ORIGINAL_TEMPORAL_SNAPSHOT_POLICY_HASH_SEED_AND_CATALOG_ONLY"},
+        "current_state_substitution_allowed": {"const": false},
+        "missing_temporal_input_error": {"const": "REPLAY_INPUT_UNAVAILABLE"},
+        "privacy_deleted_request_error": {"const": "RECOMMENDATION_NOT_FOUND"},
+        "snapshot_is_immutable_after_delayed_sync": {"const": true}
+      }
+    },
+    "offlineDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent_pack_must_be_verified", "source_rank_mutation_allowed", "mandatory_filters_preserved", "actual_presentation_creates_one_stable_impression", "later_sync_rewrites_prior_impression", "server_claim_or_model_tensor_allowed", "maximum_lifetime_ms", "expires_no_later_than_parent_pack", "parent_pack_and_item_hashes_required", "adjustment_must_match_unique_parent_recording_and_source_rank", "local_event_device_must_match_delta_device", "local_event_server_sequence", "stable_impression_key"],
+      "properties": {
+        "parent_pack_must_be_verified": {"const": true},
+        "source_rank_mutation_allowed": {"const": false},
+        "mandatory_filters_preserved": {"const": true},
+        "actual_presentation_creates_one_stable_impression": {"const": true},
+        "later_sync_rewrites_prior_impression": {"const": false},
+        "server_claim_or_model_tensor_allowed": {"const": false},
+        "maximum_lifetime_ms": {"const": 604800000},
+        "expires_no_later_than_parent_pack": {"const": true},
+        "parent_pack_and_item_hashes_required": {"const": true},
+        "adjustment_must_match_unique_parent_recording_and_source_rank": {"const": true},
+        "local_event_device_must_match_delta_device": {"const": true},
+        "local_event_server_sequence": {"const": "NULL_AND_TIME_CLASSIFICATION_LOCAL_UNSYNCED_TIME"},
+        "stable_impression_key": {"const": ["OWNER_USER_ID", "DEVICE_ID", "RECOMMENDATION_REQUEST_ID", "RECORDING_ID", "SOURCE_RANK"]}
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["r1_normalized_source_event", "r1_temporal_snapshot", "r1_request_item_trace", "server_offline_pack", "device_local_delta_maximum", "active_long_term_profile", "superseded_adaptive_profile"],
+      "properties": {
+        "r1_normalized_source_event": {"const": 30},
+        "r1_temporal_snapshot": {"const": 30},
+        "r1_request_item_trace": {"const": 30},
+        "server_offline_pack": {"const": 8},
+        "device_local_delta_maximum": {"const": 7},
+        "active_long_term_profile": {"const": "UNTIL_REPLACED_OR_OWNER_DELETE"},
+        "superseded_adaptive_profile": {"const": 0}
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_delete", "device_unbinding", "export"],
+      "properties": {
+        "owner_delete": {"$ref": "#/$defs/ownerDelete"},
+        "device_unbinding": {"$ref": "#/$defs/deviceUnbinding"},
+        "export": {"$ref": "#/$defs/exportPolicy"}
+      }
+    },
+    "ownerDelete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "partial_delete_allowed", "new_owner_writes_after_acceptance", "raw_interactions", "raw_source_sets", "normalized_temporal_events", "adaptive_profiles", "temporal_snapshots", "p11_input_snapshots", "request_items_and_replay_traces", "server_offline_packs", "server_transaction_order", "retention_trigger_override", "foreign_key_strategy", "legal_hold", "device_offline_packs_and_deltas", "offline_or_dead_device_remote_wipe_guaranteed", "server_completion_claims_device_purge", "post_delete_exact_replay", "post_delete_algorithmic_replay", "backup_generations", "backup_restore_guard", "deletion_tombstone", "deletion_tombstone_retention", "non_personal_receipt"],
+      "properties": {
+        "authority": {"const": "EXISTING_OWNER_AUTHORIZED_PRIVACY_DELETE_OPERATION"},
+        "partial_delete_allowed": {"const": false},
+        "new_owner_writes_after_acceptance": {"const": "BLOCKED_BEFORE_DELETE_TRANSACTION"},
+        "raw_interactions": {"type": "string"},
+        "raw_source_sets": {"const": ["sync.device_event_inbox owner rows and payloads", "sync.sync_event owner rows and payloads", "sync.tombstone owner rows referencing sync events", "library.user_interaction_event owner rows", "library.listening_event owner rows", "library.user_track_preference rows reached through owner user_track_ref"]},
+        "normalized_temporal_events": {"type": "string"},
+        "adaptive_profiles": {"type": "string"},
+        "temporal_snapshots": {"type": "string"},
+        "p11_input_snapshots": {"type": "string"},
+        "request_items_and_replay_traces": {"type": "string"},
+        "server_offline_packs": {"type": "string"},
+        "server_transaction_order": {"const": ["R1_AND_P11_OFFLINE_PACKS", "LIBRARY_INTERACTION_LISTENING_AND_PREFERENCE_ROWS", "R1_AND_P11_RECOMMENDATION_ITEMS_AND_TRACES", "R1_AND_P11_RECOMMENDATION_REQUESTS", "R1_TEMPORAL_SNAPSHOTS", "P11_INPUT_SNAPSHOTS", "R1_ADAPTIVE_PROFILES", "R1_NORMALIZED_TEMPORAL_EVENTS", "SYNC_TOMBSTONE_ROWS", "SYNC_EVENT_AND_DEVICE_INBOX_ROWS"]},
+        "retention_trigger_override": {"const": "RESTRICTED_SECURITY_DEFINER_PRIVACY_FUNCTION_REQUIRES_ACCEPTED_DELETE_REQUEST_AND_BYPASSES_ONLY_ACTIVE_SNAPSHOT_RETENTION"},
+        "foreign_key_strategy": {"const": "DELETE_CHILDREN_IN_DECLARED_ORDER_THEN_OWNER_ROWS;_NO_ON_DELETE_CASCADE_ASSUMPTION"},
+        "legal_hold": {"type": "string"},
+        "device_offline_packs_and_deltas": {"type": "string"},
+        "offline_or_dead_device_remote_wipe_guaranteed": {"const": false},
+        "server_completion_claims_device_purge": {"const": false},
+        "post_delete_exact_replay": {"const": "RECOMMENDATION_NOT_FOUND"},
+        "post_delete_algorithmic_replay": {"const": "RECOMMENDATION_NOT_FOUND"},
+        "backup_generations": {"type": "string"},
+        "backup_restore_guard": {"const": "BEFORE_ROUTING_A_RESTORE_REAPPLY_ACTIVE_DELETION_TOMBSTONES_AND_VERIFY_ZERO_OWNER_ROWS"},
+        "deletion_tombstone": {"type": "string"},
+        "deletion_tombstone_retention": {"type": "string"},
+        "non_personal_receipt": {"type": "string"}
+      }
+    },
+    "deviceUnbinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["derived_recommendation_pack_delta_and_memory", "credentials_and_active_binding", "library_outbox_media_and_profile_data", "retained_prior_profile_access", "remote_owner_state", "later_profile_inheritance", "same_owner_reconnect"],
+      "properties": {
+        "derived_recommendation_pack_delta_and_memory": {"const": "IMMEDIATE_PURGE"},
+        "credentials_and_active_binding": {"const": "IMMEDIATE_PURGE"},
+        "library_outbox_media_and_profile_data": {"type": "string"},
+        "retained_prior_profile_access": {"type": "string"},
+        "remote_owner_state": {"type": "string"},
+        "later_profile_inheritance": {"const": false},
+        "same_owner_reconnect": {"type": "string"}
+      }
+    },
+    "exportPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paging", "incomplete_request_status", "includes", "excludes"],
+      "properties": {
+        "paging": {"const": "IMMUTABLE_EXPORT_ID_CONTIGUOUS_PAGES_MANIFEST_HASH_AND_EXPLICIT_COMPLETE_FLAG"},
+        "incomplete_request_status": {"const": "OPEN"},
+        "includes": {"const": ["POLICY_AND_PIPELINE_VERSION", "DIMENSION_KIND_AND_STABLE_KEY", "LONG_TERM_AND_RECENT_SCORE_CONFIDENCE", "MATURITY_COMPONENTS", "MOMENTUM_AND_FATIGUE", "CUTOFF_WATERMARK_AND_TIME_CLASSIFICATION", "BOUNDED_EVENT_IDS_AND_HASHES"]},
+        "excludes": {"const": ["SECRETS", "PRIVATE_URLS", "RAW_PATHS", "RAW_SEARCH_QUERIES", "MODEL_TENSORS", "OTHER_OWNER_DATA"]}
+      }
+    },
+    "semanticInvariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_owner_cutoff_watermark_and_policy_equal_embedded_profile", "export_profile_owner_equals_export_owner", "offline_local_event_device_equals_delta_device", "offline_local_event_owner_and_profile_equal_delta", "snapshot_source_event_requires_applied_server_sequence", "offline_adjustment_matches_unique_parent_item", "export_page_index_not_greater_than_page_count", "export_complete_only_on_final_contiguous_manifest_page", "hashes_use_rfc8785_sha256_and_exclude_only_the_named_self_hash"],
+      "properties": {
+        "snapshot_owner_cutoff_watermark_and_policy_equal_embedded_profile": {"const": true},
+        "export_profile_owner_equals_export_owner": {"const": true},
+        "offline_local_event_device_equals_delta_device": {"const": true},
+        "offline_local_event_owner_and_profile_equal_delta": {"const": true},
+        "snapshot_source_event_requires_applied_server_sequence": {"const": true},
+        "offline_adjustment_matches_unique_parent_item": {"const": true},
+        "export_page_index_not_greater_than_page_count": {"const": true},
+        "export_complete_only_on_final_contiguous_manifest_page": {"const": true},
+        "hashes_use_rfc8785_sha256_and_exclude_only_the_named_self_hash": {"const": true}
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_scenario_direction_pass_rate", "mandatory_filter_violation_count", "owner_isolation_violation_count", "shadow_impression_count", "algorithmic_replay_mismatch_count", "maximum_ndcg_at_10_regression", "maximum_diversity_regression", "maximum_artist_concentration_increase", "maximum_repeat_rate_increase", "maximum_p95_latency_ms", "maximum_p95_latency_ratio_to_p11", "activation_requires_r1b_pass", "activation_requires_explicit_user_decision", "rollback_on_any_safety_or_privacy_violation"],
+      "properties": {
+        "required_scenario_direction_pass_rate": {"const": 1.0},
+        "mandatory_filter_violation_count": {"const": 0},
+        "owner_isolation_violation_count": {"const": 0},
+        "shadow_impression_count": {"const": 0},
+        "algorithmic_replay_mismatch_count": {"const": 0},
+        "maximum_ndcg_at_10_regression": {"const": 0.01},
+        "maximum_diversity_regression": {"const": 0.02},
+        "maximum_artist_concentration_increase": {"const": 0.02},
+        "maximum_repeat_rate_increase": {"const": 0.02},
+        "maximum_p95_latency_ms": {"const": 300},
+        "maximum_p95_latency_ratio_to_p11": {"const": 1.25},
+        "activation_requires_r1b_pass": {"const": true},
+        "activation_requires_explicit_user_decision": {"const": true},
+        "rollback_on_any_safety_or_privacy_violation": {"const": true}
+      }
+    }
+  }
+}

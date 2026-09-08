@@ -11,6 +11,7 @@ import json as _json
 import os as _os
 import re as _re
 import shutil as _shutil
+import tempfile as _tempfile
 import unicodedata as _unicodedata
 import uuid as _uuid
 from pathlib import Path as _Path
@@ -602,8 +603,7 @@ async def _process_one(
         state.final({"error": "downloaded_content_hash_failed", "query_ref": query_ref})
         raise _HitmoError("downloaded_content_hash_failed") from error
     state.action(
-        f"queue={queue_position} query_ref={query_ref} completed_download "
-        f"file_ref={file_ref}"
+        f"queue={queue_position} query_ref={query_ref} completed_download file_ref={file_ref}"
     )
     return {
         "query_ref": query_ref,
@@ -872,16 +872,28 @@ def _prepare_run_dir() -> _Path:
     source_dir = _Path(__file__).resolve().parent
     if source_dir.name.startswith("run_") and source_dir.parent.name == "final_runs":
         return source_dir
-    module_root = _Path(__file__).resolve().parents[3]
-    final_runs = module_root / "final_runs"
-    final_runs.mkdir(parents=True, exist_ok=True)
+    configured_root = _os.environ.get("AUTPLAY_HITMO_EVIDENCE_ROOT")
+    final_runs = (
+        _Path(configured_root)
+        if configured_root
+        else _Path(_tempfile.gettempdir()) / "autplay-hitmo" / "final_runs"
+    )
+    try:
+        final_runs.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise _HitmoError("run_directory_unavailable") from error
     for index in range(1, 100_000):
         candidate = final_runs / f"run_{index}"
         try:
             candidate.mkdir()
         except FileExistsError:
             continue
-        _shutil.copy2(__file__, candidate / "hitmo.py")
+        except OSError as error:
+            raise _HitmoError("run_directory_unavailable") from error
+        try:
+            _shutil.copy2(__file__, candidate / "hitmo.py")
+        except OSError as error:
+            raise _HitmoError("run_directory_unavailable") from error
         return candidate
     raise _HitmoError("run_directory_exhausted")
 

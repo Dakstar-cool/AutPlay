@@ -216,6 +216,18 @@ def _set_run(tool: ModuleType, monkeypatch: pytest.MonkeyPatch, run_dir: Path) -
     monkeypatch.setattr(tool, "_prepare_run_dir", lambda: run_dir)
 
 
+def test_run_evidence_uses_writable_external_root(
+    tool: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence_root = tmp_path / "runtime-evidence"
+    monkeypatch.setenv("AUTPLAY_HITMO_EVIDENCE_ROOT", str(evidence_root))
+
+    run_dir = tool._prepare_run_dir()
+
+    assert run_dir.parent == evidence_root
+    assert (run_dir / "hitmo.py").is_file()
+
+
 def test_module_exposes_one_public_reusable_function(tool: ModuleType) -> None:
     public = [name for name in dir(tool) if not name.startswith("_")]
     assert public == ["download_hitmo_tracks"]

@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0027_public_access_invite_only"
+EXPECTED_MIGRATION_HEAD: Final = "0029_sona_shadow_binding"
 
 
 @dataclass(frozen=True, slots=True)

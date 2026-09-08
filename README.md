@@ -118,10 +118,19 @@ archive reload, media/config smoke и disposable combined Compose runtime.
 
 ## Resonance Lens
 
-Resonance Lens в hero — **визуальное направление, а не реализованная функция**. Концепция описывает
-пару оптических «глаз», continuous mood и тонкий resonance filament для будущего Now Playing. Она
-не доказывает наличие Face runtime, модели или музыкального анализа в `v0.3.0`; реальное состояние
-продукта показано Android/Web screenshots выше.
+Resonance Lens теперь имеет первый Android-only runtime в Now Playing: нейтральная пара оптических
+«глаз» с закрытыми четырёхточечными aperture-ribbons локально реагирует на доступную playback
+dynamics и не требует сервера. Runtime повторяет глубину README-концепта через tapered ribbon
+facets, четыре световых U-ring, мягкие orbital echoes и тёмное оптическое ядро. Внутри ядра
+находится оптический pupil: во время воспроизведения его размер,
+небольшое смещение и оттенок реагируют на bounded process-local PCM energy/contour; это не
+pitch/тембровый или mood-анализ. Девять continuous reference-поз и их спектральные семейства
+реализованы как debug/evidence fixtures, но production timeline, модель и глубокий анализ
+музыкального характера ещё не активированы и не входят в `v0.3.0`.
+
+Сквозной горизонтальный resonance filament удалён из runtime-композиции: после появления pupil он
+читался как прицел и конкурировал с формой глаз. По той же причине убраны вертикальные оси и
+концевые точки внутри pupil; глубину теперь создают только оптические кольца и смещённый блик.
 
 См. [Resonance Lens exploration](docs/design/explorations/AutPlay_Face_Resonance_Lens_Exploration_v1.md)
 и [reviewed implementation plan](docs/design/explorations/AutPlay_Face_Resonance_Lens_Plan.md).
@@ -204,12 +213,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-releas
 
 ## Границы v0.3.0
 
-- Development signing only; production signing key и store policy не выбраны.
+- Stable production signing custody and an exact version-code 3 to 4 data-preserving update proof
+  are verified for `app.autplay`; the evidence APKs are not published, and the final schema-v2
+  hardening workflow has not been run interactively after review.
 - Bundled server — CPU `linux/amd64`, single-operator, trusted-LAN development topology.
-- Public domain/TLS/reverse proxy, registry push, production secret delivery, backup destination/retention и rollout policy остаются отдельными решениями.
+- Public TLS activation, external scan/renewal/rollback/mobile Range evidence, registry push,
+  production secret delivery and rollout policy remain separately gated; backup custody and
+  retention are already accepted and verified.
 - Web Admin доступен только на literal loopback; password login и public registration отсутствуют.
 - Automatic probabilistic Recording merge выключен; ambiguous evidence требует review.
-- P12 model activation и production Face/Resonance Lens runtime отсутствуют; deterministic CPU baseline остаётся authoritative.
+- P12 model activation и Face Timeline отсутствуют; локальный нейтральный Resonance Lens не заявляет наличие музыкального анализа.
 - Не используйте `docker compose down --volumes` для данных, которые нужно сохранить: bundled installer не является системой резервного копирования.
 
 Перед эксплуатацией прочитайте [release notes](docs/release/RELEASE_NOTES_0.3.0.md),

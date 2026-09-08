@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/owner-export-manifest.schema.json",
+  "title": "AutPlay R1 Owner Adaptive Recommendation Export Manifest v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "export_id",
+    "owner_user_id",
+    "page_count",
+    "complete",
+    "ordered_page_sha256",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "export_id": {"$ref": "#/$defs/uuid"},
+    "owner_user_id": {"$ref": "#/$defs/uuid"},
+    "page_count": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "complete": {"const": true},
+    "ordered_page_sha256": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/sha256"}
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

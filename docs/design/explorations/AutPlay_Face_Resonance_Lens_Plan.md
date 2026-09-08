@@ -5,12 +5,14 @@ _Locked via claudex-loop with the user on 2026-08-31._
 ## Status and authority
 
 This is a non-normative, implementation-ready planning artifact for the accepted post-RC AutPlay
-Face direction. It does not activate a product milestone, create P15, reopen P00-P14, modify the
-accepted UI contract, select a production model, or claim that AutPlay Face is implemented.
+Face direction. The Android-only Face Local v2 visual baseline was explicitly activated and
+implemented on 2026-09-02; this broader plan does not activate Face Contract, Face Timeline or Face
+Operations, create P15, reopen P00-P14, modify the accepted UI contract, or select a production
+model.
 
-An explicit future milestone prompt remains required before product code, API, schema, migration,
-or persistence changes begin. The future prompt must preserve the source precedence and completion
-rules in the repository `AGENTS.md` and `docs/build-pack/PROMPT_PROTOCOL.md`.
+An explicit future milestone prompt remains required before timeline/model/API/schema/migration or
+persistence work begins. The future prompt must preserve the source precedence and completion rules
+in the repository `AGENTS.md` and `docs/build-pack/PROMPT_PROTOCOL.md`.
 
 ## Goal
 
@@ -286,16 +288,26 @@ approved model, or completed analysis.
 ### 9. Define the Resonance Lens visual language
 
 1. Perceived aliveness is fixed at 5/10: equal parts musical instrument and living presence.
-2. The rig uses a shared visor field, upper/lower aperture masks, a dark optical core, two or three
-   spectral iris arcs, one resonance filament, and bounded 3–6% micro-asymmetry.
+2. The rig uses a shared visor field, upper/lower aperture masks, a dark optical core, layered
+   spectral iris arcs, one reactive optical pupil per eye, and bounded 3–6% micro-asymmetry. The
+   cross-eye resonance filament was removed by explicit user direction on 2026-09-02 because it
+   competed with the eye silhouette after the pupil was added. The same no-reticle correction
+   removes the vertical pupil axes and endpoint dots while retaining the layered pupil and its
+   off-axis glint.
+   `AutPlay_Face_Brow_Action_Grammar_Exploration_v2.md` is the user-approved Face Local visual
+   contract: the upper mask is a closed, layered four-point optical ribbon coordinated with both lid
+   masks, not a stroked human eyebrow or a rotated stock arc. Its normalized control table is
+   authoritative over generated bitmap details.
 3. Geometry, occlusion, aperture, focus, and timing carry meaning before color. White eyeballs,
-   round dot pupils, literal eyebrow glyphs, emoji symbols, and fixed angry-eye triangles are
-   excluded.
+   flat round-dot pupils, literal eyebrow glyphs, emoji symbols, and fixed angry-eye triangles are
+   excluded; the reactive pupil is a layered optical core control rather than a flat cartoon dot.
 4. The validation matrix uses nine reference anchors rather than a closed mood enum: neutral,
    calm-soft, positive-light, melancholic-dark, dreamy-atmospheric, energetic-bright,
    aggressive-tense, euphoric, and ominous.
 5. Intermediate mixtures and temporal transitions are first-class validation targets. A track is
    not snapped to the nearest named anchor.
+   The nine evidence fixtures use the v2 spectral families so geometry-plus-color can be inspected,
+   while production without trusted semantic input continues to render the neutral palette only.
 6. `TrackCharacter` changes slowly, temporal semantic keyframes may evolve every musical section,
    and app reactions remain brief. Normal playback includes visible rest rather than continuous BPM
    pulsing.
@@ -374,9 +386,10 @@ types or pretend deferred GPU evidence is complete.
 
 ## Assumptions
 
-1. AutPlay Face is an accepted product direction but remains `NOT_STARTED`; explicit activation is
-   required. Source: `README.md`, `docs/design/AutPlay_Face_Product_Concept_v1.md`, and
-   `docs/implementation/PLAN.md`.
+1. AutPlay Face is an accepted product direction and the Face Local v2 Android baseline is
+   `IN_PROGRESS`/implemented. Face Contract, Face Timeline and Face Operations remain
+   `NOT_STARTED` and require explicit activation. Source: `README.md`,
+   `docs/design/AutPlay_Face_Product_Concept_v1.md`, and `docs/implementation/PLAN.md`.
 2. Local Android actions and playback cannot require a synchronous personal-server trip. Source:
    repository `AGENTS.md` and the accepted Face product concept.
 3. PostgreSQL owns server metadata, durable jobs, and derived-result lineage; filesystem/NAS is the

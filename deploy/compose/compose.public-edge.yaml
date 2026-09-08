@@ -81,7 +81,8 @@ services:
     ports: !reset []
     networks:
       default: null
-      public-edge: null
+      public-edge:
+        ipv4_address: 172.30.77.3
 
   stream:
     environment: !override
@@ -97,7 +98,8 @@ services:
     ports: !reset []
     networks:
       default: null
-      public-edge: null
+      public-edge:
+        ipv4_address: 172.30.77.4
 
   edge:
     image: caddy:2.11.4-alpine@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a

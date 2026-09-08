@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/temporal-snapshot.schema.json",
+  "title": "AutPlay R1 Immutable Temporal Snapshot v2",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "snapshot_kind",
+    "snapshot_id",
+    "owner_user_id",
+    "cutoff_at_ms",
+    "interaction_watermark",
+    "catalog_snapshot",
+    "availability_snapshot_sha256",
+    "baseline_input_snapshot_sha256",
+    "feature_policy",
+    "event_time_policy_sha256",
+    "source_evidence",
+    "adaptive_profile",
+    "derived_features_sha256",
+    "source_evidence_sha256",
+    "snapshot_sha256",
+    "retained_until_ms"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "snapshot_kind": {"const": "RECOMMENDATION_TEMPORAL_SNAPSHOT_V2"},
+    "snapshot_id": {"$ref": "#/$defs/uuid"},
+    "owner_user_id": {"$ref": "#/$defs/uuid"},
+    "cutoff_at_ms": {"type": "integer", "minimum": 0},
+    "interaction_watermark": {"type": "integer", "minimum": 0},
+    "catalog_snapshot": {"type": "integer", "minimum": 0},
+    "availability_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "baseline_input_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "feature_policy": {"$ref": "#/$defs/versionRef"},
+    "event_time_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "source_evidence": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {"$ref": "temporal-evidence.schema.json"}
+    },
+    "adaptive_profile": {"$ref": "adaptive-profile.schema.json"},
+    "derived_features_sha256": {"$ref": "#/$defs/sha256"},
+    "source_evidence_sha256": {"$ref": "#/$defs/sha256"},
+    "snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "retained_until_ms": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "versionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "version", "content_sha256"],
+      "properties": {
+        "key": {"const": "adaptive-taste"},
+        "version": {"type": "string", "pattern": "^[1-9][0-9]{0,8}$"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

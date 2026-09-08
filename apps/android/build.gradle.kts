@@ -6,6 +6,26 @@ plugins {
 }
 
 val qaSideBySide = providers.gradleProperty("autplay.qaSideBySide").orNull == "true"
+val releaseVersionCodeOverride = providers.gradleProperty("autplay.versionCode").orNull?.toInt()
+val releaseVersionNameOverride = providers.gradleProperty("autplay.versionName").orNull
+val releaseKeystorePath = providers.environmentVariable("AUTPLAY_ANDROID_KEYSTORE_PATH").orNull
+val releaseKeystorePassword = providers.environmentVariable("AUTPLAY_ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("AUTPLAY_ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("AUTPLAY_ANDROID_KEY_PASSWORD").orNull
+val releaseSigningInputs = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+)
+val releaseSigningEnabled = releaseSigningInputs.all { !it.isNullOrBlank() }
+
+if (!releaseSigningEnabled && releaseSigningInputs.any { !it.isNullOrBlank() }) {
+    throw GradleException("Production signing requires all AUTPLAY_ANDROID_* inputs")
+}
+if (releaseSigningEnabled && gradle.startParameter.isConfigurationCacheRequested) {
+    throw GradleException("Production signing requires --no-configuration-cache")
+}
 
 android {
     namespace = "app.autplay"
@@ -22,12 +42,28 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.3.0"
+        releaseVersionCodeOverride?.let { versionCode = it }
+        releaseVersionNameOverride?.let { versionName = it }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (releaseSigningEnabled) {
+            create("autplayProduction") {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            if (releaseSigningEnabled) {
+                signingConfig = signingConfigs.getByName("autplayProduction")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

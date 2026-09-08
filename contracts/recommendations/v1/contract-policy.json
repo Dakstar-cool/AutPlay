@@ -1,0 +1,431 @@
+{
+  "schema_version": 1,
+  "contract_id": "adaptive-recommendations-r1-v1",
+  "status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "implementation_effect": "NONE",
+  "serving_pipeline_unchanged": true,
+  "public_recommendation_dto_unchanged": true,
+  "cpu_baseline_required": true,
+  "gpu_required": false,
+  "owner_source": "AUTHENTICATED_PRINCIPAL_USER_ID",
+  "bounds": {
+    "maximum_source_events_per_snapshot": 10000,
+    "maximum_dimensions_per_snapshot": 512,
+    "maximum_snapshot_bytes": 4194304,
+    "maximum_export_page_bytes": 1048576,
+    "maximum_source_references_per_dimension": 64,
+    "maximum_offline_delta_events": 256
+  },
+  "dimensions": {
+    "implemented_by_r1b_candidate": [
+      "CANONICAL_ARTIST_ID",
+      "CANONICAL_RELEASE_ID",
+      "BOUNDED_METADATA_TOKEN"
+    ],
+    "deferred": [
+      "VERSIONED_EMBEDDING_NEIGHBORHOOD"
+    ],
+    "display_text_is_identity": false,
+    "unknown_dimension_values_are_preserved_but_not_scored": true
+  },
+  "horizons": {
+    "ordered": [
+      "EPISODE",
+      "H12",
+      "H24",
+      "D3",
+      "D7",
+      "LONG_TERM"
+    ],
+    "fixed_window_ms": {
+      "H12": 43200000,
+      "H24": 86400000,
+      "D3": 259200000,
+      "D7": 604800000
+    },
+    "episode": {
+      "definition": "OWNER_EVENT_SEQUENCE_AFTER_VERSIONED_INACTIVITY_GAP",
+      "authentication_session_is_episode": false,
+      "gap_is_feature_policy_value": true
+    },
+    "fusion": {
+      "raw_window_counts_are_summed": false,
+      "event_mass_budget": 1.0,
+      "rule": "NORMALIZED_ACTIVE_VIEW_WEIGHTS",
+      "description": "Each accepted event is normalized once. Its policy weight is divided across all active overlapping views so the sum of that event's fusion coefficients is at most its single base evidence mass. Per-window summaries remain observable but cannot multiply event mass."
+    }
+  },
+  "event_time": {
+    "capture_cutoff_source": "SERVER_DATABASE_TIME",
+    "watermark_rule": "RECEIVED_AND_APPLIED_AT_OR_BEFORE_CUTOFF_AND_SERVER_SEQUENCE_AT_OR_BELOW_WATERMARK",
+    "stable_order": [
+      "effective_at_ms",
+      "received_at_ms",
+      "server_sequence",
+      "evidence_id"
+    ],
+    "future_clock_rule": "CLAMP_TO_RECEIVED_TIME_AND_REDUCE_CONFIDENCE",
+    "past_clock_rule": "KEEP_OCCURRED_TIME_BUT_REMOVE_FROM_RECENT_WINDOWS_WHEN_POLICY_BACKFILL_LIMIT_IS_EXCEEDED",
+    "delayed_sync_rule": "A_LATER_REQUEST_MAY_INCLUDE_THE_EVENT_BUT_AN_EXISTING_SNAPSHOT_NEVER_CHANGES",
+    "missing_time_rule": "RECEIPT_TIME_ONLY_WITH_REDUCED_CONFIDENCE",
+    "required_stored_times": [
+      "occurred_at_ms",
+      "received_at_ms",
+      "effective_at_ms"
+    ],
+    "client_occurred_at_controls_inclusion_or_watermark": false,
+    "accepted_event_effective_time_orders_feature_projection": true,
+    "source_selection_rule": "OWNER_EVENT_BOUND_INDEPENDENT_OF_P11_CATALOG_TRACK_LIMIT"
+  },
+  "evidence_fusion": {
+    "transport_duplicate_key": [
+      "OWNER_USER_ID",
+      "SOURCE_EVENT_ID",
+      "SOURCE_REQUEST_SHA256"
+    ],
+    "transport_hash_mismatch": "REJECT",
+    "normalized_evidence_identity": [
+      "OWNER_USER_ID",
+      "EVIDENCE_ID"
+    ],
+    "source_event_can_expand_to_multiple_evidence": true,
+    "normalized_signal_discriminator": [
+      "SIGNAL_KEY",
+      "DERIVATION_KEY"
+    ],
+    "recommendation_causal_group": [
+      "OWNER_USER_ID",
+      "RECOMMENDATION_REQUEST_ID",
+      "IMPRESSION_EVENT_ID",
+      "SOURCE_RANK",
+      "RECORDING_ID"
+    ],
+    "listening_causal_group": [
+      "OWNER_USER_ID",
+      "LISTENING_EVENT_ID"
+    ],
+    "derived_completion_and_skip_are_mutually_exclusive": true,
+    "group_mass_budget": 1.0,
+    "group_rule": "SIGNED_SIGNAL_WEIGHTS_NORMALIZED_BY_MAX_ONE_OR_SUM_ABSOLUTE_ACTIVE_WEIGHTS",
+    "description": "Events in one causal action chain stay observable but their signed signal weights are normalized as one bounded group. Recommendation selection, its attributed listen and a derived outcome are not counted as independent intentions. Mandatory filters remain outside score fusion."
+  },
+  "signals": [
+    {
+      "signal_key": "EXPLICIT_LIKE",
+      "source_event_types": [
+        "USER_TRACK_PREFERENCE_SET"
+      ],
+      "capture_status": "CAPTURED_ADDITIVE_TEMPORAL_PROJECTION_REQUIRED",
+      "origin_lane": "EXPLICIT",
+      "recent_eligible": true,
+      "durable_effect": "POSITIVE_AFFINITY",
+      "notes": "Use the generic preference transition history. The current Android finalized-listen producer writes explicit_feedback=NONE, and the current mutable preference alone is not temporal history."
+    },
+    {
+      "signal_key": "EXPLICIT_DISLIKE",
+      "source_event_types": [
+        "USER_TRACK_PREFERENCE_SET"
+      ],
+      "capture_status": "CAPTURED_ADDITIVE_TEMPORAL_PROJECTION_REQUIRED",
+      "origin_lane": "EXPLICIT",
+      "recent_eligible": false,
+      "durable_effect": "MANDATORY_FILTER",
+      "notes": "Dislike is not fatigue and cannot be offset by contextual score."
+    },
+    {
+      "signal_key": "EXCLUDE_FROM_TASTE",
+      "source_event_types": [
+        "USER_TRACK_PREFERENCE_SET",
+        "LISTENING_EVENT_RECORDED"
+      ],
+      "capture_status": "CAPTURED",
+      "origin_lane": "EXCLUSION",
+      "recent_eligible": false,
+      "durable_effect": "MANDATORY_TRAINING_AND_SERVING_EXCLUSION",
+      "notes": "Excluded events contribute zero affinity, maturity, momentum and fatigue mass."
+    },
+    {
+      "signal_key": "FINALIZED_ORGANIC_LISTEN",
+      "source_event_types": [
+        "LISTENING_EVENT_RECORDED"
+      ],
+      "capture_status": "CAPTURED",
+      "origin_lane": "ORGANIC",
+      "recent_eligible": true,
+      "durable_effect": "QUALITY_WEIGHTED_AFFINITY",
+      "notes": "Only a finalized logical listen with the ORGANIC origin lane qualifies. This is listening evidence, not proof of a Library button selection. SEARCH and PLAYLIST identify the queue/source lane but do not prove voluntary selection of each later entry."
+    },
+    {
+      "signal_key": "FINALIZED_RECOMMENDATION_LISTEN",
+      "source_event_types": [
+        "LISTENING_EVENT_RECORDED"
+      ],
+      "capture_status": "CAPTURED",
+      "origin_lane": "RECOMMENDATION",
+      "recent_eligible": true,
+      "durable_effect": "CAUSAL_GROUP_BOUNDED_AFFINITY",
+      "notes": "A finalized recommendation-origin listen is a distinct normalized evidence document sharing the source event with its mutually exclusive completion or skip outcome and the recommendation impression causal group."
+    },
+    {
+      "signal_key": "RECOMMENDATION_SELECTED",
+      "source_event_types": [
+        "RECOMMENDATION_FEEDBACK_RECORDED"
+      ],
+      "capture_status": "CAPTURED_ADDITIVE_TEMPORAL_PROJECTION_REQUIRED",
+      "origin_lane": "RECOMMENDATION",
+      "recent_eligible": true,
+      "durable_effect": "BOUNDED_POSITIVE_SELF_EXPOSURE_WEIGHT",
+      "notes": "Requires the existing causal impression link and never becomes organic evidence."
+    },
+    {
+      "signal_key": "RECOMMENDATION_DISMISSED",
+      "source_event_types": [
+        "RECOMMENDATION_FEEDBACK_RECORDED"
+      ],
+      "capture_status": "CAPTURED_ADDITIVE_TEMPORAL_PROJECTION_REQUIRED",
+      "origin_lane": "RECOMMENDATION",
+      "recent_eligible": true,
+      "durable_effect": "BOUNDED_TEMPORARY_NEGATIVE_PRESSURE",
+      "notes": "Dismissal may raise temporary fatigue but is not Dislike."
+    },
+    {
+      "signal_key": "FINALIZED_COMPLETION",
+      "source_event_types": [
+        "LISTENING_EVENT_RECORDED"
+      ],
+      "capture_status": "CAPTURED",
+      "origin_lane": "ORIGIN_DEPENDENT",
+      "recent_eligible": true,
+      "durable_effect": "QUALITY_WEIGHTED_AFFINITY",
+      "notes": "Derived once from played_ms, track_duration_ms and completion_ratio under the feature policy."
+    },
+    {
+      "signal_key": "FINALIZED_SHORT_LISTEN_SKIP",
+      "source_event_types": [
+        "LISTENING_EVENT_RECORDED"
+      ],
+      "capture_status": "CAPTURED_DERIVED_BY_VERSIONED_THRESHOLD",
+      "origin_lane": "ORIGIN_DEPENDENT",
+      "recent_eligible": true,
+      "durable_effect": "BOUNDED_TEMPORARY_FATIGUE",
+      "notes": "Seek/progress telemetry is never a separate skip and one skip cannot erase durable taste."
+    },
+    {
+      "signal_key": "VOLUNTARY_REPEAT",
+      "source_event_types": [],
+      "capture_status": "DEFERRED_EXPLICIT_CAPTURE_REQUIRED",
+      "origin_lane": "UNKNOWN",
+      "recent_eligible": false,
+      "durable_effect": "NONE",
+      "notes": "Repeated finalized listens exist, but current data cannot reliably distinguish voluntary replay from queue/autoplay repetition."
+    },
+    {
+      "signal_key": "VOLUNTARY_SURFACE_SELECTION",
+      "source_event_types": [],
+      "capture_status": "DEFERRED_EXPLICIT_CAPTURE_REQUIRED",
+      "origin_lane": "UNKNOWN",
+      "recent_eligible": false,
+      "durable_effect": "NONE",
+      "notes": "Current payloads lack a common user_initiated/selection_surface/queue_entry transition fact. SEARCH and PLAYLIST may label an entire queue and ORGANIC does not distinguish Library selection, so even a finalized listen is not proof of voluntary surface selection."
+    }
+  ],
+  "profile": {
+    "score_range": [
+      -1.0,
+      1.0
+    ],
+    "confidence_range": [
+      0.0,
+      1.0
+    ],
+    "maturity_range": [
+      0.0,
+      1.0
+    ],
+    "score_is_probability": false,
+    "confidence_is_encoded_by_extreme_score": false,
+    "maturity_uses_registration_age": false,
+    "maturity_terms": [
+      "EFFECTIVE_SIGNAL_MASS",
+      "TRACK_AND_ARTIST_COVERAGE",
+      "OBSERVATION_SPAN",
+      "RECENCY",
+      "CONSISTENCY",
+      "ORGANIC_SHARE"
+    ],
+    "plasticity_rule": "BOUNDED_MONOTONIC_DECREASE_WITH_MATURITY",
+    "recent_context_remains_available_after_maturity": true,
+    "contradiction_rule": "OPPOSING_WEIGHTED_MASS_REDUCES_CONFIDENCE_BEFORE_SCORE_MAGNITUDE_CHANGES"
+  },
+  "score_composition": [
+    "P11_BASELINE_LONG_TERM_SCORE",
+    "CONFIDENCE_GATED_RECENT_INTEREST_BOOST",
+    "BOUNDED_MOMENTUM_ADJUSTMENT",
+    "BOUNDED_TEMPORARY_FATIGUE_PENALTY",
+    "BOUNDED_EXPLORATION_ADJUSTMENT"
+  ],
+  "mandatory_pre_score_filters": [
+    "OWNER_AUTHORIZATION",
+    "AVAILABILITY",
+    "ACTIVE_IDENTITY",
+    "EXPLICIT_DISLIKE",
+    "EXCLUDE_FROM_TASTE"
+  ],
+  "replay": {
+    "exact_response_replay": "PERSISTED_REQUEST_AND_ITEMS_ONLY",
+    "algorithmic_replay": "ORIGINAL_TEMPORAL_SNAPSHOT_POLICY_HASH_SEED_AND_CATALOG_ONLY",
+    "current_state_substitution_allowed": false,
+    "missing_temporal_input_error": "REPLAY_INPUT_UNAVAILABLE",
+    "privacy_deleted_request_error": "RECOMMENDATION_NOT_FOUND",
+    "snapshot_is_immutable_after_delayed_sync": true
+  },
+  "offline_delta": {
+    "parent_pack_must_be_verified": true,
+    "source_rank_mutation_allowed": false,
+    "mandatory_filters_preserved": true,
+    "actual_presentation_creates_one_stable_impression": true,
+    "later_sync_rewrites_prior_impression": false,
+    "server_claim_or_model_tensor_allowed": false,
+    "maximum_lifetime_ms": 604800000,
+    "expires_no_later_than_parent_pack": true,
+    "parent_pack_and_item_hashes_required": true,
+    "adjustment_must_match_unique_parent_recording_and_source_rank": true,
+    "local_event_device_must_match_delta_device": true,
+    "local_event_server_sequence": "NULL_AND_TIME_CLASSIFICATION_LOCAL_UNSYNCED_TIME",
+    "stable_impression_key": [
+      "OWNER_USER_ID",
+      "DEVICE_ID",
+      "RECOMMENDATION_REQUEST_ID",
+      "RECORDING_ID",
+      "SOURCE_RANK"
+    ]
+  },
+  "retention_days": {
+    "r1_normalized_source_event": 30,
+    "r1_temporal_snapshot": 30,
+    "r1_request_item_trace": 30,
+    "server_offline_pack": 8,
+    "device_local_delta_maximum": 7,
+    "active_long_term_profile": "UNTIL_REPLACED_OR_OWNER_DELETE",
+    "superseded_adaptive_profile": 0
+  },
+  "privacy": {
+    "owner_delete": {
+      "authority": "EXISTING_OWNER_AUTHORIZED_PRIVACY_DELETE_OPERATION",
+      "partial_delete_allowed": false,
+      "new_owner_writes_after_acceptance": "BLOCKED_BEFORE_DELETE_TRANSACTION",
+      "raw_interactions": "CASCADE_PURGE",
+      "raw_source_sets": [
+        "sync.device_event_inbox owner rows and payloads",
+        "sync.sync_event owner rows and payloads",
+        "sync.tombstone owner rows referencing sync events",
+        "library.user_interaction_event owner rows",
+        "library.listening_event owner rows",
+        "library.user_track_preference rows reached through owner user_track_ref"
+      ],
+      "normalized_temporal_events": "CASCADE_PURGE",
+      "adaptive_profiles": "CASCADE_PURGE",
+      "temporal_snapshots": "CASCADE_PURGE",
+      "p11_input_snapshots": "CASCADE_PURGE_WITH_PRIVACY_OVERRIDE",
+      "request_items_and_replay_traces": "CASCADE_PURGE",
+      "server_offline_packs": "CASCADE_PURGE",
+      "server_transaction_order": [
+        "R1_AND_P11_OFFLINE_PACKS",
+        "LIBRARY_INTERACTION_LISTENING_AND_PREFERENCE_ROWS",
+        "R1_AND_P11_RECOMMENDATION_ITEMS_AND_TRACES",
+        "R1_AND_P11_RECOMMENDATION_REQUESTS",
+        "R1_TEMPORAL_SNAPSHOTS",
+        "P11_INPUT_SNAPSHOTS",
+        "R1_ADAPTIVE_PROFILES",
+        "R1_NORMALIZED_TEMPORAL_EVENTS",
+        "SYNC_TOMBSTONE_ROWS",
+        "SYNC_EVENT_AND_DEVICE_INBOX_ROWS"
+      ],
+      "retention_trigger_override": "RESTRICTED_SECURITY_DEFINER_PRIVACY_FUNCTION_REQUIRES_ACCEPTED_DELETE_REQUEST_AND_BYPASSES_ONLY_ACTIVE_SNAPSHOT_RETENTION",
+      "foreign_key_strategy": "DELETE_CHILDREN_IN_DECLARED_ORDER_THEN_OWNER_ROWS;_NO_ON_DELETE_CASCADE_ASSUMPTION",
+      "legal_hold": "R1_CREATES_NO_HOLD;_A_PREEXISTING_EXTERNAL_HOLD_BLOCKS_THE_OPERATION_BEFORE_ANY_DELETE_WITH_PRIVACY_DELETE_BLOCKED_BY_LEGAL_HOLD",
+      "device_offline_packs_and_deltas": "PURGE_ONLY_AFTER_AUTHORITATIVE_DELETE_RECEIPT_DELIVERED_OR_EXPLICIT_LOCAL_RESET_UNINSTALL_OS_ERASURE",
+      "offline_or_dead_device_remote_wipe_guaranteed": false,
+      "server_completion_claims_device_purge": false,
+      "post_delete_exact_replay": "RECOMMENDATION_NOT_FOUND",
+      "post_delete_algorithmic_replay": "RECOMMENDATION_NOT_FOUND",
+      "backup_generations": "IMMUTABLE_UNTIL_NORMAL_EXPIRY_AND_NEVER_ROUTED_DIRECTLY_AFTER_RESTORE",
+      "backup_restore_guard": "BEFORE_ROUTING_A_RESTORE_REAPPLY_ACTIVE_DELETION_TOMBSTONES_AND_VERIFY_ZERO_OWNER_ROWS",
+      "deletion_tombstone": "HMAC_SHA256_PRIVACY_DELETE_V1_USER_ID_COMPLETED_AT_PROTECT_UNTIL;NO_RAW_USER_ID_OR_PAYLOAD",
+      "deletion_tombstone_retention": "UNTIL_ALL_PREDELETE_BACKUPS_EXPIRE_OR_ARE_VERIFIED_DESTROYED",
+      "non_personal_receipt": "REQUEST_ID_COUNTS_AND_COMPLETED_AT_ONLY_AFTER_TOMBSTONE_EXPIRY"
+    },
+    "device_unbinding": {
+      "derived_recommendation_pack_delta_and_memory": "IMMEDIATE_PURGE",
+      "credentials_and_active_binding": "IMMEDIATE_PURGE",
+      "library_outbox_media_and_profile_data": "RETAIN_SEALED_UNDER_EXISTING_PAIRING_CONTRACT",
+      "retained_prior_profile_access": "INACCESSIBLE_TO_OTHER_BINDINGS",
+      "remote_owner_state": "UNCHANGED_NOT_CLAIMED_DELETED",
+      "later_profile_inheritance": false,
+      "same_owner_reconnect": "FRESH_SERVER_SNAPSHOT_REQUIRED"
+    },
+    "export": {
+      "paging": "IMMUTABLE_EXPORT_ID_CONTIGUOUS_PAGES_MANIFEST_HASH_AND_EXPLICIT_COMPLETE_FLAG",
+      "incomplete_request_status": "OPEN",
+      "includes": [
+        "POLICY_AND_PIPELINE_VERSION",
+        "DIMENSION_KIND_AND_STABLE_KEY",
+        "LONG_TERM_AND_RECENT_SCORE_CONFIDENCE",
+        "MATURITY_COMPONENTS",
+        "MOMENTUM_AND_FATIGUE",
+        "CUTOFF_WATERMARK_AND_TIME_CLASSIFICATION",
+        "BOUNDED_EVENT_IDS_AND_HASHES"
+      ],
+      "excludes": [
+        "SECRETS",
+        "PRIVATE_URLS",
+        "RAW_PATHS",
+        "RAW_SEARCH_QUERIES",
+        "MODEL_TENSORS",
+        "OTHER_OWNER_DATA"
+      ]
+    }
+  },
+  "semantic_invariants": {
+    "snapshot_owner_cutoff_watermark_and_policy_equal_embedded_profile": true,
+    "export_profile_owner_equals_export_owner": true,
+    "offline_local_event_device_equals_delta_device": true,
+    "offline_local_event_owner_and_profile_equal_delta": true,
+    "snapshot_source_event_requires_applied_server_sequence": true,
+    "offline_adjustment_matches_unique_parent_item": true,
+    "export_page_index_not_greater_than_page_count": true,
+    "export_complete_only_on_final_contiguous_manifest_page": true,
+    "hashes_use_rfc8785_sha256_and_exclude_only_the_named_self_hash": true
+  },
+  "evaluation": {
+    "required_scenario_direction_pass_rate": 1.0,
+    "mandatory_filter_violation_count": 0,
+    "owner_isolation_violation_count": 0,
+    "shadow_impression_count": 0,
+    "algorithmic_replay_mismatch_count": 0,
+    "maximum_ndcg_at_10_regression": 0.01,
+    "maximum_diversity_regression": 0.02,
+    "maximum_artist_concentration_increase": 0.02,
+    "maximum_repeat_rate_increase": 0.02,
+    "maximum_p95_latency_ms": 300,
+    "maximum_p95_latency_ratio_to_p11": 1.25,
+    "activation_requires_r1b_pass": true,
+    "activation_requires_explicit_user_decision": true,
+    "rollback_on_any_safety_or_privacy_violation": true
+  },
+  "proposed_not_implemented": {
+    "postgresql": [
+      "ml.recommendation_temporal_event",
+      "ml.recommendation_adaptive_profile",
+      "ml.recommendation_temporal_snapshot",
+      "nullable adaptive snapshot and feature-policy references on ml.recommendation_request",
+      "owner-filtered event-id projection across sync inbox/sync event/interaction/preference/listening evidence; no single current table is replay-complete"
+    ],
+    "room": [
+      "profile-user-device-pack-bound recommendation_local_delta with expiry and purge"
+    ],
+    "api": [
+      "no public DTO change; optional owner export projection only"
+    ]
+  }
+}

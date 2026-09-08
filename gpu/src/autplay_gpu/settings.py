@@ -11,6 +11,7 @@ from uuid import UUID
 _SELECTOR = re.compile(
     r"^(?:auto|uuid:GPU-[A-Za-z0-9-]{8,100}|pci:(?:(?:[0-9A-Fa-f]{4}|[0-9A-Fa-f]{8}):)?[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}\.[0-7]|index:[0-9]{1,3})$"
 )
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,10 @@ class GpuWorkerSettings:
     model_cache_root: Path = field(
         default_factory=lambda: (Path.cwd() / "var" / "models").resolve()
     )
+    sona_artifact_sha256: str | None = None
+    sona_model_manifest_sha256: str | None = None
+    sona_tokenizer_sha256: str | None = None
+    sona_bind_port: int = 8787
 
     def __post_init__(self) -> None:
         if _SELECTOR.fullmatch(self.device_selector) is None:
@@ -41,6 +46,23 @@ class GpuWorkerSettings:
             raise ValueError("GPU OOM reduction bound is invalid")
         if not self.model_cache_root.is_absolute():
             raise ValueError("GPU model cache root must be absolute")
+        sona_hashes = (
+            self.sona_artifact_sha256,
+            self.sona_model_manifest_sha256,
+            self.sona_tokenizer_sha256,
+        )
+        if any(value is not None for value in sona_hashes) != all(
+            value is not None for value in sona_hashes
+        ):
+            raise ValueError("Sona artifact identity must be configured atomically")
+        if any(value is not None and _SHA256.fullmatch(value) is None for value in sona_hashes):
+            raise ValueError("Sona artifact identity hash is invalid")
+        if not 1_024 <= self.sona_bind_port <= 65_535:
+            raise ValueError("Sona loopback port is invalid")
+
+    @property
+    def sona_configured(self) -> bool:
+        return self.sona_artifact_sha256 is not None
 
 
 def load_gpu_settings(environ: dict[str, str] | None = None) -> GpuWorkerSettings:
@@ -66,6 +88,12 @@ def load_gpu_settings(environ: dict[str, str] | None = None) -> GpuWorkerSetting
                     str((Path.cwd() / "var" / "models").resolve()),
                 )
             ),
+            sona_artifact_sha256=values.get("AUTPLAY_GPU_SONA_ARTIFACT_SHA256") or None,
+            sona_model_manifest_sha256=(
+                values.get("AUTPLAY_GPU_SONA_MODEL_MANIFEST_SHA256") or None
+            ),
+            sona_tokenizer_sha256=values.get("AUTPLAY_GPU_SONA_TOKENIZER_SHA256") or None,
+            sona_bind_port=int(values.get("AUTPLAY_GPU_SONA_BIND_PORT", "8787")),
         )
     except ValueError as error:
         raise ValueError("invalid GPU worker configuration") from error

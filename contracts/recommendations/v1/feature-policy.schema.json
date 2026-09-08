@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/feature-policy.schema.json",
+  "title": "AutPlay R1 Adaptive Recommendation Feature Policy v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_key",
+    "version",
+    "status",
+    "canonicalization_version",
+    "content_sha256",
+    "episode_inactivity_gap_ms",
+    "future_clock_tolerance_ms",
+    "maximum_recent_backfill_ms",
+    "completion_threshold",
+    "skip_completion_threshold",
+    "skip_played_ms_threshold",
+    "active_view_weights",
+    "signal_weights",
+    "origin_weights",
+    "algorithm_parameters",
+    "maturity",
+    "adjustment_caps"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "policy_key": {"const": "adaptive-taste"},
+    "version": {"type": "string", "pattern": "^[1-9][0-9]{0,8}$"},
+    "status": {"enum": ["EVALUATION_CANDIDATE", "SHADOW", "ACTIVE", "RETIRED"]},
+    "canonicalization_version": {"const": 1},
+    "content_sha256": {"$ref": "#/$defs/sha256"},
+    "episode_inactivity_gap_ms": {"type": "integer", "minimum": 300000, "maximum": 43200000},
+    "future_clock_tolerance_ms": {"type": "integer", "minimum": 0, "maximum": 3600000},
+    "maximum_recent_backfill_ms": {"type": "integer", "minimum": 604800000, "maximum": 7776000000},
+    "completion_threshold": {"type": "number", "minimum": 0.5, "maximum": 1.0},
+    "skip_completion_threshold": {"type": "number", "minimum": 0.0, "maximum": 0.5},
+    "skip_played_ms_threshold": {"type": "integer", "minimum": 1000, "maximum": 120000},
+    "active_view_weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["EPISODE", "H12", "H24", "D3", "D7"],
+      "properties": {
+        "EPISODE": {"$ref": "#/$defs/positiveUnit"},
+        "H12": {"$ref": "#/$defs/positiveUnit"},
+        "H24": {"$ref": "#/$defs/positiveUnit"},
+        "D3": {"$ref": "#/$defs/positiveUnit"},
+        "D7": {"$ref": "#/$defs/positiveUnit"}
+      }
+    },
+    "signal_weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "EXPLICIT_LIKE",
+        "FINALIZED_ORGANIC_LISTEN",
+        "FINALIZED_RECOMMENDATION_LISTEN",
+        "RECOMMENDATION_SELECTED",
+        "RECOMMENDATION_DISMISSED",
+        "FINALIZED_COMPLETION",
+        "FINALIZED_SHORT_LISTEN_SKIP"
+      ],
+      "properties": {
+        "EXPLICIT_LIKE": {"$ref": "#/$defs/positiveUnit"},
+        "FINALIZED_ORGANIC_LISTEN": {"$ref": "#/$defs/positiveUnit"},
+        "FINALIZED_RECOMMENDATION_LISTEN": {"$ref": "#/$defs/positiveUnit"},
+        "RECOMMENDATION_SELECTED": {"$ref": "#/$defs/positiveUnit"},
+        "RECOMMENDATION_DISMISSED": {"$ref": "#/$defs/negativeUnit"},
+        "FINALIZED_COMPLETION": {"$ref": "#/$defs/positiveUnit"},
+        "FINALIZED_SHORT_LISTEN_SKIP": {"$ref": "#/$defs/negativeUnit"}
+      }
+    },
+    "origin_weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["EXPLICIT", "ORGANIC", "SOURCE_QUEUE", "RECOMMENDATION"],
+      "properties": {
+        "EXPLICIT": {"$ref": "#/$defs/unit"},
+        "ORGANIC": {"$ref": "#/$defs/unit"},
+        "SOURCE_QUEUE": {"$ref": "#/$defs/unit"},
+        "RECOMMENDATION": {"$ref": "#/$defs/unit"}
+      }
+    },
+    "algorithm_parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "horizon_fusion",
+        "causal_fusion",
+        "outcome_classifier",
+        "outcome_null_completion_ratio_rule",
+        "plasticity",
+        "momentum",
+        "fatigue",
+        "contradiction_confidence"
+      ],
+      "properties": {
+        "horizon_fusion": {"const": "NORMALIZED_ACTIVE_VIEW_WEIGHTS_V1"},
+        "causal_fusion": {"const": "NORMALIZED_SIGNED_CAUSAL_GROUP_V1"},
+        "outcome_classifier": {"const": "EXCLUSION_THEN_SKIP_ELSE_COMPLETION_ELSE_NEUTRAL_V1"},
+        "outcome_null_completion_ratio_rule": {"const": "RATIO_PREDICATES_FALSE_PLAYED_MS_SKIP_STILL_APPLIES_V1"},
+        "plasticity": {"const": "LINEAR_BOUNDED_MATURITY_V1"},
+        "momentum": {"const": "EPISODE_MINUS_D7_CLAMPED_V1"},
+        "fatigue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["formula", "daily_decay_factor", "skip_gain", "completion_recovery"],
+          "properties": {
+            "formula": {"const": "DECAY_PLUS_SKIP_MINUS_COMPLETION_CLAMPED_V1"},
+            "daily_decay_factor": {"$ref": "#/$defs/unit"},
+            "skip_gain": {"$ref": "#/$defs/unit"},
+            "completion_recovery": {"$ref": "#/$defs/unit"}
+          }
+        },
+        "contradiction_confidence": {
+          "const": "BASE_TIMES_ONE_MINUS_CONTRADICTION_RATIO_V1"
+        }
+      }
+    },
+    "maturity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formula",
+        "recency_formula",
+        "term_weights",
+        "effective_mass_saturation",
+        "track_coverage_saturation",
+        "artist_coverage_saturation",
+        "observation_span_saturation_ms",
+        "recency_half_life_ms",
+        "minimum_plasticity",
+        "maximum_plasticity"
+      ],
+      "properties": {
+        "formula": {"const": "WEIGHTED_SIX_TERM_SATURATION_V1"},
+        "recency_formula": {"const": "POW_HALF_AGE_OVER_HALF_LIFE_V1"},
+        "term_weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["EFFECTIVE_SIGNAL_MASS", "TRACK_AND_ARTIST_COVERAGE", "OBSERVATION_SPAN", "RECENCY", "CONSISTENCY", "ORGANIC_SHARE"],
+          "properties": {
+            "EFFECTIVE_SIGNAL_MASS": {"$ref": "#/$defs/unit"},
+            "TRACK_AND_ARTIST_COVERAGE": {"$ref": "#/$defs/unit"},
+            "OBSERVATION_SPAN": {"$ref": "#/$defs/unit"},
+            "RECENCY": {"$ref": "#/$defs/unit"},
+            "CONSISTENCY": {"$ref": "#/$defs/unit"},
+            "ORGANIC_SHARE": {"$ref": "#/$defs/unit"}
+          }
+        },
+        "effective_mass_saturation": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
+        "track_coverage_saturation": {"type": "integer", "minimum": 1, "maximum": 5000},
+        "artist_coverage_saturation": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "observation_span_saturation_ms": {"type": "integer", "minimum": 86400000, "maximum": 31536000000},
+        "recency_half_life_ms": {"type": "integer", "minimum": 3600000, "maximum": 31536000000},
+        "minimum_plasticity": {"type": "number", "minimum": 0, "maximum": 10},
+        "maximum_plasticity": {"type": "number", "minimum": 0, "maximum": 10}
+      }
+    },
+    "adjustment_caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recent_interest", "momentum", "fatigue", "exploration", "total_absolute"],
+      "properties": {
+        "recent_interest": {"$ref": "#/$defs/unit"},
+        "momentum": {"$ref": "#/$defs/unit"},
+        "fatigue": {"$ref": "#/$defs/unit"},
+        "exploration": {"$ref": "#/$defs/unit"},
+        "total_absolute": {"type": "number", "exclusiveMinimum": 0, "maximum": 2}
+      }
+    }
+  },
+  "$defs": {
+    "unit": {"type": "number", "minimum": 0, "maximum": 1},
+    "positiveUnit": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+    "negativeUnit": {"type": "number", "minimum": -1, "exclusiveMaximum": 0},
+    "signedUnit": {"type": "number", "minimum": -1, "maximum": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

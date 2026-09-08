@@ -16,10 +16,11 @@ forgotten content and controlled exploration. Mandatory authorization, availabil
 Dislike and taste-exclusion checks run before scoring. A diversity reranker limits repeated artists
 and releases.
 
-The current profile is deliberately stable and simple. It supports an empty-history user through
-freshness and exploration, but it does not yet estimate profile maturity, per-direction confidence,
-multi-horizon recent interest, momentum or temporary fatigue. Post-MVP R1 adds those capabilities as
-a bounded dynamic layer above the existing baseline.
+The served profile is deliberately stable and simple. It supports an empty-history user through
+freshness and exploration. R1A/R1B now compute owner-scoped maturity, per-direction confidence,
+multi-horizon recent interest, momentum and temporary fatigue as immutable replayable shadow
+evidence, but none of those values changes the served P11 order. R1C remains the explicit activation
+gate for any bounded dynamic layer above the existing baseline.
 
 ## 2. Current verified architecture
 
@@ -86,13 +87,13 @@ one `last_played_at`; it is bounded to a deterministic set of 5,000 tracks.
   on the existing P04/P09 sync path.
 - CPU serving works without embeddings, GPU/CUDA, a sequential model or a separate vector store.
 
-## 5. Current cold-start behavior and missing capabilities
+## 5. Current cold-start and shadow status
 
 Cold start is safe but basic. With no learned affinity, the baseline uses authorized fresh catalog
 items and deterministic exploration. It does not fail merely because the user has no prior
 `UserTrackRef`, embeddings or GPU features.
 
-The following capabilities are not implemented today:
+The following capabilities now exist in the R1A/R1B shadow boundary:
 
 - profile maturity derived from amount, quality, diversity and consistency of evidence;
 - increased but bounded early-profile plasticity;
@@ -101,7 +102,12 @@ The following capabilities are not implemented today:
 - rising/falling interest and confidence-gated momentum;
 - temporary fatigue distinct from durable Dislike or long-term affinity;
 - deterministic replay of horizon-specific event evidence;
-- continuous profile learning or a trainable sequential/SONA-Lite serving model.
+
+They are persisted and evaluated only as immutable owner-scoped shadow evidence. A trainable
+Sona-Lite pipeline, deterministic tokenizer/training/export path and loopback-only GPU worker are
+implemented, but the present synthetic artifact is permanently `quality_eligible=false`. Continuous
+online learning and a Sona-Lite serving model are not implemented; quality promotion and any served
+activation remain separate reviewed decisions.
 
 ## 6. Recorded future recommendation features
 
@@ -148,11 +154,14 @@ pgvector retrieval, but no GPU model is active in the local RC. Compatible deriv
 later improve candidate retrieval or taste dimensions; they cannot gate CPU serving, local playback
 or core ingest.
 
-### 6.3. Later model components
+### 6.3. R1B Sona-Lite shadow model
 
-Sequential candidates, SONA-Lite representation/ranking and other trainable components remain
-future experiments behind the same ports and immutable pipeline registry. No final model is
-selected. Continuous online training after every action is not part of the accepted roadmap.
+R1B now targets a scaled Sona-Lite implementation behind the existing ports and immutable
+pipeline registry. One chronological engagement encoder is shared by Semantic-ID generation and
+the multi-head ranking module; the CPU P11 pipeline remains the serving fallback and evaluation
+control. R1B is shadow-only: any serving activation still requires the explicit R1C gate and
+rollback evidence. Continuous online training after every action is not part of the accepted
+roadmap.
 
 ### 6.4. Catalog and social extensions
 

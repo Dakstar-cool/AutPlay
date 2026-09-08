@@ -6,6 +6,7 @@ from uuid import uuid4
 from autplay.domain.admin_views import (
     AdminDashboard,
     AdminDeviceItem,
+    AdminJobItem,
     AdminPage,
     AdminReviewItem,
     AdminUnavailable,
@@ -13,7 +14,13 @@ from autplay.domain.admin_views import (
 )
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import WebActor
-from autplay.web.presentation import dashboard_context, navigation, page_context, status_context
+from autplay.web.presentation import (
+    dashboard_context,
+    jobs_context,
+    navigation,
+    page_context,
+    status_context,
+)
 from autplay.web.renderer import AdminTemplateRenderer
 
 
@@ -87,6 +94,35 @@ def test_session_expiry_format_is_locale_stable() -> None:
     item = AdminDeviceItem(uuid4(), "Phone", "ANDROID", now - timedelta(minutes=1))
     context = page_context(AdminPage((item,), None), "devices", locale="en")
     assert "UTC" in str(context["rows"])
+
+
+def test_jobs_page_renders_download_progress_statistics_and_live_refresh() -> None:
+    now = datetime.now(UTC)
+    items = (
+        AdminJobItem(uuid4(), "discovery.acquire", "RUNNING", now, 1, 3),
+        AdminJobItem(uuid4(), "library.import", "QUEUED", now, None, None),
+        AdminJobItem(uuid4(), "audio.standard_analysis", "COMPLETED", now, 2, 2),
+        AdminJobItem(uuid4(), "discovery.acquire", "FAILED", now, 0, 3),
+    )
+
+    context = jobs_context(AdminPage(items, str(uuid4())), locale="ru", live=True)
+    html = AdminTemplateRenderer().render(
+        "jobs.html", locale="ru", context=_base("jobs", "ru") | context
+    )
+
+    assert context["summary"] == (
+        {"label": "jobs_active", "value": "1", "tone": "active"},
+        {"label": "music_downloads", "value": "2", "tone": "download"},
+        {"label": "jobs_completed", "value": "1", "tone": "good"},
+        {"label": "jobs_attention", "value": "1", "tone": "warn"},
+    )
+    assert '<meta http-equiv="refresh" content="10;url=/admin/jobs?lang=ru&amp;live=1">' in html
+    assert '<progress value="1" max="3"' in html
+    assert "1 / 3 · 33%" in html
+    assert "Загрузка музыки" in html
+    assert 'class="mobile-navigation"' in html
+    assert '<p class="eyebrow">AutPlay Admin' not in html
+    assert all(str(item.job_id) not in html for item in items)
 
 
 def test_dashboard_names_all_bounded_health_components() -> None:

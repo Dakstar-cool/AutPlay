@@ -30,7 +30,13 @@ from autplay.runtime.web_security import (
     require_exact_origin,
     source_rate_key,
 )
-from autplay.web.presentation import dashboard_context, navigation, page_context, status_context
+from autplay.web.presentation import (
+    dashboard_context,
+    jobs_context,
+    navigation,
+    page_context,
+    status_context,
+)
 from autplay.web.renderer import read_static_asset, resolve_locale
 
 
@@ -740,9 +746,18 @@ def create_admin_web_router(
                 context = status_context(views.status(actor, surface), surface, locale=locale)
                 template = "status.html"
             else:
-                page_value = views.page(actor, surface, after=request.query_params.get("after"))
-                context = page_context(page_value, surface, locale=locale)
-                template = "table.html"
+                after = request.query_params.get("after")
+                page_value = views.page(actor, surface, after=after)
+                if surface == "jobs":
+                    context = jobs_context(
+                        page_value,
+                        locale=locale,
+                        live=after is None and request.query_params.get("live") == "1",
+                    )
+                    template = "jobs.html"
+                else:
+                    context = page_context(page_value, surface, locale=locale)
+                    template = "table.html"
         except ValueError, WebAdminError:
             return error("admin_surface_unavailable", 404)
         value = response(

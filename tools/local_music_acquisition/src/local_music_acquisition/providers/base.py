@@ -1,4 +1,4 @@
-"""Provider protocol for the sequential acquisition pipeline."""
+"""Provider protocol for the bounded acquisition pipeline."""
 
 from __future__ import annotations
 

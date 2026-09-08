@@ -34,7 +34,7 @@ class ProviderMiss(RuntimeError):
 
 
 class ProviderFailure(RuntimeError):
-    """A provider/permission/transport failure that must stop fallback for the row."""
+    """A terminal provider failure handled by the configured fallback policy."""
 
     def __init__(self, provider: str, code: str) -> None:
         super().__init__(f"{provider}.{code}")

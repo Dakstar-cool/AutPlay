@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "classifier": "EXCLUSION_THEN_SKIP_ELSE_COMPLETION_ELSE_NEUTRAL_V1",
+  "cases": [
+    {"case_id": "exclusion-precedes-all", "excluded_from_taste": true, "played_ms": 120000, "completion_ratio": 1.0, "expected_outcome": "EXCLUDED"},
+    {"case_id": "skip-ratio-inclusive", "excluded_from_taste": false, "played_ms": 30000, "completion_ratio": 0.2, "expected_outcome": "FINALIZED_SHORT_LISTEN_SKIP"},
+    {"case_id": "skip-played-exclusive", "excluded_from_taste": false, "played_ms": 29999, "completion_ratio": 0.5, "expected_outcome": "FINALIZED_SHORT_LISTEN_SKIP"},
+    {"case_id": "played-threshold-is-not-skip", "excluded_from_taste": false, "played_ms": 30000, "completion_ratio": 0.5, "expected_outcome": "NEUTRAL"},
+    {"case_id": "completion-ratio-inclusive", "excluded_from_taste": false, "played_ms": 30000, "completion_ratio": 0.8, "expected_outcome": "FINALIZED_COMPLETION"},
+    {"case_id": "between-thresholds-neutral", "excluded_from_taste": false, "played_ms": 60000, "completion_ratio": 0.79, "expected_outcome": "NEUTRAL"},
+    {"case_id": "null-ratio-short-play-still-skips", "excluded_from_taste": false, "played_ms": 29999, "completion_ratio": null, "expected_outcome": "FINALIZED_SHORT_LISTEN_SKIP"},
+    {"case_id": "null-ratio-long-play-is-neutral", "excluded_from_taste": false, "played_ms": 60000, "completion_ratio": null, "expected_outcome": "NEUTRAL"}
+  ]
+}

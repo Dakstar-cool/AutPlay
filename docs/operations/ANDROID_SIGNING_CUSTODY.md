@@ -32,9 +32,11 @@ a coarse non-sensitive level and the date each recovery copy was decrypted and v
 
 ## Existing development-signed APKs
 
-The current AutPlay APKs are development-signed. A newly created production signer cannot silently
-replace that signer while preserving the ordinary update contract. Before distributing the first
-production APK, accept one explicit transition:
+The original AutPlay RC and locally installed pre-PA3 APKs are development-signed. PA3 now has a
+separate stable production signer for `app.autplay`, but no production APK has been published. A
+production signer cannot silently replace an already installed development signer while preserving
+the ordinary update contract. Before distributing the first production APK, use one explicit
+transition:
 
 - preserve the existing signer under production-grade custody if it is eligible and intentionally
   promoted;
@@ -59,5 +61,47 @@ Before PA3 can pass, verify without exposing the private key:
 6. keep signing passwords, keystore bytes, aliases that reveal private inventory and raw device
    identifiers out of logs and committed evidence.
 
-Until that gate is green, the APK is not production-update-ready and PA3 remains blocked even when
-TLS and server routing are locally valid.
+This gate passed on 2026-09-02 for an exact production-signed version-code 3 to 4 pair on an
+independent API 26 emulator data image. PA3 remains `BLOCKED` only for explicit live-edge approval
+and the external TLS/scan/renewal/rollback/mobile Range evidence; no APK publication is implied.
+
+## Local signed-build procedure
+
+From the repository root, verify the non-secret inputs first:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\build-pa3-signed-release.ps1 -Preflight
+```
+
+Run the real build in a visible Windows PowerShell process so both `Read-Host -AsSecureString`
+prompts remain interactive and hidden. Do not redirect this command through a background PTY or
+paste either secret into chat or logs:
+
+```powershell
+powershell.exe -NoExit -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\build-pa3-signed-release.ps1
+```
+
+The launcher disables the Gradle configuration cache for the signed build. The Android build also
+fails closed if all signing environment variables are present while configuration caching is
+requested. This prevents production signing secrets from being serialized into a project cache.
+
+The preflight also requires the configured Java and Android SDK tools and verifies the pinned
+SHA-256 hashes of `age.exe` and `age-plugin-batchpass.exe` before any secret is requested. Override
+`-AgeDirectory` only when the replacement directory contains those exact reviewed binaries.
+
+Every schema-v2 build receipt records the Git commit, whether the worktree was clean or dirty,
+SHA-256 hashes of the captured status and tracked binary diff, and a per-file SHA-256 manifest for
+all untracked inputs. The complete provenance is captured twice before the build and again after
+the build; any instability or drift fails closed. The temporary directory and plaintext PKCS12 use
+verified owner-only protected DACLs. Receipt publication is atomic and occurs only after the
+plaintext file and temporary directory are both confirmed absent.
+
+## Current evidence
+
+[`PA3_ANDROID_SIGNING_EVIDENCE.json`](../release/PA3_ANDROID_SIGNING_EVIDENCE.json) is the bounded
+non-secret index. It links the exact APK hashes used for the successful update proof, the later
+schema-v1 interactive build hashes, and the independently approved schema-v2 workflow. It does not
+transfer the update claim to different APK hashes. The current schema-v2 workflow has not yet been
+run with production secrets, and no production APK has been published.

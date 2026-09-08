@@ -73,7 +73,17 @@ def test_public_edge_is_the_only_non_loopback_listener(tmp_path: Path) -> None:
     assert edge["cap_drop"] == ["ALL"]
     assert edge["cap_add"] == ["NET_BIND_SERVICE"]
     assert edge["read_only"] is True
-    assert edge["networks"]["public-edge"]["ipv4_address"] == "172.30.77.2"
+    public_edge_addresses = {
+        "edge": edge["networks"]["public-edge"]["ipv4_address"],
+        "mobile-api": mobile_api["networks"]["public-edge"]["ipv4_address"],
+        "stream": stream["networks"]["public-edge"]["ipv4_address"],
+    }
+    assert public_edge_addresses == {
+        "edge": "172.30.77.2",
+        "mobile-api": "172.30.77.3",
+        "stream": "172.30.77.4",
+    }
+    assert len(set(public_edge_addresses.values())) == len(public_edge_addresses)
     assert mobile_api["environment"]["AUTPLAY_PUBLIC_ACCESS_TRUSTED_PROXY_IP"] == "172.30.77.2"
     assert mobile_api["environment"]["AUTPLAY_PROFILE"] == "production"
     assert mobile_api["environment"]["AUTPLAY_PROFILE_API_ORIGIN"] == "https://api.autplay.win"

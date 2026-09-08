@@ -126,6 +126,9 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "ml.recording_tag_set",
     "ml.recommendation_pipeline_version",
     "ml.recommendation_input_snapshot",
+    "ml.recommendation_temporal_event",
+    "ml.recommendation_adaptive_profile",
+    "ml.recommendation_temporal_snapshot",
     "ml.recommendation_request",
     "ml.recommendation_item",
     "ml.taste_cluster",
@@ -254,7 +257,10 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "ml.recording_tag_set": 12,
     "ml.recommendation_pipeline_version": 9,
     "ml.recommendation_input_snapshot": 10,
-    "ml.recommendation_request": 25,
+    "ml.recommendation_temporal_event": 28,
+    "ml.recommendation_adaptive_profile": 12,
+    "ml.recommendation_temporal_snapshot": 21,
+    "ml.recommendation_request": 39,
     "ml.recommendation_item": 10,
     "ml.taste_cluster": 8,
     "ml.taste_cluster_member": 4,
@@ -377,6 +383,10 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_enrichment_job_model_recording",
         "ix_recording_tag_set_model_recording",
         "ix_recommendation_snapshot_user_retention",
+        "ix_recommendation_temporal_event_owner_watermark",
+        "ix_recommendation_temporal_event_retention",
+        "ix_recommendation_adaptive_profile_owner_cutoff",
+        "ix_recommendation_temporal_snapshot_owner_retention",
         "ix_recommendation_request_user_time",
         "ix_recommendation_item_recording",
         "ix_taste_cluster_user_active",
@@ -404,7 +414,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 1361
+EXPECTED_COLUMN_COUNT = 1436
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",
