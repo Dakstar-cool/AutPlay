@@ -1,5 +1,6 @@
 param(
-    [switch]$ServerOnly
+    [switch]$ServerOnly,
+    [string]$PythonEnvironmentRoot
 )
 
 Set-StrictMode -Version Latest
@@ -9,6 +10,69 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 
 try {
+    $resolvedEnvironmentRoot = $null
+    if ($PythonEnvironmentRoot) {
+        $candidateEnvironmentRoot = if ([IO.Path]::IsPathRooted($PythonEnvironmentRoot)) {
+            $PythonEnvironmentRoot
+        }
+        else {
+            Join-Path $repoRoot $PythonEnvironmentRoot
+        }
+        $resolvedEnvironmentRoot = [IO.Path]::GetFullPath($candidateEnvironmentRoot)
+        New-Item -ItemType Directory -Force -Path $resolvedEnvironmentRoot | Out-Null
+    }
+
+    function Sync-UvProject {
+        param(
+            [AllowEmptyString()][string]$Project,
+            [string]$EnvironmentName,
+            [string]$Label
+        )
+
+        $savedProjectEnvironment = [Environment]::GetEnvironmentVariable(
+            "UV_PROJECT_ENVIRONMENT",
+            "Process"
+        )
+        try {
+            if ($resolvedEnvironmentRoot) {
+                $env:UV_PROJECT_ENVIRONMENT = Join-Path $resolvedEnvironmentRoot $EnvironmentName
+            }
+            else {
+                Remove-Item Env:UV_PROJECT_ENVIRONMENT -ErrorAction SilentlyContinue
+                $projectRoot = if ($Project) { Join-Path $repoRoot $Project } else { $repoRoot }
+                $defaultEnvironment = Join-Path $projectRoot ".venv"
+                $environmentItem = Get-Item -Force -LiteralPath $defaultEnvironment -ErrorAction SilentlyContinue
+                if (
+                    $null -ne $environmentItem -and
+                    ($environmentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+                    -not (Test-Path -LiteralPath $defaultEnvironment)
+                ) {
+                    throw "$Label has a broken .venv reparse point; use -PythonEnvironmentRoot to recreate environments without junctions"
+                }
+            }
+
+            $projectArguments = if ($Project) { @("--project", $Project) } else { @() }
+            & uv sync @projectArguments --frozen --python 3.14.7
+            if ($LASTEXITCODE -ne 0) {
+                throw "$Label uv sync failed"
+            }
+            $pythonVersion = (
+                & uv run @projectArguments --frozen python -c "import platform; print(platform.python_version())"
+            ).Trim()
+            if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne "3.14.7") {
+                throw "$Label requires CPython 3.14.7; observed: $pythonVersion"
+            }
+        }
+        finally {
+            if ($null -eq $savedProjectEnvironment) {
+                Remove-Item Env:UV_PROJECT_ENVIRONMENT -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:UV_PROJECT_ENVIRONMENT = $savedProjectEnvironment
+            }
+        }
+    }
+
     $uvVersion = (& uv --version).Trim()
     if ($LASTEXITCODE -ne 0 -or $uvVersion -notmatch "^uv 0\.12\.3(?: |$)") {
         throw "AutPlay requires uv 0.12.3; observed: $uvVersion"
@@ -19,27 +83,14 @@ try {
         throw "uv python install failed"
     }
 
-    & uv sync --frozen --python 3.14.7
-    if ($LASTEXITCODE -ne 0) {
-        throw "AutPlay contract tooling uv sync failed"
-    }
-
-    $contractPythonVersion = (& uv run --frozen python -c "import platform; print(platform.python_version())").Trim()
-    if ($LASTEXITCODE -ne 0 -or $contractPythonVersion -ne "3.14.7") {
-        throw "AutPlay contract tooling requires CPython 3.14.7; observed: $contractPythonVersion"
-    }
-
-    & uv sync --project server --frozen --python 3.14.7
-    if ($LASTEXITCODE -ne 0) {
-        throw "uv sync failed"
-    }
-
-    $pythonVersion = (& uv run --project server --frozen python -c "import platform; print(platform.python_version())").Trim()
-    if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne "3.14.7") {
-        throw "AutPlay server environment requires CPython 3.14.7; observed: $pythonVersion"
-    }
+    Sync-UvProject -Project "" -EnvironmentName "root" -Label "AutPlay contract tooling"
+    Sync-UvProject -Project "server" -EnvironmentName "server" -Label "AutPlay server"
 
     if (-not $ServerOnly) {
+        Sync-UvProject -Project "gpu" -EnvironmentName "gpu" -Label "AutPlay GPU worker"
+        Sync-UvProject -Project "gpu/training" -EnvironmentName "training" -Label "AutPlay Sona training"
+        Sync-UvProject -Project "tools/local_music_acquisition" -EnvironmentName "acquisition" -Label "AutPlay acquisition"
+
         if (-not $env:JAVA_HOME) {
             throw "JAVA_HOME must point to the pinned JDK 17"
         }

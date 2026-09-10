@@ -592,6 +592,9 @@ def test_verified_bundle_provenance_flows_through_candidate_checkpoint_and_onnx(
     session_state: dict[str, object] = {}
 
     class CudaOnlyOptions:
+        enable_profiling: bool = False
+        profile_file_prefix: str = ""
+
         def add_session_config_entry(self, key: str, value: str) -> None:
             session_state["config"] = (key, value)
 
@@ -606,6 +609,7 @@ def test_verified_bundle_provenance_flows_through_candidate_checkpoint_and_onnx(
             assert artifact
             assert isinstance(sess_options, CudaOnlyOptions)
             assert providers == ["CUDAExecutionProvider"]
+            self.options = sess_options
 
         def disable_fallback(self) -> None:
             session_state["run_fallback_disabled"] = True
@@ -615,6 +619,23 @@ def test_verified_bundle_provenance_flows_through_candidate_checkpoint_and_onnx(
 
         def run(self, output_names: object, inputs: object) -> list[np.ndarray]:
             return [np.asarray([[selected_sid]], dtype=np.int64)]
+
+        def end_profiling(self) -> str:
+            profile_path = Path(f"{self.options.profile_file_prefix}.json")
+            profile_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "cat": "Node",
+                            "name": "fixture_kernel_time",
+                            "args": {"provider": "CUDAExecutionProvider"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            session_state["profile_verified"] = True
+            return str(profile_path)
 
     monkeypatch.setattr("autplay_sona_training.benchmark.ort.SessionOptions", CudaOnlyOptions)
     monkeypatch.setattr("autplay_sona_training.benchmark.ort.InferenceSession", CudaOnlySession)
@@ -640,6 +661,7 @@ def test_verified_bundle_provenance_flows_through_candidate_checkpoint_and_onnx(
     )
     assert session_state == {
         "config": ("session.disable_cpu_ep_fallback", "1"),
+        "profile_verified": True,
         "run_fallback_disabled": True,
     }
     assert quality_benchmark.cuda_only_execution is True

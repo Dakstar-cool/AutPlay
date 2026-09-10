@@ -32,6 +32,8 @@ class GpuWorkerSettings:
     sona_model_manifest_sha256: str | None = None
     sona_tokenizer_sha256: str | None = None
     sona_bind_port: int = 8787
+    sona_max_admitted_inferences: int = 4
+    sona_inference_timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if _SELECTOR.fullmatch(self.device_selector) is None:
@@ -59,6 +61,10 @@ class GpuWorkerSettings:
             raise ValueError("Sona artifact identity hash is invalid")
         if not 1_024 <= self.sona_bind_port <= 65_535:
             raise ValueError("Sona loopback port is invalid")
+        if not 1 <= self.sona_max_admitted_inferences <= 64:
+            raise ValueError("Sona inference admission bound is invalid")
+        if not 0.1 <= self.sona_inference_timeout_seconds <= 300:
+            raise ValueError("Sona inference timeout is invalid")
 
     @property
     def sona_configured(self) -> bool:
@@ -94,6 +100,12 @@ def load_gpu_settings(environ: dict[str, str] | None = None) -> GpuWorkerSetting
             ),
             sona_tokenizer_sha256=values.get("AUTPLAY_GPU_SONA_TOKENIZER_SHA256") or None,
             sona_bind_port=int(values.get("AUTPLAY_GPU_SONA_BIND_PORT", "8787")),
+            sona_max_admitted_inferences=int(
+                values.get("AUTPLAY_GPU_SONA_MAX_ADMITTED_INFERENCES", "4")
+            ),
+            sona_inference_timeout_seconds=float(
+                values.get("AUTPLAY_GPU_SONA_INFERENCE_TIMEOUT_SECONDS", "30")
+            ),
         )
     except ValueError as error:
         raise ValueError("invalid GPU worker configuration") from error

@@ -61,6 +61,10 @@ class SqlAlchemyRecommendationRuntime:
             # Keep the catalog/history rows and their watermark on one MVCC view.
             session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
             session.execute(
+                text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
+                {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+            )
+            session.execute(
                 text(_PURGE_EXPIRED_SNAPSHOTS_SQL),
                 {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
             )
@@ -752,6 +756,21 @@ SELECT
        added_at_ms, release_date_ordinal
 FROM selected
 ORDER BY recording_id
+"""
+
+_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL = """
+WITH expired AS (
+    SELECT recommendation_temporal_snapshot_id
+    FROM ml.recommendation_temporal_snapshot
+    WHERE user_id = :user_id AND retained_until <= now()
+    ORDER BY retained_until, recommendation_temporal_snapshot_id
+    LIMIT :limit
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM ml.recommendation_temporal_snapshot snapshot
+USING expired
+WHERE snapshot.recommendation_temporal_snapshot_id =
+      expired.recommendation_temporal_snapshot_id
 """
 
 _PURGE_EXPIRED_SNAPSHOTS_SQL = """

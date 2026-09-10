@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,12 +15,15 @@ from autplay.adapters.postgresql.models import (
     BootstrapSessionRow,
     BootstrapSnapshotItemRow,
     DeviceRow,
+    PlaylistEntryRow,
+    SyncEventRow,
     UserAccountRow,
     UserInteractionEventRow,
+    UserTrackRefRow,
 )
 from autplay.application.sync import SyncError, SyncService
 from autplay.domain.auth import AccountRole, Principal
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 
@@ -38,6 +42,21 @@ def _principal(session: Session, name: str) -> Principal:
     )
     session.flush()
     return Principal(user_id, device_id, session_id, AccountRole.USER)
+
+
+def _additional_device(session: Session, principal: Principal, name: str) -> Principal:
+    device_id = uuid4()
+    session.add(
+        DeviceRow(
+            device_id=device_id,
+            user_id=principal.user_id,
+            device_name=name,
+            platform="ANDROID",
+            app_version="audit-remediation",
+        )
+    )
+    session.flush()
+    return Principal(principal.user_id, device_id, uuid4(), AccountRole.USER)
 
 
 def _event(
@@ -735,6 +754,342 @@ def test_same_device_concurrent_push_serializes_sequence(database_url: str) -> N
         assert sorted(ack["outcome"] for ack in acks) == ["APPLIED", "REJECTED"]
         rejected = next(ack for ack in acks if ack["outcome"] == "REJECTED")
         assert rejected["error"]["code"] in {"DEVICE_SEQUENCE_GAP", "DEVICE_SEQUENCE_REUSE"}
+    finally:
+        engine.dispose()
+
+
+def test_rejected_generic_patch_rolls_back_projection_and_replays_terminal_ack(
+    database_url: str,
+) -> None:
+    """A later invalid field cannot leak an earlier mutation outside the ACK savepoint."""
+
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            principal = _principal(session, "rejected-projection")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"r" * 32)
+        body = _bind(service, principal, uuid4())
+        ref_id = uuid4()
+        created = _event(
+            principal,
+            ref_id,
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "before", "artist": "valid"},
+        )
+        assert (
+            service.push(principal, {**body, "events": [created]}, uuid4())["acks"][0]["outcome"]
+            == "APPLIED"
+        )
+
+        rejected = _event(
+            principal,
+            uuid4(),
+            2,
+            "USER_TRACK_REF_PATCHED",
+            "USER_TRACK_REF",
+            {"title": "must-not-leak", "artist": 123},
+            base=1,
+        )
+        rejected["aggregate_local_id"] = str(ref_id)
+        rejected["aggregate_server_id"] = str(ref_id)
+        _rehash(rejected)
+        first_ack = service.push(principal, {**body, "events": [rejected]}, uuid4())["acks"][0]
+        replay_ack = service.push(principal, {**body, "events": [rejected]}, uuid4())["acks"][0]
+
+        assert first_ack["outcome"] == "REJECTED"
+        assert first_ack["error"]["code"] == "REQUEST_VALIDATION_FAILED"
+        assert replay_ack["outcome"] == "DUPLICATE"
+        assert replay_ack["original_outcome"] == "REJECTED"
+        with Session(engine) as session:
+            row = session.get(UserTrackRefRow, ref_id)
+            assert row is not None
+            assert (row.raw_title, row.raw_artist, row.row_version) == ("before", "valid", 1)
+            assert (
+                session.scalar(
+                    select(text("count(*)"))
+                    .select_from(SyncEventRow)
+                    .where(SyncEventRow.aggregate_id == ref_id)
+                )
+                == 1
+            )
+    finally:
+        engine.dispose()
+
+
+def test_owner_publish_fence_preserves_cursor_delivery_and_allows_other_owners(
+    database_url: str,
+) -> None:
+    """An uncommitted lower sequence fences later events only for the same owner."""
+
+    engine = create_engine(database_url)
+    release_slow = threading.Event()
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "publish-fence-owner")
+            second = _additional_device(session, owner, "publish-fence-second")
+            puller = _additional_device(session, owner, "publish-fence-puller")
+            other = _principal(session, "publish-fence-other")
+            session.commit()
+
+        service = SyncService(engine, cursor_secret=b"f" * 32)
+        slow_id, fast_id = uuid4(), uuid4()
+        slow_allocated = threading.Event()
+
+        class DelayedCommitSyncService(SyncService):
+            def _push_one(
+                self,
+                session: Session,
+                principal: Principal,
+                device_id: UUID,
+                epoch: UUID,
+                event: dict[str, Any],
+                request_id: UUID,
+            ) -> dict[str, Any]:
+                ack = super()._push_one(session, principal, device_id, epoch, event, request_id)
+                if event["event_id"] == str(slow_id):
+                    session.flush()
+                    slow_allocated.set()
+                    if not release_slow.wait(10):
+                        raise RuntimeError("publish fence test timed out")
+                return ack
+
+        delayed = DelayedCommitSyncService(engine, cursor_secret=b"f" * 32)
+        owner_body = _bind(service, owner, uuid4())
+        second_body = _bind(service, second, uuid4())
+        puller_body = _bind(service, puller, uuid4())
+        other_body = _bind(service, other, uuid4())
+        slow = _event(
+            owner,
+            slow_id,
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "slow"},
+        )
+        fast = _event(
+            second,
+            fast_id,
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "fast"},
+        )
+        unrelated = _event(
+            other,
+            uuid4(),
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "unrelated-owner"},
+        )
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            slow_future = pool.submit(
+                delayed.push, owner, {**owner_body, "events": [slow]}, uuid4()
+            )
+            assert slow_allocated.wait(5)
+            same_owner_future = pool.submit(
+                service.push, second, {**second_body, "events": [fast]}, uuid4()
+            )
+            other_owner_future = pool.submit(
+                service.push, other, {**other_body, "events": [unrelated]}, uuid4()
+            )
+            try:
+                assert other_owner_future.result(timeout=5)["acks"][0]["outcome"] == "APPLIED"
+                first_page = service.pull(puller, {**puller_body, "cursor": None})
+                assert first_page["events"] == []
+                assert not same_owner_future.done()
+            finally:
+                release_slow.set()
+            assert slow_future.result(timeout=5)["acks"][0]["outcome"] == "APPLIED"
+            assert same_owner_future.result(timeout=5)["acks"][0]["outcome"] == "APPLIED"
+
+        delivered = service.pull(
+            puller,
+            {**puller_body, "cursor": first_page["next_cursor"]},
+        )["events"]
+        assert [event["event_id"] for event in delivered] == [str(slow_id), str(fast_id)]
+        assert delivered[0]["server_sequence"] < delivered[1]["server_sequence"]
+    finally:
+        release_slow.set()
+        engine.dispose()
+
+
+def test_cross_device_same_base_patch_has_one_applied_writer(database_url: str) -> None:
+    """The owner publication fence makes optimistic version checks atomic across devices."""
+
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            first = _principal(session, "same-base-owner")
+            second = _additional_device(session, first, "same-base-second")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"v" * 32)
+        first_body = _bind(service, first, uuid4())
+        second_body = _bind(service, second, uuid4())
+        ref_id = uuid4()
+        created = _event(
+            first,
+            ref_id,
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "before"},
+        )
+        assert (
+            service.push(first, {**first_body, "events": [created]}, uuid4())["acks"][0]["outcome"]
+            == "APPLIED"
+        )
+
+        def patch(
+            principal: Principal,
+            body: dict[str, object],
+            sequence: int,
+            title: str,
+        ) -> dict[str, Any]:
+            event = _event(
+                principal,
+                uuid4(),
+                sequence,
+                "USER_TRACK_REF_PATCHED",
+                "USER_TRACK_REF",
+                {"title": title},
+                base=1,
+            )
+            event["aggregate_local_id"] = str(ref_id)
+            event["aggregate_server_id"] = str(ref_id)
+            _rehash(event)
+            return cast(
+                dict[str, Any],
+                service.push(principal, {**body, "events": [event]}, uuid4())["acks"][0],
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = (
+                pool.submit(patch, first, first_body, 2, "first"),
+                pool.submit(patch, second, second_body, 1, "second"),
+            )
+            acks = [future.result(timeout=5) for future in futures]
+
+        assert sorted(ack["outcome"] for ack in acks) == ["APPLIED", "CONFLICT"]
+        applied = next(ack for ack in acks if ack["outcome"] == "APPLIED")
+        assert applied["server_row_version"] == 2
+        with Session(engine) as session:
+            row = session.get(UserTrackRefRow, ref_id)
+            assert row is not None
+            assert row.row_version == 2
+            assert row.raw_title in {"first", "second"}
+    finally:
+        engine.dispose()
+
+
+def test_playlist_move_rebalances_and_publishes_exact_remote_order(database_url: str) -> None:
+    """Moving UUID3 before UUID1 produces 3,1,2 in storage and incremental sync."""
+
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "playlist-rebalance-owner")
+            receiver = _additional_device(session, owner, "playlist-rebalance-receiver")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"o" * 32)
+        body = _bind(service, owner, uuid4())
+        receiver_body = _bind(service, receiver, uuid4())
+        ref_id, playlist_id = uuid4(), uuid4()
+        entry_ids = (uuid4(), uuid4(), uuid4())
+        events = [
+            _event(
+                owner,
+                ref_id,
+                1,
+                "USER_TRACK_REF_CREATED",
+                "USER_TRACK_REF",
+                {"title": "ordered"},
+            ),
+            _event(
+                owner,
+                playlist_id,
+                2,
+                "PLAYLIST_CREATED",
+                "PLAYLIST",
+                {"name": "ordered", "description": None},
+            ),
+        ]
+        events.extend(
+            _event(
+                owner,
+                entry_id,
+                sequence,
+                "PLAYLIST_ENTRY_UPSERTED",
+                "PLAYLIST_ENTRY",
+                {
+                    "local_playlist_id": str(playlist_id),
+                    "local_user_track_ref_id": str(ref_id),
+                    "before_local_playlist_entry_id": None,
+                },
+            )
+            for sequence, entry_id in enumerate(entry_ids, start=3)
+        )
+        for event in events:
+            assert (
+                service.push(owner, {**body, "events": [event]}, uuid4())["acks"][0]["outcome"]
+                == "APPLIED"
+            )
+
+        moved = _event(
+            owner,
+            uuid4(),
+            6,
+            "PLAYLIST_ENTRY_MOVED",
+            "PLAYLIST_ENTRY",
+            {
+                "local_playlist_id": str(playlist_id),
+                "before_local_playlist_entry_id": str(entry_ids[0]),
+            },
+            base=1,
+        )
+        moved["aggregate_local_id"] = str(entry_ids[2])
+        moved["aggregate_server_id"] = str(entry_ids[2])
+        _rehash(moved)
+        moved_ack = service.push(owner, {**body, "events": [moved]}, uuid4())["acks"][0]
+        assert moved_ack["outcome"] == "APPLIED"
+        assert moved_ack["server_row_version"] == 3
+
+        with Session(engine) as session:
+            rows = list(
+                session.scalars(
+                    select(PlaylistEntryRow)
+                    .where(PlaylistEntryRow.playlist_id == playlist_id)
+                    .order_by(PlaylistEntryRow.position_key)
+                )
+            )
+            assert [row.playlist_entry_id for row in rows] == [
+                entry_ids[2],
+                entry_ids[0],
+                entry_ids[1],
+            ]
+            assert [row.row_version for row in rows] == [3, 3, 3]
+
+        delivered = service.pull(receiver, {**receiver_body, "cursor": None})["events"]
+        latest_positions = {
+            event["aggregate_server_id"]: event["payload"]["position_key"]
+            for event in delivered
+            if event["aggregate_type"] == "PLAYLIST_ENTRY" and "position_key" in event["payload"]
+        }
+        assert [
+            entry_id
+            for entry_id, _position in sorted(
+                (
+                    (UUID(entry_id), position)
+                    for entry_id, position in latest_positions.items()
+                    if UUID(entry_id) in entry_ids
+                ),
+                key=lambda item: item[1],
+            )
+        ] == [entry_ids[2], entry_ids[0], entry_ids[1]]
     finally:
         engine.dispose()
 

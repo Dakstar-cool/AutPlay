@@ -383,21 +383,12 @@ def test_sona_evidence_is_owner_bound_idempotent_immutable_and_has_no_items(
                 )
             )
             session.execute(text("SET LOCAL session_replication_role = origin"))
-        with sessions() as session, session.begin():
-            session.execute(
-                delete(RecommendationTemporalSnapshotRow).where(
-                    RecommendationTemporalSnapshotRow.recommendation_temporal_snapshot_id
-                    == temporal.temporal_snapshot_id
-                )
-            )
-        with sessions() as session, session.begin():
-            session.execute(
-                delete(RecommendationInputSnapshotRow).where(
-                    RecommendationInputSnapshotRow.recommendation_input_snapshot_id
-                    == baseline.reference.snapshot_id
-                )
-            )
+        replacement = recommendations.capture(
+            owner_id,
+            retained_until=now + timedelta(days=30),
+        )
 
+        assert replacement.reference.snapshot_id != baseline.reference.snapshot_id
         assert adaptive.load_sona_snapshot(owner_id, temporal.temporal_snapshot_id) is None
         assert repository.load(owner_id, request_id) == evidence
         assert recommendations.exact(owner_id, request_id) == p11_response

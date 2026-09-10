@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "milestone": "POST_MVP_R1A_ADAPTIVE_RECOMMENDATIONS_CONTRACT",
+  "status": "ACCEPTED_CONTRACT_ONLY",
+  "accepted_at": "2026-09-03",
+  "runtime_effect": "NONE",
+  "versioned_sources": [
+    "contracts/recommendations/v1/contract-policy.json",
+    "docs/adr/ADR-048-r1a-adaptive-recommendation-profile.md",
+    "docs/design/AutPlay_Adaptive_Recommendation_Contract_v1.md"
+  ]
+}

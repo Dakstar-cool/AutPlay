@@ -6,6 +6,8 @@ import app.autplay.application.importing.LocalImportReviewRepository
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.library.CoreHomePlaylistSummary
 import app.autplay.application.library.CoreLibraryEntrySummary
+import app.autplay.application.recommendation.OfflineRecommendationRepository
+import app.autplay.data.security.BindingAuthorityWriteGate
 import app.autplay.application.server.ServerFeatureRepository
 import app.autplay.application.server.ServerFeatureStateRepository
 import app.autplay.application.sync.ClientEventBinding
@@ -500,13 +502,9 @@ internal fun buildLegacySecondaryRouteActions(
     },
     retrySync = {
         binding()?.let { activeBinding ->
-            syncScheduler.enqueue(
-                DeferredWorkRequest(
-                    DeferredWorkKind.SYNC,
-                    DeferredWorkSubject.Device(activeBinding.deviceId),
-                    activeBinding.serverProfileId,
-                ),
-            )
+            scope.launch {
+                syncScheduler.enqueue(syncWorkRequest(activeBinding))
+            }
         }
     },
     resolveServerRecordingId = resolveServerRecordingId,
@@ -519,28 +517,53 @@ internal fun buildLegacySecondaryRouteActions(
     logout = {
         launchServerAction("SERVER_LOGOUT") { server ->
             server.logout()
-            settingsStore.mutate(::deactivateServerBinding)
+            BindingAuthorityWriteGate.serialized {
+                settings.activeServerProfileId?.let { profile ->
+                    OfflineRecommendationRepository(AutPlayRuntime.database(context))
+                        .purgeLocalRecommendationContext(profile.value)
+                    AndroidKeystoreCredentialStore(context.applicationContext).clear(profile)
+                }
+                settingsStore.mutate(::deactivateServerBinding)
+            }
         }
     },
     logoutAll = {
         launchServerAction("SERVER_LOGOUT_ALL") { server ->
             server.logoutAll()
-            settingsStore.mutate(::deactivateServerBinding)
+            BindingAuthorityWriteGate.serialized {
+                settings.activeServerProfileId?.let { profile ->
+                    OfflineRecommendationRepository(AutPlayRuntime.database(context))
+                        .purgeLocalRecommendationContext(profile.value)
+                    AndroidKeystoreCredentialStore(context.applicationContext).clear(profile)
+                }
+                settingsStore.mutate(::deactivateServerBinding)
+            }
         }
     },
     revokeCurrentDevice = {
         settings.deviceId?.value?.let { deviceId ->
             launchServerAction("SERVER_DEVICE_REVOKE") { server ->
                 server.revokeDevice(deviceId)
-                settingsStore.mutate(::deactivateServerBinding)
+                BindingAuthorityWriteGate.serialized {
+                    settings.activeServerProfileId?.let { profile ->
+                        OfflineRecommendationRepository(AutPlayRuntime.database(context))
+                            .purgeLocalRecommendationContext(profile.value)
+                        AndroidKeystoreCredentialStore(context.applicationContext).clear(profile)
+                    }
+                    settingsStore.mutate(::deactivateServerBinding)
+                }
             }
         }
     },
     disconnectLocally = {
         val profileId = settings.activeServerProfileId
         if (profileId != null) scope.launch {
-            AndroidKeystoreCredentialStore(context.applicationContext).clear(profileId)
-            settingsStore.mutate(::deactivateServerBinding)
+            BindingAuthorityWriteGate.serialized {
+                OfflineRecommendationRepository(AutPlayRuntime.database(context))
+                    .purgeLocalRecommendationContext(profileId.value)
+                AndroidKeystoreCredentialStore(context.applicationContext).clear(profileId)
+                settingsStore.mutate(::deactivateServerBinding)
+            }
         }
     },
     profilePairing = ProfilePairingActions(
@@ -612,7 +635,12 @@ internal fun buildLegacySecondaryRouteActions(
     ),
     updateSettings = { transform ->
         scope.launch {
-            updateFrontendSettings(settingsStore, transform)?.let(reportError)
+            val error = updateFrontendSettings(settingsStore, transform)
+            if (error != null) {
+                reportError(error)
+            } else {
+                binding()?.let { syncScheduler.reconcile(syncWorkRequest(it)) }
+            }
         }
     },
     changeAppLanguage = { language ->
@@ -645,3 +673,10 @@ internal fun buildLegacySecondaryRouteActions(
     social = social,
     navigate = navigate,
 )
+
+private fun syncWorkRequest(binding: ClientEventBinding): DeferredWorkRequest =
+    DeferredWorkRequest(
+        DeferredWorkKind.SYNC,
+        DeferredWorkSubject.Device(binding.deviceId),
+        binding.serverProfileId,
+    )

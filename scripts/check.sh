@@ -84,14 +84,14 @@ fi
 uv lock --check
 uv run --frozen ruff check tests/contract tests/release
 uv run --frozen ruff format --check tests/contract tests/release
-uv run --frozen mypy tests/contract tests/release
-uv run --frozen pytest tests/contract tests/release
+uv run --frozen python -m mypy tests/contract tests/release
+uv run --frozen python -m pytest tests/contract tests/release
 
 uv lock --project server --check
 uv run --project server --frozen python -c "import autplay"
 uv run --project server --frozen ruff check --config server/pyproject.toml server
 uv run --project server --frozen ruff format --check --config server/pyproject.toml server
-uv run --project server --frozen mypy --config-file server/pyproject.toml server/src server/tests
+uv run --project server --frozen python -m mypy --config-file server/pyproject.toml server/src server/tests
 dependency_tree_json="$(uv tree --project server --frozen --universal --format json --preview-features json-output)"
 prohibited_packages="$(printf '%s' "$dependency_tree_json" | uv run --project server --frozen python -c '
 import json
@@ -114,7 +114,35 @@ docker compose -p "$compose_project" -f "$compose_file" -f "$compose_runtime_fil
   --profile runtime config --quiet
 
 if [[ $server_only -eq 0 ]]; then
-  ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain lintDebug testDebugUnitTest assembleDebug assembleRelease
+  uv lock --project gpu --check
+  uv run --project gpu --frozen python -m ruff check --config gpu/pyproject.toml gpu/src gpu/tests
+  uv run --project gpu --frozen python -m ruff format --check --config gpu/pyproject.toml gpu/src gpu/tests
+  uv run --project gpu --frozen python -m mypy --config-file gpu/pyproject.toml gpu/src gpu/tests
+  uv run --project gpu --frozen python -m pytest -c gpu/pyproject.toml gpu/tests
+
+  uv lock --project gpu/training --check
+  uv run --project gpu/training --frozen python -m ruff check \
+    --config gpu/training/pyproject.toml gpu/training
+  uv run --project gpu/training --frozen python -m ruff format --check \
+    --config gpu/training/pyproject.toml gpu/training
+  uv run --project gpu/training --frozen python -m mypy \
+    --config-file gpu/training/pyproject.toml gpu/training/src gpu/training/tests
+  uv run --project gpu/training --frozen python -m pytest \
+    -c gpu/training/pyproject.toml gpu/training/tests
+
+  uv lock --project tools/local_music_acquisition --check
+  uv run --project tools/local_music_acquisition --frozen python -m ruff check \
+    --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
+  uv run --project tools/local_music_acquisition --frozen python -m ruff format --check \
+    --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
+  uv run --project tools/local_music_acquisition --frozen python -m mypy \
+    --config-file tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition/src
+  uv run --project tools/local_music_acquisition --frozen python -m pytest \
+    -c tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition/tests
+
+  ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
+    --max-workers=1 --dependency-verification=strict \
+    lintDebug testDebugUnitTest assembleDebug assembleTrustedLan assembleRelease
 fi
 
 if [[ -n "$(docker ps -a --filter "label=com.docker.compose.project=$compose_project" --format '{{.ID}}')" ]] || \
@@ -169,4 +197,4 @@ if (( published_port < 1 || published_port > 65535 )); then
 fi
 export AUTPLAY_TEST_DATABASE_URL="postgresql+psycopg://autplay:autplay_dev_only@127.0.0.1:${published_port}/autplay"
 
-uv run --project server --frozen pytest -c server/pyproject.toml server/tests
+uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests

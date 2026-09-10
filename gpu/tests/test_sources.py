@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import pytest
 from autplay.domain.enrichment import EmbeddingJobTarget
-
 from autplay_gpu.preprocessing import AudioPreprocessingError
 from autplay_gpu.sources import PostgresFilesystemAudioSourceResolver
 

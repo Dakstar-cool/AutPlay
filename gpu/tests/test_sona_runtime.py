@@ -20,7 +20,6 @@ from autplay.domain.sona import (
     SonaOrigin,
     SonaSemanticId,
 )
-
 from autplay_gpu import sona_runtime
 from autplay_gpu.embedding import ModelArtifactError
 from autplay_gpu.sona_runtime import SonaOnnxCudaRuntime
@@ -66,6 +65,9 @@ class _Session:
 
     def get_providers(self) -> Sequence[str]:
         return ("CUDAExecutionProvider",)
+
+    def disable_fallback(self) -> None:
+        return None
 
     def run(
         self,
@@ -178,17 +180,17 @@ def test_default_session_loads_verified_bytes_with_deterministic_compute(
         inter_op_num_threads = 0
         use_deterministic_compute = False
 
-    class Session:
-        pass
+        def add_session_config_entry(self, key: str, value: str) -> None:
+            captured["session_config"] = (key, value)
 
-    monkeypatch.setattr(
-        "autplay_gpu.sona_runtime.ort.preload_dlls", lambda directory: None
-    )
+    class Session:
+        def disable_fallback(self) -> None:
+            captured["fallback_disabled"] = True
+
+    monkeypatch.setattr("autplay_gpu.sona_runtime.ort.preload_dlls", lambda directory: None)
     monkeypatch.setattr("autplay_gpu.sona_runtime.ort.SessionOptions", Options)
 
-    def create_session(
-        artifact: bytes, *, sess_options: Options, providers: object
-    ) -> Session:
+    def create_session(artifact: bytes, *, sess_options: Options, providers: object) -> Session:
         captured.update(artifact=artifact, options=sess_options, providers=providers)
         return Session()
 
@@ -200,3 +202,5 @@ def test_default_session_loads_verified_bytes_with_deterministic_compute(
     assert captured["artifact"] == b"verified-graph-bytes"
     assert options.use_deterministic_compute is True
     assert options.enable_mem_pattern is False
+    assert captured["session_config"] == ("session.disable_cpu_ep_fallback", "1")
+    assert captured["fallback_disabled"] is True

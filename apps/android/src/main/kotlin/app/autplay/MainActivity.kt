@@ -61,7 +61,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.work.WorkManager
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.guestroom.GUEST_DOCUMENT_MIME_TYPE
 import app.autplay.application.guestroom.GuestRoomDocumentCodec
@@ -142,10 +141,8 @@ import app.autplay.playback.presentation.PlaybackPresentationAdapter
 import app.autplay.playback.presentation.WaveCoordinatorHostPlaybackCommandPort
 import app.autplay.playback.presentation.WavePlaybackCommandOutcome
 import app.autplay.work.DeferredWorkScheduler
-import app.autplay.work.SyncWorker
 import app.autplay.work.RecommendationPackWorkScheduler
 import app.autplay.work.RemoteImportWorkScheduler
-import app.autplay.work.WorkManagerDeferredWorkScheduler
 import app.autplay.work.shouldScheduleRemoteImport
 import app.autplay.ui.AutPlayAccent
 import app.autplay.ui.AutPlayAppearance
@@ -229,11 +226,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val database = AutPlayRuntime.database(applicationContext)
         val settingsStore = applicationNonSecretSettingsStore(applicationContext)
-        val playbackRepository = PlaybackPersistenceRepository(database)
+        val syncScheduler = AutPlayRuntime.syncScheduler(applicationContext)
+        val playbackRepository = PlaybackPersistenceRepository(
+            database,
+            LibraryVerticalSliceRepository(database, syncScheduler = syncScheduler),
+        )
         val playbackOwner = ServicePlaybackSessionOwner(applicationContext)
         val downloadRepository = DownloadIntentRepository(applicationContext, database)
         val syncStatusRepository = SyncStatusRepository(database)
-        val syncScheduler = WorkManagerDeferredWorkScheduler(WorkManager.getInstance(applicationContext), SyncWorker::class.java)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
         consumeSharedDocument(intent)
@@ -375,6 +375,7 @@ internal fun AutPlayBootstrap(
                 pairingDeviceKeys,
                 pairingPort,
                 firstBindCeremonyGate,
+                recommendationRepository,
             ) {
                 ProfilePairingRuntime(
                     scope = pairingScope,
@@ -395,6 +396,9 @@ internal fun AutPlayBootstrap(
                     deviceName = android.os.Build.MODEL ?: "Android device",
                     reportSafeError = { pairingSafeError = it },
                     registerOrigin = { profile, origin -> pairingOrigins[profile.value] = origin },
+                    purgeRecommendationContext = { profile ->
+                        recommendationRepository.purgeLocalRecommendationContext(profile.value)
+                    },
                     allowUnsafeDevelopmentHttp = allowUnsafePairingHttp,
                     firstBindGate = firstBindCeremonyGate,
                 )

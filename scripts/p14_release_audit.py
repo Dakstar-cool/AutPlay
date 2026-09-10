@@ -18,7 +18,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = (
     REPOSITORY_ROOT / "server" / "src",
     REPOSITORY_ROOT / "gpu" / "src",
+    REPOSITORY_ROOT / "gpu" / "training" / "src",
+    REPOSITORY_ROOT / "tools" / "local_music_acquisition" / "src",
     REPOSITORY_ROOT / "apps" / "android" / "src" / "main",
+    REPOSITORY_ROOT / ".github" / "workflows",
     REPOSITORY_ROOT / "deploy",
     REPOSITORY_ROOT / "scripts",
 )
@@ -51,6 +54,7 @@ DISPOSABLE_PASSWORD_PATTERN = re.compile(r"\bautplay_dev_only\b")
 DISPOSABLE_PASSWORD_ALLOWLIST = {
     "deploy/compose/compose.yaml",
     "deploy/compose/compose.runtime.yaml",
+    "deploy/compose/compose.admin-local.yaml",
     "deploy/compose/README.md",
     "scripts/check.ps1",
     "scripts/check.sh",
@@ -60,7 +64,19 @@ DISPOSABLE_PASSWORD_ALLOWLIST = {
 INTERNAL_PACKAGES = {
     "autplay-contract-tools",
     "autplay-gpu-worker",
+    "autplay-local-music-acquisition",
     "autplay-server",
+    "autplay-sona-training",
+}
+PYTHON_LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, ...]] = {
+    (
+        "yandex-music-downloader",
+        "3.5.5",
+    ): (
+        "MIT (source-verified at "
+        "https://github.com/llistochek/yandex-music-downloader/blob/"
+        "9d33d6aaefae3cb882d02822e59cf0796c33a651/LICENSE)",
+    ),
 }
 PYTHON_LICENSE_SCRIPT = """
 import importlib.metadata as metadata
@@ -99,6 +115,18 @@ def _run(arguments: list[str], *, env: dict[str, str] | None = None) -> str:
         text=True,
     )
     return result.stdout
+
+
+def _tool_version(arguments: list[str]) -> str:
+    result = subprocess.run(
+        arguments,
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout.strip() or result.stderr.strip()
+    return output.splitlines()[0] if output else "unknown"
 
 
 def _sha256(path: Path) -> str:
@@ -299,7 +327,7 @@ def _python_licenses(project: str | None) -> list[dict[str, Any]]:
             raise RuntimeError("Python license inventory returned an invalid row")
         name = str(row.get("name") or "").strip()
         version = str(row.get("version") or "").strip()
-        evidence = _python_license_evidence(row, name=name)
+        evidence = _python_license_evidence(row, name=name, version=version)
         inventory.append(
             {
                 "name": name,
@@ -311,7 +339,7 @@ def _python_licenses(project: str | None) -> list[dict[str, Any]]:
     return inventory
 
 
-def _python_license_evidence(row: dict[str, Any], *, name: str) -> list[str]:
+def _python_license_evidence(row: dict[str, Any], *, name: str, version: str) -> list[str]:
     if name.lower() in INTERNAL_PACKAGES:
         return ["PROJECT-INTERNAL-NOT-PUBLISHED"]
     values: list[str] = []
@@ -325,6 +353,8 @@ def _python_license_evidence(row: dict[str, Any], *, name: str) -> list[str]:
     classifiers = row.get("classifiers")
     if isinstance(classifiers, list):
         values.extend(str(value) for value in classifiers if str(value).strip())
+    if not values:
+        values.extend(PYTHON_LICENSE_OVERRIDES.get((name.lower(), version), ()))
     if not values:
         raise RuntimeError(f"Python package license metadata is missing: {name}")
     return sorted(set(values))
@@ -416,6 +446,8 @@ def _license_inventory(android_report: Path, output: Path) -> dict[str, Any]:
         "root": _python_licenses(None),
         "server": _python_licenses("server"),
         "gpu": _python_licenses("gpu"),
+        "training": _python_licenses("gpu/training"),
+        "acquisition": _python_licenses("tools/local_music_acquisition"),
         "android_release_runtime": _android_licenses(android_report),
     }
     obligations: dict[str, list[str]] = {}
@@ -433,7 +465,8 @@ def _license_inventory(android_report: Path, output: Path) -> dict[str, Any]:
         "status": "PASS_WITH_DECLARED_PUBLICATION_REVIEW",
         "generated_at": datetime.now(UTC).isoformat(),
         "scope": (
-            "resolved root/server/GPU Python environments plus Android releaseRuntimeClasspath"
+            "resolved root/server/GPU/training/acquisition Python environments plus Android "
+            "releaseRuntimeClasspath"
         ),
         "environment_counts": {key: len(value) for key, value in environments.items()},
         "unresolved_license_count": 0,
@@ -721,11 +754,27 @@ def run(
         "root": _export_sbom(None, sbom_directory / "python-root.cdx.json"),
         "server": _export_sbom("server", sbom_directory / "python-server.cdx.json"),
         "gpu": _export_sbom("gpu", sbom_directory / "python-gpu.cdx.json"),
+        "training": _export_sbom(
+            "gpu/training",
+            sbom_directory / "python-sona-training.cdx.json",
+        ),
+        "acquisition": _export_sbom(
+            "tools/local_music_acquisition",
+            sbom_directory / "python-acquisition.cdx.json",
+        ),
     }
     audits = {
         "root": _audit(None, output_directory / "P14_UV_AUDIT_ROOT.json"),
         "server": _audit("server", output_directory / "P14_UV_AUDIT_SERVER.json"),
         "gpu": _audit("gpu", output_directory / "P14_UV_AUDIT_GPU.json"),
+        "training": _audit(
+            "gpu/training",
+            output_directory / "P14_UV_AUDIT_SONA_TRAINING.json",
+        ),
+        "acquisition": _audit(
+            "tools/local_music_acquisition",
+            output_directory / "P14_UV_AUDIT_ACQUISITION.json",
+        ),
     }
     secret_scan = _secret_scan()
     _write_json(output_directory / "P14_SECRET_SCAN.json", secret_scan)
@@ -758,6 +807,8 @@ def run(
             REPOSITORY_ROOT / "uv.lock",
             REPOSITORY_ROOT / "server" / "uv.lock",
             REPOSITORY_ROOT / "gpu" / "uv.lock",
+            REPOSITORY_ROOT / "gpu" / "training" / "uv.lock",
+            REPOSITORY_ROOT / "tools" / "local_music_acquisition" / "uv.lock",
             REPOSITORY_ROOT / "gradle" / "libs.versions.toml",
             REPOSITORY_ROOT / "gradle" / "wrapper" / "gradle-wrapper.properties",
             REPOSITORY_ROOT / "deploy" / "compose" / "compose.yaml",
@@ -795,10 +846,34 @@ def run(
     if not pinned_images:
         raise RuntimeError("no digest-pinned base image found in Compose")
 
+    status_payload = _run(["git", "status", "--porcelain=v1", "--untracked-files=all"]).encode(
+        "utf-8"
+    )
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat(),
         "status": _release_status(android_device),
+        "source": {
+            "commit": _run(["git", "rev-parse", "HEAD"]).strip(),
+            "commit_tree": _run(["git", "rev-parse", "HEAD^{tree}"]).strip(),
+            "working_tree_clean": not bool(status_payload),
+            "working_tree_status_sha256": hashlib.sha256(status_payload).hexdigest(),
+        },
+        "tool_versions": {
+            "python": sys.version.split()[0],
+            "uv": _tool_version(["uv", "--version"]),
+            "git": _tool_version(["git", "--version"]),
+            "java": _tool_version([str(Path(java_home) / "bin" / "java.exe"), "-version"]),
+            "docker": _tool_version(["docker", "--version"]),
+        },
+        "commands": {
+            "canonical_host_gate": "scripts/check.ps1",
+            "connected_gate": (
+                "gradlew.bat --no-daemon --console=plain --max-workers=1 "
+                ":apps:android:connectedDebugAndroidTest"
+            ),
+            "audit_generator": "scripts/p14_release_audit.py",
+        },
         "sboms": sboms,
         "vulnerability_audits": audits,
         "licenses": license_inventory,
@@ -813,6 +888,16 @@ def run(
             "included": False,
             "activated": False,
             "reason": "P12 real reviewed model/RTX benchmark unavailable",
+        },
+        "declared_exclusions": {
+            "cuda_hardware_quality": "requires a real target GPU and is not inferred here",
+            "public_internet_tls": "PA3 remains explicitly blocked before activation",
+            "production_signing": "workflow candidate is unsigned",
+        },
+        "artifact_claims": {
+            "development_installer": "LOCAL_DEVELOPMENT_ONLY",
+            "signed_apk": "DEVELOPMENT_KEY_PHYSICAL_DEVICE_PROOF",
+            "workflow_bundle": "UNSIGNED_CANDIDATE_NOT_FOR_PUBLICATION",
         },
         "external_actions": {
             "push": False,

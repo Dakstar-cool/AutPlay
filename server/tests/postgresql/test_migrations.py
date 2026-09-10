@@ -52,7 +52,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0029_sona_shadow_binding"]
+    assert heads == ["0030_temporal_snapshot_retention"]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
@@ -81,7 +81,9 @@ def test_upgrade_accepts_file_only_database_url(
 
     command.upgrade(database_harness.alembic_config(empty_database_name), "head")
 
-    assert _current_revision(database_harness, empty_database_name) == ("0029_sona_shadow_binding")
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_upgrade_rejects_ambiguous_database_url_sources(
@@ -139,6 +141,7 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0027_public_access_invite_only",
         "0028_adaptive_recommend_shadow",
         "0029_sona_shadow_binding",
+        "0030_temporal_snapshot_retention",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 
@@ -167,7 +170,9 @@ def test_artist_sync_downgrade_refuses_durable_catalog_events(
         database_harness.downgrade(empty_database_name, "0015_wave_runtime")
     # Alembic executes the attempted multi-revision downgrade atomically; the
     # M5B contract remains present when the predecessor refuses its rollback.
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
     with database_harness.connect(empty_database_name) as connection:
         connection.execute("DELETE FROM sync.sync_event")
@@ -200,7 +205,9 @@ def test_s1b_downgrade_refuses_durable_admission_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1B downgrade"):
         database_harness.downgrade(empty_database_name, "0020_a1b_discovery_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_s1b_downgrade_refuses_rate_only_evidence(
@@ -221,7 +228,9 @@ def test_s1b_downgrade_refuses_rate_only_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1B downgrade"):
         database_harness.downgrade(empty_database_name, "0020_a1b_discovery_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_s1b_downgrade_guard_names_every_owned_table() -> None:
@@ -260,7 +269,9 @@ def test_s1c_downgrade_refuses_rate_only_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1C downgrade"):
         database_harness.downgrade(empty_database_name, "0021_s1b_device_admission")
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_s1c_downgrade_guard_names_every_owned_table() -> None:
@@ -317,7 +328,9 @@ def test_s2_downgrade_refuses_profile_statistics_policy(
 
     with pytest.raises(DBAPIError, match="refusing S2 downgrade"):
         database_harness.downgrade(empty_database_name, "0022_s1c_social_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_s2_downgrade_guard_names_owned_policy_table() -> None:
@@ -345,7 +358,9 @@ def test_s1d_downgrade_refuses_rate_only_evidence(
 
     with pytest.raises(DBAPIError, match="refusing S1D downgrade"):
         database_harness.downgrade(empty_database_name, "0025_a1c_automation_runtime")
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_s1d_downgrade_guard_names_every_owned_table() -> None:
@@ -380,7 +395,9 @@ def test_pa2_downgrade_refuses_rate_only_evidence(
         connection.commit()
     with pytest.raises(DBAPIError, match="refusing PA2 downgrade"):
         database_harness.downgrade(empty_database_name, "0026_s1d_guest_room_access")
-    assert _current_revision(database_harness, empty_database_name) == "0029_sona_shadow_binding"
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0030_temporal_snapshot_retention"
+    )
 
 
 def test_pa2_downgrade_guard_names_every_owned_table() -> None:

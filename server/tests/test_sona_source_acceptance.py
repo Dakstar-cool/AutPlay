@@ -8,10 +8,10 @@ from uuid import UUID
 
 import pytest
 import rfc8785
-
 from autplay.application.sona_source_acceptance import (
     SONA_RECONSTRUCTED_SERVER_PROFILE_SCHEME,
     SONA_SOURCE_TEMPORAL_PROVENANCE_KIND,
+    SonaSourceProvenanceAcceptance,
     build_sona_source_provenance_acceptance,
     derive_reconstructed_server_profile_id,
     load_sona_source_provenance_acceptance,
@@ -22,7 +22,7 @@ ARCHIVE_SHA256 = "84f69171b92f7e2d8a5381b1965828ba8c788f197c3a8ffd730f5add9fcbc5
 OWNER = UUID("00000000-0000-7000-8000-000000000001")
 
 
-def _acceptance():
+def _acceptance() -> SonaSourceProvenanceAcceptance:
     return build_sona_source_provenance_acceptance(
         generation_id="20260901T110359Z-ebb958b5e91e",
         encrypted_archive_sha256=ARCHIVE_SHA256,

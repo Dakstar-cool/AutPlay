@@ -55,6 +55,8 @@ class _InferenceSession(Protocol):
 
     def get_providers(self) -> Sequence[str]: ...
 
+    def disable_fallback(self) -> None: ...
+
     def run(
         self,
         output_names: Sequence[str],
@@ -83,7 +85,8 @@ class SonaOnnxCudaRuntime:
             if _is_oom(error):
                 raise AcceleratorOutOfMemory from error
             raise ModelArtifactError("Sona ONNX CUDA session initialization failed") from error
-        if "CUDAExecutionProvider" not in self._session.get_providers():
+        providers = self._session.get_providers()
+        if not providers or providers[0] != "CUDAExecutionProvider":
             raise ModelArtifactError("Sona CUDA execution provider is unavailable")
         inputs = {value.name: value for value in self._session.get_inputs()}
         outputs = {value.name: value for value in self._session.get_outputs()}
@@ -125,12 +128,16 @@ class SonaOnnxCudaRuntime:
             or ranking_scores.dtype != np.float32
         ):
             raise ModelArtifactError("Sona ONNX returned invalid output shapes")
-        if generated_count != 1 or not np.all(generated_sids > 0) or not all(
-            np.isfinite(value).all()
-            for value in (
-                generated_log_probabilities,
-                ranking_head_scores,
-                ranking_scores,
+        if (
+            generated_count != 1
+            or not np.all(generated_sids > 0)
+            or not all(
+                np.isfinite(value).all()
+                for value in (
+                    generated_log_probabilities,
+                    ranking_head_scores,
+                    ranking_scores,
+                )
             )
         ):
             raise ModelArtifactError("Sona ONNX returned unbounded or non-finite output")
@@ -167,8 +174,9 @@ def _create_session(artifact: bytes, device_index: int) -> _InferenceSession:
     options.use_deterministic_compute = True
     options.intra_op_num_threads = 1
     options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
     try:
-        return cast(
+        session = cast(
             _InferenceSession,
             ort.InferenceSession(
                 artifact,
@@ -181,6 +189,8 @@ def _create_session(artifact: bytes, device_index: int) -> _InferenceSession:
                 ],
             ),
         )
+        session.disable_fallback()
+        return session
     except Exception as error:
         if _is_oom(error):
             raise AcceleratorOutOfMemory from error

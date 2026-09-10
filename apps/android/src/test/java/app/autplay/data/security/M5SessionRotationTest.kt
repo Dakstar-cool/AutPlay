@@ -4,16 +4,24 @@ import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.Dispatcher as MockWebServerDispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -98,6 +106,62 @@ class M5SessionRotationTest {
         }
     }
 
+    @Test
+    fun unbindingClearWaitsForRotationAndRemovesItsSuccessorCredential() = runBlocking {
+        val server = MockWebServer()
+        val requestStarted = CountDownLatch(1)
+        server.dispatcher = object : MockWebServerDispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requestStarted.countDown()
+                val rotationId = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+                    .getValue("rotation_id").jsonPrimitive.content
+                return successResponse(rotationId).setBodyDelay(500, TimeUnit.MILLISECONDS)
+            }
+        }
+        server.start()
+        val store = MutableStore(SessionCredentialEnvelopeCodec.encode(currentEnvelope()))
+        val rotation = M5SessionRotationClient(
+            contexts = object : M5RotationContextResolver {
+                override suspend fun resolve(profileId: ServerProfileId) = M5RotationContext(
+                    apiOrigin = server.url("/").toString(),
+                    serverInstanceId = SERVER_INSTANCE_ID,
+                    identityEpoch = 1,
+                    deviceId = DEVICE_ID,
+                    deviceKeyAlias = "test-key",
+                )
+
+                override suspend fun persistSuccessor(
+                    profileId: ServerProfileId,
+                    successor: SessionCredentialEnvelope,
+                ) = Unit
+            },
+            keys = FakeKeys(),
+        )
+        val provider = RefreshingSessionCredentials(
+            server.url("/api/v1").toString(),
+            store,
+            m5Rotation = rotation,
+        )
+        try {
+            val rotating = async(Dispatchers.IO) {
+                provider.refreshAfterRejection(PROFILE, 0).close()
+            }
+            assertTrue(requestStarted.await(5, TimeUnit.SECONDS))
+            val clearing = async {
+                BindingAuthorityWriteGate.serialized { store.clear(PROFILE) }
+            }
+            delay(100)
+            assertFalse(clearing.isCompleted)
+
+            rotating.await()
+            clearing.await()
+
+            assertNull(store.read(PROFILE))
+        } finally {
+            server.shutdown()
+        }
+    }
+
     private fun currentEnvelope() = SessionCredentialEnvelope(
         accessToken = "old-access",
         refreshToken = CURRENT_REFRESH,
@@ -116,13 +180,19 @@ class M5SessionRotationTest {
         )
 
     private class MutableStore(initial: ByteArray) : CredentialStore {
-        private var material = initial.copyOf()
-        override suspend fun read(profileId: ServerProfileId) = synchronized(this) { material.copyOf() }
+        private var material: ByteArray? = initial.copyOf()
+        override suspend fun read(profileId: ServerProfileId) = synchronized(this) { material?.copyOf() }
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = synchronized(this) {
+            this.material?.fill(0)
             this.material = material.copyOf()
         }
-        override suspend fun clear(profileId: ServerProfileId) = synchronized(this) { material.fill(0) }
-        fun decoded() = synchronized(this) { SessionCredentialEnvelopeCodec.decode(material.copyOf()) }
+        override suspend fun clear(profileId: ServerProfileId) = synchronized(this) {
+            material?.fill(0)
+            material = null
+        }
+        fun decoded() = synchronized(this) {
+            SessionCredentialEnvelopeCodec.decode(requireNotNull(material).copyOf())
+        }
     }
 
     private class FakeKeys : M5DeviceKeyStore {

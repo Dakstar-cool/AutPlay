@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 import rfc8785
-
 from autplay.application.sona_source_preflight import SonaSourcePreflightResult
 from autplay.entrypoints.sona_source_preflight import (
     _load_generation_summary,

@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0029_sona_shadow_binding"
+EXPECTED_MIGRATION_HEAD: Final = "0030_temporal_snapshot_retention"
 
 
 @dataclass(frozen=True, slots=True)

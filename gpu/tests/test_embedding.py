@@ -15,7 +15,6 @@ from autplay.domain.enrichment import (
     ApprovedEmbeddingModel,
     DecodedAudioSegment,
 )
-
 from autplay_gpu.embedding import ModelArtifactError, VerifiedArtifactTrackEmbedder
 
 

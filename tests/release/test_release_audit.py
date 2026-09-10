@@ -21,6 +21,30 @@ def _load_release_audit() -> ModuleType:
 p14_release_audit = _load_release_audit()
 
 
+def test_python_license_override_is_pinned_to_the_reviewed_source_version() -> None:
+    row: dict[str, object] = {
+        "license_expression": None,
+        "license": None,
+        "classifiers": [],
+    }
+
+    assert p14_release_audit._python_license_evidence(
+        row,
+        name="yandex-music-downloader",
+        version="3.5.5",
+    ) == [
+        "MIT (source-verified at "
+        "https://github.com/llistochek/yandex-music-downloader/blob/"
+        "9d33d6aaefae3cb882d02822e59cf0796c33a651/LICENSE)"
+    ]
+    with pytest.raises(RuntimeError, match="license metadata is missing"):
+        p14_release_audit._python_license_evidence(
+            row,
+            name="yandex-music-downloader",
+            version="3.5.6",
+        )
+
+
 def test_android_smoke_requires_the_dev_signed_rc_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

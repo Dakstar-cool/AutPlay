@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from local_music_acquisition.models import PlaylistItem, ProviderFailure, ProviderMiss
 from local_music_acquisition.providers._yt_dlp_worker import _find_exact
 from local_music_acquisition.providers.yt_dlp import (

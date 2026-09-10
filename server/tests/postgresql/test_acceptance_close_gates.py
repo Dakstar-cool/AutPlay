@@ -69,7 +69,7 @@ def test_full_head_snapshot_is_restored_after_clean_downgrade_to_base(
     assert len(first_head.triggers) == 62
     assert first_schemas == APPLICATION_SCHEMAS
     assert first_extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}
-    assert first_revision == "0029_sona_shadow_binding"
+    assert first_revision == "0030_temporal_snapshot_retention"
 
     database_harness.downgrade(empty_database_name, "base")
     with database_harness.connect(empty_database_name) as connection:

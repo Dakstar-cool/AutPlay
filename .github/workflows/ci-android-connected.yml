@@ -1,0 +1,73 @@
+name: CI / Android connected
+
+on:
+  schedule:
+    - cron: "17 2 * * 2,5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-android-connected-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connected-api-26:
+    name: Android connected / API 26
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      MICROSOFT_JDK_URL: https://aka.ms/download-jdk/microsoft-jdk-17.0.20-linux-x64.tar.gz
+      MICROSOFT_JDK_SHA256: 69479b83a0e4408cc24d4dfb551db3759ba145ddce6131c6806a97d7bd8604cd
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download verified pinned Microsoft JDK
+        shell: bash
+        run: |
+          jdk_archive="${RUNNER_TEMP}/microsoft-jdk-17.0.20-linux-x64.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 \
+            --output "$jdk_archive" "$MICROSOFT_JDK_URL"
+          printf '%s  %s\n' "$MICROSOFT_JDK_SHA256" "$jdk_archive" \
+            | sha256sum --check --strict
+
+      - name: Install pinned Microsoft JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: jdkfile
+          jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-linux-x64.tar.gz
+          java-version: "17.0.20"
+          architecture: x64
+          cache: gradle
+          cache-dependency-path: |
+            build.gradle.kts
+            settings.gradle.kts
+            gradle.properties
+            gradle/libs.versions.toml
+            gradle/verification-metadata.xml
+            gradle/wrapper/gradle-wrapper.properties
+            apps/android/build.gradle.kts
+
+      - name: Install compile SDK and build tools
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.1.0"
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run connected lifecycle, WorkManager, and Room scenarios
+        uses: ReactiveCircus/android-emulator-runner@c9c93e6ba9c4194322e114c40970d5983d9a07cc # v2.38.0
+        with:
+          api-level: 26
+          arch: x86_64
+          target: default
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew --no-daemon --console=plain --max-workers=1 --dependency-verification=strict :apps:android:connectedDebugAndroidTest

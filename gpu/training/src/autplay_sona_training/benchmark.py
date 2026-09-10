@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -29,6 +30,7 @@ from .trainer import DevicePreference, load_quality_sona_checkpoint, load_sona_c
 
 SONA_MAX_BENCHMARK_ARTIFACT_BYTES = 536_870_912
 SONA_MAX_BENCHMARK_SIDECAR_BYTES = 1_048_576
+SONA_MAX_ORT_PROFILE_BYTES = 67_108_864
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,8 +120,8 @@ def benchmark_sona_checkpoint(
         raise ValueError("Sona benchmark artifact does not match the verified checkpoint")
 
     provider, device_type = _select_provider(device_preference)
-    cuda_only_execution = quality_bundle is not None
-    if cuda_only_execution:
+    cuda_only_execution = False
+    if quality_bundle is not None:
         session_options = ort.SessionOptions()
         session_options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
         session = ort.InferenceSession(
@@ -132,6 +134,13 @@ def benchmark_sona_checkpoint(
         session = ort.InferenceSession(artifact_bytes, providers=[provider])
     if quality_bundle is not None and session.get_providers()[0] != "CUDAExecutionProvider":
         raise RuntimeError("Sona quality benchmark did not execute with CUDAExecutionProvider")
+    if quality_bundle is not None:
+        _verify_cuda_execution_profile(
+            artifact_bytes,
+            provider=provider,
+            inputs=_example_inputs(dataset, 0),
+        )
+        cuda_only_execution = True
     expandable_semantic_ids = {semantic_id.values for semantic_id in tokenizer.semantic_ids}
     latencies: list[float] = []
     raw_samples: list[JsonValue] = []
@@ -253,6 +262,61 @@ def benchmark_sona_checkpoint(
         quality_provenance_eligible=checkpoint.quality_provenance_eligible,
         quality_eligible=checkpoint.quality_eligible and dataset.quality_eligible,
     )
+
+
+def _verify_cuda_execution_profile(
+    artifact: bytes,
+    *,
+    provider: str,
+    inputs: dict[str, npt.NDArray[np.generic]],
+) -> None:
+    """Prove node placement from one ORT trace without contaminating latency samples."""
+
+    profile_directory = Path(tempfile.mkdtemp(prefix="autplay-sona-ort-profile."))
+    profile_path: Path | None = None
+    session: ort.InferenceSession | None = None
+    try:
+        options = ort.SessionOptions()
+        options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
+        options.enable_profiling = True
+        options.profile_file_prefix = str(profile_directory / "trace")
+        session = ort.InferenceSession(
+            artifact,
+            sess_options=options,
+            providers=[provider],
+        )
+        session.disable_fallback()
+        active_providers = session.get_providers()
+        if not active_providers or active_providers[0] != "CUDAExecutionProvider":
+            raise RuntimeError("Sona quality profile did not select CUDAExecutionProvider")
+        session.run(None, inputs)
+        profile_path = Path(session.end_profiling())
+        raw_events = cast(
+            object,
+            json.loads(_bounded_read(profile_path, SONA_MAX_ORT_PROFILE_BYTES)),
+        )
+        if not isinstance(raw_events, list):
+            raise RuntimeError("Sona quality execution profile is invalid")
+        node_providers: list[str] = []
+        for raw_event in raw_events:
+            if not isinstance(raw_event, dict) or raw_event.get("cat") != "Node":
+                continue
+            arguments = raw_event.get("args")
+            if not isinstance(arguments, dict):
+                raise RuntimeError("Sona quality execution profile omits node placement")
+            node_provider = arguments.get("provider")
+            if not isinstance(node_provider, str):
+                raise RuntimeError("Sona quality execution profile omits node placement")
+            node_providers.append(node_provider)
+        if not node_providers or set(node_providers) != {"CUDAExecutionProvider"}:
+            raise RuntimeError("Sona quality execution profile contains non-CUDA nodes")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Sona quality execution profile is unavailable") from error
+    finally:
+        if profile_path is None and session is not None:
+            with suppress(Exception):
+                session.end_profiling()
+        shutil.rmtree(profile_directory, ignore_errors=True)
 
 
 def _load_committed_artifact(

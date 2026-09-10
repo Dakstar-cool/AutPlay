@@ -59,6 +59,7 @@ _CATALOG_AGGREGATES: Final = frozenset(
     {"ARTIST", "ARTIST_CREDIT", "RECORDING_ARTIST_CREDIT", "RELEASE_ARTIST_CREDIT"}
 )
 _MISSING: Final = object()
+_SYNC_OWNER_PUBLISH_LOCK_NAMESPACE: Final = b"autplay-sync-owner-publish-v1"
 _SAFE_KEY = __import__("re").compile(r"^[a-z][a-z0-9_]{0,99}$")
 _FORBIDDEN = __import__("re").compile(
     r"(^|_)(access_token|refresh_token|token|authorization|password|credential|private_url|"
@@ -107,6 +108,7 @@ class CatalogArtistSyncPublisher:
     """Publish deterministic catalog closure events without deriving identity from names."""
 
     def publish(self, session: Session, owner_user_id: UUID) -> int:
+        _acquire_sync_owner_publish_lock(session, owner_user_id)
         resolved_refs = list(
             session.scalars(
                 select(UserTrackRefRow)
@@ -446,8 +448,10 @@ class SyncService:
             "RECOMMENDATION_IMPRESSION_RECORDED",
             "RECOMMENDATION_FEEDBACK_RECORDED",
         }:
+            _acquire_sync_owner_publish_lock(session, principal.user_id)
             return self._apply_interaction(session, principal, event, request_id)
         if kind in _GENERIC_EVENT_TYPES or kind == "AGGREGATE_DELETED":
+            _acquire_sync_owner_publish_lock(session, principal.user_id)
             return self._apply_generic(session, principal, event, request_id)
         return _rejected(event, "UNSUPPORTED_EVENT_TYPE", request_id)
 
@@ -652,13 +656,51 @@ class SyncService:
         ):
             return _rejected(event, "UNSUPPORTED_AGGREGATE_TYPE", request_id)
         try:
-            row, operation = self._generic_row(session, principal, event)
-            session.flush()
+            # Keep the durable inbox/terminal ACK in the outer transaction while
+            # guaranteeing that a rejected projection cannot leak dirty ORM state.
+            # SQLAlchemy flushes the pending inbox before opening this savepoint;
+            # all projection reads and mutations happen only after it exists.
+            with session.begin_nested():
+                row, operation, rebalanced_entries = self._generic_row(session, principal, event)
+                for related_entry in rebalanced_entries:
+                    related_entry.updated_at = _now()
+                session.flush()
+                # PostgreSQL owns row_version through BEFORE UPDATE triggers. A
+                # collision-free rebalance can require two physical updates, so
+                # refresh the final versions before constructing ACK/event facts.
+                session.refresh(row, attribute_names=["row_version"])
+                for related_entry in rebalanced_entries:
+                    session.refresh(related_entry, attribute_names=["row_version"])
+                    session.add(
+                        SyncEventRow(
+                            event_id=uuid5(
+                                NAMESPACE_URL,
+                                "autplay:playlist-rebalance-v1:"
+                                f"{event['event_id']}:{related_entry.playlist_entry_id}:"
+                                f"{related_entry.row_version}:{related_entry.position_key}",
+                            ),
+                            user_id=principal.user_id,
+                            origin_device_id=principal.device_id,
+                            event_type="PLAYLIST_ENTRY_MOVED",
+                            schema_version=event["schema_version"],
+                            aggregate_type="PLAYLIST_ENTRY",
+                            aggregate_id=related_entry.playlist_entry_id,
+                            payload=_playlist_entry_sync_payload(related_entry),
+                            operation="UPSERT",
+                            server_row_version=related_entry.row_version,
+                        )
+                    )
+                session.flush()
         except _ProjectionConflict:
             return _conflict(event)
         except KeyError, TypeError, ValueError:
             return _rejected(event, "REQUEST_VALIDATION_FAILED", request_id)
         version = int(getattr(row, "row_version", 1))
+        published_payload = (
+            _playlist_entry_sync_payload(row)
+            if operation == "UPSERT" and isinstance(row, PlaylistEntryRow)
+            else event["payload"]
+        )
         session.add(
             SyncEventRow(
                 event_id=event["event_id"],
@@ -668,7 +710,7 @@ class SyncService:
                 schema_version=event["schema_version"],
                 aggregate_type=event["aggregate_type"],
                 aggregate_id=event["aggregate_id"],
-                payload=event["payload"],
+                payload=published_payload,
                 operation=operation,
                 server_row_version=version,
             )
@@ -689,7 +731,7 @@ class SyncService:
 
     def _generic_row(
         self, session: Session, principal: Principal, event: dict[str, Any]
-    ) -> tuple[object, str]:
+    ) -> tuple[object, str, tuple[PlaylistEntryRow, ...]]:
         kind, payload, aggregate_id, base, now = (
             event["event_type"],
             event["payload"],
@@ -725,7 +767,7 @@ class SyncService:
             else:
                 row.deleted_at = now
             row.updated_at, row.row_version = now, row.row_version + 1
-            return row, "DELETE"
+            return row, "DELETE", ()
         if kind == "USER_TRACK_REF_CREATED":
             if base is not None:
                 raise _ProjectionConflict
@@ -758,19 +800,23 @@ class SyncService:
                         updated_at=now,
                     )
                 )
-            return row, "UPSERT"
+            return row, "UPSERT", ()
         if kind == "USER_TRACK_REF_PATCHED":
             row = _owned_row(session, UserTrackRefRow, aggregate_id, principal)
             _require_version(row, base)
-            for field, key in (
-                ("raw_title", "title"),
-                ("raw_artist", "artist"),
-                ("raw_album", "album"),
-            ):
-                if key in payload:
-                    setattr(row, field, _optional_string(payload, key))
+            updates = {
+                field: _optional_string(payload, key)
+                for field, key in (
+                    ("raw_title", "title"),
+                    ("raw_artist", "artist"),
+                    ("raw_album", "album"),
+                )
+                if key in payload
+            }
+            for field, value in updates.items():
+                setattr(row, field, value)
             row.updated_at, row.row_version = now, row.row_version + 1
-            return row, "UPSERT"
+            return row, "UPSERT", ()
         if kind == "LIBRARY_ENTRY_UPSERTED":
             row = session.get(LibraryEntryRow, aggregate_id)
             ref_id = _uuid_optional_alias(payload, "user_track_ref_id", "local_user_track_ref_id")
@@ -810,20 +856,22 @@ class SyncService:
                 row.removed_at = now if isinstance(removed, int) else None
                 row.updated_at = now
                 row.row_version += 1
-            return row, "UPSERT"
+            return row, "UPSERT", ()
         if kind == "USER_TRACK_PREFERENCE_SET":
             ref_id = _uuid_optional_alias(payload, "user_track_ref_id", "local_user_track_ref_id")
             if ref_id is None:
                 ref_id = aggregate_id
             _owned_row(session, UserTrackRefRow, ref_id, principal)
+            preference = _enum(payload, "preference", {"NEUTRAL", "LIKED", "DISLIKED"})
+            excluded_from_taste = _boolean(payload, "excluded_from_taste")
             row = session.get(UserTrackPreferenceRow, ref_id)
             if row is None:
                 if base is not None:
                     raise _ProjectionConflict
                 row = UserTrackPreferenceRow(
                     user_track_ref_id=ref_id,
-                    preference=_enum(payload, "preference", {"NEUTRAL", "LIKED", "DISLIKED"}),
-                    excluded_from_taste=_boolean(payload, "excluded_from_taste"),
+                    preference=preference,
+                    excluded_from_taste=excluded_from_taste,
                     updated_by_event_id=None,
                     created_at=now,
                     updated_at=now,
@@ -831,11 +879,11 @@ class SyncService:
                 session.add(row)
             else:
                 _require_version(row, base) if base is not None else None
-                row.preference = _enum(payload, "preference", {"NEUTRAL", "LIKED", "DISLIKED"})
-                row.excluded_from_taste = _boolean(payload, "excluded_from_taste")
+                row.preference = preference
+                row.excluded_from_taste = excluded_from_taste
                 row.updated_by_event_id, row.updated_at = None, now
                 row.row_version += 1
-            return row, "UPSERT"
+            return row, "UPSERT", ()
         if kind == "PLAYLIST_CREATED":
             if base is not None:
                 raise _ProjectionConflict
@@ -850,16 +898,20 @@ class SyncService:
                 updated_at=now,
             )
             session.add(row)
-            return row, "UPSERT"
+            return row, "UPSERT", ()
         if kind == "PLAYLIST_METADATA_PATCHED":
             row = _owned_row(session, PlaylistRow, aggregate_id, principal)
             _require_version(row, base)
-            if "name" in payload:
-                row.name = _string(payload, "name", 500)
-            if "description" in payload:
-                row.description = _optional_string(payload, "description")
+            has_name = "name" in payload
+            has_description = "description" in payload
+            name = _string(payload, "name", 500) if has_name else ""
+            description = _optional_string(payload, "description") if has_description else None
+            if has_name:
+                row.name = name
+            if has_description:
+                row.description = description
             row.updated_at, row.row_version = now, row.row_version + 1
-            return row, "UPSERT"
+            return row, "UPSERT", ()
         if kind not in {"PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED"}:
             raise ValueError("event type")
         entry = session.get(PlaylistEntryRow, aggregate_id)
@@ -876,13 +928,14 @@ class SyncService:
             if ref_id is None:
                 raise ValueError("track ref required")
             _owned_row(session, UserTrackRefRow, ref_id, principal)
+            position_key, rebalanced_entries = _playlist_position(
+                session, playlist.playlist_id, payload, aggregate_id
+            )
             entry = PlaylistEntryRow(
                 playlist_entry_id=aggregate_id,
                 playlist_id=playlist.playlist_id,
                 user_track_ref_id=ref_id,
-                position_key=_playlist_position(
-                    session, playlist.playlist_id, payload, aggregate_id
-                ),
+                position_key=position_key,
                 added_by_user_id=principal.user_id,
                 added_at=now,
                 created_at=now,
@@ -893,12 +946,12 @@ class SyncService:
             if entry.playlist_id != playlist.playlist_id:
                 raise _ProjectionConflict
             _require_version(entry, base)
-            entry.position_key = _playlist_position(
+            entry.position_key, rebalanced_entries = _playlist_position(
                 session, playlist.playlist_id, payload, aggregate_id
             )
             entry.updated_at = now
             entry.row_version += 1
-        return entry, "UPSERT"
+        return entry, "UPSERT", rebalanced_entries
 
     def pull(self, principal: Principal, body: dict[str, Any]) -> dict[str, Any]:
         device_id, epoch = _binding(principal, body)
@@ -1374,11 +1427,11 @@ def _enum_default(value: dict[str, Any], key: str, allowed: set[str], default: s
 
 def _playlist_position(
     session: Session, playlist_id: UUID, payload: dict[str, Any], self_id: UUID
-) -> str:
+) -> tuple[str, tuple[PlaylistEntryRow, ...]]:
     """Translate P07's before-local-id intent into a bounded, deterministic server key."""
     explicit = payload.get("position_key")
     if explicit is not None:
-        return _string(payload, "position_key", 128)
+        return _string(payload, "position_key", 128), ()
     before = _uuid_optional_alias(
         payload, "before_playlist_entry_id", "before_local_playlist_entry_id"
     )
@@ -1388,17 +1441,62 @@ def _playlist_position(
             .where(
                 PlaylistEntryRow.playlist_id == playlist_id,
                 PlaylistEntryRow.removed_at.is_(None),
-                PlaylistEntryRow.playlist_entry_id != self_id,
             )
             .order_by(PlaylistEntryRow.position_key, PlaylistEntryRow.playlist_entry_id)
         )
     )
+    self_row = next((item for item in rows if item.playlist_entry_id == self_id), None)
+    ordered = [item for item in rows if item.playlist_entry_id != self_id]
     if before is not None:
-        for index, item in enumerate(rows):
-            if item.playlist_entry_id == before:
-                return f"{index:08d}:{self_id}"
-        raise _ProjectionConflict
-    return f"{len(rows):08d}:{self_id}"
+        insert_at = next(
+            (index for index, item in enumerate(ordered) if item.playlist_entry_id == before),
+            -1,
+        )
+        if insert_at < 0:
+            raise _ProjectionConflict
+    else:
+        insert_at = len(ordered)
+
+    ordered_entries: list[PlaylistEntryRow | None] = list(ordered)
+    ordered_entries.insert(insert_at, self_row)
+    desired_keys = {
+        item.playlist_entry_id: f"{index:08d}:{item.playlist_entry_id}"
+        for index, item in enumerate(ordered_entries)
+        if item is not None
+    }
+    changed = [item for item in rows if item.position_key != desired_keys[item.playlist_entry_id]]
+
+    # Re-key changed rows in two phases so the active unique index never observes
+    # a collision. Unchanged rows keep their version and produce no synthetic event.
+    for item in changed:
+        item.position_key = f"~rebalance:{item.playlist_entry_id}"
+    if changed:
+        session.flush()
+    for item in changed:
+        item.position_key = desired_keys[item.playlist_entry_id]
+    return (
+        f"{insert_at:08d}:{self_id}",
+        tuple(item for item in changed if item.playlist_entry_id != self_id),
+    )
+
+
+def _playlist_entry_sync_payload(entry: PlaylistEntryRow) -> dict[str, Any]:
+    return {
+        "server_playlist_id": str(entry.playlist_id),
+        "server_user_track_ref_id": str(entry.user_track_ref_id),
+        "position_key": entry.position_key,
+    }
+
+
+def _acquire_sync_owner_publish_lock(session: Session, owner_user_id: UUID) -> None:
+    """Serialize commit-ordered sync publication for one owner transaction."""
+
+    lock_key = int.from_bytes(
+        hashlib.sha256(_SYNC_OWNER_PUBLISH_LOCK_NAMESPACE + owner_user_id.bytes).digest()[:8],
+        "big",
+        signed=True,
+    )
+    session.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
 def _validate_attribution(

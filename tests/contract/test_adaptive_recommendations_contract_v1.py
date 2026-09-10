@@ -19,9 +19,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "recommendations" / "v1"
 POLICY = SCHEMAS / "contract-policy.json"
 CONTRACT = ROOT / "docs" / "design" / "AutPlay_Adaptive_Recommendation_Contract_v1.md"
 ADR = ROOT / "docs" / "adr" / "ADR-048-r1a-adaptive-recommendation-profile.md"
-HANDOFF = (
-    ROOT / "docs" / "implementation" / "HANDOFF_POST_MVP_R1A_ADAPTIVE_RECOMMENDATIONS_CONTRACT.md"
-)
+ACCEPTANCE_EVIDENCE = SCHEMAS / "acceptance-evidence.json"
 
 REQUIRED_SCHEMAS = {
     "adaptive-profile.schema.json",
@@ -377,6 +375,7 @@ def snapshot_with_exact_canonical_size(target_bytes: int) -> dict[str, Any]:
 
 def test_r1a_is_accepted_contract_only_and_runtime_unimplemented() -> None:
     policy = load(POLICY)
+    evidence = load(ACCEPTANCE_EVIDENCE)
     assert policy["status"] == "ACCEPTED_RUNTIME_NOT_IMPLEMENTED"
     assert policy["implementation_effect"] == "NONE"
     assert policy["serving_pipeline_unchanged"] is True
@@ -386,7 +385,18 @@ def test_r1a_is_accepted_contract_only_and_runtime_unimplemented() -> None:
 
     assert "ACCEPTED; RUNTIME NOT IMPLEMENTED" in CONTRACT.read_text(encoding="utf-8")
     assert "Status: Accepted by the user on 2026-09-03" in ADR.read_text(encoding="utf-8")
-    assert "`PASS`" in HANDOFF.read_text(encoding="utf-8")
+    assert evidence == {
+        "schema_version": 1,
+        "milestone": "POST_MVP_R1A_ADAPTIVE_RECOMMENDATIONS_CONTRACT",
+        "status": "ACCEPTED_CONTRACT_ONLY",
+        "accepted_at": "2026-09-03",
+        "runtime_effect": "NONE",
+        "versioned_sources": [
+            "contracts/recommendations/v1/contract-policy.json",
+            "docs/adr/ADR-048-r1a-adaptive-recommendation-profile.md",
+            "docs/design/AutPlay_Adaptive_Recommendation_Contract_v1.md",
+        ],
+    }
 
 
 def test_schema_set_is_strict_versioned_and_runtime_inactive() -> None:

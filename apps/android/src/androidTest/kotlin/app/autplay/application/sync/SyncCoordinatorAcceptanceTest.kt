@@ -85,12 +85,13 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals(1, db.syncDao().observeOpenConflictCount(profile.value).first())
     }
 
-    @Test fun backlogLeasesOnlyFirstHundredContiguousEvents() = runBlocking {
+    @Test fun backlogDrainsInBoundedHundredEventBatchesAndSignalsRetry() = runBlocking {
         seed(profile, "cursor-a")
         (1L..101L).forEach { db.journalDao().insert(pending(it)) }
         val transport = FakeTransport()
-        SyncCoordinator(db, transport).run(binding)
-        assertEquals(100, transport.sent.size)
+        assertFalse(SyncCoordinator(db, transport).run(binding))
+        assertEquals(101, transport.sent.size)
+        assertEquals(listOf(100, 1), transport.sentBatchSizes)
         assertEquals(101L, db.journalDao().event(pending(101).eventId)?.deviceSequence)
         assertEquals("PENDING", db.journalDao().event(pending(101).eventId)?.state)
     }
@@ -646,8 +647,10 @@ class SyncCoordinatorAcceptanceTest {
         private val throwSessionRequired: Boolean = false,
     ) : SyncTransport {
         val sent = mutableListOf<app.autplay.data.local.entity.OfflineJournalEventEntity>()
+        val sentBatchSizes = mutableListOf<Int>()
         override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {
             sent += events
+            sentBatchSizes += events.size
             if (throwSessionRequired) throw SessionRequiredException()
             return acks
         }

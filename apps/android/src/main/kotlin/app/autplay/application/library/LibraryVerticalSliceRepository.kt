@@ -410,7 +410,7 @@ class LibraryVerticalSliceRepository(
         if (rowProfileId != (binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID)) missing()
     }
     /** Runs only after Room commits; WorkManager enqueue failure cannot roll back local intent. */
-    private fun scheduleSync(binding: ClientEventBinding?, result: SliceMutationResult) {
+    private suspend fun scheduleSync(binding: ClientEventBinding?, result: SliceMutationResult) {
         if (!result.journaled || binding == null) return
         syncScheduler?.enqueue(DeferredWorkRequest(DeferredWorkKind.SYNC, DeferredWorkSubject.Device(binding.deviceId), binding.serverProfileId))
     }

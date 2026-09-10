@@ -17,9 +17,16 @@ class HitmoProvider:
     name = "hitmo"
     requires_rights_confirmation = True
 
-    def __init__(self, *, cdp_endpoint: str, timeout_seconds: float = 120.0) -> None:
+    def __init__(
+        self,
+        *,
+        cdp_endpoint: str,
+        timeout_seconds: float = 120.0,
+        max_bytes: int = 200 * 1024 * 1024,
+    ) -> None:
         self._cdp_endpoint = cdp_endpoint
         self._timeout_seconds = timeout_seconds
+        self._max_bytes = max_bytes
 
     def acquire(self, item: PlaylistItem, output_directory: Path) -> AcquiredArtifact:
         try:
@@ -29,6 +36,7 @@ class HitmoProvider:
                 download_dir=output_directory,
                 result_limit=5,
                 timeout_seconds=self._timeout_seconds,
+                max_bytes=self._max_bytes,
                 download=True,
                 rights_confirmed=True,
                 browser="cdp",

@@ -13,14 +13,14 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.autplay.AutPlayRuntime
-import app.autplay.application.server.ServerFeatureRepository
+import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.local.entity.VaultUploadIntentEntity
-import app.autplay.data.security.AndroidKeystoreCredentialStore
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.ServerProfileId
 import java.io.InputStream
 import java.security.MessageDigest
 import java.time.Duration
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -38,15 +38,18 @@ class VaultUploadWorker(
         if (intent.state in TERMINAL_STATES) return@withContext Result.success()
 
         val settings = applicationNonSecretSettingsStore(applicationContext).settings.first()
-        if (settings.activeServerProfileId?.value != intent.serverProfileId || settings.serverBaseUrl == null) {
+        val user = settings.activeUserId
+        val device = settings.deviceId
+        if (
+            settings.activeServerProfileId?.value != intent.serverProfileId ||
+            settings.serverBaseUrl == null || user == null || device == null
+        ) {
             dao.upsertVaultUploadIntent(intent.copy(state = "BLOCKED_PROFILE", lastErrorCode = "SERVER_PROFILE_NOT_ACTIVE", updatedAtMs = now()))
             return@withContext Result.failure()
         }
-        val server = ServerFeatureRepository(
-            settings.serverBaseUrl,
-            settings.streamBaseUrl ?: settings.serverBaseUrl,
-            ServerProfileId(intent.serverProfileId),
-            AndroidKeystoreCredentialStore(applicationContext),
+        val server = AutPlayRuntime.serverFeatures(
+            applicationContext,
+            ClientEventBinding(user, device, ServerProfileId(intent.serverProfileId)),
         )
 
         try {
@@ -121,6 +124,8 @@ class VaultUploadWorker(
             val completed = server.completeVaultUpload(remote.uploadId)
             check(completed.offset == digest.size) { "VAULT_UPLOAD_INCOMPLETE" }
             settleOrPoll(intent, completed) ?: error("VAULT_UPLOAD_STATE_INVALID")
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             val code = stableErrorCode(error)
             val current = dao.vaultUploadIntent(intentId) ?: intent

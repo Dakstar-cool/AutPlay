@@ -5,17 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .orchestrator import PlaylistDownloadError, download_playlist
+from .providers.base import AcquisitionProvider
 from .providers.hitmo_provider import HitmoProvider
 from .providers.jamendo_provider import JamendoProvider
 from .providers.yandex_provider import YandexProvider
 from .providers.yt_dlp import YtDlpProvider
 
 
-def _bounded_integer(minimum: int, maximum: int):
+def _bounded_integer(minimum: int, maximum: int) -> Callable[[str], int]:
     def parse(value: str) -> int:
         try:
             parsed = int(value)
@@ -71,7 +72,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(arguments: Sequence[str] | None = None) -> int:
     try:
         options = _parser().parse_args(arguments)
-        providers = []
+        providers: list[AcquisitionProvider] = []
         rights: set[str] = set()
         if not options.disable_jamendo:
             if options.jamendo_client_id_file is None:
@@ -89,6 +90,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 HitmoProvider(
                     cdp_endpoint=options.hitmo_cdp_endpoint,
                     timeout_seconds=options.hitmo_timeout,
+                    max_bytes=options.max_mib * 1024 * 1024,
                 )
             )
             if options.hitmo_rights_confirmed:

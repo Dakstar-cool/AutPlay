@@ -1,0 +1,1695 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "serialNumber": "urn:uuid:2ef14f73-4a65-42ad-ab16-cbaefd3be725",
+  "metadata": {
+    "timestamp": "2026-09-08T22:28:46.223311600Z",
+    "tools": [
+      {
+        "vendor": "Astral Software Inc.",
+        "name": "uv",
+        "version": "0.12.3"
+      }
+    ],
+    "component": {
+      "type": "library",
+      "bom-ref": "autplay-sona-training-1@0.0.0",
+      "name": "autplay-sona-training",
+      "version": "0.0.0",
+      "properties": [
+        {
+          "name": "uv:package:is_project_root",
+          "value": "true"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "alembic-2@1.19.1",
+      "name": "alembic",
+      "version": "1.19.1",
+      "purl": "pkg:pypi/alembic@1.19.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "annotated-doc-3@0.0.5",
+      "name": "annotated-doc",
+      "version": "0.0.5",
+      "purl": "pkg:pypi/annotated-doc@0.0.5",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "annotated-types-4@0.8.0",
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "purl": "pkg:pypi/annotated-types@0.8.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "anyio-5@4.15.0",
+      "name": "anyio",
+      "version": "4.15.0",
+      "purl": "pkg:pypi/anyio@4.15.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "argon2-cffi-6@25.1.0",
+      "name": "argon2-cffi",
+      "version": "25.1.0",
+      "purl": "pkg:pypi/argon2-cffi@25.1.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "argon2-cffi-bindings-7@26.1.0",
+      "name": "argon2-cffi-bindings",
+      "version": "26.1.0",
+      "purl": "pkg:pypi/argon2-cffi-bindings@26.1.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "ast-serialize-8@0.9.0",
+      "name": "ast-serialize",
+      "version": "0.9.0",
+      "purl": "pkg:pypi/ast-serialize@0.9.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "autplay-server-9@0.0.0",
+      "name": "autplay-server",
+      "version": "0.0.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "cffi-10@2.1.1",
+      "name": "cffi",
+      "version": "2.1.1",
+      "purl": "pkg:pypi/cffi@2.1.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "click-11@8.5.0",
+      "name": "click",
+      "version": "8.5.0",
+      "purl": "pkg:pypi/click@8.5.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "colorama-12@0.4.6",
+      "name": "colorama",
+      "version": "0.4.6",
+      "purl": "pkg:pypi/colorama@0.4.6",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'AMD64' and sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "cryptography-13@50.0.0",
+      "name": "cryptography",
+      "version": "50.0.0",
+      "purl": "pkg:pypi/cryptography@50.0.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "cuda-bindings-14@13.3.1",
+      "name": "cuda-bindings",
+      "version": "13.3.1",
+      "purl": "pkg:pypi/cuda-bindings@13.3.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "cuda-pathfinder-15@1.8.1",
+      "name": "cuda-pathfinder",
+      "version": "1.8.1",
+      "purl": "pkg:pypi/cuda-pathfinder@1.8.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "cuda-toolkit-16@13.0.3.0",
+      "name": "cuda-toolkit",
+      "version": "13.0.3.0",
+      "purl": "pkg:pypi/cuda-toolkit@13.0.3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "fastapi-17@0.141.1",
+      "name": "fastapi",
+      "version": "0.141.1",
+      "purl": "pkg:pypi/fastapi@0.141.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "filelock-18@3.32.5",
+      "name": "filelock",
+      "version": "3.32.5",
+      "purl": "pkg:pypi/filelock@3.32.5",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "flatbuffers-19@25.12.19",
+      "name": "flatbuffers",
+      "version": "25.12.19",
+      "purl": "pkg:pypi/flatbuffers@25.12.19",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "fsspec-20@2026.7.0",
+      "name": "fsspec",
+      "version": "2026.7.0",
+      "purl": "pkg:pypi/fsspec@2026.7.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "greenlet-21@3.5.5",
+      "name": "greenlet",
+      "version": "3.5.5",
+      "purl": "pkg:pypi/greenlet@3.5.5",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "h11-22@0.16.0",
+      "name": "h11",
+      "version": "0.16.0",
+      "purl": "pkg:pypi/h11@0.16.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "idna-23@3.19",
+      "name": "idna",
+      "version": "3.19",
+      "purl": "pkg:pypi/idna@3.19",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "iniconfig-24@2.3.0",
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "purl": "pkg:pypi/iniconfig@2.3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "jinja2-25@3.1.6",
+      "name": "jinja2",
+      "version": "3.1.6",
+      "purl": "pkg:pypi/jinja2@3.1.6",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "librt-26@0.15.0",
+      "name": "librt",
+      "version": "0.15.0",
+      "purl": "pkg:pypi/librt@0.15.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'AMD64' and platform_python_implementation != 'PyPy' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mako-27@1.4.1",
+      "name": "mako",
+      "version": "1.4.1",
+      "purl": "pkg:pypi/mako@1.4.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "markupsafe-28@3.0.3",
+      "name": "markupsafe",
+      "version": "3.0.3",
+      "purl": "pkg:pypi/markupsafe@3.0.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "ml-dtypes-29@0.6.0",
+      "name": "ml-dtypes",
+      "version": "0.6.0",
+      "purl": "pkg:pypi/ml-dtypes@0.6.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mpmath-30@1.3.0",
+      "name": "mpmath",
+      "version": "1.3.0",
+      "purl": "pkg:pypi/mpmath@1.3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-31@2.3.0",
+      "name": "mypy",
+      "version": "2.3.0",
+      "purl": "pkg:pypi/mypy@2.3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-extensions-32@1.1.0",
+      "name": "mypy-extensions",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/mypy-extensions@1.1.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "networkx-33@3.6.1",
+      "name": "networkx",
+      "version": "3.6.1",
+      "purl": "pkg:pypi/networkx@3.6.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "numpy-34@2.5.2",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cublas-35@13.1.1.3",
+      "name": "nvidia-cublas",
+      "version": "13.1.1.3",
+      "purl": "pkg:pypi/nvidia-cublas@13.1.1.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cublas-cu12-36@12.9.2.10",
+      "name": "nvidia-cublas-cu12",
+      "version": "12.9.2.10",
+      "purl": "pkg:pypi/nvidia-cublas-cu12@12.9.2.10",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-cupti-37@13.0.85",
+      "name": "nvidia-cuda-cupti",
+      "version": "13.0.85",
+      "purl": "pkg:pypi/nvidia-cuda-cupti@13.0.85",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-nvrtc-38@13.0.88",
+      "name": "nvidia-cuda-nvrtc",
+      "version": "13.0.88",
+      "purl": "pkg:pypi/nvidia-cuda-nvrtc@13.0.88",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-nvrtc-cu12-39@12.9.86",
+      "name": "nvidia-cuda-nvrtc-cu12",
+      "version": "12.9.86",
+      "purl": "pkg:pypi/nvidia-cuda-nvrtc-cu12@12.9.86",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-runtime-40@13.0.96",
+      "name": "nvidia-cuda-runtime",
+      "version": "13.0.96",
+      "purl": "pkg:pypi/nvidia-cuda-runtime@13.0.96",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cuda-runtime-cu12-41@12.9.79",
+      "name": "nvidia-cuda-runtime-cu12",
+      "version": "12.9.79",
+      "purl": "pkg:pypi/nvidia-cuda-runtime-cu12@12.9.79",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cudnn-cu12-42@9.25.1.1",
+      "name": "nvidia-cudnn-cu12",
+      "version": "9.25.1.1",
+      "purl": "pkg:pypi/nvidia-cudnn-cu12@9.25.1.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cudnn-cu13-43@9.24.0.43",
+      "name": "nvidia-cudnn-cu13",
+      "version": "9.24.0.43",
+      "purl": "pkg:pypi/nvidia-cudnn-cu13@9.24.0.43",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cufft-44@12.0.0.61",
+      "name": "nvidia-cufft",
+      "version": "12.0.0.61",
+      "purl": "pkg:pypi/nvidia-cufft@12.0.0.61",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cufft-cu12-45@11.4.1.4",
+      "name": "nvidia-cufft-cu12",
+      "version": "11.4.1.4",
+      "purl": "pkg:pypi/nvidia-cufft-cu12@11.4.1.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cufile-46@1.15.1.6",
+      "name": "nvidia-cufile",
+      "version": "1.15.1.6",
+      "purl": "pkg:pypi/nvidia-cufile@1.15.1.6",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-curand-47@10.4.0.35",
+      "name": "nvidia-curand",
+      "version": "10.4.0.35",
+      "purl": "pkg:pypi/nvidia-curand@10.4.0.35",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-curand-cu12-48@10.3.10.19",
+      "name": "nvidia-curand-cu12",
+      "version": "10.3.10.19",
+      "purl": "pkg:pypi/nvidia-curand-cu12@10.3.10.19",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cusolver-49@12.0.4.66",
+      "name": "nvidia-cusolver",
+      "version": "12.0.4.66",
+      "purl": "pkg:pypi/nvidia-cusolver@12.0.4.66",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cusparse-50@12.6.3.3",
+      "name": "nvidia-cusparse",
+      "version": "12.6.3.3",
+      "purl": "pkg:pypi/nvidia-cusparse@12.6.3.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-cusparselt-cu13-51@0.8.1",
+      "name": "nvidia-cusparselt-cu13",
+      "version": "0.8.1",
+      "purl": "pkg:pypi/nvidia-cusparselt-cu13@0.8.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-nccl-cu13-52@2.30.7",
+      "name": "nvidia-nccl-cu13",
+      "version": "2.30.7",
+      "purl": "pkg:pypi/nvidia-nccl-cu13@2.30.7",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-nvjitlink-53@13.3.33",
+      "name": "nvidia-nvjitlink",
+      "version": "13.3.33",
+      "purl": "pkg:pypi/nvidia-nvjitlink@13.3.33",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-nvjitlink-cu12-54@12.9.86",
+      "name": "nvidia-nvjitlink-cu12",
+      "version": "12.9.86",
+      "purl": "pkg:pypi/nvidia-nvjitlink-cu12@12.9.86",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-nvshmem-cu13-55@3.4.5",
+      "name": "nvidia-nvshmem-cu13",
+      "version": "3.4.5",
+      "purl": "pkg:pypi/nvidia-nvshmem-cu13@3.4.5",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nvidia-nvtx-56@13.0.85",
+      "name": "nvidia-nvtx",
+      "version": "13.0.85",
+      "purl": "pkg:pypi/nvidia-nvtx@13.0.85",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnx-57@1.22.0",
+      "name": "onnx",
+      "version": "1.22.0",
+      "purl": "pkg:pypi/onnx@1.22.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnx-ir-58@1.0.0",
+      "name": "onnx-ir",
+      "version": "1.0.0",
+      "purl": "pkg:pypi/onnx-ir@1.0.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnxruntime-59@1.26.0",
+      "name": "onnxruntime",
+      "version": "1.26.0",
+      "purl": "pkg:pypi/onnxruntime@1.26.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'AMD64' and sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnxruntime-gpu-60@1.26.0",
+      "name": "onnxruntime-gpu",
+      "version": "1.26.0",
+      "purl": "pkg:pypi/onnxruntime-gpu@1.26.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnxscript-61@0.7.1",
+      "name": "onnxscript",
+      "version": "0.7.1",
+      "purl": "pkg:pypi/onnxscript@0.7.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "packaging-62@26.3",
+      "name": "packaging",
+      "version": "26.3",
+      "purl": "pkg:pypi/packaging@26.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pathspec-63@1.1.1",
+      "name": "pathspec",
+      "version": "1.1.1",
+      "purl": "pkg:pypi/pathspec@1.1.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pgvector-64@0.5.0",
+      "name": "pgvector",
+      "version": "0.5.0",
+      "purl": "pkg:pypi/pgvector@0.5.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pluggy-65@1.6.0",
+      "name": "pluggy",
+      "version": "1.6.0",
+      "purl": "pkg:pypi/pluggy@1.6.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "prometheus-client-66@0.25.0",
+      "name": "prometheus-client",
+      "version": "0.25.0",
+      "purl": "pkg:pypi/prometheus-client@0.25.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "protobuf-67@7.36.1",
+      "name": "protobuf",
+      "version": "7.36.1",
+      "purl": "pkg:pypi/protobuf@7.36.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "psycopg-68@3.3.4",
+      "name": "psycopg",
+      "version": "3.3.4",
+      "purl": "pkg:pypi/psycopg@3.3.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "psycopg-binary-69@3.3.4",
+      "name": "psycopg-binary",
+      "version": "3.3.4",
+      "purl": "pkg:pypi/psycopg-binary@3.3.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(implementation_name != 'pypy' and platform_machine == 'x86_64' and sys_platform == 'linux') or (implementation_name != 'pypy' and platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pycparser-70@3.0",
+      "name": "pycparser",
+      "version": "3.0",
+      "purl": "pkg:pypi/pycparser@3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(implementation_name != 'PyPy' and platform_machine == 'x86_64' and sys_platform == 'linux') or (implementation_name != 'PyPy' and platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pydantic-71@2.13.4",
+      "name": "pydantic",
+      "version": "2.13.4",
+      "purl": "pkg:pypi/pydantic@2.13.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pydantic-core-72@2.46.4",
+      "name": "pydantic-core",
+      "version": "2.46.4",
+      "purl": "pkg:pypi/pydantic-core@2.46.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pydantic-settings-73@2.15.0",
+      "name": "pydantic-settings",
+      "version": "2.15.0",
+      "purl": "pkg:pypi/pydantic-settings@2.15.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pygments-74@2.21.0",
+      "name": "pygments",
+      "version": "2.21.0",
+      "purl": "pkg:pypi/pygments@2.21.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pyjwt-75@2.13.0",
+      "name": "pyjwt",
+      "version": "2.13.0",
+      "purl": "pkg:pypi/pyjwt@2.13.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pytest-76@9.1.1",
+      "name": "pytest",
+      "version": "9.1.1",
+      "purl": "pkg:pypi/pytest@9.1.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "python-dotenv-77@1.2.3",
+      "name": "python-dotenv",
+      "version": "1.2.3",
+      "purl": "pkg:pypi/python-dotenv@1.2.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "python-multipart-78@0.0.32",
+      "name": "python-multipart",
+      "version": "0.0.32",
+      "purl": "pkg:pypi/python-multipart@0.0.32",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "rfc8785-79@0.1.4",
+      "name": "rfc8785",
+      "version": "0.1.4",
+      "purl": "pkg:pypi/rfc8785@0.1.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "ruff-80@0.16.2",
+      "name": "ruff",
+      "version": "0.16.2",
+      "purl": "pkg:pypi/ruff@0.16.2",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "setuptools-81@84.0.0",
+      "name": "setuptools",
+      "version": "84.0.0",
+      "purl": "pkg:pypi/setuptools@84.0.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "sqlalchemy-82@2.0.52",
+      "name": "sqlalchemy",
+      "version": "2.0.52",
+      "purl": "pkg:pypi/sqlalchemy@2.0.52",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "starlette-83@1.6.0",
+      "name": "starlette",
+      "version": "1.6.0",
+      "purl": "pkg:pypi/starlette@1.6.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "sympy-84@1.14.0",
+      "name": "sympy",
+      "version": "1.14.0",
+      "purl": "pkg:pypi/sympy@1.14.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "torch-85@2.14.0+cpu",
+      "name": "torch",
+      "version": "2.14.0+cpu",
+      "purl": "pkg:pypi/torch@2.14.0%2Bcpu?repository_url=https://download.pytorch.org/whl/cpu",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'AMD64' and sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "torch-86@2.14.0+cu130",
+      "name": "torch",
+      "version": "2.14.0+cu130",
+      "purl": "pkg:pypi/torch@2.14.0%2Bcu130?repository_url=https://download.pytorch.org/whl/cu130",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "triton-87@3.8.0",
+      "name": "triton",
+      "version": "3.8.0",
+      "purl": "pkg:pypi/triton@3.8.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'x86_64' and sys_platform == 'linux'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "typing-extensions-88@4.16.0",
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "purl": "pkg:pypi/typing-extensions@4.16.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "typing-inspection-89@0.4.4",
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "purl": "pkg:pypi/typing-inspection@0.4.4",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "tzdata-90@2026.3",
+      "name": "tzdata",
+      "version": "2026.3",
+      "purl": "pkg:pypi/tzdata@2026.3",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_machine == 'AMD64' and sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "uvicorn-91@0.51.0",
+      "name": "uvicorn",
+      "version": "0.51.0",
+      "purl": "pkg:pypi/uvicorn@0.51.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "alembic-2@1.19.1",
+      "dependsOn": [
+        "mako-27@1.4.1",
+        "sqlalchemy-82@2.0.52",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "annotated-doc-3@0.0.5"
+    },
+    {
+      "ref": "annotated-types-4@0.8.0"
+    },
+    {
+      "ref": "anyio-5@4.15.0",
+      "dependsOn": [
+        "idna-23@3.19",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "argon2-cffi-6@25.1.0",
+      "dependsOn": [
+        "argon2-cffi-bindings-7@26.1.0"
+      ]
+    },
+    {
+      "ref": "argon2-cffi-bindings-7@26.1.0",
+      "dependsOn": [
+        "cffi-10@2.1.1"
+      ]
+    },
+    {
+      "ref": "ast-serialize-8@0.9.0"
+    },
+    {
+      "ref": "autplay-server-9@0.0.0",
+      "dependsOn": [
+        "alembic-2@1.19.1",
+        "argon2-cffi-6@25.1.0",
+        "cryptography-13@50.0.0",
+        "fastapi-17@0.141.1",
+        "jinja2-25@3.1.6",
+        "onnx-57@1.22.0",
+        "pgvector-64@0.5.0",
+        "prometheus-client-66@0.25.0",
+        "psycopg-68@3.3.4",
+        "pydantic-71@2.13.4",
+        "pydantic-settings-73@2.15.0",
+        "pyjwt-75@2.13.0",
+        "python-multipart-78@0.0.32",
+        "rfc8785-79@0.1.4",
+        "sqlalchemy-82@2.0.52",
+        "uvicorn-91@0.51.0"
+      ]
+    },
+    {
+      "ref": "autplay-sona-training-1@0.0.0",
+      "dependsOn": [
+        "autplay-server-9@0.0.0",
+        "mypy-31@2.3.0",
+        "onnx-57@1.22.0",
+        "onnxruntime-59@1.26.0",
+        "onnxruntime-gpu-60@1.26.0",
+        "onnxscript-61@0.7.1",
+        "pytest-76@9.1.1",
+        "ruff-80@0.16.2",
+        "torch-85@2.14.0+cpu",
+        "torch-86@2.14.0+cu130"
+      ]
+    },
+    {
+      "ref": "cffi-10@2.1.1",
+      "dependsOn": [
+        "pycparser-70@3.0"
+      ]
+    },
+    {
+      "ref": "click-11@8.5.0"
+    },
+    {
+      "ref": "colorama-12@0.4.6"
+    },
+    {
+      "ref": "cryptography-13@50.0.0",
+      "dependsOn": [
+        "cffi-10@2.1.1"
+      ]
+    },
+    {
+      "ref": "cuda-bindings-14@13.3.1",
+      "dependsOn": [
+        "cuda-pathfinder-15@1.8.1"
+      ]
+    },
+    {
+      "ref": "cuda-pathfinder-15@1.8.1"
+    },
+    {
+      "ref": "cuda-toolkit-16@13.0.3.0",
+      "dependsOn": [
+        "nvidia-cublas-35@13.1.1.3",
+        "nvidia-cuda-cupti-37@13.0.85",
+        "nvidia-cuda-nvrtc-38@13.0.88",
+        "nvidia-cuda-runtime-40@13.0.96",
+        "nvidia-cufft-44@12.0.0.61",
+        "nvidia-cufile-46@1.15.1.6",
+        "nvidia-curand-47@10.4.0.35",
+        "nvidia-cusolver-49@12.0.4.66",
+        "nvidia-cusparse-50@12.6.3.3",
+        "nvidia-nvjitlink-53@13.3.33",
+        "nvidia-nvtx-56@13.0.85"
+      ]
+    },
+    {
+      "ref": "fastapi-17@0.141.1",
+      "dependsOn": [
+        "annotated-doc-3@0.0.5",
+        "pydantic-71@2.13.4",
+        "starlette-83@1.6.0",
+        "typing-extensions-88@4.16.0",
+        "typing-inspection-89@0.4.4"
+      ]
+    },
+    {
+      "ref": "filelock-18@3.32.5"
+    },
+    {
+      "ref": "flatbuffers-19@25.12.19"
+    },
+    {
+      "ref": "fsspec-20@2026.7.0"
+    },
+    {
+      "ref": "greenlet-21@3.5.5"
+    },
+    {
+      "ref": "h11-22@0.16.0"
+    },
+    {
+      "ref": "idna-23@3.19"
+    },
+    {
+      "ref": "iniconfig-24@2.3.0"
+    },
+    {
+      "ref": "jinja2-25@3.1.6",
+      "dependsOn": [
+        "markupsafe-28@3.0.3"
+      ]
+    },
+    {
+      "ref": "librt-26@0.15.0"
+    },
+    {
+      "ref": "mako-27@1.4.1",
+      "dependsOn": [
+        "markupsafe-28@3.0.3"
+      ]
+    },
+    {
+      "ref": "markupsafe-28@3.0.3"
+    },
+    {
+      "ref": "ml-dtypes-29@0.6.0",
+      "dependsOn": [
+        "numpy-34@2.5.2"
+      ]
+    },
+    {
+      "ref": "mpmath-30@1.3.0"
+    },
+    {
+      "ref": "mypy-31@2.3.0",
+      "dependsOn": [
+        "ast-serialize-8@0.9.0",
+        "librt-26@0.15.0",
+        "mypy-extensions-32@1.1.0",
+        "pathspec-63@1.1.1",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "mypy-extensions-32@1.1.0"
+    },
+    {
+      "ref": "networkx-33@3.6.1"
+    },
+    {
+      "ref": "numpy-34@2.5.2"
+    },
+    {
+      "ref": "nvidia-cublas-35@13.1.1.3",
+      "dependsOn": [
+        "nvidia-cuda-nvrtc-38@13.0.88"
+      ]
+    },
+    {
+      "ref": "nvidia-cublas-cu12-36@12.9.2.10",
+      "dependsOn": [
+        "nvidia-cuda-nvrtc-cu12-39@12.9.86"
+      ]
+    },
+    {
+      "ref": "nvidia-cuda-cupti-37@13.0.85"
+    },
+    {
+      "ref": "nvidia-cuda-nvrtc-38@13.0.88"
+    },
+    {
+      "ref": "nvidia-cuda-nvrtc-cu12-39@12.9.86"
+    },
+    {
+      "ref": "nvidia-cuda-runtime-40@13.0.96"
+    },
+    {
+      "ref": "nvidia-cuda-runtime-cu12-41@12.9.79"
+    },
+    {
+      "ref": "nvidia-cudnn-cu12-42@9.25.1.1",
+      "dependsOn": [
+        "nvidia-cublas-cu12-36@12.9.2.10"
+      ]
+    },
+    {
+      "ref": "nvidia-cudnn-cu13-43@9.24.0.43",
+      "dependsOn": [
+        "nvidia-cublas-35@13.1.1.3"
+      ]
+    },
+    {
+      "ref": "nvidia-cufft-44@12.0.0.61",
+      "dependsOn": [
+        "nvidia-nvjitlink-53@13.3.33"
+      ]
+    },
+    {
+      "ref": "nvidia-cufft-cu12-45@11.4.1.4",
+      "dependsOn": [
+        "nvidia-nvjitlink-cu12-54@12.9.86"
+      ]
+    },
+    {
+      "ref": "nvidia-cufile-46@1.15.1.6"
+    },
+    {
+      "ref": "nvidia-curand-47@10.4.0.35"
+    },
+    {
+      "ref": "nvidia-curand-cu12-48@10.3.10.19"
+    },
+    {
+      "ref": "nvidia-cusolver-49@12.0.4.66",
+      "dependsOn": [
+        "nvidia-cublas-35@13.1.1.3",
+        "nvidia-cusparse-50@12.6.3.3",
+        "nvidia-nvjitlink-53@13.3.33"
+      ]
+    },
+    {
+      "ref": "nvidia-cusparse-50@12.6.3.3",
+      "dependsOn": [
+        "nvidia-nvjitlink-53@13.3.33"
+      ]
+    },
+    {
+      "ref": "nvidia-cusparselt-cu13-51@0.8.1"
+    },
+    {
+      "ref": "nvidia-nccl-cu13-52@2.30.7"
+    },
+    {
+      "ref": "nvidia-nvjitlink-53@13.3.33"
+    },
+    {
+      "ref": "nvidia-nvjitlink-cu12-54@12.9.86"
+    },
+    {
+      "ref": "nvidia-nvshmem-cu13-55@3.4.5"
+    },
+    {
+      "ref": "nvidia-nvtx-56@13.0.85"
+    },
+    {
+      "ref": "onnx-57@1.22.0",
+      "dependsOn": [
+        "ml-dtypes-29@0.6.0",
+        "numpy-34@2.5.2",
+        "protobuf-67@7.36.1",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "onnx-ir-58@1.0.0",
+      "dependsOn": [
+        "ml-dtypes-29@0.6.0",
+        "numpy-34@2.5.2",
+        "onnx-57@1.22.0",
+        "sympy-84@1.14.0",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "onnxruntime-59@1.26.0",
+      "dependsOn": [
+        "flatbuffers-19@25.12.19",
+        "numpy-34@2.5.2",
+        "packaging-62@26.3",
+        "protobuf-67@7.36.1"
+      ]
+    },
+    {
+      "ref": "onnxruntime-gpu-60@1.26.0",
+      "dependsOn": [
+        "flatbuffers-19@25.12.19",
+        "numpy-34@2.5.2",
+        "nvidia-cuda-nvrtc-cu12-39@12.9.86",
+        "nvidia-cuda-runtime-cu12-41@12.9.79",
+        "nvidia-cudnn-cu12-42@9.25.1.1",
+        "nvidia-cufft-cu12-45@11.4.1.4",
+        "nvidia-curand-cu12-48@10.3.10.19",
+        "packaging-62@26.3",
+        "protobuf-67@7.36.1"
+      ]
+    },
+    {
+      "ref": "onnxscript-61@0.7.1",
+      "dependsOn": [
+        "ml-dtypes-29@0.6.0",
+        "numpy-34@2.5.2",
+        "onnx-57@1.22.0",
+        "onnx-ir-58@1.0.0",
+        "packaging-62@26.3",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "packaging-62@26.3"
+    },
+    {
+      "ref": "pathspec-63@1.1.1"
+    },
+    {
+      "ref": "pgvector-64@0.5.0"
+    },
+    {
+      "ref": "pluggy-65@1.6.0"
+    },
+    {
+      "ref": "prometheus-client-66@0.25.0"
+    },
+    {
+      "ref": "protobuf-67@7.36.1"
+    },
+    {
+      "ref": "psycopg-68@3.3.4",
+      "dependsOn": [
+        "psycopg-binary-69@3.3.4",
+        "tzdata-90@2026.3"
+      ]
+    },
+    {
+      "ref": "psycopg-binary-69@3.3.4"
+    },
+    {
+      "ref": "pycparser-70@3.0"
+    },
+    {
+      "ref": "pydantic-71@2.13.4",
+      "dependsOn": [
+        "annotated-types-4@0.8.0",
+        "pydantic-core-72@2.46.4",
+        "typing-extensions-88@4.16.0",
+        "typing-inspection-89@0.4.4"
+      ]
+    },
+    {
+      "ref": "pydantic-core-72@2.46.4",
+      "dependsOn": [
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "pydantic-settings-73@2.15.0",
+      "dependsOn": [
+        "pydantic-71@2.13.4",
+        "python-dotenv-77@1.2.3",
+        "typing-inspection-89@0.4.4"
+      ]
+    },
+    {
+      "ref": "pygments-74@2.21.0"
+    },
+    {
+      "ref": "pyjwt-75@2.13.0"
+    },
+    {
+      "ref": "pytest-76@9.1.1",
+      "dependsOn": [
+        "colorama-12@0.4.6",
+        "iniconfig-24@2.3.0",
+        "packaging-62@26.3",
+        "pluggy-65@1.6.0",
+        "pygments-74@2.21.0"
+      ]
+    },
+    {
+      "ref": "python-dotenv-77@1.2.3"
+    },
+    {
+      "ref": "python-multipart-78@0.0.32"
+    },
+    {
+      "ref": "rfc8785-79@0.1.4"
+    },
+    {
+      "ref": "ruff-80@0.16.2"
+    },
+    {
+      "ref": "setuptools-81@84.0.0"
+    },
+    {
+      "ref": "sqlalchemy-82@2.0.52",
+      "dependsOn": [
+        "greenlet-21@3.5.5",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "starlette-83@1.6.0",
+      "dependsOn": [
+        "anyio-5@4.15.0"
+      ]
+    },
+    {
+      "ref": "sympy-84@1.14.0",
+      "dependsOn": [
+        "mpmath-30@1.3.0"
+      ]
+    },
+    {
+      "ref": "torch-85@2.14.0+cpu",
+      "dependsOn": [
+        "filelock-18@3.32.5",
+        "fsspec-20@2026.7.0",
+        "jinja2-25@3.1.6",
+        "networkx-33@3.6.1",
+        "setuptools-81@84.0.0",
+        "sympy-84@1.14.0",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "torch-86@2.14.0+cu130",
+      "dependsOn": [
+        "cuda-bindings-14@13.3.1",
+        "cuda-toolkit-16@13.0.3.0",
+        "filelock-18@3.32.5",
+        "fsspec-20@2026.7.0",
+        "jinja2-25@3.1.6",
+        "networkx-33@3.6.1",
+        "nvidia-cudnn-cu13-43@9.24.0.43",
+        "nvidia-cusparselt-cu13-51@0.8.1",
+        "nvidia-nccl-cu13-52@2.30.7",
+        "nvidia-nvshmem-cu13-55@3.4.5",
+        "setuptools-81@84.0.0",
+        "sympy-84@1.14.0",
+        "triton-87@3.8.0",
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "triton-87@3.8.0"
+    },
+    {
+      "ref": "typing-extensions-88@4.16.0"
+    },
+    {
+      "ref": "typing-inspection-89@0.4.4",
+      "dependsOn": [
+        "typing-extensions-88@4.16.0"
+      ]
+    },
+    {
+      "ref": "tzdata-90@2026.3"
+    },
+    {
+      "ref": "uvicorn-91@0.51.0",
+      "dependsOn": [
+        "click-11@8.5.0",
+        "h11-22@0.16.0"
+      ]
+    }
+  ]
+}

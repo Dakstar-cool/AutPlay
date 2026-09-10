@@ -1,0 +1,49 @@
+name: CI / SONA training
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-training-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  training:
+    name: SONA training / Linux CUDA environment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: true
+          cache-dependency-glob: |
+            gpu/training/uv.lock
+            server/uv.lock
+
+      - name: Synchronize isolated training project
+        run: uv sync --project gpu/training --frozen --python 3.14.7
+
+      - name: Check training lock and static gates
+        run: |
+          uv lock --project gpu/training --check
+          uv run --project gpu/training --frozen ruff check gpu/training
+          uv run --project gpu/training --frozen ruff format --check gpu/training
+          uv run --project gpu/training --frozen python -m mypy --config-file gpu/training/pyproject.toml gpu/training/src gpu/training/tests
+
+      - name: Run training tests without hardware claims
+        run: uv run --project gpu/training --frozen python -m pytest -c gpu/training/pyproject.toml gpu/training/tests

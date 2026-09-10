@@ -2,9 +2,9 @@
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
   "version": 1,
-  "serialNumber": "urn:uuid:63eea296-7820-47ab-8252-023f2fcb856f",
+  "serialNumber": "urn:uuid:2892fe14-29b9-4bea-b0e5-72ddf7021b32",
   "metadata": {
-    "timestamp": "2026-08-24T09:15:10.101595400Z",
+    "timestamp": "2026-09-08T22:28:46.167782100Z",
     "tools": [
       {
         "vendor": "Astral Software Inc.",
@@ -199,133 +199,147 @@
     },
     {
       "type": "library",
-      "bom-ref": "mypy-24@2.3.0",
+      "bom-ref": "ml-dtypes-24@0.6.0",
+      "name": "ml-dtypes",
+      "version": "0.6.0",
+      "purl": "pkg:pypi/ml-dtypes@0.6.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-25@2.3.0",
       "name": "mypy",
       "version": "2.3.0",
       "purl": "pkg:pypi/mypy@2.3.0"
     },
     {
       "type": "library",
-      "bom-ref": "mypy-extensions-25@1.1.0",
+      "bom-ref": "mypy-extensions-26@1.1.0",
       "name": "mypy-extensions",
       "version": "1.1.0",
       "purl": "pkg:pypi/mypy-extensions@1.1.0"
     },
     {
       "type": "library",
-      "bom-ref": "numpy-26@2.5.2",
+      "bom-ref": "numpy-27@2.5.2",
       "name": "numpy",
       "version": "2.5.2",
       "purl": "pkg:pypi/numpy@2.5.2"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-cublas-cu12-27@12.9.2.10",
+      "bom-ref": "nvidia-cublas-cu12-28@12.9.2.10",
       "name": "nvidia-cublas-cu12",
       "version": "12.9.2.10",
       "purl": "pkg:pypi/nvidia-cublas-cu12@12.9.2.10"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-cuda-nvrtc-cu12-28@12.9.86",
+      "bom-ref": "nvidia-cuda-nvrtc-cu12-29@12.9.86",
       "name": "nvidia-cuda-nvrtc-cu12",
       "version": "12.9.86",
       "purl": "pkg:pypi/nvidia-cuda-nvrtc-cu12@12.9.86"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-cuda-runtime-cu12-29@12.9.79",
+      "bom-ref": "nvidia-cuda-runtime-cu12-30@12.9.79",
       "name": "nvidia-cuda-runtime-cu12",
       "version": "12.9.79",
       "purl": "pkg:pypi/nvidia-cuda-runtime-cu12@12.9.79"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-cudnn-cu12-30@9.24.0.43",
+      "bom-ref": "nvidia-cudnn-cu12-31@9.24.0.43",
       "name": "nvidia-cudnn-cu12",
       "version": "9.24.0.43",
       "purl": "pkg:pypi/nvidia-cudnn-cu12@9.24.0.43"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-cufft-cu12-31@11.4.1.4",
+      "bom-ref": "nvidia-cufft-cu12-32@11.4.1.4",
       "name": "nvidia-cufft-cu12",
       "version": "11.4.1.4",
       "purl": "pkg:pypi/nvidia-cufft-cu12@11.4.1.4"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-curand-cu12-32@10.3.10.19",
+      "bom-ref": "nvidia-curand-cu12-33@10.3.10.19",
       "name": "nvidia-curand-cu12",
       "version": "10.3.10.19",
       "purl": "pkg:pypi/nvidia-curand-cu12@10.3.10.19"
     },
     {
       "type": "library",
-      "bom-ref": "nvidia-nvjitlink-cu12-33@12.9.86",
+      "bom-ref": "nvidia-nvjitlink-cu12-34@12.9.86",
       "name": "nvidia-nvjitlink-cu12",
       "version": "12.9.86",
       "purl": "pkg:pypi/nvidia-nvjitlink-cu12@12.9.86"
     },
     {
       "type": "library",
-      "bom-ref": "onnxruntime-gpu-34@1.26.0",
+      "bom-ref": "onnx-35@1.22.0",
+      "name": "onnx",
+      "version": "1.22.0",
+      "purl": "pkg:pypi/onnx@1.22.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "onnxruntime-gpu-36@1.26.0",
       "name": "onnxruntime-gpu",
       "version": "1.26.0",
       "purl": "pkg:pypi/onnxruntime-gpu@1.26.0"
     },
     {
       "type": "library",
-      "bom-ref": "packaging-35@26.3",
+      "bom-ref": "packaging-37@26.3",
       "name": "packaging",
       "version": "26.3",
       "purl": "pkg:pypi/packaging@26.3"
     },
     {
       "type": "library",
-      "bom-ref": "pathspec-36@1.1.1",
+      "bom-ref": "pathspec-38@1.1.1",
       "name": "pathspec",
       "version": "1.1.1",
       "purl": "pkg:pypi/pathspec@1.1.1"
     },
     {
       "type": "library",
-      "bom-ref": "pgvector-37@0.5.0",
+      "bom-ref": "pgvector-39@0.5.0",
       "name": "pgvector",
       "version": "0.5.0",
       "purl": "pkg:pypi/pgvector@0.5.0"
     },
     {
       "type": "library",
-      "bom-ref": "pluggy-38@1.6.0",
+      "bom-ref": "pluggy-40@1.6.0",
       "name": "pluggy",
       "version": "1.6.0",
       "purl": "pkg:pypi/pluggy@1.6.0"
     },
     {
       "type": "library",
-      "bom-ref": "prometheus-client-39@0.25.0",
+      "bom-ref": "prometheus-client-41@0.25.0",
       "name": "prometheus-client",
       "version": "0.25.0",
       "purl": "pkg:pypi/prometheus-client@0.25.0"
     },
     {
       "type": "library",
-      "bom-ref": "protobuf-40@7.35.1",
+      "bom-ref": "protobuf-42@7.35.1",
       "name": "protobuf",
       "version": "7.35.1",
       "purl": "pkg:pypi/protobuf@7.35.1"
     },
     {
       "type": "library",
-      "bom-ref": "psycopg-41@3.3.4",
+      "bom-ref": "psycopg-43@3.3.4",
       "name": "psycopg",
       "version": "3.3.4",
       "purl": "pkg:pypi/psycopg@3.3.4"
     },
     {
       "type": "library",
-      "bom-ref": "psycopg-binary-42@3.3.4",
+      "bom-ref": "psycopg-binary-44@3.3.4",
       "name": "psycopg-binary",
       "version": "3.3.4",
       "purl": "pkg:pypi/psycopg-binary@3.3.4",
@@ -338,7 +352,7 @@
     },
     {
       "type": "library",
-      "bom-ref": "pycparser-43@3.0",
+      "bom-ref": "pycparser-45@3.0",
       "name": "pycparser",
       "version": "3.0",
       "purl": "pkg:pypi/pycparser@3.0",
@@ -351,105 +365,105 @@
     },
     {
       "type": "library",
-      "bom-ref": "pydantic-44@2.13.4",
+      "bom-ref": "pydantic-46@2.13.4",
       "name": "pydantic",
       "version": "2.13.4",
       "purl": "pkg:pypi/pydantic@2.13.4"
     },
     {
       "type": "library",
-      "bom-ref": "pydantic-core-45@2.46.4",
+      "bom-ref": "pydantic-core-47@2.46.4",
       "name": "pydantic-core",
       "version": "2.46.4",
       "purl": "pkg:pypi/pydantic-core@2.46.4"
     },
     {
       "type": "library",
-      "bom-ref": "pydantic-settings-46@2.15.0",
+      "bom-ref": "pydantic-settings-48@2.15.0",
       "name": "pydantic-settings",
       "version": "2.15.0",
       "purl": "pkg:pypi/pydantic-settings@2.15.0"
     },
     {
       "type": "library",
-      "bom-ref": "pygments-47@2.20.0",
+      "bom-ref": "pygments-49@2.20.0",
       "name": "pygments",
       "version": "2.20.0",
       "purl": "pkg:pypi/pygments@2.20.0"
     },
     {
       "type": "library",
-      "bom-ref": "pyjwt-48@2.13.0",
+      "bom-ref": "pyjwt-50@2.13.0",
       "name": "pyjwt",
       "version": "2.13.0",
       "purl": "pkg:pypi/pyjwt@2.13.0"
     },
     {
       "type": "library",
-      "bom-ref": "pytest-49@9.1.1",
+      "bom-ref": "pytest-51@9.1.1",
       "name": "pytest",
       "version": "9.1.1",
       "purl": "pkg:pypi/pytest@9.1.1"
     },
     {
       "type": "library",
-      "bom-ref": "python-dotenv-50@1.2.3",
+      "bom-ref": "python-dotenv-52@1.2.3",
       "name": "python-dotenv",
       "version": "1.2.3",
       "purl": "pkg:pypi/python-dotenv@1.2.3"
     },
     {
       "type": "library",
-      "bom-ref": "python-multipart-51@0.0.32",
+      "bom-ref": "python-multipart-53@0.0.32",
       "name": "python-multipart",
       "version": "0.0.32",
       "purl": "pkg:pypi/python-multipart@0.0.32"
     },
     {
       "type": "library",
-      "bom-ref": "rfc8785-52@0.1.4",
+      "bom-ref": "rfc8785-54@0.1.4",
       "name": "rfc8785",
       "version": "0.1.4",
       "purl": "pkg:pypi/rfc8785@0.1.4"
     },
     {
       "type": "library",
-      "bom-ref": "ruff-53@0.16.2",
+      "bom-ref": "ruff-55@0.16.2",
       "name": "ruff",
       "version": "0.16.2",
       "purl": "pkg:pypi/ruff@0.16.2"
     },
     {
       "type": "library",
-      "bom-ref": "sqlalchemy-54@2.0.52",
+      "bom-ref": "sqlalchemy-56@2.0.52",
       "name": "sqlalchemy",
       "version": "2.0.52",
       "purl": "pkg:pypi/sqlalchemy@2.0.52"
     },
     {
       "type": "library",
-      "bom-ref": "starlette-55@1.6.0",
+      "bom-ref": "starlette-57@1.6.0",
       "name": "starlette",
       "version": "1.6.0",
       "purl": "pkg:pypi/starlette@1.6.0"
     },
     {
       "type": "library",
-      "bom-ref": "typing-extensions-56@4.16.0",
+      "bom-ref": "typing-extensions-58@4.16.0",
       "name": "typing-extensions",
       "version": "4.16.0",
       "purl": "pkg:pypi/typing-extensions@4.16.0"
     },
     {
       "type": "library",
-      "bom-ref": "typing-inspection-57@0.4.4",
+      "bom-ref": "typing-inspection-59@0.4.4",
       "name": "typing-inspection",
       "version": "0.4.4",
       "purl": "pkg:pypi/typing-inspection@0.4.4"
     },
     {
       "type": "library",
-      "bom-ref": "tzdata-58@2026.3",
+      "bom-ref": "tzdata-60@2026.3",
       "name": "tzdata",
       "version": "2026.3",
       "purl": "pkg:pypi/tzdata@2026.3",
@@ -462,7 +476,7 @@
     },
     {
       "type": "library",
-      "bom-ref": "uvicorn-59@0.51.0",
+      "bom-ref": "uvicorn-61@0.51.0",
       "name": "uvicorn",
       "version": "0.51.0",
       "purl": "pkg:pypi/uvicorn@0.51.0"
@@ -473,8 +487,8 @@
       "ref": "alembic-2@1.19.1",
       "dependsOn": [
         "mako-22@1.4.1",
-        "sqlalchemy-54@2.0.52",
-        "typing-extensions-56@4.16.0"
+        "sqlalchemy-56@2.0.52",
+        "typing-extensions-58@4.16.0"
       ]
     },
     {
@@ -508,10 +522,10 @@
       "ref": "autplay-gpu-worker-1@0.0.0",
       "dependsOn": [
         "autplay-server-9@0.0.0",
-        "mypy-24@2.3.0",
-        "onnxruntime-gpu-34@1.26.0",
-        "pytest-49@9.1.1",
-        "ruff-53@0.16.2"
+        "mypy-25@2.3.0",
+        "onnxruntime-gpu-36@1.26.0",
+        "pytest-51@9.1.1",
+        "ruff-55@0.16.2"
       ]
     },
     {
@@ -522,22 +536,23 @@
         "cryptography-13@50.0.0",
         "fastapi-14@0.141.1",
         "jinja2-20@3.1.6",
-        "pgvector-37@0.5.0",
-        "prometheus-client-39@0.25.0",
-        "psycopg-41@3.3.4",
-        "pydantic-44@2.13.4",
-        "pydantic-settings-46@2.15.0",
-        "pyjwt-48@2.13.0",
-        "python-multipart-51@0.0.32",
-        "rfc8785-52@0.1.4",
-        "sqlalchemy-54@2.0.52",
-        "uvicorn-59@0.51.0"
+        "onnx-35@1.22.0",
+        "pgvector-39@0.5.0",
+        "prometheus-client-41@0.25.0",
+        "psycopg-43@3.3.4",
+        "pydantic-46@2.13.4",
+        "pydantic-settings-48@2.15.0",
+        "pyjwt-50@2.13.0",
+        "python-multipart-53@0.0.32",
+        "rfc8785-54@0.1.4",
+        "sqlalchemy-56@2.0.52",
+        "uvicorn-61@0.51.0"
       ]
     },
     {
       "ref": "cffi-10@2.1.1",
       "dependsOn": [
-        "pycparser-43@3.0"
+        "pycparser-45@3.0"
       ]
     },
     {
@@ -559,10 +574,10 @@
       "ref": "fastapi-14@0.141.1",
       "dependsOn": [
         "annotated-doc-3@0.0.5",
-        "pydantic-44@2.13.4",
-        "starlette-55@1.6.0",
-        "typing-extensions-56@4.16.0",
-        "typing-inspection-57@0.4.4"
+        "pydantic-46@2.13.4",
+        "starlette-57@1.6.0",
+        "typing-extensions-58@4.16.0",
+        "typing-inspection-59@0.4.4"
       ]
     },
     {
@@ -599,174 +614,189 @@
       "ref": "markupsafe-23@3.0.3"
     },
     {
-      "ref": "mypy-24@2.3.0",
+      "ref": "ml-dtypes-24@0.6.0",
+      "dependsOn": [
+        "numpy-27@2.5.2"
+      ]
+    },
+    {
+      "ref": "mypy-25@2.3.0",
       "dependsOn": [
         "ast-serialize-8@0.8.0",
         "librt-21@0.15.0",
-        "mypy-extensions-25@1.1.0",
-        "pathspec-36@1.1.1",
-        "typing-extensions-56@4.16.0"
+        "mypy-extensions-26@1.1.0",
+        "pathspec-38@1.1.1",
+        "typing-extensions-58@4.16.0"
       ]
     },
     {
-      "ref": "mypy-extensions-25@1.1.0"
+      "ref": "mypy-extensions-26@1.1.0"
     },
     {
-      "ref": "numpy-26@2.5.2"
+      "ref": "numpy-27@2.5.2"
     },
     {
-      "ref": "nvidia-cublas-cu12-27@12.9.2.10",
+      "ref": "nvidia-cublas-cu12-28@12.9.2.10",
       "dependsOn": [
-        "nvidia-cuda-nvrtc-cu12-28@12.9.86"
+        "nvidia-cuda-nvrtc-cu12-29@12.9.86"
       ]
     },
     {
-      "ref": "nvidia-cuda-nvrtc-cu12-28@12.9.86"
+      "ref": "nvidia-cuda-nvrtc-cu12-29@12.9.86"
     },
     {
-      "ref": "nvidia-cuda-runtime-cu12-29@12.9.79"
+      "ref": "nvidia-cuda-runtime-cu12-30@12.9.79"
     },
     {
-      "ref": "nvidia-cudnn-cu12-30@9.24.0.43",
+      "ref": "nvidia-cudnn-cu12-31@9.24.0.43",
       "dependsOn": [
-        "nvidia-cublas-cu12-27@12.9.2.10"
+        "nvidia-cublas-cu12-28@12.9.2.10"
       ]
     },
     {
-      "ref": "nvidia-cufft-cu12-31@11.4.1.4",
+      "ref": "nvidia-cufft-cu12-32@11.4.1.4",
       "dependsOn": [
-        "nvidia-nvjitlink-cu12-33@12.9.86"
+        "nvidia-nvjitlink-cu12-34@12.9.86"
       ]
     },
     {
-      "ref": "nvidia-curand-cu12-32@10.3.10.19"
+      "ref": "nvidia-curand-cu12-33@10.3.10.19"
     },
     {
-      "ref": "nvidia-nvjitlink-cu12-33@12.9.86"
+      "ref": "nvidia-nvjitlink-cu12-34@12.9.86"
     },
     {
-      "ref": "onnxruntime-gpu-34@1.26.0",
+      "ref": "onnx-35@1.22.0",
+      "dependsOn": [
+        "ml-dtypes-24@0.6.0",
+        "numpy-27@2.5.2",
+        "protobuf-42@7.35.1",
+        "typing-extensions-58@4.16.0"
+      ]
+    },
+    {
+      "ref": "onnxruntime-gpu-36@1.26.0",
       "dependsOn": [
         "flatbuffers-15@25.12.19",
-        "numpy-26@2.5.2",
-        "nvidia-cuda-nvrtc-cu12-28@12.9.86",
-        "nvidia-cuda-runtime-cu12-29@12.9.79",
-        "nvidia-cudnn-cu12-30@9.24.0.43",
-        "nvidia-cufft-cu12-31@11.4.1.4",
-        "nvidia-curand-cu12-32@10.3.10.19",
-        "packaging-35@26.3",
-        "protobuf-40@7.35.1"
+        "numpy-27@2.5.2",
+        "nvidia-cuda-nvrtc-cu12-29@12.9.86",
+        "nvidia-cuda-runtime-cu12-30@12.9.79",
+        "nvidia-cudnn-cu12-31@9.24.0.43",
+        "nvidia-cufft-cu12-32@11.4.1.4",
+        "nvidia-curand-cu12-33@10.3.10.19",
+        "packaging-37@26.3",
+        "protobuf-42@7.35.1"
       ]
     },
     {
-      "ref": "packaging-35@26.3"
+      "ref": "packaging-37@26.3"
     },
     {
-      "ref": "pathspec-36@1.1.1"
+      "ref": "pathspec-38@1.1.1"
     },
     {
-      "ref": "pgvector-37@0.5.0"
+      "ref": "pgvector-39@0.5.0"
     },
     {
-      "ref": "pluggy-38@1.6.0"
+      "ref": "pluggy-40@1.6.0"
     },
     {
-      "ref": "prometheus-client-39@0.25.0"
+      "ref": "prometheus-client-41@0.25.0"
     },
     {
-      "ref": "protobuf-40@7.35.1"
+      "ref": "protobuf-42@7.35.1"
     },
     {
-      "ref": "psycopg-41@3.3.4",
+      "ref": "psycopg-43@3.3.4",
       "dependsOn": [
-        "psycopg-binary-42@3.3.4",
-        "tzdata-58@2026.3"
+        "psycopg-binary-44@3.3.4",
+        "tzdata-60@2026.3"
       ]
     },
     {
-      "ref": "psycopg-binary-42@3.3.4"
+      "ref": "psycopg-binary-44@3.3.4"
     },
     {
-      "ref": "pycparser-43@3.0"
+      "ref": "pycparser-45@3.0"
     },
     {
-      "ref": "pydantic-44@2.13.4",
+      "ref": "pydantic-46@2.13.4",
       "dependsOn": [
         "annotated-types-4@0.8.0",
-        "pydantic-core-45@2.46.4",
-        "typing-extensions-56@4.16.0",
-        "typing-inspection-57@0.4.4"
+        "pydantic-core-47@2.46.4",
+        "typing-extensions-58@4.16.0",
+        "typing-inspection-59@0.4.4"
       ]
     },
     {
-      "ref": "pydantic-core-45@2.46.4",
+      "ref": "pydantic-core-47@2.46.4",
       "dependsOn": [
-        "typing-extensions-56@4.16.0"
+        "typing-extensions-58@4.16.0"
       ]
     },
     {
-      "ref": "pydantic-settings-46@2.15.0",
+      "ref": "pydantic-settings-48@2.15.0",
       "dependsOn": [
-        "pydantic-44@2.13.4",
-        "python-dotenv-50@1.2.3",
-        "typing-inspection-57@0.4.4"
+        "pydantic-46@2.13.4",
+        "python-dotenv-52@1.2.3",
+        "typing-inspection-59@0.4.4"
       ]
     },
     {
-      "ref": "pygments-47@2.20.0"
+      "ref": "pygments-49@2.20.0"
     },
     {
-      "ref": "pyjwt-48@2.13.0"
+      "ref": "pyjwt-50@2.13.0"
     },
     {
-      "ref": "pytest-49@9.1.1",
+      "ref": "pytest-51@9.1.1",
       "dependsOn": [
         "colorama-12@0.4.6",
         "iniconfig-19@2.3.0",
-        "packaging-35@26.3",
-        "pluggy-38@1.6.0",
-        "pygments-47@2.20.0"
+        "packaging-37@26.3",
+        "pluggy-40@1.6.0",
+        "pygments-49@2.20.0"
       ]
     },
     {
-      "ref": "python-dotenv-50@1.2.3"
+      "ref": "python-dotenv-52@1.2.3"
     },
     {
-      "ref": "python-multipart-51@0.0.32"
+      "ref": "python-multipart-53@0.0.32"
     },
     {
-      "ref": "rfc8785-52@0.1.4"
+      "ref": "rfc8785-54@0.1.4"
     },
     {
-      "ref": "ruff-53@0.16.2"
+      "ref": "ruff-55@0.16.2"
     },
     {
-      "ref": "sqlalchemy-54@2.0.52",
+      "ref": "sqlalchemy-56@2.0.52",
       "dependsOn": [
         "greenlet-16@3.5.5",
-        "typing-extensions-56@4.16.0"
+        "typing-extensions-58@4.16.0"
       ]
     },
     {
-      "ref": "starlette-55@1.6.0",
+      "ref": "starlette-57@1.6.0",
       "dependsOn": [
         "anyio-5@4.14.2"
       ]
     },
     {
-      "ref": "typing-extensions-56@4.16.0"
+      "ref": "typing-extensions-58@4.16.0"
     },
     {
-      "ref": "typing-inspection-57@0.4.4",
+      "ref": "typing-inspection-59@0.4.4",
       "dependsOn": [
-        "typing-extensions-56@4.16.0"
+        "typing-extensions-58@4.16.0"
       ]
     },
     {
-      "ref": "tzdata-58@2026.3"
+      "ref": "tzdata-60@2026.3"
     },
     {
-      "ref": "uvicorn-59@0.51.0",
+      "ref": "uvicorn-61@0.51.0",
       "dependsOn": [
         "click-11@8.4.2",
         "h11-17@0.16.0"

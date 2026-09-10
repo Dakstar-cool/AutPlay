@@ -28,6 +28,7 @@ class TrackOutcome:
     fallback_used: bool
     error_code: str | None = None
     artifact_ref: str | None = None
+    identity_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +57,10 @@ class _ProviderLane:
             try:
                 artifact = self.provider.acquire(item, output_directory)
             except ProviderMiss as error:
-                if error.provider != self.provider.name or error.code != "exact_match_not_found":
+                if error.provider != self.provider.name or error.code not in {
+                    "exact_match_not_found",
+                    "ambiguous_match",
+                }:
                     return self._failure("result_invalid")
                 self.consecutive_failures = 0
                 return _Attempt("miss", self.provider.name, str(error))
@@ -132,6 +136,7 @@ def _download_item(
             attempt.provider,
             index > 0,
             artifact_ref=attempt.artifact.artifact_ref,
+            identity_version=attempt.artifact.identity_version,
         )
 
     if last_failure is not None:

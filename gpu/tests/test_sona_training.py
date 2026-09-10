@@ -25,7 +25,6 @@ from autplay.domain.sona_training import (
     SonaTeacherTarget,
     SonaTrainingExample,
 )
-
 from autplay_gpu.sona_training import compute_sona_losses, pack_sona_training_examples
 
 OWNER = UUID("00000000-0000-7000-8000-000000000001")

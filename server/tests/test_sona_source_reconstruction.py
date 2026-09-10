@@ -49,15 +49,9 @@ def _listening(
     completion_ratio: float | None = 0.9,
     excluded_from_taste: bool = False,
 ) -> Sona0026AcceptedEvent:
-    causal = (
-        {
-            "recommendation_request_id": REQUEST,
-            "impression_event_id": IMPRESSION,
-            "recommendation_source_rank": 3,
-        }
-        if event_origin == "RECOMMENDED"
-        else {}
-    )
+    recommendation_request_id = REQUEST if event_origin == "RECOMMENDED" else None
+    impression_event_id = IMPRESSION if event_origin == "RECOMMENDED" else None
+    recommendation_source_rank = 3 if event_origin == "RECOMMENDED" else None
     return Sona0026AcceptedEvent(
         source_event_id=source_event_id,
         owner_user_id=OWNER,
@@ -74,7 +68,9 @@ def _listening(
         played_ms=played_ms,
         completion_ratio=completion_ratio,
         excluded_from_taste=excluded_from_taste,
-        **causal,
+        recommendation_request_id=recommendation_request_id,
+        impression_event_id=impression_event_id,
+        recommendation_source_rank=recommendation_source_rank,
     )
 
 

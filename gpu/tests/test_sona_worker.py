@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -26,15 +27,14 @@ from autplay.domain.sona import (
     SonaRankedCandidate,
     SonaSemanticId,
 )
-from starlette.types import ASGIApp, Message, Scope
-
 from autplay_gpu.embedding import ModelArtifactError
 from autplay_gpu.sona_artifacts import (
     SonaArtifactStore,
     VerifiedSonaArtifact,
     _bounded_read,
 )
-from autplay_gpu.sona_http import create_sona_shadow_app
+from autplay_gpu.sona_http import SONA_INFERENCE_PATH, create_sona_shadow_app
+from starlette.types import ASGIApp, Message, Scope
 
 ARTIFACT = "a" * 64
 MODEL = "b" * 64
@@ -230,6 +230,93 @@ def test_worker_app_accepts_only_matching_canonical_model_request(tmp_path: Path
     )
     assert status == 400
     assert json.loads(response) == {"error": "sona_request_invalid"}
+
+
+def test_worker_bounds_waiters_and_applies_total_inference_deadline(tmp_path: Path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SlowRuntime(_Runtime):
+        def infer(self, request: SonaInferenceRequest) -> SonaInferenceOutput:
+            entered.set()
+            release.wait(timeout=2)
+            return super().infer(request)
+
+    artifact = VerifiedSonaArtifact(tmp_path, ARTIFACT, MODEL, TOKENIZER, False)
+    app = create_sona_shadow_app(
+        SlowRuntime(),
+        artifact,
+        max_admitted_inferences=2,
+        inference_timeout_seconds=0.1,
+    )
+    body = rfc8785.dumps(sona_request_envelope(_request()))
+    headers = ((b"x-autplay-sona-model-manifest", MODEL.encode("ascii")),)
+
+    async def scenario() -> tuple[tuple[int, bytes], tuple[int, bytes], tuple[int, bytes]]:
+        first = asyncio.create_task(_asgi_post(app, SONA_INFERENCE_PATH, body, headers))
+        while not entered.is_set():
+            await asyncio.sleep(0.001)
+        second = asyncio.create_task(_asgi_post(app, SONA_INFERENCE_PATH, body, headers))
+        await asyncio.sleep(0.005)
+        third = await _asgi_post(app, SONA_INFERENCE_PATH, body, headers)
+        first_result, second_result = await asyncio.gather(first, second)
+        return first_result, second_result, third
+
+    try:
+        first, second, third = asyncio.run(scenario())
+    finally:
+        release.set()
+
+    assert first[0] == 504
+    assert second[0] == 504
+    assert json.loads(first[1]) == {"error": "sona_inference_timeout"}
+    assert third[0] == 429
+    assert json.loads(third[1]) == {"error": "sona_inference_busy"}
+
+
+def test_cancelled_client_retains_admission_until_inference_stops(tmp_path: Path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SlowRuntime(_Runtime):
+        def infer(self, request: SonaInferenceRequest) -> SonaInferenceOutput:
+            entered.set()
+            release.wait(timeout=2)
+            return super().infer(request)
+
+    artifact = VerifiedSonaArtifact(tmp_path, ARTIFACT, MODEL, TOKENIZER, False)
+    app = create_sona_shadow_app(
+        SlowRuntime(),
+        artifact,
+        max_admitted_inferences=1,
+        inference_timeout_seconds=1,
+    )
+    body = rfc8785.dumps(sona_request_envelope(_request()))
+    headers = ((b"x-autplay-sona-model-manifest", MODEL.encode("ascii")),)
+
+    async def scenario() -> tuple[int, bytes]:
+        cancelled = asyncio.create_task(_asgi_post(app, SONA_INFERENCE_PATH, body, headers))
+        while not entered.is_set():
+            await asyncio.sleep(0.001)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        busy = await _asgi_post(app, SONA_INFERENCE_PATH, body, headers)
+        assert busy[0] == 429
+        release.set()
+        for _ in range(100):
+            recovered = await _asgi_post(app, SONA_INFERENCE_PATH, body, headers)
+            if recovered[0] != 429:
+                return recovered
+            await asyncio.sleep(0.005)
+        return recovered
+
+    try:
+        recovered = asyncio.run(scenario())
+    finally:
+        release.set()
+
+    assert recovered[0] == 200
 
 
 async def _asgi_post(

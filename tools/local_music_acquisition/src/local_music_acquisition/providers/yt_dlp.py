@@ -36,7 +36,11 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
             raise RuntimeError("yt_dlp_process_tree_termination_failed")
     else:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            kill_process_group = getattr(os, "killpg", None)
+            signal_kill = getattr(signal, "SIGKILL", None)
+            if not callable(kill_process_group) or not isinstance(signal_kill, int):
+                raise OSError("POSIX process-group termination is unavailable")
+            kill_process_group(process.pid, signal_kill)
         except ProcessLookupError:
             pass
         except OSError as error:

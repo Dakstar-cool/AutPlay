@@ -56,7 +56,7 @@ jobs:
         run: uv run --project gpu --frozen ruff format --check gpu/src gpu/tests
 
       - name: Type-check isolated GPU project
-        run: uv run --project gpu --frozen mypy gpu/src gpu/tests
+        run: uv run --project gpu --frozen python -m mypy --config-file gpu/pyproject.toml gpu/src gpu/tests
 
       - name: Test isolated GPU project without accelerator claims
-        run: uv run --project gpu --frozen pytest gpu/tests
+        run: uv run --project gpu --frozen python -m pytest -c gpu/pyproject.toml gpu/tests

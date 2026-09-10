@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from autplay_gpu.settings import load_gpu_settings
 
 
@@ -26,6 +25,8 @@ def test_gpu_settings_support_auto_and_stable_manual_selection() -> None:
             "AUTPLAY_GPU_SONA_MODEL_MANIFEST_SHA256": "b" * 64,
             "AUTPLAY_GPU_SONA_TOKENIZER_SHA256": "c" * 64,
             "AUTPLAY_GPU_SONA_BIND_PORT": "8788",
+            "AUTPLAY_GPU_SONA_MAX_ADMITTED_INFERENCES": "7",
+            "AUTPLAY_GPU_SONA_INFERENCE_TIMEOUT_SECONDS": "12.5",
         }
     )
     assert explicit.minimum_total_memory_mib == 12_000
@@ -34,6 +35,8 @@ def test_gpu_settings_support_auto_and_stable_manual_selection() -> None:
     assert explicit.model_cache_root == model_cache_root
     assert explicit.sona_configured
     assert explicit.sona_bind_port == 8788
+    assert explicit.sona_max_admitted_inferences == 7
+    assert explicit.sona_inference_timeout_seconds == 12.5
 
 
 def test_gpu_settings_reject_ambiguous_name_or_malformed_selector() -> None:
@@ -42,3 +45,9 @@ def test_gpu_settings_reject_ambiguous_name_or_malformed_selector() -> None:
 
     with pytest.raises(ValueError, match="invalid GPU worker configuration"):
         load_gpu_settings({"AUTPLAY_GPU_SONA_ARTIFACT_SHA256": "a" * 64})
+
+    with pytest.raises(ValueError, match="invalid GPU worker configuration"):
+        load_gpu_settings({"AUTPLAY_GPU_SONA_MAX_ADMITTED_INFERENCES": "0"})
+
+    with pytest.raises(ValueError, match="invalid GPU worker configuration"):
+        load_gpu_settings({"AUTPLAY_GPU_SONA_INFERENCE_TIMEOUT_SECONDS": "0.01"})

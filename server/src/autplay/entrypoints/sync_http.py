@@ -19,15 +19,15 @@ def create_sync_router(
     router = APIRouter(dependencies=[Depends(authenticated)])
 
     @router.post("/devices/bind")
-    async def bind(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    def bind(body: dict[str, Any], request: Request) -> dict[str, Any]:
         return _call(lambda: service.bind(_principal(request), body))
 
     @router.post("/sync/push")
-    async def push(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    def push(body: dict[str, Any], request: Request) -> dict[str, Any]:
         return _call(lambda: service.push(_principal(request), body, _request_id(request)))
 
     @router.get("/sync/pull")
-    async def pull(request: Request) -> dict[str, Any]:
+    def pull(request: Request) -> dict[str, Any]:
         body: dict[str, Any] = dict(request.query_params)
         body["protocol_version"] = _query_int(body, "protocol_version")
         if "limit" in body:
@@ -39,11 +39,11 @@ def create_sync_router(
         return _call(lambda: service.pull(_principal(request), body))
 
     @router.post("/sync/bootstrap")
-    async def bootstrap(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    def bootstrap(body: dict[str, Any], request: Request) -> dict[str, Any]:
         return _call(lambda: service.bootstrap(_principal(request), body))
 
     @router.get("/sync/status")
-    async def status(request: Request) -> dict[str, Any]:
+    def status(request: Request) -> dict[str, Any]:
         body: dict[str, Any] = dict(request.query_params)
         body["protocol_version"] = _query_int(body, "protocol_version")
         return _call(lambda: service.status(_principal(request), body))

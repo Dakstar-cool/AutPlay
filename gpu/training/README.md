@@ -14,9 +14,11 @@ uv run mypy
 uv run pytest -q
 ```
 
-Linux resolves the exact PyTorch CUDA 13.0 build; other development platforms resolve the exact
-CPU build. The exported ONNX artifact remains subject to the existing approved-model registry,
-hash verification and RTX benchmark gates before shadow execution.
+Linux resolves the exact PyTorch CUDA 13.0 build and the CUDA/cuDNN ONNX Runtime distribution;
+Windows development resolves the exact CPU builds. The mutually exclusive environment markers
+keep one ONNX Runtime distribution in each environment. The exported ONNX artifact remains subject
+to the existing approved-model registry, hash verification and RTX benchmark gates before shadow
+execution.
 
 The bounded pipeline refuses to overwrite datasets, checkpoints, exports, or benchmark evidence.
 Datasets contain fixed tensors and example hashes only; raw owner and recording identifiers are not
@@ -91,7 +93,11 @@ summary-only benchmark evidence and recomputes mean, P50, and P95.
 `benchmark-quality` is CUDA-only and the server requires `CUDAExecutionProvider`; CPU/automatic
 fallback is valid only for non-quality smoke evidence. The quality session sets
 `session.disable_cpu_ep_fallback=1` and disables the Python run-fallback path, so model loading or
-execution fails instead of assigning unsupported nodes to CPU.
+execution fails instead of assigning unsupported nodes to CPU. A separate untimed profiling pass
+must also report `CUDAExecutionProvider` for every executed ONNX node before the benchmark can set
+`cuda_only_execution=true`; provider registration alone is not accepted as placement evidence.
+The exporter keeps the upstream GRU mutation warning visible and tests eager/ORT numerical parity
+for empty, single-item, and maximum history/candidate masks instead of suppressing that warning.
 
 The server-side paired evaluator separately requires a signed canonical execution bundle containing
 the persisted P11 request, baseline snapshot, complete P11 ranking, Sona request, and Shadow

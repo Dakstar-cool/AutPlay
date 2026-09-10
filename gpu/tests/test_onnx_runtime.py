@@ -14,7 +14,6 @@ import numpy.typing as npt
 import pytest
 from autplay.application.enrichment import AcceleratorOutOfMemory
 from autplay.domain.enrichment import ApprovedEmbeddingModel
-
 from autplay_gpu.embedding import ModelArtifactError
 from autplay_gpu.onnx_runtime import OnnxCudaRuntime
 

@@ -72,7 +72,12 @@ class SyncCoordinator(
         val cursor = requireCursor(binding)
         database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), null))
         try {
-            push(binding, cursor)
+            var pushed: Int
+            var pushBatches = 0
+            do {
+                pushed = push(binding, cursor)
+                pushBatches++
+            } while (pushed == PUSH_BATCH_LIMIT && pushBatches < MAX_PUSH_DRAIN_BATCHES)
             var hasMore: Boolean
             var pages = 0
             do {
@@ -87,6 +92,20 @@ class SyncCoordinator(
                 return false
             }
             compact(binding)
+            val pending = database.journalDao()
+                .nextPending(cursor.journalLineageId, Long.MAX_VALUE, 1)
+                .isNotEmpty()
+            if (pending) {
+                database.syncDao().upsertRuntimeStatus(
+                    SyncRuntimeStatusEntity(
+                        binding.serverProfileId.value,
+                        "PUSH_DRAIN_PENDING",
+                        nowMs(),
+                        null,
+                    ),
+                )
+                return false
+            }
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), nowMs()))
             return true
         } catch (error: IllegalStateException) {
@@ -95,17 +114,17 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun push(binding: ClientEventBinding, cursor: SyncCursorEntity) {
+    private suspend fun push(binding: ClientEventBinding, cursor: SyncCursorEntity): Int {
         val journal = database.journalDao()
         val now = nowMs()
         database.withWriteTransaction { journal.recoverExpiredLeases(cursor.journalLineageId, now) }
         val candidates = database.withWriteTransaction { journal.nextPending(cursor.journalLineageId, now, PUSH_BATCH_LIMIT) }
-        if (candidates.isEmpty()) return
+        if (candidates.isEmpty()) return 0
         val lease = token()
         val leased = database.withWriteTransaction {
             candidates.takeWhile { journal.lease(cursor.journalLineageId, it.eventId, lease, now + LEASE_MS) == 1 }
         }
-        if (leased.isEmpty()) return
+        if (leased.isEmpty()) return 0
         val response = try { transport.push(binding, leased) } catch (error: SessionRequiredException) {
             database.withWriteTransaction {
                 leased.forEach { journal.releaseForSession(cursor.journalLineageId, it.eventId, lease) }
@@ -140,6 +159,7 @@ class SyncCoordinator(
                 }
             }
         }
+        return leased.size
     }
 
     private suspend fun pull(binding: ClientEventBinding, cursor: SyncCursorEntity): DrainOutcome {
@@ -588,6 +608,7 @@ class SyncCoordinator(
     private companion object {
         const val LEGACY_PROFILE = "legacy-unscoped"
         const val MAX_DRAIN_PAGES = 10
+        const val MAX_PUSH_DRAIN_BATCHES = 5
         const val PUSH_BATCH_LIMIT = 100
         const val PULL_BATCH_LIMIT = 500
         const val LEASE_MS = 60_000L

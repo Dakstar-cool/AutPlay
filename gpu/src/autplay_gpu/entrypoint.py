@@ -91,7 +91,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
         except AcceleratorOutOfMemory:
             return _error("gpu_accelerator_out_of_memory", 4)
         uvicorn.run(
-            create_sona_shadow_app(sona.runtime, sona.artifact),
+            create_sona_shadow_app(
+                sona.runtime,
+                sona.artifact,
+                max_admitted_inferences=gpu.sona_max_admitted_inferences,
+                inference_timeout_seconds=gpu.sona_inference_timeout_seconds,
+            ),
             host="127.0.0.1",
             port=gpu.sona_bind_port,
             workers=1,

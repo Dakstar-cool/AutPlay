@@ -6,7 +6,6 @@ from hashlib import sha256
 
 import pytest
 import rfc8785
-
 from autplay.application.sona_source_acceptance import (
     SONA_RECONSTRUCTED_SERVER_PROFILE_SCHEME,
     build_sona_source_provenance_acceptance,

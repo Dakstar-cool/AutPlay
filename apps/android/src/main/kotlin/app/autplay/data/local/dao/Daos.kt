@@ -616,6 +616,21 @@ data class RecentRelevantReleaseRow(
     val projectionUpdatedAtMs: Long,
 )
 
+/** Bounded raw source row used only to derive one immutable device-local R1B delta. */
+data class LocalTemporalJournalRow(
+    val sourceEventId: String,
+    val ownerUserId: String,
+    val serverProfileId: String,
+    val deviceId: String,
+    val deviceSequence: Long,
+    val sourceEventType: String,
+    val aggregateLocalId: String,
+    val payloadJson: String,
+    val sourceRequestSha256: ByteArray,
+    val occurredAtMs: Long,
+    val recordingId: String?,
+)
+
 @Dao
 interface RecommendationPackDao {
     @Upsert suspend fun upsert(pack: RecommendationPackEntity)
@@ -630,6 +645,24 @@ interface RecommendationPackDao {
     suspend fun active(profileId: String, userId: String, nowMs: Long): RecommendationPackEntity?
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertDelta(delta: RecommendationTemporalDeltaEntity)
+
+    @Query("SELECT * FROM recommendation_temporal_delta WHERE server_profile_id = :profileId AND owner_user_id = :userId AND device_id = :deviceId AND offline_pack_id = :packId AND recommendation_request_id = :requestId LIMIT 1")
+    suspend fun delta(profileId: String, userId: String, deviceId: String, packId: String, requestId: String): RecommendationTemporalDeltaEntity?
+
+    @Query("DELETE FROM recommendation_temporal_delta WHERE expires_at_ms <= :nowMs")
+    suspend fun deleteExpiredDeltas(nowMs: Long): Int
+
+    @Query("DELETE FROM recommendation_presentation WHERE server_profile_id = :profileId")
+    suspend fun deletePresentationsForProfile(profileId: String): Int
+
+    @Query("DELETE FROM recommendation_temporal_delta WHERE server_profile_id = :profileId")
+    suspend fun deleteDeltasForProfile(profileId: String): Int
+
+    @Query("DELETE FROM recommendation_pack WHERE server_profile_id = :profileId")
+    suspend fun deletePacksForProfile(profileId: String): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPresentation(row: RecommendationPresentationEntity)
 
     @Query("SELECT * FROM recommendation_presentation WHERE server_profile_id = :profileId AND owner_user_id = :userId AND presentation_id = :presentationId AND recommendation_request_id = :requestId AND source_rank = :sourceRank")
@@ -640,6 +673,57 @@ interface RecommendationPackDao {
 
     @Query("SELECT count(*) FROM recommendation_presentation WHERE server_profile_id = :profileId AND owner_user_id = :userId")
     suspend fun presentationCount(profileId: String, userId: String): Int
+
+    @Query("SELECT count(*) FROM recommendation_temporal_delta WHERE server_profile_id = :profileId AND owner_user_id = :userId")
+    suspend fun deltaCount(profileId: String, userId: String): Int
+
+    @Query(
+        """
+        SELECT
+            e.event_id AS sourceEventId,
+            e.user_id AS ownerUserId,
+            e.server_profile_id AS serverProfileId,
+            e.device_id AS deviceId,
+            e.device_sequence AS deviceSequence,
+            e.event_type AS sourceEventType,
+            e.aggregate_local_id AS aggregateLocalId,
+            e.payload_json AS payloadJson,
+            e.request_hash AS sourceRequestSha256,
+            e.occurred_at_ms AS occurredAtMs,
+            COALESCE(preference_track.server_recording_id, listening_track.server_recording_id) AS recordingId
+        FROM offline_journal_event e
+        LEFT JOIN user_track_ref preference_track
+          ON e.event_type = 'USER_TRACK_PREFERENCE_SET'
+         AND preference_track.local_user_track_ref_id = e.aggregate_local_id
+         AND preference_track.server_profile_id = e.server_profile_id
+         AND preference_track.deleted_at_ms IS NULL
+        LEFT JOIN listening_event listening
+          ON e.event_type = 'LISTENING_EVENT_RECORDED'
+         AND listening.listening_event_id = e.aggregate_local_id
+         AND listening.server_profile_id = e.server_profile_id
+        LEFT JOIN user_track_ref listening_track
+          ON listening_track.local_user_track_ref_id = listening.local_user_track_ref_id
+         AND listening_track.server_profile_id = e.server_profile_id
+         AND listening_track.deleted_at_ms IS NULL
+        WHERE e.server_profile_id = :profileId
+          AND e.user_id = :userId
+          AND e.device_id = :deviceId
+          AND e.event_type IN ('USER_TRACK_PREFERENCE_SET', 'LISTENING_EVENT_RECORDED')
+          AND e.state IN ('PENDING', 'SENDING')
+          AND e.occurred_at_ms > :cutoffAtMs
+          AND e.occurred_at_ms <= :nowMs
+        ORDER BY e.occurred_at_ms DESC, e.device_sequence DESC, e.event_id DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun localTemporalEvents(
+        profileId: String,
+        userId: String,
+        deviceId: String,
+        cutoffAtMs: Long,
+        nowMs: Long,
+        limit: Int,
+    ): List<LocalTemporalJournalRow>
 
     @Query(
         """
@@ -695,6 +779,9 @@ interface RecommendationPackDao {
           AND u.server_profile_id = :profileId
           AND u.server_recording_id IN (:recordingIds)
           AND u.deleted_at_ms IS NULL
+          AND r.is_deleted = 0
+          AND r.redirect_server_recording_id IS NULL
+          AND r.server_recording_id = u.server_recording_id
         ORDER BY u.local_user_track_ref_id ASC
         LIMIT :limit
         """,

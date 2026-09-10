@@ -1,0 +1,47 @@
+name: CI / Acquisition
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-acquisition-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acquisition:
+    name: Acquisition / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: true
+          cache-dependency-glob: tools/local_music_acquisition/uv.lock
+
+      - name: Synchronize acquisition project
+        run: uv sync --project tools/local_music_acquisition --frozen --python 3.14.7
+
+      - name: Check acquisition lock and static gates
+        run: |
+          uv lock --project tools/local_music_acquisition --check
+          uv run --project tools/local_music_acquisition --frozen ruff check tools/local_music_acquisition
+          uv run --project tools/local_music_acquisition --frozen ruff format --check tools/local_music_acquisition
+          uv run --project tools/local_music_acquisition --frozen python -m mypy --config-file tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition/src
+
+      - name: Run acquisition tests
+        run: uv run --project tools/local_music_acquisition --frozen python -m pytest tools/local_music_acquisition/tests

@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 from autplay.domain.enrichment import ApprovedEmbeddingModel
-
 from autplay_gpu.artifacts import ModelArtifactStore
 from autplay_gpu.embedding import ModelArtifactError
 

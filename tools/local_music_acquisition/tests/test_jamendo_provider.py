@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from local_music_acquisition.models import PlaylistItem, ProviderMiss
 from local_music_acquisition.providers import jamendo
 from local_music_acquisition.providers.jamendo_provider import JamendoProvider

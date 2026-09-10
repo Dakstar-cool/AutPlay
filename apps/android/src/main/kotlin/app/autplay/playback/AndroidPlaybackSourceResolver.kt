@@ -13,7 +13,10 @@ import app.autplay.download.MediaDownloadComponents
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 enum class SelectedAudioSource { LOCAL_URI, MEDIA3_DOWNLOAD, VAULT_STREAM }
 
@@ -35,12 +38,16 @@ class AndroidPlaybackSourceResolver(
     context: Context,
     private val database: AutPlayDatabase,
     private val settings: NonSecretSettingsStore,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val remoteVariantLookup: suspend (ServerProfileId, String) -> String? = { _, _ -> null },
 ) {
     private val applicationContext = context.applicationContext
     private val inspector = ContentUriInspector(applicationContext.contentResolver)
 
-    suspend fun resolve(trackRefId: LocalId, nowMs: Long): AndroidSourceResolution {
+    suspend fun resolve(trackRefId: LocalId, nowMs: Long): AndroidSourceResolution =
+        withContext(ioDispatcher) { resolveOffMain(trackRefId, nowMs) }
+
+    private suspend fun resolveOffMain(trackRefId: LocalId, nowMs: Long): AndroidSourceResolution {
         val localStates = database.localAudioDao().statesForPlayback(trackRefId.value, MAX_SOURCES)
         var localFailure: PlaybackUnavailableReason? = null
         for (state in localStates) {

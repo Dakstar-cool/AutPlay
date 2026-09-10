@@ -1,8 +1,17 @@
+import javax.inject.Inject
+
+import org.gradle.api.configuration.BuildFeatures
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room3)
+}
+
+interface InjectedBuildFeatures {
+    @get:Inject
+    val buildFeatures: BuildFeatures
 }
 
 val qaSideBySide = providers.gradleProperty("autplay.qaSideBySide").orNull == "true"
@@ -19,11 +28,12 @@ val releaseSigningInputs = listOf(
     releaseKeyPassword,
 )
 val releaseSigningEnabled = releaseSigningInputs.all { !it.isNullOrBlank() }
+val buildFeatures = objects.newInstance<InjectedBuildFeatures>().buildFeatures
 
 if (!releaseSigningEnabled && releaseSigningInputs.any { !it.isNullOrBlank() }) {
     throw GradleException("Production signing requires all AUTPLAY_ANDROID_* inputs")
 }
-if (releaseSigningEnabled && gradle.startParameter.isConfigurationCacheRequested) {
+if (releaseSigningEnabled && buildFeatures.configurationCache.active.get()) {
     throw GradleException("Production signing requires --no-configuration-cache")
 }
 

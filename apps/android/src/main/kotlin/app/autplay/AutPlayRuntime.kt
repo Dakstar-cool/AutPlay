@@ -3,6 +3,7 @@ package app.autplay
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import androidx.work.WorkManager
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.guestroom.GuestRoomRuntime
 import app.autplay.application.guestroom.GuestWaveProjectionStore
@@ -26,9 +27,12 @@ import app.autplay.data.security.M5RotationContext
 import app.autplay.data.security.M5RotationContextResolver
 import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.settings.applicationNonSecretSettingsStore
+import app.autplay.data.settings.NonSecretSettings
 import app.autplay.data.local.AutPlayDatabase
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
+import app.autplay.work.SyncWorker
+import app.autplay.work.WorkManagerDeferredWorkScheduler
 
 /** Process-scoped graph shared by the Activity and Media3 services. */
 object AutPlayRuntime {
@@ -37,6 +41,19 @@ object AutPlayRuntime {
 
     fun database(context: Context): AutPlayDatabase = databaseInstance ?: synchronized(this) {
         databaseInstance ?: AutPlayDatabase.open(context.applicationContext).also { databaseInstance = it }
+    }
+
+    /** Builds the durable sync scheduler with the latest persisted metered-network policy. */
+    fun syncScheduler(context: Context): WorkManagerDeferredWorkScheduler {
+        val applicationContext = context.applicationContext
+        return WorkManagerDeferredWorkScheduler(
+            WorkManager.getInstance(applicationContext),
+            SyncWorker::class.java,
+            allowMeteredNetwork = {
+                applicationNonSecretSettingsStore(applicationContext)
+                    .settings.first().syncOnMeteredNetwork
+            },
+        )
     }
 
     /** Instrumentation-only lifecycle seam; production keeps one database for the process. */
@@ -123,16 +140,19 @@ object AutPlayRuntime {
         repository: OfflineRecommendationRepository,
         nowMs: Long,
     ): DecodedOfflinePack {
-        val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
-        check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) {
+        val settingsStore = applicationNonSecretSettingsStore(context.applicationContext)
+        val settings = settingsStore.settings.first()
+        check(isSameRecommendationBinding(settings, settings, binding)) {
             "RECOMMENDATION_PROFILE_NOT_ACTIVE"
         }
         val transport = OkHttpRecommendationPackTransport(
-            apiV1BaseUrl(settings.serverBaseUrl),
+            apiV1BaseUrl(requireNotNull(settings.serverBaseUrl)),
             AndroidKeystoreCredentialStore(context.applicationContext),
             m5Rotation = m5Rotation(context),
         )
-        return repository.refreshPack(binding, transport, nowMs)
+        return repository.refreshPack(binding, transport, nowMs) {
+            isSameRecommendationBinding(settings, settingsStore.settings.first(), binding)
+        }
     }
 
     /** Creates the bounded server-surface adapter for the active profile only. */
@@ -238,3 +258,30 @@ object AutPlayRuntime {
     internal fun wavePrefetchMode(value: String): WavePrefetchMode =
         runCatching { WavePrefetchMode.valueOf(value) }.getOrDefault(WavePrefetchMode.NEXT)
 }
+
+/** Exact binding lease used to reject responses that cross unbind/reconnect of the same IDs. */
+internal fun isSameRecommendationBinding(
+    expected: NonSecretSettings,
+    current: NonSecretSettings,
+    binding: ClientEventBinding,
+): Boolean =
+    expected.activeServerProfileId == binding.serverProfileId &&
+        expected.activeUserId == binding.userId &&
+        expected.deviceId == binding.deviceId &&
+        expected.serverBaseUrl != null &&
+        expected.m5Binding != null &&
+        current.activeServerProfileId == binding.serverProfileId &&
+        current.activeUserId == binding.userId &&
+        current.deviceId == binding.deviceId &&
+        current.serverBaseUrl == expected.serverBaseUrl &&
+        current.m5Binding?.let { active ->
+            val captured = requireNotNull(expected.m5Binding)
+            active.bindingCommitId == captured.bindingCommitId &&
+                active.serverInstanceId == captured.serverInstanceId &&
+                active.identityEpoch == captured.identityEpoch &&
+                active.identityThumbprintSha256 == captured.identityThumbprintSha256 &&
+                active.deviceKeyAlias == captured.deviceKeyAlias &&
+                active.sessionFamilyId == captured.sessionFamilyId &&
+                active.sessionGeneration >= captured.sessionGeneration &&
+                (active.sessionGeneration != captured.sessionGeneration || active.sessionId == captured.sessionId)
+        } == true

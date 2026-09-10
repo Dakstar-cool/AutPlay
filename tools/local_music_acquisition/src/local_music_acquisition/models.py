@@ -22,6 +22,7 @@ class AcquiredArtifact:
 
     provider: str
     artifact_ref: str
+    identity_version: str | None = None
 
 
 class ProviderMiss(RuntimeError):

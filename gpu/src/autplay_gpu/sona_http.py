@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, suppress
 from typing import cast
 
 import rfc8785
@@ -15,6 +17,7 @@ from autplay.application.sona_codec import (
     sona_request_from_envelope,
 )
 from autplay.domain.recommendations import JsonValue
+from autplay.domain.sona import SonaInferenceOutput
 from autplay.ports.recommendations import SonaInferenceGateway
 from fastapi import FastAPI, Request, Response
 from starlette.requests import ClientDisconnect
@@ -26,17 +29,63 @@ SONA_INFERENCE_PATH = "/internal/sona/v1/infer"
 
 
 def create_sona_shadow_app(
-    runtime: SonaInferenceGateway, artifact: VerifiedSonaArtifact
+    runtime: SonaInferenceGateway,
+    artifact: VerifiedSonaArtifact,
+    *,
+    max_admitted_inferences: int = 4,
+    inference_timeout_seconds: float = 30.0,
 ) -> FastAPI:
     """Create a single-runtime app; callers must bind it to 127.0.0.1 only."""
+
+    if not 1 <= max_admitted_inferences <= 64:
+        raise ValueError("Sona inference admission bound is invalid")
+    if not 0.1 <= inference_timeout_seconds <= 300:
+        raise ValueError("Sona inference timeout is invalid")
+
+    inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sona-inference")
+    admission_lock = asyncio.Lock()
+    admitted = 0
+    background_release_tasks: set[asyncio.Task[None]] = set()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            inference_executor.shutdown(wait=False, cancel_futures=True)
+            for task in background_release_tasks:
+                task.cancel()
 
     app = FastAPI(
         title="AutPlay Sona shadow worker",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
-    inference_lock = asyncio.Lock()
+
+    async def reserve() -> bool:
+        nonlocal admitted
+        async with admission_lock:
+            if admitted >= max_admitted_inferences:
+                return False
+            admitted += 1
+            return True
+
+    async def release() -> None:
+        nonlocal admitted
+        async with admission_lock:
+            admitted -= 1
+
+    def defer_release(future: asyncio.Future[SonaInferenceOutput]) -> None:
+        async def release_when_complete() -> None:
+            with suppress(BaseException):
+                await future
+            await release()
+
+        task = asyncio.create_task(release_when_complete())
+        background_release_tasks.add(task)
+        task.add_done_callback(background_release_tasks.discard)
 
     @app.get("/internal/sona/v1/ready")
     async def ready() -> dict[str, JsonValue]:
@@ -46,6 +95,8 @@ def create_sona_shadow_app(
             "model_manifest_sha256": artifact.model_manifest_sha256,
             "tokenizer_sha256": artifact.tokenizer_sha256,
             "quality_eligible": artifact.quality_eligible,
+            "max_admitted_inferences": max_admitted_inferences,
+            "inference_timeout_ms": int(inference_timeout_seconds * 1_000),
         }
 
     @app.post(SONA_INFERENCE_PATH)
@@ -74,8 +125,29 @@ def create_sona_shadow_app(
                 or inference_request.tokenizer_sha256 != artifact.tokenizer_sha256
             ):
                 return _error("sona_request_artifact_mismatch", 409)
-            async with inference_lock:
-                output = await asyncio.to_thread(runtime.infer, inference_request)
+            if not await reserve():
+                return _error("sona_inference_busy", 429)
+            loop = asyncio.get_running_loop()
+            future = loop.run_in_executor(inference_executor, runtime.infer, inference_request)
+            release_deferred = False
+            try:
+                output = await asyncio.wait_for(
+                    asyncio.shield(future),
+                    timeout=inference_timeout_seconds,
+                )
+            except TimeoutError:
+                if not future.done():
+                    release_deferred = True
+                    defer_release(future)
+                return _error("sona_inference_timeout", 504)
+            except asyncio.CancelledError:
+                if not future.done():
+                    release_deferred = True
+                    defer_release(future)
+                raise
+            finally:
+                if not release_deferred:
+                    await release()
         except UnicodeDecodeError, json.JSONDecodeError, ValueError:
             return _error("sona_request_invalid", 400)
         except AcceleratorOutOfMemory:
