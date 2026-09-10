@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/offline-temporal-delta.schema.json",
+  "title": "AutPlay R1 Device-local Offline Temporal Delta v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "delta_id",
+    "server_profile_id",
+    "owner_user_id",
+    "device_id",
+    "offline_pack_id",
+    "parent_pack_sha256",
+    "parent_items_sha256",
+    "parent_expires_at_ms",
+    "parent_items",
+    "recommendation_request_id",
+    "feature_policy",
+    "cutoff_at_ms",
+    "local_events",
+    "adjustments",
+    "created_at_ms",
+    "expires_at_ms",
+    "delta_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "delta_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "owner_user_id": {"$ref": "#/$defs/uuid"},
+    "device_id": {"$ref": "#/$defs/uuid"},
+    "offline_pack_id": {"$ref": "#/$defs/uuid"},
+    "parent_pack_sha256": {"$ref": "#/$defs/sha256"},
+    "parent_items_sha256": {"$ref": "#/$defs/sha256"},
+    "parent_expires_at_ms": {"type": "integer", "minimum": 0},
+    "parent_items": {
+      "type": "array",
+      "maxItems": 1000,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/parentItem"}
+    },
+    "recommendation_request_id": {"$ref": "#/$defs/uuid"},
+    "feature_policy": {"$ref": "#/$defs/versionRef"},
+    "cutoff_at_ms": {"type": "integer", "minimum": 0},
+    "local_events": {"type": "array", "maxItems": 256, "items": {"$ref": "temporal-evidence.schema.json"}},
+    "adjustments": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recording_id", "source_rank", "display_position", "bounded_delta", "mandatory_filter_passed", "impression_event_id", "impression_key_sha256"],
+        "properties": {
+          "recording_id": {"$ref": "#/$defs/uuid"},
+          "source_rank": {"type": "integer", "minimum": 1, "maximum": 1000},
+          "display_position": {"type": "integer", "minimum": 1, "maximum": 1000},
+          "bounded_delta": {"type": "number", "minimum": -1, "maximum": 1},
+          "mandatory_filter_passed": {"const": true},
+          "impression_event_id": {"$ref": "#/$defs/uuid"},
+          "impression_key_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "created_at_ms": {"type": "integer", "minimum": 0},
+    "expires_at_ms": {"type": "integer", "minimum": 0},
+    "delta_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "versionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "version", "content_sha256"],
+      "properties": {
+        "key": {"const": "adaptive-taste"},
+        "version": {"type": "string", "pattern": "^[1-9][0-9]{0,8}$"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "parentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recording_id", "source_rank"],
+      "properties": {
+        "recording_id": {"$ref": "#/$defs/uuid"},
+        "source_rank": {"type": "integer", "minimum": 1, "maximum": 1000}
+      }
+    }
+  }
+}

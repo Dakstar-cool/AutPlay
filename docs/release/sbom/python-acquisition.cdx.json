@@ -1,0 +1,487 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "serialNumber": "urn:uuid:350c7250-e6e4-4e09-be62-95fedc20191a",
+  "metadata": {
+    "timestamp": "2026-09-08T22:28:46.280956500Z",
+    "tools": [
+      {
+        "vendor": "Astral Software Inc.",
+        "name": "uv",
+        "version": "0.12.3"
+      }
+    ],
+    "component": {
+      "type": "library",
+      "bom-ref": "autplay-local-music-acquisition-1@0.1.0",
+      "name": "autplay-local-music-acquisition",
+      "version": "0.1.0",
+      "properties": [
+        {
+          "name": "uv:package:is_project_root",
+          "value": "true"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "ast-serialize-2@0.11.0",
+      "name": "ast-serialize",
+      "version": "0.11.0",
+      "purl": "pkg:pypi/ast-serialize@0.11.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "brotli-3@1.2.0",
+      "name": "brotli",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/brotli@1.2.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "implementation_name == 'cpython' and sys_platform != 'ios'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "brotlicffi-4@1.2.0.1",
+      "name": "brotlicffi",
+      "version": "1.2.0.1",
+      "purl": "pkg:pypi/brotlicffi@1.2.0.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "implementation_name != 'cpython'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "certifi-5@2026.7.22",
+      "name": "certifi",
+      "version": "2026.7.22",
+      "purl": "pkg:pypi/certifi@2026.7.22"
+    },
+    {
+      "type": "library",
+      "bom-ref": "cffi-6@2.1.1",
+      "name": "cffi",
+      "version": "2.1.1",
+      "purl": "pkg:pypi/cffi@2.1.1",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "implementation_name != 'cpython'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "charset-normalizer-7@3.5.0",
+      "name": "charset-normalizer",
+      "version": "3.5.0",
+      "purl": "pkg:pypi/charset-normalizer@3.5.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "colorama-8@0.4.6",
+      "name": "colorama",
+      "version": "0.4.6",
+      "purl": "pkg:pypi/colorama@0.4.6",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "sys_platform == 'win32'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "greenlet-9@3.5.5",
+      "name": "greenlet",
+      "version": "3.5.5",
+      "purl": "pkg:pypi/greenlet@3.5.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "idna-10@3.18",
+      "name": "idna",
+      "version": "3.18",
+      "purl": "pkg:pypi/idna@3.18"
+    },
+    {
+      "type": "library",
+      "bom-ref": "iniconfig-11@2.3.0",
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "purl": "pkg:pypi/iniconfig@2.3.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "librt-12@0.15.0",
+      "name": "librt",
+      "version": "0.15.0",
+      "purl": "pkg:pypi/librt@0.15.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "platform_python_implementation != 'PyPy'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mutagen-13@1.48.1",
+      "name": "mutagen",
+      "version": "1.48.1",
+      "purl": "pkg:pypi/mutagen@1.48.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-14@2.3.0",
+      "name": "mypy",
+      "version": "2.3.0",
+      "purl": "pkg:pypi/mypy@2.3.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "mypy-extensions-15@1.1.0",
+      "name": "mypy-extensions",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/mypy-extensions@1.1.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "packaging-16@26.3",
+      "name": "packaging",
+      "version": "26.3",
+      "purl": "pkg:pypi/packaging@26.3"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pathspec-17@1.1.1",
+      "name": "pathspec",
+      "version": "1.1.1",
+      "purl": "pkg:pypi/pathspec@1.1.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "playwright-18@1.60.0",
+      "name": "playwright",
+      "version": "1.60.0",
+      "purl": "pkg:pypi/playwright@1.60.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pluggy-19@1.6.0",
+      "name": "pluggy",
+      "version": "1.6.0",
+      "purl": "pkg:pypi/pluggy@1.6.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pycparser-20@3.0",
+      "name": "pycparser",
+      "version": "3.0",
+      "purl": "pkg:pypi/pycparser@3.0",
+      "properties": [
+        {
+          "name": "uv:package:marker",
+          "value": "implementation_name != 'PyPy' and implementation_name != 'cpython'"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pycryptodome-21@3.23.0",
+      "name": "pycryptodome",
+      "version": "3.23.0",
+      "purl": "pkg:pypi/pycryptodome@3.23.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pycryptodomex-22@3.23.0",
+      "name": "pycryptodomex",
+      "version": "3.23.0",
+      "purl": "pkg:pypi/pycryptodomex@3.23.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pyee-23@13.0.1",
+      "name": "pyee",
+      "version": "13.0.1",
+      "purl": "pkg:pypi/pyee@13.0.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pygments-24@2.21.0",
+      "name": "pygments",
+      "version": "2.21.0",
+      "purl": "pkg:pypi/pygments@2.21.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pysocks-25@1.7.1",
+      "name": "pysocks",
+      "version": "1.7.1",
+      "purl": "pkg:pypi/pysocks@1.7.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pytest-26@9.1.1",
+      "name": "pytest",
+      "version": "9.1.1",
+      "purl": "pkg:pypi/pytest@9.1.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "requests-27@2.34.2",
+      "name": "requests",
+      "version": "2.34.2",
+      "purl": "pkg:pypi/requests@2.34.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "ruff-28@0.16.2",
+      "name": "ruff",
+      "version": "0.16.2",
+      "purl": "pkg:pypi/ruff@0.16.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "strenum-29@0.4.15",
+      "name": "strenum",
+      "version": "0.4.15",
+      "purl": "pkg:pypi/strenum@0.4.15"
+    },
+    {
+      "type": "library",
+      "bom-ref": "typing-extensions-30@4.16.0",
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "purl": "pkg:pypi/typing-extensions@4.16.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "urllib3-31@2.7.0",
+      "name": "urllib3",
+      "version": "2.7.0",
+      "purl": "pkg:pypi/urllib3@2.7.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "websockets-32@17.0.1",
+      "name": "websockets",
+      "version": "17.0.1",
+      "purl": "pkg:pypi/websockets@17.0.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "yandex-music-33@3.0.0",
+      "name": "yandex-music",
+      "version": "3.0.0",
+      "purl": "pkg:pypi/yandex-music@3.0.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "yandex-music-downloader-34@3.5.5",
+      "name": "yandex-music-downloader",
+      "version": "3.5.5",
+      "purl": "pkg:pypi/yandex-music-downloader@3.5.5?vcs_url=https://github.com/llistochek/yandex-music-downloader.git%3Frev%3D9d33d6aaefae3cb882d02822e59cf0796c33a651%239d33d6aaefae3cb882d02822e59cf0796c33a651"
+    },
+    {
+      "type": "library",
+      "bom-ref": "yt-dlp-35@2026.8.19",
+      "name": "yt-dlp",
+      "version": "2026.8.19",
+      "purl": "pkg:pypi/yt-dlp@2026.8.19"
+    },
+    {
+      "type": "library",
+      "bom-ref": "yt-dlp-ejs-36@0.8.0",
+      "name": "yt-dlp-ejs",
+      "version": "0.8.0",
+      "purl": "pkg:pypi/yt-dlp-ejs@0.8.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "ast-serialize-2@0.11.0"
+    },
+    {
+      "ref": "autplay-local-music-acquisition-1@0.1.0",
+      "dependsOn": [
+        "mypy-14@2.3.0",
+        "playwright-18@1.60.0",
+        "pytest-26@9.1.1",
+        "requests-27@2.34.2",
+        "ruff-28@0.16.2",
+        "yandex-music-downloader-34@3.5.5",
+        "yt-dlp-35@2026.8.19"
+      ]
+    },
+    {
+      "ref": "brotli-3@1.2.0"
+    },
+    {
+      "ref": "brotlicffi-4@1.2.0.1",
+      "dependsOn": [
+        "cffi-6@2.1.1"
+      ]
+    },
+    {
+      "ref": "certifi-5@2026.7.22"
+    },
+    {
+      "ref": "cffi-6@2.1.1",
+      "dependsOn": [
+        "pycparser-20@3.0"
+      ]
+    },
+    {
+      "ref": "charset-normalizer-7@3.5.0"
+    },
+    {
+      "ref": "colorama-8@0.4.6"
+    },
+    {
+      "ref": "greenlet-9@3.5.5"
+    },
+    {
+      "ref": "idna-10@3.18"
+    },
+    {
+      "ref": "iniconfig-11@2.3.0"
+    },
+    {
+      "ref": "librt-12@0.15.0"
+    },
+    {
+      "ref": "mutagen-13@1.48.1"
+    },
+    {
+      "ref": "mypy-14@2.3.0",
+      "dependsOn": [
+        "ast-serialize-2@0.11.0",
+        "librt-12@0.15.0",
+        "mypy-extensions-15@1.1.0",
+        "pathspec-17@1.1.1",
+        "typing-extensions-30@4.16.0"
+      ]
+    },
+    {
+      "ref": "mypy-extensions-15@1.1.0"
+    },
+    {
+      "ref": "packaging-16@26.3"
+    },
+    {
+      "ref": "pathspec-17@1.1.1"
+    },
+    {
+      "ref": "playwright-18@1.60.0",
+      "dependsOn": [
+        "greenlet-9@3.5.5",
+        "pyee-23@13.0.1"
+      ]
+    },
+    {
+      "ref": "pluggy-19@1.6.0"
+    },
+    {
+      "ref": "pycparser-20@3.0"
+    },
+    {
+      "ref": "pycryptodome-21@3.23.0"
+    },
+    {
+      "ref": "pycryptodomex-22@3.23.0"
+    },
+    {
+      "ref": "pyee-23@13.0.1",
+      "dependsOn": [
+        "typing-extensions-30@4.16.0"
+      ]
+    },
+    {
+      "ref": "pygments-24@2.21.0"
+    },
+    {
+      "ref": "pysocks-25@1.7.1"
+    },
+    {
+      "ref": "pytest-26@9.1.1",
+      "dependsOn": [
+        "colorama-8@0.4.6",
+        "iniconfig-11@2.3.0",
+        "packaging-16@26.3",
+        "pluggy-19@1.6.0",
+        "pygments-24@2.21.0"
+      ]
+    },
+    {
+      "ref": "requests-27@2.34.2",
+      "dependsOn": [
+        "certifi-5@2026.7.22",
+        "charset-normalizer-7@3.5.0",
+        "idna-10@3.18",
+        "pysocks-25@1.7.1",
+        "urllib3-31@2.7.0"
+      ]
+    },
+    {
+      "ref": "ruff-28@0.16.2"
+    },
+    {
+      "ref": "strenum-29@0.4.15"
+    },
+    {
+      "ref": "typing-extensions-30@4.16.0"
+    },
+    {
+      "ref": "urllib3-31@2.7.0"
+    },
+    {
+      "ref": "websockets-32@17.0.1"
+    },
+    {
+      "ref": "yandex-music-33@3.0.0",
+      "dependsOn": [
+        "requests-27@2.34.2",
+        "typing-extensions-30@4.16.0"
+      ]
+    },
+    {
+      "ref": "yandex-music-downloader-34@3.5.5",
+      "dependsOn": [
+        "mutagen-13@1.48.1",
+        "pycryptodome-21@3.23.0",
+        "strenum-29@0.4.15",
+        "yandex-music-33@3.0.0"
+      ]
+    },
+    {
+      "ref": "yt-dlp-35@2026.8.19",
+      "dependsOn": [
+        "brotli-3@1.2.0",
+        "brotlicffi-4@1.2.0.1",
+        "certifi-5@2026.7.22",
+        "charset-normalizer-7@3.5.0",
+        "idna-10@3.18",
+        "mutagen-13@1.48.1",
+        "pycryptodomex-22@3.23.0",
+        "requests-27@2.34.2",
+        "urllib3-31@2.7.0",
+        "websockets-32@17.0.1",
+        "yt-dlp-ejs-36@0.8.0"
+      ]
+    },
+    {
+      "ref": "yt-dlp-ejs-36@0.8.0"
+    }
+  ]
+}

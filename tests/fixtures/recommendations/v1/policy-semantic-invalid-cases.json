@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "active-view-weight-sum", "mutation": {"path": "active_view_weights.EPISODE", "value": 0.4}, "expected_error_code": "ACTIVE_VIEW_WEIGHT_SUM_INVALID"},
+    {"case_id": "active-view-zero", "mutation": {"path": "active_view_weights.EPISODE", "value": 0.0}, "expected_error_code": "ACTIVE_VIEW_WEIGHT_ZERO"},
+    {"case_id": "maturity-weight-sum", "mutation": {"path": "maturity.term_weights.RECENCY", "value": 0.25}, "expected_error_code": "MATURITY_WEIGHT_SUM_INVALID"},
+    {"case_id": "outcome-threshold-overlap", "mutation": {"path": "skip_completion_threshold", "value": 0.8}, "expected_error_code": "OUTCOME_THRESHOLD_OVERLAP"},
+    {"case_id": "plasticity-minimum-over-maximum", "mutation": {"path": "maturity.minimum_plasticity", "value": 3.0}, "expected_error_code": "PLASTICITY_RANGE_INVALID"},
+    {"case_id": "like-sign-invalid", "mutation": {"path": "signal_weights.EXPLICIT_LIKE", "value": 0.0}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "organic-listen-sign-invalid", "mutation": {"path": "signal_weights.FINALIZED_ORGANIC_LISTEN", "value": 0.0}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "recommendation-listen-sign-invalid", "mutation": {"path": "signal_weights.FINALIZED_RECOMMENDATION_LISTEN", "value": -0.1}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "recommendation-selected-sign-invalid", "mutation": {"path": "signal_weights.RECOMMENDATION_SELECTED", "value": 0.0}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "recommendation-dismissed-sign-invalid", "mutation": {"path": "signal_weights.RECOMMENDATION_DISMISSED", "value": 0.0}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "completion-sign-invalid", "mutation": {"path": "signal_weights.FINALIZED_COMPLETION", "value": 0.0}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "skip-sign-invalid", "mutation": {"path": "signal_weights.FINALIZED_SHORT_LISTEN_SKIP", "value": 0.1}, "expected_error_code": "SIGNAL_SIGN_INVALID"},
+    {"case_id": "recommendation-origin-unbounded", "mutation": {"path": "origin_weights.RECOMMENDATION", "value": 0.9}, "expected_error_code": "ORIGIN_WEIGHT_ORDER_INVALID"},
+    {"case_id": "total-cap-over-components", "mutation": {"path": "adjustment_caps.total_absolute", "value": 1.2}, "expected_error_code": "ADJUSTMENT_CAP_INVALID"}
+  ]
+}

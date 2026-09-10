@@ -47,6 +47,7 @@ import app.autplay.data.local.entity.QueueEntryEntity
 import app.autplay.data.local.entity.QueueSnapshotEntity
 import app.autplay.data.local.entity.RecommendationPackEntity
 import app.autplay.data.local.entity.RecommendationPresentationEntity
+import app.autplay.data.local.entity.RecommendationTemporalDeltaEntity
 import app.autplay.data.local.entity.RecommendationResponseSnapshotEntity
 import app.autplay.data.local.entity.RemoteImportJobProjectionEntity
 import app.autplay.data.local.entity.RecordingProjectionEntity
@@ -103,6 +104,7 @@ import kotlinx.coroutines.Dispatchers
         TombstoneEntity::class,
         SyncConflictEntity::class,
         RecommendationPackEntity::class,
+        RecommendationTemporalDeltaEntity::class,
         RecommendationPresentationEntity::class,
         TrackSearchContentEntity::class,
         TrackSearchFtsEntity::class,
@@ -123,7 +125,7 @@ import kotlinx.coroutines.Dispatchers
         GuestWavePreflightEntity::class,
         GuestWaveQueueProjectionEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -163,7 +165,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
             ).setDriver(BundledSQLiteDriver())
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */
@@ -371,6 +373,16 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_wave_preflight_guest_session_id ON guest_wave_preflight(guest_session_id)")
                 connection.execSQL("CREATE TABLE IF NOT EXISTS guest_wave_queue_projection (guest_session_id TEXT NOT NULL, sequence INTEGER NOT NULL, position INTEGER NOT NULL, queue_entry_id TEXT NOT NULL, server_recording_id TEXT NOT NULL, local_user_track_ref_id TEXT, ready INTEGER NOT NULL, PRIMARY KEY(guest_session_id, sequence, position), FOREIGN KEY(guest_session_id) REFERENCES guest_room_projection(guest_session_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
                 connection.execSQL("CREATE INDEX IF NOT EXISTS index_guest_wave_queue_projection_guest_session_id_sequence ON guest_wave_queue_projection(guest_session_id, sequence)")
+            }
+        }
+
+        /** R1B additive, immutable device-local delta; existing P11 pack bytes stay untouched. */
+        val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("CREATE TABLE IF NOT EXISTS recommendation_temporal_delta (delta_id TEXT NOT NULL, server_profile_id TEXT NOT NULL, owner_user_id TEXT NOT NULL, device_id TEXT NOT NULL, offline_pack_id TEXT NOT NULL, recommendation_request_id TEXT NOT NULL, feature_policy_version TEXT NOT NULL, feature_policy_sha256 BLOB NOT NULL, parent_pack_sha256 BLOB NOT NULL, parent_items_sha256 BLOB NOT NULL, payload_version INTEGER NOT NULL, payload_encoding TEXT NOT NULL, payload BLOB NOT NULL, payload_sha256 BLOB NOT NULL, cutoff_at_ms INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, expires_at_ms INTEGER NOT NULL, PRIMARY KEY(delta_id), FOREIGN KEY(offline_pack_id) REFERENCES recommendation_pack(offline_pack_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                connection.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_recommendation_temporal_delta_server_profile_id_owner_user_id_device_id_offline_pack_id_recommendation_request_id ON recommendation_temporal_delta(server_profile_id, owner_user_id, device_id, offline_pack_id, recommendation_request_id)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_recommendation_temporal_delta_offline_pack_id ON recommendation_temporal_delta(offline_pack_id)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_recommendation_temporal_delta_server_profile_id_expires_at_ms ON recommendation_temporal_delta(server_profile_id, expires_at_ms)")
             }
         }
     }

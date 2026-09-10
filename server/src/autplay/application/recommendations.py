@@ -54,6 +54,7 @@ from autplay.ports.recommendations import (
 
 DEFAULT_PIPELINE_KEY: Final = "cpu-baseline"
 DEFAULT_PIPELINE_VERSION: Final = "1"
+RECOMMENDATION_MAX_SNAPSHOT_TRACKS: Final = 5_000
 _COMPONENT_CONFIG_SHA256: Final = sha256(b"{}").hexdigest()
 _SOURCE_REASON: Final = {
     "preferences": "LIKED_TRACK",
@@ -340,6 +341,9 @@ class DeterministicHeuristicRanker:
         "exploration": 0.35,
     }
 
+    def _source_weight(self, source_key: str) -> float:
+        return self._WEIGHTS.get(source_key, 0.0)
+
     def score(
         self, query: RecommendationQuery, candidates: Sequence[Candidate]
     ) -> Sequence[ScoredCandidate]:
@@ -348,7 +352,7 @@ class DeterministicHeuristicRanker:
             total = 0.0
             reasons: list[str] = []
             for contribution in candidate.contributions:
-                weight = self._WEIGHTS.get(contribution.source_key, 0.0)
+                weight = self._source_weight(contribution.source_key)
                 if contribution.source_key == "exploration":
                     weight *= query.exploration
                 total += weight * contribution.raw_score
@@ -539,6 +543,57 @@ class RecommendationPipelineRunner:
     ) -> tuple[RankedRecommendation, ...]:
         """Rerank one already-generated pool without recomputing user state."""
         return tuple(self._reranker.rerank(query, scored, limit=query.limit, pipeline=pipeline))
+
+    def filter_snapshot_tracks(
+        self,
+        query: RecommendationQuery,
+        snapshot: RecommendationInputSnapshot,
+    ) -> tuple[SnapshotTrack, ...]:
+        """Apply the production mandatory filter to an external model's snapshot universe."""
+
+        candidates = tuple(Candidate(track, ()) for track in snapshot.tracks)
+        return tuple(candidate.track for candidate in self._filter.apply(query, candidates))
+
+    def rank_external_scores(
+        self,
+        query: RecommendationQuery,
+        snapshot: RecommendationInputSnapshot,
+        scores: Sequence[tuple[UUID, float]],
+        pipeline: PipelineDefinition,
+        *,
+        source_key: str,
+        source_version: str,
+    ) -> tuple[RankedRecommendation, ...]:
+        """Route external model scores through the same filter and diversity authority as P11."""
+
+        recording_ids = tuple(recording_id for recording_id, _ in scores)
+        if len(recording_ids) != len(set(recording_ids)):
+            raise ValueError("external recommendation scores contain duplicate recordings")
+        track_by_id = {track.recording_id: track for track in snapshot.tracks}
+        if any(recording_id not in track_by_id for recording_id in recording_ids):
+            raise ValueError("external recommendation score escapes the bound snapshot")
+        candidates = tuple(
+            Candidate(
+                track_by_id[recording_id],
+                (
+                    CandidateContribution(
+                        source_key,
+                        source_version,
+                        source_rank,
+                        score,
+                        {"shadow": True},
+                    ),
+                ),
+            )
+            for source_rank, (recording_id, score) in enumerate(scores, 1)
+        )
+        allowed = self._filter.apply(query, candidates)
+        score_by_id = dict(scores)
+        scored = tuple(
+            ScoredCandidate(candidate, score_by_id[candidate.recording_id], ("SONA_SHADOW_SCORE",))
+            for candidate in allowed
+        )
+        return self.rank(query, scored, pipeline)
 
     def candidate_pool(
         self,
@@ -764,6 +819,86 @@ def request_document(
             "availability_snapshot": snapshot.availability_snapshot,
             "policy_snapshot_sha256": snapshot.policy_snapshot_sha256,
         },
+    }
+
+
+def recommendation_input_snapshot_document(
+    owner_user_id: UUID,
+    *,
+    interaction_watermark: int,
+    tracks: tuple[SnapshotTrack, ...],
+) -> dict[str, JsonValue]:
+    """Build the exact canonical baseline snapshot document persisted by P11."""
+
+    if interaction_watermark < 0 or len(tracks) > RECOMMENDATION_MAX_SNAPSHOT_TRACKS:
+        raise ValueError("recommendation snapshot bounds are invalid")
+    return {
+        "schema_version": 1,
+        "user_id": str(owner_user_id),
+        "interaction_watermark": interaction_watermark,
+        "selection_policy": "most_recent_added_then_recording_id_v1",
+        "max_tracks": RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
+        "tracks": [recommendation_snapshot_track_document(track) for track in tracks],
+    }
+
+
+def recommendation_availability_snapshot_document(
+    tracks: tuple[SnapshotTrack, ...],
+) -> dict[str, JsonValue]:
+    """Build the availability identity document bound to a baseline snapshot."""
+
+    return {
+        "tracks": [
+            {
+                "recording_id": str(track.recording_id),
+                "availability": track.availability,
+                "authorized": track.authorized,
+            }
+            for track in tracks
+        ]
+    }
+
+
+def recommendation_policy_snapshot_document(
+    tracks: tuple[SnapshotTrack, ...],
+) -> dict[str, JsonValue]:
+    """Build the policy identity document bound to a baseline snapshot."""
+
+    return {
+        "tracks": [
+            {
+                "recording_id": str(track.recording_id),
+                "identity_status": track.identity_status,
+                "preference": track.preference,
+                "excluded": track.excluded,
+            }
+            for track in tracks
+        ]
+    }
+
+
+def recommendation_snapshot_track_document(track: SnapshotTrack) -> dict[str, JsonValue]:
+    """Serialize every persisted baseline snapshot track field."""
+
+    return {
+        "recording_id": str(track.recording_id),
+        "user_track_ref_id": (
+            None if track.user_track_ref_id is None else str(track.user_track_ref_id)
+        ),
+        "artist_key": track.artist_key,
+        "release_key": track.release_key,
+        "metadata_tokens": list(track.metadata_tokens),
+        "availability": track.availability,
+        "authorized": track.authorized,
+        "identity_status": track.identity_status,
+        "preference": track.preference,
+        "excluded": track.excluded,
+        "play_count": track.play_count,
+        "organic_play_count": track.organic_play_count,
+        "recommended_play_count": track.recommended_play_count,
+        "last_played_at_ms": track.last_played_at_ms,
+        "added_at_ms": track.added_at_ms,
+        "release_date_ordinal": track.release_date_ordinal,
     }
 
 
@@ -1070,6 +1205,7 @@ def _candidate_recall(
 __all__ = (
     "DEFAULT_PIPELINE_KEY",
     "DEFAULT_PIPELINE_VERSION",
+    "RECOMMENDATION_MAX_SNAPSHOT_TRACKS",
     "ArtistReleaseMetadataCandidateGenerator",
     "BaselineUserRepresentationProvider",
     "DeterministicCandidatePoolComposer",
@@ -1090,5 +1226,9 @@ __all__ = (
     "baseline_pipeline_definition",
     "offline_pack_document",
     "pipeline_manifest_document",
+    "recommendation_availability_snapshot_document",
+    "recommendation_input_snapshot_document",
+    "recommendation_policy_snapshot_document",
+    "recommendation_snapshot_track_document",
     "request_document",
 )

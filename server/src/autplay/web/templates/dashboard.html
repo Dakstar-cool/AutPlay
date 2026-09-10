@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <header class="page-heading">
-  <div><p class="eyebrow">AutPlay Admin</p><h1>{{ t("dashboard_title") }}</h1><p>{{ t("dashboard_intro") }}</p></div>
+  <div><h1>{{ t("dashboard_title") }}</h1><p class="page-summary">{{ t("dashboard_intro") }}</p></div>
   <dl class="identity"><div><dt>{{ t("server_label") }}</dt><dd>{{ server_label }}</dd></div><div><dt>{{ t("current_account") }}</dt><dd>{{ account_label }}</dd></div><div><dt>{{ t("role") }}</dt><dd>{{ role }}</dd></div></dl>
 </header>
 <section aria-labelledby="health-title">

@@ -11,12 +11,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.autplay.AutPlayRuntime
-import app.autplay.application.server.ServerFeatureRepository
 import app.autplay.application.server.ServerFeatureStateRepository
-import app.autplay.data.security.AndroidKeystoreCredentialStore
+import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.ServerProfileId
 import java.time.Duration
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.flow.first
 
 /** Bounded status polling for a durable remote import reference. */
@@ -31,16 +31,19 @@ class RemoteImportStatusWorker(
         val local = dao.remoteImportJobById(importJobId) ?: return Result.success()
         if (local.state in TERMINAL_STATES) return Result.success()
         val settings = applicationNonSecretSettingsStore(applicationContext).settings.first()
-        if (settings.activeServerProfileId?.value != local.serverProfileId || settings.serverBaseUrl == null) {
+        val user = settings.activeUserId
+        val device = settings.deviceId
+        if (
+            settings.activeServerProfileId?.value != local.serverProfileId ||
+            settings.serverBaseUrl == null || user == null || device == null
+        ) {
             dao.upsertRemoteImportJob(local.copy(lastErrorCode = "SERVER_PROFILE_NOT_ACTIVE", updatedAtMs = now()))
             return Result.failure()
         }
         return try {
-            val server = ServerFeatureRepository(
-                settings.serverBaseUrl,
-                settings.streamBaseUrl ?: settings.serverBaseUrl,
-                ServerProfileId(local.serverProfileId),
-                AndroidKeystoreCredentialStore(applicationContext),
+            val server = AutPlayRuntime.serverFeatures(
+                applicationContext,
+                ClientEventBinding(user, device, ServerProfileId(local.serverProfileId)),
             )
             val report = server.importReport(importJobId)
             ServerFeatureStateRepository(database).recordImportReport(
@@ -52,6 +55,8 @@ class RemoteImportStatusWorker(
                 updated?.let { dao.upsertRemoteImportJob(it.copy(lastErrorCode = "IMPORT_POLLING_PAUSED", updatedAtMs = now())) }
                 Result.success()
             } else Result.retry()
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: Exception) {
             if (runAttemptCount >= MAX_POLLS) {
                 dao.upsertRemoteImportJob(local.copy(lastErrorCode = "IMPORT_STATUS_UNAVAILABLE", updatedAtMs = now()))

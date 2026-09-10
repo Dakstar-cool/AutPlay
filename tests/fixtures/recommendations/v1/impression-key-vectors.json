@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "algorithm": "RFC8785_SHA256",
+  "vectors": [
+    {
+      "case_id": "offline-presentation-key-v1",
+      "material": {
+        "owner_user_id": "00000000-0000-7000-8000-000000000001",
+        "device_id": "00000000-0000-7000-8000-000000000201",
+        "recommendation_request_id": "00000000-0000-7000-8000-000000000801",
+        "recording_id": "00000000-0000-7000-8000-000000000301",
+        "source_rank": 4
+      },
+      "sha256": "d6ebda61574ec2c49725856cbe41a23bae20370993c9c8f0a18b136b1d3dd56a"
+    }
+  ]
+}

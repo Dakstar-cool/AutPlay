@@ -2,11 +2,11 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Non-normative visual/interaction exploration; not an implementation milestone |
+| Status | User-approved Face Local visual contract as of 2026-09-02; normalized controls are authoritative |
 | Date | 2026-08-31 |
 | Scope | Make the upper aperture materially contribute to perceived musical character |
 | Preview | [`autplay-face-brow-action-grammar-v2.png`](autplay-face-brow-action-grammar-v2.png) |
-| Supersedes | The repeated upper-aperture poses in the v1 concept board, not the approved plan |
+| Supersedes | The repeated upper-aperture poses in the v1 concept board and the first simplified Face Local renderer |
 
 ## Problem
 
@@ -71,17 +71,17 @@ one stock arc or select a pre-rendered eyebrow asset.
 Values are starting hypotheses for a perceptual prototype, not production tuning. They deliberately
 make the starting positions and forms different enough to test in monochrome.
 
-| Anchor | `inner_y` | `outer_y` | `arch` | `center_pull` | `upper_open` | `lower_lift` | `lid_tightness` | Geometric read |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Neutral | `0.00` | `0.00` | `0.05` | `0.00` | `0.55` | `0.05` | `0.10` | Shallow, balanced baseline |
-| Calm soft | `0.10` | `0.05` | `0.12` | `0.00` | `0.48` | `0.10` | `0.05` | Wide, slightly elevated, low tension |
-| Positive light | `0.08` | `0.24` | `0.16` | `0.00` | `0.68` | `0.34` | `0.10` | Outer lift plus open/lower-lid lift |
-| Melancholic dark | `0.34` | `-0.10` | `0.08` | `0.24` | `0.40` | `0.08` | `0.24` | Inner endpoints high and inward; outer ends lower |
-| Dreamy atmospheric | `0.10` | `0.18` | `0.28` | `0.00` | `0.40` | `0.08` | `0.08` | Soft high arch with controlled left/right phase |
-| Energetic bright | `0.28` | `0.36` | `0.20` | `0.02` | `0.88` | `0.16` | `0.28` | Both regions high, wide and taut |
-| Aggressive tense | `-0.32` | `-0.10` | `-0.04` | `0.44` | `0.42` | `0.42` | `0.82` | Inner endpoints lowest, strongly convergent, compressed |
-| Euphoric | `0.22` | `0.34` | `0.24` | `0.00` | `0.78` | `0.58` | `0.12` | Broad lift with strong lower-aperture participation |
-| Ominous | `-0.18` | `-0.16` | `0.00` | `0.16` | `0.24` | `0.08` | `0.56` | Low, quiet, near-horizontal and symmetrical |
+| Anchor | `inner_y` | `outer_y` | `arch` | `center_pull` | `ribbon_tension` | `upper_open` | `lower_lift` | `lid_tightness` | Geometric read |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Neutral | `0.00` | `0.00` | `0.05` | `0.00` | `0.30` | `0.55` | `0.05` | `0.10` | Shallow, balanced baseline |
+| Calm soft | `0.10` | `0.05` | `0.12` | `0.00` | `0.12` | `0.48` | `0.10` | `0.05` | Wide, slightly elevated, low tension |
+| Positive light | `0.08` | `0.24` | `0.16` | `0.00` | `0.30` | `0.68` | `0.34` | `0.10` | Outer lift plus open/lower-lid lift |
+| Melancholic dark | `0.34` | `-0.10` | `0.08` | `0.24` | `0.38` | `0.40` | `0.08` | `0.24` | Inner endpoints high and inward; outer ends lower |
+| Dreamy atmospheric | `0.10` | `0.18` | `0.28` | `0.00` | `0.08` | `0.40` | `0.08` | `0.08` | Soft high arch with controlled left/right phase |
+| Energetic bright | `0.28` | `0.36` | `0.20` | `0.02` | `0.76` | `0.88` | `0.16` | `0.28` | Both regions high, wide and taut |
+| Aggressive tense | `-0.32` | `-0.10` | `-0.04` | `0.44` | `0.94` | `0.42` | `0.42` | `0.82` | Inner endpoints lowest, strongly convergent, compressed |
+| Euphoric | `0.22` | `0.34` | `0.24` | `0.00` | `0.38` | `0.78` | `0.58` | `0.12` | Broad lift with strong lower-aperture participation |
+| Ominous | `-0.18` | `-0.16` | `0.00` | `0.16` | `0.82` | `0.24` | `0.08` | `0.56` | Low, quiet, near-horizontal and symmetrical |
 
 `Melancholic dark` and `Aggressive tense` are the key polarity test: melancholy raises the inner
 endpoints above the outer ones; aggression lowers them below the outer ones and increases central
@@ -101,7 +101,7 @@ tone remain separate continuous controls.
 | Chroma | energy plus semantic confidence | More energetic and well-supported analysis may be more chromatic; calm or uncertain states move toward neutral, not toward another mood |
 | Tone | light ↔ dark | Controls perceived luminosity and contrast independently of hue |
 | Spectral width | direct ↔ atmospheric | Direct states use a narrow coherent band; atmospheric states permit a bounded adjacent-hue spread |
-| Accent attack | soft ↔ aggressive / transient intensity | Changes the short-lived filament/core accent, not the permanent background or UI semantic colors |
+| Accent attack | soft ↔ aggressive / transient intensity | Changes the short-lived pupil/core accent, not the permanent background or UI semantic colors |
 
 The future Android renderer should interpolate in HCT or an equivalent perceptual color space rather
 than blending encoded RGB/HSL values. Hue interpolation follows bounded palette paths; tone and
@@ -131,8 +131,10 @@ hue regions; production tone/chroma require device evidence.
    dominant expression carrier.
 2. Iris arcs use the same palette family at staggered tones/chroma, creating optical depth without a
    second semantic code.
-3. The resonance filament uses a short high-tone accent derived from the current family. It does not
-   introduce a random contrasting mood color on every transient.
+3. The pupil/core highlight uses a short high-tone accent derived from the current family. It does
+   not introduce a random contrasting mood color on every transient. The cross-eye filament was
+   removed from the Android runtime by user direction on 2026-09-02 because it read as a targeting
+   reticle after the reactive pupil was added.
 4. The optical core and background remain neutral. Playback, errors, warnings, Like, and other UI
    semantics retain their established app color roles and are never overridden by Face color.
 5. User accent/theme preferences may harmonize the palette at the renderer, but cannot rewrite the
@@ -169,7 +171,7 @@ hue regions; production tone/chroma require device evidence.
 
 1. A forced-choice monochrome test without labels distinguishes at least these pairs: melancholic
    versus aggressive, calm versus ominous, positive versus euphoric, and dreamy versus energetic.
-2. Remove iris color and filament motion: target readings must still remain above chance.
+2. Remove iris color and pupil motion: target readings must still remain above chance.
 3. Test eyebrow-only, aperture-only, and combined conditions. Positive states are expected to fail
    or become ambiguous in eyebrow-only form; that is evidence to keep lower-lid participation.
 4. Test intermediate semantic mixtures and transitions so the system does not collapse into the
@@ -196,6 +198,9 @@ hue regions; production tone/chroma require device evidence.
 
 ## Boundary
 
-This exploration does not modify the approved Resonance Lens plan, activate Face Contract, select a
-renderer, or turn psychological research into a human-state inference feature. Promotion requires
-explicit user approval and an update/re-review of the locked visual contract.
+The user promoted this visual grammar for the existing Android Face Local slice on 2026-09-02. The
+promotion updates the visual section of the approved Resonance Lens plan and requires independent
+review plus fresh device evidence. It does not activate Face Contract, Face Timeline, a model, or
+human-state inference. Production without a trustworthy semantic timeline remains neutral; named
+anchor palettes and poses remain prototype/evidence fixtures rather than a mood enum emitted at
+runtime.

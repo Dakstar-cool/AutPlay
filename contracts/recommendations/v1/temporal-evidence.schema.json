@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/temporal-evidence.schema.json",
+  "title": "AutPlay R1 Normalized Temporal Evidence v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_id",
+    "source_event_id",
+    "owner_user_id",
+    "server_profile_id",
+    "device_id",
+    "device_sequence",
+    "server_sequence",
+    "source_event_type",
+    "signal_key",
+    "derivation_key",
+    "recording_id",
+    "dimensions",
+    "occurred_at_ms",
+    "received_at_ms",
+    "effective_at_ms",
+    "time_classification",
+    "origin_lane",
+    "signed_strength",
+    "quality_weight",
+    "excluded_from_taste",
+    "source_request_sha256",
+    "normalized_evidence_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "evidence_id": {"$ref": "#/$defs/uuid"},
+    "source_event_id": {"$ref": "#/$defs/uuid"},
+    "owner_user_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "device_id": {"$ref": "#/$defs/uuid"},
+    "device_sequence": {"type": "integer", "minimum": 1},
+    "server_sequence": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "null"}
+      ]
+    },
+    "source_event_type": {"enum": ["USER_TRACK_PREFERENCE_SET", "LISTENING_EVENT_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED"]},
+    "signal_key": {"enum": ["EXPLICIT_LIKE", "EXPLICIT_DISLIKE", "EXCLUDE_FROM_TASTE", "FINALIZED_ORGANIC_LISTEN", "FINALIZED_RECOMMENDATION_LISTEN", "RECOMMENDATION_SELECTED", "RECOMMENDATION_DISMISSED", "FINALIZED_COMPLETION", "FINALIZED_SHORT_LISTEN_SKIP"]},
+    "derivation_key": {"enum": ["PREFERENCE_TRANSITION_V1", "EXCLUSION_PROJECTION_V1", "BASE_LISTEN_V1", "OUTCOME_CLASSIFIER_V1", "RECOMMENDATION_FEEDBACK_V1"]},
+    "recording_id": {"$ref": "#/$defs/uuid"},
+    "dimensions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/dimension"}
+    },
+    "occurred_at_ms": {"type": "integer", "minimum": 0},
+    "received_at_ms": {"type": "integer", "minimum": 0},
+    "effective_at_ms": {"type": "integer", "minimum": 0},
+    "time_classification": {"enum": ["TRUSTED_EVENT_TIME", "DELAYED_WITHIN_POLICY", "FUTURE_SKEW_CLAMPED", "PAST_SKEW_RECENT_DISABLED", "RECEIPT_TIME_ONLY", "LOCAL_UNSYNCED_TIME"]},
+    "origin_lane": {"enum": ["EXPLICIT", "ORGANIC", "SOURCE_QUEUE", "RECOMMENDATION", "EXCLUSION"]},
+    "signed_strength": {"type": "number", "minimum": -1, "maximum": 1},
+    "quality_weight": {"type": "number", "minimum": 0, "maximum": 1},
+    "excluded_from_taste": {"type": "boolean"},
+    "recommendation_request_id": {"$ref": "#/$defs/uuid"},
+    "impression_event_id": {"$ref": "#/$defs/uuid"},
+    "recommendation_source_rank": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "source_request_sha256": {"$ref": "#/$defs/sha256"},
+    "normalized_evidence_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "source_event_type": {"const": "USER_TRACK_PREFERENCE_SET"},
+        "signal_key": {"const": "EXPLICIT_LIKE"},
+        "derivation_key": {"const": "PREFERENCE_TRANSITION_V1"},
+        "origin_lane": {"const": "EXPLICIT"},
+        "signed_strength": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "excluded_from_taste": {"const": false}
+      },
+      "not": {"anyOf": [{"required": ["recommendation_request_id"]}, {"required": ["impression_event_id"]}, {"required": ["recommendation_source_rank"]}]}
+    },
+    {
+      "properties": {
+        "source_event_type": {"const": "USER_TRACK_PREFERENCE_SET"},
+        "signal_key": {"const": "EXPLICIT_DISLIKE"},
+        "derivation_key": {"const": "PREFERENCE_TRANSITION_V1"},
+        "origin_lane": {"const": "EXPLICIT"},
+        "signed_strength": {"const": 0},
+        "excluded_from_taste": {"const": false}
+      },
+      "not": {"anyOf": [{"required": ["recommendation_request_id"]}, {"required": ["impression_event_id"]}, {"required": ["recommendation_source_rank"]}]}
+    },
+    {
+      "properties": {
+        "source_event_type": {"enum": ["USER_TRACK_PREFERENCE_SET", "LISTENING_EVENT_RECORDED"]},
+        "signal_key": {"const": "EXCLUDE_FROM_TASTE"},
+        "derivation_key": {"const": "EXCLUSION_PROJECTION_V1"},
+        "origin_lane": {"const": "EXCLUSION"},
+        "signed_strength": {"const": 0},
+        "quality_weight": {"const": 0},
+        "excluded_from_taste": {"const": true}
+      },
+      "not": {"anyOf": [{"required": ["recommendation_request_id"]}, {"required": ["impression_event_id"]}, {"required": ["recommendation_source_rank"]}]}
+    },
+    {
+      "properties": {
+        "source_event_type": {"const": "LISTENING_EVENT_RECORDED"},
+        "signal_key": {"const": "FINALIZED_ORGANIC_LISTEN"},
+        "derivation_key": {"const": "BASE_LISTEN_V1"},
+        "origin_lane": {"const": "ORGANIC"},
+        "signed_strength": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "excluded_from_taste": {"const": false}
+      },
+      "not": {"anyOf": [{"required": ["recommendation_request_id"]}, {"required": ["impression_event_id"]}, {"required": ["recommendation_source_rank"]}]}
+    },
+    {
+      "required": ["recommendation_request_id", "impression_event_id", "recommendation_source_rank"],
+      "properties": {
+        "source_event_type": {"const": "LISTENING_EVENT_RECORDED"},
+        "signal_key": {"const": "FINALIZED_RECOMMENDATION_LISTEN"},
+        "derivation_key": {"const": "BASE_LISTEN_V1"},
+        "origin_lane": {"const": "RECOMMENDATION"},
+        "signed_strength": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "excluded_from_taste": {"const": false}
+      }
+    },
+    {
+      "properties": {
+        "source_event_type": {"const": "LISTENING_EVENT_RECORDED"},
+        "signal_key": {"const": "FINALIZED_COMPLETION"},
+        "derivation_key": {"const": "OUTCOME_CLASSIFIER_V1"},
+        "origin_lane": {"enum": ["ORGANIC", "SOURCE_QUEUE", "RECOMMENDATION"]},
+        "signed_strength": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "excluded_from_taste": {"const": false}
+      },
+      "allOf": [{
+        "if": {"properties": {"origin_lane": {"const": "RECOMMENDATION"}}},
+        "then": {"required": ["recommendation_request_id", "impression_event_id", "recommendation_source_rank"]},
+        "else": {"not": {"anyOf": [{"required": ["recommendation_request_id"]}, {"required": ["impression_event_id"]}, {"required": ["recommendation_source_rank"]}]}}
+      }]
+    },
+    {
+      "properties": {
+        "source_event_type": {"const": "LISTENING_EVENT_RECORDED"},
+        "signal_key": {"const": "FINALIZED_SHORT_LISTEN_SKIP"},
+        "derivation_key": {"const": "OUTCOME_CLASSIFIER_V1"},
+        "origin_lane": {"enum": ["ORGANIC", "SOURCE_QUEUE", "RECOMMENDATION"]},
+        "signed_strength": {"type": "number", "minimum": -1, "exclusiveMaximum": 0},
+        "excluded_from_taste": {"const": false}
+      },
+      "allOf": [{
+        "if": {"properties": {"origin_lane": {"const": "RECOMMENDATION"}}},
+        "then": {"required": ["recommendation_request_id", "impression_event_id", "recommendation_source_rank"]},
+        "else": {"not": {"anyOf": [{"required": ["recommendation_request_id"]}, {"required": ["impression_event_id"]}, {"required": ["recommendation_source_rank"]}]}}
+      }]
+    },
+    {
+      "required": ["recommendation_request_id", "impression_event_id", "recommendation_source_rank"],
+      "properties": {
+        "source_event_type": {"const": "RECOMMENDATION_FEEDBACK_RECORDED"},
+        "signal_key": {"const": "RECOMMENDATION_SELECTED"},
+        "derivation_key": {"const": "RECOMMENDATION_FEEDBACK_V1"},
+        "origin_lane": {"const": "RECOMMENDATION"},
+        "signed_strength": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "excluded_from_taste": {"const": false}
+      }
+    },
+    {
+      "required": ["recommendation_request_id", "impression_event_id", "recommendation_source_rank"],
+      "properties": {
+        "source_event_type": {"const": "RECOMMENDATION_FEEDBACK_RECORDED"},
+        "signal_key": {"const": "RECOMMENDATION_DISMISSED"},
+        "derivation_key": {"const": "RECOMMENDATION_FEEDBACK_V1"},
+        "origin_lane": {"const": "RECOMMENDATION"},
+        "signed_strength": {"type": "number", "minimum": -1, "exclusiveMaximum": 0},
+        "excluded_from_taste": {"const": false}
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key"],
+      "properties": {
+        "kind": {"enum": ["CANONICAL_ARTIST_ID", "CANONICAL_RELEASE_ID", "BOUNDED_METADATA_TOKEN"]},
+        "key": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    }
+  }
+}

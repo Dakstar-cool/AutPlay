@@ -216,6 +216,18 @@ def _set_run(tool: ModuleType, monkeypatch: pytest.MonkeyPatch, run_dir: Path) -
     monkeypatch.setattr(tool, "_prepare_run_dir", lambda: run_dir)
 
 
+def test_run_evidence_uses_writable_external_root(
+    tool: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence_root = tmp_path / "runtime-evidence"
+    monkeypatch.setenv("AUTPLAY_HITMO_EVIDENCE_ROOT", str(evidence_root))
+
+    run_dir = tool._prepare_run_dir()
+
+    assert run_dir.parent == evidence_root
+    assert (run_dir / "hitmo.py").is_file()
+
+
 def test_module_exposes_one_public_reusable_function(tool: ModuleType) -> None:
     public = [name for name in dir(tool) if not name.startswith("_")]
     assert public == ["download_hitmo_tracks"]
@@ -316,6 +328,7 @@ def test_cdp_uses_owned_tab_without_closing_browser(
             download_dir=tmp_path / "downloads",
             result_limit=5,
             timeout_ms=15_000,
+            max_bytes=200 * 1024 * 1024,
             should_download=False,
             headless=True,
             browser="cdp",
@@ -500,6 +513,29 @@ def test_authorized_download_waits_and_publishes_audio(
         "sha256:" + hashlib.sha256(downloaded.read_bytes()).hexdigest()[:12]
     )
     assert not list(destination.glob("*.part"))
+
+
+def test_download_byte_budget_cancels_growing_transfer(
+    tool: ModuleType,
+    tmp_path: Path,
+) -> None:
+    class GrowingTransfer:
+        suggested_filename = "oversize.mp3"
+        cancelled = False
+
+        async def save_as(self, destination: Path) -> None:
+            destination.write_bytes(b"ID3" + (b"x" * 4096))
+            await asyncio.Event().wait()
+
+        async def cancel(self) -> None:
+            self.cancelled = True
+
+    transfer = GrowingTransfer()
+    with pytest.raises(RuntimeError, match="download_size_invalid"):
+        asyncio.run(tool._save_download(transfer, tmp_path, max_bytes=1024))
+
+    assert transfer.cancelled
+    assert not list(tmp_path.glob("*.part"))
 
 
 def test_tsv_queue_preserves_input_order(tool: ModuleType, tmp_path: Path) -> None:

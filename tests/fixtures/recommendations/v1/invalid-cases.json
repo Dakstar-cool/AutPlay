@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "policy-rejects-active-without-valid-status", "schema": "feature-policy.schema.json", "base_example_index": 0, "mutation": {"path": "status", "value": "SERVING"}, "expected_error": "enum"},
+    {"case_id": "policy-rejects-unbounded-gap", "schema": "feature-policy.schema.json", "base_example_index": 0, "mutation": {"path": "episode_inactivity_gap_ms", "value": 999999999}, "expected_error": "maximum"},
+    {"case_id": "policy-rejects-unknown-field", "schema": "feature-policy.schema.json", "base_example_index": 0, "mutation": {"path": "latest", "value": true}, "expected_error": "additionalProperties"},
+    {"case_id": "evidence-rejects-unversioned-signal", "schema": "temporal-evidence.schema.json", "base_example_index": 1, "mutation": {"path": "signal_key", "value": "MOOD"}, "expected_error": "enum"},
+    {"case_id": "evidence-rejects-noncanonical-hash", "schema": "temporal-evidence.schema.json", "base_example_index": 1, "mutation": {"path": "normalized_evidence_sha256", "value": "ABC"}, "expected_error": "pattern"},
+    {"case_id": "feedback-requires-causal-impression", "schema": "temporal-evidence.schema.json", "base_example_index": 1, "mutation": {"path": "source_event_type", "value": "RECOMMENDATION_FEEDBACK_RECORDED"}, "expected_error": "oneOf"},
+    {"case_id": "feedback-cannot-claim-organic-origin", "schema": "temporal-evidence.schema.json", "base_example_index": 1, "mutation": {"path": "signal_key", "value": "RECOMMENDATION_SELECTED"}, "expected_error": "oneOf"},
+    {"case_id": "excluded-evidence-cannot-retain-positive-mass", "schema": "temporal-evidence.schema.json", "base_example_index": 1, "mutation": {"path": "excluded_from_taste", "value": true}, "expected_error": "oneOf"},
+    {"case_id": "profile-rejects-score-as-confidence", "schema": "adaptive-profile.schema.json", "base_example_index": 2, "mutation": {"path": "dimensions.0.long_term.confidence", "value": 2.0}, "expected_error": "maximum"},
+    {"case_id": "profile-rejects-unbounded-adjustment", "schema": "adaptive-profile.schema.json", "base_example_index": 2, "mutation": {"path": "dimensions.0.recent_adjustment", "value": -2.0}, "expected_error": "minimum"},
+    {"case_id": "snapshot-requires-retention", "schema": "temporal-snapshot.schema.json", "base_example_index": 3, "mutation": {"path": "retained_until_ms", "delete": true}, "expected_error": "required"},
+    {"case_id": "offline-delta-preserves-positive-source-rank", "schema": "offline-temporal-delta.schema.json", "base_example_index": 4, "mutation": {"path": "adjustments.0.source_rank", "value": 0}, "expected_error": "minimum"},
+    {"case_id": "offline-delta-cannot-bypass-filter", "schema": "offline-temporal-delta.schema.json", "base_example_index": 4, "mutation": {"path": "adjustments.0.mandatory_filter_passed", "value": false}, "expected_error": "const"},
+    {"case_id": "export-rejects-arbitrary-personal-payload", "schema": "owner-export.schema.json", "base_example_index": 5, "mutation": {"path": "raw_history", "value": []}, "expected_error": "additionalProperties"},
+    {"case_id": "incomplete-export-requires-continuation", "schema": "owner-export.schema.json", "base_example_index": 5, "mutation": {"path": "page.complete", "value": false}, "expected_error": "required"}
+  ]
+}

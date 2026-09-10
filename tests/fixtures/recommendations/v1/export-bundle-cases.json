@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "missing-page", "page_indexes": [], "expected_error_code": "EXPORT_PAGE_SEQUENCE_INVALID"},
+    {"case_id": "duplicate-page", "page_indexes": [1, 1], "expected_error_code": "EXPORT_PAGE_DUPLICATE"},
+    {"case_id": "reordered-page", "page_indexes": [2, 1], "expected_error_code": "EXPORT_PAGE_SEQUENCE_INVALID"},
+    {"case_id": "oversized-page", "page_indexes": [1], "observed_page_bytes": 1048577, "expected_error_code": "EXPORT_PAGE_TOO_LARGE"}
+  ]
+}

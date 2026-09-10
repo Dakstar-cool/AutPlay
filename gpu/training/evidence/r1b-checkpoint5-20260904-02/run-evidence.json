@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "run_id": "r1b-checkpoint5-20260904-02",
+  "scope": "SYNTHETIC_QUALITY_INELIGIBLE_SHADOW_RUNTIME_SMOKE",
+  "quality_eligible": false,
+  "source_transfer": {
+    "host": "user@ii-rtx3060",
+    "run_path": "/home/user/autplay-sona-smoke/r1b-checkpoint5-20260904-02",
+    "archive_sha256": "05be84c18097c7e1f3125cb01262774f1cad56cb91f110b7fc082c9dd2f7d1c5",
+    "archive_bytes": 2646016,
+    "source_file_count": 203,
+    "contains_production_or_user_data": false
+  },
+  "immutable_identities": {
+    "artifact_sha256": "79233fd2272908bc52cf0e8133a82e3b718314faca30be534d9769838df093d6",
+    "model_manifest_sha256": "fef43ea548121a339d255e6a3b175d309d0fd90879362c06225d8b70ffac23c4",
+    "tokenizer_fit_manifest_sha256": "8994e61fe09e1d90283cfbc6b50c8c686067fe5efb4259bdbf78d4da6d0ceb2a",
+    "tokenizer_artifact_manifest_sha256": "ae53beb1c4aaf8eedf86c1421313613cada075275d702950cba2a0c466adfca3",
+    "shadow_pipeline_manifest_sha256": "7b3dfae0a74430d51c9278b6fd2c450d98ddfbdc236e47818cdace91d50c1375"
+  },
+  "remote_gates": {
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "driver_version": "595.84",
+    "uv_version": "0.12.3",
+    "python_version": "3.14.7",
+    "ruff": "PASS",
+    "strict_mypy": "PASS_27_SOURCE_FILES",
+    "pytest": "PASS_33_TESTS"
+  },
+  "local_gates": {
+    "server_strict_mypy": "PASS_260_SOURCE_FILES",
+    "gpu_strict_mypy": "PASS_27_SOURCE_FILES",
+    "server_targeted_sona": "PASS_18_TESTS",
+    "gpu_pytest": "PASS_31_TESTS_2_WINDOWS_SYMLINK_SKIPS",
+    "postgresql_migration_and_sona": "PASS_18_TESTS_POSTGRESQL_18_4_PGVECTOR_0_8_6",
+    "server_full_pytest": "PASS_761_TESTS_1_WINDOWS_SYMLINK_SKIP_1_PREEXISTING_WARNING"
+  },
+  "transport": {
+    "remote_bind": "127.0.0.1:8788",
+    "local_tunnel": "127.0.0.1:18787",
+    "tailscale_ping_ms": 8,
+    "readiness_status": "ready",
+    "runtime": "SONA_LITE_ONNX_CUDA"
+  },
+  "end_to_end_smoke": {
+    "request_sha256": "557421c5ebed27f7e35f8303486f027bfe14781676f7db4e79b09524e8b15626",
+    "generated_semantic_id": [1, 1, 1],
+    "generated_count": 1,
+    "ranked_recording_id": "00000000-0000-0000-0000-000000002710",
+    "ranked_count": 1,
+    "degraded_to_p11": false,
+    "worker_http_status": 200
+  },
+  "safety": {
+    "shadow_only": true,
+    "serving_activation": false,
+    "recommendation_items_created": false,
+    "impressions_created": false,
+    "p11_mutation_allowed": false,
+    "fail_closed_to_p11": true,
+    "post_expiry_algorithmic_replay_unavailable": true,
+    "persisted_exact_p11_and_sona_evidence_remain_loadable": true
+  },
+  "independent_review": {
+    "verdict": "APPROVED",
+    "critical_findings": 0,
+    "major_findings": 0,
+    "minor_findings": 0
+  }
+}

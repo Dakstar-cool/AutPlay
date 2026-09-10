@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "run_id": "r1b-checkpoint4-20260904-02",
+  "scope": "SYNTHETIC_QUALITY_INELIGIBLE_GPU_SMOKE",
+  "quality_eligible": false,
+  "remote": {
+    "host": "user@ii-rtx3060",
+    "run_path": "/home/user/autplay-sona-smoke/r1b-checkpoint4-20260904-02",
+    "source_archive_sha256": "b79274df0ee973522632595cad36caef8472220aeeaf8d366806535573f1fc94",
+    "source_archive_bytes": 2526720,
+    "source_entry_count": 213
+  },
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "gpu_memory_bytes": 12490440704,
+    "driver_version": "595.84",
+    "python_version": "3.14.7",
+    "uv_version": "0.12.3",
+    "torch_version": "2.14.0+cu130",
+    "cuda_version": "13.0",
+    "onnx_version": "1.22.0",
+    "onnxruntime_version": "1.26.0",
+    "onnxscript_version": "0.7.1"
+  },
+  "remote_gates": {
+    "ruff_format": "PASS_16_FILES",
+    "ruff_check": "PASS",
+    "strict_mypy": "PASS_16_SOURCE_FILES",
+    "pytest": "PASS_16_TESTS_2_KNOWN_GRU_EXPORT_WARNINGS",
+    "onnx_checker": "PASS",
+    "cpu_inference_provider": "CPUExecutionProvider",
+    "cpu_output_shapes": [[1, 1, 3], [1, 1], [1, 1024, 4], [1, 1024]],
+    "cpu_generated_sid": [1, 1, 1]
+  },
+  "training": {
+    "device_type": "cuda",
+    "dataset_manifest_sha256": "aefb4fb9fcdfa8fe09ee91a24b58b8d2ca49d0b22133846fe2012e543529ec5b",
+    "tokenizer_fit_manifest_sha256": "8994e61fe09e1d90283cfbc6b50c8c686067fe5efb4259bdbf78d4da6d0ceb2a",
+    "checkpoint_manifest_sha256": "18d58a994450e074ec9f6e503e03ad879e6a14aebf3980a6b89fc39e19322ac1",
+    "weights_sha256": "668e62aaaa215a15b8b71692cf96e724403063388c9645f7052790a5dae8b80a",
+    "repeat_checkpoint_manifest_sha256": "18d58a994450e074ec9f6e503e03ad879e6a14aebf3980a6b89fc39e19322ac1",
+    "repeat_weights_sha256": "668e62aaaa215a15b8b71692cf96e724403063388c9645f7052790a5dae8b80a",
+    "cuda_checkpoint_reproducible": true,
+    "checkpoint_tree_sha256": "89260ef900b0a87b1997c28831de3ac8c02980734d795273e3bc0f7c6ea6b538",
+    "optimizer_steps": 1,
+    "epoch_total_losses": [1.1180015802383423]
+  },
+  "onnx_reproducibility": {
+    "export_a_sha256": "79233fd2272908bc52cf0e8133a82e3b718314faca30be534d9769838df093d6",
+    "export_b_sha256": "79233fd2272908bc52cf0e8133a82e3b718314faca30be534d9769838df093d6",
+    "repeat_training_export_sha256": "79233fd2272908bc52cf0e8133a82e3b718314faca30be534d9769838df093d6",
+    "byte_identical": true,
+    "training_to_onnx_reproducible": true,
+    "opset": 20,
+    "model_manifest_sha256": "fef43ea548121a339d255e6a3b175d309d0fd90879362c06225d8b70ffac23c4",
+    "commit_sha256": "b57973db02ffe47554a6a734e352b3209efda5b016db349dcd738b11250651f3",
+    "downloaded_manifest_file_sha256": "3841075067a0aa792db94ad70387a5a6ae3a33c365d85c0aa9a9d83e7dff839a",
+    "downloaded_commit_file_sha256": "4ee6b124355244bbc2eebd251658532ca6ed6c90df1a6f769e99fa01575131c6"
+  },
+  "gpu_benchmark": {
+    "evidence_sha256": "657264c9ef479c8e3cbf35eb63dc8cbd6862f2f41f4ccb2ffc7d603105ed62e3",
+    "downloaded_file_sha256": "81d1c787bee4d47762688dd43636bccfae23ac24bf47e3bfc33389f73def6169",
+    "warmup_iterations": 20,
+    "measured_iterations": 100,
+    "mean_latency_ms": 3.185135609237477,
+    "p50_latency_ms": 3.1691149924881756,
+    "p95_latency_ms": 3.533768991474062,
+    "generated_nonzero": true,
+    "generated_within_tokenizer": true,
+    "generated_expandable": true
+  },
+  "local_download_verification": {
+    "evidence_envelope": "PASS",
+    "onnx_byte_reproducibility": "PASS",
+    "checkpoint_dataset_tokenizer_binding": "PASS",
+    "onnx_checker_cpu_inference": "PASS"
+  }
+}

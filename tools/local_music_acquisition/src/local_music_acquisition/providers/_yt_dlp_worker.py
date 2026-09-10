@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -31,7 +32,7 @@ class _SilentLogger:
     def error(self, _message: str) -> None: ...
 
 
-def _size_hook(max_bytes: int):
+def _size_hook(max_bytes: int) -> Callable[[dict[str, object]], None]:
     def check(progress: dict[str, object]) -> None:
         for name in ("downloaded_bytes", "total_bytes", "total_bytes_estimate"):
             value = progress.get(name)

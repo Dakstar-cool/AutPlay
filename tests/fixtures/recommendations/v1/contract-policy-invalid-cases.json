@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "bound-is-versioned", "mutation": {"path": "bounds.maximum_snapshot_bytes", "value": 4194305}, "expected_error": "const"},
+    {"case_id": "event-order-is-versioned", "mutation": {"path": "event_time.stable_order.3", "value": "source_event_id"}, "expected_error": "const"},
+    {"case_id": "evidence-identity-is-versioned", "mutation": {"path": "evidence_fusion.normalized_evidence_identity.1", "value": "SOURCE_EVENT_ID"}, "expected_error": "const"},
+    {"case_id": "signal-order-is-versioned", "mutation": {"path": "signals.0.signal_key", "value": "FINALIZED_COMPLETION"}, "expected_error": "const"},
+    {"case_id": "delete-order-is-versioned", "mutation": {"path": "privacy.owner_delete.server_transaction_order.1", "value": "R1_AND_P11_RECOMMENDATION_REQUESTS"}, "expected_error": "const"},
+    {"case_id": "export-redactions-are-versioned", "mutation": {"path": "privacy.export.excludes.0", "value": "NONE"}, "expected_error": "const"},
+    {"case_id": "evaluation-threshold-is-versioned", "mutation": {"path": "evaluation.maximum_p95_latency_ms", "value": 301}, "expected_error": "const"}
+  ]
+}

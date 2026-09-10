@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block head %}{% if live_refresh_seconds %}<meta http-equiv="refresh" content="{{ live_refresh_seconds }};url={{ refresh_url }}">{% endif %}{% endblock %}
+{% block content %}
+<header class="page-heading jobs-heading">
+  <div>
+    <h1>{{ t(page_title_key) }}</h1>
+    <p class="page-summary">{{ t(page_intro_key) }}</p>
+  </div>
+  <div class="jobs-controls" aria-label="{{ t('job_controls') }}">
+    {% if live %}<span class="live-indicator"><span aria-hidden="true"></span>{{ t("live_short") }}</span>{% endif %}
+    <a class="button secondary compact-button" href="{{ refresh_url }}">{{ t("refresh_now") }}</a>
+    <a class="button secondary compact-button" href="{{ live_toggle_url }}">{{ t("stop_live_refresh") if live else t("start_live_refresh") }}</a>
+  </div>
+</header>
+
+<section class="jobs-overview" aria-labelledby="job-summary-title">
+  <h2 class="visually-hidden" id="job-summary-title">{{ t("job_statistics") }}</h2>
+  <div class="job-stats">
+  {% for item in summary %}
+    <article class="job-stat job-stat-{{ item.tone }}"><strong>{{ item.value }}</strong><span>{{ t(item.label) }}</span></article>
+  {% endfor %}
+  </div>
+  <p class="statistics-scope">{{ t("job_statistics_scope") }}</p>
+</section>
+
+<section aria-labelledby="job-list-title">
+  <div class="section-heading"><h2 id="job-list-title">{{ t("recent_jobs") }}</h2></div>
+  {% if rows %}
+  <div class="job-list">
+  {% for row in rows %}
+    <article class="job-card job-card-{{ row.tone }}">
+      <div class="job-card-heading">
+        <div class="job-kind-line"><code>{{ row.kind }}</code>{% if row.is_music_download %}<span class="job-type">{{ t("music_download") }}</span>{% endif %}</div>
+        <span class="pill pill-{{ row.tone }}">{{ t(row.state_key) }}</span>
+      </div>
+      <div class="job-progress">
+        <div class="job-progress-label"><span>{{ t("created") }}: {{ row.created }}</span><strong>{{ row.progress_text }}</strong></div>
+        {% if row.progress_value is not none %}
+        <progress value="{{ row.progress_value }}" max="{{ row.progress_max }}" aria-label="{{ t('progress') }}: {{ row.progress_text }}">{{ row.progress_percent }}%</progress>
+        {% else %}
+        <div class="progress-track progress-track-unknown" role="img" aria-label="{{ t('progress_unavailable') }}"><span></span></div>
+        {% endif %}
+      </div>
+    </article>
+  {% endfor %}
+  </div>
+  {% else %}<section class="empty" aria-labelledby="empty-title"><h2 id="empty-title">{{ t("empty_title") }}</h2><p>{{ t("empty_body") }}</p></section>{% endif %}
+</section>
+
+{% if next_url %}<nav class="pagination" aria-label="Pagination"><a href="{{ next_url }}">{{ t("next") }}</a></nav>{% endif %}
+{% endblock %}

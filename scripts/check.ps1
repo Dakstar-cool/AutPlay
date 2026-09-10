@@ -31,10 +31,12 @@ try {
     & uv run --frozen ruff format --check tests/contract tests/release
     if ($LASTEXITCODE -ne 0) { throw "Root test Ruff format check failed" }
 
-    & uv run --frozen mypy tests/contract tests/release
+    # Bypass Windows console-script trampolines so relocated/non-ASCII workspaces
+    # use the interpreter from the locked project environment deterministically.
+    & uv run --frozen python -m mypy tests/contract tests/release
     if ($LASTEXITCODE -ne 0) { throw "Root test mypy failed" }
 
-    & uv run --frozen pytest tests/contract tests/release
+    & uv run --frozen python -m pytest tests/contract tests/release
     if ($LASTEXITCODE -ne 0) { throw "Root contract/release validation failed" }
 
     & uv lock --project server --check
@@ -49,7 +51,9 @@ try {
     & uv run --project server --frozen ruff format --check --config server/pyproject.toml server
     if ($LASTEXITCODE -ne 0) { throw "Ruff format check failed" }
 
-    & uv run --project server --frozen mypy --config-file server/pyproject.toml server/src server/tests
+    # Bypass Windows console-script trampolines so relocated/non-ASCII workspaces
+    # use the interpreter from the locked project environment deterministically.
+    & uv run --project server --frozen python -m mypy --config-file server/pyproject.toml server/src server/tests
     if ($LASTEXITCODE -ne 0) { throw "mypy failed" }
 
     $dependencyTreeJson = (& uv tree --project server --frozen --universal --format json --preview-features json-output | Out-String)
@@ -78,16 +82,52 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Runtime Docker Compose configuration validation failed" }
 
     if (-not $ServerOnly) {
+        & uv lock --project gpu --check
+        if ($LASTEXITCODE -ne 0) { throw "GPU uv lock freshness check failed" }
+        & uv run --project gpu --frozen python -m ruff check --config gpu/pyproject.toml gpu/src gpu/tests
+        if ($LASTEXITCODE -ne 0) { throw "GPU Ruff lint failed" }
+        & uv run --project gpu --frozen python -m ruff format --check --config gpu/pyproject.toml gpu/src gpu/tests
+        if ($LASTEXITCODE -ne 0) { throw "GPU Ruff format check failed" }
+        & uv run --project gpu --frozen python -m mypy --config-file gpu/pyproject.toml gpu/src gpu/tests
+        if ($LASTEXITCODE -ne 0) { throw "GPU mypy failed" }
+        & uv run --project gpu --frozen python -m pytest -c gpu/pyproject.toml gpu/tests
+        if ($LASTEXITCODE -ne 0) { throw "GPU tests failed" }
+
+        & uv lock --project gpu/training --check
+        if ($LASTEXITCODE -ne 0) { throw "Sona training uv lock freshness check failed" }
+        & uv run --project gpu/training --frozen python -m ruff check --config gpu/training/pyproject.toml gpu/training
+        if ($LASTEXITCODE -ne 0) { throw "Sona training Ruff lint failed" }
+        & uv run --project gpu/training --frozen python -m ruff format --check --config gpu/training/pyproject.toml gpu/training
+        if ($LASTEXITCODE -ne 0) { throw "Sona training Ruff format check failed" }
+        & uv run --project gpu/training --frozen python -m mypy --config-file gpu/training/pyproject.toml gpu/training/src gpu/training/tests
+        if ($LASTEXITCODE -ne 0) { throw "Sona training mypy failed" }
+        & uv run --project gpu/training --frozen python -m pytest -c gpu/training/pyproject.toml gpu/training/tests
+        if ($LASTEXITCODE -ne 0) { throw "Sona training tests failed" }
+
+        & uv lock --project tools/local_music_acquisition --check
+        if ($LASTEXITCODE -ne 0) { throw "Acquisition uv lock freshness check failed" }
+        & uv run --project tools/local_music_acquisition --frozen python -m ruff check --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
+        if ($LASTEXITCODE -ne 0) { throw "Acquisition Ruff lint failed" }
+        & uv run --project tools/local_music_acquisition --frozen python -m ruff format --check --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
+        if ($LASTEXITCODE -ne 0) { throw "Acquisition Ruff format check failed" }
+        & uv run --project tools/local_music_acquisition --frozen python -m mypy --config-file tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition/src
+        if ($LASTEXITCODE -ne 0) { throw "Acquisition mypy failed" }
+        & uv run --project tools/local_music_acquisition --frozen python -m pytest -c tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition/tests
+        if ($LASTEXITCODE -ne 0) { throw "Acquisition tests failed" }
+
         $gradleArguments = @(
             "--no-daemon",
             "--console=plain",
+            "--max-workers=1",
+            "--dependency-verification=strict",
             "lintDebug",
             "testDebugUnitTest",
             "assembleDebug",
+            "assembleTrustedLan",
             "assembleRelease"
         )
         & .\gradlew.bat @gradleArguments
-        if ($LASTEXITCODE -ne 0) { throw "Android lint/unit/debug/release-R8 gate failed" }
+        if ($LASTEXITCODE -ne 0) { throw "Android lint/unit/debug/trustedLan/release-R8 gate failed" }
     }
 
     $existingContainers = (& docker ps -a --filter "label=com.docker.compose.project=$composeProject" --format "{{.ID}}" | Out-String).Trim()
@@ -143,7 +183,7 @@ try {
         "postgresql+psycopg://autplay:autplay_dev_only@127.0.0.1:$publishedPort/autplay"
     )
 
-    & uv run --project server --frozen pytest -c server/pyproject.toml server/tests
+    & uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests
     if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 }
 finally {

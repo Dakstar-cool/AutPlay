@@ -15,7 +15,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
-from autplay.application.recommendations import pipeline_manifest_document
+from autplay.application.recommendations import (
+    RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
+    pipeline_manifest_document,
+    recommendation_availability_snapshot_document,
+    recommendation_input_snapshot_document,
+    recommendation_policy_snapshot_document,
+)
 from autplay.domain.recommendations import (
     CandidateContribution,
     ComponentVersionRef,
@@ -39,7 +45,7 @@ from .models import (
     RecommendationRequestRow,
 )
 
-_MAX_SNAPSHOT_TRACKS = 5_000
+_MAX_SNAPSHOT_TRACKS = RECOMMENDATION_MAX_SNAPSHOT_TRACKS
 _SNAPSHOT_CLEANUP_BATCH = 100
 
 
@@ -54,6 +60,10 @@ class SqlAlchemyRecommendationRuntime:
         with self._sessions() as session:
             # Keep the catalog/history rows and their watermark on one MVCC view.
             session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+            session.execute(
+                text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
+                {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+            )
             session.execute(
                 text(_PURGE_EXPIRED_SNAPSHOTS_SQL),
                 {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
@@ -75,36 +85,14 @@ class SqlAlchemyRecommendationRuntime:
                 )
                 or 0
             )
-            document: dict[str, JsonValue] = {
-                "schema_version": 1,
-                "user_id": str(user_id),
-                "interaction_watermark": watermark,
-                "selection_policy": "most_recent_added_then_recording_id_v1",
-                "max_tracks": _MAX_SNAPSHOT_TRACKS,
-                "tracks": [_track_document(track) for track in tracks],
-            }
+            document = recommendation_input_snapshot_document(
+                user_id,
+                interaction_watermark=watermark,
+                tracks=tracks,
+            )
             encoded = _canonical_bytes(document)
-            availability_document: dict[str, JsonValue] = {
-                "tracks": [
-                    {
-                        "recording_id": str(track.recording_id),
-                        "availability": track.availability,
-                        "authorized": track.authorized,
-                    }
-                    for track in tracks
-                ]
-            }
-            policy_document: dict[str, JsonValue] = {
-                "tracks": [
-                    {
-                        "recording_id": str(track.recording_id),
-                        "identity_status": track.identity_status,
-                        "preference": track.preference,
-                        "excluded": track.excluded,
-                    }
-                    for track in tracks
-                ]
-            }
+            availability_document = recommendation_availability_snapshot_document(tracks)
+            policy_document = recommendation_policy_snapshot_document(tracks)
             snapshot_id = uuid7()
             input_digest = sha256(encoded)
             availability_digest = sha256(_canonical_bytes(availability_document)).hexdigest()
@@ -558,29 +546,6 @@ def _track_from_mapping(value: RowMapping) -> SnapshotTrack:
     )
 
 
-def _track_document(track: SnapshotTrack) -> dict[str, JsonValue]:
-    return {
-        "recording_id": str(track.recording_id),
-        "user_track_ref_id": (
-            None if track.user_track_ref_id is None else str(track.user_track_ref_id)
-        ),
-        "artist_key": track.artist_key,
-        "release_key": track.release_key,
-        "metadata_tokens": list(track.metadata_tokens),
-        "availability": track.availability,
-        "authorized": track.authorized,
-        "identity_status": track.identity_status,
-        "preference": track.preference,
-        "excluded": track.excluded,
-        "play_count": track.play_count,
-        "organic_play_count": track.organic_play_count,
-        "recommended_play_count": track.recommended_play_count,
-        "last_played_at_ms": track.last_played_at_ms,
-        "added_at_ms": track.added_at_ms,
-        "release_date_ordinal": track.release_date_ordinal,
-    }
-
-
 def _track_from_document(value: Mapping[str, JsonValue]) -> SnapshotTrack:
     ref = value.get("user_track_ref_id")
     release = value.get("release_key")
@@ -791,6 +756,21 @@ SELECT
        added_at_ms, release_date_ordinal
 FROM selected
 ORDER BY recording_id
+"""
+
+_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL = """
+WITH expired AS (
+    SELECT recommendation_temporal_snapshot_id
+    FROM ml.recommendation_temporal_snapshot
+    WHERE user_id = :user_id AND retained_until <= now()
+    ORDER BY retained_until, recommendation_temporal_snapshot_id
+    LIMIT :limit
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM ml.recommendation_temporal_snapshot snapshot
+USING expired
+WHERE snapshot.recommendation_temporal_snapshot_id =
+      expired.recommendation_temporal_snapshot_id
 """
 
 _PURGE_EXPIRED_SNAPSHOTS_SQL = """

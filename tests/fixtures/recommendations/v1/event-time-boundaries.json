@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "received_at_ms": 1788375600000,
+  "future_clock_tolerance_ms": 300000,
+  "maximum_recent_backfill_ms": 2592000000,
+  "cases": [
+    {
+      "case_id": "future-tolerance-minus-one",
+      "occurred_at_ms": 1788375899999,
+      "expected_effective_at_ms": 1788375899999,
+      "expected_classification": "TRUSTED_EVENT_TIME",
+      "expected_recent_eligible": true
+    },
+    {
+      "case_id": "future-tolerance-exact",
+      "occurred_at_ms": 1788375900000,
+      "expected_effective_at_ms": 1788375900000,
+      "expected_classification": "TRUSTED_EVENT_TIME",
+      "expected_recent_eligible": true
+    },
+    {
+      "case_id": "future-tolerance-plus-one",
+      "occurred_at_ms": 1788375900001,
+      "expected_effective_at_ms": 1788375600000,
+      "expected_classification": "FUTURE_SKEW_CLAMPED",
+      "expected_recent_eligible": true
+    },
+    {
+      "case_id": "backfill-limit-minus-one",
+      "occurred_at_ms": 1785783600001,
+      "expected_effective_at_ms": 1785783600001,
+      "expected_classification": "DELAYED_WITHIN_POLICY",
+      "expected_recent_eligible": true
+    },
+    {
+      "case_id": "backfill-limit-exact",
+      "occurred_at_ms": 1785783600000,
+      "expected_effective_at_ms": 1785783600000,
+      "expected_classification": "DELAYED_WITHIN_POLICY",
+      "expected_recent_eligible": true
+    },
+    {
+      "case_id": "backfill-limit-plus-one",
+      "occurred_at_ms": 1785783599999,
+      "expected_effective_at_ms": 1785783599999,
+      "expected_classification": "PAST_SKEW_RECENT_DISABLED",
+      "expected_recent_eligible": false
+    },
+    {
+      "case_id": "missing-occurrence-time",
+      "occurred_at_ms": null,
+      "expected_effective_at_ms": 1788375600000,
+      "expected_classification": "RECEIPT_TIME_ONLY",
+      "expected_recent_eligible": true
+    }
+  ]
+}

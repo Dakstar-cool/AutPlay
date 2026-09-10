@@ -166,6 +166,10 @@
     <string name="detail_release_date">Release date</string>
 
     <string name="player_nothing_playing">Nothing playing</string>
+    <string name="face_description_idle">Resonance Lens is neutral and waiting for playback</string>
+    <string name="face_description_playing">Resonance Lens is using a neutral local response to playback</string>
+    <string name="face_description_paused">Resonance Lens is neutral; playback is paused</string>
+    <string name="face_description_buffering">Resonance Lens is neutral; playback is buffering</string>
     <string name="player_unknown_artist">Unknown artist</string>
     <string name="player_queue_context">Current queue</string>
     <string name="player_buffering">Buffering</string>

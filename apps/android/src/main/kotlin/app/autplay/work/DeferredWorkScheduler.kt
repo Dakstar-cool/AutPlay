@@ -47,27 +47,56 @@ data class DeferredWorkRequest(
 
 /** Port allowing application code to schedule durable metadata/sync work without WorkManager APIs. */
 interface DeferredWorkScheduler {
-    fun enqueue(request: DeferredWorkRequest)
+    suspend fun enqueue(request: DeferredWorkRequest)
+
+    /** Re-evaluates constraints for already queued unique work after a policy change. */
+    suspend fun reconcile(request: DeferredWorkRequest) = enqueue(request)
 }
 
 /** WorkManager adapter which passes only typed stable IDs through input [Data]. */
 class WorkManagerDeferredWorkScheduler(
     private val workManager: WorkManager,
     private val workerClass: Class<out ListenableWorker>,
+    private val allowMeteredNetwork: suspend () -> Boolean = { false },
 ) : DeferredWorkScheduler {
-    override fun enqueue(request: DeferredWorkRequest) {
+    override suspend fun enqueue(request: DeferredWorkRequest) {
+        enqueue(request, ExistingWorkPolicy.APPEND_OR_REPLACE)
+    }
+
+    override suspend fun reconcile(request: DeferredWorkRequest) {
+        // One-time unique work has no UPDATE policy. Replacing it is safe because sync intent
+        // lives in Room; it also cancels a running worker whose network policy just changed.
+        enqueue(request, ExistingWorkPolicy.REPLACE)
+    }
+
+    private suspend fun enqueue(request: DeferredWorkRequest, policy: ExistingWorkPolicy) {
         val workRequest = OneTimeWorkRequest.Builder(workerClass)
             .setInputData(request.toInputData())
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(
+                        requiredNetworkType(request.kind, allowMeteredNetwork()),
+                    )
+                    .build(),
+            )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, java.time.Duration.ofSeconds(10))
             .addTag("autplay-deferred-${request.kind.name.lowercase()}")
             .build()
         workManager.enqueueUniqueWork(
             request.uniqueName(),
-            ExistingWorkPolicy.KEEP,
+            policy,
             workRequest,
         )
     }
+}
+
+internal fun requiredNetworkType(
+    kind: DeferredWorkKind,
+    allowMeteredNetwork: Boolean,
+): NetworkType = if (kind == DeferredWorkKind.SYNC && !allowMeteredNetwork) {
+    NetworkType.UNMETERED
+} else {
+    NetworkType.CONNECTED
 }
 
 /** Parses the stable-ID-only input supplied by [WorkManagerDeferredWorkScheduler]. */

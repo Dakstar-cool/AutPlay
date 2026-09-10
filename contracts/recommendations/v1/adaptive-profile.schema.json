@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/adaptive-profile.schema.json",
+  "title": "AutPlay R1 Adaptive Profile v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "owner_user_id", "cutoff_at_ms", "interaction_watermark", "feature_policy", "maturity", "dimensions", "profile_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "owner_user_id": {"$ref": "#/$defs/uuid"},
+    "cutoff_at_ms": {"type": "integer", "minimum": 0},
+    "interaction_watermark": {"type": "integer", "minimum": 0},
+    "feature_policy": {"$ref": "#/$defs/versionRef"},
+    "maturity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "effective_signal_mass", "track_coverage", "artist_coverage", "observation_span_ms", "recency_age_ms", "recency", "consistency", "organic_share", "plasticity_multiplier"],
+      "properties": {
+        "score": {"$ref": "#/$defs/unit"},
+        "effective_signal_mass": {"type": "number", "minimum": 0},
+        "track_coverage": {"type": "integer", "minimum": 0},
+        "artist_coverage": {"type": "integer", "minimum": 0},
+        "observation_span_ms": {"type": "integer", "minimum": 0},
+        "recency_age_ms": {"type": "integer", "minimum": 0},
+        "recency": {"$ref": "#/$defs/unit"},
+        "consistency": {"$ref": "#/$defs/unit"},
+        "organic_share": {"$ref": "#/$defs/unit"},
+        "plasticity_multiplier": {"type": "number", "minimum": 0, "maximum": 10}
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/dimensionProfile"}
+    },
+    "profile_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "unit": {"type": "number", "minimum": 0, "maximum": 1},
+    "signedUnit": {"type": "number", "minimum": -1, "maximum": 1},
+    "versionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "version", "content_sha256"],
+      "properties": {
+        "key": {"const": "adaptive-taste"},
+        "version": {"type": "string", "pattern": "^[1-9][0-9]{0,8}$"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "horizonValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "confidence", "evidence_mass"],
+      "properties": {
+        "score": {"$ref": "#/$defs/signedUnit"},
+        "confidence": {"$ref": "#/$defs/unit"},
+        "evidence_mass": {"type": "number", "minimum": 0}
+      }
+    },
+    "dimensionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key", "long_term", "recent", "persistence", "momentum", "fatigue", "recent_adjustment", "source_event_ids"],
+      "properties": {
+        "kind": {"enum": ["CANONICAL_ARTIST_ID", "CANONICAL_RELEASE_ID", "BOUNDED_METADATA_TOKEN"]},
+        "key": {"type": "string", "minLength": 1, "maxLength": 200},
+        "long_term": {"$ref": "#/$defs/horizonValue"},
+        "recent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["EPISODE", "H12", "H24", "D3", "D7"],
+          "properties": {
+            "EPISODE": {"$ref": "#/$defs/horizonValue"},
+            "H12": {"$ref": "#/$defs/horizonValue"},
+            "H24": {"$ref": "#/$defs/horizonValue"},
+            "D3": {"$ref": "#/$defs/horizonValue"},
+            "D7": {"$ref": "#/$defs/horizonValue"}
+          }
+        },
+        "persistence": {"$ref": "#/$defs/unit"},
+        "momentum": {"$ref": "#/$defs/signedUnit"},
+        "fatigue": {"$ref": "#/$defs/unit"},
+        "recent_adjustment": {"$ref": "#/$defs/signedUnit"},
+        "source_event_ids": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/uuid"}}
+      }
+    }
+  }
+}

@@ -5,9 +5,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from yt_dlp.utils import DownloadError
-
 from local_music_acquisition.providers._yt_dlp_worker import _probe_audio, _size_hook
+from yt_dlp.utils import DownloadError
 
 
 def test_size_hook_stops_unknown_length_download_at_limit() -> None:

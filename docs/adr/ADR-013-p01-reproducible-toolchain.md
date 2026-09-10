@@ -50,7 +50,9 @@ properties, and digest-pinned Compose files.
 
 - Patch upgrades require an ADR/version record update and full P01-equivalent smoke.
 - Android SDK/JDK prerequisites must be provisioned explicitly on CI hosts.
-- `android.overridePathCheck=true` is required because the current Windows workspace contains non-ASCII path components.
+- The historical OneDrive workspace required `android.overridePathCheck=true` for non-ASCII path
+  components. The canonical `D:\AutPlayProd\AutPlay` workspace no longer requires that
+  experimental override, so it is deliberately absent from `gradle.properties`.
 
 ## Compatibility and migration
 

@@ -3,6 +3,7 @@ package app.autplay.application.recommendation
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.application.sync.ClientEventBinding
+import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.LibraryEntryEntity
 import app.autplay.data.local.entity.RecordingProjectionEntity
@@ -130,6 +131,105 @@ class OfflineRecommendationRepositoryTest {
     }
 
     @Test
+    fun temporalDeltaSurvivesRestartCreatesImpressionOnlyOnVisibilityAndPurgesOnUnbind() = runBlocking {
+        val repository = OfflineRecommendationRepository(database, eventIdFactory = { LocalId(EVENT_ONE) })
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        LibraryVerticalSliceRepository(database).setPreference(
+            BINDING,
+            LocalId(TRACK),
+            LocalId(PREFERENCE_EVENT),
+            "LIKED",
+            false,
+            null,
+            NOW + 1,
+        )
+
+        val firstItem = repository.loadHomeFeed(BINDING, NOW + 2).recommendationSections.values.flatten().single()
+        val deltaId = requireNotNull(firstItem.deltaId)
+        val deltaEventId = requireNotNull(firstItem.impressionEventId)
+        assertEquals("local_temporal_delta", firstItem.source)
+        assertEquals(1, database.recommendationPackDao().deltaCount(PROFILE, USER))
+        assertEquals(1, database.journalDao().eventCount())
+
+        database.close()
+        database = AutPlayDatabase.open(context, name)
+        val restarted = OfflineRecommendationRepository(database, eventIdFactory = { LocalId(EVENT_TWO) })
+        val restartedItem = restarted.loadHomeFeed(BINDING, NOW + 3).recommendationSections.values.flatten().single()
+        assertEquals(deltaId, restartedItem.deltaId)
+        assertEquals(deltaEventId, restartedItem.impressionEventId)
+        assertEquals(1, database.journalDao().eventCount())
+
+        val presented = restarted.recordPresentation(BINDING, LocalId(PACK), restartedItem, NOW + 3)
+        val repeated = restarted.recordPresentation(BINDING, LocalId(PACK), restartedItem, NOW + 4)
+        assertEquals(deltaEventId, presented.impressionEventId.value)
+        assertTrue(repeated.duplicate)
+        assertEquals(2, database.journalDao().eventCount())
+
+        restarted.purgeLocalRecommendationContext(PROFILE)
+        assertTrue(database.recommendationPackDao().latest(PROFILE, USER, 5).isEmpty())
+        assertEquals(0, database.recommendationPackDao().deltaCount(PROFILE, USER))
+        assertEquals(0, database.recommendationPackDao().presentationCount(PROFILE, USER))
+        assertEquals(2, database.journalDao().eventCount())
+        assertEquals(TRACK, requireNotNull(database.libraryDao().trackRef(TRACK)).localUserTrackRefId)
+    }
+
+    @Test
+    fun expiredDeltaFallsBackWithoutChangingExistingPresentationAttribution() = runBlocking {
+        val repository = OfflineRecommendationRepository(database, eventIdFactory = { LocalId(EVENT_ONE) })
+        val parentExpiry = NOW + OfflineTemporalDeltaCodec.MAX_DELTA_LIFETIME_MS + 10_000
+        repository.storeVerifiedPack(pack(expiresAtMs = parentExpiry), BINDING, NOW)
+        LibraryVerticalSliceRepository(database).setPreference(
+            BINDING,
+            LocalId(TRACK),
+            LocalId(PREFERENCE_EVENT),
+            "LIKED",
+            false,
+            null,
+            NOW + 1,
+        )
+        val deltaItem = repository.loadHomeFeed(BINDING, NOW + 2).recommendationSections.values.flatten().single()
+        val first = repository.recordPresentation(BINDING, LocalId(PACK), deltaItem, NOW + 3)
+
+        val afterExpiry = NOW + 2 + OfflineTemporalDeltaCodec.MAX_DELTA_LIFETIME_MS
+        val baseItem = repository.loadHomeFeed(BINDING, afterExpiry).recommendationSections.values.flatten().single()
+        assertEquals("offline_pack", baseItem.source)
+        assertEquals(null, baseItem.deltaId)
+
+        val repeated = repository.recordPresentation(BINDING, LocalId(PACK), baseItem, afterExpiry)
+        assertTrue(repeated.duplicate)
+        assertEquals(first.impressionEventId, repeated.impressionEventId)
+        assertEquals(1, database.recommendationPackDao().presentationCount(PROFILE, USER))
+        assertEquals(2, database.journalDao().eventCount())
+    }
+
+    @Test
+    fun refreshRevalidatesBindingBeforeCommittingDownloadedPack() = runBlocking {
+        val source = pack()
+        val repository = OfflineRecommendationRepository(database)
+        val failure = runCatching {
+            repository.refreshPack(
+                BINDING,
+                RecommendationPackTransport { _, _ ->
+                    DownloadedRecommendationPack(
+                        offlinePackId = source.offlinePackId,
+                        recommendationRequestId = REQUEST,
+                        payloadVersion = 1,
+                        payloadEncoding = "RAW_JSON",
+                        payloadBase64 = Base64.getEncoder().encodeToString(source.payload),
+                        payloadSha256 = source.payloadSha256.joinToString("") { "%02x".format(it.toInt() and 0xff) },
+                        createdAtMs = source.createdAtMs,
+                        expiresAtMs = source.expiresAtMs,
+                    )
+                },
+                NOW,
+                isBindingActive = { false },
+            )
+        }
+        assertTrue(failure.isFailure)
+        assertTrue(database.recommendationPackDao().latest(PROFILE, USER, 5).isEmpty())
+    }
+
+    @Test
     fun mappingAndJournalRollBackTogetherWhenJournalStepFails() = runBlocking {
         val base = OfflineRecommendationRepository(database)
         base.storeVerifiedPack(pack(), BINDING, NOW)
@@ -247,8 +347,9 @@ class OfflineRecommendationRepositoryTest {
         device: String = DEVICE,
         packId: String = PACK,
         requestId: String = REQUEST,
+        expiresAtMs: Long = EXPIRES,
     ): RecommendationPackEntity {
-        val raw = """{"payload_version":1,"offline_pack_id":"$packId","recommendation_request_id":"$requestId","user_id":"$user","device_id":"$device","pipeline":{"key":"cpu_baseline","version":"cpu-v1","manifest_sha256":"${"a".repeat(64)}"},"input_snapshot_sha256":"${"b".repeat(64)}","catalog_snapshot":7,"availability_snapshot":"availability-7","created_at_ms":$CREATED,"expires_at_ms":$EXPIRES,"request":{"schema_version":1,"canonicalization_version":1,"surface":"home","context":"GENERAL","limit":1,"exploration":0.1,"seed":42,"shadow":false},"items":[{"offline_pack_id":"$packId","recording_id":"$RECORDING","source_rank":1,"pack_position":1,"section":"for_you","score":1.0,"reason_code":"AFFINITY","reason_codes":["AFFINITY"],"contributions":[{"source_key":"library_affinity","source_version":"1","source_rank":1,"raw_score":1.0,"provenance":{"kind":"explicit"}}]}]}"""
+        val raw = """{"payload_version":1,"offline_pack_id":"$packId","recommendation_request_id":"$requestId","user_id":"$user","device_id":"$device","pipeline":{"key":"cpu_baseline","version":"cpu-v1","manifest_sha256":"${"a".repeat(64)}"},"input_snapshot_sha256":"${"b".repeat(64)}","catalog_snapshot":7,"availability_snapshot":"availability-7","created_at_ms":$CREATED,"expires_at_ms":$expiresAtMs,"request":{"schema_version":1,"canonicalization_version":1,"surface":"home","context":"GENERAL","limit":1,"exploration":0.1,"seed":42,"shadow":false},"items":[{"offline_pack_id":"$packId","recording_id":"$RECORDING","source_rank":1,"pack_position":1,"section":"for_you","score":1.0,"reason_code":"AFFINITY","reason_codes":["AFFINITY"],"contributions":[{"source_key":"library_affinity","source_version":"1","source_rank":1,"raw_score":1.0,"provenance":{"kind":"explicit"}}]}]}"""
         val bytes = JsonCanonicalizer(raw).encodedString.toByteArray(StandardCharsets.UTF_8)
         return RecommendationPackEntity(
             offlinePackId = packId,
@@ -261,7 +362,7 @@ class OfflineRecommendationRepositoryTest {
             payload = bytes,
             payloadSha256 = MessageDigest.getInstance("SHA-256").digest(bytes),
             createdAtMs = CREATED,
-            expiresAtMs = EXPIRES,
+            expiresAtMs = expiresAtMs,
         )
     }
 
@@ -277,6 +378,7 @@ class OfflineRecommendationRepositoryTest {
         const val LIBRARY_ENTRY = "99999999-9999-4999-8999-999999999999"
         const val EVENT_ONE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         const val EVENT_TWO = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        const val PREFERENCE_EVENT = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         const val PRESENTATION_TWO = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
         const val RELEASE = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
         const val OTHER_PROFILE = "d1111111-1111-4111-8111-111111111111"

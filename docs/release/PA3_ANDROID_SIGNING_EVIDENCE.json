@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "status": "EVIDENCE_LINKED",
+  "generated_at_utc": "2026-09-02T10:10:55Z",
+  "application_id": "app.autplay",
+  "production_certificate_sha256": "3cafd266aeec3707ecb6f019c9b10646ec84ba16c3ef1a3b40b7a737fff7b20d",
+  "update_proof_generation": {
+    "evidence_run": "20260902T065415Z",
+    "build_receipt_sha256": "65a33a7b7869a1792636e30aeb53157cd7fb2a51227ed043eac852fdfdb6cc71",
+    "update_receipt_sha256": "cc2075943db025d1d421b5fea1b3416687961bd29906028d1c2e8477b5131c8b",
+    "status": "PASS",
+    "scope": "Exact APK pair installed on an independent API 26 emulator data image; version 3 clean install followed by version 4 adb install -r with Room v13, local state, server binding and playback preserved.",
+    "artifacts": [
+      {
+        "filename": "autplay-0.3.0-pa3.1-signed.apk",
+        "version_code": 3,
+        "sha256": "f69cca1e3ba77e89265939cd7c42455f95dd036de3220fcac4178c7c9e7407f5"
+      },
+      {
+        "filename": "autplay-0.3.0-pa3.2-signed.apk",
+        "version_code": 4,
+        "sha256": "0c174e8bfd3618c0d4550913f2ad992bb8b8cafd686c1dcc3988e8898ea0e4d2"
+      }
+    ]
+  },
+  "latest_interactive_build_generation": {
+    "evidence_run": "20260902T084853Z",
+    "build_receipt_schema_version": 1,
+    "build_receipt_sha256": "c4701ec2aefbbf5d3fdef852ec010499448b43d57f2de206d1201173767a5ce6",
+    "status": "PASS",
+    "update_install": "NOT_REPEATED",
+    "scope": "Both APK identities, versions, SHA-256 values and production certificate were independently verified; this exact pair was not used for the emulator update proof.",
+    "artifacts": [
+      {
+        "filename": "autplay-0.3.0-pa3.1-signed.apk",
+        "version_code": 3,
+        "sha256": "52ba5492b73502d94f36ec95548a95429876eebe71bedb83dd8d6c3a8171b1a7"
+      },
+      {
+        "filename": "autplay-0.3.0-pa3.2-signed.apk",
+        "version_code": 4,
+        "sha256": "45d8a185fe51ef0b79770953b9864e83574d4a4fa169fe1e45ad662d4b89661e"
+      }
+    ]
+  },
+  "current_signing_workflow": {
+    "script_sha256": "20464ec9f537a374f0a89c35df3a15aa8df4b53e52feb61c865d02abee8917f6",
+    "receipt_schema_version": 2,
+    "interactive_build_status": "NOT_RUN_AFTER_FINAL_HARDENING",
+    "independent_review": "APPROVED_0_CRITICAL_0_MAJOR",
+    "verified_controls": [
+      "OWNER_ONLY_TEMPORARY_ACL",
+      "ATOMIC_PASS_RECEIPT_AFTER_VERIFIED_CLEANUP",
+      "COMPLETE_STABLE_DIRTY_AND_UNTRACKED_PROVENANCE"
+    ]
+  },
+  "claims": {
+    "exact_update_proof_artifact_set": "20260902T065415Z",
+    "latest_interactive_build_artifact_set": "20260902T084853Z",
+    "update_proof_transferred_to_different_apk_hashes": false,
+    "repeated_emulator_update_required_by_final_review": false,
+    "production_apk_published": false
+  },
+  "secrets": "NOT_RECORDED"
+}

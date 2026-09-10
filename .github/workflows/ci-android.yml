@@ -52,6 +52,7 @@ jobs:
             settings.gradle.kts
             gradle.properties
             gradle/libs.versions.toml
+            gradle/verification-metadata.xml
             gradle/wrapper/gradle-wrapper.properties
             apps/android/build.gradle.kts
 
@@ -64,6 +65,9 @@ jobs:
           cache-dependency-glob: |
             uv.lock
             server/uv.lock
+            gpu/uv.lock
+            gpu/training/uv.lock
+            tools/local_music_acquisition/uv.lock
 
       - name: Install pinned Android SDK packages
         shell: bash
@@ -80,8 +84,10 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk_root" "$sdk_root" \
             >> "$GITHUB_ENV"
 
-      - name: Install pinned Playwright Chromium
-        run: uv run --project server --frozen playwright install --with-deps chromium
+      - name: Install pinned Playwright browsers
+        run: |
+          uv run --project server --frozen playwright install --with-deps chromium
+          uv run --project tools/local_music_acquisition --frozen playwright install --with-deps firefox
 
       - name: Run canonical Android host gate
         run: bash scripts/check.sh
@@ -92,6 +98,7 @@ jobs:
           name: android-host-${{ github.sha }}
           path: |
             apps/android/build/outputs/apk/debug/android-debug.apk
+            apps/android/build/outputs/apk/trustedLan/android-trustedLan.apk
             apps/android/build/outputs/apk/release/android-release-unsigned.apk
             apps/android/build/reports/lint-results-debug.html
             apps/android/build/test-results/testDebugUnitTest/

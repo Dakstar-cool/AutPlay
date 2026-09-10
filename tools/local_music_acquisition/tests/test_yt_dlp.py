@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from local_music_acquisition.models import PlaylistItem, ProviderFailure, ProviderMiss
 from local_music_acquisition.providers._yt_dlp_worker import _find_exact
 from local_music_acquisition.providers.yt_dlp import (
@@ -155,9 +154,5 @@ def test_provider_maps_timeout_tree_termination_failure(
         fail_termination,
     )
 
-    with pytest.raises(
-        ProviderFailure, match=r"yt_dlp\.process_tree_termination_failed"
-    ):
-        YtDlpProvider(timeout_seconds=10).acquire(
-            PlaylistItem(1, "Artist", "Title"), tmp_path
-        )
+    with pytest.raises(ProviderFailure, match=r"yt_dlp\.process_tree_termination_failed"):
+        YtDlpProvider(timeout_seconds=10).acquire(PlaylistItem(1, "Artist", "Title"), tmp_path)

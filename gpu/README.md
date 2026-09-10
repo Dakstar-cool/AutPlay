@@ -33,3 +33,27 @@ Use `scripts/test-p12-gpu.ps1` for a host-installed `uv` workflow or
 the isolated image and runs list, deterministic selection and configuration checks with no network,
 no volumes, a read-only root filesystem and exact-name cleanup. PCI selectors accept both NVML's
 legacy four-digit and current eight-digit domain forms.
+
+## Sona-Lite shadow endpoint
+
+Checkpoint R1B-5 adds an inference-only mode that is deliberately separate from the durable P12
+worker:
+
+```text
+autplay-ml-gpu --serve-sona-shadow
+```
+
+It always binds `127.0.0.1` and exposes exactly `POST /internal/sona/v1/infer` plus the
+identity-only readiness probe `GET /internal/sona/v1/ready`. Configure the port with
+`AUTPLAY_GPU_SONA_BIND_PORT` and provide all three immutable identities:
+
+- `AUTPLAY_GPU_SONA_ARTIFACT_SHA256` for the content-addressed ONNX bytes;
+- `AUTPLAY_GPU_SONA_MODEL_MANIFEST_SHA256` for the canonical model manifest;
+- `AUTPLAY_GPU_SONA_TOKENIZER_SHA256` for the exact Semantic-ID tokenizer used by the CPU server.
+
+The artifact, `<artifact>.manifest.json` and `<artifact>.commit.json` must already exist under the
+configured model cache. Startup verifies every hash before CUDA session creation. The endpoint has
+strict request/response size and schema bounds. The canonical request carries the owner UUID needed
+for end-to-end snapshot/hash binding, but the worker does not log or persist it, write recommendation
+items or create impressions. Access from another host must terminate in an authenticated
+SSH/Tailscale tunnel whose remote destination is still loopback.

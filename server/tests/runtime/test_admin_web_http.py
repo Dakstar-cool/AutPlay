@@ -12,6 +12,7 @@ from autplay.domain.admin_views import (
     AdminConfirmationTarget,
     AdminDashboard,
     AdminDeviceItem,
+    AdminJobItem,
     AdminPage,
     AdminUnavailable,
 )
@@ -196,9 +197,16 @@ class _Views:
         after: str | None = None,
     ) -> AdminPage:
         del actor, limit, after
-        if surface != "devices":
-            raise WebAdminError("admin_surface_unavailable")
-        return AdminPage((AdminDeviceItem(uuid4(), "Phone", "ANDROID", datetime.now(UTC)),), None)
+        if surface == "devices":
+            return AdminPage(
+                (AdminDeviceItem(uuid4(), "Phone", "ANDROID", datetime.now(UTC)),), None
+            )
+        if surface == "jobs":
+            return AdminPage(
+                (AdminJobItem(uuid4(), "discovery.acquire", "RUNNING", datetime.now(UTC), 1, 3),),
+                None,
+            )
+        raise WebAdminError("admin_surface_unavailable")
 
     def status(self, actor: WebActor, surface: str) -> object:
         del actor, surface
@@ -472,10 +480,14 @@ def test_actual_renderer_renders_dashboard_table_and_status() -> None:
     for path, text in (
         ("/admin/", "Test server"),
         ("/admin/devices", "Phone"),
+        ("/admin/jobs?live=1", "33%"),
         ("/admin/vault", "This information is unavailable"),
     ):
         response = client.get(path)
         assert response.status_code == 200 and text in response.text
+    jobs = client.get("/admin/jobs?live=1")
+    assert '<meta http-equiv="refresh"' in jobs.text
+    assert "discovery.acquire" in jobs.text
 
 
 def test_dashboard_navigation_discovers_enabled_automation() -> None:

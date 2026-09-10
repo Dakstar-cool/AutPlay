@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "AUTPLAY_AUDIT_REMEDIATION_REGISTRY_V1",
+  "as_of_utc_date": "2026-09-09",
+  "source_audit": {
+    "report_sha256": "97cc85280d83cfd3426d681d47bdb123e048c9e617227a2c39c1ad7f563c4550",
+    "evidence_archive_sha256": "b1b05d9ab2c7a93d0fbcd9cfd5e31fc7dfff24d1474cbebeed4f51d53ab4b701",
+    "audited_head": "e594d5282558e5b71fb4f759efe81ef9c0bbeba2"
+  },
+  "preservation_checkpoint": {
+    "commit": "3b45a311cbd123fcc90d9c8afa0cd5d93ce5e57f",
+    "branch": "codex/pa3-linux-migration",
+    "remote_ref": "origin/codex/pa3-linux-migration"
+  },
+  "dependent_r1b": {
+    "status": "BLOCKED",
+    "reason": "Canonical causally joined outcomes, complete eligible candidate sets, and approved embedding evidence are unavailable.",
+    "r1c_activated": false
+  },
+  "states": {
+    "FIXED_WITH_LOCAL_EVIDENCE": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "G1",
+      "T1",
+      "T2",
+      "Q1",
+      "Q2",
+      "Q5",
+      "Q6"
+    ],
+    "CODE_CHANGED_CONNECTED_EVIDENCE_PENDING": [
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5",
+      "A6",
+      "A7",
+      "A8",
+      "Q3"
+    ],
+    "CODE_CHANGED_FINAL_AUDIT_PENDING": [
+      "Q4"
+    ],
+    "ACTIVATION_CONDITION_NOT_MET": [
+      "G2"
+    ]
+  },
+  "non_numbered_risks": {
+    "yandex_hardlink_fallback": "FIXED_WITH_LOCAL_EVIDENCE",
+    "yandex_full_audio_decode": "FIXED_WITH_LOCAL_EVIDENCE",
+    "sona_execution_policy": "CODE_FIXED_TARGET_GPU_EVIDENCE_PENDING",
+    "sona_admission": "FIXED_WITH_LOCAL_EVIDENCE",
+    "onnx_export_matrix": "FIXED_WITH_LOCAL_EVIDENCE"
+  },
+  "claim_boundaries": {
+    "android_connected_gate": "NOT_RUN_ON_THIS_SNAPSHOT",
+    "linux_cuda_hardware_gate": "NOT_RUN_ON_THIS_SNAPSHOT",
+    "release_published": false,
+    "production_data_repaired_or_reset": false,
+    "r1b_evaluation_pass": false
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/recommendations/v1/owner-export.schema.json",
+  "title": "AutPlay R1 Owner Adaptive Recommendation Export v1",
+  "x-autplay-implementation-status": "ACCEPTED_RUNTIME_NOT_IMPLEMENTED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "owner_user_id", "exported_at_ms", "page", "policy_versions", "profiles", "snapshot_lineage", "redactions", "export_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "owner_user_id": {"$ref": "#/$defs/uuid"},
+    "exported_at_ms": {"type": "integer", "minimum": 0},
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["export_id", "page_index", "page_count", "complete", "item_count"],
+      "properties": {
+        "export_id": {"$ref": "#/$defs/uuid"},
+        "page_index": {"type": "integer", "minimum": 1},
+        "page_count": {"type": "integer", "minimum": 1},
+        "complete": {"type": "boolean"},
+        "item_count": {"type": "integer", "minimum": 0, "maximum": 1100},
+        "next_cursor": {"type": "string", "minLength": 1, "maxLength": 512}
+      },
+      "allOf": [{
+        "if": {"properties": {"complete": {"const": false}}},
+        "then": {"required": ["next_cursor"]},
+        "else": {"not": {"required": ["next_cursor"]}}
+      }]
+    },
+    "policy_versions": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/$defs/versionRef"}},
+    "profiles": {"type": "array", "maxItems": 100, "items": {"$ref": "adaptive-profile.schema.json"}},
+    "snapshot_lineage": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["snapshot_id", "cutoff_at_ms", "interaction_watermark", "snapshot_sha256", "bounded_event_lineage"],
+        "properties": {
+          "snapshot_id": {"$ref": "#/$defs/uuid"},
+          "cutoff_at_ms": {"type": "integer", "minimum": 0},
+          "interaction_watermark": {"type": "integer", "minimum": 0},
+          "snapshot_sha256": {"$ref": "#/$defs/sha256"},
+          "bounded_event_lineage": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["evidence_id", "source_event_id", "source_request_sha256", "normalized_evidence_sha256", "time_classification"],
+              "properties": {
+                "evidence_id": {"$ref": "#/$defs/uuid"},
+                "source_event_id": {"$ref": "#/$defs/uuid"},
+                "source_request_sha256": {"$ref": "#/$defs/sha256"},
+                "normalized_evidence_sha256": {"$ref": "#/$defs/sha256"},
+                "time_classification": {"enum": ["TRUSTED_EVENT_TIME", "DELAYED_WITHIN_POLICY", "FUTURE_SKEW_CLAMPED", "PAST_SKEW_RECENT_DISABLED", "RECEIPT_TIME_ONLY"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    "redactions": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {"enum": ["SECRETS", "PRIVATE_URLS", "RAW_PATHS", "RAW_SEARCH_QUERIES", "MODEL_TENSORS", "OTHER_OWNER_DATA"]}
+    },
+    "export_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "versionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "version", "content_sha256"],
+      "properties": {
+        "key": {"const": "adaptive-taste"},
+        "version": {"type": "string", "pattern": "^[1-9][0-9]{0,8}$"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

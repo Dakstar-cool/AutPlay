@@ -124,7 +124,7 @@ class DiscoveryAcquisitionHandler:
                 session.commit()
             if target is None:
                 return
-            context.checkpoint({"stage": "ACQUIRING"})
+            context.checkpoint({"stage": "ACQUIRING"}, progress_current=0, progress_total=3)
             with self._sessions() as session:
                 PostgresBulkDiscoveryRepository(session).require_before_acquire(
                     candidate_id=candidate_id,
@@ -141,12 +141,13 @@ class DiscoveryAcquisitionHandler:
             )
             context.raise_if_cancelled()
             source = self._discovery.staged_audio_path(owner_id, staged)
+            context.checkpoint({"stage": "DOWNLOADED"}, progress_current=1, progress_total=3)
             staging_key = OpaqueStorageKey(f"disc-{target.acquisition_attempt_id.hex}")
             self._copy_to_vault(source, staging_key)
             verified = self._storage.verify_staging(staging_key)
             if verified.byte_size != staged.byte_count:
                 raise StorageSafetyError()
-            context.checkpoint({"stage": "VAULT_STAGED"})
+            context.checkpoint({"stage": "VAULT_STAGED"}, progress_current=2, progress_total=3)
             candidate = self._discovery.lookup_for_acquisition(target.provider_track_id)
             context.raise_if_cancelled()
             with self._sessions() as session:
@@ -160,7 +161,7 @@ class DiscoveryAcquisitionHandler:
                     limits=self._limits,
                 )
                 session.commit()
-            context.checkpoint({"stage": "INGEST_QUEUED"})
+            context.checkpoint({"stage": "INGEST_QUEUED"}, progress_current=3, progress_total=3)
         except (DiscoveryError, BulkDiscoveryError) as error:
             code = error.code
             terminal = code in _TERMINAL_DISCOVERY_ERRORS

@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from autplay_gpu.settings import load_gpu_settings
 
 
@@ -22,14 +21,33 @@ def test_gpu_settings_support_auto_and_stable_manual_selection() -> None:
             "AUTPLAY_GPU_MIN_COMPUTE_MINOR": "6",
             "AUTPLAY_GPU_MODEL_ID": "11111111-2222-3333-4444-555555555555",
             "AUTPLAY_GPU_MODEL_CACHE_ROOT": str(model_cache_root),
+            "AUTPLAY_GPU_SONA_ARTIFACT_SHA256": "a" * 64,
+            "AUTPLAY_GPU_SONA_MODEL_MANIFEST_SHA256": "b" * 64,
+            "AUTPLAY_GPU_SONA_TOKENIZER_SHA256": "c" * 64,
+            "AUTPLAY_GPU_SONA_BIND_PORT": "8788",
+            "AUTPLAY_GPU_SONA_MAX_ADMITTED_INFERENCES": "7",
+            "AUTPLAY_GPU_SONA_INFERENCE_TIMEOUT_SECONDS": "12.5",
         }
     )
     assert explicit.minimum_total_memory_mib == 12_000
     assert (explicit.minimum_compute_major, explicit.minimum_compute_minor) == (8, 6)
     assert str(explicit.model_id) == "11111111-2222-3333-4444-555555555555"
     assert explicit.model_cache_root == model_cache_root
+    assert explicit.sona_configured
+    assert explicit.sona_bind_port == 8788
+    assert explicit.sona_max_admitted_inferences == 7
+    assert explicit.sona_inference_timeout_seconds == 12.5
 
 
 def test_gpu_settings_reject_ambiguous_name_or_malformed_selector() -> None:
     with pytest.raises(ValueError, match="invalid GPU worker configuration"):
         load_gpu_settings({"AUTPLAY_GPU_DEVICE_SELECTOR": "name:RTX 3060"})
+
+    with pytest.raises(ValueError, match="invalid GPU worker configuration"):
+        load_gpu_settings({"AUTPLAY_GPU_SONA_ARTIFACT_SHA256": "a" * 64})
+
+    with pytest.raises(ValueError, match="invalid GPU worker configuration"):
+        load_gpu_settings({"AUTPLAY_GPU_SONA_MAX_ADMITTED_INFERENCES": "0"})
+
+    with pytest.raises(ValueError, match="invalid GPU worker configuration"):
+        load_gpu_settings({"AUTPLAY_GPU_SONA_INFERENCE_TIMEOUT_SECONDS": "0.01"})

@@ -153,6 +153,37 @@ PA2_INDEXES = frozenset(
         "ix_account_provisioning_rate_expiry",
     }
 )
+R1B_TABLES = frozenset(
+    {
+        ("ml", "recommendation_temporal_event"),
+        ("ml", "recommendation_adaptive_profile"),
+        ("ml", "recommendation_temporal_snapshot"),
+    }
+)
+R1B_INDEXES = frozenset(
+    {
+        "ix_recommendation_temporal_event_owner_watermark",
+        "ix_recommendation_temporal_event_retention",
+        "ix_recommendation_adaptive_profile_owner_cutoff",
+        "ix_recommendation_temporal_snapshot_owner_retention",
+    }
+)
+R1B_FUNCTIONS = frozenset(
+    {
+        "protect_sona_shadow_binding",
+        "protect_recommendation_temporal_event",
+        "protect_recommendation_adaptive_profile",
+        "protect_recommendation_temporal_snapshot",
+    }
+)
+R1B_TRIGGERS = frozenset(
+    {
+        "tr_recommendation_request_sona_shadow_immutable",
+        "tr_recommendation_temporal_event_immutable",
+        "tr_recommendation_adaptive_profile_immutable",
+        "tr_recommendation_temporal_snapshot_immutable",
+    }
+)
 
 
 def test_migrated_database_has_exact_named_inventory(
@@ -206,6 +237,7 @@ def test_migrated_database_has_exact_named_inventory(
         | S2_TABLES
         | S1D_TABLES
         | PA2_TABLES
+        | R1B_TABLES
     )
     assert index_names == (
         expected.indexes
@@ -215,9 +247,12 @@ def test_migrated_database_has_exact_named_inventory(
         | S1C_INDEXES
         | S1D_INDEXES
         | PA2_INDEXES
+        | R1B_INDEXES
     )
-    assert function_names == expected.functions | A1C_FUNCTIONS
-    assert trigger_names == expected.triggers | S1C_TRIGGERS | A1C_TRIGGERS | S1D_TRIGGERS
+    assert function_names == expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS
+    assert trigger_names == (
+        expected.triggers | S1C_TRIGGERS | A1C_TRIGGERS | S1D_TRIGGERS | R1B_TRIGGERS
+    )
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0
     assert extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}

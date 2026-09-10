@@ -11,10 +11,12 @@ import json as _json
 import os as _os
 import re as _re
 import shutil as _shutil
+import tempfile as _tempfile
 import unicodedata as _unicodedata
 import uuid as _uuid
 from pathlib import Path as _Path
 from typing import Any as _Any
+from typing import cast as _cast
 from urllib.parse import urlsplit as _urlsplit
 
 from playwright.async_api import Error as _PlaywrightError
@@ -93,6 +95,7 @@ def download_hitmo_tracks(
     download_dir: _Path = _Path("downloads"),
     result_limit: int = 5,
     timeout_seconds: float = 120.0,
+    max_bytes: int = _MAX_DOWNLOAD_BYTES,
     download: bool = False,
     rights_confirmed: bool = False,
     headless: bool = True,
@@ -115,6 +118,7 @@ def download_hitmo_tracks(
             Default: ``5``.
         timeout_seconds: Positive navigation/download timeout, at most 600 seconds.
             Default: ``120.0``.
+        max_bytes: Maximum bytes accepted while publishing one download.
         download: Download an exact authorized match and wait until the validated
             audio file is published. Default: ``False``.
         rights_confirmed: Caller assertion that every requested download is authorized.
@@ -138,6 +142,7 @@ def download_hitmo_tracks(
         requests=requests,
         result_limit=result_limit,
         timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
         download=download,
         rights_confirmed=rights_confirmed,
         browser=browser,
@@ -149,6 +154,7 @@ def download_hitmo_tracks(
             download_dir=_Path(download_dir),
             result_limit=result_limit,
             timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
             download=download,
             rights_confirmed=rights_confirmed,
             headless=headless,
@@ -193,6 +199,7 @@ def _validate_arguments(
     requests: list[tuple[str, str]],
     result_limit: int,
     timeout_seconds: float,
+    max_bytes: int,
     download: bool,
     rights_confirmed: bool,
     browser: str,
@@ -204,6 +211,8 @@ def _validate_arguments(
         raise _HitmoError("result_limit_invalid")
     if not 0 < timeout_seconds <= 600:
         raise _HitmoError("timeout_invalid")
+    if not 1024 <= max_bytes <= 1024 * 1024 * 1024:
+        raise _HitmoError("max_bytes_invalid")
     if download and not rights_confirmed:
         raise _HitmoError("rights_confirmation_required")
     if browser not in {"firefox", "edge", "cdp"}:
@@ -237,6 +246,7 @@ async def _run(
     download_dir: _Path,
     result_limit: int,
     timeout_seconds: float,
+    max_bytes: int,
     download: bool,
     rights_confirmed: bool,
     headless: bool,
@@ -254,6 +264,7 @@ async def _run(
             "download_dir": _private_path(download_dir),
             "result_limit": result_limit,
             "timeout_seconds": timeout_seconds,
+            "max_bytes": max_bytes,
             "download": download,
             "rights_confirmed": rights_confirmed,
             "headless": headless,
@@ -277,6 +288,7 @@ async def _run(
             download_dir=download_dir,
             result_limit=result_limit,
             timeout_ms=timeout_ms,
+            max_bytes=max_bytes,
             should_download=download,
             headless=headless,
             browser=browser,
@@ -313,6 +325,7 @@ async def _drive_browser(
     download_dir: _Path,
     result_limit: int,
     timeout_ms: float,
+    max_bytes: int,
     should_download: bool,
     headless: bool,
     browser: str,
@@ -344,6 +357,7 @@ async def _drive_browser(
                     download_dir=download_dir,
                     result_limit=result_limit,
                     timeout_ms=timeout_ms,
+                    max_bytes=max_bytes,
                     should_download=should_download,
                     reuse_current_page=reused_hitmo_page,
                 )
@@ -368,6 +382,7 @@ async def _drive_browser(
                 download_dir=download_dir,
                 result_limit=result_limit,
                 timeout_ms=timeout_ms,
+                max_bytes=max_bytes,
                 should_download=should_download,
                 reuse_current_page=False,
             )
@@ -412,6 +427,7 @@ async def _process_queue(
     download_dir: _Path,
     result_limit: int,
     timeout_ms: float,
+    max_bytes: int,
     should_download: bool,
     reuse_current_page: bool,
 ) -> list[dict[str, object]]:
@@ -428,6 +444,7 @@ async def _process_queue(
             download_dir=download_dir,
             result_limit=result_limit,
             timeout_ms=timeout_ms,
+            max_bytes=max_bytes,
             should_download=should_download,
             reuse_current_page=reuse_current_page,
         )
@@ -447,6 +464,7 @@ async def _process_one(
     download_dir: _Path,
     result_limit: int,
     timeout_ms: float,
+    max_bytes: int,
     should_download: bool,
     reuse_current_page: bool,
 ) -> dict[str, object]:
@@ -567,7 +585,10 @@ async def _process_one(
     # artist. Its ranked order is deterministic, so select the earliest exact
     # match within the user-requested result window.
     match = matches[0]
-    position = int(match["position"])
+    raw_position = match["position"]
+    if not isinstance(raw_position, int):
+        return {"query_ref": query_ref, "status": "result_structure_unsupported"}
+    position = raw_position
     state.action(f"queue={queue_position} query_ref={query_ref} exact_match_position={position}")
     await _screenshot(page, state, "exact_match")
     if not should_download:
@@ -580,20 +601,27 @@ async def _process_one(
     download_click_point = await _actionable_click_point(control)
     if download_click_point is None:
         return {"query_ref": query_ref, "status": "download_control_not_actionable"}
+    transfer = None
     try:
-        async with page.expect_download(timeout=timeout_ms) as download_info:
-            await page.mouse.click(download_click_point["x"], download_click_point["y"])
-        transfer = await download_info.value
+        async with _asyncio.timeout(timeout_ms / 1_000):
+            async with page.expect_download(timeout=timeout_ms) as download_info:
+                await page.mouse.click(download_click_point["x"], download_click_point["y"])
+            transfer = await download_info.value
+            failure = await transfer.failure()
+            if failure is not None:
+                state.final({"error": "download_failed", "query_ref": query_ref})
+                raise _HitmoError("download_failed")
+            saved_path = await _save_download(transfer, download_dir, max_bytes=max_bytes)
     except _PlaywrightTimeoutError as error:
+        await _cancel_transfer(transfer)
         state.final({"error": "download_event_timeout", "query_ref": query_ref})
         raise _HitmoError("download_event_timeout") from error
-    failure = await transfer.failure()
-    if failure is not None:
-        state.final({"error": "download_failed", "query_ref": query_ref})
-        raise _HitmoError("download_failed")
-    try:
-        saved_path = await _save_download(transfer, download_dir)
+    except TimeoutError as error:
+        await _cancel_transfer(transfer)
+        state.final({"error": "download_timeout", "query_ref": query_ref})
+        raise _HitmoError("download_timeout") from error
     except _HitmoError as error:
+        await _cancel_transfer(transfer)
         state.final({"error": str(error), "query_ref": query_ref})
         raise
     try:
@@ -602,8 +630,7 @@ async def _process_one(
         state.final({"error": "downloaded_content_hash_failed", "query_ref": query_ref})
         raise _HitmoError("downloaded_content_hash_failed") from error
     state.action(
-        f"queue={queue_position} query_ref={query_ref} completed_download "
-        f"file_ref={file_ref}"
+        f"queue={queue_position} query_ref={query_ref} completed_download file_ref={file_ref}"
     )
     return {
         "query_ref": query_ref,
@@ -629,7 +656,7 @@ async def _actionable_click_point(locator: _Any) -> dict[str, float] | None:
             return { x, y };
         }"""
     )
-    return value
+    return _cast(dict[str, float] | None, value)
 
 
 async def _wait_for_fresh_results(
@@ -723,13 +750,34 @@ async def _extract_candidates(page: _Any, result_limit: int) -> list[dict[str, o
     return list(value)
 
 
-async def _save_download(transfer: _Any, download_dir: _Path) -> _Path:
+async def _cancel_transfer(transfer: _Any | None) -> None:
+    if transfer is None:
+        return
+    with _contextlib.suppress(Exception):
+        await _asyncio.wait_for(transfer.cancel(), timeout=2.0)
+
+
+async def _save_download(
+    transfer: _Any,
+    download_dir: _Path,
+    *,
+    max_bytes: int,
+) -> _Path:
     suggested = _safe_filename(transfer.suggested_filename)
     temporary = download_dir / f".{_uuid.uuid4().hex}.part"
+    save_task = _asyncio.create_task(transfer.save_as(temporary))
     try:
-        await transfer.save_as(temporary)
+        while not save_task.done():
+            if temporary.exists() and temporary.stat().st_size > max_bytes:
+                await _cancel_transfer(transfer)
+                save_task.cancel()
+                with _contextlib.suppress(BaseException):
+                    await save_task
+                raise _HitmoError("download_size_invalid")
+            await _asyncio.sleep(0.05)
+        await save_task
         size = temporary.stat().st_size
-        if size <= 0 or size > _MAX_DOWNLOAD_BYTES or not _looks_like_audio(temporary):
+        if size <= 0 or size > max_bytes or not _looks_like_audio(temporary):
             raise _HitmoError("downloaded_content_invalid")
         destination = _publish_exclusive(temporary, download_dir, suggested)
     except (OSError, _PlaywrightError) as error:
@@ -872,22 +920,35 @@ def _prepare_run_dir() -> _Path:
     source_dir = _Path(__file__).resolve().parent
     if source_dir.name.startswith("run_") and source_dir.parent.name == "final_runs":
         return source_dir
-    module_root = _Path(__file__).resolve().parents[3]
-    final_runs = module_root / "final_runs"
-    final_runs.mkdir(parents=True, exist_ok=True)
+    configured_root = _os.environ.get("AUTPLAY_HITMO_EVIDENCE_ROOT")
+    final_runs = (
+        _Path(configured_root)
+        if configured_root
+        else _Path(_tempfile.gettempdir()) / "autplay-hitmo" / "final_runs"
+    )
+    try:
+        final_runs.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise _HitmoError("run_directory_unavailable") from error
     for index in range(1, 100_000):
         candidate = final_runs / f"run_{index}"
         try:
             candidate.mkdir()
         except FileExistsError:
             continue
-        _shutil.copy2(__file__, candidate / "hitmo.py")
+        except OSError as error:
+            raise _HitmoError("run_directory_unavailable") from error
+        try:
+            _shutil.copy2(__file__, candidate / "hitmo.py")
+        except OSError as error:
+            raise _HitmoError("run_directory_unavailable") from error
         return candidate
     raise _HitmoError("run_directory_exhausted")
 
 
 def _build_parser() -> _argparse.ArgumentParser:
-    parser = _argparse.ArgumentParser(description=download_hitmo_tracks.__doc__.splitlines()[0])
+    description = (download_hitmo_tracks.__doc__ or "Hitmo downloader").splitlines()[0]
+    parser = _argparse.ArgumentParser(description=description)
     parser.add_argument("--title", default="Хочу перемен", help="Track title for a single query.")
     parser.add_argument("--artist", default="Кино", help="Artist for a single query.")
     parser.add_argument(
@@ -914,6 +975,13 @@ def _build_parser() -> _argparse.ArgumentParser:
         type=float,
         default=120.0,
         help="Per-navigation/download timeout in seconds (0-600].",
+    )
+    parser.add_argument(
+        "--max-mib",
+        type=int,
+        choices=range(1, 1025),
+        default=200,
+        help="Maximum accepted size of one download in MiB.",
     )
     parser.add_argument(
         "--download",
@@ -954,7 +1022,9 @@ def _build_parser() -> _argparse.ArgumentParser:
 def _main() -> int:
     try:
         args = _build_parser().parse_args()
-        result = download_hitmo_tracks(**vars(args))
+        values = vars(args)
+        values["max_bytes"] = values.pop("max_mib") * 1024 * 1024
+        result = download_hitmo_tracks(**values)
     except _HitmoError as error:
         print(_json.dumps({"error": str(error)}, sort_keys=True))
         return 2

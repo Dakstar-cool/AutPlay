@@ -54,9 +54,14 @@ class RefreshingSessionCredentials(
         val current = readEnvelope(profileId) ?: throw SessionRequiredException()
         if (current.bindingCommitId != null) {
             val rotation = m5Rotation ?: throw SessionRequiredException()
-            rotation.persistSuccessor(profileId, current)
-            if (current.refreshPending || current.shouldRefresh(now())) return rotateM5(profileId, current.generation)
-            return current.toAccess()
+            val durable = BindingAuthorityWriteGate.serialized {
+                val latest = readEnvelope(profileId) ?: throw SessionRequiredException()
+                if (latest.bindingCommitId == null) throw SessionRequiredException()
+                rotation.persistSuccessor(profileId, latest)
+                latest
+            }
+            if (durable.refreshPending || durable.shouldRefresh(now())) return rotateM5(profileId, durable.generation)
+            return durable.toAccess()
         }
         if (current.refreshPending) throw SessionRequiredException()
         return if (current.shouldRefresh(now())) {
@@ -75,22 +80,26 @@ class RefreshingSessionCredentials(
     }
 
     private suspend fun rotateM5(profileId: ServerProfileId, rejectedGeneration: Long): SessionAccess = mutex(profileId).withLock {
-        val current = readEnvelope(profileId) ?: throw SessionRequiredException()
-        if (current.bindingCommitId == null) throw SessionRequiredException()
-        if (current.generation != rejectedGeneration && !current.refreshPending && !current.shouldRefresh(now())) return@withLock current.toAccess()
-        val rotation = m5Rotation ?: throw SessionRequiredException()
-        val pending = if (current.refreshPending) current else rotation.prepare(profileId, current)
-        if (!current.refreshPending) persist(profileId, pending)
-        try {
-            val successor = rotation.execute(profileId, pending)
-            persist(profileId, successor)
-            rotation.persistSuccessor(profileId, successor)
-            successor.toAccess()
-        } catch (error: SessionRequiredException) {
-            throw error
-        } catch (_: Exception) {
-            // Retain the exact encrypted request for an idempotent replay after a lost response.
-            throw SessionRequiredException()
+        BindingAuthorityWriteGate.serialized {
+            val current = readEnvelope(profileId) ?: throw SessionRequiredException()
+            if (current.bindingCommitId == null) throw SessionRequiredException()
+            if (current.generation != rejectedGeneration && !current.refreshPending && !current.shouldRefresh(now())) {
+                return@serialized current.toAccess()
+            }
+            val rotation = m5Rotation ?: throw SessionRequiredException()
+            val pending = if (current.refreshPending) current else rotation.prepare(profileId, current)
+            if (!current.refreshPending) persistLocked(profileId, pending)
+            try {
+                val successor = rotation.execute(profileId, pending)
+                persistLocked(profileId, successor)
+                rotation.persistSuccessor(profileId, successor)
+                successor.toAccess()
+            } catch (error: SessionRequiredException) {
+                throw error
+            } catch (_: Exception) {
+                // Retain the exact encrypted request for an idempotent replay after a lost response.
+                throw SessionRequiredException()
+            }
         }
     }
 
@@ -98,32 +107,35 @@ class RefreshingSessionCredentials(
         profileId: ServerProfileId,
         rejectedGeneration: Long,
     ): SessionAccess = mutex(profileId).withLock {
-        val current = readEnvelope(profileId) ?: throw SessionRequiredException()
-        if (current.refreshPending) throw SessionRequiredException()
-        if (current.bindingCommitId != null) throw SessionRequiredException()
-        if (current.generation != rejectedGeneration && !current.shouldRefresh(now())) {
-            return@withLock current.toAccess()
-        }
-        val refreshToken = current.refreshToken ?: throw SessionRequiredException()
-        try {
-            persist(profileId, current.copy(refreshPending = true))
-        } catch (error: Exception) {
-            // No request was sent, so retrying this preflight write cannot replay the refresh token.
-            throw error
-        }
-        try {
-            val rotated = rotate(refreshToken, current.generation)
-            persist(profileId, rotated)
-            rotated.toAccess()
-        } catch (error: SessionRequiredException) {
-            throw error
-        } catch (error: Exception) {
-            // The POST may have committed. The durable pending marker prevents token replay.
-            throw SessionRequiredException()
+        BindingAuthorityWriteGate.serialized {
+            val current = readEnvelope(profileId) ?: throw SessionRequiredException()
+            if (current.refreshPending) throw SessionRequiredException()
+            if (current.bindingCommitId != null) throw SessionRequiredException()
+            if (current.generation != rejectedGeneration && !current.shouldRefresh(now())) {
+                return@serialized current.toAccess()
+            }
+            val refreshToken = current.refreshToken ?: throw SessionRequiredException()
+            try {
+                persistLocked(profileId, current.copy(refreshPending = true))
+            } catch (error: Exception) {
+                // No request was sent, so retrying this preflight write cannot replay the refresh token.
+                throw error
+            }
+            try {
+                val rotated = rotate(refreshToken, current.generation)
+                persistLocked(profileId, rotated)
+                rotated.toAccess()
+            } catch (error: SessionRequiredException) {
+                throw error
+            } catch (error: Exception) {
+                // The POST may have committed. The durable pending marker prevents token replay.
+                throw SessionRequiredException()
+            }
         }
     }
 
-    private suspend fun persist(profileId: ServerProfileId, value: SessionCredentialEnvelope) {
+    /** Call only while [BindingAuthorityWriteGate] is held. */
+    private suspend fun persistLocked(profileId: ServerProfileId, value: SessionCredentialEnvelope) {
         val encoded = SessionCredentialEnvelopeCodec.encode(value)
         try {
             credentials.write(profileId, encoded)

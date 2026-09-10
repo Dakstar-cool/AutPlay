@@ -17,7 +17,6 @@ from autplay.domain.enrichment import (
     ApprovedEmbeddingModel,
 )
 from autplay.runtime.settings import WorkerSettings
-
 from autplay_gpu.settings import GpuWorkerSettings
 from autplay_gpu.worker import GpuWorkerCompositionError, compose_gpu_worker
 

@@ -76,6 +76,7 @@ jobs:
             settings.gradle.kts
             gradle.properties
             gradle/libs.versions.toml
+            gradle/verification-metadata.xml
             gradle/wrapper/gradle-wrapper.properties
             apps/android/build.gradle.kts
 
@@ -88,6 +89,9 @@ jobs:
           cache-dependency-glob: |
             uv.lock
             server/uv.lock
+            gpu/uv.lock
+            gpu/training/uv.lock
+            tools/local_music_acquisition/uv.lock
 
       - name: Install pinned Android SDK packages
         shell: bash
@@ -104,8 +108,10 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk_root" "$sdk_root" \
             >> "$GITHUB_ENV"
 
-      - name: Install pinned Playwright Chromium
-        run: uv run --project server --frozen playwright install --with-deps chromium
+      - name: Install pinned Playwright browsers
+        run: |
+          uv run --project server --frozen playwright install --with-deps chromium
+          uv run --project tools/local_music_acquisition --frozen playwright install --with-deps firefox
 
       - name: Run canonical release host gate
         run: bash scripts/check.sh
@@ -129,7 +135,12 @@ jobs:
             --output-file "$bundle_dir/sbom/python-server.cdx.json"
           uv export --project gpu --frozen --format cyclonedx1.5 \
             --output-file "$bundle_dir/sbom/python-gpu.cdx.json"
-          ./gradlew --no-daemon --console=plain :apps:android:dependencies \
+          uv export --project gpu/training --frozen --format cyclonedx1.5 \
+            --output-file "$bundle_dir/sbom/python-sona-training.cdx.json"
+          uv export --project tools/local_music_acquisition --frozen --format cyclonedx1.5 \
+            --output-file "$bundle_dir/sbom/python-acquisition.cdx.json"
+          ./gradlew --no-daemon --console=plain --max-workers=1 \
+            --dependency-verification=strict :apps:android:dependencies \
             --configuration releaseRuntimeClasspath \
             > "$bundle_dir/ANDROID_RELEASE_DEPENDENCIES.txt"
           cp docs/release/RC1_CHECKLIST.md "$bundle_dir/"
@@ -148,6 +159,9 @@ jobs:
             echo "container_archive_format=DOCKER_IMAGE_ARCHIVE_GZIP"
             echo "container_distribution=WORKFLOW_ARTIFACT_ONLY"
             echo "production_deployment=NOT_CONFIGURED"
+            echo "development_installer=LOCAL_DEVELOPMENT_ONLY"
+            echo "signed_apk=NOT_INCLUDED"
+            echo "workflow_bundle=UNSIGNED_CANDIDATE_NOT_FOR_PUBLICATION"
           } > "$bundle_dir/manifest.txt"
           find "$bundle_dir" -type f ! -name SHA256SUMS -print0 \
             | sort -z \

@@ -15,6 +15,11 @@ from ..models import AcquiredArtifact, PlaylistItem, ProviderFailure, ProviderMi
 
 _SAFE_CODE = re.compile(r"[a-z0-9_.-]{1,100}")
 
+if sys.platform == "win32":
+    from subprocess import CREATE_NEW_PROCESS_GROUP as _CREATE_NEW_PROCESS_GROUP
+else:
+    _CREATE_NEW_PROCESS_GROUP = 0
+
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
     """Synchronously stop the worker and all descendants before returning."""
@@ -36,7 +41,11 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
             raise RuntimeError("yt_dlp_process_tree_termination_failed")
     else:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            kill_process_group = getattr(os, "killpg", None)
+            signal_kill = getattr(signal, "SIGKILL", None)
+            if not callable(kill_process_group) or not isinstance(signal_kill, int):
+                raise OSError("POSIX process-group termination is unavailable")
+            kill_process_group(process.pid, signal_kill)
         except ProcessLookupError:
             pass
         except OSError as error:
@@ -85,7 +94,6 @@ class YtDlpProvider:
                 "YTDLP_NO_PLUGINS": "1",
             }
         )
-        creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
             process = subprocess.Popen(
                 [sys.executable, "-m", "local_music_acquisition.providers._yt_dlp_worker"],
@@ -94,7 +102,7 @@ class YtDlpProvider:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=environment,
-                creationflags=creation_flags,
+                creationflags=_CREATE_NEW_PROCESS_GROUP,
                 start_new_session=os.name != "nt",
             )
         except OSError as error:

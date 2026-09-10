@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero-hybrid.png" width="100%" alt="AutPlay — local-first Android-плеер: слушать сразу, синхронизировать потом; справа показан реальный экран приложения, Resonance Lens обозначен как визуальное направление">
+  <img src="./assets/readme/hero-hybrid.png" width="100%" alt="AutPlay — local-first Android-плеер: слушать сразу, синхронизировать потом; справа показан реальный экран приложения, а Resonance Lens — локальная playback-reactive визуализация">
 </p>
 
 <p align="center">
@@ -16,6 +16,10 @@
 
 > [!IMPORTANT]
 > `v0.3.0` — development pre-release. APK подписаны сохранённым development key, а готовый серверный installer рассчитан только на доверенную домашнюю RFC1918-сеть. Это не store-ready Android distribution и не public-Internet production deployment.
+
+> [!NOTE]
+> Текущая ветка разработки содержит post-v0.3.0 audit remediation. Эти изменения ещё не опубликованы
+> отдельным релизом: ссылки ниже по-прежнему ведут на проверенные артефакты `v0.3.0`.
 
 AutPlay — local-first Android-плеер для личной музыкальной коллекции. Воспроизведение, поиск,
 медиатека, плейлисты, очередь и загрузки остаются на устройстве и не ждут ответа сервера.
@@ -47,6 +51,33 @@ id и могут стоять рядом; их локальные базы ав�
 - **Подключать сервер осознанно.** Android сверяет owner-controlled identity fingerprint, затем владелец подтверждает exact device key в loopback Web Admin.
 - **Сохранять неоднозначность.** Неуверенная identity evidence уходит на review; probabilistic auto-merge остаётся выключен.
 - **Расширять приватно.** Sync, Vault, импорт, рекомендации, друзья, статистика и Wave добавляются отдельными полномочиями, а не одним «доступом ко всему».
+
+## Что изменилось после v0.3.0
+
+- **Android стал устойчивее к гонкам и перезапускам.** Binding/credential writes сериализованы,
+  unbind очищает привязанный к профилю recommendation context, а playback и deferred work получили
+  дополнительные lifecycle/recovery regressions.
+- **Sync и retention закрыты локальными regressions.** Server-side sync projections, terminal ACK
+  semantics и temporal snapshot retention усилены без destructive migration fallback.
+- **Recommendation evidence теперь причинно связано.** Android хранит bounded temporal delta,
+  parent-pack identity, eligible set и impression mapping атомарно; это не объявляет R1B готовым.
+- **Acquisition и SONA fail closed.** Загрузки ограничены по размеру и времени, публикуются без
+  перезаписи существующих файлов; SONA shadow runtime ограничивает admission/deadline и запрещает
+  CPU fallback для quality evidence.
+- **Проверка разделена по реальным контурам.** Root, server, GPU, SONA training и acquisition имеют
+  отдельные lock/static/test gates; Gradle использует strict dependency verification, а connected
+  Android, training и acquisition получили собственные CI workflows.
+
+| Evidence на текущем snapshot | Статус |
+| --- | --- |
+| Fresh Windows host gate: root `168 passed`; GPU `33 passed, 2 skipped`; training `37 passed`; acquisition `66 passed`; Android `144 actionable tasks`; PostgreSQL `878 passed, 1 skipped` | **PASS · 2026-09-10** |
+| Server S1–S5, retention G1, acquisition T1–T2, reproducibility Q1/Q2/Q5/Q6 | **Fixed with local evidence** |
+| Android A1–A8 / Q3 connected API 26, Q4 final release audit, G2 Linux/CUDA hardware proof | **Pending external/final evidence** |
+| R1B evaluation / R1C activation | **BLOCKED / inactive** |
+
+Полная граница утверждений и machine-readable registry:
+[audit remediation review pack](docs/release/AUDIT_REMEDIATION_AFTER_R1B_V1.md) ·
+[status JSON](docs/release/AUDIT_REMEDIATION_AFTER_R1B_V1.json).
 
 ## Первый успешный запуск
 
@@ -114,14 +145,19 @@ archive reload, media/config smoke и disposable combined Compose runtime.
 - [RC test evidence](docs/release/TEST_EVIDENCE.md)
 - [security review](docs/release/SECURITY_REVIEW.md)
 - [performance report](docs/release/PERFORMANCE_REPORT.md)
-- [P14 handoff](docs/implementation/HANDOFF_P14.md)
+- [Versioned RC checklist](docs/release/RC1_CHECKLIST.md)
+- [Post-v0.3.0 audit remediation](docs/release/AUDIT_REMEDIATION_AFTER_R1B_V1.md)
 
 ## Resonance Lens
 
-Resonance Lens в hero — **визуальное направление, а не реализованная функция**. Концепция описывает
-пару оптических «глаз», continuous mood и тонкий resonance filament для будущего Now Playing. Она
-не доказывает наличие Face runtime, модели или музыкального анализа в `v0.3.0`; реальное состояние
-продукта показано Android/Web screenshots выше.
+Resonance Lens имеет первый Android-only runtime в Now Playing: оптическая пара локально реагирует
+на bounded process-local PCM energy/contour и не требует сервера. Размер, небольшое смещение и
+оттенок pupil отражают только доступную playback dynamics — это не pitch, тембровый или mood-анализ.
+
+Девять continuous reference-поз и их спектральные семейства остаются debug/evidence fixtures.
+Production timeline, модель и глубокий анализ музыкального характера не активированы и не входят
+в `v0.3.0`; визуальная глубина создаётся aperture-ribbons, световыми кольцами и orbital echoes без
+прицельных осей и сквозного filament.
 
 См. [Resonance Lens exploration](docs/design/explorations/AutPlay_Face_Resonance_Lens_Exploration_v1.md)
 и [reviewed implementation plan](docs/design/explorations/AutPlay_Face_Resonance_Lens_Plan.md).
@@ -138,10 +174,35 @@ Resonance Lens в hero — **визуальное направление, а н�
 - Docker Engine + Docker Compose `2.24.4+`.
 
 Gradle Wrapper загружает Gradle `9.3.1` и проверяет checksum дистрибутива.
+`gradle/verification-metadata.xml` включает strict SHA-256 verification всех Gradle plugins,
+metadata и транзитивных Android-зависимостей. Обновляйте его только явным
+`--write-verification-metadata sha256` и проверяйте diff повторной резолюцией из пустого
+`GRADLE_USER_HOME`.
+
+Bootstrap не требует junction или фиксированного пути для Python-окружений. Чтобы полностью
+пересоздать их в отдельном расположении, передайте абсолютный либо новый относительный корень:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1 `
+  -PythonEnvironmentRoot D:\AutPlay-Environments
+```
+
+```bash
+bash scripts/bootstrap.sh --python-environment-root /var/tmp/autplay-environments
+```
+
+Без параметра uv использует обычные project-local `.venv`. Локальное предупреждение Android SDK
+об XML schema v4 означает несовпадение поколений установленных command-line tools и SDK reader;
+оно не подавляется. Bootstrap всё равно fail-closed проверяет точные `android-36.1/android.jar` и
+Build Tools `36.1.0`, а CI собирает отдельный SDK root. Экспериментальный
+`android.overridePathCheck` больше не используется в каноническом ASCII-пути репозитория.
 
 ### Канонические команды
 
-Запускайте из корня репозитория. Этот README — источник истины для bootstrap/check порядка.
+Запускайте из корня репозитория. Этот README — источник истины для bootstrap/check порядка. Полный
+check охватывает пять изолированных Python projects, strict Gradle dependency verification,
+Android lint/unit/build variants и disposable PostgreSQL suite; `--server-only` сохраняет
+root/server CPU-границу.
 
 Windows PowerShell:
 
@@ -204,12 +265,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-releas
 
 ## Границы v0.3.0
 
-- Development signing only; production signing key и store policy не выбраны.
+- Stable production signing custody and an exact version-code 3 to 4 data-preserving update proof
+  are verified for `app.autplay`; the evidence APKs are not published, and the final schema-v2
+  hardening workflow has not been run interactively after review.
 - Bundled server — CPU `linux/amd64`, single-operator, trusted-LAN development topology.
-- Public domain/TLS/reverse proxy, registry push, production secret delivery, backup destination/retention и rollout policy остаются отдельными решениями.
+- Public TLS activation, external scan/renewal/rollback/mobile Range evidence, registry push,
+  production secret delivery and rollout policy remain separately gated; backup custody and
+  retention are already accepted and verified.
 - Web Admin доступен только на literal loopback; password login и public registration отсутствуют.
 - Automatic probabilistic Recording merge выключен; ambiguous evidence требует review.
-- P12 model activation и production Face/Resonance Lens runtime отсутствуют; deterministic CPU baseline остаётся authoritative.
+- P12 model activation и Face Timeline отсутствуют; локальный нейтральный Resonance Lens не заявляет наличие музыкального анализа.
 - Не используйте `docker compose down --volumes` для данных, которые нужно сохранить: bundled installer не является системой резервного копирования.
 
 Перед эксплуатацией прочитайте [release notes](docs/release/RELEASE_NOTES_0.3.0.md),

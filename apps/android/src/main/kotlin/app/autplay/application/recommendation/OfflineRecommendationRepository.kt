@@ -36,6 +36,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import app.autplay.data.security.BindingAuthorityWriteGate
 import org.erdtman.jcs.JsonCanonicalizer
 
 enum class OfflinePackErrorCode {
@@ -488,10 +489,42 @@ data class HomeRecommendationItem(
     val surface: String,
     val source: String,
     val reasonCode: String,
+    val deltaId: String? = null,
+    val impressionEventId: String? = null,
+    val impressionKeySha256: String? = null,
 )
 
 /** Deterministic on-device policy; it changes only display order and makes no server-ML claim. */
 object LocalRecommendationReranker {
+    /** Mandatory local eligibility in immutable parent order, without an adaptive claim. */
+    fun baseOrder(
+        pack: DecodedOfflinePack,
+        evidence: List<LocalRecommendationEvidence>,
+        limit: Int = pack.request.limit,
+        maxArtistRepeats: Int = 2,
+    ): List<HomeRecommendationItem> {
+        require(limit in 1..OfflineRecommendationPackCodec.MAX_ITEMS)
+        require(maxArtistRepeats in 1..10)
+        val filtered = evidence
+            .asSequence()
+            .filter(LocalRecommendationEvidence::isLocallyAvailable)
+            .filterNot(LocalRecommendationEvidence::excludedFromTaste)
+            .filterNot { it.preference == "DISLIKED" }
+            .distinctBy { it.item.recordingId }
+            .sortedWith(compareBy({ it.item.packPosition }, { it.item.sourceRank }, { it.item.recordingId }))
+            .toList()
+        val artistCounts = mutableMapOf<String, Int>()
+        return buildList {
+            for (candidate in filtered) {
+                val artistKey = candidate.artist.trim().lowercase(Locale.ROOT)
+                if ((artistCounts[artistKey] ?: 0) >= maxArtistRepeats) continue
+                artistCounts[artistKey] = (artistCounts[artistKey] ?: 0) + 1
+                add(candidate.toHomeItem(pack, size + 1, "offline_pack"))
+                if (size == limit) break
+            }
+        }
+    }
+
     fun rerank(
         pack: DecodedOfflinePack,
         evidence: List<LocalRecommendationEvidence>,
@@ -530,25 +563,34 @@ object LocalRecommendationReranker {
         }
 
         return selected.mapIndexed { index, candidate ->
-            val item = candidate.item
             val displayPosition = index + 1
-            HomeRecommendationItem(
-                offlinePackId = item.offlinePackId,
-                recommendationRequestId = pack.recommendationRequestId,
-                recordingId = item.recordingId,
-                localUserTrackRefId = candidate.localUserTrackRefId,
-                title = candidate.title,
-                artist = candidate.artist,
-                sourceRank = item.sourceRank,
-                packPosition = item.packPosition,
-                displayPosition = displayPosition,
-                sectionKey = item.section,
-                surface = pack.request.surface,
-                source = if (displayPosition == item.packPosition) "offline_pack" else "local_rerank",
-                reasonCode = item.reasonCode,
+            candidate.toHomeItem(
+                pack,
+                displayPosition,
+                if (displayPosition == candidate.item.packPosition) "offline_pack" else "local_rerank",
             )
         }
     }
+
+    private fun LocalRecommendationEvidence.toHomeItem(
+        pack: DecodedOfflinePack,
+        displayPosition: Int,
+        source: String,
+    ) = HomeRecommendationItem(
+        offlinePackId = item.offlinePackId,
+        recommendationRequestId = pack.recommendationRequestId,
+        recordingId = item.recordingId,
+        localUserTrackRefId = localUserTrackRefId,
+        title = title,
+        artist = artist,
+        sourceRank = item.sourceRank,
+        packPosition = item.packPosition,
+        displayPosition = displayPosition,
+        sectionKey = item.section,
+        surface = pack.request.surface,
+        source = source,
+        reasonCode = item.reasonCode,
+    )
 
     private fun signalBucket(evidence: LocalRecommendationEvidence, nowMs: Long): Int {
         val freshLike = evidence.preference == "LIKED" && evidence.preferenceUpdatedAtMs.isFresh(nowMs, LIKE_FRESHNESS_MS)
@@ -602,10 +644,14 @@ class OfflineRecommendationRepository(
         transport: RecommendationPackTransport,
         nowMs: Long,
         request: RecommendationPackFetchRequest = RecommendationPackFetchRequest(),
+        isBindingActive: suspend () -> Boolean = { true },
     ): DecodedOfflinePack {
         val downloaded = transport.fetch(binding, request)
         val entity = OfflineRecommendationPackCodec.entityFromDownload(downloaded, binding)
-        return storeVerifiedPack(entity, binding, nowMs)
+        return BindingAuthorityWriteGate.serialized {
+            check(isBindingActive()) { "RECOMMENDATION_PROFILE_NOT_ACTIVE" }
+            storeVerifiedPack(entity, binding, nowMs)
+        }
     }
 
     suspend fun storeVerifiedPack(entity: RecommendationPackEntity, binding: ClientEventBinding, nowMs: Long): DecodedOfflinePack {
@@ -623,7 +669,7 @@ class OfflineRecommendationRepository(
      * Loads only owner/profile/device-bound packs and locally available tracks. A stale pack is
      * considered only after every fresh pack failed and only inside the explicit 24-hour fallback.
      */
-    suspend fun loadHomeFeed(binding: ClientEventBinding, nowMs: Long): HomeFeed {
+    suspend fun loadHomeFeed(binding: ClientEventBinding, nowMs: Long): HomeFeed = database.withWriteTransaction {
         val dao = database.recommendationPackDao()
         val stored = dao.latest(binding.serverProfileId.value, binding.userId.value, MAX_PACK_CANDIDATES)
         val fresh = stored.firstNotNullOfOrNull { entity -> decodeOrNull(entity, binding, nowMs, OfflinePackExpiryPolicy.FreshOnly) }
@@ -636,7 +682,7 @@ class OfflineRecommendationRepository(
             MAX_RECENT_RELEASES,
         )
         if (decoded == null || decoded.items.isEmpty()) {
-            return HomeFeed(
+            return@withWriteTransaction HomeFeed(
                 binding.serverProfileId.value,
                 binding.userId.value,
                 binding.deviceId.value,
@@ -661,14 +707,20 @@ class OfflineRecommendationRepository(
         val evidence = decoded.items.mapNotNull { item ->
             bestLocalByRecording[item.recordingId]?.let { row -> row.toEvidence(item) }
         }
-        val ranked = LocalRecommendationReranker.rerank(decoded, evidence, nowMs)
+        val baseItems = LocalRecommendationReranker.baseOrder(decoded, evidence)
+        val parentEntity = stored.single { it.offlinePackId == decoded.offlinePackId }
+        val ranked = if (decoded.isStale) {
+            baseItems
+        } else {
+            loadOrCreateDelta(parentEntity, decoded, binding, baseItems, nowMs)
+        }
         val sections = ranked.groupBy(HomeRecommendationItem::sectionKey)
         val status = when {
             ranked.isEmpty() -> "NO_LOCALLY_AVAILABLE_RECOMMENDATIONS"
             decoded.isStale -> "STALE_LOCAL_FALLBACK"
             else -> "FRESH_OFFLINE_PACK"
         }
-        return HomeFeed(
+        HomeFeed(
             ownerProfileId = binding.serverProfileId.value,
             ownerUserId = binding.userId.value,
             ownerDeviceId = binding.deviceId.value,
@@ -680,6 +732,17 @@ class OfflineRecommendationRepository(
             recommendationSections = sections,
             recentRelevantReleases = releases,
         )
+    }
+
+    /** Immediate local unbinding boundary. Raw journal/library/media rows remain sealed in place. */
+    suspend fun purgeLocalRecommendationContext(profileId: String) {
+        require(UUID.fromString(profileId).toString() == profileId)
+        database.withWriteTransaction {
+            val dao = database.recommendationPackDao()
+            dao.deletePresentationsForProfile(profileId)
+            dao.deleteDeltasForProfile(profileId)
+            dao.deletePacksForProfile(profileId)
+        }
     }
 
     /** Persists the semantic mapping first and the existing P04 Offline Journal event atomically. */
@@ -702,6 +765,17 @@ class OfflineRecommendationRepository(
             )
             if (existing != null) {
                 checkMappingMatches(existing, item)
+                if (item.deltaId != null) {
+                    val rawPack = dao.pack(item.offlinePackId, binding.serverProfileId.value, binding.userId.value)
+                        ?: error("RECOMMENDATION_PACK_NOT_FOUND")
+                    val decoded = OfflineRecommendationPackCodec.decode(
+                        rawPack,
+                        binding,
+                        nowMs,
+                        OfflinePackExpiryPolicy.AllowStaleLocalOnly(HOME_STALE_FALLBACK_MS),
+                    )
+                    validateTemporalPresentation(dao, rawPack, decoded, binding, item, nowMs)
+                }
                 val journal = checkNotNull(database.journalDao().event(existing.impressionEventId)) {
                     "IMPRESSION_MAPPING_WITHOUT_JOURNAL"
                 }
@@ -727,10 +801,11 @@ class OfflineRecommendationRepository(
             check(original.packPosition == item.packPosition && original.section == item.sectionKey) {
                 "RECOMMENDATION_ITEM_MISMATCH"
             }
+            validateTemporalPresentation(dao, rawPack, decoded, binding, item, nowMs)
 
             val lineage = resolveLineage(binding, nowMs)
             val sequence = database.journalDao().allocateSequence(lineage.lineageId)
-            val eventId = eventIdFactory()
+            val eventId = item.impressionEventId?.let(::LocalId) ?: eventIdFactory()
             val payload = impressionPayload(presentationId, item)
             val mapping = RecommendationPresentationEntity(
                 serverProfileId = binding.serverProfileId.value,
@@ -781,8 +856,103 @@ class OfflineRecommendationRepository(
             put("source", item.source)
             put("source_rank", item.sourceRank)
             put("surface", item.surface)
+            item.deltaId?.let { put("offline_temporal_delta_id", it) }
+            item.impressionKeySha256?.let { put("impression_key_sha256", it) }
         }.toString(),
     )
+
+    private suspend fun loadOrCreateDelta(
+        parentEntity: RecommendationPackEntity,
+        parent: DecodedOfflinePack,
+        binding: ClientEventBinding,
+        baseItems: List<HomeRecommendationItem>,
+        nowMs: Long,
+    ): List<HomeRecommendationItem> {
+        val dao = database.recommendationPackDao()
+        dao.deleteExpiredDeltas(nowMs)
+        val stored = dao.delta(
+            binding.serverProfileId.value,
+            binding.userId.value,
+            binding.deviceId.value,
+            parent.offlinePackId,
+            parent.recommendationRequestId,
+        )
+        if (stored != null) {
+            return try {
+                OfflineTemporalDeltaCodec.apply(
+                    OfflineTemporalDeltaCodec.decode(stored, parentEntity, parent, binding, nowMs),
+                    baseItems,
+                )
+            } catch (_: OfflineTemporalDeltaException) {
+                baseItems
+            }
+        }
+        val rows = dao.localTemporalEvents(
+            binding.serverProfileId.value,
+            binding.userId.value,
+            binding.deviceId.value,
+            parent.createdAtMs,
+            nowMs,
+            OfflineTemporalDeltaCodec.MAX_SOURCE_ROWS,
+        )
+        val created = try {
+            OfflineTemporalDeltaCodec.build(parentEntity, parent, binding, rows, baseItems, nowMs)
+        } catch (_: OfflineTemporalDeltaException) {
+            null
+        } ?: return baseItems
+        dao.insertDelta(created)
+        return OfflineTemporalDeltaCodec.apply(
+            OfflineTemporalDeltaCodec.decode(created, parentEntity, parent, binding, nowMs),
+            baseItems,
+        )
+    }
+
+    private suspend fun validateTemporalPresentation(
+        dao: app.autplay.data.local.dao.RecommendationPackDao,
+        parentEntity: RecommendationPackEntity,
+        parent: DecodedOfflinePack,
+        binding: ClientEventBinding,
+        item: HomeRecommendationItem,
+        nowMs: Long,
+    ) {
+        val deltaFields = listOf(item.deltaId, item.impressionEventId, item.impressionKeySha256)
+        if (deltaFields.all { it == null }) {
+            check(item.source == "offline_pack") { "RECOMMENDATION_DELTA_MISSING" }
+            return
+        }
+        check(deltaFields.all { it != null } && item.source == "local_temporal_delta") {
+            "RECOMMENDATION_DELTA_INCOMPLETE"
+        }
+        val stored = dao.delta(
+            binding.serverProfileId.value,
+            binding.userId.value,
+            binding.deviceId.value,
+            parent.offlinePackId,
+            parent.recommendationRequestId,
+        ) ?: error("RECOMMENDATION_DELTA_NOT_FOUND")
+        check(stored.deltaId == item.deltaId) { "RECOMMENDATION_DELTA_MISMATCH" }
+        val decoded = OfflineTemporalDeltaCodec.decode(stored, parentEntity, parent, binding, nowMs)
+        val adjustment = decoded.adjustments.singleOrNull {
+            it.recordingId == item.recordingId && it.sourceRank == item.sourceRank
+        } ?: error("RECOMMENDATION_DELTA_ITEM_NOT_FOUND")
+        check(
+            adjustment.displayPosition == item.displayPosition &&
+                adjustment.impressionEventId == item.impressionEventId &&
+                adjustment.impressionKeySha256 == item.impressionKeySha256,
+        ) { "RECOMMENDATION_DELTA_ITEM_MISMATCH" }
+        val eligible = dao.localCandidates(
+            binding.serverProfileId.value,
+            binding.userId.value,
+            listOf(item.recordingId),
+            2,
+        ).singleOrNull { row ->
+            row.recordingId == item.recordingId &&
+                row.isLocallyAvailable &&
+                !row.excludedFromTaste &&
+                row.preference != "DISLIKED"
+        }
+        check(eligible != null) { "RECOMMENDATION_ITEM_NO_LONGER_ELIGIBLE" }
+    }
 
     private fun decodeOrNull(
         entity: RecommendationPackEntity,
@@ -861,6 +1031,8 @@ class OfflineRecommendationRepository(
                         put("source", item.source)
                         put("source_rank", item.sourceRank)
                         put("surface", item.surface)
+                        item.deltaId?.let { put("offline_temporal_delta_id", it) }
+                        item.impressionKeySha256?.let { put("impression_key_sha256", it) }
                     },
                 )
             }.toString(),
@@ -921,6 +1093,10 @@ class OfflineRecommendationRepository(
         listOf(item.offlinePackId, item.recommendationRequestId, item.recordingId).forEach { raw ->
             require(UUID.fromString(raw).toString() == raw) { "RECOMMENDATION_ID_INVALID" }
         }
+        listOfNotNull(item.deltaId, item.impressionEventId).forEach { raw ->
+            require(UUID.fromString(raw).toString() == raw) { "RECOMMENDATION_DELTA_ID_INVALID" }
+        }
+        item.impressionKeySha256?.let { require(Regex("^[0-9a-f]{64}$").matches(it)) }
         require(item.sourceRank in 1..1_000 && item.displayPosition in 1..1_000 && item.packPosition in 1..100)
         val token = Regex("^[a-z][a-z0-9_]{0,99}$")
         require(token.matches(item.source) && token.matches(item.surface) && token.matches(item.sectionKey))
@@ -928,13 +1104,12 @@ class OfflineRecommendationRepository(
 
     private fun checkMappingMatches(mapping: RecommendationPresentationEntity, item: HomeRecommendationItem) {
         check(
-            mapping.recordingId == item.recordingId &&
+                mapping.recordingId == item.recordingId &&
                 mapping.offlinePackId == item.offlinePackId &&
-                mapping.source == item.source &&
                 mapping.surface == item.surface &&
                 mapping.sectionKey == item.sectionKey &&
-                mapping.displayPosition == item.displayPosition,
-        ) { "IMPRESSION_PRESENTATION_MISMATCH" }
+                (item.impressionEventId == null || mapping.impressionEventId == item.impressionEventId),
+        ) { "IMPRESSION_PRESENTATION_IDENTITY_MISMATCH" }
     }
 
     private fun LocalRecommendationCandidateRow.toEvidence(item: OfflinePackItem) = LocalRecommendationEvidence(

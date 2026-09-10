@@ -323,6 +323,71 @@ class ProfilePairingRuntimeTest {
         assertNull(fixture.settings.value.m5LocalDataDecision)
         assertNull(fixture.credentials.read(activeProfile))
         assertTrue(activeAlias in fixture.keys.deletedAliases)
+        assertEquals(listOf(activeProfile), fixture.purgedProfiles)
+    }
+
+    @Test
+    fun partialBindingRecoveryPurgesRecommendationContextBeforeClearingAuthority() = runBlocking {
+        val checkpoint = M5BindingCheckpoint(
+            BINDING_COMMIT_ID,
+            SERVER_INSTANCE_ID,
+            1,
+            IDENTITY_THUMBPRINT,
+            KEY_ALIAS,
+            SESSION_ID,
+            SESSION_FAMILY_ID,
+            0,
+        )
+        val fixture = Fixture(
+            initialSettings = NonSecretSettings(
+                activeServerProfileId = PROFILE,
+                activeUserId = USER,
+                deviceId = DEVICE,
+                serverBaseUrl = API_ORIGIN,
+                streamBaseUrl = STREAM_ORIGIN,
+                m5Binding = checkpoint,
+            ),
+        )
+
+        fixture.runtime.recoverAndRefresh()
+
+        assertEquals(listOf(PROFILE), fixture.purgedProfiles)
+        assertNull(fixture.settings.value.activeServerProfileId)
+        assertNull(fixture.settings.value.activeUserId)
+        assertNull(fixture.settings.value.deviceId)
+        assertNull(fixture.settings.value.m5Binding)
+    }
+
+    @Test
+    fun corruptedBindingCredentialPurgesRecommendationContextFailClosed() = runBlocking {
+        val checkpoint = M5BindingCheckpoint(
+            BINDING_COMMIT_ID,
+            SERVER_INSTANCE_ID,
+            1,
+            IDENTITY_THUMBPRINT,
+            KEY_ALIAS,
+            SESSION_ID,
+            SESSION_FAMILY_ID,
+            0,
+        )
+        val fixture = Fixture(
+            initialSettings = NonSecretSettings(
+                activeServerProfileId = PROFILE,
+                activeUserId = USER,
+                deviceId = DEVICE,
+                serverBaseUrl = API_ORIGIN,
+                streamBaseUrl = STREAM_ORIGIN,
+                m5Binding = checkpoint,
+            ),
+        )
+        fixture.credentials.write(PROFILE, "{".toByteArray(StandardCharsets.UTF_8))
+
+        fixture.runtime.recoverAndRefresh()
+
+        assertEquals(listOf(PROFILE), fixture.purgedProfiles)
+        assertNull(fixture.credentials.read(PROFILE))
+        assertNull(fixture.settings.value.activeServerProfileId)
+        assertNull(fixture.settings.value.m5Binding)
     }
 
     @Test
@@ -651,6 +716,7 @@ class ProfilePairingRuntimeTest {
         val settings = FakeSettings(initialSettings)
         val keys = FakeKeys()
         val registeredOrigins = mutableListOf<Pair<ServerProfileId, String>>()
+        val purgedProfiles = mutableListOf<ServerProfileId>()
         val firstBindGate = FirstBindCeremonyGate()
         val runtime = ProfilePairingRuntime(
             scope = CoroutineScope(Dispatchers.Unconfined),
@@ -662,6 +728,7 @@ class ProfilePairingRuntimeTest {
             deviceName = "Test device",
             reportSafeError = {},
             registerOrigin = { profile, origin -> registeredOrigins += profile to origin },
+            purgeRecommendationContext = { profile -> purgedProfiles += profile },
             firstBindGate = firstBindGate,
         )
     }

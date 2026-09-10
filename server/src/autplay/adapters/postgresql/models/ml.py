@@ -677,6 +677,312 @@ class RecommendationInputSnapshotRow(Base):
     )
 
 
+class RecommendationTemporalEventRow(Base):
+    """Immutable normalized R1 event selected by owner watermark."""
+
+    __tablename__ = "recommendation_temporal_event"
+
+    recommendation_temporal_event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    server_profile_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_request_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    device_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    server_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    source_event_type: Mapped[str] = mapped_column(Text(), nullable=False)
+    signal_key: Mapped[str] = mapped_column(Text(), nullable=False)
+    derivation_key: Mapped[str] = mapped_column(Text(), nullable=False)
+    recording_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    dimensions: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
+    occurred_at_ms: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    received_at_ms: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    effective_at_ms: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    time_classification: Mapped[str] = mapped_column(Text(), nullable=False)
+    origin_lane: Mapped[str] = mapped_column(Text(), nullable=False)
+    signed_strength: Mapped[Decimal] = mapped_column(Numeric(8, 7), nullable=False)
+    quality_weight: Mapped[Decimal] = mapped_column(Numeric(8, 7), nullable=False)
+    excluded_from_taste: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    recommendation_request_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    impression_event_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    recommendation_source_rank: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    normalized_evidence_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    evidence_document: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
+    retained_until: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "recommendation_temporal_event_id",
+            name="recommendation_temporal_event_pkey",
+        ),
+        ForeignKeyConstraint(
+            ["user_id"],
+            ["account.user_account.user_id"],
+            name="recommendation_temporal_event_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "device_id"],
+            ["account.device.user_id", "account.device.device_id"],
+            name="fk_recommendation_temporal_event_device_owner",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["recording_id"],
+            ["catalog.recording.recording_id"],
+            name="recommendation_temporal_event_recording_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "recommendation_temporal_event_id",
+            name="uq_recommendation_temporal_event_owner",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "source_event_id",
+            "signal_key",
+            "derivation_key",
+            name="uq_recommendation_temporal_event_derivation",
+        ),
+        CheckConstraint(
+            "octet_length(source_request_sha256)=32 "
+            "AND octet_length(normalized_evidence_sha256)=32",
+            name="ck_recommendation_temporal_event_hashes",
+        ),
+        CheckConstraint(
+            "device_sequence>=1 AND server_sequence>=1",
+            name="ck_recommendation_temporal_event_sequences",
+        ),
+        CheckConstraint(
+            "occurred_at_ms>=0 AND received_at_ms>=0 AND effective_at_ms>=0",
+            name="ck_recommendation_temporal_event_times",
+        ),
+        CheckConstraint(
+            "source_event_type IN ('USER_TRACK_PREFERENCE_SET',"
+            "'LISTENING_EVENT_RECORDED','RECOMMENDATION_FEEDBACK_RECORDED')",
+            name="ck_recommendation_temporal_event_source_type",
+        ),
+        CheckConstraint(
+            "signal_key IN ('EXPLICIT_LIKE','EXPLICIT_DISLIKE','EXCLUDE_FROM_TASTE',"
+            "'FINALIZED_ORGANIC_LISTEN','FINALIZED_RECOMMENDATION_LISTEN',"
+            "'RECOMMENDATION_SELECTED','RECOMMENDATION_DISMISSED',"
+            "'FINALIZED_COMPLETION','FINALIZED_SHORT_LISTEN_SKIP')",
+            name="ck_recommendation_temporal_event_signal",
+        ),
+        CheckConstraint(
+            "derivation_key IN ('PREFERENCE_TRANSITION_V1','EXCLUSION_PROJECTION_V1',"
+            "'BASE_LISTEN_V1','OUTCOME_CLASSIFIER_V1','RECOMMENDATION_FEEDBACK_V1')",
+            name="ck_recommendation_temporal_event_derivation",
+        ),
+        CheckConstraint(
+            "time_classification IN ('TRUSTED_EVENT_TIME','DELAYED_WITHIN_POLICY',"
+            "'FUTURE_SKEW_CLAMPED','PAST_SKEW_RECENT_DISABLED','RECEIPT_TIME_ONLY')",
+            name="ck_recommendation_temporal_event_time_class",
+        ),
+        CheckConstraint(
+            "origin_lane IN ('EXPLICIT','ORGANIC','SOURCE_QUEUE','RECOMMENDATION','EXCLUSION')",
+            name="ck_recommendation_temporal_event_origin",
+        ),
+        CheckConstraint(
+            "signed_strength BETWEEN -1 AND 1 AND quality_weight BETWEEN 0 AND 1",
+            name="ck_recommendation_temporal_event_weights",
+        ),
+        CheckConstraint(
+            "(recommendation_request_id IS NULL AND impression_event_id IS NULL "
+            "AND recommendation_source_rank IS NULL AND origin_lane<>'RECOMMENDATION') "
+            "OR (recommendation_request_id IS NOT NULL AND impression_event_id IS NOT NULL "
+            "AND recommendation_source_rank BETWEEN 1 AND 1000 "
+            "AND origin_lane='RECOMMENDATION')",
+            name="ck_recommendation_temporal_event_causal_refs",
+        ),
+        CheckConstraint(
+            "retained_until>created_at",
+            name="ck_recommendation_temporal_event_retention",
+        ),
+        {"schema": "ml"},
+    )
+
+
+class RecommendationAdaptiveProfileRow(Base):
+    """Immutable materialized R1 adaptive profile."""
+
+    __tablename__ = "recommendation_adaptive_profile"
+
+    recommendation_adaptive_profile_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, server_default=text("uuidv7()")
+    )
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    cutoff_at_ms: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    interaction_watermark: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    feature_policy_key: Mapped[str] = mapped_column(Text(), nullable=False)
+    feature_policy_version: Mapped[str] = mapped_column(Text(), nullable=False)
+    feature_policy_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    profile_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    profile_document: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
+    source_event_count: Mapped[int] = mapped_column(Integer(), nullable=False)
+    dimension_count: Mapped[int] = mapped_column(Integer(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "recommendation_adaptive_profile_id",
+            name="recommendation_adaptive_profile_pkey",
+        ),
+        ForeignKeyConstraint(
+            ["user_id"],
+            ["account.user_account.user_id"],
+            name="recommendation_adaptive_profile_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "recommendation_adaptive_profile_id",
+            name="uq_recommendation_adaptive_profile_owner",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "cutoff_at_ms",
+            "interaction_watermark",
+            "feature_policy_key",
+            "feature_policy_version",
+            name="uq_recommendation_adaptive_profile_cutoff",
+        ),
+        CheckConstraint(
+            "cutoff_at_ms>=0 AND interaction_watermark>=0",
+            name="ck_recommendation_adaptive_profile_watermark",
+        ),
+        CheckConstraint(
+            "octet_length(feature_policy_sha256)=32 AND octet_length(profile_sha256)=32",
+            name="ck_recommendation_adaptive_profile_hashes",
+        ),
+        CheckConstraint(
+            "feature_policy_key='adaptive-taste' AND feature_policy_version ~ '^[1-9][0-9]{0,8}$'",
+            name="ck_recommendation_adaptive_profile_policy",
+        ),
+        CheckConstraint(
+            "source_event_count BETWEEN 0 AND 10000 AND dimension_count BETWEEN 0 AND 512",
+            name="ck_recommendation_adaptive_profile_bounds",
+        ),
+        {"schema": "ml"},
+    )
+
+
+class RecommendationTemporalSnapshotRow(Base):
+    """Immutable R1 temporal snapshot bound to the original P11 input."""
+
+    __tablename__ = "recommendation_temporal_snapshot"
+
+    recommendation_temporal_snapshot_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, server_default=text("uuidv7()")
+    )
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    recommendation_input_snapshot_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    recommendation_adaptive_profile_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    cutoff_at_ms: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    interaction_watermark: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    catalog_snapshot: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    availability_snapshot_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    baseline_input_snapshot_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    feature_policy_key: Mapped[str] = mapped_column(Text(), nullable=False)
+    feature_policy_version: Mapped[str] = mapped_column(Text(), nullable=False)
+    feature_policy_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    event_time_policy_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    derived_features_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    source_evidence_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    snapshot_sha256: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    source_event_count: Mapped[int] = mapped_column(Integer(), nullable=False)
+    dimension_count: Mapped[int] = mapped_column(Integer(), nullable=False)
+    snapshot_document: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
+    retained_until: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "recommendation_temporal_snapshot_id",
+            name="recommendation_temporal_snapshot_pkey",
+        ),
+        ForeignKeyConstraint(
+            ["user_id"],
+            ["account.user_account.user_id"],
+            name="recommendation_temporal_snapshot_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "recommendation_input_snapshot_id"],
+            [
+                "ml.recommendation_input_snapshot.user_id",
+                "ml.recommendation_input_snapshot.recommendation_input_snapshot_id",
+            ],
+            name="fk_recommendation_temporal_snapshot_input_owner",
+            ondelete="SET NULL (recommendation_input_snapshot_id)",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "recommendation_adaptive_profile_id"],
+            [
+                "ml.recommendation_adaptive_profile.user_id",
+                "ml.recommendation_adaptive_profile.recommendation_adaptive_profile_id",
+            ],
+            name="fk_recommendation_temporal_snapshot_profile_owner",
+            ondelete="SET NULL (recommendation_adaptive_profile_id)",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "recommendation_temporal_snapshot_id",
+            name="uq_recommendation_temporal_snapshot_owner",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "recommendation_input_snapshot_id",
+            "feature_policy_key",
+            "feature_policy_version",
+            name="uq_recommendation_temporal_snapshot_baseline",
+        ),
+        CheckConstraint(
+            "cutoff_at_ms>=0 AND interaction_watermark>=0 AND catalog_snapshot>=0",
+            name="ck_recommendation_temporal_snapshot_watermark",
+        ),
+        CheckConstraint(
+            "octet_length(availability_snapshot_sha256)=32 "
+            "AND octet_length(baseline_input_snapshot_sha256)=32 "
+            "AND octet_length(feature_policy_sha256)=32 "
+            "AND octet_length(event_time_policy_sha256)=32 "
+            "AND octet_length(derived_features_sha256)=32 "
+            "AND octet_length(source_evidence_sha256)=32 "
+            "AND octet_length(snapshot_sha256)=32",
+            name="ck_recommendation_temporal_snapshot_hashes",
+        ),
+        CheckConstraint(
+            "feature_policy_key='adaptive-taste' AND feature_policy_version ~ '^[1-9][0-9]{0,8}$'",
+            name="ck_recommendation_temporal_snapshot_policy",
+        ),
+        CheckConstraint(
+            "source_event_count BETWEEN 0 AND 10000 AND dimension_count BETWEEN 0 AND 512",
+            name="ck_recommendation_temporal_snapshot_bounds",
+        ),
+        CheckConstraint(
+            "retained_until>created_at",
+            name="ck_recommendation_temporal_snapshot_retention",
+        ),
+        {"schema": "ml"},
+    )
+
+
 class RecommendationRequestRow(Base):
     """Persistence row for ``ml.recommendation_request``."""
 
@@ -711,6 +1017,24 @@ class RecommendationRequestRow(Base):
     catalog_snapshot: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
     availability_snapshot_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
     policy_snapshot_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    recommendation_temporal_snapshot_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    temporal_snapshot_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    adaptive_feature_policy_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    sona_shadow_pipeline_key: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    sona_shadow_pipeline_version: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    sona_shadow_pipeline_manifest_sha256: Mapped[bytes | None] = mapped_column(
+        BYTEA(), nullable=True
+    )
+    sona_tokenizer_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    sona_model_manifest_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    sona_request_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    sona_output_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    sona_shadow_evidence_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    sona_shadow_status: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    sona_shadow_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    sona_shadow_document: Mapped[JsonValue | None] = mapped_column(JSONB(), nullable=True)
     request_document: Mapped[JsonValue | None] = mapped_column(JSONB(), nullable=True)
     shadow: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=text("false"))
     model_bundle_version: Mapped[str] = mapped_column(
@@ -770,6 +1094,24 @@ class RecommendationRequestRow(Base):
             name="fk_recommendation_request_input_owner",
             ondelete="SET NULL (recommendation_input_snapshot_id)",
         ),
+        ForeignKeyConstraint(
+            ["user_id", "recommendation_temporal_snapshot_id"],
+            [
+                "ml.recommendation_temporal_snapshot.user_id",
+                "ml.recommendation_temporal_snapshot.recommendation_temporal_snapshot_id",
+            ],
+            name="fk_recommendation_request_temporal_snapshot_owner",
+            ondelete="SET NULL (recommendation_temporal_snapshot_id)",
+        ),
+        ForeignKeyConstraint(
+            ["sona_shadow_pipeline_key", "sona_shadow_pipeline_version"],
+            [
+                "ml.recommendation_pipeline_version.pipeline_key",
+                "ml.recommendation_pipeline_version.version",
+            ],
+            name="fk_recommendation_request_sona_shadow_pipeline",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "user_id",
             "recommendation_request_id",
@@ -797,6 +1139,55 @@ class RecommendationRequestRow(Base):
             "AND (interaction_watermark IS NULL OR interaction_watermark >= 0) "
             "AND (catalog_snapshot IS NULL OR catalog_snapshot >= 0)",
             name="ck_recommendation_request_replay_versions",
+        ),
+        CheckConstraint(
+            "(temporal_snapshot_sha256 IS NULL "
+            "OR octet_length(temporal_snapshot_sha256)=32) "
+            "AND (adaptive_feature_policy_sha256 IS NULL "
+            "OR octet_length(adaptive_feature_policy_sha256)=32)",
+            name="ck_recommendation_request_temporal_hashes",
+        ),
+        CheckConstraint(
+            "(sona_shadow_pipeline_manifest_sha256 IS NULL OR "
+            "octet_length(sona_shadow_pipeline_manifest_sha256)=32) AND "
+            "(sona_tokenizer_sha256 IS NULL OR octet_length(sona_tokenizer_sha256)=32) AND "
+            "(sona_model_manifest_sha256 IS NULL OR "
+            "octet_length(sona_model_manifest_sha256)=32) AND "
+            "(sona_request_sha256 IS NULL OR octet_length(sona_request_sha256)=32) AND "
+            "(sona_output_sha256 IS NULL OR octet_length(sona_output_sha256)=32) AND "
+            "(sona_shadow_evidence_sha256 IS NULL OR "
+            "octet_length(sona_shadow_evidence_sha256)=32)",
+            name="ck_recommendation_request_sona_hashes",
+        ),
+        CheckConstraint(
+            "(sona_shadow_status IS NULL AND sona_shadow_pipeline_key IS NULL "
+            "AND sona_shadow_pipeline_version IS NULL "
+            "AND sona_shadow_pipeline_manifest_sha256 IS NULL "
+            "AND sona_tokenizer_sha256 IS NULL AND sona_model_manifest_sha256 IS NULL "
+            "AND sona_request_sha256 IS NULL AND sona_output_sha256 IS NULL "
+            "AND sona_shadow_evidence_sha256 IS NULL AND sona_shadow_reason IS NULL "
+            "AND sona_shadow_document IS NULL) OR "
+            "(sona_shadow_status='SUCCEEDED' AND sona_shadow_reason IS NULL "
+            "AND sona_shadow_pipeline_key IS NOT NULL "
+            "AND sona_shadow_pipeline_version IS NOT NULL "
+            "AND sona_shadow_pipeline_manifest_sha256 IS NOT NULL "
+            "AND sona_tokenizer_sha256 IS NOT NULL AND sona_model_manifest_sha256 IS NOT NULL "
+            "AND sona_request_sha256 IS NOT NULL AND sona_output_sha256 IS NOT NULL "
+            "AND sona_shadow_evidence_sha256 IS NOT NULL "
+            "AND sona_shadow_document IS NOT NULL "
+            "AND temporal_snapshot_sha256 IS NOT NULL "
+            "AND adaptive_feature_policy_sha256 IS NOT NULL) OR "
+            "(sona_shadow_status='DEGRADED' "
+            "AND sona_shadow_reason IN ('SONA_UNAVAILABLE','SONA_OUTPUT_UNBOUND') "
+            "AND sona_shadow_pipeline_key IS NOT NULL "
+            "AND sona_shadow_pipeline_version IS NOT NULL "
+            "AND sona_shadow_pipeline_manifest_sha256 IS NOT NULL "
+            "AND sona_tokenizer_sha256 IS NOT NULL AND sona_model_manifest_sha256 IS NOT NULL "
+            "AND sona_output_sha256 IS NULL AND sona_shadow_evidence_sha256 IS NOT NULL "
+            "AND sona_shadow_document IS NOT NULL "
+            "AND temporal_snapshot_sha256 IS NOT NULL "
+            "AND adaptive_feature_policy_sha256 IS NOT NULL)",
+            name="ck_recommendation_request_sona_binding",
         ),
         {"schema": "ml"},
     )
@@ -1122,6 +1513,34 @@ Index(
 )
 
 Index(
+    "ix_recommendation_temporal_event_owner_watermark",
+    RecommendationTemporalEventRow.user_id,
+    RecommendationTemporalEventRow.server_sequence,
+    RecommendationTemporalEventRow.effective_at_ms,
+    RecommendationTemporalEventRow.recommendation_temporal_event_id,
+)
+
+Index(
+    "ix_recommendation_temporal_event_retention",
+    RecommendationTemporalEventRow.retained_until,
+    RecommendationTemporalEventRow.recommendation_temporal_event_id,
+)
+
+Index(
+    "ix_recommendation_adaptive_profile_owner_cutoff",
+    RecommendationAdaptiveProfileRow.user_id,
+    RecommendationAdaptiveProfileRow.cutoff_at_ms.desc(),
+    RecommendationAdaptiveProfileRow.interaction_watermark.desc(),
+)
+
+Index(
+    "ix_recommendation_temporal_snapshot_owner_retention",
+    RecommendationTemporalSnapshotRow.user_id,
+    RecommendationTemporalSnapshotRow.retained_until.desc(),
+    RecommendationTemporalSnapshotRow.recommendation_temporal_snapshot_id,
+)
+
+Index(
     "ix_recording_embedding_model_recording",
     RecordingEmbeddingRow.embedding_model_id,
     RecordingEmbeddingRow.recording_id,
@@ -1185,10 +1604,13 @@ __all__ = (
     "EmbeddingModelRow",
     "EnrichmentJobRow",
     "OfflineRecommendationPackRow",
+    "RecommendationAdaptiveProfileRow",
     "RecommendationInputSnapshotRow",
     "RecommendationItemRow",
     "RecommendationPipelineVersionRow",
     "RecommendationRequestRow",
+    "RecommendationTemporalEventRow",
+    "RecommendationTemporalSnapshotRow",
     "RecordingEmbeddingRow",
     "RecordingTagSetRow",
     "TasteClusterMemberRow",

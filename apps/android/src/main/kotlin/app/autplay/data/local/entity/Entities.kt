@@ -675,6 +675,58 @@ data class RecommendationPackEntity(
 )
 
 /**
+ * Immutable R1B device-local temporal delta over one verified offline pack.
+ *
+ * The canonical payload carries the bounded source evidence and presentation adjustments. The
+ * indexed envelope is deliberately redundant so owner/profile/device and parent integrity can be
+ * rejected before the payload is interpreted. A pack replacement cannot mutate this row.
+ */
+@Entity(
+    tableName = "recommendation_temporal_delta",
+    foreignKeys = [
+        ForeignKey(
+            entity = RecommendationPackEntity::class,
+            parentColumns = ["offline_pack_id"],
+            childColumns = ["offline_pack_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(
+            value = [
+                "server_profile_id",
+                "owner_user_id",
+                "device_id",
+                "offline_pack_id",
+                "recommendation_request_id",
+            ],
+            unique = true,
+        ),
+        Index(value = ["offline_pack_id"]),
+        Index(value = ["server_profile_id", "expires_at_ms"]),
+    ],
+)
+data class RecommendationTemporalDeltaEntity(
+    @PrimaryKey @ColumnInfo(name = "delta_id") val deltaId: String,
+    @ColumnInfo(name = "server_profile_id") val serverProfileId: String,
+    @ColumnInfo(name = "owner_user_id") val ownerUserId: String,
+    @ColumnInfo(name = "device_id") val deviceId: String,
+    @ColumnInfo(name = "offline_pack_id") val offlinePackId: String,
+    @ColumnInfo(name = "recommendation_request_id") val recommendationRequestId: String,
+    @ColumnInfo(name = "feature_policy_version") val featurePolicyVersion: String,
+    @ColumnInfo(name = "feature_policy_sha256") val featurePolicySha256: ByteArray,
+    @ColumnInfo(name = "parent_pack_sha256") val parentPackSha256: ByteArray,
+    @ColumnInfo(name = "parent_items_sha256") val parentItemsSha256: ByteArray,
+    @ColumnInfo(name = "payload_version") val payloadVersion: Int,
+    @ColumnInfo(name = "payload_encoding") val payloadEncoding: String,
+    val payload: ByteArray,
+    @ColumnInfo(name = "payload_sha256") val payloadSha256: ByteArray,
+    @ColumnInfo(name = "cutoff_at_ms") val cutoffAtMs: Long,
+    @ColumnInfo(name = "created_at_ms") val createdAtMs: Long,
+    @ColumnInfo(name = "expires_at_ms") val expiresAtMs: Long,
+)
+
+/**
  * Durable semantic idempotency key for one actual recommendation presentation.
  *
  * The composite primary key is intentionally the P04/P11 owner-scoped semantic tuple. A new UUID
