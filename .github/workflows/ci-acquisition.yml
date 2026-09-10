@@ -36,6 +36,9 @@ jobs:
       - name: Synchronize acquisition project
         run: uv sync --project tools/local_music_acquisition --frozen --python 3.14.7
 
+      - name: Install pinned Playwright Firefox
+        run: uv run --project tools/local_music_acquisition --frozen playwright install --with-deps firefox
+
       - name: Check acquisition lock and static gates
         run: |
           uv lock --project tools/local_music_acquisition --check
