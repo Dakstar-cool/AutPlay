@@ -41,8 +41,8 @@ jobs:
       - name: Check training lock and static gates
         run: |
           uv lock --project gpu/training --check
-          uv run --project gpu/training --frozen ruff check gpu/training
-          uv run --project gpu/training --frozen ruff format --check gpu/training
+          uv run --project gpu/training --frozen ruff check --config gpu/training/pyproject.toml gpu/training
+          uv run --project gpu/training --frozen ruff format --check --config gpu/training/pyproject.toml gpu/training
           uv run --project gpu/training --frozen python -m mypy --config-file gpu/training/pyproject.toml gpu/training/src gpu/training/tests
 
       - name: Run training tests without hardware claims

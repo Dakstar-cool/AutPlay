@@ -42,8 +42,8 @@ jobs:
       - name: Check acquisition lock and static gates
         run: |
           uv lock --project tools/local_music_acquisition --check
-          uv run --project tools/local_music_acquisition --frozen ruff check tools/local_music_acquisition
-          uv run --project tools/local_music_acquisition --frozen ruff format --check tools/local_music_acquisition
+          uv run --project tools/local_music_acquisition --frozen ruff check --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
+          uv run --project tools/local_music_acquisition --frozen ruff format --check --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
           uv run --project tools/local_music_acquisition --frozen python -m mypy --config-file tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition/src
 
       - name: Run acquisition tests

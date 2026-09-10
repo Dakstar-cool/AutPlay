@@ -50,10 +50,10 @@ jobs:
         run: uv lock --project gpu --check
 
       - name: Lint isolated GPU project
-        run: uv run --project gpu --frozen ruff check gpu/src gpu/tests
+        run: uv run --project gpu --frozen ruff check --config gpu/pyproject.toml gpu/src gpu/tests
 
       - name: Check isolated GPU formatting
-        run: uv run --project gpu --frozen ruff format --check gpu/src gpu/tests
+        run: uv run --project gpu --frozen ruff format --check --config gpu/pyproject.toml gpu/src gpu/tests
 
       - name: Type-check isolated GPU project
         run: uv run --project gpu --frozen python -m mypy --config-file gpu/pyproject.toml gpu/src gpu/tests
