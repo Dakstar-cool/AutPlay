@@ -1,13 +1,19 @@
 package app.autplay.ui.profilepairing
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -58,7 +64,7 @@ class ProfilePairingScreenTest {
             ProfilePairingActions(admission = AdmissionActions(confirmAccount = confirmations::incrementAndGet)),
         )
         compose.onNodeWithText("Approved for Owner (66666666-6666-4666-8666-666666666666). Confirm this account before connecting.").assertIsDisplayed()
-        compose.onNodeWithText("Confirm account").performClick()
+        compose.onNodeWithText("Confirm account").performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, confirmations.get()) }
     }
 
@@ -187,27 +193,42 @@ class ProfilePairingScreenTest {
     fun authenticatedInvitationManagementUsesBoundedExpiryAndClearsOnCancel() {
         val createdExpiry = AtomicReference<Int?>(null)
         val cancelled = AtomicInteger(0)
-        render(
+        val state = mutableStateOf(
             ProfilePairingUiState(
                 pairing = connectedState(),
                 invitationManagement = InvitationManagementUiState(
                     canCreate = true,
                     minExpiryMinutes = 10,
                     maxExpiryMinutes = 60,
-                    createdSecret = "shown-once-secret",
                 ),
             ),
-            ProfilePairingActions(
-                createInvitation = createdExpiry::set,
-                cancelCreatedInvitation = { cancelled.incrementAndGet() },
+        )
+        render(
+            state = { state.value },
+            actions = ProfilePairingActions(
+                createInvitation = { expiry ->
+                    createdExpiry.set(expiry)
+                    state.value = state.value.copy(
+                        invitationManagement = requireNotNull(state.value.invitationManagement).copy(createdSecret = "shown-once-secret"),
+                    )
+                },
+                cancelCreatedInvitation = {
+                    cancelled.incrementAndGet()
+                    state.value = state.value.copy(
+                        invitationManagement = requireNotNull(state.value.invitationManagement).copy(createdSecret = null),
+                    )
+                },
             ),
         )
 
-        compose.onNodeWithText(context.getString(R.string.profile_create_invitation)).performClick()
-        compose.runOnIdle { assert(createdExpiry.get() == 10) }
+        compose.onNodeWithText(context.getString(R.string.profile_create_invitation))
+            .performScrollTo().assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(10, createdExpiry.get()) }
         compose.onNodeWithContentDescription("One-time invitation secret").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.profile_cancel_invitation)).performClick()
-        compose.runOnIdle { assert(cancelled.get() == 1) }
+        compose.onNodeWithText(context.getString(R.string.profile_cancel_invitation))
+            .assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, cancelled.get()) }
+        compose.onNodeWithContentDescription("One-time invitation secret").assertDoesNotExist()
     }
 
     @Test
@@ -229,8 +250,17 @@ class ProfilePairingScreenTest {
         assertEquals(listOf(QR_CONTENT_DESCRIPTION), qr.config[SemanticsProperties.ContentDescription])
     }
 
-    private fun render(state: ProfilePairingUiState, actions: ProfilePairingActions = ProfilePairingActions()) {
-        compose.setContent { MaterialTheme { ProfilePairingScreen(state, actions) } }
+    private fun render(state: ProfilePairingUiState, actions: ProfilePairingActions = ProfilePairingActions()) =
+        render(state = { state }, actions = actions)
+
+    private fun render(state: () -> ProfilePairingUiState, actions: ProfilePairingActions) {
+        compose.setContent {
+            MaterialTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ProfilePairingScreen(state(), actions)
+                }
+            }
+        }
         // v2 uses StandardTestDispatcher; advance the initial composition before querying nodes.
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()

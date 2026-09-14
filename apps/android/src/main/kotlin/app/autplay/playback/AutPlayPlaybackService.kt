@@ -378,7 +378,12 @@ class AutPlayPlaybackService : MediaSessionService() {
                     ) {
                         return@withLock
                     }
+                    val currentPositionMs = if (index == player.currentMediaItemIndex) {
+                        player.currentPosition.coerceAtLeast(0)
+                    } else null
                     player.replaceMediaItem(index, resolution.item)
+                    // A new source has a new period and would otherwise reset the current position.
+                    currentPositionMs?.let { player.seekTo(index, it) }
                     resolvedQueueEntryIds += entry.queueEntryId
                     if (index == player.currentMediaItemIndex) {
                         publishRuntimeState(

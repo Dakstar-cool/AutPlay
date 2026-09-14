@@ -18,6 +18,7 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -77,8 +78,9 @@ class DiscoveryAutomationPanelTest {
         compose.onNodeWithText(context.getString(R.string.discovery_automation_provider_artist_id))
             .performTextInput("20")
         compose.onNodeWithText(context.getString(R.string.discovery_automation_auto_import))
-            .performClick()
-        compose.onNodeWithText(context.getString(R.string.action_save)).performClick()
+            .performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText(context.getString(R.string.action_save))
+            .performScrollTo().assertIsDisplayed().performClick()
 
         assertNull(submitted.get())
         compose.onNodeWithText(context.getString(R.string.discovery_automation_auto_import_consequence))

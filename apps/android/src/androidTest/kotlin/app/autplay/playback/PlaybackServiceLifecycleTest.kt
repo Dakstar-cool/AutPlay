@@ -114,11 +114,15 @@ class PlaybackServiceLifecycleTest {
             fixture.connect()
             assertEquals(0, fixture.main { fixture.controller?.mediaItemCount })
             releaseWriter.complete(Unit)
-            fixture.await { fixture.main { (fixture.controller?.currentPosition ?: 0) >= 12_000 } }
+            fixture.await {
+                fixture.main {
+                    fixture.controller?.playbackState == Player.STATE_READY &&
+                        (fixture.controller?.currentPosition ?: 0) >= 12_000
+                }
+            }
             val persisted = requireNotNull(fixture.database.queueDao().activeSnapshotOnce())
             assertEquals(event, persisted.activeListeningEventId)
             assertTrue((persisted.activeSessionObservedPlayedMs ?: 0) >= 800)
-            fixture.await { fixture.main { fixture.controller?.playbackState == Player.STATE_READY } }
             fixture.main { fixture.controller?.seekTo(18_000) }
             fixture.await { (fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs ?: 0) >= 18_000 }
             delay(150)

@@ -152,7 +152,8 @@ class PlaybackPlayerSurfacesTest {
             }
         }
 
-        composeRule.onNodeWithText(context.getString(R.string.player_timeline_locked_wave)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.player_timeline_locked_wave))
+            .performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)).assertIsNotEnabled()
         composeRule.onNodeWithContentDescription(context.getString(R.string.player_seek_description)).assertIsNotEnabled()
         composeRule.onNodeWithTag("player-wave-by-track").performScrollTo().assertIsNotEnabled()
