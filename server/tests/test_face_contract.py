@@ -8,7 +8,6 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-
 from autplay.application.face_contract import (
     decode_projection,
     decode_timeline,

@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-
 from autplay.application.recommendations import (
     BaselineUserRepresentationProvider,
     DeterministicOfflineEvaluator,
