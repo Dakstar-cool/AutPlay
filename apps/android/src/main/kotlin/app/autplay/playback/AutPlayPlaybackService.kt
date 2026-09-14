@@ -212,8 +212,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
         val cancelledService = requireNotNull(scope.coroutineContext[Job])
         scope.cancel()
-        resolutionJobs.values.forEach(Job::cancel)
-        resolutionJobs.clear()
+        cancelResolutionJobs(resolutionJobs)
         resolvedQueueEntryIds.clear()
         mediaSession.release()
         scheduledPlayJob?.cancel()
@@ -347,8 +346,7 @@ class AutPlayPlaybackService : MediaSessionService() {
 
     private fun beginQueueGeneration(): Long {
         queueGeneration += 1
-        resolutionJobs.values.forEach(Job::cancel)
-        resolutionJobs.clear()
+        cancelResolutionJobs(resolutionJobs)
         resolvedQueueEntryIds.clear()
         pendingTransitionMetrics = null
         return queueGeneration
