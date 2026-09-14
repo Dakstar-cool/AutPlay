@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -156,7 +157,8 @@ def audio_receipt(
     }
 
 
-def verify_receipt(directory: Path, key: str) -> dict[str, Any]:
+def inspect_receipt(directory: Path, key: str) -> dict[str, Any]:
+    """Check receipt shape and file metadata without reading the audio payload."""
     receipt = read_json(directory / "receipt.json")
     filename = receipt.get("filename")
     provider = receipt.get("provider")
@@ -165,21 +167,31 @@ def verify_receipt(directory: Path, key: str) -> dict[str, Any]:
         or receipt.get("key") != key
         or not isinstance(filename, str)
         or Path(filename).name != filename
+        or filename in {"", ".", ".."}
         or not isinstance(provider, str)
         or Path(provider).name != provider
         or provider in {"", ".", ".."}
+        or not isinstance(receipt.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", receipt["sha256"]) is None
     ):
         raise PlaylistDownloadError("queue_receipt_invalid")
     path = directory / provider / filename
     try:
         if (
-            directory.is_symlink()
-            or path.parent.is_symlink()
-            or path.is_symlink()
+            any(part.is_symlink() or part.is_junction() for part in (path, *path.parents))
             or not path.is_file()
             or path.stat().st_size != receipt.get("bytes")
-            or file_digest(path) != receipt.get("sha256")
         ):
+            raise ValueError
+    except (OSError, ValueError) as error:
+        raise PlaylistDownloadError("queue_artifact_integrity_failed") from error
+    return receipt
+
+
+def verify_receipt(directory: Path, key: str) -> dict[str, Any]:
+    receipt = inspect_receipt(directory, key)
+    try:
+        if file_digest(directory / receipt["provider"] / receipt["filename"]) != receipt["sha256"]:
             raise ValueError
     except (OSError, ValueError) as error:
         raise PlaylistDownloadError("queue_artifact_integrity_failed") from error

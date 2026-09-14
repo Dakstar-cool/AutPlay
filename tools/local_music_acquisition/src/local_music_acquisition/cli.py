@@ -98,6 +98,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--queue-dir", type=Path, help="Use a durable per-track server queue.")
     parser.add_argument("--queue-max-attempts", type=_bounded_integer(1, 10), default=3)
     parser.add_argument("--queue-retry-seconds", type=_bounded_integer(1, 3600), default=60)
+    parser.add_argument("--index-recheck-seconds", type=_bounded_integer(0, 86400), default=86400)
     parser.add_argument(
         "--check-runtime",
         action="store_true",
@@ -240,6 +241,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 retry_seconds=options.queue_retry_seconds,
                 max_bytes=options.max_mib * 1024 * 1024,
                 stop=stop,
+                index_recheck_seconds=options.index_recheck_seconds,
             )
         else:
             summary = download_playlist(
@@ -268,6 +270,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
         return 2
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     if options.queue_dir is not None:
+        if summary.get("paused", False):
+            return 0
         if summary["state"] != "finished":
             return 75
         return (

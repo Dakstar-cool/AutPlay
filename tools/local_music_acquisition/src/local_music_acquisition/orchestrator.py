@@ -37,6 +37,7 @@ class TrackOutcome:
     error_code: str | None = None
     artifact_ref: str | None = None
     identity_version: str | None = None
+    deferred: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,37 +60,56 @@ class _ProviderLane:
     circuit_open: bool = False
     cooldown_seconds: float | None = None
     opened_at: float = 0.0
+    requests: int = 0
+    misses: int = 0
+    downloaded: int = 0
+    deferred: int = 0
+    request_seconds: float = 0.0
+    wait_seconds: float = 0.0
 
     def invoke(self, item: PlaylistItem, output_directory: Path) -> _Attempt:
+        waiting = time.monotonic()
         with self.lock:
+            self.wait_seconds += time.monotonic() - waiting
             if self.circuit_open:
                 if self.cooldown_seconds is None or time.monotonic() < (
                     self.opened_at + self.cooldown_seconds
                 ):
+                    self.deferred += 1
                     return _Attempt(
-                        "failure", self.provider.name, f"{self.provider.name}.circuit_open"
+                        "deferred", self.provider.name, f"{self.provider.name}.circuit_open"
                     )
                 self.circuit_open = False
                 self.consecutive_failures = 0
+            self.requests += 1
+            started = time.monotonic()
             try:
-                artifact = self.provider.acquire(item, output_directory)
-            except ProviderMiss as error:
-                if error.provider != self.provider.name or error.code not in PROVIDER_MISS_CODES:
-                    return self._failure("result_invalid")
-                self.consecutive_failures = 0
-                return _Attempt("miss", self.provider.name, str(error))
-            except ProviderFailure as error:
-                code = error.code if error.provider == self.provider.name else "result_invalid"
-                return self._failure(code)
-            except OSError:
-                return self._failure("operational_failure")
-            if (
-                artifact.provider != self.provider.name
-                or re.fullmatch(r"sha256:[0-9a-f]{12}", artifact.artifact_ref) is None
-            ):
+                return self._acquire(item, output_directory)
+            finally:
+                self.request_seconds += time.monotonic() - started
+
+    def _acquire(self, item: PlaylistItem, output_directory: Path) -> _Attempt:
+        try:
+            artifact = self.provider.acquire(item, output_directory)
+        except ProviderMiss as error:
+            if error.provider != self.provider.name or error.code not in PROVIDER_MISS_CODES:
                 return self._failure("result_invalid")
             self.consecutive_failures = 0
-            return _Attempt("downloaded", self.provider.name, artifact=artifact)
+            self.misses += 1
+            return _Attempt("miss", self.provider.name, str(error))
+        except ProviderFailure as error:
+            code = error.code if error.provider == self.provider.name else "result_invalid"
+            return self._failure(code)
+        except OSError:
+            return self._failure("operational_failure")
+        if (
+            artifact.provider != self.provider.name
+            or re.fullmatch(r"sha256:[0-9a-f]{12}", artifact.artifact_ref) is None
+        ):
+            return self._failure("result_invalid")
+        self.consecutive_failures = 0
+        self.downloaded += 1
+        return _Attempt("downloaded", self.provider.name, artifact=artifact)
 
     def _failure(self, code: str) -> _Attempt:
         self.consecutive_failures += 1
@@ -142,6 +162,22 @@ class DownloadSession:
     def download(self, item: PlaylistItem, output_directory: Path) -> TrackOutcome:
         return _download_item(item, output_directory, self.lanes, continue_on_provider_failure=True)
 
+    def metrics(self) -> dict[str, dict[str, int | float | bool]]:
+        """Aggregate only: no track metadata, URLs, credentials or exception text."""
+        return {
+            lane.provider.name: {
+                "requests": lane.requests,
+                "misses": lane.misses,
+                "downloaded": lane.downloaded,
+                "failures": lane.terminal_failures,
+                "deferred": lane.deferred,
+                "circuit_open": lane.circuit_open,
+                "request_seconds": round(lane.request_seconds, 3),
+                "wait_seconds": round(lane.wait_seconds, 3),
+            }
+            for lane in self.lanes
+        }
+
 
 def _read_items(
     input_file: Path, *, normalize_numbered: bool, normalization_catalog: Path | None = None
@@ -172,16 +208,20 @@ def _download_item(
 
     last_miss: _Attempt | None = None
     last_failure: _Attempt | None = None
+    last_deferred: _Attempt | None = None
     for index, lane in enumerate(lanes):
         if stop is not None and stop.is_set():
             return TrackOutcome(item.row_number, "failed", None, False, "download_interrupted")
         attempt = lane.invoke(item, output_directory)
+        if attempt.status == "deferred":
+            last_deferred = attempt
+            continue
         if attempt.status == "miss":
             last_miss = attempt
             continue
         if attempt.status == "failure":
             last_failure = attempt
-            if continue_on_provider_failure and index + 1 < len(lanes):
+            if continue_on_provider_failure:
                 continue
             return TrackOutcome(
                 item.row_number,
@@ -207,6 +247,15 @@ def _download_item(
             last_failure.provider,
             len(lanes) > 1,
             last_failure.error_code,
+        )
+    if last_deferred is not None:
+        return TrackOutcome(
+            item.row_number,
+            "failed",
+            last_deferred.provider,
+            len(lanes) > 1,
+            last_deferred.error_code,
+            deferred=True,
         )
     assert last_miss is not None
     return TrackOutcome(
