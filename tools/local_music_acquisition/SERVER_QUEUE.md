@@ -12,11 +12,15 @@
 - Перед публикацией выполняется полное декодирование ffmpeg, сверяются размер, полный SHA-256
   и отпечаток, возвращённый провайдером. Каталог трека публикуется атомарным переименованием.
   На Linux локальная файловая система получает fsync файлов и родительских каталогов.
-- Повторный запуск сверяет полные SHA-256 уже завершённых файлов. Изменённый или удалённый
-  файл получает `needs_review`; автоматической перезаписи и удаления нет.
+- Повторный запуск проверяет квитанции и метаданные завершённых файлов через локальный индекс.
+  Изменение файла или истечение срока кеша требует полной проверки SHA-256. Повреждённый или
+  удалённый файл получает `needs_review`; автоматической перезаписи и удаления нет.
 - По умолчанию временные ошибки повторяются до 3 попыток, с интервалами 60 и 120 секунд.
   Источник после двух сбоев получает паузу, затем допускается пробный запрос. Если все источники
   отключились, оставшаяся очередь ждёт следующего запуска, не расходуя попытки на тысячи строк.
+  Если параллельная задача дождалась уже отключённого источника, такой пропуск тоже не расходует
+  бюджет. При сочетании отсутствия совпадений и отключённого источника трек остаётся в `retry`.
+  Настоящая ошибка любого источника расходует попытку, даже если следующий источник отключён.
 - `not_found`, `failed`, `retry` и `needs_review` считаются отдельно. Ненайденные треки повторяются
   только по явной команде. Отсутствие совпадения не означает успешную загрузку.
 - Два процесса не могут одновременно работать с одной очередью или одним каталогом результатов.
@@ -41,7 +45,7 @@ uv run --frozen local-music-acquire /input/playlist.txt \
 Ту же команду можно повторять: существующий прогресс подхватывается автоматически. Флаги
 `--queue-max-attempts` и `--queue-retry-seconds` задают бюджет повторов. В режиме очереди
 fallback после ограниченной ошибки источника включён. Команда завершает один проход;
-код `75` означает, что осталась работа для следующего запуска, `0` — всё скачано,
+код `75` означает, что осталась работа для следующего запуска, `0` — всё скачано либо стоит пауза,
 `1` — проход завершён с пропусками/ошибками, `2` — проблема конфигурации или файловой системы.
 
 ```sh
@@ -50,6 +54,7 @@ local-music-acquire queue pause --queue-dir /queue
 local-music-acquire queue resume --queue-dir /queue
 local-music-acquire queue retry --queue-dir /queue
 local-music-acquire queue retry --queue-dir /queue --include-not-found
+local-music-acquire queue verify --queue-dir /queue
 ```
 
 `resume` снимает паузу; исполнитель запускается прежней командой или systemd. `retry` выдаёт
@@ -96,6 +101,9 @@ image ID. Образ не содержит базу AutPlay, музыку или
 ```ini
 ACQUISITION_UID=1000
 ACQUISITION_GID=1000
+ACQUISITION_CPUS=6
+ACQUISITION_WORKERS=2
+ACQUISITION_INDEX_RECHECK_SECONDS=86400
 ACQUISITION_IMAGE=autplay-acquisition:queue-20260914
 ACQUISITION_PLAYLIST=/srv/autplay/operator/acquisition/playlist.txt
 ACQUISITION_QUEUE=/srv/autplay/operator/acquisition/queue-v2
@@ -151,6 +159,57 @@ the server default (disabled). `ACQUISITION_ENABLE_HITMO`, `ACQUISITION_ENABLE_Y
 `ACQUISITION_ENABLE_SOUNDCLOUD` and `ACQUISITION_ENABLE_BANDCAMP` accept `0` or `1` to select
 sources for a particular run. No playlists, track corrections or
 user catalog entries are built into the image or launcher.
+
+The launcher defaults to a six-CPU quota (`ACQUISITION_CPUS=1..64`), not six dedicated cores.
+`ACQUISITION_WORKERS=1..4` separately controls concurrent tracks (default 2). Each provider
+remains serialized. Compare throughput and cgroup throttling before increasing workers;
+the container memory limit remains 2 GiB. These settings take effect on the next launch;
+changing them does not resume a paused queue.
+
+## Download index and performance checks
+
+`/music/.download-index.sqlite3` is a disposable SQLite index keyed by the existing SHA-256
+of normalized artist, title and album. Unicode NFKC, case folding and whitespace normalization
+retain compatibility with existing receipts. Track versions, featured artists and distinct albums
+remain distinct. Reviewed spelling corrections still come from the normalization catalog.
+
+The first encounter with an existing receipt verifies its full audio hash. Later lookups use
+the primary key and compare receipt/file identity, size, modification time and change time.
+Changed files and entries older than `--index-recheck-seconds` (default 86400, maximum one day)
+are hashed again. Set this option to 0 for full verification on every run. Metadata caching cannot
+detect silent disk corruption without metadata changes until the next full check.
+`queue verify` forces full verification now without network access or clearing the pause marker.
+
+Only artifacts published by the queue and backed by valid receipts enter this index. New queues
+sharing the same output directory reuse it. Legacy loose audio files or files in another output
+directory still require explicit reconciliation; matching a filename alone is not sufficient.
+Deleting the cache while the worker is stopped is safe: verified receipts rebuild it on demand.
+A corrupt/unwritable cache falls back to full verification and reports `unavailable`; it never
+marks an unverified file downloaded. This cache is not the AutPlay library database or Vault.
+
+`/queue/runtime.json` contains aggregate metrics from the latest completed pass: actual provider
+requests, misses, failures, downloads, cooldown skips, time inside provider calls (including audio
+validation), time waiting for provider locks, and index hits/full checks. No artist names, URLs or
+credentials are included. It is a completed-pass snapshot, not a live speed counter.
+
+Run this from the acquisition environment on both machines for a comparable baseline:
+
+```sh
+python -m local_music_acquisition.diagnostics
+python -m local_music_acquisition.diagnostics --network
+python -m local_music_acquisition.diagnostics --network --proxy-url socks5h://127.0.0.1:10808
+```
+
+The optional network probes request only public page headers, without redirects, cookies or
+environment proxy settings. The explicit SOCKS proxy must already be running; diagnostics never
+start Xray. Reports contain tool versions, logical/affinity CPU counts, container cgroup quota and
+throttling counters when available, HTTP status and header latency. Homepage success does not
+prove that media URLs are downloadable or measure track throughput.
+
+For the server comparison, first record CPU topology, affinity and cgroup limits: host core count
+and the container's quota are different quantities. Then use the same provider versions and
+authorized sample on both machines, comparing tracks/hour, provider times, network errors and
+the change in throttling counters. Keep the production queue paused until an explicit resume.
 
 Set `ACQUISITION_IMAGE` to the tested image ID and `ACQUISITION_SECCOMP` to the existing
 Chromium profile. Optional settings are `ACQUISITION_JAMENDO_ID`,

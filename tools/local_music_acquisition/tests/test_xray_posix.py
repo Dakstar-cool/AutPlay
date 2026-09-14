@@ -93,7 +93,8 @@ def test_real_cli_signal_waits_for_download_and_reaps_xray(tmp_path, signum):
         process.wait(timeout=5)
 
 
-def test_docker_launcher_mounts_existing_xray_without_host_network(tmp_path):
+@pytest.mark.parametrize("cpus,workers", [("6", "2"), ("4", "4"), ("0", "2"), ("6", "9")])
+def test_docker_launcher_mounts_existing_xray_without_host_network(tmp_path, cpus, workers):
     script = Path(__file__).parents[1] / "docker" / "run-queue.sh"
     arguments = tmp_path / "docker-args.json"
     binary = tmp_path / "docker"
@@ -114,6 +115,8 @@ def test_docker_launcher_mounts_existing_xray_without_host_network(tmp_path):
         "ACQUISITION_CONTAINER_NAME": "fixture-queue",
         "ACQUISITION_UID": "1000",
         "ACQUISITION_GID": "1001",
+        "ACQUISITION_CPUS": cpus,
+        "ACQUISITION_WORKERS": workers,
     }
     result = subprocess.run(
         [
@@ -128,8 +131,14 @@ def test_docker_launcher_mounts_existing_xray_without_host_network(tmp_path):
         text=True,
         timeout=5,
     )
+    if cpus == "0" or workers == "9":
+        assert result.returncode == 2
+        assert not arguments.exists()
+        return
     assert result.returncode == 0, result.stderr
     args = json.loads(arguments.read_text())
+    assert args[args.index("--cpus") + 1] == cpus
+    assert args[args.index("--workers") + 1] == workers
     assert args[args.index("--user") + 1] == "1000:1001"
     assert args[args.index("--name") + 1] == "fixture-queue"
     assert args[args.index("--xray-proxy-url") + 1] == "socks5h://127.0.0.1:10808"
