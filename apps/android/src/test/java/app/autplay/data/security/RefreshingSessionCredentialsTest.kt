@@ -14,6 +14,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RefreshingSessionCredentialsTest {
+    @Test fun cancellationBeforeRefreshSendPreservesUsableEnvelope() = runBlocking {
+        val store = MutableStore(envelope("old-access", "old-refresh", 0))
+        val provider = RefreshingSessionCredentials(
+            "https://unused.test/api/v1", store,
+            beforeRequest = { throw kotlinx.coroutines.CancellationException("cancelled") },
+        )
+        val failure = runCatching { provider.refreshAfterRejection(PROFILE, 0) }.exceptionOrNull()
+        assertTrue(failure is kotlinx.coroutines.CancellationException)
+        org.junit.Assert.assertFalse(store.decoded().refreshPending)
+        assertEquals(0, store.decoded().generation)
+    }
+
     @Test fun rejectedGenerationRotatesAndPersistsCredential() = runBlocking {
         val server = MockWebServer()
         server.enqueue(tokenResponse("new-access", "new-refresh"))

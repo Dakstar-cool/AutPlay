@@ -44,13 +44,13 @@ def test_registry_preserves_unproven_claim_boundaries() -> None:
     assert isinstance(boundaries, dict)
     assert isinstance(dependent_r1b, dict)
 
-    assert set(states["CODE_CHANGED_CONNECTED_EVIDENCE_PENDING"]) == {
+    assert set(states["FIXED_WITH_LOCAL_EVIDENCE"]) >= {
         *(f"A{number}" for number in range(1, 9)),
-        "Q3",
     }
+    assert states["CODE_CHANGED_HOSTED_CI_EVIDENCE_PENDING"] == ["Q3"]
     assert states["ACTIVATION_CONDITION_NOT_MET"] == ["G2"]
     assert boundaries == {
-        "android_connected_gate": "NOT_RUN_ON_THIS_SNAPSHOT",
+        "android_connected_gate": "LOCAL_API26_SUITE_AND_A1_A8_TARGETED_PASS",
         "linux_cuda_hardware_gate": "NOT_RUN_ON_THIS_SNAPSHOT",
         "release_published": False,
         "production_data_repaired_or_reset": False,
@@ -58,3 +58,32 @@ def test_registry_preserves_unproven_claim_boundaries() -> None:
     }
     assert dependent_r1b["status"] == "BLOCKED"
     assert dependent_r1b["r1c_activated"] is False
+
+    evidence = registry["current_evidence"]
+    remaining = registry["remaining_evidence"]
+    assert isinstance(evidence, dict)
+    assert isinstance(remaining, dict)
+    root = Path(__file__).resolve().parents[2]
+    connected = json.loads((root / evidence["android_connected"]).read_text(encoding="utf-8"))
+    assert connected["status"] == "PASS"
+    assert connected["suite"]["failures"] == "0"
+    assert connected["suite"]["errors"] == "0"
+    assert len(connected["testcases"]) == int(connected["suite"]["tests"])
+    skipped = [row for row in connected["testcases"] if row["skipped"]]
+    assert len(skipped) == int(connected["suite"]["skipped"])
+    assert any("PlaybackServiceProcessStageTest" in row["class"] for row in skipped)
+    implementation = json.loads((root / evidence["android_implementation"]).read_text())
+    receipt = json.loads(
+        (root / evidence["android_implementation"]).with_name("process-receipt.json").read_text()
+    )
+    assert implementation["checks"]["process_death"]["status"] == "PASS"
+    assert receipt["verified_process_boundary"] is True
+    assert len(receipt["stages"]) == 2
+    assert all(f"A{number}" not in remaining for number in range(1, 9))
+    passed_classes = {row["class"] for row in connected["testcases"] if not row["skipped"]}
+    assert {
+        "app.autplay.work.ServerWorkersAuthenticationTest",
+        "app.autplay.work.SyncWorkerLifecycleTest",
+        "app.autplay.playback.PlaybackServiceLifecycleTest",
+    } <= passed_classes
+    assert remaining["Q3"] and remaining["Q4"]

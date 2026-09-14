@@ -47,12 +47,11 @@ class VaultUploadWorker(
             dao.upsertVaultUploadIntent(intent.copy(state = "BLOCKED_PROFILE", lastErrorCode = "SERVER_PROFILE_NOT_ACTIVE", updatedAtMs = now()))
             return@withContext Result.failure()
         }
-        val server = AutPlayRuntime.serverFeatures(
-            applicationContext,
-            ClientEventBinding(user, device, ServerProfileId(intent.serverProfileId)),
-        )
-
         try {
+            val server = AutPlayRuntime.serverFeatures(
+                applicationContext,
+                ClientEventBinding(user, device, ServerProfileId(intent.serverProfileId)),
+            )
             if (intent.state == "CANCEL_REQUESTED") {
                 intent.serverUploadId?.let { server.cancelVaultUpload(it) }
                 dao.upsertVaultUploadIntent(intent.copy(state = "CANCELLED", lastErrorCode = null, updatedAtMs = now()))
@@ -127,9 +126,9 @@ class VaultUploadWorker(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            val code = stableErrorCode(error)
+            val code = serverWorkErrorCode(error)
             val current = dao.vaultUploadIntent(intentId) ?: intent
-            if (runAttemptCount >= MAX_RETRIES || code in NON_RETRYABLE_ERRORS) {
+            if (runAttemptCount >= MAX_RETRIES || code in NON_RETRYABLE_ERRORS || terminalServerWorkError(code)) {
                 terminalFailure(current, code)
             } else {
                 dao.upsertVaultUploadIntent(
@@ -228,11 +227,6 @@ class VaultUploadWorker(
         return total
     }
 
-    private fun stableErrorCode(error: Exception): String {
-        val value = error.message
-        return if (value != null && STABLE_CODE.matches(value)) value.take(100) else error::class.java.simpleName.uppercase()
-    }
-
     private fun now(): Long = System.currentTimeMillis()
     private data class SourceDigest(val size: Long, val sha256: String)
 
@@ -249,7 +243,6 @@ class VaultUploadWorker(
             "LOCAL_AUDIO_MISSING", "LOCAL_AUDIO_UNAVAILABLE", "VAULT_UPLOAD_EMPTY", "VAULT_UPLOAD_TOO_LARGE",
             "VAULT_UPLOAD_SOURCE_CHANGED", "VAULT_UPLOAD_STATE_INVALID", "VAULT_UPLOAD_ID_CONFLICT",
         )
-        private val STABLE_CODE = Regex("[A-Z][A-Z0-9_]{2,99}")
     }
 }
 

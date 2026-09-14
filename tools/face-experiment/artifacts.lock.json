@@ -1,0 +1,65 @@
+{
+  "usage": "PRIVATE_NONCOMMERCIAL_REFERENCE_ONLY",
+  "files": [
+    {
+      "name": "musicnn.json",
+      "url": "https://essentia.upf.edu/models/feature-extractors/musicnn/msd-musicnn-1.json",
+      "size_bytes": 3299,
+      "sha256": "8e6b3b509f0610c0e65dce467fd459d6777509388eaddb13ed138d8ac1341ffe"
+    },
+    {
+      "name": "musicnn.pb",
+      "url": "https://essentia.upf.edu/models/feature-extractors/musicnn/msd-musicnn-1.pb",
+      "size_bytes": 3197999,
+      "sha256": "cdea0722bcee7f731286843f2233e3aa69887bb5c3e2dce011eff55f38d04f3e"
+    },
+    {
+      "name": "deam.json",
+      "url": "https://essentia.upf.edu/models/classification-heads/deam/deam-msd-musicnn-2.json",
+      "size_bytes": 2698,
+      "sha256": "079df8d538d093ba35c34b7fbee01ff2773c4469be5281520f55d585295a3c58"
+    },
+    {
+      "name": "deam.pb",
+      "url": "https://essentia.upf.edu/models/classification-heads/deam/deam-msd-musicnn-2.pb",
+      "size_bytes": 82460,
+      "sha256": "beb5eeb0909266eeb78b8d6bb1323b10829cf2fe55e3c01a13fa1846fa98b371"
+    },
+    {
+      "name": "effnet.json",
+      "url": "https://essentia.upf.edu/models/music-style-classification/discogs-effnet/discogs-effnet-bs64-1.json",
+      "size_bytes": 14990,
+      "sha256": "395479c8d0e23c1185bf903079c38b9c536014787db6e1184abd68463c92b2da"
+    },
+    {
+      "name": "effnet.pb",
+      "url": "https://essentia.upf.edu/models/music-style-classification/discogs-effnet/discogs-effnet-bs64-1.pb",
+      "size_bytes": 18366619,
+      "sha256": "3ed9af50d5367c0b9c795b294b00e7599e4943244f4cbd376869f3bfc87721b1"
+    },
+    {
+      "name": "jamendo.json",
+      "url": "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.json",
+      "size_bytes": 3646,
+      "sha256": "d62cd90263e4d613fa7fcce7a831e339450394794af63685f96e065c1a896ab0"
+    },
+    {
+      "name": "jamendo.pb",
+      "url": "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.pb",
+      "size_bytes": 2739668,
+      "sha256": "03f2b047020aee4ab39f8880da7bdae2a36d06a1508d656c6d424ad4d6de07a9"
+    },
+    {
+      "name": "models-README.md",
+      "url": "https://essentia.upf.edu/models/README.md",
+      "size_bytes": 1998,
+      "sha256": "d94545ed53390189b34b6b92ac521747e15e0ffd961b8f01b970f92e17606198"
+    },
+    {
+      "name": "models-LICENSE.txt",
+      "url": "https://essentia.upf.edu/models/LICENSE",
+      "size_bytes": 69392,
+      "sha256": "f0c076094cc08acb265ea3304ec522cf331917d19bdd271ed69f10ef174f3ea4"
+    }
+  ]
+}

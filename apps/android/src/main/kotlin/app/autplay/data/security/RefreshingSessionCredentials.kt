@@ -2,6 +2,9 @@ package app.autplay.data.security
 
 import app.autplay.domain.ServerProfileId
 import app.autplay.data.network.withAutPlayRedirectPolicy
+import app.autplay.data.network.readCancellable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import java.io.Closeable
 import java.nio.charset.StandardCharsets
 import java.time.Duration
@@ -48,6 +51,7 @@ class RefreshingSessionCredentials(
         .build(),
     private val now: () -> Instant = Instant::now,
     private val m5Rotation: M5SessionRotationClient? = null,
+    private val beforeRequest: suspend () -> Unit = {},
 ) {
     private val client = client.withAutPlayRedirectPolicy()
     suspend fun access(profileId: ServerProfileId): SessionAccess {
@@ -89,12 +93,19 @@ class RefreshingSessionCredentials(
             val rotation = m5Rotation ?: throw SessionRequiredException()
             val pending = if (current.refreshPending) current else rotation.prepare(profileId, current)
             if (!current.refreshPending) persistLocked(profileId, pending)
+            // This failure is positively before the POST. Preserve its retry/cancellation class.
+            beforeRequest()
             try {
                 val successor = rotation.execute(profileId, pending)
                 persistLocked(profileId, successor)
                 rotation.persistSuccessor(profileId, successor)
                 successor.toAccess()
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: SessionRequiredException) {
+                throw error
+            } catch (error: java.io.IOException) {
+                // M5 retains an idempotent rotation request, so transport failure is retryable.
                 throw error
             } catch (_: Exception) {
                 // Retain the exact encrypted request for an idempotent replay after a lost response.
@@ -115,16 +126,21 @@ class RefreshingSessionCredentials(
                 return@serialized current.toAccess()
             }
             val refreshToken = current.refreshToken ?: throw SessionRequiredException()
+            beforeRequest()
             try {
                 persistLocked(profileId, current.copy(refreshPending = true))
+                beforeRequest()
             } catch (error: Exception) {
-                // No request was sent, so retrying this preflight write cannot replay the refresh token.
+                // No request was sent. Restore the usable envelope under the same authority lock.
+                withContext(NonCancellable) { persistLocked(profileId, current) }
                 throw error
             }
             try {
                 val rotated = rotate(refreshToken, current.generation)
                 persistLocked(profileId, rotated)
                 rotated.toAccess()
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: SessionRequiredException) {
                 throw error
             } catch (error: Exception) {
@@ -166,7 +182,7 @@ class RefreshingSessionCredentials(
             .header("Cache-Control", "no-store")
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
+        client.newCall(request).readCancellable { response ->
             if (response.code == 401 || response.code == 403) throw SessionRequiredException()
             check(response.isSuccessful) { "AUTH_REFRESH_HTTP_${response.code}" }
             val source = response.body.source()

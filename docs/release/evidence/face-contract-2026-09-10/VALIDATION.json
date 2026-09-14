@@ -1,0 +1,64 @@
+{
+  "status": "PASS_CONTRACT_AND_TECHNICAL_PREFLIGHT_ONLY",
+  "date": "2026-09-10",
+  "branch": "codex/pa3-linux-migration",
+  "head": "f208ce6",
+  "dirty_worktree": true,
+  "checks": {
+    "android_jvm": {
+      "tests": 277,
+      "failures": 0,
+      "face_cases": 7
+    },
+    "android_lint": "PASS after final review corrections",
+    "python_face": {
+      "tests": 38,
+      "failures": 0
+    },
+    "root_contract_release": {
+      "tests": 171,
+      "failures": 0
+    },
+    "ruff_mypy": "PASS affected Python contract/tests",
+    "read_only_contract_review": "APPROVED after strict JSON number grammar and captured/current generation attachment fixes",
+    "reference_runtime": "Both baselines TECHNICAL_PREFLIGHT_PASS after manifest/row-shape review corrections",
+    "tampered_manifest": "PASS: empty file list rejected against image-bundled trusted lock before graph loading",
+    "read_only_experiment_review": "APPROVED after trusted image manifest and nonempty/equal row-shape checks; actual final-image reruns and tampered-manifest rejection PASS"
+  },
+  "runtime_image": "sha256:857f717adcb7949c67278c127964afbe31d123eaf1eebe800c9e148b57fbb8d5",
+  "runtime_image_bytes": 692311645,
+  "limits": {
+    "cpus": 2,
+    "memory_bytes": 4294967296,
+    "network": "none",
+    "root_filesystem": "read-only",
+    "uid": 65532,
+    "fixtures_per_baseline": 3,
+    "fixture_seconds": 12
+  },
+  "claims": {
+    "musical_quality_evaluated": false,
+    "interpreter_approved": false,
+    "gpu_measured": false,
+    "timeline_persistence_implemented": false,
+    "semantic_renderer_activated": false,
+    "dataset_downloaded": false,
+    "weights_redistributed": false
+  },
+  "artifact_manifest": "tools/face-experiment/artifacts.lock.json",
+  "evidence_sha256": {
+    "ANDROID_FACE_TESTS.json": "1decbeac99cb7aefa617e49b3a4cb4a276ff7ec99a36a5ae51e4c183f1aeb492",
+    "deam.json": "079df8d538d093ba35c34b7fbee01ff2773c4469be5281520f55d585295a3c58",
+    "effnet-jamendo-run.log": "3f04fd2a075c50d233cd0a61f1a2bc731987f4436b6786f2e1b8d4d26d979f66",
+    "effnet-jamendo.json": "a184939c211ed5e6704f4b46b2b173494be7a63ef556032de06f4736585276de",
+    "effnet.json": "395479c8d0e23c1185bf903079c38b9c536014787db6e1184abd68463c92b2da",
+    "jamendo.json": "d62cd90263e4d613fa7fcce7a831e339450394794af63685f96e065c1a896ab0",
+    "models-LICENSE.txt": "f0c076094cc08acb265ea3304ec522cf331917d19bdd271ed69f10ef174f3ea4",
+    "models-README.md": "d94545ed53390189b34b6b92ac521747e15e0ffd961b8f01b970f92e17606198",
+    "musicnn-deam-run.log": "eb177310414101e350cb78413b304ce703fb81b3b2ee5d8c14ca4ab53f90868e",
+    "musicnn-deam.json": "4cddc9a042e597adfee8dd70edef8ac213d1062a0a2514e33eb6d0038f3b07b3",
+    "musicnn.json": "8e6b3b509f0610c0e65dce467fd459d6777509388eaddb13ed138d8ac1341ffe",
+    "rejected-manifest.log": "e368431ed2541967aa17ce1bdb1fd7414136f5a811adbd4d1f391a4fe798d302",
+    "SOURCE_SHA256.json": "1944b028f19b88b80d70e93aa770e043fc4935716ec6eab8cf77b6d840f75321"
+  }
+}

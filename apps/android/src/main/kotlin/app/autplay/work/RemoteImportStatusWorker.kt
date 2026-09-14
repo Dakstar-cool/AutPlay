@@ -57,9 +57,13 @@ class RemoteImportStatusWorker(
             } else Result.retry()
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
-            if (runAttemptCount >= MAX_POLLS) {
-                dao.upsertRemoteImportJob(local.copy(lastErrorCode = "IMPORT_STATUS_UNAVAILABLE", updatedAtMs = now()))
+        } catch (error: Exception) {
+            val code = serverWorkErrorCode(error)
+            if (terminalServerWorkError(code) || runAttemptCount >= MAX_POLLS) {
+                dao.upsertRemoteImportJob(local.copy(
+                    lastErrorCode = if (terminalServerWorkError(code)) code else "IMPORT_STATUS_UNAVAILABLE",
+                    updatedAtMs = now(),
+                ))
                 Result.failure()
             } else Result.retry()
         }
@@ -91,4 +95,5 @@ object RemoteImportWorkScheduler {
 
 internal fun shouldScheduleRemoteImport(state: String, lastErrorCode: String?): Boolean =
     state !in setOf("COMPLETED", "FAILED", "CANCELLED") &&
+        !terminalServerWorkError(lastErrorCode.orEmpty()) &&
         lastErrorCode !in setOf("IMPORT_POLLING_PAUSED", "IMPORT_STATUS_UNAVAILABLE")

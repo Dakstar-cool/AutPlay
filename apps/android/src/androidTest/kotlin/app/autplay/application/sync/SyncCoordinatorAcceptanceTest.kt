@@ -29,6 +29,8 @@ import app.autplay.domain.UserId
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -94,6 +96,53 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals(listOf(100, 1), transport.sentBatchSizes)
         assertEquals(101L, db.journalDao().event(pending(101).eventId)?.deviceSequence)
         assertEquals("PENDING", db.journalDao().event(pending(101).eventId)?.state)
+    }
+
+    @Test fun validAcknowledgementsDrain101EventsWithOriginalIdentitiesAndHashes() = runBlocking {
+        seed(profile, "cursor-a")
+        val events = (1L..101L).map { pending(it).copy(aggregateType = "LISTENING_EVENT", eventType = "LISTENING_EVENT_RECORDED") }
+        events.forEach { db.journalDao().insert(it) }
+        val transport = FakeTransport(acks = events.map { event ->
+            SyncAck(event.eventId, "APPLIED", aggregateType = event.aggregateType,
+                aggregateLocalId = event.aggregateLocalId, aggregateServerId = event.eventId, serverRowVersion = 1)
+        })
+        org.junit.Assert.assertTrue(SyncCoordinator(db, transport).run(binding))
+        assertEquals(listOf(100, 1), transport.sentBatchSizes)
+        assertEquals(events.map { it.eventId }, transport.sent.map { it.eventId })
+        // Successful compaction retains the safety window of the last 100 acknowledgements.
+        assertEquals(null, db.journalDao().event(events.first().eventId))
+        events.drop(1).forEach { original ->
+            val persisted = requireNotNull(db.journalDao().event(original.eventId))
+            assertEquals("ACKED", persisted.state)
+            org.junit.Assert.assertArrayEquals(original.requestHash, persisted.requestHash)
+        }
+    }
+
+    @Test fun cancelledPushReleasesLeaseWithoutSpendingRetryBudgetOrChangingIdentity() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1)
+        db.journalDao().insert(event)
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun push(binding: ClientEventBinding, events: List<OfflineJournalEventEntity>): List<SyncAck> {
+                entered.complete(Unit)
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        val job = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).launch {
+            SyncCoordinator(db, transport).run(binding)
+        }
+        try {
+            kotlinx.coroutines.withTimeout(5_000) { entered.await() }
+            assertEquals("SENDING", db.journalDao().event(event.eventId)?.state)
+            kotlinx.coroutines.withTimeout(5_000) { job.cancelAndJoin() }
+            val restored = requireNotNull(db.journalDao().event(event.eventId))
+            assertEquals("PENDING", restored.state)
+            assertEquals(0, restored.attemptCount)
+            assertEquals(null, restored.leaseToken)
+            assertEquals(null, restored.lastErrorCode)
+            org.junit.Assert.assertArrayEquals(event.requestHash, restored.requestHash)
+        } finally { job.cancelAndJoin() }
     }
 
     @Test fun sessionRequiredReleasesJournalWithoutConsumingRetryBudget() = runBlocking {
@@ -652,7 +701,7 @@ class SyncCoordinatorAcceptanceTest {
             sent += events
             sentBatchSizes += events.size
             if (throwSessionRequired) throw SessionRequiredException()
-            return acks
+            return acks.filter { ack -> events.any { it.eventId == ack.eventId } }
         }
         override suspend fun pull(binding: ClientEventBinding, cursor: String?): PullPage { if (throwInvalidCursor) throw InvalidCursorException(); return pull }
         private var bootstrapIndex = 0

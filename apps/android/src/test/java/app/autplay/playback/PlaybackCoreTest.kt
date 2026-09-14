@@ -67,6 +67,22 @@ class PlaybackCoreTest {
         assertEquals(70, finalized.lastObservedPositionMs)
     }
 
+    @Test fun tasteExclusionSurvivesCheckpointAndFinalizationWithoutChangingIdentity() {
+        val entry = PlaybackQueueEntry(id(12), id(13), 0)
+        val started = LogicalListeningSession.start(
+            entry = entry,
+            eventId = id(14),
+            nowMs = 100,
+            positionMs = 0,
+            excludedFromTaste = true,
+        )
+        val checkpoint = LogicalListeningSession.checkpoint(started, 100, 100)
+        val (_, event) = LogicalListeningSession.finalizeOnce(checkpoint, 120, 1_000)
+
+        assertEquals(id(14), event?.listeningEventId)
+        assertTrue(event?.excludedFromTaste == true)
+    }
+
     private fun id(value: Int): LocalId = LocalId(uuid(value))
     private fun uuid(value: Int): String = "00000000-0000-0000-0000-%012d".format(value)
 }

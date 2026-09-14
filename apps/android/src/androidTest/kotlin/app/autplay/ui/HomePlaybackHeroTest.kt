@@ -3,6 +3,8 @@ package app.autplay.ui
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -15,9 +17,13 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.R
 import org.junit.Assert.assertEquals
@@ -60,9 +66,11 @@ class HomePlaybackHeroTest {
         }
 
         composeRule.onNodeWithTag("home-playback-hero").assertIsDisplayed()
-        composeRule.onNodeWithTag("playback-halo").assertIsDisplayed()
+        composeRule.onNodeWithTag("artwork-placeholder", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_pause))
-            .assertIsDisplayed().performClick()
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+            .performClick()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_like))
             .assertIsDisplayed().performClick()
         composeRule.onNodeWithContentDescription(context.getString(R.string.home_hero_open_player))
@@ -168,10 +176,11 @@ class HomePlaybackHeroTest {
 
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_pause))
             .assertIsDisplayed().assertIsNotEnabled()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
     }
 
     @Test
-    fun fallbackHeroKeepsItsHaloDecorativeInsteadOfClaimingPausedPlayback() {
+    fun fallbackHeroKeepsItsArtworkDecorativeInsteadOfClaimingPausedPlayback() {
         composeRule.setContent {
             AutPlayTheme {
                 HomePlaybackHero(
@@ -193,12 +202,14 @@ class HomePlaybackHeroTest {
             }
         }
 
-        val halo = composeRule.onNodeWithTag("playback-halo").assertIsDisplayed().fetchSemanticsNode()
-        assertTrue(!halo.config.contains(SemanticsProperties.ContentDescription))
+        val artwork = composeRule.onNodeWithTag("artwork-placeholder", useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode()
+        assertTrue(!artwork.config.contains(SemanticsProperties.ContentDescription))
     }
 
     @Test
     fun russianHeroStacksHeaderAndActionAtTwoHundredPercentFontScale() {
+        var toggles = 0
         val configuration = Configuration(context.resources.configuration).apply {
             setLocale(java.util.Locale.forLanguageTag("ru"))
         }
@@ -211,21 +222,21 @@ class HomePlaybackHeroTest {
                 LocalResources provides localizedContext.resources,
                 LocalDensity provides density,
             ) {
-                Box(Modifier.width(320.dp)) {
+                Box(Modifier.width(320.dp).verticalScroll(rememberScrollState())) {
                     AutPlayTheme {
                         HomePlaybackHero(
                             state = HomePlaybackHeroUiState(
                                 trackId = "track",
                                 title = "Quiet Signals",
                                 artist = "Mara Lin",
-                                isPlaying = true,
+                                isPlaying = false,
                                 hasActivePlayback = true,
                                 liked = false,
                             ),
                             localMode = false,
                             onOpenPlayer = {},
                             onPlayTrack = {},
-                            onTogglePlayPause = {},
+                            onTogglePlayPause = { toggles += 1 },
                             onLike = {},
                             onOpenListenTogether = {},
                         )
@@ -237,5 +248,10 @@ class HomePlaybackHeroTest {
         val heading = composeRule.onNodeWithTag("home-hero-heading").fetchSemanticsNode().boundsInRoot
         val action = composeRule.onNodeWithTag("home-listen-together").fetchSemanticsNode().boundsInRoot
         assertTrue("Hero action must be stacked below the heading at 200% font scale", heading.bottom <= action.top)
+        composeRule.onNodeWithTag("home-listen-together")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+        composeRule.onNodeWithContentDescription(localizedContext.getString(R.string.action_play))
+            .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertEquals(1, toggles) }
     }
 }

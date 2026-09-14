@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
+
 from local_music_acquisition.models import AcquiredArtifact, ProviderFailure, ProviderMiss
 from local_music_acquisition.orchestrator import PlaylistDownloadError, download_playlist
 

@@ -41,6 +41,12 @@ class ContentUriInspector(
     }
     fun inspect(rawUri: String): ContentUriInspection = inspectInternal(rawUri, computeDigest = false)
 
+    /** Null means a transient timeout/saturated probe pool, never evidence that a file is missing. */
+    suspend fun inspectForPlayback(rawUri: String): ContentUriInspection? =
+        CancellableContentProbe.inspect { signal, opened ->
+            inspectInternal(rawUri, computeDigest = false, signal = signal, opened = opened)
+        }
+
     /** Reads a bounded complete stream off the main thread so readable input has an exact digest. */
     suspend fun inspectWithDigest(rawUri: String): ContentUriInspection = kotlinx.coroutines.withContext(
         kotlinx.coroutines.Dispatchers.IO,
@@ -48,24 +54,38 @@ class ContentUriInspector(
         inspectInternal(rawUri, computeDigest = true)
     }
 
-    private fun inspectInternal(rawUri: String, computeDigest: Boolean): ContentUriInspection {
+    private fun inspectInternal(
+        rawUri: String,
+        computeDigest: Boolean,
+        signal: android.os.CancellationSignal? = null,
+        opened: (java.io.Closeable?) -> Unit = {},
+    ): ContentUriInspection {
         val uri = runCatching { rawUri.toUri() }.getOrNull()
             ?: return ContentUriInspection(rawUri, ContentUriStatus.INVALID, null, null)
         if (uri.scheme != ContentResolver.SCHEME_CONTENT || uri.authority.isNullOrBlank()) {
             return ContentUriInspection(rawUri, ContentUriStatus.INVALID, null, null)
         }
         return try {
-            val metadata = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+            val metadata = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null, signal)
                 .useMetadata()
             val byteSize = metadata.second
             if (byteSize != null && byteSize > MAX_SOURCE_BYTES) {
                 return ContentUriInspection(rawUri, ContentUriStatus.MISSING, metadata.first, byteSize)
             }
-            val input = streamOpener(uri)
+            signal?.throwIfCanceled()
+            val input = if (signal == null) streamOpener(uri) else {
+                resolver.openAssetFileDescriptor(uri, "r", signal)?.let { descriptor ->
+                    try { descriptor.createInputStream() } catch (error: Exception) {
+                        descriptor.close()
+                        throw error
+                    }
+                }
+            }
                 ?: return ContentUriInspection(rawUri, ContentUriStatus.MISSING, metadata.first, metadata.second)
+            opened(input)
             val digest = input.use {
                 if (!computeDigest) {
-                    it.read()
+                    if (it.read() < 0) return ContentUriInspection(rawUri, ContentUriStatus.MISSING, metadata.first, byteSize)
                     null
                 } else {
                     val sha256 = java.security.MessageDigest.getInstance("SHA-256")
@@ -92,6 +112,8 @@ class ContentUriInspector(
             ContentUriInspection(rawUri, ContentUriStatus.MISSING, null, null)
         } catch (_: IllegalArgumentException) {
             ContentUriInspection(rawUri, ContentUriStatus.INVALID, null, null)
+        } finally {
+            opened(null)
         }
     }
 

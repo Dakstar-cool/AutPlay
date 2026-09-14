@@ -6,6 +6,8 @@ import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import app.autplay.domain.ServerProfileId
 import app.autplay.data.network.withAutPlayRedirectPolicy
+import app.autplay.data.network.readCancellable
+import app.autplay.data.security.SessionRequiredException
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,9 +34,10 @@ class OkHttpSyncTransport(
     private val credentials: CredentialStore,
     client: OkHttpClient = OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(30)).build(),
     private val m5Rotation: M5SessionRotationClient? = null,
+    private val beforeRequest: suspend () -> Unit = {},
 ) : SyncTransport {
     private val client = client.withAutPlayRedirectPolicy()
-    private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client, m5Rotation = m5Rotation)
+    private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client, m5Rotation = m5Rotation, beforeRequest = beforeRequest)
 
     override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {
         require(events.size in 1..100)
@@ -90,16 +93,19 @@ class OkHttpSyncTransport(
 
     private suspend fun execute(profileId: ServerProfileId, path: String, body: String?) = withContext(Dispatchers.IO) {
         val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path
+        beforeRequest()
         var access = sessionCredentials.access(profileId)
         try {
             var result = executeOnce(url, body, access)
             if (result.first == 401) {
                 val rejectedGeneration = access.generation
                 access.close()
+                beforeRequest()
                 access = sessionCredentials.refreshAfterRejection(profileId, rejectedGeneration)
                 result = executeOnce(url, body, access)
             }
             val (status, text) = result
+            if (status == 401 || status == 403) throw SessionRequiredException()
             if (status == 410 || (status == 409 && runCatching { Json.parseToJsonElement(text).jsonObject["code"]?.jsonPrimitive?.content }.getOrNull() in setOf("CURSOR_INVALID", "DEVICE_RESET_REQUIRED"))) throw InvalidCursorException()
             if (status !in 200..299) throw IllegalStateException("SYNC_HTTP_$status")
             Json.parseToJsonElement(text)
@@ -108,12 +114,17 @@ class OkHttpSyncTransport(
         }
     }
 
-    private fun executeOnce(url: String, body: String?, access: SessionAccess): Pair<Int, String> {
+    private suspend fun executeOnce(url: String, body: String?, access: SessionAccess): Pair<Int, String> {
+        beforeRequest()
         val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer ${access.token.toString(StandardCharsets.UTF_8)}")
         if (body != null) builder.post(body.toRequestBody("application/json".toMediaType())) else builder.get()
-        return client.newCall(builder.build()).execute().use { it.code to it.body.string() }
+        return client.newCall(builder.build()).readCancellable { response ->
+            val source = response.body.source()
+            check(!source.request(MAX_RESPONSE_BYTES + 1)) { "SYNC_RESPONSE_TOO_LARGE" }
+            response.code to source.readUtf8()
+        }
     }
 
     private fun events(items: JsonArray) = items.map { item -> item.jsonObject.let { value -> RemoteEvent(value["event_id"]!!.jsonPrimitive.content, value["server_sequence"]!!.jsonPrimitive.long, value["event_type"]!!.jsonPrimitive.content, value["schema_version"]!!.jsonPrimitive.int, value["payload"]!!.toString(), value["aggregate_type"]!!.jsonPrimitive.content, value["aggregate_server_id"]?.jsonPrimitive?.contentOrNull, value["server_row_version"]?.jsonPrimitive?.longOrNull, value["operation"]!!.jsonPrimitive.content, value["tombstone"]?.jsonObject?.get("tombstone_id")?.jsonPrimitive?.content, value["tombstone"]?.jsonObject?.get("retain_until")?.jsonPrimitive?.contentOrNull?.let(::instantMs), value["redirect"]?.jsonObject?.get("canonical_server_id")?.jsonPrimitive?.content) } }
@@ -132,6 +143,7 @@ class OkHttpSyncTransport(
     private fun eventJson(e: app.autplay.data.local.entity.OfflineJournalEventEntity) = "{\"event_id\":\"${e.eventId}\",\"idempotency_key\":\"${e.idempotencyKey}\",\"user_id\":\"${e.userId}\",\"device_id\":\"${e.deviceId}\",\"server_profile_id\":\"${e.serverProfileId}\",\"device_sequence\":${e.deviceSequence},\"event_type\":\"${e.eventType}\",\"schema_version\":${e.schemaVersion},\"aggregate_type\":\"${e.aggregateType}\",\"aggregate_local_id\":\"${e.aggregateLocalId}\",\"aggregate_server_id\":${e.aggregateServerId?.let { "\"$it\"" } ?: "null"},\"base_server_row_version\":${e.baseServerRowVersion ?: "null"},\"occurred_at\":\"${java.time.Instant.ofEpochMilli(e.occurredAtMs)}\",\"payload\":${e.payloadJson},\"request_hash\":\"${e.requestHash.joinToString("") { "%02x".format(it) }}\"}"
 
     private companion object {
+        const val MAX_RESPONSE_BYTES = 2L * 1024 * 1024
         const val CATALOG_ARTIST_ID_CAPABILITY = "CATALOG_ARTIST_ID_V1"
     }
 }

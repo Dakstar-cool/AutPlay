@@ -35,14 +35,14 @@ public enum class AutPlayAccent(
     public val lightContainer: Color,
     public val darkContainer: Color,
 ) {
-    Coral(Color(0xFFFF5B35), Color(0xFFFF6B45), Color(0xFFFFE2D7), Color(0xFF3C211B)),
+    Coral(Color(0xFFB73819), Color(0xFFFF7854), Color(0xFFFFE2D7), Color(0xFF47271F)),
     Violet(Color(0xFF6246A8), Color(0xFFDCCEFF), Color(0xFFE8DEFF), Color(0xFF4B3A73)),
     Green(Color(0xFF176B3A), Color(0xFF83F8A6), Color(0xFFC2F8D1), Color(0xFF19562D)),
     Blue(Color(0xFF00639B), Color(0xFFA8D8FF), Color(0xFFCDE5FF), Color(0xFF174A68)),
 }
 
 public data class AutPlayAppearance(
-    public val mode: AutPlayThemeMode = AutPlayThemeMode.System,
+    public val mode: AutPlayThemeMode = AutPlayThemeMode.Dark,
     public val accent: AutPlayAccent = AutPlayAccent.Coral,
 )
 
@@ -64,7 +64,7 @@ public data class AutPlaySemanticColors(
 public data class AutPlayDimensions(
     public val screenPadding: androidx.compose.ui.unit.Dp = 20.dp,
     public val sectionSpacing: androidx.compose.ui.unit.Dp = 28.dp,
-    public val cardRadius: androidx.compose.ui.unit.Dp = 22.dp,
+    public val cardRadius: androidx.compose.ui.unit.Dp = 18.dp,
     public val compactRadius: androidx.compose.ui.unit.Dp = 14.dp,
     public val minimumTouchTarget: androidx.compose.ui.unit.Dp = 48.dp,
 )
@@ -138,18 +138,30 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorScheme = if (dark) {
     darkColorScheme(
         primary = accent.darkPrimary,
-        onPrimary = Color.Black,
+        onPrimary = Color(0xFF17120F),
         primaryContainer = accent.darkContainer,
         onPrimaryContainer = Color.White,
-        secondary = Color(0xFFB8A7D9),
-        tertiary = Color(0xFF78D79A),
-        background = Color(0xFF08090B),
-        onBackground = Color(0xFFF6F4F1),
-        surface = Color(0xFF111216),
-        onSurface = Color(0xFFF6F4F1),
-        surfaceVariant = Color(0xFF1A1B20),
-        onSurfaceVariant = Color(0xFFA7A5AB),
-        outline = Color(0xFF45464E),
+        secondary = Color(0xFFC4C6CD),
+        onSecondary = Color(0xFF191B20),
+        secondaryContainer = Color(0xFF30333A),
+        onSecondaryContainer = Color(0xFFF1F1F4),
+        tertiary = Color(0xFFBBDD82),
+        background = Color(0xFF111215),
+        onBackground = Color(0xFFF4F3EF),
+        surface = Color(0xFF181A1F),
+        onSurface = Color(0xFFF4F3EF),
+        surfaceVariant = Color(0xFF24272E),
+        onSurfaceVariant = Color(0xFFB2B4BD),
+        surfaceDim = Color(0xFF111215),
+        surfaceBright = Color(0xFF363941),
+        surfaceContainerLowest = Color(0xFF0C0D10),
+        surfaceContainerLow = Color(0xFF17191E),
+        surfaceContainer = Color(0xFF1D1F25),
+        surfaceContainerHigh = Color(0xFF272A31),
+        surfaceContainerHighest = Color(0xFF33363E),
+        surfaceTint = Color.Transparent,
+        outline = Color(0xFF737780),
+        outlineVariant = Color(0xFF32353C),
         error = Color(0xFFFFB4AB),
     )
 } else {
@@ -166,6 +178,12 @@ private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorSchem
         onSurface = Color(0xFF181818),
         surfaceVariant = Color(0xFFFAF8F4),
         onSurfaceVariant = Color(0xFF706D68),
+        surfaceContainerLowest = Color(0xFFFFFFFF),
+        surfaceContainerLow = Color(0xFFFAF8F4),
+        surfaceContainer = Color(0xFFF1EEE8),
+        surfaceContainerHigh = Color(0xFFEAE6DE),
+        surfaceContainerHighest = Color(0xFFE2DED6),
+        surfaceTint = Color.Transparent,
         outline = Color(0xFF817D76),
         error = Color(0xFFB3261E),
     )
@@ -174,14 +192,14 @@ private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorSchem
 private fun semanticColors(dark: Boolean, accent: AutPlayAccent): AutPlaySemanticColors =
     if (dark) {
         AutPlaySemanticColors(
-            raisedSurface = Color(0xFF191A1F),
-            border = Color(0xFF34353D),
-            mutedText = Color(0xFFA7A5AB),
+            raisedSurface = Color(0xFF202229),
+            border = Color(0xFF32353C),
+            mutedText = Color(0xFFB2B4BD),
             softAccent = accent.darkContainer,
-            glassSurface = Color(0xB81B1C21),
-            glassBorder = Color(0x3DFFFFFF),
-            miniPlayerSurface = Color(0xF21A1B20),
-            onMiniPlayer = Color(0xFFF6F4F1),
+            glassSurface = Color(0xF024272E),
+            glassBorder = Color(0x24FFFFFF),
+            miniPlayerSurface = Color(0xFF292C34),
+            onMiniPlayer = Color(0xFFF4F3EF),
             success = Color(0xFF78D79A),
             info = Color(0xFF8FCBFF),
         )
@@ -202,16 +220,16 @@ private fun semanticColors(dark: Boolean, accent: AutPlayAccent): AutPlaySemanti
 
 private val AutPlayShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-    small = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-    medium = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-    large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(30.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
 )
 
 private val AutPlayTypography = Typography(
-    displaySmall = TextStyle(fontSize = 42.sp, lineHeight = 46.sp, fontWeight = FontWeight.Bold),
-    headlineLarge = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Bold),
-    headlineMedium = TextStyle(fontSize = 28.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold),
+    displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 42.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
+    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 37.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp),
+    headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
     headlineSmall = TextStyle(fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
     titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
     titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),

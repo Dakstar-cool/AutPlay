@@ -15,6 +15,8 @@ import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.recommendation.RecommendationPresentationResult
 import app.autplay.application.search.LocalTrackSearchRepository
 import app.autplay.application.search.LocalTrackSearchResult
+import app.autplay.application.search.VaultSearchProjector
+import app.autplay.application.search.VaultSearchResult
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.domain.LocalId
 import app.autplay.download.DownloadStorageClass
@@ -36,6 +38,7 @@ internal data class CoreCommandActions(
     val recordHomeFeedback: (String, String) -> Unit,
     val startTrack: (String, String, String, String?) -> Unit,
     val startSearchTrack: (String) -> Unit,
+    val startVaultSearchTrack: (String) -> Unit,
     val startPlaylistEntry: (String) -> Unit,
     val updateLibraryMembership: (String) -> Unit,
     val likeTrack: (String) -> Unit,
@@ -56,6 +59,7 @@ internal fun buildCoreCommandActions(
     playbackRepository: PlaybackPersistenceRepository,
     playbackOwner: PlaybackSessionOwner,
     searchResultStore: SearchResultStore<LocalTrackSearchResult>,
+    vaultSearchResultStore: SearchResultStore<VaultSearchResult>,
     searchSessionId: () -> String?,
     setSearchSessionId: (String) -> Unit,
     playlistDetail: () -> CorePlaylistDetail?,
@@ -174,6 +178,43 @@ internal fun buildCoreCommandActions(
                 )
             }
             val startEntryId = entries.first { it.first == trackRefId }.second.queueEntryId
+            scope.launch {
+                try {
+                    runCatching {
+                        val snapshotId = LocalId.random()
+                        playbackRepository.activateQueue(
+                            snapshotId = snapshotId,
+                            entries = entries.map { it.second },
+                            queueType = "SEARCH",
+                            sourceContextId = sessionId,
+                            serverProfileId = binding()?.serverProfileId?.value,
+                            listeningContext = "GENERAL",
+                            nowMs = System.currentTimeMillis(),
+                            startEntryId = startEntryId,
+                        )
+                        playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
+                    }.onFailure { reportError("PLAYBACK_UNAVAILABLE") }
+                } finally {
+                    actionGate.complete(actionKey)
+                }
+            }
+        },
+        startVaultSearchTrack = vaultPlay@{ remoteLibraryEntryId ->
+            val orderedResults = vaultSearchResultStore.results.filter { it.playable }
+            val selected = orderedResults.firstOrNull { it.remoteLibraryEntryId == remoteLibraryEntryId }
+                ?: return@vaultPlay
+            val sessionId = searchSessionId() ?: LocalId.random().value.also(setSearchSessionId)
+            val actionKey = "vault-search-play:$sessionId:$remoteLibraryEntryId"
+            if (!actionGate.begin(actionKey)) return@vaultPlay
+            val entries = orderedResults.map { result ->
+                result.remoteLibraryEntryId to NewPlaybackQueueEntry(
+                    queueEntryId = LocalId.random(),
+                    trackRefId = LocalId(checkNotNull(result.localUserTrackRefId)),
+                    sourceOrigin = "SEARCH",
+                    sourceAudioPolicy = "LOCAL_THEN_VAULT",
+                )
+            }
+            val startEntryId = entries.first { it.first == selected.remoteLibraryEntryId }.second.queueEntryId
             scope.launch {
                 try {
                     runCatching {
@@ -331,7 +372,8 @@ internal data class SearchActionState(
     val setError: (Boolean) -> Unit,
     val setVaultLoading: (Boolean) -> Unit,
     val setVaultError: (Boolean) -> Unit,
-    val setVaultResultCount: (Int?) -> Unit,
+    val setVaultResults: (List<VaultSearchResult>) -> Unit,
+    val setVaultSearched: (Boolean) -> Unit,
 )
 
 internal data class SearchCommandActions(
@@ -348,13 +390,16 @@ internal fun buildSearchCommandActions(
     coreState: CoreProductUiState,
     generation: SearchGenerationGuard,
     resultStore: SearchResultStore<LocalTrackSearchResult>,
+    vaultResultStore: SearchResultStore<VaultSearchResult>,
     searchRepository: LocalTrackSearchRepository,
+    vaultProjector: VaultSearchProjector,
     state: SearchActionState,
     reportError: (String) -> Unit,
 ): SearchCommandActions {
     fun reset() {
         generation.invalidate()
         resultStore.invalidate()
+        vaultResultStore.invalidate()
         state.setResults(emptyList())
         state.setCompleted(false)
         state.setSessionId(null)
@@ -362,7 +407,8 @@ internal fun buildSearchCommandActions(
         state.setError(false)
         state.setVaultLoading(false)
         state.setVaultError(false)
-        state.setVaultResultCount(null)
+        state.setVaultResults(emptyList())
+        state.setVaultSearched(false)
     }
 
     fun submit() {
@@ -372,12 +418,14 @@ internal fun buildSearchCommandActions(
         val request = generation.begin(coreState.query, activeScopes, activeBinding?.serverProfileId?.value)
         state.setSessionId(LocalId.random().value)
         resultStore.start(request)
+        vaultResultStore.start(request)
         state.setResults(emptyList())
         state.setLoading(true)
         state.setError(false)
         state.setVaultLoading(SearchScope.Vault in activeScopes && activeBinding != null)
         state.setVaultError(false)
-        state.setVaultResultCount(null)
+        state.setVaultResults(emptyList())
+        state.setVaultSearched(false)
         scope.launch {
             runCatching { searchRepository.search(request.normalizedQuery, activeBinding?.serverProfileId?.value) }
                 .onSuccess {
@@ -401,15 +449,19 @@ internal fun buildSearchCommandActions(
             scope.launch {
                 runCatching {
                     AutPlayRuntime.serverFeatures(context, activeBinding).searchLibrary(request.normalizedQuery)
+                }.mapCatching { rows ->
+                    vaultProjector.project(activeBinding.serverProfileId.value, rows)
                 }.onSuccess { rows ->
-                    if (generation.accepts(request)) {
-                        state.setVaultResultCount(rows.size)
+                    if (generation.accepts(request) && vaultResultStore.accept(request, rows)) {
+                        state.setVaultResults(vaultResultStore.results)
+                        state.setVaultSearched(true)
                         state.setVaultLoading(false)
                     }
                 }.onFailure {
                     if (generation.accepts(request)) {
                         state.setVaultLoading(false)
                         state.setVaultError(true)
+                        state.setVaultSearched(true)
                     }
                 }
             }

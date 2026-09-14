@@ -344,6 +344,69 @@ class AdaptiveShellTest {
     }
 
     @Test
+    fun vaultRowsShowMetadataAndOnlyPlayableRowInvokesPlayback() {
+        var played: String? = null
+        composeRule.setContent {
+            AutPlayTheme {
+                SearchProductScreen(
+                    state = SearchScreenUiState(
+                        query = "vault",
+                        results = emptyList(),
+                        searched = true,
+                        vaultAvailable = true,
+                        vaultSelected = true,
+                        vaultSearched = true,
+                        vaultResults = listOf(
+                            VaultSearchUiItem("playable", "Vault track", "Artist", "UPLOAD", "AVAILABLE", true),
+                            VaultSearchUiItem("remote-only", null, null, "IMPORT", "PENDING", false),
+                        ),
+                    ),
+                    contentPadding = PaddingValues(),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onPlay = {},
+                    onPlayVault = { played = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("search-product-list")
+            .performScrollToNode(hasTestTag("vault-result-playable"))
+        composeRule.onNodeWithTag("vault-result-playable").performClick()
+        composeRule.runOnIdle { assertEquals("playable", played) }
+        composeRule.onNodeWithTag("search-product-list")
+            .performScrollToNode(hasTestTag("vault-result-remote-only"))
+        composeRule.onNodeWithTag("vault-result-remote-only").assertHasNoClickAction()
+        composeRule.onNodeWithText(context.getString(R.string.search_vault_playback_unavailable)).assertIsDisplayed()
+    }
+
+    @Test
+    fun completedEmptyVaultSearchHasItsOwnEmptyState() {
+        composeRule.setContent {
+            AutPlayTheme {
+                SearchProductScreen(
+                    state = SearchScreenUiState(
+                        query = "nothing",
+                        results = emptyList(),
+                        searched = true,
+                        vaultAvailable = true,
+                        vaultSelected = true,
+                        vaultSearched = true,
+                    ),
+                    contentPadding = PaddingValues(),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onPlay = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("search-product-list")
+            .performScrollToNode(hasText(context.getString(R.string.search_vault_empty)))
+        composeRule.onNodeWithText(context.getString(R.string.search_vault_empty)).assertIsDisplayed()
+    }
+
+    @Test
     fun libraryFailureRemainsVisibleWithLocalContent() {
         composeRule.setContent {
             AutPlayTheme {

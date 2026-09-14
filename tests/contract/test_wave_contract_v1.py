@@ -24,6 +24,11 @@ def test_wave_openapi_freezes_authenticated_snapshot_and_strict_start() -> None:
         document["components"]["schemas"]["CreateRoom"]["properties"]["allow_user_ids"]["maxItems"]
         == 7
     )
+    snapshot = document["components"]["schemas"]["Snapshot"]
+    assert "host_transfer_targets" in snapshot["required"]
+    assert snapshot["properties"]["host_transfer_targets"]["maxItems"] == 7
+    target = document["components"]["schemas"]["HostTransferTarget"]
+    assert target["required"] == ["device_id", "device_name"]
 
 
 def test_wave_live_envelope_requires_version_and_ordered_event_fields() -> None:

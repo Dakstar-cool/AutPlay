@@ -53,7 +53,7 @@ class PlaybackServiceProcessStageTest {
         val thirdEntryId = id(78)
         database.libraryDao().upsertTrackRef(track(trackId))
         database.libraryDao().upsertTrackRef(track(secondTrackId))
-        database.libraryDao().upsertTrackRef(track(thirdTrackId))
+        database.libraryDao().upsertTrackRef(track(thirdTrackId).copy(rawDurationMs = 2_000))
         database.localAudioDao().upsertState(audio(trackId, 74))
         database.localAudioDao().upsertState(audio(secondTrackId, 79))
         database.localAudioDao().upsertState(audio(thirdTrackId, 80))
@@ -128,6 +128,10 @@ class PlaybackServiceProcessStageTest {
             await("next Room checkpoint") {
                 runBlocking { database.queueDao().activeSnapshotOnce()?.currentEntryId } == thirdEntryId.value
             }
+            await("different successor duration") { onMain { controller.duration } == 2_000L }
+            val previousEvent = requireNotNull(database.historyDao().event(requireNotNull(listeningEventId)))
+            assertEquals(40_000L, previousEvent.trackDurationMs)
+            assertEquals(previousEvent.playedMs / 40_000.0, requireNotNull(previousEvent.completionRatio), 0.000001)
             ServicePlaybackSessionOwner(context).dispatch(PlaybackCommand.Previous)
             await("previous service command") { onMain { controller.currentMediaItem?.mediaId } == entryId.value }
             await("previous Room checkpoint") {
@@ -222,7 +226,7 @@ class PlaybackServiceProcessStageTest {
         localUserTrackRefId = trackId.value,
         localRecordingId = null,
         serverAudioVariantId = null,
-        contentUri = "content://$testPackageName.readable/audio/process",
+        contentUri = "content://$testPackageName.readable/audio/" + if (stateSeed == 80) "short" else "process-$stateSeed",
         persistedUriPermission = false,
         localSha256 = null,
         fingerprintAlgorithm = null,
@@ -233,7 +237,7 @@ class PlaybackServiceProcessStageTest {
         bitrateBps = 128_000,
         sampleRateHz = 8_000,
         channels = 1,
-        durationMs = 40_000,
+        durationMs = if (stateSeed == 80) 2_000 else 40_000,
         status = "AVAILABLE",
         storageClass = "USER_IMPORT",
         byteSize = 640_044,

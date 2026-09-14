@@ -5,6 +5,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import app.autplay.application.search.LocalTrackSearchRepository
 import app.autplay.application.search.LocalTrackSearchResult
+import app.autplay.application.search.VaultSearchProjector
+import app.autplay.application.search.VaultSearchResult
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.ui.core.CoreProductUiState
 import app.autplay.ui.core.SearchGenerationGuard
@@ -20,13 +22,16 @@ internal fun RefreshSearchOnBindingEffect(
     coreState: CoreProductUiState,
     generation: SearchGenerationGuard,
     resultStore: SearchResultStore<LocalTrackSearchResult>,
+    vaultResultStore: SearchResultStore<VaultSearchResult>,
     repository: LocalTrackSearchRepository,
+    vaultProjector: VaultSearchProjector,
     setResults: (List<LocalTrackSearchResult>) -> Unit,
     setLoading: (Boolean) -> Unit,
     setError: (Boolean) -> Unit,
     setVaultLoading: (Boolean) -> Unit,
     setVaultError: (Boolean) -> Unit,
-    setVaultResultCount: (Int?) -> Unit,
+    setVaultResults: (List<VaultSearchResult>) -> Unit,
+    setVaultSearched: (Boolean) -> Unit,
     reportError: (String) -> Unit,
 ) {
     val bindingKey = binding?.serverProfileId?.value
@@ -34,17 +39,20 @@ internal fun RefreshSearchOnBindingEffect(
         if (binding == null) coreState.scopes = setOf(SearchScope.Local)
         generation.invalidate()
         resultStore.invalidate()
+        vaultResultStore.invalidate()
         setResults(emptyList())
         setLoading(false)
         setError(false)
         setVaultLoading(false)
         setVaultError(false)
-        setVaultResultCount(null)
+        setVaultResults(emptyList())
+        setVaultSearched(false)
         if (!completed) return@LaunchedEffect
 
         val activeScopes = coreState.scopes + SearchScope.Local
         val request = generation.begin(coreState.query, activeScopes, bindingKey)
         resultStore.start(request)
+        vaultResultStore.start(request)
         setLoading(true)
         runCatching { repository.search(request.normalizedQuery, bindingKey) }
             .onSuccess { rows ->
@@ -66,15 +74,19 @@ internal fun RefreshSearchOnBindingEffect(
         setVaultLoading(true)
         runCatching {
             AutPlayRuntime.serverFeatures(context, binding).searchLibrary(request.normalizedQuery)
+        }.mapCatching { rows ->
+            vaultProjector.project(binding.serverProfileId.value, rows)
         }.onSuccess { rows ->
-            if (generation.accepts(request)) {
-                setVaultResultCount(rows.size)
+            if (generation.accepts(request) && vaultResultStore.accept(request, rows)) {
+                setVaultResults(vaultResultStore.results)
+                setVaultSearched(true)
                 setVaultLoading(false)
             }
         }.onFailure {
             if (generation.accepts(request)) {
                 setVaultLoading(false)
                 setVaultError(true)
+                setVaultSearched(true)
             }
         }
     }

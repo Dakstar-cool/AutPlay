@@ -221,3 +221,48 @@ def test_wave_host_loss_leave_policy_and_expiry(database_url: str) -> None:
         assert command == "EXPIRE"
     finally:
         engine.dispose()
+
+
+def test_wave_transfer_targets_exclude_stale_and_revoked_devices(database_url: str) -> None:
+    engine = create_engine(database_url)
+    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    now = datetime(2026, 8, 17, tzinfo=UTC)
+    try:
+        with sessions.begin() as session:
+            owner = _principal(session, "wave-transfer-owner")
+            member = _principal(session, "wave-transfer-member")
+            revoked = _principal(session, "wave-transfer-revoked")
+        service = SqlAlchemyWaveService(sessions)
+        room = service.create(owner, now, (member.user_id, revoked.user_id))
+        service.join(room.code, member, now)
+        service.join(room.code, revoked, now)
+
+        targets = service.snapshot(room.room_id, owner, now).host_transfer_targets
+        assert {(target.device_id, target.device_name) for target in targets} == {
+            (member.device_id, "wave-transfer-member"),
+            (revoked.device_id, "wave-transfer-revoked"),
+        }
+
+        observed_after_presence_timeout = now + timedelta(seconds=31)
+        with sessions.begin() as session:
+            session.execute(
+                text("UPDATE account.device SET revoked_at=:now WHERE device_id=:device"),
+                {"now": now, "device": revoked.device_id},
+            )
+
+        assert (
+            service.snapshot(
+                room.room_id, owner, observed_after_presence_timeout
+            ).host_transfer_targets
+            == ()
+        )
+        with pytest.raises(WaveForbidden):
+            service.transfer_host(
+                room.room_id, owner, member.device_id, observed_after_presence_timeout
+            )
+        with pytest.raises(WaveForbidden):
+            service.transfer_host(
+                room.room_id, owner, revoked.device_id, observed_after_presence_timeout
+            )
+    finally:
+        engine.dispose()

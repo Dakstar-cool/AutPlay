@@ -1,0 +1,43 @@
+{
+  "suite": {
+    "name": "app.autplay.application.face.FaceContractTest",
+    "tests": "7",
+    "skipped": "0",
+    "failures": "0",
+    "errors": "0",
+    "timestamp": "2026-09-10T14:12:51.443Z",
+    "hostname": "DAKSTAR1",
+    "time": "0.177"
+  },
+  "source_sha256": "5e75ac6c1d8878f067ed74abd6d466a37b0c93bb923bd9fc9b48c29600789c86",
+  "testcases": [
+    {
+      "name": "everyIdentityFieldChangesSemanticKeyButActivationDoesNot",
+      "passed": true
+    },
+    {
+      "name": "lateSourceProfileOwnerEpochGenerationAndCorruptResultFallBack",
+      "passed": true
+    },
+    {
+      "name": "mutableInputCannotChangeAnAttachedResult",
+      "passed": true
+    },
+    {
+      "name": "sharedInvalidCasesAreRejected",
+      "passed": true
+    },
+    {
+      "name": "canonicalHashesMatchPythonGoldenAndPreserveUnknownValues",
+      "passed": true
+    },
+    {
+      "name": "duplicateEscapedKeysAndDepthSizeUtf8NumericLexemesFailClosed",
+      "passed": true
+    },
+    {
+      "name": "interpolationSeekAndPauseUseAbsoluteSourceTimeWithoutDoubleCountingCharacter",
+      "passed": true
+    }
+  ]
+}

@@ -61,6 +61,8 @@ internal fun buildNowPlayingRouteActions(
     playbackOwner: PlaybackSessionOwner,
     currentTrackRefId: () -> String?,
     currentQueueEntryId: () -> String?,
+    currentQueueSnapshotId: () -> String?,
+    currentListeningEventId: () -> String?,
     scope: CoroutineScope,
     sliceRepository: LibraryVerticalSliceRepository,
     binding: () -> ClientEventBinding?,
@@ -88,6 +90,25 @@ internal fun buildNowPlayingRouteActions(
     like = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "LIKED", reportError) },
     dislike = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "DISLIKED", reportError) },
     clearPreference = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "NEUTRAL", reportError) },
+    setCurrentListenTasteExcluded = { excluded ->
+        val entryId = currentQueueEntryId() ?: return@NowPlayingRouteActions
+        val eventId = currentListeningEventId() ?: return@NowPlayingRouteActions
+        scope.launch {
+            runCatching {
+                playbackOwner.dispatch(
+                    PlaybackCommand.SetCurrentListenTasteExcluded(LocalId(entryId), LocalId(eventId), excluded),
+                )
+            }.onFailure { reportError("TASTE_EXCLUSION_UNAVAILABLE") }
+        }
+    },
+    setSessionTasteExcluded = { excluded ->
+        val snapshotId = currentQueueSnapshotId() ?: return@NowPlayingRouteActions
+        scope.launch {
+            runCatching {
+                playbackOwner.dispatch(PlaybackCommand.SetSessionTasteExcluded(LocalId(snapshotId), excluded))
+            }.onFailure { reportError("TASTE_EXCLUSION_UNAVAILABLE") }
+        }
+    },
     scheduleSleepTimer = { durationMs ->
         scope.launch {
             runCatching { playbackOwner.dispatch(PlaybackCommand.ScheduleSleepTimer(durationMs)) }
@@ -122,12 +143,11 @@ private fun recordPlaybackPreference(
     currentTrackRefId()?.let { trackRefId ->
         scope.launch {
             runCatching {
-                repository.setPreference(
+                repository.setPlaybackPreference(
                     binding(),
                     LocalId(trackRefId),
                     LocalId.random(),
                     preference,
-                    false,
                     null,
                     System.currentTimeMillis(),
                 )
@@ -161,8 +181,13 @@ internal fun buildServerFeaturesActions(
         }
     },
     search = { query ->
+        val expectedProfile = binding()?.serverProfileId?.value
+        setState(state().copy(searchAttempted = true, searchError = false))
         launchServerAction("SERVER_SEARCH") { server ->
-            setState(state().copy(searchResults = server.searchLibrary(query)))
+            val rows = server.searchLibrary(query)
+            if (binding()?.serverProfileId?.value == expectedProfile) {
+                setState(state().copy(searchResults = rows, searchAttempted = true, searchError = false))
+            }
         }
     },
     chooseServerImport = chooseServerImport,
@@ -254,31 +279,48 @@ internal fun buildServerFeaturesActions(
         }
     },
     recommendations = { home ->
+        val expectedBinding = binding()
+        val expectedProfile = expectedBinding?.serverProfileId?.value
+        setState(state().copy(recommendationAttempted = true, recommendationError = false))
         launchServerAction("SERVER_RECOMMENDATIONS") { server ->
             val result = if (home) server.homeRecommendations() else server.recommendations()
-            stateRepository.recordRecommendation(
-                checkNotNull(binding()).serverProfileId,
-                result,
-                System.currentTimeMillis(),
-            )
-            setState(state().copy(recommendation = result))
+            expectedBinding?.let {
+                stateRepository.recordRecommendation(it.serverProfileId, result, System.currentTimeMillis())
+            }
+            if (binding()?.serverProfileId?.value == expectedProfile) {
+                setState(state().copy(recommendation = result, recommendationAttempted = true, recommendationError = false))
+            }
         }
     },
     exactReplay = {
         state().recommendation?.requestId?.let { requestId ->
+            val expectedBinding = binding()
+            val expectedProfile = expectedBinding?.serverProfileId?.value
+            setState(state().copy(recommendationAttempted = true, recommendationError = false))
             launchServerAction("SERVER_REPLAY_EXACT") { server ->
                 val result = server.exactRecommendationReplay(requestId)
-                stateRepository.recordRecommendation(checkNotNull(binding()).serverProfileId, result, System.currentTimeMillis())
-                setState(state().copy(recommendation = result))
+                expectedBinding?.let {
+                    stateRepository.recordRecommendation(it.serverProfileId, result, System.currentTimeMillis())
+                }
+                if (binding()?.serverProfileId?.value == expectedProfile) {
+                    setState(state().copy(recommendation = result, recommendationAttempted = true, recommendationError = false))
+                }
             }
         }
     },
     algorithmicReplay = {
         state().recommendation?.requestId?.let { requestId ->
+            val expectedBinding = binding()
+            val expectedProfile = expectedBinding?.serverProfileId?.value
+            setState(state().copy(recommendationAttempted = true, recommendationError = false))
             launchServerAction("SERVER_REPLAY_ALGORITHMIC") { server ->
                 val result = server.algorithmicRecommendationReplay(requestId)
-                stateRepository.recordRecommendation(checkNotNull(binding()).serverProfileId, result, System.currentTimeMillis())
-                setState(state().copy(recommendation = result))
+                expectedBinding?.let {
+                    stateRepository.recordRecommendation(it.serverProfileId, result, System.currentTimeMillis())
+                }
+                if (binding()?.serverProfileId?.value == expectedProfile) {
+                    setState(state().copy(recommendation = result, recommendationAttempted = true, recommendationError = false))
+                }
             }
         }
     },

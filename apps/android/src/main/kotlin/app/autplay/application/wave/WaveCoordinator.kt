@@ -89,7 +89,9 @@ data class WaveSnapshot(
     val entries: List<WaveSnapshotEntry>,
     val preflight: Map<String, WaveAvailability>,
     val roomCode: String? = null,
+    val hostTransferTargets: List<WaveHostTransferTarget> = emptyList(),
 )
+data class WaveHostTransferTarget(val deviceId: String, val deviceName: String)
 data class WaveSnapshotEntry(
     val queueEntryId: String,
     val serverRecordingId: String,
@@ -98,7 +100,13 @@ data class WaveSnapshotEntry(
     val ready: Boolean,
 )
 data class WaveEvent(val epoch: String, val command: WaveCommand)
-data class WaveUiState(val roomId: String? = null, val state: WaveRuntimeState = WaveRuntimeState.IDLE, val isHost: Boolean = false, val message: String? = null)
+data class WaveUiState(
+    val roomId: String? = null,
+    val state: WaveRuntimeState = WaveRuntimeState.IDLE,
+    val isHost: Boolean = false,
+    val message: String? = null,
+    val hostTransferTargets: List<WaveHostTransferTarget> = emptyList(),
+)
 
 /** REST/Room coordinator; playback and proactive bytes cross only the existing P08 owner ports. */
 class WaveCoordinator(
@@ -167,10 +175,12 @@ class WaveCoordinator(
         close()
     }
     suspend fun transferHost(targetDeviceId: String) {
-        require(uiState.value.isHost) { "WAVE_HOST_REQUIRED" }
-        val roomId = uiState.value.roomId ?: return
+        val current = uiState.value
+        require(current.isHost) { "WAVE_HOST_REQUIRED" }
+        require(current.hostTransferTargets.any { it.deviceId == targetDeviceId }) { "WAVE_TRANSFER_TARGET_STALE" }
+        val roomId = current.roomId ?: return
         runWaveTransportCall { transport.transferHost(roomId, targetDeviceId) }
-        recover(roomId)
+        applySnapshot(runWaveTransportCall { transport.snapshot(roomId) })
     }
     suspend fun submitPreflight(availability: Map<String, WaveAvailability>, finalReady: Boolean) {
         val roomId = uiState.value.roomId ?: return
@@ -392,7 +402,13 @@ class WaveCoordinator(
         runMediaPreflight(resolvedSnapshot)
         prefetch?.prefetch(resolvedSnapshot, prefetchMode(), unmetered(), nowMs)
         runCatching { refreshClock(snapshot.roomId, snapshot.sequence) }
-        mutableUiState.value = WaveUiState(snapshot.roomId, if (snapshot.state == "CLOSED") WaveRuntimeState.CLOSED else WaveRuntimeState.PREFLIGHT, snapshot.role == "HOST", null)
+        mutableUiState.value = WaveUiState(
+            roomId = snapshot.roomId,
+            state = if (snapshot.state == "CLOSED") WaveRuntimeState.CLOSED else WaveRuntimeState.PREFLIGHT,
+            isHost = snapshot.role == "HOST",
+            message = null,
+            hostTransferTargets = if (snapshot.role == "HOST") snapshot.hostTransferTargets.take(7) else emptyList(),
+        )
     }
 
     private suspend fun refreshClock(roomId: String, commandSequence: Long) {

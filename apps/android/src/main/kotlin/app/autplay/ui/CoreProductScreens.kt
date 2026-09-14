@@ -138,8 +138,18 @@ public data class SearchScreenUiState(
     public val vaultAvailable: Boolean = false,
     public val vaultSelected: Boolean = false,
     public val vaultLoading: Boolean = false,
-    public val vaultResultCount: Int? = null,
+    public val vaultResults: List<VaultSearchUiItem> = emptyList(),
+    public val vaultSearched: Boolean = false,
     public val vaultError: Boolean = false,
+)
+
+public data class VaultSearchUiItem(
+    public val id: String,
+    public val title: String?,
+    public val artist: String?,
+    public val source: String,
+    public val availability: String,
+    public val playable: Boolean,
 )
 
 public data class LibraryScreenUiState(
@@ -200,12 +210,12 @@ public fun HomeProductScreen(
             state = listState,
             modifier = Modifier.fillMaxWidth().testTag("home-product-list"),
             contentPadding = PaddingValues(
-                start = 8.dp,
+                start = 20.dp,
                 top = 0.dp,
-                end = 8.dp,
+                end = 20.dp,
                 bottom = contentPadding.calculateBottomPadding() + 28.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
         item(key = "home:playback-hero") {
             BoxWithConstraints(
@@ -220,7 +230,7 @@ public fun HomeProductScreen(
                     onTogglePlayPause = onTogglePlayPause,
                     onLike = onLikeHeroTrack,
                     onOpenListenTogether = onOpenListenTogether,
-                    modifier = Modifier.requiredWidth(maxWidth + 16.dp),
+                    modifier = Modifier.requiredWidth(maxWidth + 40.dp),
                     topChromePadding = contentPadding.calculateTopPadding(),
                 )
             }
@@ -422,6 +432,7 @@ public fun SearchProductScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onPlay: (String) -> Unit,
+    onPlayVault: (String) -> Unit = {},
     onRetry: () -> Unit = {},
     onVaultScopeChange: (Boolean) -> Unit = {},
     listAnchor: ListAnchor? = null,
@@ -433,10 +444,11 @@ public fun SearchProductScreen(
         contextKey = listContextKey,
         persistedAnchor = listAnchor,
         orderedKeys = listKeys,
-        contentPrefixes = setOf(SEARCH_RESULT_PREFIX),
+        contentPrefixes = setOf(SEARCH_RESULT_PREFIX, SEARCH_VAULT_RESULT_PREFIX),
         onAnchorChange = onListAnchorChange,
     )
     LazyColumn(
+        modifier = Modifier.testTag("search-product-list"),
         state = listState,
         contentPadding = PaddingValues(
             start = AutPlayTokens.dimensions.screenPadding,
@@ -544,18 +556,55 @@ public fun SearchProductScreen(
                 state.vaultError -> item(key = "search:vault-error") {
                     AutPlayStateSurface(AutPlayStateKind.Offline, stringResource(R.string.search_vault_unavailable))
                 }
-                state.vaultResultCount == 0 -> item(key = "search:vault-empty") {
+                state.vaultSearched && state.vaultResults.isEmpty() -> item(key = "search:vault-empty") {
                     AutPlayStateSurface(AutPlayStateKind.Empty, stringResource(R.string.search_vault_empty))
                 }
-                state.vaultResultCount != null -> item(key = "search:vault-count") {
+                state.vaultSearched -> item(key = "search:vault-count") {
                     Text(
                         pluralStringResource(
                             R.plurals.search_vault_result_count,
-                            state.vaultResultCount,
-                            state.vaultResultCount,
+                            state.vaultResults.size,
+                            state.vaultResults.size,
                         ),
                         color = AutPlayTokens.colors.mutedText,
                     )
+                }
+            }
+            items(state.vaultResults, key = { "$SEARCH_VAULT_RESULT_PREFIX${it.id}" }) { track ->
+                AutPlayCard(
+                    modifier = Modifier.testTag("vault-result-${track.id}"),
+                    onClick = if (track.playable) ({ onPlayVault(track.id) }) else null,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        AutPlayArtwork(track.title ?: stringResource(R.string.track_untitled))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                track.title ?: stringResource(R.string.search_vault_metadata_unavailable),
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                track.artist ?: stringResource(R.string.library_unknown_artist),
+                                color = AutPlayTokens.colors.mutedText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                stringResource(R.string.search_vault_source_availability, track.source, track.availability),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AutPlayTokens.colors.mutedText,
+                            )
+                        }
+                        if (track.playable) {
+                            AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.action_play), Modifier.size(24.dp))
+                        } else {
+                            Text(stringResource(R.string.search_vault_playback_unavailable), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
                 }
             }
         }
@@ -917,6 +966,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.collectionItems(
 }
 
 private const val SEARCH_RESULT_PREFIX = "search-result:"
+private const val SEARCH_VAULT_RESULT_PREFIX = "search-vault-result:"
 private const val LIBRARY_TRACK_PREFIX = "library-track:"
 private const val LIBRARY_ARTIST_PREFIX = "library-artist:"
 private const val LIBRARY_ALBUM_PREFIX = "library-album:"
@@ -943,9 +993,10 @@ private fun searchListKeys(state: SearchScreenUiState): List<String> = buildList
         when {
             state.vaultLoading -> add("search:vault-loading")
             state.vaultError -> add("search:vault-error")
-            state.vaultResultCount == 0 -> add("search:vault-empty")
-            state.vaultResultCount != null -> add("search:vault-count")
+            state.vaultSearched && state.vaultResults.isEmpty() -> add("search:vault-empty")
+            state.vaultSearched -> add("search:vault-count")
         }
+        state.vaultResults.forEach { add("$SEARCH_VAULT_RESULT_PREFIX${it.id}") }
     }
 }
 

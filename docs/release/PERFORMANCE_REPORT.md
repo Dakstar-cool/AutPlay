@@ -1,5 +1,15 @@
 # AutPlay RC1 performance report
 
+## Current development snapshot supplement - 2026-09-10
+
+Recovered API 26 connected evidence measures local FTS over 10,000 records at p50 10.4098 ms,
+p95 11.5697 ms and p99 14.565 ms. The 1,000-entry playlist query measures p50 8.584 ms,
+p95 11.0831 ms and p99 12.6886 ms. Both p95 values meet the 150 ms threshold. These are 30-sample
+Room query measurements, not a new physical-device, Face rendering or whole-release qualification.
+See the [dated audit reconciliation](ANDROID_AUDIT_RECONCILIATION_2026-09-10.md) and
+[machine-readable measurements](evidence/android-audit-2026-09-10/ANDROID_PERFORMANCE.json).
+The original RC measurements below remain historical evidence.
+
 ## Environment and method
 
 - Evidence window: server benchmark 2026-08-17; final Android/release audit 2026-08-18.

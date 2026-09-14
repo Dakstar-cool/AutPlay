@@ -1,7 +1,7 @@
 package app.autplay.ui
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,15 +21,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -83,28 +83,18 @@ public fun AutPlayArtwork(
     size: Dp = 56.dp,
     painter: Painter? = null,
 ) {
-    val shape = MaterialTheme.shapes.medium
-    val palette = remember(title) { playbackVisualPalette(title) }
-    val placeholder = Brush.linearGradient(palette.map { it.copy(alpha = 0.86f) })
+    val shape = MaterialTheme.shapes.small
     Box(
         modifier = modifier
             .size(size)
             .clip(shape)
-            .background(placeholder)
             .semantics { contentDescription = title },
         contentAlignment = Alignment.Center,
     ) {
         if (painter == null) {
-            Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.28f)) {
-                Text(
-                    text = title.trim().firstOrNull()?.uppercase() ?: "A",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Color.White,
-                )
-            }
+            AutPlayArtworkPlaceholder(title, Modifier.fillMaxSize())
         } else {
-            Icon(painter = painter, contentDescription = null, tint = Color.Unspecified)
+            Image(painter = painter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
     }
 }
@@ -119,12 +109,12 @@ public fun AutPlayCard(
     Surface(
         modifier = interaction
             .fillMaxWidth()
-            .border(1.dp, AutPlayTokens.colors.border, MaterialTheme.shapes.large),
+            .border(1.dp, AutPlayTokens.colors.border.copy(alpha = 0.55f), MaterialTheme.shapes.large),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        tonalElevation = 0.dp,
     ) {
-        Box(Modifier.padding(18.dp)) { content() }
+        Box(Modifier.padding(16.dp)) { content() }
     }
 }
 
@@ -168,14 +158,14 @@ public fun AutPlayChip(
                 if (!enabled) disabled()
             },
         shape = CircleShape,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else AutPlayTokens.colors.raisedSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, AutPlayTokens.colors.border),
+        color = if (selected) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.raisedSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.border),
     ) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             style = MaterialTheme.typography.labelLarge,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,

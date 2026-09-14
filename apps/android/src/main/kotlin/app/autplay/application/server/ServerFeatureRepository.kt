@@ -6,6 +6,7 @@ import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SessionAccess
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.data.network.withAutPlayRedirectPolicy
+import app.autplay.data.network.readCancellable
 import app.autplay.domain.ServerProfileId
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
@@ -177,12 +178,13 @@ class ServerFeatureRepository(
         .callTimeout(Duration.ofSeconds(45))
         .build(),
     private val m5Rotation: M5SessionRotationClient? = null,
+    private val beforeRequest: suspend () -> Unit = {},
 ) {
     private val client = client.withAutPlayRedirectPolicy()
     private val serverRoot = serverBaseUrl.trimEnd('/')
     private val streamRoot = streamBaseUrl.trimEnd('/')
     private val apiBaseUrl = "$serverRoot/api/v1"
-    private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl, credentials, client, m5Rotation = m5Rotation)
+    private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl, credentials, client, m5Rotation = m5Rotation, beforeRequest = beforeRequest)
 
     suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
         ServerHealth(
@@ -692,15 +694,18 @@ class ServerFeatureRepository(
 
     private suspend fun authorizedRaw(request: Request, expectBody: Boolean): HttpResult =
         withContext(Dispatchers.IO) {
+            beforeRequest()
             var access = sessionCredentials.access(profileId)
             try {
                 var result = executeOnce(request, access, expectBody)
                 if (result.status == 401) {
                     val rejectedGeneration = access.generation
                     access.close()
+                    beforeRequest()
                     access = sessionCredentials.refreshAfterRejection(profileId, rejectedGeneration)
                     result = executeOnce(request, access, expectBody)
                 }
+                if (result.status == 401 || result.status == 403) throw SessionRequiredException()
                 if (result.status !in 200..299) error("SERVER_HTTP_${result.status}")
                 result
             } finally {
@@ -708,12 +713,13 @@ class ServerFeatureRepository(
             }
         }
 
-    private fun executeOnce(request: Request, access: SessionAccess, expectBody: Boolean): HttpResult {
+    private suspend fun executeOnce(request: Request, access: SessionAccess, expectBody: Boolean): HttpResult {
+        beforeRequest()
         val authorized = request.newBuilder()
             .header("Authorization", "Bearer ${access.token.toString(StandardCharsets.UTF_8)}")
             .header("Cache-Control", "no-store")
             .build()
-        return client.newCall(authorized).execute().use { response ->
+        return client.newCall(authorized).readCancellable { response ->
             HttpResult(
                 response.code,
                 if (expectBody) response.body.readBoundedUtf8(MAX_RESPONSE_BYTES) else null,
@@ -722,8 +728,8 @@ class ServerFeatureRepository(
         }
     }
 
-    private fun executePublic(url: String): Int = client.newCall(Request.Builder().url(url).get().build())
-        .execute().use { response -> response.code }
+    private suspend fun executePublic(url: String): Int = client.newCall(Request.Builder().url(url).get().build())
+        .readCancellable { response -> response.code }
 
     private fun JsonObject.requiredArray(name: String, maxItems: Int): List<JsonObject> {
         val array = this[name] as? JsonArray ?: error("SERVER_RESPONSE_INVALID")

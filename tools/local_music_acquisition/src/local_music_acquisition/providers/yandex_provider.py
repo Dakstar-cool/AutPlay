@@ -256,6 +256,7 @@ class YandexProvider:
 
     name = "yandex"
     requires_rights_confirmation = True
+    requires_proxy = False
 
     def __init__(
         self,

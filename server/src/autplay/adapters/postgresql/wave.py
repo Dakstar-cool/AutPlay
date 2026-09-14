@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from autplay.domain.auth import Principal
 from autplay.domain.wave import (
     Availability,
+    HostTransferTarget,
     QueueEntry,
     WaveConflict,
     WaveForbidden,
@@ -200,9 +201,14 @@ class SqlAlchemyWaveService:
             target = (
                 s.execute(
                     text(
-                        "SELECT user_id FROM wave.member WHERE room_id=:room AND device_id=:device AND status='JOINED' FOR UPDATE"
+                        "SELECT m.user_id FROM wave.member m JOIN account.device d ON d.device_id=m.device_id AND d.user_id=m.user_id WHERE m.room_id=:room AND m.device_id=:device AND m.device_id<>:actor AND m.status='JOINED' AND m.last_present_at>=:presence_cutoff AND d.revoked_at IS NULL FOR UPDATE OF m"
                     ),
-                    {"room": room_id, "device": target_device_id},
+                    {
+                        "room": room_id,
+                        "device": target_device_id,
+                        "actor": principal.device_id,
+                        "presence_cutoff": now - timedelta(seconds=30),
+                    },
                 )
                 .mappings()
                 .first()
@@ -813,6 +819,27 @@ class SqlAlchemyWaveService:
                 },
             ).mappings()
         }
+        transfer_targets = (
+            tuple(
+                HostTransferTarget(x.device_id, x.device_name)
+                for x in s.execute(
+                    text(
+                        "SELECT m.device_id,d.device_name FROM wave.member m "
+                        "JOIN account.device d ON d.device_id=m.device_id AND d.user_id=m.user_id "
+                        "WHERE m.room_id=:room AND m.status='JOINED' AND m.device_id<>:device "
+                        "AND m.last_present_at>=:presence_cutoff AND d.revoked_at IS NULL "
+                        "ORDER BY m.joined_at,m.device_id LIMIT 7"
+                    ),
+                    {
+                        "room": room,
+                        "device": p.device_id,
+                        "presence_cutoff": now - timedelta(seconds=30),
+                    },
+                ).mappings()
+            )
+            if self_role == "HOST"
+            else ()
+        )
         return WaveRoom(
             room_id=row.room_id,
             code="",
@@ -830,4 +857,5 @@ class SqlAlchemyWaveService:
             playback_state=row.playback_state,
             self_role=self_role,
             self_preflight=self_preflight,
+            host_transfer_targets=transfer_targets,
         )

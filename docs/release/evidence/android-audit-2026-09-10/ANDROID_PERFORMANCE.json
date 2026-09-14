@@ -1,0 +1,40 @@
+{
+  "environment": {
+    "abi": "x86_64",
+    "api_level": 26,
+    "device": "codex_p13_api26",
+    "display": "1080x1920@420dpi"
+  },
+  "generated_at": "2026-09-10T11:33:26.437532+00:00",
+  "method": {
+    "clock": "SystemClock.elapsedRealtimeNanos",
+    "instrumentation_test": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest#largeSearchAndPlaylistQueriesMeetApi26Baseline",
+    "measured_iterations": 30,
+    "percentile": "nearest-rank",
+    "warmup_iterations": 1
+  },
+  "paths": {
+    "android_local_fts_top_50": {
+      "dataset_rows": 10000,
+      "p50_ms": 10.4098,
+      "p95_ms": 11.5697,
+      "p95_target_ms": 150.0,
+      "p99_ms": 14.565,
+      "status": "PASS"
+    },
+    "android_playlist_query": {
+      "dataset_rows": 1000,
+      "p50_ms": 8.584,
+      "p95_ms": 11.0831,
+      "p95_target_ms": 150.0,
+      "p99_ms": 12.6886,
+      "status": "PASS"
+    }
+  },
+  "schema_version": 1,
+  "source": {
+    "path": "apps/android/build/outputs/androidTest-results/connected/debug/codex_p13_api26(AVD) - 8.0.0/logcat-app.autplay.application.library.LibraryVerticalSliceRepositoryTest-largeSearchAndPlaylistQueriesMeetApi26Baseline.txt",
+    "sha256": "934748c9ca5b988be4af95e02d52dd97e3563feeb054064d0cbe046b8332d995"
+  },
+  "status": "PASS"
+}

@@ -2,6 +2,7 @@ package app.autplay.data.security
 
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
@@ -66,7 +67,7 @@ class M5SessionRotationTest {
         try {
             assertTrue(
                 runCatching { provider.refreshAfterRejection(PROFILE, 0).close() }
-                    .exceptionOrNull() is SessionRequiredException,
+                    .exceptionOrNull() is IOException,
             )
             val first = server.takeRequest().body.readUtf8()
             val pending = store.decoded()

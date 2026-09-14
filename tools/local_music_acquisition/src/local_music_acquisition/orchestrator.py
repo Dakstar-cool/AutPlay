@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .models import AcquiredArtifact, PlaylistItem, ProviderFailure, ProviderMiss
+from .models import (
+    PROVIDER_MISS_CODES,
+    AcquiredArtifact,
+    PlaylistItem,
+    ProviderFailure,
+    ProviderMiss,
+)
+from .normalization import normalize_items
 from .playlist import PlaylistParseError, normalize_numbered_collection, parse_playlist
 from .providers.base import AcquisitionProvider
 
@@ -49,18 +57,24 @@ class _ProviderLane:
     consecutive_failures: int = 0
     terminal_failures: int = 0
     circuit_open: bool = False
+    cooldown_seconds: float | None = None
+    opened_at: float = 0.0
 
     def invoke(self, item: PlaylistItem, output_directory: Path) -> _Attempt:
         with self.lock:
             if self.circuit_open:
-                return _Attempt("failure", self.provider.name, f"{self.provider.name}.circuit_open")
+                if self.cooldown_seconds is None or time.monotonic() < (
+                    self.opened_at + self.cooldown_seconds
+                ):
+                    return _Attempt(
+                        "failure", self.provider.name, f"{self.provider.name}.circuit_open"
+                    )
+                self.circuit_open = False
+                self.consecutive_failures = 0
             try:
                 artifact = self.provider.acquire(item, output_directory)
             except ProviderMiss as error:
-                if error.provider != self.provider.name or error.code not in {
-                    "exact_match_not_found",
-                    "ambiguous_match",
-                }:
+                if error.provider != self.provider.name or error.code not in PROVIDER_MISS_CODES:
                     return self._failure("result_invalid")
                 self.consecutive_failures = 0
                 return _Attempt("miss", self.provider.name, str(error))
@@ -85,10 +99,53 @@ class _ProviderLane:
             and self.consecutive_failures >= self.failure_threshold
         ):
             self.circuit_open = True
+            self.opened_at = time.monotonic()
         return _Attempt("failure", self.provider.name, f"{self.provider.name}.{code}")
 
 
-def _read_items(input_file: Path, *, normalize_numbered: bool) -> tuple[list[PlaylistItem], int]:
+class DownloadSession:
+    """Reusable ordered lanes for a durable queue; no persistence or network on construction."""
+
+    def __init__(
+        self,
+        providers: tuple[AcquisitionProvider, ...],
+        rights_confirmed: frozenset[str],
+        *,
+        failure_threshold: int = 2,
+        cooldown_seconds: float = 60,
+    ) -> None:
+        if not providers:
+            raise PlaylistDownloadError("providers_empty")
+        names = [provider.name for provider in providers]
+        if len(names) != len(set(names)) or any(
+            re.fullmatch(r"[a-z][a-z0-9_]{0,31}", name) is None for name in names
+        ):
+            raise PlaylistDownloadError("provider_names_invalid")
+        if not 1 <= failure_threshold <= 100 or not 1 <= cooldown_seconds <= 3600:
+            raise PlaylistDownloadError("provider_retry_policy_invalid")
+        for provider in providers:
+            if provider.requires_rights_confirmation and provider.name not in rights_confirmed:
+                raise PlaylistDownloadError(f"{provider.name}_rights_confirmation_required")
+        self.lanes = tuple(
+            _ProviderLane(provider, failure_threshold, cooldown_seconds=cooldown_seconds)
+            for provider in providers
+        )
+
+    @property
+    def available(self) -> bool:
+        return any(
+            not lane.circuit_open
+            or time.monotonic() >= lane.opened_at + (lane.cooldown_seconds or 0)
+            for lane in self.lanes
+        )
+
+    def download(self, item: PlaylistItem, output_directory: Path) -> TrackOutcome:
+        return _download_item(item, output_directory, self.lanes, continue_on_provider_failure=True)
+
+
+def _read_items(
+    input_file: Path, *, normalize_numbered: bool, normalization_catalog: Path | None = None
+) -> tuple[list[PlaylistItem], int]:
     try:
         payload = input_file.read_bytes()
         if normalize_numbered:
@@ -98,7 +155,8 @@ def _read_items(input_file: Path, *, normalize_numbered: bool) -> tuple[list[Pla
         raise PlaylistDownloadError("playlist_file_unavailable") from error
     except PlaylistParseError as error:
         raise PlaylistDownloadError(str(error)) from error
-    return list(parsed.rows), parsed.malformed_count
+    rows, _changes = normalize_items(parsed.rows, catalog_path=normalization_catalog)
+    return list(rows), sum(row.error_code is not None for row in rows)
 
 
 def _download_item(
@@ -107,6 +165,7 @@ def _download_item(
     lanes: tuple[_ProviderLane, ...],
     *,
     continue_on_provider_failure: bool,
+    stop: threading.Event | None = None,
 ) -> TrackOutcome:
     if item.error_code is not None:
         return TrackOutcome(item.row_number, "invalid_input", None, False, item.error_code)
@@ -114,6 +173,8 @@ def _download_item(
     last_miss: _Attempt | None = None
     last_failure: _Attempt | None = None
     for index, lane in enumerate(lanes):
+        if stop is not None and stop.is_set():
+            return TrackOutcome(item.row_number, "failed", None, False, "download_interrupted")
         attempt = lane.invoke(item, output_directory)
         if attempt.status == "miss":
             last_miss = attempt
@@ -164,9 +225,11 @@ def download_playlist(
     providers: tuple[AcquisitionProvider, ...],
     rights_confirmed: frozenset[str] = frozenset(),
     normalize_numbered: bool = False,
+    normalization_catalog: Path | None = None,
     max_workers: int = 1,
     continue_on_provider_failure: bool = False,
     provider_failure_threshold: int = 3,
+    stop: threading.Event | None = None,
 ) -> dict[str, object]:
     """Acquire rows with ordered fallback and optional provider-lane parallelism."""
 
@@ -183,7 +246,11 @@ def download_playlist(
         if provider.requires_rights_confirmation and provider.name not in rights_confirmed:
             raise PlaylistDownloadError(f"{provider.name}_rights_confirmation_required")
 
-    items, malformed_count = _read_items(input_file, normalize_numbered=normalize_numbered)
+    items, malformed_count = _read_items(
+        input_file,
+        normalize_numbered=normalize_numbered,
+        normalization_catalog=normalization_catalog,
+    )
     if sum(item.error_code is None for item in items) > MAX_PLAYLIST_TRACKS:
         raise PlaylistDownloadError("playlist_track_limit_exceeded")
 
@@ -196,6 +263,7 @@ def download_playlist(
                 output_directory,
                 lanes,
                 continue_on_provider_failure=continue_on_provider_failure,
+                stop=stop,
             )
             for item in items
         ]
@@ -208,6 +276,7 @@ def download_playlist(
                         output_directory,
                         lanes,
                         continue_on_provider_failure=continue_on_provider_failure,
+                        stop=stop,
                     ),
                     items,
                 )

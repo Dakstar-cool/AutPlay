@@ -141,6 +141,7 @@ data class LogicalListeningCheckpoint(
     val accumulatedPlayedMs: Long,
     val attribution: PlaybackRecommendationAttribution?,
     val ownerBinding: PlaybackSessionOwnerBinding? = null,
+    val excludedFromTaste: Boolean = false,
     val finalized: Boolean = false,
 ) {
     init {
@@ -171,6 +172,7 @@ data class FinalizedListeningEvent(
     val durationMs: Long?,
     val endPositionMs: Long,
     val attribution: PlaybackRecommendationAttribution?,
+    val excludedFromTaste: Boolean,
 ) {
     init { require(playedMs >= 0 && endPositionMs >= 0 && (durationMs == null || durationMs > 0)) }
 }
@@ -187,6 +189,7 @@ object LogicalListeningSession {
         nowMs: Long,
         positionMs: Long,
         ownerBinding: PlaybackSessionOwnerBinding? = null,
+        excludedFromTaste: Boolean = false,
     ): LogicalListeningCheckpoint = LogicalListeningCheckpoint(
         eventId,
         entry.queueEntryId,
@@ -197,6 +200,7 @@ object LogicalListeningSession {
         0,
         entry.attribution,
         ownerBinding,
+        excludedFromTaste,
     )
 
     fun checkpoint(current: LogicalListeningCheckpoint, positionMs: Long, observedPlaybackDeltaMs: Long): LogicalListeningCheckpoint {
@@ -226,6 +230,7 @@ object LogicalListeningSession {
             durationMs = durationMs,
             endPositionMs = endPositionMs,
             attribution = current.attribution,
+            excludedFromTaste = current.excludedFromTaste,
         )
     }
 }

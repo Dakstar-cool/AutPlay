@@ -98,6 +98,11 @@ class RecommendationInputSnapshot:
     tracks: tuple[SnapshotTrack, ...]
     retained_until: datetime
 
+    def __post_init__(self) -> None:
+        recording_ids = tuple(track.recording_id for track in self.tracks)
+        if len(recording_ids) != len(set(recording_ids)):
+            raise ValueError("recommendation snapshot contains duplicate recordings")
+
 
 @dataclass(frozen=True, slots=True)
 class ComponentVersionRef:

@@ -23,6 +23,7 @@ class RoomSchemaExportTest {
             val expectedTables = when (version) {
                 8 -> APPROVED_TABLES + P09_TABLES + P10_TABLES
                 9 -> APPROVED_TABLES + P09_TABLES + P10_TABLES + P11_TABLES
+                15 -> APPROVED_TABLES + P09_TABLES + P10_TABLES + P11_TABLES + P12_TO_P15_TABLES
                 else -> APPROVED_TABLES
             }
             assertEquals(expectedTables, tableNames)
@@ -39,6 +40,9 @@ class RoomSchemaExportTest {
         assertTrue(v9.contains("owner_user_id"))
         assertTrue(v9.contains("recommendation_presentation"))
         assertTrue(v9.contains("impression_event_id"))
+        val v15 = File("schemas/app.autplay.data.local.AutPlayDatabase/15.json").readText()
+        assertTrue(v15.contains("session_excluded_from_taste"))
+        assertTrue(v15.contains("active_listen_excluded_from_taste"))
     }
 
     private companion object {
@@ -47,6 +51,7 @@ class RoomSchemaExportTest {
             2 to "c69acd49acceadf9c1c92874ab2eca9069c6958f1bd4c313136ed8a5e80d3acf",
             8 to "7639eb1f005957e057a76812ec4a1a7a2699ed5c451443b4883dda309d73f82c",
             9 to "f7764762cdc29efe25c285e53b0cce6c513dfba0e4a491dfc9ffd2bdcb915d62",
+            15 to "23659cec8bc0df1acc7ce8bc6b561de22694f63d71f4b65602e31ac99efcfadd",
         )
 
         val APPROVED_TABLES = setOf(
@@ -92,6 +97,24 @@ class RoomSchemaExportTest {
         )
 
         val P11_TABLES = setOf("recommendation_presentation")
+
+        val P12_TO_P15_TABLES = setOf(
+            "artist_projection",
+            "artist_credit_projection",
+            "artist_credit_name_projection",
+            "catalog_artist_credit_link",
+            "catalog_artist_credit_link_owner",
+            "recommendation_temporal_delta",
+            "wave_room",
+            "wave_preflight",
+            "wave_queue_projection",
+            "remote_import_job_projection",
+            "vault_upload_intent",
+            "recommendation_response_snapshot",
+            "guest_room_projection",
+            "guest_wave_preflight",
+            "guest_wave_queue_projection",
+        )
     }
 
     private fun String.normalizedSha256(): String = MessageDigest.getInstance("SHA-256")

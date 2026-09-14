@@ -69,5 +69,17 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: ./gradlew --no-daemon --console=plain --max-workers=1 --dependency-verification=strict :apps:android:connectedDebugAndroidTest
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -timezone Etc/UTC
+          script: |
+            ./gradlew --no-daemon --console=plain --max-workers=1 --dependency-verification=strict :apps:android:connectedDebugAndroidTest
+            python3 scripts/test_l1_process_death.py
+
+      - name: Retain connected and process-death evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-connected-api26
+          path: |
+            apps/android/build/outputs/androidTest-results/
+            apps/android/build/reports/androidTests/
+            build/l1-process-death/

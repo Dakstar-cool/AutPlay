@@ -8,6 +8,17 @@ public-Internet production distribution: the APKs use the retained development s
 server topology uses cleartext HTTP on a concrete RFC1918 address, and production signing,
 domain/TLS, backup and rollout decisions remain open.
 
+## Post-v0.3.0 branch note (not included in the published assets)
+
+The development branch now completes Android UI functional parity for seven previously partial
+surfaces. Vault Search, History, Downloads and Server Features render bounded useful rows instead
+of counts; Now Playing persists independent current-listen and queue-session Taste exclusion;
+local import exposes repository-owned pause/resume/cancel; and a Wave host can select and confirm
+an authoritative active-device transfer target. Room v15 is an additive migration. Media3 remains
+the download/playback execution and byte-progress owner, and remote responses remain guarded by
+the active profile/binding generation. This note describes branch state only and does not amend the
+contents or verification claims of the already-published v0.3.0 APKs.
+
 ## Highlights since v0.2.0
 
 - Completed Android product surfaces for Home, local/Vault search, Library, artist/release/track

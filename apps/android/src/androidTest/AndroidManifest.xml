@@ -6,6 +6,10 @@
 
     <application>
         <provider
+            android:name="app.autplay.testing.SlowContentProvider"
+            android:authorities="${applicationId}.slow"
+            android:exported="true" />
+        <provider
             android:name="app.autplay.testing.RevokedContentProvider"
             android:authorities="${applicationId}.revoked"
             android:exported="true"

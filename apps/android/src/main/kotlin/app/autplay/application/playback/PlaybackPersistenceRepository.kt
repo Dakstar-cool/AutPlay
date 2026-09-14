@@ -39,6 +39,17 @@ data class RestoredPlaybackQueue(
     val media: QueueRestore,
 )
 
+data class PlaybackTasteExclusionState(
+    val queueSnapshotId: String? = null,
+    val queueEntryId: String? = null,
+    val listeningEventId: String? = null,
+    val listenExcluded: Boolean = false,
+    val sessionExcluded: Boolean = false,
+) {
+    val listenActionAvailable: Boolean get() = listeningEventId != null
+    val sessionActionAvailable: Boolean get() = queueSnapshotId != null
+}
+
 /** Owns Room queue/session transactions; it never persists a URL, token, or byte progress. */
 class PlaybackPersistenceRepository(
     private val database: AutPlayDatabase,
@@ -125,12 +136,22 @@ class PlaybackPersistenceRepository(
         nowMs: Long,
         ownerBinding: PlaybackSessionOwnerBinding?,
     ): LogicalListeningCheckpoint {
-        val snapshot = requireNotNull(database.queueDao().activeSnapshotOnce()) { "ACTIVE_QUEUE_NOT_FOUND" }
-        val entry = requireNotNull(database.queueDao().entry(entryId.value)) { "QUEUE_ENTRY_NOT_FOUND" }
-        require(entry.queueSnapshotId == snapshot.queueSnapshotId)
-        val checkpoint = LogicalListeningSession.start(toCore(entry), LocalId.random(), nowMs, positionMs, ownerBinding)
-        persistCheckpoint(snapshot, checkpoint, positionMs, nowMs)
-        return checkpoint
+        return database.withWriteTransaction {
+            val snapshot = requireNotNull(database.queueDao().activeSnapshotOnce()) { "ACTIVE_QUEUE_NOT_FOUND" }
+            val entry = requireNotNull(database.queueDao().entry(entryId.value)) { "QUEUE_ENTRY_NOT_FOUND" }
+            require(entry.queueSnapshotId == snapshot.queueSnapshotId)
+            require(database.queueDao().beginActiveListenTasteExclusion(snapshot.queueSnapshotId, nowMs) == 1)
+            val checkpoint = LogicalListeningSession.start(
+                toCore(entry),
+                LocalId.random(),
+                nowMs,
+                positionMs,
+                ownerBinding,
+                excludedFromTaste = false,
+            )
+            persistCheckpoint(snapshot, checkpoint, positionMs, nowMs)
+            checkpoint
+        }
     }
 
     suspend fun recoverSession(): LogicalListeningCheckpoint? {
@@ -179,7 +200,38 @@ class PlaybackPersistenceRepository(
                     requireNotNull(snapshot.activeSessionServerProfileId),
                 )
             },
+            excludedFromTaste = snapshot.activeListenExcludedFromTaste,
         )
+    }
+
+    suspend fun setCurrentListenTasteExcluded(
+        current: LogicalListeningCheckpoint,
+        excluded: Boolean,
+        nowMs: Long = System.currentTimeMillis(),
+    ): LogicalListeningCheckpoint {
+        val entry = requireNotNull(database.queueDao().entry(current.queueEntryId.value)) { "QUEUE_ENTRY_NOT_FOUND" }
+        require(
+            database.queueDao().setActiveListenTasteExclusion(
+                entry.queueSnapshotId,
+                current.queueEntryId.value,
+                current.listeningEventId.value,
+                excluded,
+                nowMs,
+            ) == 1,
+        ) { "TASTE_LISTEN_STALE" }
+        return current.copy(excludedFromTaste = excluded)
+    }
+
+    suspend fun setSessionTasteExcluded(
+        snapshotId: LocalId,
+        current: LogicalListeningCheckpoint?,
+        excluded: Boolean,
+        nowMs: Long = System.currentTimeMillis(),
+    ): LogicalListeningCheckpoint? = database.withWriteTransaction {
+        val snapshot = requireNotNull(database.queueDao().activeSnapshotOnce()) { "ACTIVE_QUEUE_NOT_FOUND" }
+        require(snapshot.queueSnapshotId == snapshotId.value) { "TASTE_SESSION_STALE" }
+        require(database.queueDao().setSessionTasteExclusion(snapshotId.value, excluded, nowMs) == 1)
+        current
     }
 
     suspend fun checkpoint(
@@ -211,6 +263,28 @@ class PlaybackPersistenceRepository(
             nowMs,
         ) == 1)
         return next
+    }
+
+    /** Teardown may update only the still-active session after all former service writes settle. */
+    suspend fun checkpointExistingSession(
+        current: LogicalListeningCheckpoint,
+        positionMs: Long,
+        observedPlaybackDeltaMs: Long,
+        shuffleMode: String,
+        repeatMode: String,
+        seed: Long?,
+        nowMs: Long,
+    ): Boolean = database.withWriteTransaction {
+        val snapshot = database.queueDao().activeSnapshotOnce() ?: return@withWriteTransaction false
+        if (snapshot.activeListeningEventId != current.listeningEventId.value ||
+            snapshot.currentEntryId != current.queueEntryId.value) return@withWriteTransaction false
+        if (database.historyDao().event(current.listeningEventId.value) != null) {
+            database.queueDao().clearFinalizedSession(snapshot.queueSnapshotId, current.listeningEventId.value,
+                current.queueEntryId.value, positionMs, nowMs)
+            return@withWriteTransaction false
+        }
+        checkpoint(current, positionMs, observedPlaybackDeltaMs, shuffleMode, repeatMode, seed, nowMs)
+        true
     }
 
     /** Persists a paused Media3 selection without inventing a logical listening session. */
@@ -267,7 +341,7 @@ class PlaybackPersistenceRepository(
             trackRefId = finalized.trackRefId,
             playedMs = finalized.playedMs,
             durationMs = finalized.durationMs,
-            excluded = false,
+            excluded = snapshot.sessionExcludedFromTaste || snapshot.activeListenExcludedFromTaste,
             origin = origin,
             attributionJson = queueEntry.recommendationAttributionJson,
             context = snapshot.listeningContext,

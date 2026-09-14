@@ -1275,3 +1275,30 @@ link only after the final page. Every read then intersects those members with a 
 not expose Room entities to Compose. The v12 identity hash is
 `cb830a4861efe1393696302f31bd06be`; exported-file SHA-256 is
 `a7bcf4041ce9199f559312472436ff4574bf858050b491f56926f35f49b5087c`.
+
+---
+
+# 36. Android UI functional parity and durable Taste state (Room v15)
+
+Android UI functional parity applies named additive `MIGRATION_14_15`. It adds two non-null boolean
+columns with a `0` default to `queue_snapshot`: `session_excluded_from_taste` and
+`active_listen_excluded_from_taste`. Existing queue, playback and listening-event identities are
+preserved and no destructive fallback is introduced.
+
+The flags are deliberately independent. A new logical listen resets only the active-listen flag;
+the queue-session flag remains in force for later events in the same durable snapshot. Finalization
+writes `excluded_from_taste = session_excluded_from_taste OR
+active_listen_excluded_from_taste` to the existing listening event and Journal flow. Like/Dislike
+remains track preference state and is neither read from nor mutated by these flags. Playback-service
+commands serialize mutations with queue/session state so Activity recreation and process recovery
+observe the Room authority.
+
+The same UI slice does not add a second download-progress store: `download_intent` continues to
+hold bounded coarse intent state while Media3 owns bytes and execution progress. History is exposed
+through a bounded keyset projection ordered by `(started_at_ms DESC, listening_event_id DESC)`, so
+duplicate listens retain separate immutable event identities.
+
+The v15 Room identity hash is `da53f7241663acfbd655a1443678c8a9`; exported-file SHA-256 is
+`23659cec8bc0df1acc7ce8bc6b561de22694f63d71f4b65602e31ac99efcfadd`. The v14→v15 API 26 migration
+test verifies preservation and independence of both flags, and the exact manifest is pinned by
+`RoomSchemaExportTest`.

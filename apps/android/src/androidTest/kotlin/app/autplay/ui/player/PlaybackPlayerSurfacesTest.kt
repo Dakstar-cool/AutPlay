@@ -221,6 +221,42 @@ class PlaybackPlayerSurfacesTest {
         composeRule.runOnIdle { check(stopAfterTrack) }
     }
 
+    @Test
+    fun tasteExclusionControlsExposeIndependentDurableIntents() {
+        var listenExcluded: Boolean? = null
+        var sessionExcluded: Boolean? = null
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState(),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                    listenExcludedFromTaste = false,
+                    sessionExcludedFromTaste = true,
+                    listenTasteActionAvailable = true,
+                    sessionTasteActionAvailable = true,
+                    onSetCurrentListenTasteExcluded = { listenExcluded = it },
+                    onSetSessionTasteExcluded = { sessionExcluded = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("taste-exclude-listen").performScrollTo().performClick()
+        composeRule.onNodeWithTag("taste-exclude-session").performScrollTo().performClick()
+        composeRule.runOnIdle {
+            assertEquals(true, listenExcluded)
+            assertEquals(false, sessionExcluded)
+        }
+    }
+
     private fun ordinaryState() = PlaybackPresentationState(
         mediaId = "entry-1",
         title = "Fixture track",

@@ -168,6 +168,13 @@ def create_wave_router(
                 str(queue_entry_id): availability.value
                 for queue_entry_id, availability in value.self_preflight.items()
             },
+            "host_transfer_targets": [
+                {
+                    "device_id": str(target.device_id),
+                    "device_name": target.device_name,
+                }
+                for target in value.host_transfer_targets
+            ],
         }
         if value.code:
             result["room_code"] = value.code

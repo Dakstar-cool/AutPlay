@@ -56,8 +56,62 @@ class DownloadIntentRepository(
         val rows = profileId?.let { database.localAudioDao().observeDownloadIntentsForProfile(it, bounded) }
             ?: database.localAudioDao().observeStandaloneDownloadIntents(bounded)
         return rows.map { intents ->
-            intents.map { DownloadIntentPresentation(it.downloadIntentId, it.localUserTrackRefId, it.state) }
+            val tracks = database.libraryDao().trackRefs(
+                intents.map(DownloadIntentEntity::localUserTrackRefId).distinct(),
+                bounded,
+            ).associateBy { it.localUserTrackRefId }
+            intents.map { intent ->
+                val track = tracks[intent.localUserTrackRefId]
+                DownloadIntentPresentation(
+                    stableId = intent.downloadIntentId,
+                    localUserTrackRefId = intent.localUserTrackRefId,
+                    title = track?.rawTitle,
+                    artist = track?.rawArtist,
+                    state = intent.state,
+                    failureCode = intent.failureCode,
+                )
+            }
         }
+    }
+
+    suspend fun cancel(intentId: String, profileId: String?, nowMs: Long): DownloadIntentEntity {
+        val current = requireNotNull(database.localAudioDao().downloadIntent(intentId)) { "DOWNLOAD_INTENT_NOT_FOUND" }
+        require(current.serverProfileId == profileId) { "DOWNLOAD_PROFILE_MISMATCH" }
+        require(current.state in CANCELLABLE_STATES) { "DOWNLOAD_CANCEL_NOT_ALLOWED" }
+        val cancelled = current.copy(
+            state = "CANCELLED",
+            failureCode = app.autplay.download.DownloadFailureCode.CANCELED.name,
+            updatedAtMs = nowMs,
+            completedAtMs = null,
+        )
+        database.localAudioDao().upsertDownloadIntent(cancelled)
+        DownloadService.sendRemoveDownload(
+            applicationContext,
+            AutPlayDownloadService::class.java,
+            current.media3DownloadId ?: current.downloadIntentId,
+            false,
+        )
+        return cancelled
+    }
+
+    suspend fun retry(intentId: String, profileId: String?, nowMs: Long): DownloadIntentEntity {
+        val current = requireNotNull(database.localAudioDao().downloadIntent(intentId)) { "DOWNLOAD_INTENT_NOT_FOUND" }
+        require(current.serverProfileId == profileId) { "DOWNLOAD_PROFILE_MISMATCH" }
+        require(current.state == "FAILED") { "DOWNLOAD_RETRY_NOT_ALLOWED" }
+        val retried = current.copy(
+            state = "REQUESTED",
+            failureCode = null,
+            updatedAtMs = nowMs,
+            completedAtMs = null,
+        )
+        database.localAudioDao().upsertDownloadIntent(retried)
+        DownloadService.sendAddDownload(
+            applicationContext,
+            AutPlayDownloadService::class.java,
+            retried.toDownloadRequest(),
+            false,
+        )
+        return retried
     }
 
     suspend fun requestPreferredVaultDownload(
@@ -308,6 +362,7 @@ class DownloadIntentRepository(
         if (this == DownloadIntentState.CANCELED) "CANCELLED" else name
 
     private companion object {
+        val CANCELLABLE_STATES = setOf("REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED")
         const val MAX_TRACK_INTENTS = 32
         const val MAX_RECONCILE_INTENTS = 10_000
         const val DEFAULT_ADMISSION_BYTES = 64L * 1024 * 1024
@@ -323,4 +378,16 @@ data class DownloadIntentPresentation(
     val stableId: String,
     val localUserTrackRefId: String,
     val state: String,
+    val title: String? = null,
+    val artist: String? = null,
+    val failureCode: String? = null,
 )
+
+enum class DownloadPresentationAction { PLAY, CANCEL, RETRY }
+
+fun allowedDownloadPresentationActions(state: String): Set<DownloadPresentationAction> = when (state) {
+    "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> setOf(DownloadPresentationAction.CANCEL)
+    "COMPLETED" -> setOf(DownloadPresentationAction.PLAY)
+    "FAILED" -> setOf(DownloadPresentationAction.RETRY)
+    else -> emptySet()
+}

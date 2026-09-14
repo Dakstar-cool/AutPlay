@@ -34,6 +34,43 @@ class Media3PlaybackDeviceTest {
     private val context = instrumentation.targetContext
     private val testPackageName = instrumentation.context.packageName
 
+    @Test fun unresolvedNextDoesNotFailCurrentAndCanBeReplacedDuringPlayback() {
+        val player = AtomicReference<ExoPlayer>()
+        val ready = CountDownLatch(1)
+        val failure = AtomicReference<PlaybackException?>()
+        try {
+            instrumentation.runOnMainSync {
+                player.set(ExoPlayer.Builder(context)
+                    .setMediaSourceFactory(ResolvingMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context))))
+                    .build().also { instance ->
+                        instance.volume = 0f
+                        instance.addListener(object : Player.Listener {
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                if (playbackState == Player.STATE_READY) ready.countDown()
+                            }
+                            override fun onPlayerError(error: PlaybackException) { failure.set(error) }
+                        })
+                        instance.setMediaItems(listOf(
+                            MediaItem.Builder().setMediaId("current").setUri("content://$testPackageName.readable/audio/1").build(),
+                            MediaItem.Builder().setMediaId("next").setUri("autplay-unresolved://queue/next").build(),
+                        ))
+                        instance.prepare()
+                        instance.play()
+                    })
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            SystemClock.sleep(1_000)
+            instrumentation.runOnMainSync {
+                assertTrue(player.get().isPlaying)
+                assertEquals("current", player.get().currentMediaItem?.mediaId)
+                player.get().replaceMediaItem(1, MediaItem.Builder().setMediaId("next")
+                    .setUri("content://$testPackageName.readable/audio/tone").build())
+                assertEquals("current", player.get().currentMediaItem?.mediaId)
+            }
+            assertNull(failure.get())
+        } finally { instrumentation.runOnMainSync { player.get()?.release() } }
+    }
+
     @Test fun media3PreparesAndPlaysReadableLocalAudio() {
         assertMediaReady(
             DefaultMediaSourceFactory(DefaultDataSource.Factory(context)),

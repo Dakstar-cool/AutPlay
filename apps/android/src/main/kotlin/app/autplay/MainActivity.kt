@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -73,17 +76,21 @@ import app.autplay.application.library.CoreTrackDetail
 import app.autplay.application.artist.RoomArtistCatalogPort
 import app.autplay.application.search.LocalTrackSearchRepository
 import app.autplay.application.search.LocalTrackSearchResult
+import app.autplay.application.search.VaultSearchProjector
+import app.autplay.application.search.VaultSearchResult
 import app.autplay.application.settings.SettingsTransferCodec
 import app.autplay.application.importing.ContentUriInspector
 import app.autplay.application.importing.ContentTreeAudioScanner
 import app.autplay.application.importing.ImportResolverState
 import app.autplay.application.importing.ImportReviewAction
+import app.autplay.application.importing.ImportJobControlAction
 import app.autplay.application.importing.LEGACY_PROFILE_ID
 import app.autplay.application.importing.LocalImportReviewRepository
 import app.autplay.application.importing.RecordImportReviewCommand
 import app.autplay.application.importing.RecordShadowEvaluationCommand
 import app.autplay.application.importing.singleUriImportCommand
 import app.autplay.application.importing.treeUriImportCommand
+import app.autplay.application.history.HistoryRepository
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatusRepository
 import app.autplay.application.download.DownloadIntentRepository
@@ -152,6 +159,10 @@ import app.autplay.ui.AppLanguage
 import app.autplay.ui.UiDestination
 import app.autplay.ui.WelcomeOnboardingScreen
 import app.autplay.ui.player.PlaybackPreferenceUiState
+import app.autplay.ui.player.NowPlayingTasteUiState
+import app.autplay.ui.history.HistoryUiActions
+import app.autplay.ui.history.HistoryUiState
+import app.autplay.ui.downloads.DownloadsUiActions
 import app.autplay.ui.playlist.ManualPlaylistUi
 import app.autplay.ui.queue.QueueEditorUiActions
 import app.autplay.ui.queue.QueueEditorUiEntry
@@ -187,6 +198,7 @@ import app.autplay.ui.LegacyImportRouteState
 import app.autplay.ui.profilepairing.ProfilePairingUiState
 import app.autplay.ui.social.SocialActions
 import app.autplay.ui.SearchScreenUiState
+import app.autplay.ui.VaultSearchUiItem
 import app.autplay.ui.rememberAutPlayNavigationState
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -781,6 +793,42 @@ private fun OfflineLibraryScreen(
     }.collectAsState(initial = null)
     val navigation = rememberAutPlayNavigationState(initialDestination)
     val destination = navigation.current
+    val historyRepository = remember(context) { HistoryRepository(AutPlayRuntime.database(context)) }
+    var historyState by remember(binding?.serverProfileId?.value) { mutableStateOf(HistoryUiState()) }
+    var historyGeneration by remember(binding?.serverProfileId?.value) { mutableIntStateOf(0) }
+    fun requestHistory(reset: Boolean) {
+        if (historyState.loadingMore || (historyState.loading && historyState.items.isNotEmpty())) return
+        val cursor = if (reset) null else historyState.nextCursor ?: return
+        historyGeneration += 1
+        val requestGeneration = historyGeneration
+        historyState = if (reset) {
+            HistoryUiState(loading = true)
+        } else {
+            historyState.copy(loadingMore = true, error = false)
+        }
+        scope.launch {
+            runCatching {
+                historyRepository.loadPage(binding?.serverProfileId?.value, cursor)
+            }.onSuccess { page ->
+                if (historyGeneration == requestGeneration) {
+                    historyState = HistoryUiState(
+                        items = if (reset) page.items else (historyState.items + page.items).distinctBy { it.listeningEventId },
+                        loading = false,
+                        loadingMore = false,
+                        error = false,
+                        nextCursor = page.nextCursor,
+                    )
+                }
+            }.onFailure {
+                if (historyGeneration == requestGeneration) {
+                    historyState = historyState.copy(loading = false, loadingMore = false, error = true)
+                }
+            }
+        }
+    }
+    LaunchedEffect(destination, binding?.serverProfileId?.value) {
+        if (destination == UiDestination.History) requestHistory(reset = true)
+    }
     LaunchedEffect(destination, socialRuntime) {
         if (destination != UiDestination.Profile) socialRuntime?.clearFriendProfileStatistics()
     }
@@ -793,9 +841,12 @@ private fun OfflineLibraryScreen(
     var searchLoading by remember { mutableStateOf(false) }
     var vaultSearchLoading by remember { mutableStateOf(false) }
     var vaultSearchError by remember { mutableStateOf(false) }
-    var vaultSearchResultCount by remember { mutableStateOf<Int?>(null) }
+    var vaultSearchResults by remember { mutableStateOf<List<VaultSearchResult>>(emptyList()) }
+    var vaultSearchCompleted by rememberSaveable { mutableStateOf(false) }
     val searchGeneration = remember { SearchGenerationGuard() }
     val searchResultStore = remember { SearchResultStore<LocalTrackSearchResult>() }
+    val vaultSearchResultStore = remember { SearchResultStore<VaultSearchResult>() }
+    val vaultSearchProjector = remember(context) { VaultSearchProjector(AutPlayRuntime.database(context)) }
     var stableError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(pairingSafeError) {
         pairingSafeError?.let {
@@ -811,6 +862,8 @@ private fun OfflineLibraryScreen(
     var homeRetryNonce by remember { mutableStateOf(false) }
     val playbackState by PlaybackRuntimeState.state.collectAsState()
     var selectedImportEntryId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingImportControl by remember { mutableStateOf<ImportJobControlAction?>(null) }
+    var importControlError by remember { mutableStateOf(false) }
     val repositorySnapshot = rememberOfflineRepositorySnapshot(
         coreProductRepository,
         artistCatalogPort,
@@ -825,6 +878,7 @@ private fun OfflineLibraryScreen(
     val libraryPreferences = repositorySnapshot.preferences
     val historyCount = repositorySnapshot.historyCount
     val downloads = repositorySnapshot.downloads
+    var pendingDownloadIntentId by remember { mutableStateOf<String?>(null) }
     val localAudioStates = repositorySnapshot.localAudio
     val downloadedTrackIds = repositorySnapshot.downloadedTrackIds
     val homeRecentlyAdded = repositorySnapshot.recentlyAdded
@@ -935,13 +989,16 @@ private fun OfflineLibraryScreen(
         coreState = coreProductState,
         generation = searchGeneration,
         resultStore = searchResultStore,
+        vaultResultStore = vaultSearchResultStore,
         repository = searchRepository,
+        vaultProjector = vaultSearchProjector,
         setResults = { searchResults = it },
         setLoading = { searchLoading = it },
         setError = { searchError = it },
         setVaultLoading = { vaultSearchLoading = it },
         setVaultError = { vaultSearchError = it },
-        setVaultResultCount = { vaultSearchResultCount = it },
+        setVaultResults = { vaultSearchResults = it },
+        setVaultSearched = { vaultSearchCompleted = it },
         reportError = { stableError = it },
     )
     LaunchedEffect(selectedTrackRefId, binding?.serverProfileId?.value) {
@@ -981,7 +1038,20 @@ private fun OfflineLibraryScreen(
             runCatching {
                 operation(AutPlayRuntime.serverFeatures(context, activeBinding))
             }.onFailure {
-                serverUiState = serverUiState.copy(stableMessage = "${action}_UNAVAILABLE")
+                serverUiState = when {
+                    action == "SERVER_SEARCH" -> serverUiState.copy(
+                        stableMessage = "${action}_UNAVAILABLE",
+                        searchAttempted = true,
+                        searchError = true,
+                    )
+                    action in setOf("SERVER_RECOMMENDATIONS", "SERVER_REPLAY_EXACT", "SERVER_REPLAY_ALGORITHMIC") ->
+                        serverUiState.copy(
+                            stableMessage = "${action}_UNAVAILABLE",
+                            recommendationAttempted = true,
+                            recommendationError = true,
+                        )
+                    else -> serverUiState.copy(stableMessage = "${action}_UNAVAILABLE")
+                }
             }
             serverUiState = serverUiState.copy(busyAction = null)
         }
@@ -1077,6 +1147,7 @@ private fun OfflineLibraryScreen(
         playbackRepository = playbackRepository,
         playbackOwner = playbackOwner,
         searchResultStore = searchResultStore,
+        vaultSearchResultStore = vaultSearchResultStore,
         searchSessionId = { searchSessionId },
         setSearchSessionId = { searchSessionId = it },
         playlistDetail = { coreDetailState.playlist },
@@ -1100,7 +1171,9 @@ private fun OfflineLibraryScreen(
         coreState = coreProductState,
         generation = searchGeneration,
         resultStore = searchResultStore,
+        vaultResultStore = vaultSearchResultStore,
         searchRepository = searchRepository,
+        vaultProjector = vaultSearchProjector,
         state = SearchActionState(
             setCompleted = { searchCompleted = it },
             setSessionId = { searchSessionId = it },
@@ -1109,7 +1182,8 @@ private fun OfflineLibraryScreen(
             setError = { searchError = it },
             setVaultLoading = { vaultSearchLoading = it },
             setVaultError = { vaultSearchError = it },
-            setVaultResultCount = { vaultSearchResultCount = it },
+            setVaultResults = { vaultSearchResults = it },
+            setVaultSearched = { vaultSearchCompleted = it },
         ),
         reportError = { stableError = it },
     )
@@ -1148,6 +1222,11 @@ private fun OfflineLibraryScreen(
         binding?.serverProfileId?.value,
     )
     val searchContextIsCurrent = searchResultStore.matchesContext(
+        coreProductState.query,
+        coreProductState.scopes + SearchScope.Local,
+        binding?.serverProfileId?.value,
+    )
+    val visibleVaultSearchResults = vaultSearchResultStore.visibleFor(
         coreProductState.query,
         coreProductState.scopes + SearchScope.Local,
         binding?.serverProfileId?.value,
@@ -1334,7 +1413,17 @@ private fun OfflineLibraryScreen(
         vaultAvailable = binding != null,
         vaultSelected = SearchScope.Vault in coreProductState.scopes,
         vaultLoading = vaultSearchLoading && searchContextIsCurrent,
-        vaultResultCount = vaultSearchResultCount.takeIf { searchContextIsCurrent },
+        vaultResults = visibleVaultSearchResults.map { result ->
+            VaultSearchUiItem(
+                id = result.remoteLibraryEntryId,
+                title = result.title,
+                artist = result.artist,
+                source = result.source,
+                availability = result.availability,
+                playable = result.playable,
+            )
+        },
+        vaultSearched = vaultSearchCompleted && searchContextIsCurrent,
         vaultError = vaultSearchError && searchContextIsCurrent,
     )
     val coreDetailUiState = CoreProductDetailUiState(
@@ -1361,6 +1450,7 @@ private fun OfflineLibraryScreen(
         changeQuery = searchCommandActions.changeQuery,
         submitSearch = searchCommandActions.submit,
         playSearchResult = coreCommandActions.startSearchTrack,
+        playVaultSearchResult = coreCommandActions.startVaultSearchTrack,
         changeVaultScope = searchCommandActions.changeVaultScope,
         changeSearchAnchor = { coreProductState.searchListAnchor = it },
         addLocal = { activityLaunchers.addLocalAudio.launch(arrayOf("audio/*")) },
@@ -1389,11 +1479,70 @@ private fun OfflineLibraryScreen(
         playbackOwner = playbackOwner,
         currentTrackRefId = { playbackState.localUserTrackRefId },
         currentQueueEntryId = { playbackState.queueEntryId },
+        currentQueueSnapshotId = { playbackState.queueSnapshotId },
+        currentListeningEventId = { playbackState.listeningEventId },
         scope = scope,
         sliceRepository = sliceRepository,
         binding = { binding },
         reportError = { stableError = it },
         queueActions = queueEditorActions,
+    )
+    val historyActions = HistoryUiActions(
+        retry = { requestHistory(reset = true) },
+        loadMore = { requestHistory(reset = false) },
+        play = { event ->
+            coreCommandActions.startTrack(
+                event.localUserTrackRefId,
+                "ORGANIC",
+                "LIBRARY",
+                event.listeningEventId,
+            )
+        },
+        open = { event -> openCoreDetail(DetailTarget(DetailKind.Track, event.localUserTrackRefId)) },
+        openLibrary = { navigation.navigate(UiDestination.Library) },
+    )
+    val downloadsActions = DownloadsUiActions(
+        play = { download ->
+            coreCommandActions.startTrack(
+                download.localUserTrackRefId,
+                "ORGANIC",
+                "LIBRARY",
+                download.stableId,
+            )
+        },
+        cancel = { download ->
+            if (pendingDownloadIntentId == null) {
+                pendingDownloadIntentId = download.stableId
+                scope.launch {
+                    runCatching {
+                        downloadRepository.cancel(
+                            download.stableId,
+                            binding?.serverProfileId?.value,
+                            System.currentTimeMillis(),
+                        )
+                    }.onFailure { stableError = "DOWNLOAD_CANCEL_UNAVAILABLE" }
+                    pendingDownloadIntentId = null
+                }
+            }
+        },
+        retry = { download ->
+            if (pendingDownloadIntentId == null) {
+                pendingDownloadIntentId = download.stableId
+                scope.launch {
+                    runCatching {
+                        downloadRepository.retry(
+                            download.stableId,
+                            binding?.serverProfileId?.value,
+                            System.currentTimeMillis(),
+                        )
+                    }.onFailure { stableError = "DOWNLOAD_RETRY_UNAVAILABLE" }
+                    pendingDownloadIntentId = null
+                }
+            }
+        },
+        downloadSelected = {
+            selectedTrackRefId?.let(coreCommandActions.downloadTrack)
+        },
     )
     val currentTrackPreference = playbackState.localUserTrackRefId?.let { trackRefId ->
         libraryPreferences.firstOrNull { it.stableId == trackRefId }
@@ -1440,6 +1589,27 @@ private fun OfflineLibraryScreen(
                 }
             }
         },
+        controlJob = { action ->
+            val jobId = importJob?.importJobId
+            if (jobId != null && pendingImportControl == null) {
+                pendingImportControl = action
+                importControlError = false
+                scope.launch {
+                    runCatching {
+                        importRepository.controlJob(
+                            importJobId = jobId,
+                            localChangeId = LocalId.random().value,
+                            action = action,
+                            nowMs = System.currentTimeMillis(),
+                        )
+                    }.onFailure {
+                        importControlError = true
+                        stableError = "IMPORT_JOB_CONTROL_UNAVAILABLE"
+                    }
+                    pendingImportControl = null
+                }
+            }
+        },
     )
     val socialActions = SocialActions(
         refresh = { socialRuntime?.load() },
@@ -1483,6 +1653,8 @@ private fun OfflineLibraryScreen(
             items = importItems,
             selectedItem = selectedImportItem,
             candidates = importCandidates,
+            pendingControl = pendingImportControl,
+            controlError = importControlError,
         ),
         downloads = downloads,
         isProfileBound = binding != null,
@@ -1622,9 +1794,23 @@ private fun OfflineLibraryScreen(
                 currentTrackPreference?.disliked == true -> PlaybackPreferenceUiState.Disliked
                 else -> PlaybackPreferenceUiState.Neutral
             },
+            nowPlayingTaste = NowPlayingTasteUiState(
+                listenExcluded = playbackState.listenExcludedFromTaste,
+                sessionExcluded = playbackState.sessionExcludedFromTaste,
+                listenActionAvailable = playbackState.listeningEventId != null,
+                sessionActionAvailable = playbackState.queueSnapshotId != null,
+                errorCode = playbackState.tasteExclusionError,
+            ),
             sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
             stopAfterCurrentTrackActive = playbackState.stopAfterQueueEntryId == playbackState.queueEntryId,
             nowPlayingActions = nowPlayingRouteActions,
+            historyState = historyState,
+            historyActions = historyActions,
+            downloadsPendingIntentId = pendingDownloadIntentId,
+            canDownloadSelected = binding != null && libraryEntries.any {
+                it.localUserTrackRefId == selectedTrackRefId
+            },
+            downloadsActions = downloadsActions,
             legacyState = legacySecondaryState,
             legacyActions = legacySecondaryActions,
         ),
@@ -1883,6 +2069,11 @@ internal fun WaveFrontendScreen(
         Text(stringResource(if (state.isHost) R.string.wave_you_control else R.string.wave_host_controls))
         if (state.isHost) {
             Column {
+                WaveHostTransferControls(
+                    state = state,
+                    onTransfer = { target -> checkNotNull(coordinator).transferHost(target.deviceId) },
+                    onError = onError,
+                )
                 Button(
                     enabled = settings.serverBaseUrl != null && settings.m5Binding != null,
                     onClick = {
@@ -1978,6 +2169,55 @@ internal fun WaveFrontendScreen(
                 }
             }) { Text(stringResource(R.string.wave_leave_room)) }
         }
+    }
+}
+
+@Composable
+internal fun WaveHostTransferControls(
+    state: app.autplay.application.wave.WaveUiState,
+    onTransfer: suspend (app.autplay.application.wave.WaveHostTransferTarget) -> Unit,
+    onError: (String) -> Unit,
+) {
+    if (!state.isHost || state.hostTransferTargets.isEmpty()) return
+    val scope = rememberCoroutineScope()
+    var selected by remember(state.roomId) {
+        mutableStateOf<app.autplay.application.wave.WaveHostTransferTarget?>(null)
+    }
+    var pending by remember(state.roomId) { mutableStateOf(false) }
+    selected?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!pending) selected = null },
+            title = { Text(stringResource(R.string.wave_transfer_title)) },
+            text = { Text(stringResource(R.string.wave_transfer_confirm, target.deviceName)) },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag("wave-transfer-confirm"),
+                    enabled = !pending,
+                    onClick = {
+                        pending = true
+                        scope.launch {
+                            runCatching { onTransfer(target) }
+                                .onFailure { onError("WAVE_TRANSFER_UNAVAILABLE") }
+                            pending = false
+                            selected = null
+                        }
+                    },
+                ) { Text(stringResource(R.string.wave_transfer_action)) }
+            },
+            dismissButton = {
+                TextButton(enabled = !pending, onClick = { selected = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+    Text(stringResource(R.string.wave_transfer_targets), style = MaterialTheme.typography.titleMedium)
+    state.hostTransferTargets.forEachIndexed { index, target ->
+        OutlinedButton(
+            modifier = Modifier.testTag("wave-transfer-target-$index"),
+            enabled = !pending,
+            onClick = { selected = target },
+        ) { Text(stringResource(R.string.wave_transfer_to, target.deviceName)) }
     }
 }
 

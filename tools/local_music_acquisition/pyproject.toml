@@ -5,7 +5,7 @@ description = "Portable local-only Jamendo, Hitmo, yt-dlp, and Yandex acquisitio
 requires-python = ">=3.12,<3.15"
 dependencies = [
     "playwright==1.60.0",
-    "requests==2.34.2",
+    "requests[socks]==2.34.2",
     "yandex-music-downloader @ git+https://github.com/llistochek/yandex-music-downloader.git@9d33d6aaefae3cb882d02822e59cf0796c33a651",
     "yt-dlp[default,pin]==2026.8.19",
 ]
@@ -51,6 +51,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "RUF", "SIM", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["local_music_acquisition"]
 
 [tool.ruff.format]
 line-ending = "lf"

@@ -21,6 +21,9 @@ import app.autplay.domain.LocalId
 import java.util.UUID
 import kotlin.math.min
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -108,6 +111,8 @@ class SyncCoordinator(
             }
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), nowMs()))
             return true
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: IllegalStateException) {
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, error.message?.take(100), nowMs(), null))
             throw error
@@ -121,17 +126,47 @@ class SyncCoordinator(
         val candidates = database.withWriteTransaction { journal.nextPending(cursor.journalLineageId, now, PUSH_BATCH_LIMIT) }
         if (candidates.isEmpty()) return 0
         val lease = token()
+        return try {
+            pushLeased(binding, cursor, candidates, lease, now)
+        } catch (error: CancellationException) {
+            // Covers cancellation after the lease commit and during ACK application too.
+            // ACKED rows are excluded by the lease predicate; a lost ACK is safe to replay.
+            withContext(NonCancellable) {
+                kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    database.withWriteTransaction { journal.releaseCancelledLease(cursor.journalLineageId, lease) }
+                }
+            }
+            throw error
+        }
+    }
+
+    private suspend fun pushLeased(
+        binding: ClientEventBinding,
+        cursor: SyncCursorEntity,
+        candidates: List<OfflineJournalEventEntity>,
+        lease: String,
+        now: Long,
+    ): Int {
+        val journal = database.journalDao()
         val leased = database.withWriteTransaction {
             candidates.takeWhile { journal.lease(cursor.journalLineageId, it.eventId, lease, now + LEASE_MS) == 1 }
         }
         if (leased.isEmpty()) return 0
-        val response = try { transport.push(binding, leased) } catch (error: SessionRequiredException) {
+        val response = try { transport.push(binding, leased) } catch (error: CancellationException) {
+            throw error
+        } catch (error: SessionRequiredException) {
             database.withWriteTransaction {
                 leased.forEach { journal.releaseForSession(cursor.journalLineageId, it.eventId, lease) }
             }
             throw error
         } catch (error: Exception) {
-            database.withWriteTransaction { leased.forEach { retry(cursor, it, lease, "NETWORK_UNAVAILABLE", null) } }
+            database.withWriteTransaction {
+                if (error is IllegalStateException && error.message in setOf("SYNC_PROFILE_NOT_ACTIVE", "SYNC_NETWORK_POLICY_BLOCKED")) {
+                    journal.releaseCancelledLease(cursor.journalLineageId, lease)
+                } else {
+                    leased.forEach { retry(cursor, it, lease, "NETWORK_UNAVAILABLE", null) }
+                }
+            }
             throw error
         }
         val acknowledgements = response.associateBy { it.eventId }

@@ -14,6 +14,41 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class OkHttpSyncTransportRefreshTest {
+    @Test fun repeatedUnauthorizedIsTerminalAfterExactlyOneRefresh() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(401))
+            server.enqueue(MockResponse().setBody("{\"access_token\":\"fresh-access\",\"refresh_token\":\"fresh-refresh\"}"))
+            server.enqueue(MockResponse().setResponseCode(401))
+            server.start()
+            val store = MutableCredentialStore(SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope("stale-access", "valid-refresh", 0),
+            ))
+            val error = runCatching {
+                OkHttpSyncTransport(server.url("/api/v1").toString(), store).pull(BINDING, "before")
+            }.exceptionOrNull()
+            org.junit.Assert.assertTrue(error is app.autplay.data.security.SessionRequiredException)
+            assertEquals(3, server.requestCount)
+        }
+    }
+
+    @Test fun bindingChangeBlocksNextRequestWithoutReadingCredentialsOrSendingHttp() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("{\"next_cursor\":\"next\",\"has_more\":false,\"events\":[]}"))
+            server.start()
+            var active = true
+            val store = MutableCredentialStore(SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope("valid-access", "valid-refresh", 0),
+            ))
+            val transport = OkHttpSyncTransport(server.url("/api/v1").toString(), store,
+                beforeRequest = { check(active) { "SYNC_PROFILE_NOT_ACTIVE" } },
+            )
+            transport.pull(BINDING, "before")
+            active = false
+            assertEquals("SYNC_PROFILE_NOT_ACTIVE", runCatching { transport.pull(BINDING, "next") }.exceptionOrNull()?.message)
+            assertEquals(1, server.requestCount)
+        }
+    }
+
     @Test fun pullRefreshesRejectedAccessAndRetriesSameRequestOnce() = runBlocking {
         val server = MockWebServer()
         server.enqueue(MockResponse().setResponseCode(401))

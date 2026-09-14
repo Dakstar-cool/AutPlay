@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ..matching import SEARCH_LIMIT
 from ..models import AcquiredArtifact, PlaylistItem, ProviderFailure, ProviderMiss
 from . import hitmo
 
@@ -16,6 +17,7 @@ class HitmoProvider:
 
     name = "hitmo"
     requires_rights_confirmation = True
+    requires_proxy = False
 
     def __init__(
         self,
@@ -34,7 +36,7 @@ class HitmoProvider:
                 title=item.title,
                 artist=item.artist,
                 download_dir=output_directory,
-                result_limit=5,
+                result_limit=SEARCH_LIMIT,
                 timeout_seconds=self._timeout_seconds,
                 max_bytes=self._max_bytes,
                 download=True,
@@ -69,4 +71,12 @@ class HitmoProvider:
             or re.fullmatch(r"sha256:[0-9a-f]{12}", artifact_ref) is None
         ):
             raise ProviderFailure(self.name, "result_invalid")
-        return AcquiredArtifact(self.name, artifact_ref)
+        expected = result.get("expected_duration_seconds")
+        return AcquiredArtifact(
+            self.name,
+            artifact_ref,
+            identity_version="recording-match-v2",
+            expected_duration_seconds=float(expected)
+            if isinstance(expected, (int, float))
+            else None,
+        )

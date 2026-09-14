@@ -113,6 +113,24 @@ class LibraryVerticalSliceRepository(
         }
     }
 
+    /** Playback feedback changes Like/Dislike only; durable track-level Taste settings stay intact. */
+    suspend fun setPlaybackPreference(
+        binding: ClientEventBinding?,
+        trackRefId: LocalId,
+        changeId: LocalId,
+        preference: String,
+        attributionJson: String?,
+        now: Long,
+    ): SliceMutationResult = setPreference(
+        binding = binding,
+        trackRefId = trackRefId,
+        changeId = changeId,
+        preference = preference,
+        excluded = database.libraryDao().preference(trackRefId.value)?.excludedFromTaste ?: false,
+        attributionJson = attributionJson,
+        now = now,
+    )
+
     suspend fun createPlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult {
         val metadata = validatedPlaylistMetadata(name, description)
         return mutate(binding, changeId, "PLAYLIST_CREATED", "PLAYLIST", playlistId, now, "{\"description\":${metadata.description?.let(::q) ?: "null"},\"name\":${q(metadata.name)}}") { sequence, bound ->

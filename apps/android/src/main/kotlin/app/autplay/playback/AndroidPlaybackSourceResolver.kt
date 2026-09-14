@@ -51,7 +51,7 @@ class AndroidPlaybackSourceResolver(
         val localStates = database.localAudioDao().statesForPlayback(trackRefId.value, MAX_SOURCES)
         var localFailure: PlaybackUnavailableReason? = null
         for (state in localStates) {
-            val inspection = inspector.inspect(state.contentUri)
+            val inspection = inspector.inspectForPlayback(state.contentUri) ?: continue
             if (inspection.status == ContentUriStatus.AVAILABLE) {
                 markInspected(state, "AVAILABLE", nowMs)
                 return AndroidSourceResolution.Available(
