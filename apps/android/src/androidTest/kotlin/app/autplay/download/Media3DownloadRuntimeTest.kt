@@ -1,7 +1,10 @@
 package app.autplay.download
 
+import android.app.ActivityManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
@@ -15,6 +18,8 @@ import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
+import androidx.media3.exoplayer.scheduler.PlatformScheduler
+import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.AutPlayRuntime
@@ -23,7 +28,9 @@ import app.autplay.data.local.entity.UserTrackRefEntity
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -39,7 +46,8 @@ import org.junit.runner.RunWith
 @UnstableApi
 @RunWith(AndroidJUnit4::class)
 class Media3DownloadRuntimeTest {
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val context = instrumentation.targetContext
 
     @Test fun interruptedProgressiveDownloadResumesFromCachedRangeAndCompletes() {
         val directory = File(context.cacheDir, "p08-download-${System.nanoTime()}").apply { mkdirs() }
@@ -47,32 +55,40 @@ class Media3DownloadRuntimeTest {
         val cache = SimpleCache(directory, NoOpCacheEvictor(), databaseProvider)
         val sourceFactory = InterruptingDataSourceFactory(ByteArray(64 * 1024) { (it % 251).toByte() })
         val executor = Executors.newFixedThreadPool(2)
-        val manager = DownloadManager(context, databaseProvider, cache, sourceFactory, executor)
+        val manager = onMain {
+            DownloadManager(context, databaseProvider, cache, sourceFactory, executor).apply {
+                setRequirements(Requirements(0))
+            }
+        }
         val cacheKey = "range-resume-${UUID.randomUUID()}"
         val terminal = CountDownLatch(1)
         val result = AtomicReference<Download>()
-        manager.addListener(object : DownloadManager.Listener {
-            override fun onDownloadChanged(manager: DownloadManager, download: Download, finalException: Exception?) {
-                if (download.state == Download.STATE_COMPLETED || download.state == Download.STATE_FAILED) {
-                    result.set(download)
-                    terminal.countDown()
+        onMain {
+            manager.addListener(object : DownloadManager.Listener {
+                override fun onDownloadChanged(manager: DownloadManager, download: Download, finalException: Exception?) {
+                    if (download.state == Download.STATE_COMPLETED || download.state == Download.STATE_FAILED) {
+                        result.set(download)
+                        terminal.countDown()
+                    }
                 }
-            }
-        })
+            })
+        }
         try {
-            manager.addDownload(
-                DownloadRequest.Builder(cacheKey, Uri.parse("test://audio/range-resume"))
-                    .setMimeType(MimeTypes.AUDIO_MPEG)
-                    .setCustomCacheKey(cacheKey)
-                    .build(),
-            )
-            manager.resumeDownloads()
+            onMain {
+                manager.addDownload(
+                    DownloadRequest.Builder(cacheKey, Uri.parse("test://audio/range-resume"))
+                        .setMimeType(MimeTypes.AUDIO_MPEG)
+                        .setCustomCacheKey(cacheKey)
+                        .build(),
+                )
+                manager.resumeDownloads()
+            }
             assertTrue("Media3 download did not terminate", terminal.await(30, TimeUnit.SECONDS))
             assertEquals(Download.STATE_COMPLETED, result.get().state)
-            assertTrue("Expected a resumed non-zero range", sourceFactory.openPositions.any { it > 0 })
+            assertTrue("Expected a resumed non-zero range", sourceFactory.openedAtNonZeroPosition)
             assertEquals(sourceFactory.payloadSize.toLong(), cache.getCachedBytes(cacheKey, 0, sourceFactory.payloadSize.toLong()))
         } finally {
-            manager.release()
+            onMain { manager.release() }
             executor.shutdownNow()
             cache.release()
             databaseProvider.close()
@@ -91,31 +107,46 @@ class Media3DownloadRuntimeTest {
         )
         assertNotNull(service)
         assertTrue(service.enabled)
+        val schedulerService = context.packageManager.getServiceInfo(
+            ComponentName(context, PlatformScheduler.PlatformSchedulerService::class.java),
+            0,
+        )
+        assertTrue(schedulerService.enabled)
+        assertTrue(schedulerService.exported)
+        assertEquals("android.permission.BIND_JOB_SERVICE", schedulerService.permission)
+        assertTrue(
+            context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+                .requestedPermissions.orEmpty()
+                .contains(android.Manifest.permission.RECEIVE_BOOT_COMPLETED),
+        )
     }
 
     @Test fun realDownloadServiceReconcilesCompletionAfterServiceRecreation() = runBlocking {
-        context.stopService(Intent(context, AutPlayDownloadService::class.java))
+        stopDownloadServiceAndClearHelper()
         val directory = File(context.cacheDir, "p08-service-download-${System.nanoTime()}").apply { mkdirs() }
         val databaseProvider = StandaloneDatabaseProvider(context)
         val cache = SimpleCache(directory, NoOpCacheEvictor(), databaseProvider)
         val sourceFactory = InterruptingDataSourceFactory(ByteArray(64 * 1024) { (it % 239).toByte() })
         val executor = Executors.newFixedThreadPool(2)
-        val manager = DownloadManager(context, databaseProvider, cache, sourceFactory, executor).apply {
-            maxParallelDownloads = 1
+        val manager = onMain {
+            DownloadManager(context, databaseProvider, cache, sourceFactory, executor).apply {
+                maxParallelDownloads = 1
+                setRequirements(Requirements(0))
+            }
         }
         val streamDirectory = File(context.cacheDir, "p08-service-stream-${System.nanoTime()}").apply { mkdirs() }
         val streamCache = SimpleCache(streamDirectory, NoOpCacheEvictor(), databaseProvider)
         val replacement = MediaDownloadComponents.State(databaseProvider, cache, streamCache, manager, executor)
         val previous = MediaDownloadComponents.replaceForTests(replacement)
         val database = AutPlayRuntime.database(context)
-        val trackId = UUID(0, 81).toString()
-        val intentId = UUID(0, 82).toString()
+        val trackId = UUID.randomUUID().toString()
+        val intentId = UUID.randomUUID().toString()
         database.libraryDao().upsertTrackRef(track(trackId))
         database.localAudioDao().upsertDownloadIntent(
             DownloadIntentEntity(
                 downloadIntentId = intentId,
                 localUserTrackRefId = trackId,
-                serverAudioVariantId = UUID(0, 83).toString(),
+                serverAudioVariantId = UUID.randomUUID().toString(),
                 media3DownloadId = intentId,
                 desiredStorageClass = "PROACTIVE_CACHE",
                 qualityPolicy = "DIRECT_ORIGINAL",
@@ -125,16 +156,20 @@ class Media3DownloadRuntimeTest {
                 createdAtMs = 1,
                 updatedAtMs = 1,
                 completedAtMs = null,
-                serverProfileId = UUID(0, 84).toString(),
+                serverProfileId = UUID.randomUUID().toString(),
                 lastAccessedAtMs = null,
             ),
         )
         val terminal = CountDownLatch(1)
-        manager.addListener(object : DownloadManager.Listener {
-            override fun onDownloadChanged(manager: DownloadManager, download: Download, finalException: Exception?) {
-                if (download.state == Download.STATE_COMPLETED) terminal.countDown()
-            }
-        })
+        onMain {
+            manager.addListener(object : DownloadManager.Listener {
+                override fun onDownloadChanged(manager: DownloadManager, download: Download, finalException: Exception?) {
+                    if (download.request.id == intentId && download.state == Download.STATE_COMPLETED) {
+                        terminal.countDown()
+                    }
+                }
+            })
+        }
         try {
             val request = DownloadRequest.Builder(intentId, Uri.parse("test://audio/service"))
                 .setMimeType(MimeTypes.AUDIO_MPEG)
@@ -142,7 +177,7 @@ class Media3DownloadRuntimeTest {
                 .build()
             DownloadService.sendAddDownload(context, AutPlayDownloadService::class.java, request, false)
             assertTrue("expected injected interruption", sourceFactory.interrupted.await(10, TimeUnit.SECONDS))
-            context.stopService(Intent(context, AutPlayDownloadService::class.java))
+            stopDownloadServiceAndClearHelper()
             // This is the public Media3 service command path used after a service/process restart.
             // The test never resumes the DownloadManager directly or completes the download itself.
             DownloadService.sendResumeDownloads(context, AutPlayDownloadService::class.java, false)
@@ -152,9 +187,9 @@ class Media3DownloadRuntimeTest {
             }
             assertEquals("COMPLETED", database.localAudioDao().downloadIntent(intentId)?.state)
         } finally {
-            context.stopService(Intent(context, AutPlayDownloadService::class.java))
+            stopDownloadServiceAndClearHelper()
             MediaDownloadComponents.replaceForTests(previous)
-            manager.release()
+            onMain { manager.release() }
             executor.shutdownNow()
             streamCache.release()
             cache.release()
@@ -170,6 +205,24 @@ class Media3DownloadRuntimeTest {
             android.os.SystemClock.sleep(50)
         }
         assertTrue("Timed out waiting for $label", condition())
+    }
+
+    private fun <T> onMain(block: () -> T): T {
+        val task = FutureTask(Callable(block))
+        instrumentation.runOnMainSync(task)
+        return task.get()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopDownloadServiceAndClearHelper() {
+        context.stopService(Intent(context, AutPlayDownloadService::class.java))
+        await("download service shutdown") {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            manager.getRunningServices(Int.MAX_VALUE).none {
+                it.service.className == AutPlayDownloadService::class.java.name
+            }
+        }
+        DownloadService.clearDownloadManagerHelpers()
     }
 
     private fun track(id: String) = UserTrackRefEntity(
@@ -194,6 +247,7 @@ class Media3DownloadRuntimeTest {
     private class InterruptingDataSourceFactory(private val payload: ByteArray) : DataSource.Factory {
         val payloadSize: Int get() = payload.size
         val openPositions = mutableListOf<Long>()
+        val openedAtNonZeroPosition: Boolean get() = synchronized(openPositions) { openPositions.any { it > 0 } }
         val interrupted = CountDownLatch(1)
         private val failurePending = AtomicBoolean(true)
 

@@ -21,10 +21,8 @@ class MainAdaptiveShellChromeTest {
     }
 
     @Test
-    fun statusIconsFollowTheRouteSurfaceInTheLightTheme() {
-        assertTrue(shouldUseDarkStatusBarIcons(UiDestination.Home, lightTheme = true))
-        assertFalse(shouldUseDarkStatusBarIcons(UiDestination.NowPlaying, lightTheme = true))
-        assertTrue(shouldUseDarkStatusBarIcons(UiDestination.Library, lightTheme = true))
-        assertFalse(shouldUseDarkStatusBarIcons(UiDestination.Library, lightTheme = false))
+    fun statusIconsFollowTheSurfaceThemeIncludingThePlayer() {
+        assertTrue(shouldUseDarkStatusBarIcons(lightTheme = true))
+        assertFalse(shouldUseDarkStatusBarIcons(lightTheme = false))
     }
 }

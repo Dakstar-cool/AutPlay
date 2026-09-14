@@ -164,6 +164,13 @@ public fun NowPlayingScreen(
     onCancelSleepTimer: () -> Unit = {},
     queueState: QueueEditorUiState = QueueEditorUiState(),
     queueActions: QueueEditorUiActions = QueueEditorUiActions(),
+    listenExcludedFromTaste: Boolean = false,
+    sessionExcludedFromTaste: Boolean = false,
+    listenTasteActionAvailable: Boolean = false,
+    sessionTasteActionAvailable: Boolean = false,
+    tasteExclusionError: String? = null,
+    onSetCurrentListenTasteExcluded: (Boolean) -> Unit = {},
+    onSetSessionTasteExcluded: (Boolean) -> Unit = {},
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -230,8 +237,8 @@ public fun NowPlayingScreen(
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        palette.first().copy(alpha = 0.46f),
-                        palette.last().copy(alpha = 0.20f),
+                        palette.first().copy(alpha = 0.12f),
+                        palette.last().copy(alpha = 0.05f),
                         MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
                         MaterialTheme.colorScheme.background,
                     ),
@@ -310,6 +317,15 @@ public fun NowPlayingScreen(
                     },
                 )
             }
+            TasteExclusionControls(
+                listenExcluded = listenExcludedFromTaste,
+                sessionExcluded = sessionExcludedFromTaste,
+                listenActionAvailable = listenTasteActionAvailable,
+                sessionActionAvailable = sessionTasteActionAvailable,
+                errorCode = tasteExclusionError,
+                onSetListenExcluded = onSetCurrentListenTasteExcluded,
+                onSetSessionExcluded = onSetSessionTasteExcluded,
+            )
             PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
             DirectControlMessage(state)
             Row(
@@ -368,6 +384,83 @@ public fun NowPlayingScreen(
             FutureWaveByTrackCard()
             Spacer(Modifier.height(12.dp))
         }
+    }
+}
+
+@Composable
+private fun TasteExclusionControls(
+    listenExcluded: Boolean,
+    sessionExcluded: Boolean,
+    listenActionAvailable: Boolean,
+    sessionActionAvailable: Boolean,
+    errorCode: String?,
+    onSetListenExcluded: (Boolean) -> Unit,
+    onSetSessionExcluded: (Boolean) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Text(stringResource(R.string.player_taste_exclusion_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                stringResource(R.string.player_taste_exclusion_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = AutPlayTokens.colors.mutedText,
+            )
+            TasteExclusionRow(
+                label = stringResource(R.string.player_exclude_current_listen),
+                checked = listenExcluded,
+                enabled = listenActionAvailable,
+                testTag = "taste-exclude-listen",
+                onCheckedChange = onSetListenExcluded,
+            )
+            TasteExclusionRow(
+                label = stringResource(R.string.player_exclude_session),
+                checked = sessionExcluded,
+                enabled = sessionActionAvailable,
+                testTag = "taste-exclude-session",
+                onCheckedChange = onSetSessionExcluded,
+            )
+            if (!listenActionAvailable) {
+                Text(
+                    stringResource(R.string.player_taste_listen_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AutPlayTokens.colors.mutedText,
+                )
+            }
+            if (errorCode != null) {
+                Text(
+                    stringResource(R.string.player_taste_exclusion_error),
+                    modifier = Modifier.testTag("taste-exclusion-error"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TasteExclusionRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    testTag: String,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            modifier = Modifier.testTag(testTag),
+        )
     }
 }
 

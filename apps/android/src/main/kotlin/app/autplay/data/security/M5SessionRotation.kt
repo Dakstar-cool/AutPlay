@@ -3,6 +3,7 @@ package app.autplay.data.security
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.data.network.withAutPlayRedirectPolicy
+import app.autplay.data.network.readCancellable
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Duration
@@ -81,7 +82,10 @@ class M5SessionRotationClient(
             val response = Request.Builder().url(context.apiOrigin.trimEnd('/') + "/api/v1/account/sessions/rotate")
                 .header("Accept", "application/json").header("Cache-Control", "no-store").header("Pragma", "no-cache")
                 .post(request.toRequestBody(JSON)).build()
-            client.newCall(response).execute().use { http ->
+            client.newCall(response).readCancellable { http ->
+                if (http.code == 429 || http.code in 500..599) {
+                    throw java.io.IOException("SESSION_ROTATION_UNAVAILABLE")
+                }
                 if (!http.header("Cache-Control").orEmpty().contains("no-store") || !http.header("Pragma").orEmpty().contains("no-cache")) throw SessionRequiredException()
                 val source = http.body.source(); if (source.request(MAX_RESPONSE_BYTES + 1L)) throw SessionRequiredException()
                 val root = Json.parseToJsonElement(source.readUtf8()).jsonObject

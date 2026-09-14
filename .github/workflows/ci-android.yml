@@ -89,6 +89,9 @@ jobs:
           uv run --project server --frozen playwright install --with-deps chromium
           uv run --project tools/local_music_acquisition --frozen playwright install --with-deps firefox
 
+      - name: Install pinned ffmpeg and ffprobe
+        run: bash scripts/install-ci-ffmpeg.sh
+
       - name: Run canonical Android host gate
         run: bash scripts/check.sh
 

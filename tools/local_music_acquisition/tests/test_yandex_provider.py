@@ -6,10 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from yandex_music import Artist, Track
+
 from local_music_acquisition.models import PlaylistItem, ProviderFailure, ProviderMiss
 from local_music_acquisition.providers import yandex_provider
 from local_music_acquisition.providers.yandex_provider import YandexProvider
-from yandex_music import Artist, Track
 
 
 def _track(artist: str = "Artist", title: str = "Title", version: str | None = None) -> Track:

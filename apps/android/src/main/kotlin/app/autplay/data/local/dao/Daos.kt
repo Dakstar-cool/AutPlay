@@ -62,6 +62,7 @@ interface LibraryDao {
     @Query("SELECT * FROM library_entry WHERE server_profile_id = 'legacy-unscoped' ORDER BY added_at_ms DESC LIMIT :limit") fun legacyEntries(limit: Int): Flow<List<LibraryEntryEntity>>
     @Query("SELECT * FROM user_track_ref WHERE local_user_track_ref_id = :localId") suspend fun trackRef(localId: String): UserTrackRefEntity?
     @Query("SELECT * FROM user_track_ref WHERE server_profile_id = :profileId AND server_user_track_ref_id = :serverId LIMIT 1") suspend fun trackRefByServerId(profileId: String, serverId: String): UserTrackRefEntity?
+    @Query("SELECT * FROM user_track_ref WHERE server_profile_id = :profileId AND server_user_track_ref_id IN (:serverIds) AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC, local_user_track_ref_id ASC LIMIT :limit") suspend fun trackRefsByServerIds(profileId: String, serverIds: List<String>, limit: Int): List<UserTrackRefEntity>
     @Query("SELECT * FROM user_track_ref WHERE server_profile_id = :profileId AND server_recording_id = :recordingId AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT 1") suspend fun trackRefByRecording(profileId: String, recordingId: String): UserTrackRefEntity?
     @Query("SELECT u.* FROM user_track_ref u WHERE u.server_profile_id = :profileId AND u.server_recording_id IN (:recordingIds) AND u.deleted_at_ms IS NULL AND u.local_user_track_ref_id = (SELECT candidate.local_user_track_ref_id FROM user_track_ref candidate WHERE candidate.server_profile_id = u.server_profile_id AND candidate.server_recording_id = u.server_recording_id AND candidate.deleted_at_ms IS NULL ORDER BY candidate.updated_at_ms DESC, candidate.local_user_track_ref_id ASC LIMIT 1) ORDER BY u.updated_at_ms DESC, u.local_user_track_ref_id ASC LIMIT :limit") suspend fun trackRefsByServerRecordings(profileId: String, recordingIds: List<String>, limit: Int): List<UserTrackRefEntity>
     @Query("SELECT * FROM user_track_ref WHERE local_user_track_ref_id IN (:localIds) LIMIT :limit") suspend fun trackRefs(localIds: List<String>, limit: Int): List<UserTrackRefEntity>
@@ -277,7 +278,13 @@ interface QueueDao {
         sessionServerProfileId: String?,
         nowMs: Long,
     ): Int
-    @Query("UPDATE queue_snapshot SET current_entry_id = :entryId, current_position_ms = :positionMs, active_listening_event_id = NULL, active_session_started_at_ms = NULL, active_session_start_position_ms = NULL, active_session_observed_played_ms = NULL, active_session_user_id = NULL, active_session_device_id = NULL, active_session_server_profile_id = NULL, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_listening_event_id = :eventId")
+    @Query("UPDATE queue_snapshot SET active_listen_excluded_from_taste = 0, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")
+    suspend fun beginActiveListenTasteExclusion(snapshotId: String, nowMs: Long): Int
+    @Query("UPDATE queue_snapshot SET active_listen_excluded_from_taste = :excluded, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE' AND current_entry_id = :entryId AND active_listening_event_id = :eventId")
+    suspend fun setActiveListenTasteExclusion(snapshotId: String, entryId: String, eventId: String, excluded: Boolean, nowMs: Long): Int
+    @Query("UPDATE queue_snapshot SET session_excluded_from_taste = :excluded, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")
+    suspend fun setSessionTasteExclusion(snapshotId: String, excluded: Boolean, nowMs: Long): Int
+    @Query("UPDATE queue_snapshot SET current_entry_id = :entryId, current_position_ms = :positionMs, active_listening_event_id = NULL, active_session_started_at_ms = NULL, active_session_start_position_ms = NULL, active_session_observed_played_ms = NULL, active_session_user_id = NULL, active_session_device_id = NULL, active_session_server_profile_id = NULL, active_listen_excluded_from_taste = 0, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_listening_event_id = :eventId")
     suspend fun clearFinalizedSession(snapshotId: String, eventId: String, entryId: String, positionMs: Long, nowMs: Long): Int
 }
 
@@ -377,6 +384,10 @@ interface HistoryDao {
     @Query("SELECT * FROM listening_event ORDER BY started_at_ms DESC LIMIT :limit") fun recent(limit: Int): Flow<List<ListeningEventEntity>>
     @Query("SELECT * FROM listening_event WHERE server_profile_id = :profileId ORDER BY started_at_ms DESC LIMIT :limit") fun recentForProfile(profileId: String, limit: Int): Flow<List<ListeningEventEntity>>
     @Query("SELECT * FROM listening_event WHERE server_profile_id = 'legacy-unscoped' ORDER BY started_at_ms DESC LIMIT :limit") fun recentLegacy(limit: Int): Flow<List<ListeningEventEntity>>
+    @Query("SELECT e.listening_event_id AS listeningEventId, e.local_user_track_ref_id AS localUserTrackRefId, u.raw_title AS title, u.raw_artist AS artist, e.started_at_ms AS startedAtMs, e.played_ms AS playedMs, e.track_duration_ms AS trackDurationMs, e.completion_ratio AS completionRatio, e.event_origin AS eventOrigin, e.context AS context, e.excluded_from_taste AS excludedFromTaste FROM listening_event e JOIN user_track_ref u ON u.local_user_track_ref_id = e.local_user_track_ref_id WHERE e.server_profile_id = :profileId ORDER BY e.started_at_ms DESC, e.listening_event_id DESC LIMIT :limit")
+    suspend fun presentationFirstPage(profileId: String, limit: Int): List<HistoryPresentationRow>
+    @Query("SELECT e.listening_event_id AS listeningEventId, e.local_user_track_ref_id AS localUserTrackRefId, u.raw_title AS title, u.raw_artist AS artist, e.started_at_ms AS startedAtMs, e.played_ms AS playedMs, e.track_duration_ms AS trackDurationMs, e.completion_ratio AS completionRatio, e.event_origin AS eventOrigin, e.context AS context, e.excluded_from_taste AS excludedFromTaste FROM listening_event e JOIN user_track_ref u ON u.local_user_track_ref_id = e.local_user_track_ref_id WHERE e.server_profile_id = :profileId AND (e.started_at_ms < :beforeStartedAtMs OR (e.started_at_ms = :beforeStartedAtMs AND e.listening_event_id < :beforeEventId)) ORDER BY e.started_at_ms DESC, e.listening_event_id DESC LIMIT :limit")
+    suspend fun presentationNextPage(profileId: String, beforeStartedAtMs: Long, beforeEventId: String, limit: Int): List<HistoryPresentationRow>
 
     @Query(
         """
@@ -461,6 +472,20 @@ interface HistoryDao {
         limit: Int,
     ): Flow<List<OwnerTopArtistProjection>>
 }
+
+data class HistoryPresentationRow(
+    val listeningEventId: String,
+    val localUserTrackRefId: String,
+    val title: String?,
+    val artist: String?,
+    val startedAtMs: Long,
+    val playedMs: Long,
+    val trackDurationMs: Long?,
+    val completionRatio: Double?,
+    val eventOrigin: String,
+    val context: String,
+    val excludedFromTaste: Boolean,
+)
 
 data class OwnerStatisticsWindowProjection(
     @androidx.room3.ColumnInfo(name = "play_session_count") val playSessionCount: Long,
@@ -548,6 +573,9 @@ interface JournalDao {
 
     @Query("UPDATE offline_journal_event SET state = 'PENDING', attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, next_attempt_at_ms = NULL, last_error_code = 'SESSION_REQUIRED', lease_token = NULL, lease_expires_at_ms = NULL WHERE journal_lineage_id = :lineageId AND event_id = :eventId AND state = 'SENDING' AND lease_token = :leaseToken")
     suspend fun releaseForSession(lineageId: String, eventId: String, leaseToken: String): Int
+
+    @Query("UPDATE offline_journal_event SET state = 'PENDING', attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, next_attempt_at_ms = NULL, last_error_code = NULL, lease_token = NULL, lease_expires_at_ms = NULL WHERE journal_lineage_id = :lineageId AND state = 'SENDING' AND lease_token = :leaseToken")
+    suspend fun releaseCancelledLease(lineageId: String, leaseToken: String): Int
 
     @Query("SELECT * FROM offline_journal_event WHERE journal_lineage_id = :lineageId AND device_sequence >= :fromSequence AND state IN ('ACKED', 'DEAD_LETTER') ORDER BY device_sequence ASC LIMIT :limit")
     suspend fun compactable(lineageId: String, fromSequence: Long, limit: Int): List<OfflineJournalEventEntity>

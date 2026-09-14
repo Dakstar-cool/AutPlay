@@ -29,6 +29,7 @@ class JamendoProvider:
 
     name = "jamendo"
     requires_rights_confirmation = False
+    requires_proxy = False
 
     def __init__(
         self,

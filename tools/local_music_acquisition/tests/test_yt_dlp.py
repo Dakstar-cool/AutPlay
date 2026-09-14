@@ -7,8 +7,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from local_music_acquisition.models import PlaylistItem, ProviderFailure, ProviderMiss
-from local_music_acquisition.providers._yt_dlp_worker import _find_exact
+from local_music_acquisition.providers._yt_dlp_worker import _find_exact, _find_with_metadata
 from local_music_acquisition.providers.yt_dlp import (
     YtDlpProvider,
     _terminate_process_tree,
@@ -32,12 +33,58 @@ def test_worker_accepts_only_bounded_youtube_video_identity() -> None:
     assert _find_exact(entries, artist="Artist", title="Song") == entries[2]
 
 
+def test_flat_search_ie_key_and_twentieth_candidate_are_supported() -> None:
+    entries = [{"id": "abcdefghijk", "ie_key": "Youtube", "title": "Other - Song"}] * 19
+    match = {"id": "12345678901", "ie_key": "Youtube", "title": "Artist - Song (Official Audio)"}
+    assert _find_exact([*entries, match], artist="Artist", title="Song") == match
+    assert _find_exact(entries + entries + [match], artist="Artist", title="Song") is None
+    assert _find_exact([match | {"ie_key": "YoutubeFake"}], artist="Artist", title="Song") is None
+
+
 def test_provider_maps_exact_miss(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     process = _FakeProcess(json.dumps({"status": "miss", "code": "exact_match_not_found"}))
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
 
     with pytest.raises(ProviderMiss, match=r"yt_dlp\.exact_match_not_found"):
         YtDlpProvider().acquire(PlaylistItem(1, "Artist", "Title"), tmp_path)
+
+
+def test_title_only_verified_channel_requires_full_recording_tags() -> None:
+    entry = {
+        "id": "abcdefghijk",
+        "ie_key": "Youtube",
+        "title": "Song",
+        "uploader": "Artist",
+        "channel_is_verified": True,
+    }
+
+    class Metadata:
+        def __init__(self, artist: str) -> None:
+            self.artist = artist
+            self.calls = 0
+
+        def extract_info(self, url, *, download):
+            assert url == "https://www.youtube.com/watch?v=abcdefghijk"
+            assert download is False
+            self.calls += 1
+            return {
+                "id": "abcdefghijk",
+                "extractor_key": "Youtube",
+                "artist": self.artist,
+                "track": "Song",
+                "duration": 233,
+            }
+
+    good = Metadata("Artist")
+    assert _find_with_metadata(good, [entry], artist="Artist", title="Song")["duration"] == 233
+    assert _find_with_metadata(Metadata("Other"), [entry], artist="Artist", title="Song") is None
+    assert (
+        _find_with_metadata(
+            good, [entry | {"channel_is_verified": False}], artist="Artist", title="Song"
+        )
+        is None
+    )
+    assert good.calls == 1
 
 
 def test_provider_maps_worker_failure_without_leaking_stderr(

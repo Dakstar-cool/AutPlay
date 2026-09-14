@@ -34,6 +34,7 @@ class _FixtureHandler(http.server.BaseHTTPRequestHandler):
     overlay_submit = False
     overlay_download = False
     prevent_search_navigation = False
+    empty_results = False
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlsplit(self.path)
@@ -93,13 +94,17 @@ class _FixtureHandler(http.server.BaseHTTPRequestHandler):
             if self.overlay_submit
             else ""
         )
+        heading = "Треки"
+        if query and self.empty_results:
+            rows = ""
+            heading = "По вашему запросу ничего не найдено"
         body = (
             "<!doctype html><html><body>"
             f"<form method='get'{form_style}>"
             "<input type='search' name='q' placeholder='Поиск'>"
             f"<button type='submit'{search_handler}>Search</button>{overlay}</form>"
             "<aside><a class='download' href='/download/advert.mp3'>Скачать</a></aside>"
-            f"<main><h2>Треки</h2>{rows}</main></body></html>"
+            f"<main><h2>{heading}</h2>{rows}</main></body></html>"
         ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -121,6 +126,7 @@ def _fixture_site(
     overlay_submit: bool = False,
     overlay_download: bool = False,
     prevent_search_navigation: bool = False,
+    empty_results: bool = False,
 ) -> Iterator[str]:
     handler = type(
         "FixtureHandler",
@@ -133,6 +139,7 @@ def _fixture_site(
             "overlay_submit": overlay_submit,
             "overlay_download": overlay_download,
             "prevent_search_navigation": prevent_search_navigation,
+            "empty_results": empty_results,
         },
     )
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -237,6 +244,23 @@ def test_real_download_requires_rights_confirmation(tool: ModuleType, tmp_path: 
     with pytest.raises(RuntimeError, match="rights_confirmation_required"):
         tool.download_hitmo_tracks(download=True)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_explicit_empty_results_are_a_miss_not_provider_failure(
+    tool: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_run(tool, monkeypatch, tmp_path / "evidence")
+    with _fixture_site(2, empty_results=True) as url:
+        monkeypatch.setattr(tool, "_START_URL", url)
+        result = tool.download_hitmo_tracks(
+            artist="Missing Artist",
+            title="Missing Track",
+            download=False,
+            download_dir=tmp_path / "music",
+            timeout_seconds=5,
+        )
+    assert result["results"][0]["status"] == "exact_match_not_found"
+    assert result["downloaded"] == 0
 
 
 @pytest.mark.parametrize(

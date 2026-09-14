@@ -69,7 +69,7 @@ class RoutingPlaybackDataSource(
 
 @UnstableApi
 object PlaybackMediaSourceFactory {
-    fun create(context: Context): DefaultMediaSourceFactory {
+    fun create(context: Context): androidx.media3.exoplayer.source.MediaSource.Factory {
         val components = MediaDownloadComponents.get(context.applicationContext)
         val routing = RoutingPlaybackDataSource.Factory(context)
         val streamCache = CacheDataSource.Factory()
@@ -80,6 +80,6 @@ object PlaybackMediaSourceFactory {
             .setCache(components.downloadCache)
             .setUpstreamDataSourceFactory(streamCache)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        return DefaultMediaSourceFactory(downloadCache)
+        return ResolvingMediaSourceFactory(DefaultMediaSourceFactory(downloadCache))
     }
 }

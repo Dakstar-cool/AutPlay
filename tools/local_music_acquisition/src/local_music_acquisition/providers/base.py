@@ -13,5 +13,6 @@ class AcquisitionProvider(Protocol):
 
     name: str
     requires_rights_confirmation: bool
+    requires_proxy: bool
 
     def acquire(self, item: PlaylistItem, output_directory: Path) -> AcquiredArtifact: ...

@@ -54,6 +54,10 @@ id и могут стоять рядом; их локальные базы ав�
 
 ## Что изменилось после v0.3.0
 
+- **Android UI больше не сводит рабочие возможности к счётчикам.** Vault Search, History,
+  Downloads и Server Features показывают bounded typed rows с честными действиями и состояниями;
+  локальный импорт получил pause/resume/cancel, Wave — подтверждаемую передачу хоста, а Now Playing
+  — независимое durable-исключение текущего прослушивания или всей queue session из Taste Profile.
 - **Android стал устойчивее к гонкам и перезапускам.** Binding/credential writes сериализованы,
   unbind очищает привязанный к профилю recommendation context, а playback и deferred work получили
   дополнительные lifecycle/recovery regressions.
@@ -70,13 +74,17 @@ id и могут стоять рядом; их локальные базы ав�
 
 | Evidence на текущем snapshot | Статус |
 | --- | --- |
-| Fresh Windows host gate: root `168 passed`; GPU `33 passed, 2 skipped`; training `37 passed`; acquisition `66 passed`; Android `144 actionable tasks`; PostgreSQL `878 passed, 1 skipped` | **PASS · 2026-09-10** |
+| Fresh Windows host gate: root `168 passed`; GPU `33 passed, 2 skipped`; training `37 passed`; acquisition `66 passed`; Android `144 actionable tasks`; PostgreSQL `879 passed, 1 skipped` | **PASS · 2026-09-10** |
 | Server S1–S5, retention G1, acquisition T1–T2, reproducibility Q1/Q2/Q5/Q6 | **Fixed with local evidence** |
-| Android A1–A8 / Q3 connected API 26, Q4 final release audit, G2 Linux/CUDA hardware proof | **Pending external/final evidence** |
+| Android connected API 26: `212 tests, 0 failures, 3 skipped`; process-death `2/2 PASS` | **PASS · 2026-09-10** |
+| Android audit A1–A8 | **PASS locally; Q3 hosted CI and Q4 physical A55 remain open** |
+| Android FTS / playlist query p95: `11.57 / 11.08 ms` | **PASS · API 26 · 2026-09-10** |
+| Q4 final release audit, G2 Linux/CUDA hardware proof | **Pending external/final evidence** |
 | R1B evaluation / R1C activation | **BLOCKED / inactive** |
 
 Полная граница утверждений и machine-readable registry:
 [audit remediation review pack](docs/release/AUDIT_REMEDIATION_AFTER_R1B_V1.md) ·
+[current audit reconciliation](docs/release/ANDROID_AUDIT_RECONCILIATION_2026-09-10.md) ·
 [status JSON](docs/release/AUDIT_REMEDIATION_AFTER_R1B_V1.json).
 
 ## Первый успешный запуск
@@ -124,7 +132,7 @@ Server-rendered Web Admin использует отдельную browser-sessio
 
 | Контур | Реализовано |
 | --- | --- |
-| Android | Home, Search, Library, Track/Release/Playlist/Artist details, Media3 playback/downloads, ручные плейлисты и очередь, import review, Profile, statistics, sync status |
+| Android | Home, typed Local/Vault Search, Library, meaningful History/Downloads, Track/Release/Playlist/Artist details, Media3 playback, Taste exclusion, lifecycle-aware import review, Wave host transfer, Profile, statistics, sync status and actionable Server Features |
 | Pairing | Signed discovery, owner-controlled fingerprint, exact-key enrollment, Web-approved admission, recovery/reenrollment без plaintext credential persistence |
 | Server | CPU modular monolith, PostgreSQL metadata/jobs/sync, immutable filesystem Vault, Range streaming, imports, deterministic recommendations |
 | Admin | Loopback SSR Web Admin: devices, sessions, trust, Vault, jobs/imports, review, recovery, diagnostics and audit |

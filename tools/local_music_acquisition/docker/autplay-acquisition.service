@@ -1,0 +1,22 @@
+[Unit]
+Description=AutPlay file-only music acquisition queue
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=ACQUISITION_CONTAINER_NAME=autplay-acquisition-queue
+Environment=ACQUISITION_ENABLE_SOUNDCLOUD=0
+Environment=ACQUISITION_ENABLE_BANDCAMP=0
+EnvironmentFile=/etc/autplay-acquisition.env
+ExecStart=/usr/local/lib/autplay-acquisition/run-queue.sh ${ACQUISITION_PLAYLIST} ${ACQUISITION_QUEUE} ${ACQUISITION_OUTPUT}
+ExecStop=-/usr/bin/docker stop --time 180 autplay-acquisition-queue
+TimeoutStopSec=210
+Restart=on-failure
+RestartSec=60
+RestartPreventExitStatus=1 2 125 126 127
+
+[Install]
+WantedBy=multi-user.target

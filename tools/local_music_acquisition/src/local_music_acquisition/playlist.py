@@ -79,8 +79,10 @@ def parse_playlist(payload: bytes) -> ParsedPlaylist:
         if len(fields) in {2, 3}:
             artist, title = fields[:2]
             album = fields[2] if len(fields) == 3 and fields[2] else None
-        elif " - " in line:
-            artist, title = (value.strip() for value in line.split(" - ", 1))
+        elif re.search(r"\s[-\u2013\u2014]\s", line):
+            artist, title = (
+                value.strip() for value in re.split(r"\s[-\u2013\u2014]\s", line, maxsplit=1)
+            )
         else:
             rows.append(PlaylistItem(number, "", "", error_code="import.txt_row_malformed"))
             continue

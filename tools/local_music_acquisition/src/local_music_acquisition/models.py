@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+PROVIDER_MISS_CODES = frozenset(
+    {
+        "exact_match_not_found",
+        "ambiguous_match",
+        "drm_protected",
+        "preview_only",
+        "source_unavailable",
+        "original_download_unavailable",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PlaylistItem:
@@ -14,6 +25,7 @@ class PlaylistItem:
     title: str
     album: str | None = None
     error_code: str | None = None
+    expected_duration_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +35,7 @@ class AcquiredArtifact:
     provider: str
     artifact_ref: str
     identity_version: str | None = None
+    expected_duration_seconds: float | None = None
 
 
 class ProviderMiss(RuntimeError):

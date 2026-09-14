@@ -105,7 +105,20 @@ object AutPlayRuntime {
     suspend fun syncCoordinator(context: Context, binding: ClientEventBinding): SyncCoordinator {
         val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
         check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) { "SYNC_PROFILE_NOT_ACTIVE" }
-        return SyncCoordinator(database(context), OkHttpSyncTransport(apiV1BaseUrl(settings.serverBaseUrl), AndroidKeystoreCredentialStore(context.applicationContext), m5Rotation = m5Rotation(context)))
+        return SyncCoordinator(database(context), OkHttpSyncTransport(
+            apiV1BaseUrl(settings.serverBaseUrl),
+            AndroidKeystoreCredentialStore(context.applicationContext),
+            m5Rotation = m5Rotation(context),
+            beforeRequest = {
+                checkActiveRequestBinding(context, binding, settings, "SYNC_PROFILE_NOT_ACTIVE")
+                val latest = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
+                val metered = context.getSystemService(android.net.ConnectivityManager::class.java)
+                    ?.isActiveNetworkMetered ?: true
+                check(app.autplay.work.syncNetworkAllowed(latest.syncOnMeteredNetwork, metered)) {
+                    "SYNC_NETWORK_POLICY_BLOCKED"
+                }
+            },
+        ))
     }
 
     /** Wave is available only for the active authenticated profile; local playback remains independent. */
@@ -167,7 +180,23 @@ object AutPlayRuntime {
             binding.serverProfileId,
             AndroidKeystoreCredentialStore(context.applicationContext),
             m5Rotation = m5Rotation(context),
+            beforeRequest = { checkActiveRequestBinding(context, binding, settings, "SERVER_PROFILE_NOT_ACTIVE") },
         )
+    }
+
+    private suspend fun checkActiveRequestBinding(
+        context: Context,
+        binding: ClientEventBinding,
+        admitted: NonSecretSettings,
+        errorCode: String,
+    ) {
+        val latest = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
+        check(latest.activeServerProfileId == binding.serverProfileId &&
+            latest.activeUserId == binding.userId && latest.deviceId == binding.deviceId &&
+            latest.serverBaseUrl == admitted.serverBaseUrl &&
+            latest.streamBaseUrl == admitted.streamBaseUrl &&
+            latest.m5Binding?.bindingCommitId == admitted.m5Binding?.bindingCommitId
+        ) { errorCode }
     }
 
     /** Resolves a server-only Track to a stable Vault Variant without persisting a URL or token. */

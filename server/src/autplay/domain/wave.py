@@ -50,6 +50,12 @@ class QueueEntry:
     position: int
 
 
+@dataclass(frozen=True, slots=True)
+class HostTransferTarget:
+    device_id: UUID
+    device_name: str
+
+
 @dataclass(slots=True)
 class WaveRoom:
     room_id: UUID
@@ -68,6 +74,7 @@ class WaveRoom:
     playback_state: str = "IDLE"
     self_role: str = "MEMBER"
     self_preflight: dict[UUID, Availability] = field(default_factory=dict)
+    host_transfer_targets: tuple[HostTransferTarget, ...] = ()
 
     @classmethod
     def create(cls, host_user_id: UUID, now: datetime) -> WaveRoom:
@@ -140,6 +147,7 @@ __all__ = (
     "PRESENCE_TTL",
     "ROOM_TTL",
     "Availability",
+    "HostTransferTarget",
     "QueueEntry",
     "WaveConflict",
     "WaveError",

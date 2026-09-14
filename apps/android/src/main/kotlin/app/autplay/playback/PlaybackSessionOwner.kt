@@ -68,6 +68,15 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
             PlaybackCommand.CancelSleepTimer -> intent.action = AutPlayPlaybackService.ACTION_CANCEL_SLEEP_TIMER
             is PlaybackCommand.SetSpeed -> intent.setAction(AutPlayPlaybackService.ACTION_SET_SPEED)
                 .putExtra(AutPlayPlaybackService.EXTRA_SPEED, command.speed)
+            is PlaybackCommand.SetCurrentListenTasteExcluded -> intent
+                .setAction(AutPlayPlaybackService.ACTION_SET_CURRENT_LISTEN_TASTE_EXCLUDED)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.expectedQueueEntryId.value)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_LISTENING_EVENT_ID, command.expectedListeningEventId.value)
+                .putExtra(AutPlayPlaybackService.EXTRA_TASTE_EXCLUDED, command.excluded)
+            is PlaybackCommand.SetSessionTasteExcluded -> intent
+                .setAction(AutPlayPlaybackService.ACTION_SET_SESSION_TASTE_EXCLUDED)
+                .putExtra(AutPlayPlaybackService.EXTRA_QUEUE_SNAPSHOT_ID, command.expectedQueueSnapshotId.value)
+                .putExtra(AutPlayPlaybackService.EXTRA_TASTE_EXCLUDED, command.excluded)
         }
         applicationContext.startService(intent)
     }
@@ -111,6 +120,7 @@ internal object PlaybackCommandAuthorization {
 }
 
 data class PlaybackUiState(
+    val queueSnapshotId: String? = null,
     val queueEntryId: String? = null,
     val localUserTrackRefId: String? = null,
     val title: String? = null,
@@ -126,6 +136,10 @@ data class PlaybackUiState(
     val sleepTimerDeadlineElapsedRealtimeMs: Long? = null,
     /** Queue entry armed to pause exactly at its end; null means this mode is inactive. */
     val stopAfterQueueEntryId: String? = null,
+    val listeningEventId: String? = null,
+    val listenExcludedFromTaste: Boolean = false,
+    val sessionExcludedFromTaste: Boolean = false,
+    val tasteExclusionError: String? = null,
 )
 
 /** Process-local projection for Compose; Media3/Room remain the execution and persistence owners. */
@@ -182,6 +196,17 @@ sealed interface PlaybackCommand {
     data object CancelSleepTimer : PlaybackCommand
 
     data class SetSpeed(val speed: Float) : PlaybackCommand { init { require(speed in .98f..1.02f || speed == 1f) } }
+
+    data class SetCurrentListenTasteExcluded(
+        val expectedQueueEntryId: LocalId,
+        val expectedListeningEventId: LocalId,
+        val excluded: Boolean,
+    ) : PlaybackCommand
+
+    data class SetSessionTasteExcluded(
+        val expectedQueueSnapshotId: LocalId,
+        val excluded: Boolean,
+    ) : PlaybackCommand
 }
 
 /**

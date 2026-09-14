@@ -14,6 +14,12 @@ import app.autplay.domain.UserId
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -48,6 +54,41 @@ class AndroidPlaybackSourceResolverTest {
         val resolver = AndroidPlaybackSourceResolver(context, database, applicationNonSecretSettingsStore(context))
         val result = resolver.resolve(LocalId(track.localUserTrackRefId), 10) as AndroidSourceResolution.Available
         assertEquals(SelectedAudioSource.LOCAL_URI, result.value.source)
+    }
+
+    @Test fun slowProviderKeepsMainResponsiveAndReceivesCancellationWithoutPersistingMissing() = runBlocking {
+        val uri = android.net.Uri.parse("content://$testPackageName.slow/audio/1")
+        context.contentResolver.call(uri, "reset", null, null)
+        val track = track(14)
+        val local = audio(track, uri.toString())
+        database.libraryDao().upsertTrackRef(track)
+        database.localAudioDao().upsertState(local)
+        val resolver = AndroidPlaybackSourceResolver(context, database, applicationNonSecretSettingsStore(context))
+        val probe = launch(Dispatchers.Main) { resolver.resolve(LocalId(track.localUserTrackRefId), 77) }
+        try {
+            withTimeout(5_000) {
+                while (context.contentResolver.call(uri, "status", null, null)?.getInt("started") != 1) delay(20)
+            }
+            withTimeout(1_000) { repeat(5) { withContext(Dispatchers.Main) { android.os.Looper.myLooper() }; delay(10) } }
+            withTimeout(1_000) { probe.cancelAndJoin() }
+            withTimeout(1_000) {
+                while (context.contentResolver.call(uri, "status", null, null)?.getInt("cancelled") != 1) delay(20)
+            }
+            assertEquals("AVAILABLE", database.localAudioDao().state(local.localAudioStateId)?.status)
+            assertEquals(null, database.localAudioDao().state(local.localAudioStateId)?.lastVerifiedAtMs)
+        } finally { probe.cancelAndJoin() }
+    }
+
+    @Test fun slowProviderTimeoutIsTransientAndCancelsBinderProbe() = runBlocking {
+        val uri = android.net.Uri.parse("content://$testPackageName.slow/audio/timeout")
+        context.contentResolver.call(uri, "reset", null, null)
+        val result = withTimeout(4_000) {
+            app.autplay.application.importing.ContentUriInspector(context.contentResolver).inspectForPlayback(uri.toString())
+        }
+        assertEquals(null, result)
+        withTimeout(1_000) {
+            while (context.contentResolver.call(uri, "status", null, null)?.getInt("cancelled") != 1) delay(20)
+        }
     }
 
     @Test fun revokedUriFallsBackToStableVaultReferenceWithoutDeletingTrack() = runBlocking {

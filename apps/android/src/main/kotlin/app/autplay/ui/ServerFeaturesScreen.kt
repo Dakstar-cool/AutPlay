@@ -33,8 +33,12 @@ data class ServerFeaturesUiState(
     val health: ServerHealth? = null,
     val library: RemoteLibrarySnapshot? = null,
     val searchResults: List<RemoteLibraryEntry> = emptyList(),
+    val searchAttempted: Boolean = false,
+    val searchError: Boolean = false,
     val importReport: RemoteImportReport? = null,
     val recommendation: ServerRecommendationResult? = null,
+    val recommendationAttempted: Boolean = false,
+    val recommendationError: Boolean = false,
     val uploadStatus: String? = null,
     val stableMessage: String? = null,
     val discovery: DiscoveryAutomationUiState = DiscoveryAutomationUiState(),
@@ -131,7 +135,24 @@ fun ServerFeaturesScreen(
             enabled = isBound && searchText.isNotBlank() && state.busyAction == null,
             onClick = { actions.search(searchText) },
         ) { Text(stringResource(R.string.search_action)) }
-        if (state.searchResults.isNotEmpty()) Text(stringResource(R.string.server_search_results, state.searchResults.size))
+        when {
+            state.busyAction == "SERVER_SEARCH" -> Text(stringResource(R.string.search_vault_loading))
+            state.searchError -> Text(stringResource(R.string.server_search_error), color = MaterialTheme.colorScheme.error)
+            state.searchAttempted && state.searchResults.isEmpty() -> Text(stringResource(R.string.server_search_empty))
+            state.searchResults.isNotEmpty() -> {
+                Text(stringResource(R.string.server_search_results, state.searchResults.size))
+                state.searchResults.forEach { row ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text(stringResource(R.string.server_search_row, row.source, row.availabilityStatus))
+                        Text(
+                            stringResource(R.string.server_result_identity, row.libraryEntryId.take(8)),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(stringResource(R.string.server_result_unavailable), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
     }
 
     Section(stringResource(R.string.server_import_section)) {
@@ -203,6 +224,17 @@ fun ServerFeaturesScreen(
         }
         state.recommendation?.let { result ->
             Text(stringResource(R.string.server_recommendations_count, result.items.size))
+            Text(stringResource(R.string.server_recommendations_authority, result.replay, result.requestId.take(8)))
+            if (result.items.isEmpty()) Text(stringResource(R.string.server_recommendations_empty))
+            if (state.recommendationError) {
+                Text(stringResource(R.string.server_recommendations_error), color = MaterialTheme.colorScheme.error)
+            }
+            result.items.forEach { item ->
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text(stringResource(R.string.server_recommendation_row, item.section, item.reasonCode))
+                    Text(stringResource(R.string.server_result_unavailable), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(enabled = state.busyAction == null, onClick = actions.exactReplay) {
                     Text(stringResource(R.string.server_recommendations_repeat))
@@ -211,6 +243,12 @@ fun ServerFeaturesScreen(
                     Text(stringResource(R.string.server_recommendations_refresh))
                 }
             }
+        } ?: when {
+            state.busyAction in setOf("SERVER_RECOMMENDATIONS", "SERVER_REPLAY_EXACT", "SERVER_REPLAY_ALGORITHMIC") ->
+                Text(stringResource(R.string.action_in_progress))
+            state.recommendationError -> Text(stringResource(R.string.server_recommendations_error), color = MaterialTheme.colorScheme.error)
+            state.recommendationAttempted -> Text(stringResource(R.string.server_recommendations_empty))
+            else -> Unit
         }
     }
 

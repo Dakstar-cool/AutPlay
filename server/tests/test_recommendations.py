@@ -200,6 +200,14 @@ def test_fixed_seed_snapshot_is_deterministic_and_dedupe_preserves_all_sources()
     }
 
 
+@pytest.mark.parametrize("conflicting_acl", [False, True])
+def test_snapshot_rejects_duplicate_recordings_before_scoring(conflicting_acl: bool) -> None:
+    track = _track(uuid4(), preference="LIKED", plays=3, organic=2)
+    duplicate = replace(track, authorized=False) if conflicting_acl else track
+    with pytest.raises(ValueError, match="snapshot contains duplicate recordings"):
+        _snapshot((track, duplicate))
+
+
 def test_diversity_caps_artist_and_release_repeats_deterministically() -> None:
     user_id = uuid4()
     tracks = tuple(

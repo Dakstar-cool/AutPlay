@@ -1,0 +1,202 @@
+{
+  "checks": {
+    "android_connected": {
+      "evidence_origin": "Recovered 2026-09-10 connected run, not rerun during reconciliation",
+      "source_path": "apps/android/build/outputs/androidTest-results/connected/debug/TEST-codex_p13_api26(AVD) - 8.0.0-_apps_android-.xml",
+      "source_sha256": "5ec7d55d6ce1e12d05b0ee8a34e8b626ab8556063e6abc99d7ee7be3e464bc40",
+      "status": "PASS",
+      "suite": {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "localhost",
+        "skipped": "3",
+        "tests": "192",
+        "time": "122.062",
+        "timestamp": "2026-09-10T10:31:46"
+      }
+    },
+    "android_dependencies": {
+      "configuration": "releaseRuntimeClasspath",
+      "path": "docs/release/evidence/android-audit-2026-09-10/ANDROID_DEPENDENCIES.txt",
+      "sha256": "42a84dd979d817eeb7cb0ddae00c94f1446120f647d9385cd44c842b8c6fc7cb"
+    },
+    "android_performance": {
+      "path": "docs/release/evidence/android-audit-2026-09-10/ANDROID_PERFORMANCE.json",
+      "paths": {
+        "android_local_fts_top_50": {
+          "dataset_rows": 10000,
+          "p50_ms": 10.4098,
+          "p95_ms": 11.5697,
+          "p95_target_ms": 150.0,
+          "p99_ms": 14.565,
+          "status": "PASS"
+        },
+        "android_playlist_query": {
+          "dataset_rows": 1000,
+          "p50_ms": 8.584,
+          "p95_ms": 11.0831,
+          "p95_target_ms": 150.0,
+          "p99_ms": 12.6886,
+          "status": "PASS"
+        }
+      },
+      "retained_source": {
+        "path": "docs/release/evidence/android-audit-2026-09-10/ANDROID_PERFORMANCE_SOURCE.txt",
+        "sha256": "934748c9ca5b988be4af95e02d52dd97e3563feeb054064d0cbe046b8332d995"
+      },
+      "sha256": "559989a6fcbbced05aeb01780ff9fa0e87427232cf1fb05cc3ec5621313993be",
+      "status": "PASS"
+    },
+    "licenses": {
+      "environment_counts": {
+        "acquisition": 33,
+        "android_release_runtime": 160,
+        "gpu": 61,
+        "root": 34,
+        "server": 56,
+        "training": 63
+      },
+      "path": "docs/release/evidence/android-audit-2026-09-10/LICENSE_INVENTORY.json",
+      "sha256": "ac1919fdac42c015e090f4ab94de5e141f1321d07ff9e6db502bf31aba6a4ffc",
+      "status": "PASS_WITH_DECLARED_PUBLICATION_REVIEW",
+      "unresolved_license_count": 0
+    },
+    "root_validation": {
+      "command": "uv run --frozen python -m pytest tests/contract tests/release",
+      "cwd": "repository root",
+      "duration_seconds": 25.58,
+      "git_diff_check": "PASS",
+      "mypy": "16 root contract/release source files passed",
+      "ruff": "modified registry check lint and format passed",
+      "status": "PASS",
+      "tests": 168
+    },
+    "sbom_acquisition": {
+      "components": 35,
+      "format": "CycloneDX 1.5",
+      "path": "docs/release/evidence/android-audit-2026-09-10/SBOM_acquisition.json",
+      "sha256": "d9bdb1426baec97f1232048d430f77d692b9d52a1250a372ab29fc46478bd842"
+    },
+    "sbom_gpu": {
+      "components": 60,
+      "format": "CycloneDX 1.5",
+      "path": "docs/release/evidence/android-audit-2026-09-10/SBOM_gpu.json",
+      "sha256": "3d096228fa8a84ce560f2f58bf201e3d26fe65ff33b2591589f38af175be2842"
+    },
+    "sbom_root": {
+      "components": 34,
+      "format": "CycloneDX 1.5",
+      "path": "docs/release/evidence/android-audit-2026-09-10/SBOM_root.json",
+      "sha256": "b16e55381dcd110ae36d62f933e331079e051e6645c100a45045c91201118639"
+    },
+    "sbom_server": {
+      "components": 56,
+      "format": "CycloneDX 1.5",
+      "path": "docs/release/evidence/android-audit-2026-09-10/SBOM_server.json",
+      "sha256": "702f3318c7161a0884cb007c8c466a7fc03157fe1134408e60f1d34784bde016"
+    },
+    "sbom_training": {
+      "components": 90,
+      "format": "CycloneDX 1.5",
+      "path": "docs/release/evidence/android-audit-2026-09-10/SBOM_training.json",
+      "sha256": "6e264fedf2ee928eeac2bfe8b2d274342864b4cfb253cc6b693c96c9b270fec4"
+    },
+    "secret_scan": {
+      "allowlisted_disposable_credential": {
+        "paths": [
+          "deploy/compose/README.md",
+          "deploy/compose/compose.admin-local.yaml",
+          "deploy/compose/compose.runtime.yaml",
+          "deploy/compose/compose.yaml",
+          "scripts/check.ps1",
+          "scripts/check.sh",
+          "scripts/p14_drill.py",
+          "scripts/p14_release_audit.py"
+        ],
+        "scope": "loopback/disposable development Compose only",
+        "value_disclosed": false
+      },
+      "findings": [],
+      "rules": [
+        "aws_access_key",
+        "disposable_password_outside_allowlist",
+        "github_token",
+        "private_key",
+        "slack_token",
+        "url_secret"
+      ],
+      "scanned_bytes": 5156249,
+      "scanned_files": 429,
+      "status": "PASS"
+    },
+    "vulnerability_acquisition": {
+      "adverse_statuses": 0,
+      "audited_packages": 35,
+      "path": "docs/release/evidence/android-audit-2026-09-10/AUDIT_acquisition.json",
+      "service": "OSV via uv audit",
+      "sha256": "2f85e618e18722852dd359cf8339f1db8b236f1af3926b7a4c2d50b5e44d6892",
+      "status": "PASS",
+      "vulnerabilities": 0
+    },
+    "vulnerability_gpu": {
+      "adverse_statuses": 0,
+      "audited_packages": 60,
+      "path": "docs/release/evidence/android-audit-2026-09-10/AUDIT_gpu.json",
+      "service": "OSV via uv audit",
+      "sha256": "408fcb8a6d93852ada0607830e7974c0cc17b1fa9100de454a56c02c585afad1",
+      "status": "PASS",
+      "vulnerabilities": 0
+    },
+    "vulnerability_root": {
+      "adverse_statuses": 0,
+      "audited_packages": 34,
+      "path": "docs/release/evidence/android-audit-2026-09-10/AUDIT_root.json",
+      "service": "OSV via uv audit",
+      "sha256": "c958984e6e5e6c6384df3568bd2aa8c91e620f8702c8c211e99c919901524267",
+      "status": "PASS",
+      "vulnerabilities": 0
+    },
+    "vulnerability_server": {
+      "adverse_statuses": 0,
+      "audited_packages": 56,
+      "path": "docs/release/evidence/android-audit-2026-09-10/AUDIT_server.json",
+      "service": "OSV via uv audit",
+      "sha256": "a4104a3597e10966b6575ca6e6b551d7267fc79baf88e7453f86c8d42682eb87",
+      "status": "PASS",
+      "vulnerabilities": 0
+    },
+    "vulnerability_training": {
+      "adverse_statuses": 0,
+      "audited_packages": 90,
+      "path": "docs/release/evidence/android-audit-2026-09-10/AUDIT_training.json",
+      "service": "OSV via uv audit",
+      "sha256": "9873901eee779b7ec8c358b2c64ff2ce9d4dd19373a0e13fdd47614a10da63eb",
+      "status": "PASS",
+      "vulnerabilities": 0
+    }
+  },
+  "claim_boundary": "Recovered connected evidence plus fresh local audit checks; not a final release qualification.",
+  "completed_at": "2026-09-10T11:35:21.088850+00:00",
+  "external_actions": {
+    "deployment": false,
+    "production_data_mutation": false,
+    "publication": false
+  },
+  "generated_at": "2026-09-10T11:33:26.349730+00:00",
+  "kind": "AUTPLAY_ANDROID_AUDIT_RECONCILIATION_V1",
+  "reconciled_at": "2026-09-10T11:53:03.283875+00:00",
+  "remaining_gates": {
+    "G2": "Current target Linux/CUDA quality benchmark remains unavailable.",
+    "Q4": "Fresh build-bound release artifacts and physical Samsung A55 proof are unavailable; historical August APK evidence is not reused.",
+    "R1B": "Real quality-source and paired evaluation remain blocked.",
+    "hosted_connected_ci": "Local instrumentation results do not establish a hosted CI run."
+  },
+  "schema_version": 1,
+  "source": {
+    "commit": "f208ce6900736f114367355f24cd742bf2bea124",
+    "evidence_limitation": "Connected XML is a retained run; no fresh build-to-source or physical APK qualification was inferred.",
+    "manifest": "docs/release/evidence/android-audit-2026-09-10/SOURCE_MANIFEST.json",
+    "manifest_sha256": "453794f059ad19b7927a6e64c0abe83d8c4610d23f88c4589268e26d67f0b7d9",
+    "working_tree_clean": false
+  }
+}

@@ -352,6 +352,8 @@ data class QueueSnapshotEntity(
     @ColumnInfo(name = "active_session_user_id") val activeSessionUserId: String? = null,
     @ColumnInfo(name = "active_session_device_id") val activeSessionDeviceId: String? = null,
     @ColumnInfo(name = "active_session_server_profile_id") val activeSessionServerProfileId: String? = null,
+    @ColumnInfo(name = "session_excluded_from_taste", defaultValue = "0") val sessionExcludedFromTaste: Boolean = false,
+    @ColumnInfo(name = "active_listen_excluded_from_taste", defaultValue = "0") val activeListenExcludedFromTaste: Boolean = false,
 )
 
 @Entity(tableName = "queue_entry", foreignKeys = [ForeignKey(entity = QueueSnapshotEntity::class, parentColumns = ["queue_snapshot_id"], childColumns = ["queue_snapshot_id"], onDelete = ForeignKey.CASCADE), ForeignKey(entity = UserTrackRefEntity::class, parentColumns = ["local_user_track_ref_id"], childColumns = ["local_user_track_ref_id"], onDelete = ForeignKey.RESTRICT)], indices = [Index(value = ["queue_snapshot_id", "position"], unique = true), Index(value = ["local_user_track_ref_id"])])

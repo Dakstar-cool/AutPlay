@@ -43,7 +43,7 @@ internal enum class SyncWorkerErrorDisposition { CANCEL, FAILURE, RETRY }
 internal fun syncWorkerErrorDisposition(error: Exception): SyncWorkerErrorDisposition = when {
     error is CancellationException -> SyncWorkerErrorDisposition.CANCEL
     error is IOException -> SyncWorkerErrorDisposition.RETRY
-    error is IllegalStateException && error.message in TERMINAL_SYNC_ERRORS ->
+    error is IllegalStateException && terminalServerWorkError(serverWorkErrorCode(error)) ->
         SyncWorkerErrorDisposition.FAILURE
     else -> SyncWorkerErrorDisposition.RETRY
 }
@@ -52,9 +52,3 @@ internal fun syncNetworkAllowed(
     allowMeteredNetwork: Boolean,
     activeNetworkMetered: Boolean,
 ): Boolean = allowMeteredNetwork || !activeNetworkMetered
-
-private val TERMINAL_SYNC_ERRORS = setOf(
-    "SESSION_REQUIRED",
-    "SYNC_PROFILE_NOT_ACTIVE",
-    "DEVICE_REVOKED",
-)

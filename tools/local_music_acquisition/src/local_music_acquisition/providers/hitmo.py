@@ -23,6 +23,9 @@ from playwright.async_api import Error as _PlaywrightError
 from playwright.async_api import TimeoutError as _PlaywrightTimeoutError
 from playwright.async_api import async_playwright as _async_playwright
 
+from ..matching import SEARCH_LIMIT as _SEARCH_LIMIT
+from ..matching import candidate_matches as _candidate_matches
+
 globals().pop("annotations", None)
 
 _START_URL = "https://ru.hitmoz.org/"
@@ -114,7 +117,7 @@ def download_hitmo_tracks(
             Default: ``None``.
         download_dir: Local destination directory for completed downloads.
             Default: ``Path("downloads")``.
-        result_limit: Number of leading Hitmo track rows to inspect, from 1 to 5.
+        result_limit: Number of leading Hitmo track rows to inspect, from 1 to 20.
             Default: ``5``.
         timeout_seconds: Positive navigation/download timeout, at most 600 seconds.
             Default: ``120.0``.
@@ -207,7 +210,7 @@ def _validate_arguments(
 ) -> None:
     if not requests:
         raise _HitmoError("track_count_invalid")
-    if not 1 <= result_limit <= 5:
+    if not 1 <= result_limit <= _SEARCH_LIMIT:
         raise _HitmoError("result_limit_invalid")
     if not 0 < timeout_seconds <= 600:
         raise _HitmoError("timeout_invalid")
@@ -552,12 +555,19 @@ async def _process_one(
     tracks_heading = page.get_by_role(
         "heading", name=_re.compile(r"^(треки|tracks)$", _re.IGNORECASE)
     ).first
+    empty_heading = page.get_by_role(
+        "heading",
+        name=_re.compile(r"^По вашему запросу ничего не найдено[.!]?$", _re.IGNORECASE),
+    ).first
     try:
-        await tracks_heading.wait_for(state="visible", timeout=timeout_ms)
+        await tracks_heading.or_(empty_heading).first.wait_for(state="visible", timeout=timeout_ms)
     except _PlaywrightTimeoutError:
         state.action(f"queue={queue_position} query_ref={query_ref} results_timeout")
         await _screenshot(page, state, "results_timeout")
         return {"query_ref": query_ref, "status": "results_timeout"}
+    if await empty_heading.is_visible():
+        state.action(f"queue={queue_position} query_ref={query_ref} explicit_empty_results")
+        return {"query_ref": query_ref, "status": "exact_match_not_found"}
     await page.wait_for_timeout(250)
     state.action(f"queue={queue_position} query_ref={query_ref} submitted visible search")
     await _screenshot(page, state, "search_results")
@@ -570,13 +580,13 @@ async def _process_one(
     if not candidates:
         return {"query_ref": query_ref, "status": "result_structure_unsupported"}
 
-    normalized_title = _normalize(title)
-    normalized_artist = _normalize(artist)
     matches = []
     for candidate in candidates:
-        candidate_title = _normalize(str(candidate["title"]))
-        candidate_artist = _normalize(str(candidate["artist"]))
-        if normalized_title == candidate_title and normalized_artist == candidate_artist:
+        if _candidate_matches(
+            {"artist": candidate["artist"], "track": candidate["title"]},
+            artist=artist,
+            title=title,
+        ):
             matches.append(candidate)
     if not matches:
         return {"query_ref": query_ref, "status": "exact_match_not_found"}
@@ -637,6 +647,7 @@ async def _process_one(
         "status": "downloaded",
         "position": position,
         "file_ref": file_ref,
+        "expected_duration_seconds": match.get("duration_seconds"),
     }
 
 
@@ -683,7 +694,7 @@ async def _wait_for_fresh_results(
 
 
 async def _extract_candidates(page: _Any, result_limit: int) -> list[dict[str, object]]:
-    script = """
+    script = r"""
     ({ limit }) => {
       const visible = (element) => {
         const style = window.getComputedStyle(element);
@@ -737,11 +748,18 @@ async def _extract_candidates(page: _Any, result_limit: int) -> list[dict[str, o
         if (!title || !artist) continue;
         const control = [...row.querySelectorAll('a,button,[role="button"]')]
           .find((element) =>
-            visible(element) && /(скач|загруз|download|\\bdl\\b)/i.test(signature(element))
+            visible(element) && /(скач|загруз|download|\bdl\b)/i.test(signature(element))
           ) || null;
         const position = index + 1;
         if (control) control.setAttribute('data-autplay-hitmo-download', String(position));
-        rows.push({ position, title, artist, download_available: Boolean(control) });
+        const timeNode = row.querySelector('.track__fulltime,.track__time');
+        const timeText = (timeNode?.innerText || '').trim();
+        const timeParts = /^\d{1,2}:\d{2}(?::\d{2})?$/.test(timeText)
+          ? timeText.split(':').map(Number) : [];
+        const duration_seconds = timeParts.length
+          ? timeParts.reduce((total, part) => total * 60 + part, 0) : null;
+        rows.push({ position, title, artist, duration_seconds,
+                    download_available: Boolean(control) });
       }
       return rows;
     }

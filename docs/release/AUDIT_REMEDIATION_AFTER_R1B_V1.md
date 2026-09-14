@@ -13,12 +13,15 @@ release evidence and are not included in Git.
 
 ## Outcome boundary
 
-Server S1-S5, retention G1, acquisition T1-T2 and reproducibility Q1/Q2/Q5/Q6 have new local
-regressions or deterministic static evidence. Android A1-A8 have implementation and host-test
-coverage, but remain pending connected API 26 evidence on the final snapshot. Q3 adds host,
-training, acquisition and scheduled connected workflows; the connected workflow itself has not run
-on this worktree. Q4 expands the local evidence generator and release workflow, and must be judged
-from a fresh final audit output rather than from the historical archive.
+Server S1-S5, retention G1, acquisition T1-T2 and reproducibility Q1/Q2/Q5/Q6 have local
+regressions or deterministic static evidence. The fresh 2026-09-10 Android implementation gate
+passed 270 JVM tests, 212 API 26 connected tests (zero failures, three ordinary-suite skips),
+lint and debug build. Both separately orchestrated process-death stages also passed on the same
+installed APK/data with a verified force-stop boundary. A1-A8 now have real worker/lifecycle
+acceptance, mapped in the [dated reconciliation](ANDROID_AUDIT_RECONCILIATION_2026-09-10.md) and
+bound to source/APK hashes in its implementation manifest. Q3 still requires hosted clean CI and
+required-check inspection. Q4 still requires final release inventory and physical Samsung A55
+qualification; historical August APK/device receipts are not reused for the current snapshot.
 
 G2 and the SONA execution policy are implemented in locks, configuration and code, including
 fail-closed CPU fallback, bounded admission/deadline/cancellation, an eager/ORT export matrix and an
@@ -57,6 +60,8 @@ The PostgreSQL container, volume and network were removed by the gate.
 
 Gradle dependency verification also passed `assembleDebug` from a new isolated cache. Fresh
 vulnerability audits report zero vulnerabilities and zero adverse statuses in all five Python
-graphs after updating `httpx2` and `httpcore2` to 2.12.0. The P14 generator reaches Android
-performance evidence after completing SBOM, vulnerability, secret and license stages; it remains
-incomplete because no current connected performance run is available. This does not close Q4.
+graphs after updating `httpx2` and `httpcore2` to 2.12.0. The 2026-09-10 reconciliation extracted
+current performance measurements from the connected log: FTS p95 11.5697 ms and playlist p95
+11.0831 ms, both below the 150 ms threshold. Fresh local audit components are retained under
+`docs/release/evidence/android-audit-2026-09-10/`. The full P14 generator was not rerun with
+historical physical-device receipts; Q4 remains open on its final build/device/inventory obligations.

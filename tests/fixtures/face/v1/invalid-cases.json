@@ -1,0 +1,97 @@
+[
+  {
+    "name": "axis outside range",
+    "path": "track_character.axes.energy.value",
+    "value": 1.01
+  },
+  {
+    "name": "uncalibrated confidence",
+    "path": "track_character.axes.energy.confidence",
+    "value": null
+  },
+  {
+    "name": "boolean is not number",
+    "path": "track_character.axes.energy.value",
+    "value": true
+  },
+  {
+    "name": "false abstention",
+    "path": "track_character.axes.energy.abstained",
+    "value": true
+  },
+  {
+    "name": "null is not an estimate",
+    "path": "track_character.axes.energy.value",
+    "value": null
+  },
+  {
+    "name": "invalid reason",
+    "path": "track_character.axes.valence.reason_code",
+    "value": "bad reason"
+  },
+  {
+    "name": "missing abstention reason",
+    "path": "track_character.axes.valence.reason_code",
+    "value": null
+  },
+  {
+    "name": "invalid schema",
+    "path": "schema_version",
+    "value": 2
+  },
+  {
+    "name": "invalid duration",
+    "path": "identity.source_duration_ms",
+    "value": 0
+  },
+  {
+    "name": "wrong timebase",
+    "path": "identity.source_timebase",
+    "value": "PLAYER_MILLISECONDS"
+  },
+  {
+    "name": "invalid hash",
+    "path": "identity.source_sha256",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "noncanonical UUID",
+    "path": "identity.recording_id",
+    "value": "10000000-0000-4000-8000-00000000000A"
+  },
+  {
+    "name": "unsorted frames",
+    "path": "keyframes.1.time_ms",
+    "value": 0
+  },
+  {
+    "name": "first frame not zero",
+    "path": "keyframes.0.time_ms",
+    "value": 1
+  },
+  {
+    "name": "past source end",
+    "path": "events.0.time_ms",
+    "value": 10001
+  },
+  {
+    "name": "negative event strength",
+    "path": "events.0.strength",
+    "value": -0.01
+  },
+  {
+    "name": "unsafe event name",
+    "path": "events.0.event_type",
+    "value": "future/event"
+  },
+  {
+    "name": "unknown identity field",
+    "path": "identity.extra",
+    "value": 1
+  },
+  {
+    "name": "wrong keyframe type",
+    "path": "keyframes",
+    "value": {}
+  }
+]

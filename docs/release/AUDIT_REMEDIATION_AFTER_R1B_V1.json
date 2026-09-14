@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "AUTPLAY_AUDIT_REMEDIATION_REGISTRY_V1",
-  "as_of_utc_date": "2026-09-09",
+  "as_of_utc_date": "2026-09-10",
   "source_audit": {
     "report_sha256": "97cc85280d83cfd3426d681d47bdb123e048c9e617227a2c39c1ad7f563c4550",
     "evidence_archive_sha256": "b1b05d9ab2c7a93d0fbcd9cfd5e31fc7dfff24d1474cbebeed4f51d53ab4b701",
@@ -30,9 +30,7 @@
       "Q1",
       "Q2",
       "Q5",
-      "Q6"
-    ],
-    "CODE_CHANGED_CONNECTED_EVIDENCE_PENDING": [
+      "Q6",
       "A1",
       "A2",
       "A3",
@@ -40,14 +38,16 @@
       "A5",
       "A6",
       "A7",
-      "A8",
-      "Q3"
+      "A8"
     ],
     "CODE_CHANGED_FINAL_AUDIT_PENDING": [
       "Q4"
     ],
     "ACTIVATION_CONDITION_NOT_MET": [
       "G2"
+    ],
+    "CODE_CHANGED_HOSTED_CI_EVIDENCE_PENDING": [
+      "Q3"
     ]
   },
   "non_numbered_risks": {
@@ -58,10 +58,21 @@
     "onnx_export_matrix": "FIXED_WITH_LOCAL_EVIDENCE"
   },
   "claim_boundaries": {
-    "android_connected_gate": "NOT_RUN_ON_THIS_SNAPSHOT",
+    "android_connected_gate": "LOCAL_API26_SUITE_AND_A1_A8_TARGETED_PASS",
     "linux_cuda_hardware_gate": "NOT_RUN_ON_THIS_SNAPSHOT",
     "release_published": false,
     "production_data_repaired_or_reset": false,
     "r1b_evaluation_pass": false
+  },
+  "current_evidence": {
+    "reconciliation": "docs/release/evidence/android-audit-2026-09-10/RECONCILIATION.json",
+    "android_connected": "docs/release/evidence/android-audit-2026-09-10/implementation/CONNECTED_RESULTS.json",
+    "android_performance": "docs/release/evidence/android-audit-2026-09-10/ANDROID_PERFORMANCE.json",
+    "finding_review": "docs/release/ANDROID_AUDIT_RECONCILIATION_2026-09-10.md",
+    "android_implementation": "docs/release/evidence/android-audit-2026-09-10/implementation/IMPLEMENTATION.json"
+  },
+  "remaining_evidence": {
+    "Q3": "Hosted clean CI and required-check configuration remain unverified. Local worker/lifecycle and separately orchestrated process stages pass; workflow now invokes the portable process harness.",
+    "Q4": "Fresh source/artifact-bound final release inventory and physical Samsung A55 qualification; current performance and local audit components pass."
   }
 }

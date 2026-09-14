@@ -8,6 +8,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.ListenableWorker
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
+import androidx.work.await
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
@@ -86,7 +87,7 @@ class WorkManagerDeferredWorkScheduler(
             request.uniqueName(),
             policy,
             workRequest,
-        )
+        ).await()
     }
 }
 

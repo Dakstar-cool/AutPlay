@@ -79,6 +79,9 @@
     <string name="search_vault_loading">Searching your personal Vault…</string>
     <string name="search_vault_unavailable">The personal Vault is unavailable. Local results remain usable.</string>
     <string name="search_vault_empty">No matching items in the personal Vault.</string>
+    <string name="search_vault_metadata_unavailable">Metadata unavailable on this device</string>
+    <string name="search_vault_source_availability">%1$s · %2$s</string>
+    <string name="search_vault_playback_unavailable">Unavailable here</string>
     <plurals name="search_vault_result_count">
         <item quantity="one">%d Vault item found. Add or sync it to play on this device.</item>
         <item quantity="other">%d Vault items found. Add or sync them to play on this device.</item>
@@ -143,6 +146,12 @@
     <string name="action_next">Next</string>
     <string name="action_like">Like</string>
     <string name="action_liked">Liked</string>
+    <string name="player_taste_exclusion_title">Taste Profile</string>
+    <string name="player_taste_exclusion_description">Exclude listening evidence without changing Like or Dislike.</string>
+    <string name="player_exclude_current_listen">Exclude this listen</string>
+    <string name="player_exclude_session">Exclude this queue session</string>
+    <string name="player_taste_listen_unavailable">Start listening before excluding the current listen.</string>
+    <string name="player_taste_exclusion_error">Couldn’t update Taste Profile exclusion. Try again.</string>
     <string name="action_dislike">Dislike</string>
     <string name="action_download">Download for offline use</string>
     <string name="action_choose_folder_again">Choose music folder again</string>
@@ -222,6 +231,27 @@
     <string name="action_in_progress">Working…</string>
     <string name="action_refresh">Refresh</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_open">Open</string>
+    <string name="history_loading">Loading listening history…</string>
+    <string name="history_error">Listening history is unavailable. Try again.</string>
+    <string name="history_empty">Your listening history will appear here after you play something.</string>
+    <string name="history_open_library">Open Library</string>
+    <string name="history_listened_at">Listened %1$s</string>
+    <string name="history_played_duration">Played %1$s</string>
+    <string name="history_taste_excluded">Excluded from Taste Profile</string>
+    <string name="history_load_more">Load earlier listens</string>
+    <string name="history_loading_more">Loading…</string>
+    <string name="import_job_state">Job state: %1$s</string>
+    <string name="import_pause">Pause import</string>
+    <string name="import_resume">Resume import</string>
+    <string name="import_cancel">Cancel import</string>
+    <string name="import_cancel_title">Cancel this import?</string>
+    <plurals name="import_cancel_confirm">
+        <item quantity="one">Cancel the import containing %1$d item? Imported library data is kept.</item>
+        <item quantity="other">Cancel the import containing %1$d items? Imported library data is kept.</item>
+    </plurals>
+    <string name="import_control_pending">Updating import…</string>
+    <string name="import_control_error">The import state changed or storage is unavailable. Refresh and try again.</string>
     <string name="action_continue">Continue</string>
     <string name="action_show_more">Show more</string>
     <string name="import_intro">Choose an audio file. If access changes later, the track will stay in your library and can be reconnected.</string>
@@ -265,6 +295,18 @@
     <string name="download_state_failed">The latest download failed. Try again.</string>
     <string name="download_state_cancelled">The latest download was cancelled</string>
     <string name="download_state_in_progress">The latest track is being downloaded</string>
+    <string name="download_state_requested">Requested</string>
+    <string name="download_state_queued">Queued</string>
+    <string name="download_state_downloading">Downloading</string>
+    <string name="download_state_paused">Paused</string>
+    <string name="download_state_unknown">Status unavailable</string>
+    <string name="downloads_empty">No offline downloads yet.</string>
+    <string name="download_failure_storage">Not enough storage. Free space and retry.</string>
+    <string name="download_failure_authorization">Vault access needs attention. Reconnect and retry.</string>
+    <string name="download_failure_not_found">This audio version is no longer available.</string>
+    <string name="download_failure_network">The transfer was interrupted. Retry when connected.</string>
+    <string name="download_failure_media">This audio version could not be downloaded.</string>
+    <string name="download_failure_unknown">The download failed. Retry or choose another source.</string>
     <string name="sync_requires_server">Connect your personal server to synchronize this device.</string>
     <string name="sync_pending_count">Waiting to synchronize: %1$d</string>
     <string name="sync_attention_count">Need attention: %1$d</string>
@@ -303,8 +345,17 @@
     <string name="server_storage_upload">Save selected track on the server</string>
     <string name="server_recommendations_section">Online recommendations</string>
     <string name="server_recommendations_load">Load recommendations</string>
-    <string name="server_recommendations_home">Refresh Home</string>
+    <string name="server_recommendations_home">Preview Home recommendations</string>
     <string name="server_recommendations_count">Recommendations: %1$d</string>
+    <string name="server_search_error">Server search is unavailable. Local Search is unaffected.</string>
+    <string name="server_search_empty">No server matches.</string>
+    <string name="server_search_row">%1$s · %2$s</string>
+    <string name="server_result_identity">Result %1$s</string>
+    <string name="server_result_unavailable">Open this result from Search after it is synchronized to this device.</string>
+    <string name="server_recommendations_authority">%1$s result · request %2$s</string>
+    <string name="server_recommendation_row">%1$s · %2$s</string>
+    <string name="server_recommendations_error">The replay failed; the last authoritative result is still shown.</string>
+    <string name="server_recommendations_empty">The server returned no recommendations.</string>
     <string name="server_recommendations_repeat">Repeat the same list</string>
     <string name="server_recommendations_refresh">Create a new list</string>
 
@@ -327,6 +378,11 @@
     <string name="wave_start_playback">Start playback</string>
     <string name="wave_pause_playback">Pause playback</string>
     <string name="wave_close_room">Close room</string>
+    <string name="wave_transfer_targets">Transfer host role</string>
+    <string name="wave_transfer_to">Transfer to %1$s</string>
+    <string name="wave_transfer_title">Transfer host role?</string>
+    <string name="wave_transfer_confirm">Give Wave controls to %1$s? Your role changes only after the server confirms it.</string>
+    <string name="wave_transfer_action">Transfer</string>
     <string name="wave_leave_room">Leave room</string>
     <string name="wave_state_ready">The room is ready</string>
     <string name="wave_state_preparing">Preparing playback…</string>
@@ -614,4 +670,5 @@
     <string name="discovery_automation_confirm_auto_import">Enable auto-import</string>
     <string name="discovery_automation_pending_resolution">The previous command has an unknown outcome. Retry the same action or refresh server state before starting another.</string>
     <string name="discovery_automation_unsupported_mode">Unsupported server mode: %1$s</string>
+    <string name="home_listen_together_short">Together</string>
 </resources>

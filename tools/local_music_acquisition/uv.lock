@@ -75,7 +75,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "playwright" },
-    { name = "requests" },
+    { name = "requests", extra = ["socks"] },
     { name = "yandex-music-downloader" },
     { name = "yt-dlp", extra = ["default", "pin"] },
 ]
@@ -90,7 +90,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "playwright", specifier = "==1.60.0" },
-    { name = "requests", specifier = "==2.34.2" },
+    { name = "requests", extras = ["socks"], specifier = "==2.34.2" },
     { name = "yandex-music-downloader", git = "https://github.com/llistochek/yandex-music-downloader.git?rev=9d33d6aaefae3cb882d02822e59cf0796c33a651" },
     { name = "yt-dlp", extras = ["default", "pin"], specifier = "==2026.8.19" },
 ]

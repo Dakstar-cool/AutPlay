@@ -47,6 +47,33 @@ class OkHttpWaveTransportTest {
         } finally { server.shutdown() }
     }
 
+    @Test fun snapshotKeepsOnlyBoundedWellFormedHostTransferTargets() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse().setBody(
+                "{\"room_id\":\"$ROOM_ID\",\"role\":\"HOST\",\"state\":\"OPEN\",\"sequence\":1," +
+                    "\"entries\":[],\"host_transfer_targets\":[" +
+                    "{\"device_id\":\"$TARGET_DEVICE_ID\",\"device_name\":\" Living room \"}," +
+                    "{\"device_id\":\"not-a-uuid\",\"device_name\":\"Invalid\"}," +
+                    "{\"device_id\":\"77777777-7777-4777-8777-777777777777\",\"device_name\":\"   \"}]}"
+            ),
+        )
+        server.start()
+        val credentials = object : CredentialStore {
+            override suspend fun read(profileId: ServerProfileId) = "secret".toByteArray()
+            override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
+            override suspend fun clear(profileId: ServerProfileId) = Unit
+        }
+        try {
+            val snapshot = OkHttpWaveTransport(
+                server.url("/api").toString(),
+                ServerProfileId(PROFILE),
+                credentials,
+            ).snapshot(ROOM_ID)
+            assertEquals(listOf(WaveHostTransferTarget(TARGET_DEVICE_ID, "Living room")), snapshot.hostTransferTargets)
+        } finally { server.shutdown() }
+    }
+
     @Test fun joinAndPreflightUseBoundedAuthenticatedJsonBodies() = runBlocking {
         val server = MockWebServer()
         server.enqueue(

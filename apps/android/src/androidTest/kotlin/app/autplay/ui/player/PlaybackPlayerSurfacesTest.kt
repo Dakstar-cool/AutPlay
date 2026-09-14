@@ -152,7 +152,8 @@ class PlaybackPlayerSurfacesTest {
             }
         }
 
-        composeRule.onNodeWithText(context.getString(R.string.player_timeline_locked_wave)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.player_timeline_locked_wave))
+            .performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)).assertIsNotEnabled()
         composeRule.onNodeWithContentDescription(context.getString(R.string.player_seek_description)).assertIsNotEnabled()
         composeRule.onNodeWithTag("player-wave-by-track").performScrollTo().assertIsNotEnabled()
@@ -219,6 +220,42 @@ class PlaybackPlayerSurfacesTest {
         composeRule.onNodeWithTag("sleep-timer-after-track").performClick()
         composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
         composeRule.runOnIdle { check(stopAfterTrack) }
+    }
+
+    @Test
+    fun tasteExclusionControlsExposeIndependentDurableIntents() {
+        var listenExcluded: Boolean? = null
+        var sessionExcluded: Boolean? = null
+        composeRule.setContent {
+            AutPlayTheme {
+                NowPlayingScreen(
+                    state = ordinaryState(),
+                    onTogglePlayPause = {},
+                    onToggleShuffle = {},
+                    onCycleRepeat = {},
+                    onSeekBegin = {},
+                    onSeekUpdate = {},
+                    onSeekCommit = {},
+                    onLike = {},
+                    onDislike = {},
+                    feedbackEnabled = true,
+                    onObservingChanged = {},
+                    listenExcludedFromTaste = false,
+                    sessionExcludedFromTaste = true,
+                    listenTasteActionAvailable = true,
+                    sessionTasteActionAvailable = true,
+                    onSetCurrentListenTasteExcluded = { listenExcluded = it },
+                    onSetSessionTasteExcluded = { sessionExcluded = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("taste-exclude-listen").performScrollTo().performClick()
+        composeRule.onNodeWithTag("taste-exclude-session").performScrollTo().performClick()
+        composeRule.runOnIdle {
+            assertEquals(true, listenExcluded)
+            assertEquals(false, sessionExcluded)
+        }
     }
 
     private fun ordinaryState() = PlaybackPresentationState(

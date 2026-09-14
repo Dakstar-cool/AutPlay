@@ -17,6 +17,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.R
 import app.autplay.application.server.RemoteImportEntry
 import app.autplay.application.server.RemoteImportReport
+import app.autplay.application.server.RemoteLibraryEntry
+import app.autplay.application.server.ServerRecommendationItem
+import app.autplay.application.server.ServerRecommendationResult
 import org.junit.Rule
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,4 +83,53 @@ class ServerFeaturesScreenTest {
         assertTrue(nextLoaded.get())
         compose.onAllNodesWithText("Accept", substring = true).assertCountEquals(0)
     }
+
+    @Test
+    fun searchAndRecommendationRowsExposeAuthoritativeReplayWithTruthfulLabel() {
+        val exact = AtomicBoolean(false)
+        val algorithmic = AtomicBoolean(false)
+        compose.setContent {
+            MaterialTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ServerFeaturesScreen(
+                        isBound = true,
+                        selectedTrackLabel = null,
+                        selectedTrackUploadEligible = false,
+                        state = ServerFeaturesUiState(
+                            searchAttempted = true,
+                            searchResults = listOf(RemoteLibraryEntry("library-entry", "track-ref", "UPLOAD", "AVAILABLE", 1)),
+                            recommendationAttempted = true,
+                            recommendation = ServerRecommendationResult(
+                                requestId = "request-identity",
+                                replay = "exact",
+                                items = listOf(ServerRecommendationItem("recording", 1, .9, "recent_affinity", "for_you")),
+                            ),
+                        ),
+                        actions = noOpActions(
+                            exactReplay = { exact.set(true) },
+                            algorithmicReplay = { algorithmic.set(true) },
+                        ),
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithText("UPLOAD · AVAILABLE").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("for_you · recent_affinity").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.server_recommendations_home)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.server_recommendations_repeat)).performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.server_recommendations_refresh)).performScrollTo().performClick()
+        assertTrue(exact.get())
+        assertTrue(algorithmic.get())
+    }
+
+    private fun noOpActions(
+        exactReplay: () -> Unit = {},
+        algorithmicReplay: () -> Unit = {},
+    ) = ServerFeaturesActions(
+        refreshHealth = {}, refreshLibrary = {}, search = {}, chooseServerImport = {}, refreshImport = {},
+        loadNextImport = {}, cancelImport = {}, resumeImport = {}, reviewImport = { _, _ -> },
+        uploadSelectedTrack = {}, cancelUpload = {}, recommendations = {}, exactReplay = exactReplay,
+        algorithmicReplay = algorithmicReplay,
+    )
 }

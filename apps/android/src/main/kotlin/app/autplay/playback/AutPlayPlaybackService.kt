@@ -48,6 +48,7 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var restored: RestoredPlaybackQueue? = null
     private var logicalSession: LogicalListeningCheckpoint? = null
     private var observedPlaybackStartedAtMs: Long? = null
+    private var uncommittedPlaybackDeltaMs = 0L
     private var shuffleSeed: Long? = null
     private var scheduledPlayJob: kotlinx.coroutines.Job? = null
     private var sleepTimerJob: kotlinx.coroutines.Job? = null
@@ -145,7 +146,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             ACTION_NEXT -> moveWithinOrdinaryQueue(next = true)
             ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
-            ACTION_RESUME -> if (player.currentMediaItem.isResolvedPlaybackSource()) player.play()
+            ACTION_RESUME -> player.play()
             ACTION_PAUSE -> player.pause()
             ACTION_STOP -> scope.launch {
                 stateMutex.withLock {
@@ -174,6 +175,23 @@ class AutPlayPlaybackService : MediaSessionService() {
             )
             ACTION_CANCEL_SLEEP_TIMER -> cancelSleepTimer()
             ACTION_SET_SPEED -> player.playbackParameters = PlaybackParameters(intent.getFloatExtra(EXTRA_SPEED, 1f).coerceIn(.98f, 1.02f))
+            ACTION_SET_CURRENT_LISTEN_TASTE_EXCLUDED -> scope.launch {
+                stateMutex.withLock {
+                    setCurrentListenTasteExcluded(
+                        intent.getStringExtra(EXTRA_EXPECTED_QUEUE_ENTRY_ID),
+                        intent.getStringExtra(EXTRA_EXPECTED_LISTENING_EVENT_ID),
+                        intent.getBooleanExtra(EXTRA_TASTE_EXCLUDED, false),
+                    )
+                }
+            }
+            ACTION_SET_SESSION_TASTE_EXCLUDED -> scope.launch {
+                stateMutex.withLock {
+                    setSessionTasteExcluded(
+                        intent.getStringExtra(EXTRA_QUEUE_SNAPSHOT_ID),
+                        intent.getBooleanExtra(EXTRA_TASTE_EXCLUDED, false),
+                    )
+                }
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -185,16 +203,16 @@ class AutPlayPlaybackService : MediaSessionService() {
             ShutdownCheckpoint(
                 current = current,
                 positionMs = metricsFor(current)?.positionMs ?: player.currentPosition.coerceAtLeast(0),
-                observedPlaybackDeltaMs = consumeObservedDelta(continueIfPlaying = false),
+                observedPlaybackDeltaMs = collectObservedDelta(continueIfPlaying = false),
                 shuffleMode = if (player.shuffleModeEnabled) "SEEDED" else "OFF",
                 repeatMode = player.repeatMode.fromMedia3RepeatMode(),
                 seed = shuffleSeed,
                 nowMs = System.currentTimeMillis(),
             )
         }
+        val cancelledService = requireNotNull(scope.coroutineContext[Job])
         scope.cancel()
-        resolutionJobs.values.forEach(Job::cancel)
-        resolutionJobs.clear()
+        cancelResolutionJobs(resolutionJobs)
         resolvedQueueEntryIds.clear()
         mediaSession.release()
         scheduledPlayJob?.cancel()
@@ -206,28 +224,28 @@ class AutPlayPlaybackService : MediaSessionService() {
         player.setPauseAtEndOfMediaItems(false)
         audioContourSink.reset()
         PlaybackAudioContourRuntime.reset()
+        player.pause()
+        player.stop()
         publishRuntimeState()
         player.release()
         shutdownCheckpoint?.let { checkpoint ->
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                runCatching {
-                    persistence.checkpoint(
-                        checkpoint.current,
-                        checkpoint.positionMs,
-                        checkpoint.observedPlaybackDeltaMs,
-                        checkpoint.shuffleMode,
-                        checkpoint.repeatMode,
-                        checkpoint.seed,
-                        checkpoint.nowMs,
-                    )
-                }
-                cancel()
+            PlaybackShutdownPersistence.enqueue(cancelledService) {
+                persistence.checkpointExistingSession(
+                    checkpoint.current,
+                    checkpoint.positionMs,
+                    checkpoint.observedPlaybackDeltaMs,
+                    checkpoint.shuffleMode,
+                    checkpoint.repeatMode,
+                    checkpoint.seed,
+                    checkpoint.nowMs,
+                )
             }
         }
         super.onDestroy()
     }
 
     private suspend fun restoreQueue(autoplay: Boolean, requiredSnapshotId: String? = null) {
+        PlaybackShutdownPersistence.awaitPending()
         val plan = stateMutex.withLock {
             val queue = persistence.restoreActive() ?: return@withLock null
             if (!GuestQueueRestorePolicy.allows(queue.snapshot.queueType, requiredSnapshotId)) {
@@ -248,6 +266,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             val index = queue.media.currentIndex.coerceIn(placeholders.indices)
             player.setMediaItems(placeholders, index, queue.media.currentPositionMs)
             player.seekTo(index, queue.media.currentPositionMs)
+            player.playWhenReady = autoplay
             player.repeatMode = queue.snapshot.repeatMode.toMedia3RepeatMode()
             shuffleSeed = queue.snapshot.seed
             if (queue.snapshot.shuffleMode != "OFF") {
@@ -256,19 +275,19 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             player.shuffleModeEnabled = queue.snapshot.shuffleMode != "OFF"
             publishRuntimeState(unavailableReason = currentUnavailableReason())
-            QueueResolutionPlan(queue, generation, index, autoplay)
+            QueueResolutionPlan(queue, generation, index)
         }
         plan ?: return
-        scheduleResolveIndex(plan.queue, plan.currentIndex, plan.generation, prepareWhenResolved = true, playWhenResolved = plan.autoplay)
-        scheduleResolveIndex(plan.queue, plan.currentIndex + 1, plan.generation)
+        scheduleResolveIndex(plan.queue, plan.currentIndex, plan.generation)
+        scheduleResolveIndex(plan.queue, player.nextMediaItemIndex, plan.generation)
     }
 
     /** Reloads a committed ordinary queue while preserving the active stable entry and player mode. */
     private suspend fun refreshQueue(requiredSnapshotId: String?) {
+        PlaybackShutdownPersistence.awaitPending()
         val plan = stateMutex.withLock {
             val currentId = player.currentMediaItem?.mediaId ?: return@withLock null
             val currentPositionMs = player.currentPosition.coerceAtLeast(0)
-            val shouldPlay = player.playWhenReady
             val preservedRepeatMode = player.repeatMode
             val preservedShuffleEnabled = player.shuffleModeEnabled
             val preservedShuffleSeed = if (preservedShuffleEnabled) {
@@ -280,26 +299,39 @@ class AutPlayPlaybackService : MediaSessionService() {
             logicalSession?.let { checkpointCurrent(it, currentPositionMs) }
             val queue = persistence.restoreActive() ?: return@withLock null
             if (queue.snapshot.queueSnapshotId != requiredSnapshotId || queue.snapshot.currentEntryId != currentId) return@withLock null
+            val retainedResolved = resolvedQueueEntryIds.toSet()
             restored = queue
             val generation = beginQueueGeneration()
-            val placeholders = queue.entries.map { placeholder(it.queueEntryId) }
+            val retainedIds = queue.entries.map { it.queueEntryId }.toSet()
+            resolvedQueueEntryIds += retainedResolved.intersect(retainedIds)
             val index = queue.entries.indexOfFirst { it.queueEntryId == currentId }
             if (index < 0) return@withLock null
-            player.setMediaItems(placeholders, index, currentPositionMs)
-            player.seekTo(index, currentPositionMs)
+            // Media3 retains the current period for moves. Replacing the entire playlist
+            // would reload its source and synthesize a seek/new listening session.
+            for (oldIndex in player.mediaItemCount - 1 downTo 0) {
+                if (player.getMediaItemAt(oldIndex).mediaId !in retainedIds) player.removeMediaItem(oldIndex)
+            }
+            queue.entries.forEachIndexed { desiredIndex, entry ->
+                val existingIndex = (desiredIndex until player.mediaItemCount)
+                    .firstOrNull { player.getMediaItemAt(it).mediaId == entry.queueEntryId }
+                when {
+                    existingIndex == null -> player.addMediaItem(desiredIndex, placeholder(entry.queueEntryId))
+                    existingIndex != desiredIndex -> player.moveMediaItem(existingIndex, desiredIndex)
+                }
+            }
             player.repeatMode = preservedRepeatMode
             if (preservedShuffleEnabled) {
                 player.setShuffleOrder(
-                    ShuffleOrder.DefaultShuffleOrder(placeholders.size, requireNotNull(preservedShuffleSeed)),
+                    ShuffleOrder.DefaultShuffleOrder(queue.entries.size, requireNotNull(preservedShuffleSeed)),
                 )
             }
             player.shuffleModeEnabled = preservedShuffleEnabled
             publishRuntimeState(unavailableReason = currentUnavailableReason())
-            QueueResolutionPlan(queue, generation, index, shouldPlay)
+            QueueResolutionPlan(queue, generation, index)
         }
         plan ?: return
-        scheduleResolveIndex(plan.queue, plan.currentIndex, plan.generation, prepareWhenResolved = true, playWhenResolved = plan.autoplay)
-        scheduleResolveIndex(plan.queue, plan.currentIndex + 1, plan.generation)
+        scheduleResolveIndex(plan.queue, plan.currentIndex, plan.generation)
+        scheduleResolveIndex(plan.queue, player.nextMediaItemIndex, plan.generation)
     }
 
     /** Wave movement is room-authoritative; only ordinary queues may invoke local navigation. */
@@ -314,8 +346,7 @@ class AutPlayPlaybackService : MediaSessionService() {
 
     private fun beginQueueGeneration(): Long {
         queueGeneration += 1
-        resolutionJobs.values.forEach(Job::cancel)
-        resolutionJobs.clear()
+        cancelResolutionJobs(resolutionJobs)
         resolvedQueueEntryIds.clear()
         pendingTransitionMetrics = null
         return queueGeneration
@@ -326,12 +357,14 @@ class AutPlayPlaybackService : MediaSessionService() {
         queue: RestoredPlaybackQueue,
         index: Int,
         generation: Long,
-        prepareWhenResolved: Boolean = false,
-        playWhenResolved: Boolean = false,
     ) {
         if (index !in queue.entries.indices) return
         val entry = queue.entries[index]
-        if (entry.queueEntryId in resolvedQueueEntryIds || resolutionJobs[entry.queueEntryId]?.isActive == true) return
+        if (entry.queueEntryId in resolvedQueueEntryIds) {
+            if (index == player.currentMediaItemIndex) settleCurrentSource()
+            return
+        }
+        if (resolutionJobs[entry.queueEntryId]?.isActive == true) return
         val job = scope.launch {
             try {
                 val resolution = resolveQueueItem(queue, index)
@@ -343,7 +376,12 @@ class AutPlayPlaybackService : MediaSessionService() {
                     ) {
                         return@withLock
                     }
+                    val currentPositionMs = if (index == player.currentMediaItemIndex) {
+                        player.currentPosition.coerceAtLeast(0)
+                    } else null
                     player.replaceMediaItem(index, resolution.item)
+                    // A new source has a new period and would otherwise reset the current position.
+                    currentPositionMs?.let { player.seekTo(index, it) }
                     resolvedQueueEntryIds += entry.queueEntryId
                     if (index == player.currentMediaItemIndex) {
                         publishRuntimeState(
@@ -351,10 +389,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                             unavailableReason = resolution.unavailableReason,
                             title = resolution.title,
                         )
-                        if (prepareWhenResolved && resolution.available) {
-                            player.prepare()
-                            if (playWhenResolved) player.play()
-                        }
+                        settleCurrentSource()
                     }
                 }
             } catch (error: CancellationException) {
@@ -369,6 +404,20 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
     }
 
+    private fun settleCurrentSource() {
+        if (currentUnavailableReason() != null) {
+            player.pause()
+            player.stop()
+            publishRuntimeState(unavailableReason = currentUnavailableReason())
+        } else if (player.currentMediaItem.isResolvedPlaybackSource() && player.playbackState == Player.STATE_IDLE) {
+            player.prepare()
+        }
+        publishRuntimeState(
+            source = player.mediaMetadata.extras?.getString("selected_source"),
+            unavailableReason = currentUnavailableReason(),
+        )
+    }
+
     private suspend fun resolveQueueItem(queue: RestoredPlaybackQueue, index: Int): QueueItemResolution =
         withContext(Dispatchers.IO) {
             val entry = queue.entries[index]
@@ -381,7 +430,6 @@ class AutPlayPlaybackService : MediaSessionService() {
                         source = null,
                         unavailableReason = reason,
                         title = track?.rawTitle,
-                        available = false,
                     )
                 }
                 is AndroidSourceResolution.Available -> QueueItemResolution(
@@ -403,7 +451,6 @@ class AutPlayPlaybackService : MediaSessionService() {
                     source = resolved.value.source.name,
                     unavailableReason = null,
                     title = track?.rawTitle,
-                    available = true,
                 )
             }
         }
@@ -413,14 +460,12 @@ class AutPlayPlaybackService : MediaSessionService() {
         val source: String?,
         val unavailableReason: String?,
         val title: String?,
-        val available: Boolean,
     )
 
     private data class QueueResolutionPlan(
         val queue: RestoredPlaybackQueue,
         val generation: Long,
         val currentIndex: Int,
-        val autoplay: Boolean,
     )
 
     private data class PlayerMetricsSnapshot(
@@ -479,7 +524,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         current: LogicalListeningCheckpoint,
         positionMs: Long,
     ): LogicalListeningCheckpoint {
-        val delta = consumeObservedDelta(continueIfPlaying = true)
+        val delta = collectObservedDelta(continueIfPlaying = true)
         return persistence.checkpoint(
             current,
             positionMs,
@@ -488,7 +533,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             player.repeatMode.fromMedia3RepeatMode(),
             shuffleSeed,
             System.currentTimeMillis(),
-        ).also { logicalSession = it }
+        ).also { logicalSession = it; uncommittedPlaybackDeltaMs = 0 }
     }
 
     private suspend fun checkpointPlayerStateLocked() {
@@ -530,11 +575,61 @@ class AutPlayPlaybackService : MediaSessionService() {
             current = current,
             endPositionMs = stableMetrics?.positionMs ?: current.lastObservedPositionMs,
             durationMs = duration,
-            observedPlaybackDeltaMs = consumeObservedDelta(continueIfPlaying = false),
+            observedPlaybackDeltaMs = collectObservedDelta(continueIfPlaying = false),
             nowMs = System.currentTimeMillis(),
         )
         logicalSession = null
+        uncommittedPlaybackDeltaMs = 0
+        restored = restored?.let { queue ->
+            queue.copy(snapshot = queue.snapshot.copy(activeListenExcludedFromTaste = false))
+        }
         observedPlaybackStartedAtMs = null
+    }
+
+    private suspend fun setCurrentListenTasteExcluded(
+        expectedQueueEntryId: String?,
+        expectedListeningEventId: String?,
+        excluded: Boolean,
+    ) {
+        val current = logicalSession
+        if (current == null || current.queueEntryId.value != expectedQueueEntryId ||
+            current.listeningEventId.value != expectedListeningEventId
+        ) {
+            publishRuntimeState(tasteExclusionError = "TASTE_LISTEN_STALE")
+            return
+        }
+        runCatching {
+            persistence.setCurrentListenTasteExcluded(current, excluded)
+        }.onSuccess { updated ->
+            logicalSession = updated
+            restored = restored?.let { queue ->
+                queue.copy(snapshot = queue.snapshot.copy(activeListenExcludedFromTaste = excluded))
+            }
+            publishRuntimeState(tasteExclusionError = null)
+        }.onFailure {
+            publishRuntimeState(tasteExclusionError = "TASTE_EXCLUSION_UNAVAILABLE")
+        }
+    }
+
+    private suspend fun setSessionTasteExcluded(expectedSnapshotId: String?, excluded: Boolean) {
+        val queue = restored
+        if (queue == null || queue.snapshot.queueSnapshotId != expectedSnapshotId) {
+            publishRuntimeState(tasteExclusionError = "TASTE_SESSION_STALE")
+            return
+        }
+        runCatching {
+            persistence.setSessionTasteExcluded(LocalId(queue.snapshot.queueSnapshotId), logicalSession, excluded)
+        }.onSuccess { updated ->
+            logicalSession = updated
+            restored = queue.copy(
+                snapshot = queue.snapshot.copy(
+                    sessionExcludedFromTaste = excluded,
+                ),
+            )
+            publishRuntimeState(tasteExclusionError = null)
+        }.onFailure {
+            publishRuntimeState(tasteExclusionError = "TASTE_EXCLUSION_UNAVAILABLE")
+        }
     }
 
     private fun capturePlayerMetrics(): PlayerMetricsSnapshot? {
@@ -547,9 +642,15 @@ class AutPlayPlaybackService : MediaSessionService() {
     }
 
     private fun metricsFor(current: LogicalListeningCheckpoint): PlayerMetricsSnapshot? =
-        sequenceOf(pendingTransitionMetrics, lastPlayerMetrics, capturePlayerMetrics())
+        sequenceOf(pendingTransitionMetrics, capturePlayerMetrics(), lastPlayerMetrics)
             .filterNotNull()
             .firstOrNull { it.queueEntryId == current.queueEntryId.value }
+
+    private fun collectObservedDelta(continueIfPlaying: Boolean): Long {
+        uncommittedPlaybackDeltaMs = (uncommittedPlaybackDeltaMs + consumeObservedDelta(continueIfPlaying))
+            .coerceAtMost(MAX_CHECKPOINT_DELTA_MS)
+        return uncommittedPlaybackDeltaMs
+    }
 
     private fun consumeObservedDelta(continueIfPlaying: Boolean): Long {
         val now = SystemClock.elapsedRealtime()
@@ -577,6 +678,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         source: String? = PlaybackRuntimeState.state.value.source,
         unavailableReason: String? = PlaybackRuntimeState.state.value.unavailableReason,
         title: String? = player.mediaMetadata.title?.toString() ?: PlaybackRuntimeState.state.value.title,
+        tasteExclusionError: String? = PlaybackRuntimeState.state.value.tasteExclusionError,
     ) {
         lastPlayerMetrics = capturePlayerMetrics()
         val queueEntryId = player.currentMediaItem?.mediaId
@@ -586,6 +688,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         )
         PlaybackRuntimeState.publish(
             PlaybackUiState(
+                queueSnapshotId = restored?.snapshot?.queueSnapshotId,
                 queueEntryId = queueEntryId,
                 localUserTrackRefId = localTrackRefId,
                 title = title,
@@ -599,6 +702,12 @@ class AutPlayPlaybackService : MediaSessionService() {
                 repeatMode = player.repeatMode.fromMedia3RepeatMode(),
                 sleepTimerDeadlineElapsedRealtimeMs = sleepTimerDeadlineElapsedRealtimeMs,
                 stopAfterQueueEntryId = stopAfterQueueEntryId,
+                listeningEventId = logicalSession?.listeningEventId?.value,
+                listenExcludedFromTaste = logicalSession?.excludedFromTaste
+                    ?: restored?.snapshot?.activeListenExcludedFromTaste
+                    ?: false,
+                sessionExcludedFromTaste = restored?.snapshot?.sessionExcludedFromTaste ?: false,
+                tasteExclusionError = tasteExclusionError,
             ),
         )
     }
@@ -724,10 +833,8 @@ class AutPlayPlaybackService : MediaSessionService() {
                         queue,
                         index,
                         queueGeneration,
-                        prepareWhenResolved = true,
-                        playWhenResolved = player.playWhenReady,
                     )
-                    scheduleResolveIndex(queue, index + 1, queueGeneration)
+                    scheduleResolveIndex(queue, player.nextMediaItemIndex, queueGeneration)
                     if (player.isPlaying) {
                         ensureSession()
                         observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
@@ -752,10 +859,8 @@ class AutPlayPlaybackService : MediaSessionService() {
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
-            if (oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
-                val oldQueueEntryId = restored?.entries
-                    ?.getOrNull(oldPosition.mediaItemIndex)
-                    ?.queueEntryId
+            if (oldPosition.mediaItem?.mediaId != newPosition.mediaItem?.mediaId) {
+                val oldQueueEntryId = oldPosition.mediaItem?.mediaId
                 if (oldQueueEntryId != null) {
                     pendingTransitionMetrics = PlayerMetricsSnapshot(
                         queueEntryId = oldQueueEntryId,
@@ -791,6 +896,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                         player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(size, requireNotNull(shuffleSeed)))
                     }
                     checkpointPlayerStateLocked()
+                    restored?.let { scheduleResolveIndex(it, player.nextMediaItemIndex, queueGeneration) }
                     publishRuntimeState()
                 }
             }
@@ -858,6 +964,8 @@ class AutPlayPlaybackService : MediaSessionService() {
         const val ACTION_STOP_AFTER_CURRENT_ITEM = "app.autplay.playback.STOP_AFTER_CURRENT_ITEM"
         const val ACTION_CANCEL_SLEEP_TIMER = "app.autplay.playback.CANCEL_SLEEP_TIMER"
         const val ACTION_SET_SPEED = "app.autplay.playback.SET_SPEED"
+        const val ACTION_SET_CURRENT_LISTEN_TASTE_EXCLUDED = "app.autplay.playback.SET_CURRENT_LISTEN_TASTE_EXCLUDED"
+        const val ACTION_SET_SESSION_TASTE_EXCLUDED = "app.autplay.playback.SET_SESSION_TASTE_EXCLUDED"
         const val EXTRA_QUEUE_SNAPSHOT_ID = "queue_snapshot_id"
         const val EXTRA_POSITION_MS = "position_ms"
         const val EXTRA_SHUFFLE_ENABLED = "shuffle_enabled"
@@ -866,6 +974,8 @@ class AutPlayPlaybackService : MediaSessionService() {
         const val EXTRA_SLEEP_TIMER_DURATION_MS = "sleep_timer_duration_ms"
         const val EXTRA_EXPECTED_QUEUE_ENTRY_ID = "expected_queue_entry_id"
         const val EXTRA_SPEED = "speed"
+        const val EXTRA_EXPECTED_LISTENING_EVENT_ID = "expected_listening_event_id"
+        const val EXTRA_TASTE_EXCLUDED = "taste_excluded"
         private val APP_COMMAND_ACTIONS = setOf(
             ACTION_START_QUEUE,
             ACTION_PREPARE_QUEUE,
@@ -883,6 +993,8 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_STOP_AFTER_CURRENT_ITEM,
             ACTION_CANCEL_SLEEP_TIMER,
             ACTION_SET_SPEED,
+            ACTION_SET_CURRENT_LISTEN_TASTE_EXCLUDED,
+            ACTION_SET_SESSION_TASTE_EXCLUDED,
         )
         private const val PERIODIC_CHECKPOINT_MS = 15_000L
         private const val AUDIO_CONTOUR_PUBLISH_MS = 50L

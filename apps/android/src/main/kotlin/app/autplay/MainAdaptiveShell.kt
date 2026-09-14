@@ -17,10 +17,16 @@ import app.autplay.ui.core.DetailTarget
 import app.autplay.ui.core.ListAnchor
 import app.autplay.ui.player.NowPlayingRouteActions
 import app.autplay.ui.player.NowPlayingRouteRenderer
+import app.autplay.ui.player.NowPlayingTasteUiState
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.PlaybackPreferenceUiState
 import app.autplay.ui.queue.QueueEditorPanel
 import app.autplay.ui.queue.QueueEditorUiState
+import app.autplay.ui.history.HistoryScreen
+import app.autplay.ui.history.HistoryUiActions
+import app.autplay.ui.history.HistoryUiState
+import app.autplay.ui.downloads.DownloadsScreen
+import app.autplay.ui.downloads.DownloadsUiActions
 
 internal data class MainAdaptiveShellState(
     val destination: UiDestination,
@@ -41,9 +47,15 @@ internal data class MainAdaptiveShellState(
     val queueState: QueueEditorUiState,
     val nowPlayingFeedbackEnabled: Boolean,
     val nowPlayingPreference: PlaybackPreferenceUiState,
+    val nowPlayingTaste: NowPlayingTasteUiState,
     val sleepTimerRemainingMinutes: Int?,
     val stopAfterCurrentTrackActive: Boolean,
     val nowPlayingActions: NowPlayingRouteActions,
+    val historyState: HistoryUiState,
+    val historyActions: HistoryUiActions,
+    val downloadsPendingIntentId: String?,
+    val canDownloadSelected: Boolean,
+    val downloadsActions: DownloadsUiActions,
     val legacyState: LegacySecondaryRouteState,
     val legacyActions: LegacySecondaryRouteActions,
 )
@@ -139,11 +151,24 @@ internal fun MainAdaptiveShell(
                 state = state.playerState,
                 feedbackEnabled = state.nowPlayingFeedbackEnabled,
                 preference = state.nowPlayingPreference,
+                taste = state.nowPlayingTaste,
                 sleepTimerRemainingMinutes = state.sleepTimerRemainingMinutes,
                 stopAfterCurrentTrackActive = state.stopAfterCurrentTrackActive,
                 queueState = state.queueState,
                 actions = state.nowPlayingActions,
                 modifier = Modifier.padding(contentPadding),
+            )
+            UiDestination.History -> HistoryScreen(
+                state = state.historyState,
+                actions = state.historyActions,
+                contentPadding = contentPadding,
+            )
+            UiDestination.Downloads -> DownloadsScreen(
+                downloads = state.legacyState.downloads,
+                pendingIntentId = state.downloadsPendingIntentId,
+                canDownloadSelected = state.canDownloadSelected,
+                actions = state.downloadsActions,
+                contentPadding = contentPadding,
             )
             else -> LegacySecondaryRouteRenderer(
                 state = state.legacyState,

@@ -1,7 +1,6 @@
 package app.autplay.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,23 +13,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -102,259 +99,151 @@ public fun HomePlaybackHero(
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
-    val density = LocalDensity.current
-    val heroHeight = with(density) {
-        LocalWindowInfo.current.containerSize.height.toDp() * 0.74f
-    }.coerceIn(600.dp, 760.dp)
     val palette = remember(title) { playbackVisualPalette(title) }
     val openPlayerLabel = stringResource(R.string.home_hero_open_player)
+    val togetherLabel = stringResource(R.string.nav_wave_rooms)
     val hasPlaybackTarget = state.hasActivePlayback || state.trackId != null
     val canTogglePlayback = hasPlaybackTarget && (!state.hasActivePlayback || state.playPauseEnabled)
-    val lightHero = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val heroContentColor = if (lightHero) MaterialTheme.colorScheme.onSurface else Color.White
-    val heroMutedContentColor = if (lightHero) {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    } else {
-        Color.White.copy(alpha = 0.72f)
+    val playLabel = stringResource(if (state.isPlaying) R.string.action_pause else R.string.action_play)
+    val openTarget = {
+        if (state.hasActivePlayback) onOpenPlayer() else state.trackId?.let(onPlayTrack)
+        Unit
     }
-    val heroGlassSurface = if (lightHero) {
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
-    } else {
-        AutPlayTokens.colors.glassSurface
-    }
-    val heroGlassBorder = if (lightHero) {
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
-    } else {
-        AutPlayTokens.colors.glassBorder
-    }
-    val heroGradient = if (lightHero) {
-        listOf(
-            palette.first().copy(alpha = 0.46f),
-            palette[1].copy(alpha = 0.24f),
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
-            MaterialTheme.colorScheme.background,
-        )
-    } else {
-        listOf(
-            palette.first().copy(alpha = 0.86f),
-            palette[1].copy(alpha = 0.62f),
-            Color(0xFF111216),
-            Color(0xFF08090B),
-        )
-    }
-
+    val colors = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = heroHeight)
-            .testTag("home-playback-hero"),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = Color.Transparent,
+        modifier = modifier.fillMaxWidth().testTag("home-playback-hero"),
+        color = colors.background,
     ) {
-        Box(
-            modifier = Modifier.background(
-                Brush.verticalGradient(
-                    heroGradient,
-                ),
-            ),
+        Column(
+            modifier = Modifier
+                .background(Brush.verticalGradient(listOf(palette[0].copy(alpha = 0.10f), Color.Transparent)))
+                .padding(start = 24.dp, top = topChromePadding + 12.dp, end = 24.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Canvas(Modifier.fillMaxSize()) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        listOf(
-                            palette.last().copy(alpha = if (lightHero) 0.22f else 0.62f),
-                            Color.Transparent,
-                        ),
-                    ),
-                    radius = size.minDimension * 0.72f,
-                    center = androidx.compose.ui.geometry.Offset(size.width * 0.88f, size.height * 0.22f),
-                )
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        listOf(
-                            palette[2].copy(alpha = if (lightHero) 0.14f else 0.34f),
-                            Color.Transparent,
-                        ),
-                    ),
-                    radius = size.minDimension * 0.78f,
-                    center = androidx.compose.ui.geometry.Offset(size.width * 0.08f, size.height * 0.66f),
-                )
+            HomeHeroHeader(localMode, togetherLabel, onOpenListenTogether)
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val artworkSize = (maxWidth * 0.84f).coerceIn(160.dp, 320.dp)
+                Box(
+                    Modifier.size(artworkSize)
+                        .shadow(20.dp, MaterialTheme.shapes.small)
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable(enabled = hasPlaybackTarget, role = Role.Button, onClick = openTarget)
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = openPlayerLabel
+                            if (!hasPlaybackTarget) disabled()
+                        },
+                ) {
+                    AutPlayArtwork(title = title, size = artworkSize)
+                }
             }
             Column(
-                modifier = Modifier.fillMaxSize().padding(
-                    start = 20.dp,
-                    top = 20.dp + topChromePadding,
-                    end = 20.dp,
-                    bottom = 20.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val heading: @Composable () -> Unit = {
-                        Column(Modifier.testTag("home-hero-heading")) {
-                            Text(
-                                stringResource(
-                                    if (localMode) R.string.library_local_mode else R.string.home_hero_personal_flow,
-                                ),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = heroContentColor,
-                            )
-                        }
-                    }
-                    val listenTogether: @Composable () -> Unit = {
-                        Surface(
-                            onClick = onOpenListenTogether,
-                            modifier = Modifier
-                                .testTag("home-listen-together")
-                                .heightIn(min = 48.dp)
-                                .widthIn(max = 190.dp),
-                            shape = CircleShape,
-                            color = heroGlassSurface,
-                            contentColor = heroContentColor,
-                            border = BorderStroke(1.dp, heroGlassBorder),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.nav_wave_rooms),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    if (density.fontScale >= 1.5f || maxWidth < 380.dp) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            heading()
-                            listenTogether()
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            heading()
-                            listenTogether()
-                        }
-                    }
-                }
-
                 Text(
-                    text = artist,
-                    style = MaterialTheme.typography.displaySmall,
-                    color = heroContentColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    title, style = MaterialTheme.typography.headlineMedium, color = colors.onSurface,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
-
-                BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 210.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val visualSize = (maxWidth * 0.84f).coerceIn(210.dp, 360.dp)
-                    val artworkSize = visualSize * 0.62f
-                    AutPlayPlaybackHalo(
-                        seed = title,
-                        isPlaying = state.isPlaying,
-                        surfaceId = "home-playback-halo",
-                        modifier = Modifier.size(visualSize),
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(artworkSize)
-                            .clip(MaterialTheme.shapes.extraLarge)
-                            .clickable(
-                                enabled = hasPlaybackTarget,
-                                role = Role.Button,
-                                onClick = {
-                                    if (state.hasActivePlayback) {
-                                        onOpenPlayer()
-                                    } else {
-                                        state.trackId?.let(onPlayTrack)
-                                    }
-                                },
-                            )
-                            .semantics {
-                                role = Role.Button
-                                contentDescription = openPlayerLabel
-                                if (!hasPlaybackTarget) disabled()
-                            },
-                    ) {
-                        AutPlayArtwork(title = title, size = artworkSize)
-                    }
-                }
-
+                Text(
+                    artist, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        if (state.hasActivePlayback) onTogglePlayPause() else state.trackId?.let(onPlayTrack)
+                    },
+                    enabled = canTogglePlayback,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp)
+                        .semantics { contentDescription = playLabel; role = Role.Button },
                     shape = CircleShape,
-                    color = heroGlassSurface,
-                    contentColor = heroContentColor,
-                    border = BorderStroke(1.dp, heroGlassBorder),
+                    color = if (canTogglePlayback) colors.primary else colors.surfaceContainerHigh,
+                    contentColor = if (canTogglePlayback) colors.onPrimary else colors.onSurfaceVariant,
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                        Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        HeroIconButton(
-                            icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
-                            label = stringResource(
-                                if (state.isPlaying) R.string.action_pause else R.string.action_play,
-                            ),
-                            enabled = canTogglePlayback,
-                            onClick = {
-                                if (state.hasActivePlayback) {
-                                    onTogglePlayPause()
-                                } else {
-                                    state.trackId?.let(onPlayTrack)
-                                }
-                            },
-                        )
-                        Column(
-                            modifier = Modifier.weight(1f).clickable(
-                                enabled = hasPlaybackTarget,
-                                role = Role.Button,
-                                onClick = {
-                                    if (state.hasActivePlayback) onOpenPlayer() else state.trackId?.let(onPlayTrack)
-                                },
-                            ),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                title,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                artist,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = heroMutedContentColor,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        HeroIconButton(
-                            icon = AutPlayIcon.Favorite,
-                            label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
-                            enabled = state.trackId != null && !state.liked,
-                            selected = state.liked,
-                            onClick = { state.trackId?.let(onLike) },
-                        )
+                        AutPlayPlatformIcon(if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play, null, Modifier.size(22.dp))
+                        Text(playLabel, style = MaterialTheme.typography.titleMedium)
                     }
                 }
-                Text(
-                    stringResource(
-                        when {
-                            state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
-                            state.isPlaying -> R.string.home_hero_playing
-                            hasPlaybackTarget -> R.string.home_hero_ready
-                            else -> R.string.home_hero_empty
-                        },
-                    ),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (state.isPlaying) MaterialTheme.colorScheme.primary else heroMutedContentColor,
+                HeroIconButton(
+                    icon = AutPlayIcon.Favorite,
+                    label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
+                    enabled = state.trackId != null && !state.liked,
+                    selected = state.liked,
+                    onClick = { state.trackId?.let(onLike) },
                 )
+            }
+            Text(
+                stringResource(when {
+                    state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
+                    state.isPlaying -> R.string.home_hero_playing
+                    hasPlaybackTarget -> R.string.home_hero_ready
+                    else -> R.string.home_hero_empty
+                }),
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                color = if (state.isPlaying) colors.primary else colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun HomeHeroHeader(localMode: Boolean, togetherLabel: String, onOpen: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val fontScale = LocalDensity.current.fontScale
+    Box(Modifier.fillMaxWidth()) {
+        val heading: @Composable (Modifier) -> Unit = { modifier ->
+            Text(
+                stringResource(if (localMode) R.string.library_local_mode else R.string.home_hero_personal_flow),
+                modifier = modifier.testTag("home-hero-heading"),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
+        }
+        val action: @Composable () -> Unit = {
+            Surface(
+                onClick = onOpen,
+                modifier = Modifier.testTag("home-listen-together").heightIn(min = 48.dp)
+                    .semantics { contentDescription = togetherLabel; role = Role.Button },
+                shape = CircleShape,
+                color = colors.surfaceContainerHigh,
+                contentColor = colors.onSurface,
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AutPlayPlatformIcon(AutPlayIcon.Wave, null, Modifier.size(18.dp), colors.primary)
+                    Text(stringResource(R.string.home_listen_together_short), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+        if (fontScale >= 1.5f) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                heading(Modifier)
+                action()
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                heading(Modifier.weight(1f))
+                action()
             }
         }
     }
@@ -431,7 +320,7 @@ private fun HeroIconButton(
             lightSurface -> MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)
             else -> Color.Black.copy(alpha = 0.34f)
         },
-        contentColor = if (lightSurface && !selected) MaterialTheme.colorScheme.onSurface else Color.White,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(
             1.dp,
             if (lightSurface) {
@@ -455,7 +344,7 @@ private fun HeroIconButton(
                 icon = icon,
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
-                tint = if (lightSurface && !selected) MaterialTheme.colorScheme.onSurface else Color.White,
+                tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             )
         }
     }

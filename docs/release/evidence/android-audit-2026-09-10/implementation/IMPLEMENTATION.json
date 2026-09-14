@@ -1,0 +1,42 @@
+{
+  "branch": "codex/pa3-linux-migration",
+  "checks": {
+    "connected": {
+      "failures": 0,
+      "skipped": 3,
+      "tests": 212
+    },
+    "debug_build": "PASS",
+    "lint": "PASS",
+    "process_death": {
+      "receipt": "process-receipt.json",
+      "status": "PASS",
+      "verified_process_boundary": true
+    },
+    "read_only_review": "APPROVED; service shutdown/persistence, source preparation, Sync lease cancellation/policy, M5 retry and worker guards",
+    "unit": {
+      "failures": 0,
+      "tests": 270
+    }
+  },
+  "date": "2026-09-10",
+  "dirty_worktree": true,
+  "evidence_sha256": {
+    "CONNECTED_RESULTS.json": "0fb15090e62ae32a373a8fa36e457b87a3c638398ca0680442a3d8cdf5a2cf68",
+    "SOURCE_SHA256.json": "a7f920ca37517302451e45213cdd68b049fec30cff405c0784d2755e5993f718",
+    "UNIT_RESULTS.json": "96a8df59c2299c2e769addf90c3ccfb4344c28f1a9b5b2192e07420c234e7225",
+    "process-receipt.json": "1d740e909df0d04a634a0a6fcb4cf34efbb635c3add609591297134908b73c62",
+    "process-stage1.txt": "a74d20a284640220003d8a94e2eebc3d17635b6521238bfe95d737444688ee2b",
+    "process-stage2.txt": "2cf33f603fd38572fce6367e1b36c810df4be333475f0f9766b77387bba98d35"
+  },
+  "gradle_command": "gradlew --no-daemon --console=plain --max-workers=1 :apps:android:testDebugUnitTest :apps:android:lintDebug :apps:android:assembleDebug :apps:android:connectedDebugAndroidTest",
+  "head": "f208ce6",
+  "limitations": [
+    "API26 disposable emulator only; physical Samsung A55 unavailable",
+    "Q3 hosted clean CI and required-check configuration unverified",
+    "Q4 final production release/artifact/device qualification pending",
+    "ordinary-suite M5 pairing E2E skipped; not claimed by this audit slice"
+  ],
+  "source_scope": "Android audit snapshot before pure Face contract additions; SOURCE_SHA256.json binds all 325 Android/harness/workflow inputs",
+  "status": "PASS_LOCAL_ANDROID_A1_A8"
+}

@@ -18,6 +18,8 @@ internal data class NowPlayingRouteActions(
     val like: () -> Unit,
     val dislike: () -> Unit,
     val clearPreference: () -> Unit,
+    val setCurrentListenTasteExcluded: (Boolean) -> Unit = {},
+    val setSessionTasteExcluded: (Boolean) -> Unit = {},
     val scheduleSleepTimer: (Long) -> Unit,
     val stopAfterCurrentTrack: () -> Unit,
     val cancelSleepTimer: () -> Unit,
@@ -25,11 +27,20 @@ internal data class NowPlayingRouteActions(
     val queue: QueueEditorUiActions = QueueEditorUiActions(),
 )
 
+internal data class NowPlayingTasteUiState(
+    val listenExcluded: Boolean = false,
+    val sessionExcluded: Boolean = false,
+    val listenActionAvailable: Boolean = false,
+    val sessionActionAvailable: Boolean = false,
+    val errorCode: String? = null,
+)
+
 @Composable
 internal fun NowPlayingRouteRenderer(
     state: PlaybackPresentationState,
     feedbackEnabled: Boolean,
     preference: PlaybackPreferenceUiState,
+    taste: NowPlayingTasteUiState,
     sleepTimerRemainingMinutes: Int?,
     stopAfterCurrentTrackActive: Boolean,
     queueState: QueueEditorUiState,
@@ -51,6 +62,13 @@ internal fun NowPlayingRouteRenderer(
         preference = preference,
         onClearPreference = actions.clearPreference,
         feedbackEnabled = feedbackEnabled,
+        listenExcludedFromTaste = taste.listenExcluded,
+        sessionExcludedFromTaste = taste.sessionExcluded,
+        listenTasteActionAvailable = taste.listenActionAvailable,
+        sessionTasteActionAvailable = taste.sessionActionAvailable,
+        tasteExclusionError = taste.errorCode,
+        onSetCurrentListenTasteExcluded = actions.setCurrentListenTasteExcluded,
+        onSetSessionTasteExcluded = actions.setSessionTasteExcluded,
         sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
         stopAfterCurrentTrackActive = stopAfterCurrentTrackActive,
         onSetSleepTimer = actions.scheduleSleepTimer,

@@ -39,6 +39,9 @@ jobs:
       - name: Install pinned Playwright Firefox
         run: uv run --project tools/local_music_acquisition --frozen playwright install --with-deps firefox
 
+      - name: Install pinned ffmpeg and ffprobe
+        run: bash scripts/install-ci-ffmpeg.sh
+
       - name: Check acquisition lock and static gates
         run: |
           uv lock --project tools/local_music_acquisition --check

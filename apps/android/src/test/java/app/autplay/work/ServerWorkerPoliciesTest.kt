@@ -51,5 +51,7 @@ class ServerWorkerPoliciesTest {
         assertFalse(shouldScheduleRemoteImport("RUNNING", "IMPORT_POLLING_PAUSED"))
         assertFalse(shouldScheduleRemoteImport("RUNNING", "IMPORT_STATUS_UNAVAILABLE"))
         assertFalse(shouldScheduleRemoteImport("COMPLETED", null))
+        assertFalse(shouldScheduleRemoteImport("RUNNING", "SESSION_REQUIRED"))
+        assertFalse(shouldScheduleRemoteImport("RUNNING", "SERVER_PROFILE_NOT_ACTIVE"))
     }
 }

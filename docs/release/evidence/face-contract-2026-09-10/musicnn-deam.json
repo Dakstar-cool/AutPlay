@@ -1,0 +1,164 @@
+{
+  "status": "TECHNICAL_PREFLIGHT_PASS",
+  "baseline": "musicnn-deam",
+  "source_kind": "GENERATED_SYNTHETIC_PCM_NOT_MUSIC_EVALUATION",
+  "musical_quality_evaluated": false,
+  "interpreter_approved": false,
+  "calibrated_confidence_available": false,
+  "target_gpu_measured": false,
+  "runtime": {
+    "python": "3.14.7",
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "essentia_tensorflow": "2.1b6.dev1438",
+    "numpy": "2.5.3",
+    "cpu_limit": 2
+  },
+  "model_manifest_sha256": "064b40a27fe4a44ad4724cf60ba083ba1906f575665e74f3e0a6e1b8aa9b2eb9",
+  "model_load_seconds": 0.048741935000066405,
+  "process_peak_rss_kib": 382384,
+  "measurement_scope": "One isolated CPU process, three fixtures in order; first inference cold, no performance qualification",
+  "class_order": [
+    "valence",
+    "arousal"
+  ],
+  "fixtures": [
+    {
+      "fixture": "silence",
+      "pcm_f32le_sha256": "351a8054b23144894668c6a51d5dbba82f56523ef43cc45b6f4d7060a969c31a",
+      "sample_rate": 16000,
+      "duration_seconds": 12,
+      "embedding_shape": [
+        7,
+        200
+      ],
+      "prediction_shape": [
+        7,
+        2
+      ],
+      "elapsed_seconds": 0.4485342489999766,
+      "real_time_factor": 0.037377854083331385,
+      "raw_predictions": [
+        [
+          3.5013349056243896,
+          4.379309177398682
+        ],
+        [
+          3.5013349056243896,
+          4.379309177398682
+        ],
+        [
+          3.5013349056243896,
+          4.379309177398682
+        ],
+        [
+          3.5013349056243896,
+          4.379309177398682
+        ],
+        [
+          3.5013349056243896,
+          4.379309177398682
+        ],
+        [
+          3.5013349056243896,
+          4.379309177398682
+        ],
+        [
+          3.5013351440429688,
+          4.379309177398682
+        ]
+      ]
+    },
+    {
+      "fixture": "steady_tone",
+      "pcm_f32le_sha256": "6dc2a95971f0c5e22285aee89cace02d071484a40d01b12fec2e8acaafdf9733",
+      "sample_rate": 16000,
+      "duration_seconds": 12,
+      "embedding_shape": [
+        7,
+        200
+      ],
+      "prediction_shape": [
+        7,
+        2
+      ],
+      "elapsed_seconds": 0.4007525819999955,
+      "real_time_factor": 0.03339604849999963,
+      "raw_predictions": [
+        [
+          3.1876423358917236,
+          3.385143756866455
+        ],
+        [
+          3.1762020587921143,
+          3.48507022857666
+        ],
+        [
+          3.1762008666992188,
+          3.4850964546203613
+        ],
+        [
+          3.1762149333953857,
+          3.4850685596466064
+        ],
+        [
+          3.1761908531188965,
+          3.4850945472717285
+        ],
+        [
+          3.176218271255493,
+          3.485071897506714
+        ],
+        [
+          3.1761908531188965,
+          3.4850876331329346
+        ]
+      ]
+    },
+    {
+      "fixture": "pulsed_chord",
+      "pcm_f32le_sha256": "432c589831468f410909223e78e235cacb3a3396debfdf00109e3edd9dff7067",
+      "sample_rate": 16000,
+      "duration_seconds": 12,
+      "embedding_shape": [
+        7,
+        200
+      ],
+      "prediction_shape": [
+        7,
+        2
+      ],
+      "elapsed_seconds": 0.3965525969999817,
+      "real_time_factor": 0.033046049749998474,
+      "raw_predictions": [
+        [
+          4.390615463256836,
+          4.428442001342773
+        ],
+        [
+          4.46091365814209,
+          4.479964256286621
+        ],
+        [
+          4.4082255363464355,
+          4.486189842224121
+        ],
+        [
+          4.4271159172058105,
+          4.428779602050781
+        ],
+        [
+          4.4804368019104,
+          4.486358642578125
+        ],
+        [
+          4.54861307144165,
+          4.579265117645264
+        ],
+        [
+          4.815155029296875,
+          4.733120441436768
+        ]
+      ]
+    }
+  ]
+}

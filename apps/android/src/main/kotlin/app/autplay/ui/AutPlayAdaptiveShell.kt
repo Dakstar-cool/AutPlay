@@ -17,6 +17,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -68,7 +69,7 @@ public fun AutPlayAdaptiveShell(
 ) {
     val lightTheme = MaterialTheme.colorScheme.background.luminance() > 0.5f
     AutPlaySystemBarIconAppearance(
-        useDarkStatusBarIcons = shouldUseDarkStatusBarIcons(selectedDestination, lightTheme),
+        useDarkStatusBarIcons = shouldUseDarkStatusBarIcons(lightTheme),
         useDarkNavigationBarIcons = lightTheme,
     )
     val stateHolder = rememberSaveableStateHolder()
@@ -128,8 +129,7 @@ public fun AutPlayAdaptiveShell(
     }
 }
 
-internal fun shouldUseDarkStatusBarIcons(destination: UiDestination, lightTheme: Boolean): Boolean =
-    lightTheme && destination != UiDestination.NowPlaying
+internal fun shouldUseDarkStatusBarIcons(lightTheme: Boolean): Boolean = lightTheme
 
 /** Public for previews and deterministic width-class tests. */
 public fun widthClassFor(width: Dp): UiWidthClass = when {
@@ -167,9 +167,9 @@ private fun CompactShell(
         bottomBar = {
             Column {
                 nowPlayingBar()
+                HorizontalDivider(color = AutPlayTokens.colors.border.copy(alpha = 0.65f))
                 NavigationBar(
-                    modifier = Modifier.height(72.dp),
-                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.98f),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                     tonalElevation = 0.dp,
                 ) {
                     UiDestination.compactNavigation.forEach { destination ->
@@ -272,7 +272,7 @@ private fun AutPlayTopBar(
             if (!immersive) {
                 Text(
                     stringResource(topBarTitle(destination)),
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -314,11 +314,11 @@ private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
         selected = destination == selectedDestination,
         onClick = { onDestinationSelected(destination) },
         icon = { DestinationIcon(destination, unreadSyncConflicts) },
-        label = { Text(label, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis) },
+        label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis) },
         colors = NavigationBarItemDefaults.colors(
             selectedIconColor = MaterialTheme.colorScheme.primary,
             selectedTextColor = MaterialTheme.colorScheme.primary,
-            indicatorColor = Color.Transparent,
+            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f),
             unselectedIconColor = AutPlayTokens.colors.mutedText,
             unselectedTextColor = AutPlayTokens.colors.mutedText,
         ),

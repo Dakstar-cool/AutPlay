@@ -228,9 +228,9 @@ internal fun playbackHaloDisplacement(
 }
 
 internal fun playbackVisualPalette(seed: String): List<Color> = when (seed.hashCode().ushr(1) % 5) {
-    0 -> listOf(Color(0xFFFF5B35), Color(0xFFFFB443), Color(0xFF8A5CFF), Color(0xFF46D7C8))
-    1 -> listOf(Color(0xFF46D7C8), Color(0xFF2676FF), Color(0xFFA45CFF), Color(0xFFFF5B78))
-    2 -> listOf(Color(0xFFFFB443), Color(0xFFFF5B78), Color(0xFF7C5CFF), Color(0xFF33A6FF))
-    3 -> listOf(Color(0xFF82E68A), Color(0xFF33A6FF), Color(0xFF7C5CFF), Color(0xFFFF6B45))
-    else -> listOf(Color(0xFFFF6B45), Color(0xFFFF5BA6), Color(0xFFA45CFF), Color(0xFF46D7C8))
+    0 -> listOf(Color(0xFFE86339), Color(0xFFF6B46C), Color(0xFF643129), Color(0xFFFFDED0))
+    1 -> listOf(Color(0xFF376DAD), Color(0xFF81BBD1), Color(0xFF203950), Color(0xFFD9EBEB))
+    2 -> listOf(Color(0xFF9070B5), Color(0xFFCBA8CE), Color(0xFF392C55), Color(0xFFF1DAE9))
+    3 -> listOf(Color(0xFF55795A), Color(0xFFBBDD82), Color(0xFF253E38), Color(0xFFE3ECCB))
+    else -> listOf(Color(0xFFDB6746), Color(0xFFF1A66A), Color(0xFF492C31), Color(0xFFFFE7CA))
 }

@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -40,8 +41,9 @@ class GuestRoomScreenTest {
             actions = GuestRoomScreenActions(join = joinedName::set),
         )
 
-        compose.onNodeWithTag("guest-display-name").performTextInput("  Listener  ")
-        compose.onNodeWithText(context.getString(R.string.guest_join)).performClick()
+        compose.onNodeWithTag("guest-display-name").performScrollTo().performTextInput("  Listener  ")
+        compose.onNodeWithText(context.getString(R.string.guest_join))
+            .performScrollTo().assertIsDisplayed().performClick()
 
         compose.runOnIdle { assertEquals("Listener", joinedName.get()) }
     }
@@ -85,13 +87,14 @@ class GuestRoomScreenTest {
         compose.onNodeWithText(context.getString(R.string.guest_active_title, "Listener"))
             .assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.guest_host_controls_playback))
-            .assertIsDisplayed()
+            .performScrollTo().assertIsDisplayed()
         assertEquals(
             0,
             compose.onAllNodesWithText(context.getString(R.string.wave_host_controls))
                 .fetchSemanticsNodes().size,
         )
-        compose.onNodeWithText(context.getString(R.string.wave_leave_room)).performClick()
+        compose.onNodeWithText(context.getString(R.string.wave_leave_room))
+            .performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertTrue(left.get()) }
     }
 

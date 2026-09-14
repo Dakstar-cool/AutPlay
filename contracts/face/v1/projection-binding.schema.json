@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.app/contracts/face/v1/projection-binding.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "server_profile_id",
+    "user_id",
+    "identity",
+    "semantic_key",
+    "result_hash",
+    "activation_epoch"
+  ],
+  "properties": {
+    "server_profile_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "user_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "identity": {
+      "$ref": "timeline-identity.schema.json"
+    },
+    "semantic_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "result_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "activation_epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  }
+}

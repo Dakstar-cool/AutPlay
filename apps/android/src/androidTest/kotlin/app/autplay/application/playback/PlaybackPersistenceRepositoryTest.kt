@@ -37,6 +37,23 @@ class PlaybackPersistenceRepositoryTest {
         context.deleteDatabase(databaseName)
     }
 
+    @Test fun shutdownCheckpointCannotResurrectFinalizedOrReplaceNewSession() = runBlocking {
+        val repository = PlaybackPersistenceRepository(database)
+        database.libraryDao().upsertTrackRef(track(id(80), uuid(81)))
+        repository.activateQueue(id(82), listOf(NewPlaybackQueueEntry(id(83), id(80), "ORGANIC", "LOCAL_THEN_VAULT")),
+            "USER", null, null, "GENERAL", 1)
+        val old = repository.startSession(id(83), 0, 2, ownerBinding = null)
+        repository.finalizeSession(old, 500, 1_000, 500, 3)
+        // Reproduce a crash between the immutable history commit and clearing its active marker.
+        repository.checkpoint(old, 500, 500, "OFF", "OFF", null, 3)
+        assertEquals(false, repository.checkpointExistingSession(old, 700, 700, "OFF", "OFF", null, 4))
+        assertNull(database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
+        assertEquals(500L, database.historyDao().event(old.listeningEventId.value)?.playedMs)
+        val next = repository.startSession(id(83), 0, 5, ownerBinding = null)
+        assertEquals(false, repository.checkpointExistingSession(old, 900, 900, "OFF", "OFF", null, 6))
+        assertEquals(next.listeningEventId.value, database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
+    }
+
     @Test
     fun repeatedTrackQueueAndAttributionSessionRestoreFinalizeExactlyOnce() = runBlocking {
         val trackId = id(1)
@@ -229,6 +246,47 @@ class PlaybackPersistenceRepositoryTest {
         assertEquals(1, database.journalDao().eventCount())
         recovered.restoreActive(15)
         assertEquals(1, database.journalDao().eventCount())
+        Unit
+    }
+
+    @Test
+    fun tasteExclusionSurvivesRestartAndSessionFlagAppliesToLaterListen() = runBlocking {
+        val trackId = id(91)
+        val profileId = uuid(96)
+        val owner = PlaybackSessionOwnerBinding(uuid(97), uuid(98), profileId)
+        database.libraryDao().upsertTrackRef(track(trackId, uuid(92), profileId))
+        val snapshotId = id(93)
+        val firstEntry = id(94)
+        val secondEntry = id(95)
+        var repository = PlaybackPersistenceRepository(database)
+        repository.activateQueue(
+            snapshotId,
+            listOf(
+                NewPlaybackQueueEntry(firstEntry, trackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+                NewPlaybackQueueEntry(secondEntry, trackId, "ORGANIC", "LOCAL_THEN_VAULT"),
+            ),
+            "USER", null, profileId, "GENERAL", 100,
+        )
+        var first = repository.startSession(firstEntry, 0, 110, owner)
+        first = repository.setCurrentListenTasteExcluded(first, true, 111)
+        val firstEventId = first.listeningEventId.value
+
+        database.close()
+        database = AutPlayDatabase.open(context, databaseName)
+        repository = PlaybackPersistenceRepository(database)
+        val restored = requireNotNull(repository.recoverSession())
+        assertEquals(firstEventId, restored.listeningEventId.value)
+        assertEquals(true, restored.excludedFromTaste)
+        repository.finalizeSession(restored, 100, 1_000, 100, 120)
+        assertEquals(true, database.historyDao().event(firstEventId)?.excludedFromTaste)
+        assertEquals(true, database.journalDao().event(firstEventId)?.payloadJson?.contains("\"excluded_from_taste\":true"))
+
+        repository.setSessionTasteExcluded(snapshotId, null, true, 121)
+        repository.selectIdleEntry(snapshotId, secondEntry, 0, "OFF", "OFF", null, 122)
+        val second = repository.startSession(secondEntry, 0, 123, owner)
+        assertEquals(false, second.excludedFromTaste)
+        repository.finalizeSession(second, 80, 1_000, 80, 124)
+        assertEquals(true, database.historyDao().event(second.listeningEventId.value)?.excludedFromTaste)
         Unit
     }
 

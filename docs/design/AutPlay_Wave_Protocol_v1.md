@@ -96,6 +96,14 @@ one room-row transaction to select the earliest eligible present member and appe
 If no eligible member exists, playback is paused and the room becomes `ORPHANED`. Close and expiry
 are terminal. Leaving or losing a room never deletes or rewrites a device library row.
 
+An authenticated snapshot exposes `host_transfer_targets` only to the current host. The list is
+bounded to seven entries and contains only device UUID plus human-readable device name; tokens,
+room codes and other authority material are excluded. A target must still be joined, present within
+30 seconds, different from the acting device and not revoked when the transfer transaction locks
+and revalidates it. Android confirms the selected name, sends the existing host-transfer command,
+and applies a fresh authoritative snapshot before changing the displayed role. A disappeared,
+stale, revoked, offline or rejected target therefore cannot produce an optimistic local transfer.
+
 ## 6. Queue and command types
 
 The shared queue preserves duplicate Recording entries through distinct queue-entry UUIDs. Host

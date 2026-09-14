@@ -330,6 +330,21 @@ class OkHttpWaveTransport(
             runCatching { WaveAvailability.valueOf(element.jsonPrimitive.content) }
                 .getOrDefault(WaveAvailability.UNAVAILABLE)
         }.orEmpty()
+        val transferTargets = value["host_transfer_targets"]?.jsonArray
+            ?.asSequence()
+            ?.mapNotNull { element ->
+                runCatching {
+                    val row = element.jsonObject
+                    val deviceId = row.getValue("device_id").jsonPrimitive.content
+                    val deviceName = row.getValue("device_name").jsonPrimitive.content.trim()
+                    java.util.UUID.fromString(deviceId)
+                    require(deviceName.length in 1..200)
+                    WaveHostTransferTarget(deviceId, deviceName)
+                }.getOrNull()
+            }
+            ?.take(7)
+            ?.toList()
+            .orEmpty()
         return WaveSnapshot(
             value.getValue("room_id").jsonPrimitive.content,
             profileId.value,
@@ -345,6 +360,7 @@ class OkHttpWaveTransport(
             entries,
             preflight,
             value["room_code"]?.jsonPrimitive?.contentOrNull?.ifBlank { null },
+            transferTargets,
         )
     }
 
