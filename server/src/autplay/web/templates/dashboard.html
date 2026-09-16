@@ -4,6 +4,17 @@
   <div><h1>{{ t("dashboard_title") }}</h1><p class="page-summary">{{ t("dashboard_intro") }}</p></div>
   <dl class="identity"><div><dt>{{ t("server_label") }}</dt><dd>{{ server_label }}</dd></div><div><dt>{{ t("current_account") }}</dt><dd>{{ account_label }}</dd></div><div><dt>{{ t("role") }}</dt><dd>{{ role }}</dd></div></dl>
 </header>
+<section aria-labelledby="next-action-title">
+  <h2 id="next-action-title">{{ t("next_action_title") }}</h2>
+  <div class="section-grid">
+  {% for section in navigation %}{% if section.children %}
+    <article class="section-card">
+      <h3><a href="{{ section.href }}?lang={{ locale }}">{{ t(section.label) }}</a></h3>
+      <ul>{% for item in section.children %}<li><a href="{{ item.href }}?lang={{ locale }}">{{ t(item.label) }}</a></li>{% endfor %}</ul>
+    </article>
+  {% endif %}{% endfor %}
+  </div>
+</section>
 <section aria-labelledby="health-title">
   <h2 id="health-title">{{ t("status") }}</h2>
   <div class="status-grid">

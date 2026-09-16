@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/self-device-pairing/v1/qr-document.schema.json",
+  "title": "qr-document",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "autplay-self-device-pairing"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "ceremony_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "rendezvous_secret": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "expected_server_instance_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "expected_identity_epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "expected_identity_thumbprint_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "expected_api_origin": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "expected_stream_origin": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "ceremony_id",
+    "rendezvous_secret",
+    "expected_server_instance_id",
+    "expected_identity_epoch",
+    "expected_identity_thumbprint_sha256",
+    "expected_api_origin",
+    "expected_stream_origin",
+    "expires_at"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+}

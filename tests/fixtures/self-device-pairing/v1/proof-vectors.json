@@ -1,0 +1,129 @@
+{
+  "description": "PUBLIC SYNTHETIC TEST KEY AND BEARERS; never runtime credentials",
+  "private_key_pkcs8_b64": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAdbzRWhRANCAAT7UDiPKUmNCpOtJexMNAN7nTzDzKR4frb+2r4rMAPqyJ93ZcqdYojm/3NPXNCPOlkhz1SyG7OYtQrA0ld/oHRy",
+  "secrets": {
+    "rendezvous": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "poll": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "next_refresh": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
+  },
+  "requests": {
+    "start": {
+      "request": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "ceremony_id": "10000000-0000-4000-8000-000000000002",
+        "requested_at": "2026-09-16T12:00:00Z",
+        "expected_server_instance_id": "10000000-0000-4000-8000-000000000001",
+        "expected_identity_epoch": 2,
+        "expected_identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_api_origin": "https://api.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "operation_id": "10000000-0000-4000-8000-000000000003",
+        "rendezvous_secret_sha256": "ea866a757e4c38babfa8127cbe9a409d3e1f93a00ff1488ff735fcf917afffd0",
+        "request_sha256": "8316e83f696365d0ca8582f0a22057d8ae1d8735ca6d35e2d00449888842f047"
+      },
+      "canonical_unsigned_utf8": "{\"ceremony_id\":\"10000000-0000-4000-8000-000000000002\",\"contract_version\":\"v1\",\"expected_api_origin\":\"https://api.test.invalid\",\"expected_identity_epoch\":2,\"expected_identity_thumbprint_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expected_server_instance_id\":\"10000000-0000-4000-8000-000000000001\",\"expected_stream_origin\":\"https://stream.test.invalid\",\"operation_id\":\"10000000-0000-4000-8000-000000000003\",\"rendezvous_secret_sha256\":\"ea866a757e4c38babfa8127cbe9a409d3e1f93a00ff1488ff735fcf917afffd0\",\"requested_at\":\"2026-09-16T12:00:00Z\",\"schema_version\":1}",
+      "request_sha256": "8316e83f696365d0ca8582f0a22057d8ae1d8735ca6d35e2d00449888842f047"
+    },
+    "claim": {
+      "request": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "ceremony_id": "10000000-0000-4000-8000-000000000002",
+        "requested_at": "2026-09-16T12:00:00Z",
+        "expected_server_instance_id": "10000000-0000-4000-8000-000000000001",
+        "expected_identity_epoch": 2,
+        "expected_identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_api_origin": "https://api.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "claim_id": "10000000-0000-4000-8000-000000000004",
+        "poll_secret_sha256": "cf0931e168b49e987503caf18af6fe253b6b3d82a81008c3e8e1ee67c7c8dc55",
+        "device_public_key_spki_b64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+1A4jylJjQqTrSXsTDQDe508w8ykeH62/tq+KzAD6sifd2XKnWKI5v9zT1zQjzpZIc9UshuzmLUKwNJXf6B0cg==",
+        "device_key_thumbprint_sha256": "140983b6c2cb674ec9f2d6e7fb9432a3a81758396f68cac3f683835c17edf725",
+        "device_name": "Телефон №2",
+        "platform": "ANDROID",
+        "app_version": "fixture-1",
+        "request_sha256": "be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126",
+        "device_signature_b64url": "xWZDW0G0JNz3uj6KDru4ccUgkjSOjct1fYCjrKHoOqpMKipuaLA3LnUy4kqi-vSoBaNKVBfo0p1AkZKOnc2LtA"
+      },
+      "canonical_unsigned_utf8": "{\"app_version\":\"fixture-1\",\"ceremony_id\":\"10000000-0000-4000-8000-000000000002\",\"claim_id\":\"10000000-0000-4000-8000-000000000004\",\"contract_version\":\"v1\",\"device_key_thumbprint_sha256\":\"140983b6c2cb674ec9f2d6e7fb9432a3a81758396f68cac3f683835c17edf725\",\"device_name\":\"Телефон №2\",\"device_public_key_spki_b64\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+1A4jylJjQqTrSXsTDQDe508w8ykeH62/tq+KzAD6sifd2XKnWKI5v9zT1zQjzpZIc9UshuzmLUKwNJXf6B0cg==\",\"expected_api_origin\":\"https://api.test.invalid\",\"expected_identity_epoch\":2,\"expected_identity_thumbprint_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expected_server_instance_id\":\"10000000-0000-4000-8000-000000000001\",\"expected_stream_origin\":\"https://stream.test.invalid\",\"platform\":\"ANDROID\",\"poll_secret_sha256\":\"cf0931e168b49e987503caf18af6fe253b6b3d82a81008c3e8e1ee67c7c8dc55\",\"requested_at\":\"2026-09-16T12:00:00Z\",\"schema_version\":1}",
+      "request_sha256": "be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126"
+    },
+    "poll": {
+      "request": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "ceremony_id": "10000000-0000-4000-8000-000000000002",
+        "requested_at": "2026-09-16T12:00:00Z",
+        "expected_server_instance_id": "10000000-0000-4000-8000-000000000001",
+        "expected_identity_epoch": 2,
+        "expected_identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_api_origin": "https://api.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "claim_id": "10000000-0000-4000-8000-000000000004",
+        "claim_request_sha256": "be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126",
+        "request_sha256": "9432b6ad33a9b142f535f306049185afdc30c8ffa99bed949255b3ab6fe8d9b1",
+        "device_signature_b64url": "7PakuyK_HrbvCvYyrQRpN6HpQL6nK7Kv9YCDw1NX4Klv84qSiZCeqg5-8jRlo46o2zYStPZ_PsAge7gDemgxNA"
+      },
+      "canonical_unsigned_utf8": "{\"ceremony_id\":\"10000000-0000-4000-8000-000000000002\",\"claim_id\":\"10000000-0000-4000-8000-000000000004\",\"claim_request_sha256\":\"be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126\",\"contract_version\":\"v1\",\"expected_api_origin\":\"https://api.test.invalid\",\"expected_identity_epoch\":2,\"expected_identity_thumbprint_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expected_server_instance_id\":\"10000000-0000-4000-8000-000000000001\",\"expected_stream_origin\":\"https://stream.test.invalid\",\"requested_at\":\"2026-09-16T12:00:00Z\",\"schema_version\":1}",
+      "request_sha256": "9432b6ad33a9b142f535f306049185afdc30c8ffa99bed949255b3ab6fe8d9b1"
+    },
+    "decision": {
+      "request": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "ceremony_id": "10000000-0000-4000-8000-000000000002",
+        "requested_at": "2026-09-16T12:00:00Z",
+        "expected_server_instance_id": "10000000-0000-4000-8000-000000000001",
+        "expected_identity_epoch": 2,
+        "expected_identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_api_origin": "https://api.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "operation_id": "10000000-0000-4000-8000-000000000005",
+        "action": "APPROVE",
+        "expected_revision": 2,
+        "claim_id": "10000000-0000-4000-8000-000000000004",
+        "claim_request_sha256": "be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126",
+        "comparison_code": "848459960268",
+        "request_sha256": "66ea005961ab36f16d415b44785ab92dd38f0cabd212c4a6a270c6b6e26f263f"
+      },
+      "canonical_unsigned_utf8": "{\"action\":\"APPROVE\",\"ceremony_id\":\"10000000-0000-4000-8000-000000000002\",\"claim_id\":\"10000000-0000-4000-8000-000000000004\",\"claim_request_sha256\":\"be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126\",\"comparison_code\":\"848459960268\",\"contract_version\":\"v1\",\"expected_api_origin\":\"https://api.test.invalid\",\"expected_identity_epoch\":2,\"expected_identity_thumbprint_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expected_revision\":2,\"expected_server_instance_id\":\"10000000-0000-4000-8000-000000000001\",\"expected_stream_origin\":\"https://stream.test.invalid\",\"operation_id\":\"10000000-0000-4000-8000-000000000005\",\"requested_at\":\"2026-09-16T12:00:00Z\",\"schema_version\":1}",
+      "request_sha256": "66ea005961ab36f16d415b44785ab92dd38f0cabd212c4a6a270c6b6e26f263f"
+    },
+    "exchange": {
+      "request": {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "ceremony_id": "10000000-0000-4000-8000-000000000002",
+        "requested_at": "2026-09-16T12:00:00Z",
+        "expected_server_instance_id": "10000000-0000-4000-8000-000000000001",
+        "expected_identity_epoch": 2,
+        "expected_identity_thumbprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_api_origin": "https://api.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "exchange_id": "10000000-0000-4000-8000-000000000006",
+        "binding_commit_id": "10000000-0000-4000-8000-000000000007",
+        "claim_id": "10000000-0000-4000-8000-000000000004",
+        "claim_request_sha256": "be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126",
+        "approval_operation_id": "10000000-0000-4000-8000-000000000005",
+        "confirmed_account_id": "10000000-0000-4000-8000-000000000008",
+        "next_refresh_token_sha256": "f45dc82a7523d14974cea050e3028e8bf06a8ee855a9d63034ebb4fb9ecc2305",
+        "request_sha256": "1ea42b54476fd4afd30f3a3a3157ef219d12db4183d700c662d2265cbbaa9096",
+        "device_signature_b64url": "Cs48bcY-9p47WLtux1ys_UH6k06LnjH1izNPrnrAH4BgOo80X0wUBFyNDir3Ocjc6nqxe5fu19PWSjIkTQq4pg"
+      },
+      "canonical_unsigned_utf8": "{\"approval_operation_id\":\"10000000-0000-4000-8000-000000000005\",\"binding_commit_id\":\"10000000-0000-4000-8000-000000000007\",\"ceremony_id\":\"10000000-0000-4000-8000-000000000002\",\"claim_id\":\"10000000-0000-4000-8000-000000000004\",\"claim_request_sha256\":\"be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126\",\"confirmed_account_id\":\"10000000-0000-4000-8000-000000000008\",\"contract_version\":\"v1\",\"exchange_id\":\"10000000-0000-4000-8000-000000000006\",\"expected_api_origin\":\"https://api.test.invalid\",\"expected_identity_epoch\":2,\"expected_identity_thumbprint_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expected_server_instance_id\":\"10000000-0000-4000-8000-000000000001\",\"expected_stream_origin\":\"https://stream.test.invalid\",\"next_refresh_token_sha256\":\"f45dc82a7523d14974cea050e3028e8bf06a8ee855a9d63034ebb4fb9ecc2305\",\"requested_at\":\"2026-09-16T12:00:00Z\",\"schema_version\":1}",
+      "request_sha256": "1ea42b54476fd4afd30f3a3a3157ef219d12db4183d700c662d2265cbbaa9096"
+    }
+  },
+  "sas": {
+    "payload": {
+      "server_instance_id": "10000000-0000-4000-8000-000000000001",
+      "identity_epoch": 2,
+      "ceremony_id": "10000000-0000-4000-8000-000000000002",
+      "claim_request_sha256": "be188bb870bc699e91ed5a89f2cdccec40ce1e2b3e34eb688334409a688e8126",
+      "key_thumbprint": "140983b6c2cb674ec9f2d6e7fb9432a3a81758396f68cac3f683835c17edf725"
+    },
+    "digest_sha256": "e0af40448561dfccd161ea33e1b669c39c44d91960fed8e5fb851a033692a7b2",
+    "comparison_code": "848459960268"
+  }
+}

@@ -6,6 +6,15 @@ import app.autplay.application.profilebinding.PendingLocalIntentSummary
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.M5DeviceKeyStore
+import app.autplay.data.security.M5SessionRotationClient
+import app.autplay.data.security.SettingsM5RotationContextResolver
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.settings.M5TrustEvidence
@@ -481,69 +490,75 @@ class ProfilePairingRuntimeTest {
     }
 
     @Test
-    fun coldRecoveryRotatesRejectedAccessTokenAndRetriesCapabilitiesOnce() = runBlocking {
-        val binding = M5BindingCheckpoint(
-            BINDING_COMMIT_ID,
-            SERVER_INSTANCE_ID,
-            1,
-            IDENTITY_THUMBPRINT,
-            KEY_ALIAS,
-            SESSION_ID,
-            SESSION_FAMILY_ID,
-            0,
-        )
-        val port = FakePort(
-            initialCapabilitiesFailure = "authentication_required",
-            rotationSession = EnrollmentSession(
-                DEVICE,
-                SUCCESSOR_SESSION_ID,
-                SESSION_FAMILY_ID,
-                1,
-                "rotated-access-token".toByteArray(StandardCharsets.US_ASCII),
-                REFRESH_TOKEN.copyOf(),
-            ),
-        )
-        val fixture = Fixture(
-            port = port,
-            initialSettings = NonSecretSettings(
-                activeServerProfileId = PROFILE,
-                activeUserId = USER,
-                deviceId = DEVICE,
-                serverBaseUrl = API_ORIGIN,
-                streamBaseUrl = STREAM_ORIGIN,
-                m5Binding = binding,
-                m5TrustEvidence = M5TrustEvidence(
-                    identityPublicKeySpkiB64 = Base64.getEncoder().encodeToString(IDENTITY_SPKI),
-                    serverLabelHint = "Test server",
-                    capabilitySignedPayloadB64 = Base64.getEncoder().encodeToString("old".toByteArray()),
-                    capabilityPayloadSha256 = "0".repeat(64),
-                    capabilityRevisionHighWater = 1,
-                ),
-                m5LocalDataDecision = "KEEP_LOCAL",
-            ),
-        )
-        fixture.credentials.write(
-            PROFILE,
-            SessionCredentialEnvelopeCodec.encode(
-                SessionCredentialEnvelope(
-                    accessToken = "expired-access-token",
+    fun coldRecoveryUsesDurableRotationAndReplaysLostResponseAfterRestart() = runBlocking {
+        for (decision in listOf("KEEP_LOCAL", "REVIEW_SELECTED")) for (loseResponse in listOf(false, true)) {
+            val server = MockWebServer()
+            val requests = mutableListOf<String>()
+            server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val body = request.body.readUtf8()
+                    requests += body
+                    if (loseResponse && requests.size == 1) return MockResponse()
+                        .setHeader("Cache-Control", "no-store").setHeader("Pragma", "no-cache")
+                        .setBody("{").setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+                    val rotation = Json.parseToJsonElement(body).jsonObject.getValue("rotation_id").jsonPrimitive.content
+                    return MockResponse().setHeader("Cache-Control", "no-store").setHeader("Pragma", "no-cache")
+                        .setBody(buildJsonObject {
+                            put("contract_version", "v1"); put("schema_version", 1); put("rotation_id", rotation)
+                            put("parent_session_id", SESSION_ID); put("session_id", SUCCESSOR_SESSION_ID)
+                            put("family_id", SESSION_FAMILY_ID); put("generation", 1)
+                            put("access_token", "rotated-access-token-with-enough-length")
+                        }.toString())
+                }
+            }
+            server.start()
+            try {
+                val materializer = RecordingMaterializer()
+                val fixture = Fixture(
+                    materializer = materializer,
+                    port = FakePort(initialCapabilitiesFailure = if (decision == "KEEP_LOCAL") "authentication_required" else null),
+                    initialSettings = NonSecretSettings(
+                        activeServerProfileId = PROFILE, activeUserId = USER, deviceId = DEVICE,
+                        serverBaseUrl = server.url("/").toString(), streamBaseUrl = STREAM_ORIGIN,
+                        m5Binding = M5BindingCheckpoint(BINDING_COMMIT_ID, SERVER_INSTANCE_ID, 1, IDENTITY_THUMBPRINT,
+                            KEY_ALIAS, SESSION_ID, SESSION_FAMILY_ID, 0),
+                        m5TrustEvidence = M5TrustEvidence(
+                            identityPublicKeySpkiB64 = Base64.getEncoder().encodeToString(IDENTITY_SPKI),
+                            serverLabelHint = "Test server", capabilitySignedPayloadB64 = Base64.getEncoder().encodeToString("old".toByteArray()),
+                            capabilityPayloadSha256 = "0".repeat(64), capabilityRevisionHighWater = 1,
+                        ),
+                        m5LocalDataDecision = decision,
+                    ),
+                )
+                fixture.credentials.write(PROFILE, SessionCredentialEnvelopeCodec.encode(SessionCredentialEnvelope(
+                    accessToken = if (decision == "REVIEW_SELECTED") "e30.eyJleHAiOjF9.signature" else "expired-access-token",
                     refreshToken = REFRESH_TOKEN.toString(StandardCharsets.US_ASCII),
-                    generation = 0,
-                    bindingCommitId = BINDING_COMMIT_ID,
-                    sessionId = SESSION_ID,
-                    sessionFamilyId = SESSION_FAMILY_ID,
-                    sessionGeneration = 0,
-                ),
-            ),
-        )
-
-        fixture.runtime.recoverAndRefresh()
-
-        assertEquals(1, port.rotateCalls)
-        assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
-        assertEquals(SUCCESSOR_SESSION_ID, fixture.settings.value.m5Binding?.sessionId)
-        assertEquals(1L, fixture.settings.value.m5Binding?.sessionGeneration)
-        assertEquals(1L, fixture.settings.value.m5TrustEvidence?.capabilityRevisionHighWater)
+                    generation = 0, bindingCommitId = BINDING_COMMIT_ID, sessionId = SESSION_ID,
+                    sessionFamilyId = SESSION_FAMILY_ID, sessionGeneration = 0,
+                    m5PendingMaterializationRequest = if (decision == "REVIEW_SELECTED") materializationMarker(server.url("/").toString()) else null,
+                )))
+                fixture.runtime.recoverAndRefresh()
+                val completed = if (loseResponse) {
+                    assertTrue(fixture.runtime.state.value.pairing is PairingState.Blocked)
+                    val pending = SessionCredentialEnvelopeCodec.decode(requireNotNull(fixture.credentials.read(PROFILE)))
+                    assertTrue(pending.refreshPending)
+                    assertEquals(requests.single(), pending.m5PendingRotationRequest)
+                    Fixture(initialSettings = fixture.settings.value, credentials = fixture.credentials, materializer = materializer).also {
+                        it.runtime.recoverAndRefresh()
+                    }
+                } else fixture
+                assertEquals(if (decision == "REVIEW_SELECTED") listOf(LocalId(LOCAL_CHANGE_ID)) else emptyList<LocalId>(), materializer.calls)
+                assertNull(SessionCredentialEnvelopeCodec.decode(requireNotNull(completed.credentials.read(PROFILE))).m5PendingMaterializationRequest)
+                assertEquals(if (loseResponse) 2 else 1, requests.size)
+                assertEquals(requests.first(), requests.last())
+                assertEquals(0, fixture.port.rotateCalls)
+                assertTrue(completed.runtime.state.value.pairing is PairingState.Connected)
+                assertEquals(SUCCESSOR_SESSION_ID, completed.settings.value.m5Binding?.sessionId)
+                assertEquals(1L, completed.settings.value.m5Binding?.sessionGeneration)
+                assertEquals(1L, completed.settings.value.m5TrustEvidence?.capabilityRevisionHighWater)
+                assertFalse(SessionCredentialEnvelopeCodec.decode(requireNotNull(completed.credentials.read(PROFILE))).refreshPending)
+            } finally { server.shutdown() }
+        }
     }
 
     @Test
@@ -903,6 +918,7 @@ class ProfilePairingRuntimeTest {
         override suspend fun cancelInvitation(profileId: ServerProfileId, invitationId: String, operationId: String) = PairingNetworkResult.Failure("server_unavailable")
         override suspend fun rotate(request: SessionRotationCommand): PairingNetworkResult<EnrollmentSession> {
             rotateCalls += 1
+            assertEquals(KEY_ALIAS, request.deviceKeyAlias)
             return rotationSession?.let { session ->
                 PairingNetworkResult.Success(
                     session.copy(
@@ -970,10 +986,10 @@ class ProfilePairingRuntimeTest {
         streamOrigin = STREAM_ORIGIN,
     )
 
-    private fun materializationMarker() = buildJsonObject {
+    private fun materializationMarker(apiOrigin: String = API_ORIGIN) = buildJsonObject {
         put("marker_version", 1)
         put("generation_id", GENERATION_ID)
-        put("api_origin", API_ORIGIN)
+        put("api_origin", apiOrigin)
         put("stream_origin", STREAM_ORIGIN)
         put("server_profile_id", PROFILE.value)
         put("server_instance_id", SERVER_INSTANCE_ID)

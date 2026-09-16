@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block head %}<script src="/admin/static/passkeys-v1.js" defer></script>{% endblock %}
+{% block content %}
+<header class="page-heading"><div><h1>{{ t("nav_passkeys") }}</h1><p class="page-summary">{{ t("passkey_intro") }}</p></div></header>
+<form data-passkey="register" data-error="{{ t('passkey_error') }}" data-unsupported="{{ t('passkey_unsupported') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <label for="passkey-label">{{ t("passkey_label") }}</label>
+  <input id="passkey-label" name="label" required maxlength="80" autocomplete="off">
+  <button type="submit">{{ t("passkey_add") }}</button>
+  <p data-passkey-status role="status" aria-live="polite"></p>
+</form>
+<section aria-labelledby="passkey-list-title">
+  <h2 id="passkey-list-title">{{ t("passkey_list") }}</h2>
+  {% if not passkeys %}<p>{{ t("passkey_empty") }}</p>{% endif %}
+  <div class="section-grid">
+  {% for key in passkeys %}
+  <article class="section-card">
+    <h3>{{ key.label }}</h3>
+    <dl class="facts"><div><dt>{{ t("created") }}</dt><dd>{{ format_datetime(key.created_at) }}</dd></div><div><dt>{{ t("last_seen") }}</dt><dd>{{ format_datetime(key.last_used_at) }}</dd></div></dl>
+    {% if key.revoked_at %}<p>{{ t("passkey_revoked") }}</p>{% else %}
+    <details><summary>{{ t("passkey_remove") }}</summary>
+      <p>{{ t("passkey_revoke_consequence") }}</p>
+      <form method="post" action="/admin/passkeys/{{ key.passkey_id }}/revoke" data-passkey-navigation data-error="{{ t('passkey_action_error') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="operation_id" value="{{ revoke_operations[key.passkey_id] }}">
+        <button class="danger" type="submit">{{ t("passkey_confirm_remove") }}</button>
+        <p data-passkey-status role="status"></p>
+      </form>
+    </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

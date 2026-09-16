@@ -9,7 +9,7 @@ from typing import Protocol
 from uuid import UUID
 
 from autplay.domain.vault import ChunkWriteResult, OpaqueStorageKey, Sha256Digest, VaultLimits
-from autplay.ports.vault import VaultStorage
+from autplay.ports.vault import ReconciledChunkWriter, VaultStorage
 
 
 class VaultNotFoundError(RuntimeError):
@@ -134,6 +134,7 @@ class VaultUploadService:
         limits: VaultLimits | None = None,
         ttl: timedelta = timedelta(hours=24),
         minimum_free_bytes: int = 0,
+        chunk_writer: ReconciledChunkWriter | None = None,
     ) -> None:
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive")
@@ -144,6 +145,7 @@ class VaultUploadService:
         self._limits = limits or VaultLimits()
         self._ttl = ttl
         self._minimum_free_bytes = minimum_free_bytes
+        self._chunk_writer = chunk_writer
 
     def create(
         self,
@@ -202,10 +204,19 @@ class VaultUploadService:
         if len(payload) > info.chunk_size or info.received_size + len(payload) > info.expected_size:
             raise UploadStateError()
         key = self._repository.staging_key_for_owned(principal, upload_session_id)
-        self._storage.truncate_staging(key, info.received_size)
-        self._storage.write_chunk(
-            key, offset=offset, payload=payload, payload_sha256=payload_sha256
-        )
+        if self._chunk_writer is None:
+            self._storage.truncate_staging(key, info.received_size)
+            self._storage.write_chunk(
+                key, offset=offset, payload=payload, payload_sha256=payload_sha256
+            )
+        else:
+            self._chunk_writer.append_reconciled_chunk(
+                key,
+                committed_size=info.received_size,
+                offset=offset,
+                payload=payload,
+                payload_sha256=payload_sha256,
+            )
         return self._repository.record_chunk(
             principal,
             upload_session_id,

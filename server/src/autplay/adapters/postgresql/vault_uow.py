@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import TracebackType
 from typing import cast
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.postgresql.resource_commit_guard import require_device_upload_commit
 from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
 from autplay.application.vault_ingest import IngestRepository, IngestSession
+from autplay.domain.auth import Principal
 from autplay.domain.discovery import AcquisitionAuthorizationReceipt
+from autplay.domain.resource_execution import ExecutionStatus
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
@@ -23,8 +27,14 @@ from autplay.ports.transactions import VaultUnitOfWorkFactory
 class SqlAlchemyVaultUnitOfWork:
     """Own one transaction and expose a transaction-bound Vault repository."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        *,
+        upload_execution: ExecutionStatus | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._upload_execution = upload_execution
         self._session: Session | None = None
         self._vault: PostgresVaultRuntime | None = None
         self._finished = False
@@ -39,7 +49,7 @@ class SqlAlchemyVaultUnitOfWork:
         if self._session is not None:
             raise RuntimeError("unit of work cannot be entered twice")
         self._session = self._session_factory()
-        self._vault = PostgresVaultRuntime(self._session)
+        self._vault = PostgresVaultRuntime(self._session, upload_execution=self._upload_execution)
         return self
 
     def __exit__(
@@ -70,6 +80,21 @@ class SqlAlchemyVaultUnitOfWork:
         self._require_session().rollback()
         self._finished = True
 
+    def commit_admitted_upload(
+        self, actor: Principal, upload_id: UUID, *, stopped: Callable[[], bool]
+    ) -> None:
+        if self._upload_execution is None:
+            raise RuntimeError("upload execution is missing")
+        require_device_upload_commit(
+            self._require_session(),
+            actor,
+            upload_id,
+            self._upload_execution.ticket.permit,
+            stopped=stopped,
+            execution=self._upload_execution,
+        )
+        self.commit()
+
     def _require_session(self) -> Session:
         if self._session is None:
             raise RuntimeError("unit of work has not been entered")
@@ -84,6 +109,9 @@ class SqlAlchemyVaultUnitOfWorkFactory:
 
     def __call__(self) -> SqlAlchemyVaultUnitOfWork:
         return SqlAlchemyVaultUnitOfWork(self._session_factory)
+
+    def for_upload(self, execution: ExecutionStatus) -> SqlAlchemyVaultUnitOfWork:
+        return SqlAlchemyVaultUnitOfWork(self._session_factory, upload_execution=execution)
 
 
 class TransactionalIngestRepository(IngestRepository):

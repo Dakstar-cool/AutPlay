@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/resource-admission/v1/status-response.schema.json",
+  "title": "status-response",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "x-autplay-integer-token-only": true,
+      "const": 1
+    },
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "kind": {
+      "enum": [
+        "PLAYBACK",
+        "TRANSFER"
+      ]
+    },
+    "resource_type": {
+      "enum": [
+        "PLAY_INSTANCE",
+        "DOWNLOAD_INTENT",
+        "UPLOAD_INTENT"
+      ]
+    },
+    "resource_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "target_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": [
+        "WAITING",
+        "ACTIVE",
+        "RELEASED",
+        "EXPIRED"
+      ]
+    },
+    "activation_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "generation": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "x-autplay-integer-token-only": true
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "waiting_until": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "claim_until": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lease_until": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attachment_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "x-autplay-integer-token-only": true
+    },
+    "current_recording_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_recording_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "account_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "x-autplay-integer-token-only": true
+    },
+    "device_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2,
+      "x-autplay-integer-token-only": true
+    },
+    "server_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "x-autplay-integer-token-only": true
+    },
+    "account_usage": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "x-autplay-integer-token-only": true
+    },
+    "device_usage": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "x-autplay-integer-token-only": true
+    },
+    "server_usage": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "x-autplay-integer-token-only": true
+    },
+    "waiting_reason": {
+      "enum": [
+        "ACCOUNT_CAPACITY",
+        "DEVICE_CAPACITY",
+        "SERVER_CAPACITY",
+        null
+      ]
+    },
+    "retry_after_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15,
+      "x-autplay-integer-token-only": true
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "operation_id",
+    "kind",
+    "resource_type",
+    "resource_id",
+    "target_id",
+    "operation_sha256",
+    "state",
+    "activation_id",
+    "generation",
+    "waiting_until",
+    "claim_until",
+    "lease_until",
+    "attachment_revision",
+    "current_recording_id",
+    "next_recording_id",
+    "account_limit",
+    "device_limit",
+    "server_limit",
+    "account_usage",
+    "device_usage",
+    "server_usage",
+    "waiting_reason",
+    "retry_after_seconds"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "WAITING"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "activation_id": {
+            "type": "null"
+          },
+          "generation": {
+            "type": "null"
+          },
+          "waiting_until": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+          },
+          "waiting_reason": {
+            "enum": [
+              "ACCOUNT_CAPACITY",
+              "DEVICE_CAPACITY",
+              "SERVER_CAPACITY"
+            ]
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15,
+            "x-autplay-integer-token-only": true
+          },
+          "claim_until": {
+            "type": "null"
+          },
+          "lease_until": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "ACTIVE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "activation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "claim_until": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+          },
+          "lease_until": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+          },
+          "waiting_reason": {
+            "type": "null"
+          },
+          "retry_after_seconds": {
+            "const": 0
+          }
+        }
+      }
+    }
+  ]
+}

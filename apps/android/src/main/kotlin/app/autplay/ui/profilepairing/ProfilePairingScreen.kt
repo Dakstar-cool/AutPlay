@@ -77,6 +77,7 @@ internal data class ProfilePairingUiState(
     val ownerProvisioning: OwnerProvisioningUiState? = null,
     /** Exact S1B checkpoint availability; PA2 USER first-bind creates no trusted-key recovery path. */
     val canReenrollTrustedDevice: Boolean = false,
+    val selfPairing: SelfPairingUiState? = null,
 )
 
 internal data class PublicAccountTrustPresentation(
@@ -179,6 +180,7 @@ internal data class ProfilePairingActions(
     val dismissOwnerAccountInvitation: () -> Unit = {},
     val shareOwnerAccountInvitation: (AccountInvitation) -> Unit = {},
     val admission: AdmissionActions = AdmissionActions(),
+    val selfPairing: SelfPairingActions = SelfPairingActions(),
 )
 
 @Composable
@@ -194,7 +196,7 @@ internal fun ProfilePairingScreen(
     var pendingConfirmation by rememberSaveable { mutableStateOf<ProfileRemoteAction?>(null) }
     val publicFirstBindReserved = publicRegistrationBlocksOrdinaryFirstBind(
         state.publicAccountRegistration,
-    )
+    ) || selfPairingBlocksFirstBind(state.selfPairing)
 
     SecureWindowWhileVisible(
         enabled = requiresSecureProfileWindow(state, publicInvitationDocument.isNotBlank()),
@@ -205,7 +207,8 @@ internal fun ProfilePairingScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PersonalServerHero(state)
-        when (val pairing = state.pairing) {
+        state.selfPairing?.let { SelfPairingCard(it, actions.selfPairing) }
+        if (!selfPairingBlocksFirstBind(state.selfPairing)) when (val pairing = state.pairing) {
             PairingState.NotConnected, PairingState.Cancelled -> {
                 if (!publicFirstBindReserved) Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -291,7 +294,7 @@ internal fun ProfilePairingScreen(
             state.admission?.let { AdmissionPanel(it, actions.admission) }
         }
 
-        if (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
+        if (!selfPairingBlocksFirstBind(state.selfPairing) && state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
             OutlinedTextField(
                 value = invitation,
                 onValueChange = { invitation = it.take(4096) },
@@ -310,7 +313,7 @@ internal fun ProfilePairingScreen(
                 Text(stringResource(R.string.profile_connect_device))
             }
         }
-        state.publicAccountRegistration?.takeIf { state.pairing is PairingState.NotConnected }?.let { registration ->
+        state.publicAccountRegistration?.takeIf { state.pairing is PairingState.NotConnected && !selfPairingBlocksFirstBind(state.selfPairing) }?.let { registration ->
             PublicAccountRegistrationPanel(
                 state = registration,
                 invitationDocument = publicInvitationDocument,
@@ -381,6 +384,10 @@ internal fun requiresSecureProfileWindow(
         state.pairing is PairingState.ExchangingInvitation ||
         state.invitationManagement?.createdSecret != null ||
         state.ownerProvisioning?.shownInvitation != null ||
+        state.selfPairing?.let {
+            it.source != app.autplay.application.selfpairing.SelfPairingSourceState.Idle ||
+                it.recipient != app.autplay.application.selfpairing.SelfPairingRecipientState.Idle
+        } == true ||
         state.admission != null || hasTypedPublicInvitation ||
         when (state.publicAccountRegistration) {
             is PublicAccountRegistrationState.Importing,

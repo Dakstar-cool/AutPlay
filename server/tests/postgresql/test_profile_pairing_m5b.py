@@ -13,6 +13,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from fastapi.testclient import TestClient
+from psycopg import Connection
+from pydantic import SecretStr
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.auth import BootstrapOwnerCommand
@@ -25,15 +32,13 @@ from autplay.domain.profile_pairing import (
     public_spki,
     sign_p1363,
 )
+from autplay.domain.resource_admission import AdmissionState, ResourceAdmissionError
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_auth_service
 from autplay.runtime.settings import ApiSettings, RuntimeProfile
-from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi.testclient import TestClient
-from psycopg import Connection
-from pydantic import SecretStr
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+
+from .test_resource_admission_runtime import AdmissionHarness, fence, play
+from .test_resource_admission_runtime import admission as admission
 
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
 HTTP_AUTH_SECRET = "m5b-http-retry-signing-secret-at-least-thirty-two-bytes"
@@ -72,8 +77,27 @@ def _owner(connection: Connection[Any]) -> Principal:
         "VALUES ('M5B owner', 'OWNER') RETURNING user_id"
     ).fetchone()
     assert row is not None
+    device_id, session_id = uuid4(), uuid4()
+    connection.execute(
+        "INSERT INTO account.device (device_id,user_id,device_name,platform,app_version) "
+        "VALUES (%s,%s,'Owner phone','ANDROID','m5b-test')",
+        (device_id, row[0]),
+    )
+    connection.execute(
+        "INSERT INTO account.user_session "
+        "(session_id,user_id,device_id,refresh_token_hash,issued_at,expires_at) "
+        "VALUES (%s,%s,%s,%s,%s,%s)",
+        (
+            session_id,
+            row[0],
+            device_id,
+            hashlib.sha256(session_id.bytes).digest(),
+            NOW,
+            NOW + timedelta(days=90),
+        ),
+    )
     connection.commit()
-    return Principal(UUID(str(row[0])), uuid4(), uuid4(), AccountRole.OWNER)
+    return Principal(UUID(str(row[0])), device_id, session_id, AccountRole.OWNER)
 
 
 def _exchange_request(
@@ -162,6 +186,18 @@ def test_concurrent_first_discovery_creates_one_server_identity(
     assert database_connection.execute(
         "SELECT count(*) FROM account.server_instance"
     ).fetchone() == (1,)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_self_pairing_capability_requires_feature_flag_for_user(
+    pairing_service: ProfilePairingService, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    monkeypatch.setattr(pairing_service, "_self_device_pairing_enabled", enabled)
+    actor = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
+    signed = pairing_service.capabilities(actor)
+    payload = signed["payload"]
+    assert isinstance(payload, dict)
+    assert ("self_device_pairing" in payload["operations"]) is enabled
 
 
 def test_discovery_reconciles_configured_origins_without_rotating_identity(
@@ -320,9 +356,9 @@ def test_concurrent_exchange_has_one_create_and_exact_replay_only(
         kind == "success" or value == "enrollment_invitation_unavailable"
         for kind, value in outcomes
     )
-    assert database_connection.execute("SELECT count(*) FROM account.device").fetchone() == (1,)
+    assert database_connection.execute("SELECT count(*) FROM account.device").fetchone() == (2,)
     assert database_connection.execute("SELECT count(*) FROM account.user_session").fetchone() == (
-        1,
+        2,
     )
     replay, replayed = pairing_service.exchange(request)
     assert replayed is True
@@ -358,6 +394,70 @@ def test_rotation_exact_replay_then_changed_replay_must_revoke_device(
         "SELECT count(*) FROM account.user_session WHERE device_id = %s AND revoked_at IS NULL",
         (UUID(str(exchanged["device_id"])),),
     ).fetchone() == (0,)
+
+
+@pytest.mark.parametrize("terminal", ["logout_current", "logout_all", "rotation_replay"])
+def test_real_m5_rotation_keeps_admission_until_terminal_revocation(
+    pairing_service: ProfilePairingService,
+    database_connection: Connection[object],
+    admission: AdmissionHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal: str,
+) -> None:
+    monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: datetime.now(UTC))
+    owner = _owner(database_connection)
+    invitation = pairing_service.issue_invitation(owner, uuid4(), 60)
+    request, key, refresh = _exchange_request(invitation)
+    exchanged, _ = pairing_service.exchange(request)
+    original = Principal(
+        owner.user_id,
+        UUID(str(exchanged["device_id"])),
+        UUID(str(exchanged["session_id"])),
+        AccountRole.OWNER,
+    )
+    admission.budget(playbacks=1)
+    active = admission.service.acquire(original, play())
+    recording = admission.recording(original)
+    admission.service.attach(original, fence(active), 0, recording, None)
+    permit = admission.service.open_io(original, fence(active), recording)
+    rotation = _rotation_request(exchanged, key, refresh)
+    rotated, _ = pairing_service.rotate(rotation)
+    successor = Principal(
+        original.user_id, original.device_id, UUID(str(rotated["session_id"])), AccountRole.OWNER
+    )
+    assert admission.service.renew(successor, fence(active)).operation.fence == fence(active)
+    permit = admission.service.renew_io(successor, permit)
+    # A delayed terminal action on the retired ancestor must not kill the live family.
+    pairing_service.logout_current(original, uuid4())
+    assert admission.service.renew(successor, fence(active)).operation.fence == fence(active)
+    other = admission.actor()
+    waiting = admission.service.acquire(other, play())
+    if terminal == "rotation_replay":
+        changed = dict(rotation)
+        changed["next_refresh_token_sha256"] = hashlib.sha256(b"different-replay").hexdigest()
+        digest = canonical_sha256(
+            {
+                k: v
+                for k, v in changed.items()
+                if k not in {"request_sha256", "device_signature_b64url"}
+            }
+        )
+        changed["request_sha256"] = digest.hex()
+        changed["device_signature_b64url"] = sign_p1363(
+            key, "AutPlay session rotation v1\n", digest
+        )
+        with pytest.raises(ProfilePairingError, match="session_revoked"):
+            pairing_service.rotate(changed)
+    else:
+        getattr(pairing_service, terminal)(successor, uuid4())
+    with pytest.raises(ResourceAdmissionError):
+        admission.service.renew_io(successor, permit)
+    blocked = admission.service.poll(other, waiting.operation.request.operation_id)
+    assert blocked.operation.state == AdmissionState.WAITING and blocked.usage.server == 1
+    admission.service.close_io(permit)
+    assert admission.service.poll(
+        other, waiting.operation.request.operation_id
+    ).operation.state == (AdmissionState.ACTIVE)
 
 
 @pytest.mark.parametrize("action", ["logout_current", "logout_all", "revoke_current"])

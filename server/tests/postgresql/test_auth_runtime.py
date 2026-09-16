@@ -15,6 +15,10 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from psycopg import Connection
+from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
 from autplay.adapters.postgresql.auth_runtime import SqlAlchemyAuthUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec, OpaqueRefreshTokenCodec
 from autplay.adapters.system import Uuid7Generator
@@ -32,9 +36,6 @@ from autplay.domain.auth import (
     TokenPair,
 )
 from autplay.entrypoints.admin import run_bootstrap
-from psycopg import Connection
-from sqlalchemy import Engine, create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
 
 ACCESS_SECRET = b"p03-test-access-secret-with-at-least-thirty-two-bytes"
 ISSUER = "autplay-p03-test"
@@ -380,11 +381,11 @@ def test_logout_all_revokes_only_principal_sessions_and_preserves_devices(
         )
 
 
-def test_logout_all_account_lock_serializes_refresh_rotation(
+def test_logout_all_admission_lock_serializes_refresh_rotation(
     auth_runtime: AuthRuntime,
     database_connection: Connection[Any],
 ) -> None:
-    """A rotation waiting behind logout-all cannot insert a surviving generation."""
+    """A rotation blocked at admission before the account cannot insert a surviving generation."""
 
     pair = _bootstrap(auth_runtime)
     principal = auth_runtime.service.authenticate_access(pair.access_token)
@@ -406,7 +407,7 @@ def test_logout_all_account_lock_serializes_refresh_rotation(
         _context: Any,
         _executemany: bool,
     ) -> None:
-        if operation.name == "rotate" and _is_account_lock(statement):
+        if operation.name == "rotate" and "pg_advisory_xact_lock" in statement:
             rotation_lock_attempted.set()
 
     def _after_cursor_execute(

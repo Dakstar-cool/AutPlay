@@ -34,6 +34,11 @@ from autplay.adapters.postgresql.models.vault import (
     VaultObjectRow,
     VaultReplicaRow,
 )
+from autplay.adapters.postgresql.resource_upload_guard import (
+    require_upload_writer,
+    unclosed_upload_targets,
+    upload_has_unclosed_writer,
+)
 from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.application.vault_ingest import IngestSession
 from autplay.application.vault_reconciliation import ReconcileReport
@@ -49,6 +54,7 @@ from autplay.application.vault_uploads import (
 )
 from autplay.domain.discovery import AcquisitionAuthorizationReceipt
 from autplay.domain.jobs import JobKey
+from autplay.domain.resource_execution import ExecutionStatus
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
@@ -68,8 +74,11 @@ from autplay.ports.vault import VaultStorage
 class PostgresVaultRuntime(UploadRepository):
     """Short-transaction upload state operations backed by PostgreSQL rows."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self, session: Session, *, upload_execution: ExecutionStatus | None = None
+    ) -> None:
         self._session = session
+        self._upload_execution = upload_execution
 
     def authorize_target(self, principal: VaultPrincipal, recording_id: UUID) -> bool:
         statement = (
@@ -143,9 +152,9 @@ class PostgresVaultRuntime(UploadRepository):
     def staging_key_for_owned(
         self, principal: VaultPrincipal, upload_session_id: UUID
     ) -> OpaqueStorageKey:
-        return OpaqueStorageKey(
-            self._owned_row(principal, upload_session_id, lock=True).staging_key
-        )
+        row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id, expected=self._upload_execution)
+        return OpaqueStorageKey(row.staging_key)
 
     def record_chunk(
         self,
@@ -158,6 +167,7 @@ class PostgresVaultRuntime(UploadRepository):
         sha256: Sha256Digest,
     ) -> ChunkWriteResult:
         row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id, expected=self._upload_execution)
         if row.state != "OPEN" or row.expires_at <= datetime.now(UTC):
             raise UploadStateError()
         existing = self._session.execute(
@@ -198,6 +208,7 @@ class PostgresVaultRuntime(UploadRepository):
 
     def seal_and_enqueue(self, principal: VaultPrincipal, upload_session_id: UUID) -> UploadInfo:
         row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id)
         if row.state in {"SEALED", "PROCESSING", "COMMIT_PREPARED", "COMMITTED", "REUSED"}:
             return _info(row)
         if row.state != "OPEN" or row.received_size != row.expected_size:
@@ -225,6 +236,7 @@ class PostgresVaultRuntime(UploadRepository):
 
         row = self._owned_row(principal, upload_session_id, lock=True)
         if row.state == "OPEN":
+            require_upload_writer(self._session, upload_session_id)
             row.state = "EXPIRED"
             row.error_code = "upload_session_expired"
             row.completed_at = datetime.now(UTC)
@@ -234,6 +246,7 @@ class PostgresVaultRuntime(UploadRepository):
 
     def cancel(self, principal: VaultPrincipal, upload_session_id: UUID) -> None:
         row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id)
         if row.state in {"OPEN", "SEALED"}:
             row.state = "CANCELLED"
             row.error_code = "upload_cancelled"
@@ -277,6 +290,7 @@ class PostgresVaultRuntime(UploadRepository):
         ).scalar_one_or_none()
         if row is None or row.job_id != job_id:
             return None
+        require_upload_writer(self._session, upload_session_id)
         if row.state in {"COMMITTED", "REUSED", "QUARANTINED", "FAILED", "CANCELLED"}:
             return None
         if row.state == "SEALED":
@@ -322,6 +336,7 @@ class PostgresVaultRuntime(UploadRepository):
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
+        require_upload_writer(self._session, ingest.upload_session_id)
         if session.source_candidate_id is not None and not self._discovery_commit_authorized(
             session
         ):
@@ -424,6 +439,7 @@ class PostgresVaultRuntime(UploadRepository):
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
+        require_upload_writer(self._session, ingest.upload_session_id)
         if session.state in {"COMMITTED", "REUSED"}:
             return True
         if session.vault_object_id is None or session.computed_sha256 is None:
@@ -505,6 +521,7 @@ class PostgresVaultRuntime(UploadRepository):
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
+        require_upload_writer(self._session, ingest.upload_session_id)
         if row.state not in {"COMMITTED", "REUSED", "CANCELLED"}:
             self._detach_uncommitted_object(row)
             row.state = "QUARANTINED"
@@ -865,16 +882,35 @@ class PostgresVaultRuntime(UploadRepository):
             tuple[OpaqueStorageKey, UploadSessionRow | None, str | None, bool, bool]
         ] = []
         if remaining_capacity and staging_values:
+            # A skipped locked/protected row still owns its staging file. Keep
+            # tracking separate from mutation candidates; absence below is not
+            # proof that such a file is an orphan.
+            tracked_keys = set(
+                self._session.scalars(
+                    select(UploadSessionRow.staging_key).where(
+                        UploadSessionRow.staging_key.in_(staging_values)
+                    )
+                )
+            )
             staging_rows = self._session.execute(
                 select(UploadSessionRow, JobRow.state)
                 .outerjoin(JobRow, JobRow.job_id == UploadSessionRow.job_id)
-                .where(UploadSessionRow.staging_key.in_(staging_values))
-                .with_for_update(of=UploadSessionRow)
+                .where(
+                    UploadSessionRow.staging_key.in_(staging_values),
+                    UploadSessionRow.upload_session_id.not_in(unclosed_upload_targets()),
+                )
+                .with_for_update(of=UploadSessionRow, skip_locked=True)
             ).all()
             by_staging_key = {row.staging_key: (row, job_state) for row, job_state in staging_rows}
             for key in inventory.staging_keys:
                 tracked = by_staging_key.get(key.value)
+                if tracked is None and key.value in tracked_keys:
+                    continue
                 session = None if tracked is None else tracked[0]
+                if session is not None and upload_has_unclosed_writer(
+                    self._session, session.upload_session_id
+                ):
+                    continue
                 job_state = None if tracked is None else tracked[1]
                 expired = (
                     session is not None
@@ -911,7 +947,10 @@ class PostgresVaultRuntime(UploadRepository):
         remaining_capacity = limit - inspected
         missing_total = missing_processed = 0
         if remaining_capacity:
-            base_missing = UploadSessionRow.state.not_in(terminal)
+            base_missing = and_(
+                UploadSessionRow.state.not_in(terminal),
+                UploadSessionRow.upload_session_id.not_in(unclosed_upload_targets()),
+            )
             missing_condition = (
                 and_(base_missing, UploadSessionRow.staging_key.not_in(staging_values))
                 if staging_values
@@ -926,7 +965,7 @@ class PostgresVaultRuntime(UploadRepository):
                     .outerjoin(JobRow, JobRow.job_id == UploadSessionRow.job_id)
                     .where(missing_condition)
                     .order_by(UploadSessionRow.created_at, UploadSessionRow.upload_session_id)
-                    .with_for_update(of=UploadSessionRow)
+                    .with_for_update(of=UploadSessionRow, skip_locked=True)
                     .limit(remaining_capacity)
                 )
                 .scalars()
@@ -934,6 +973,8 @@ class PostgresVaultRuntime(UploadRepository):
             )
             missing_processed = len(missing_rows)
             for session in missing_rows:
+                if upload_has_unclosed_writer(self._session, session.upload_session_id):
+                    continue
                 inspected += 1
                 if not apply:
                     continue

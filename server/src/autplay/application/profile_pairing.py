@@ -39,6 +39,12 @@ from autplay.adapters.postgresql.models.profile_pairing import (
     TrustedDeviceReenrollmentChallengeRow,
 )
 from autplay.adapters.postgresql.models.web_admin import WebSessionRow
+from autplay.adapters.postgresql.resource_limits import (
+    lock_resource_admission,
+    require_device_capacity,
+    terminate_resource_authority,
+    terminate_retired_session,
+)
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.profile_pairing import (
     ProfilePairingError,
@@ -50,6 +56,7 @@ from autplay.domain.profile_pairing import (
     sign_p1363,
     verify_p1363,
 )
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.web_admin import WebActor
 from autplay.ports.auth import AccessTokenCodec
 
@@ -81,6 +88,7 @@ class ProfilePairingService:
         stream_origin: str,
         access_tokens: AccessTokenCodec,
         access_ttl: timedelta,
+        self_device_pairing_enabled: bool = False,
     ) -> None:
         self._sessions, self._key, self._label, self._api, self._stream = (
             sessions,
@@ -90,6 +98,7 @@ class ProfilePairingService:
             stream_origin,
         )
         self._access, self._access_ttl = access_tokens, access_ttl
+        self._self_device_pairing_enabled = self_device_pairing_enabled
 
     def discovery(self) -> dict[str, object]:
         now = _now()
@@ -138,7 +147,8 @@ class ProfilePairingService:
                 "product_version": "0.0.0",
                 "api_major": 1,
                 "capability_revision": instance.capability_revision,
-                "operations": _capability_operations(principal.role, trusted_key_available),
+                "operations": _capability_operations(principal.role, trusted_key_available)
+                + (["self_device_pairing"] if self._self_device_pairing_enabled else []),
                 "limits": {
                     "device_list_max": 100,
                     "session_list_max": 200,
@@ -174,9 +184,15 @@ class ProfilePairingService:
         digest = hashlib.sha256(secret.encode()).digest()
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
+            lock_resource_admission(s)
             account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
+            if not audit_as_system:
+                if account.role not in {"OWNER", "ADMIN"}:
+                    raise ProfilePairingError("unauthorized")
+                self._require_application_actor(s, principal)
+            now = _now()
             active = (
                 s.scalar(
                     select(func.count())
@@ -318,6 +334,9 @@ class ProfilePairingService:
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
+            # Serialize with account recovery and self-service before device/session locks.
+            lock_resource_admission(s)
+            s.get(UserAccountRow, principal.user_id, with_for_update=True)
             invitation = s.scalar(
                 select(EnrollmentInvitationRow)
                 .where(EnrollmentInvitationRow.invitation_id == invitation_id)
@@ -347,6 +366,7 @@ class ProfilePairingService:
             )
             if existing is not None:
                 return existing
+            self._require_application_actor(s, principal)
             if not already_terminal:
                 invitation.cancelled_at = now
                 terminal_at = now
@@ -382,6 +402,9 @@ class ProfilePairingService:
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
+            # Serialize with account recovery and self-service before device/session locks.
+            lock_resource_admission(s)
+            s.get(UserAccountRow, principal.user_id, with_for_update=True)
             row = s.scalar(
                 select(UserSessionRow)
                 .where(
@@ -410,6 +433,7 @@ class ProfilePairingService:
             if not already_terminal:
                 row.revoked_at = now
                 terminal_at = now
+            terminate_retired_session(s, row, now)
             result = _lifecycle(operation_id, terminal_at, already_terminal)
             self._store_lifecycle(
                 s,
@@ -443,6 +467,7 @@ class ProfilePairingService:
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
+            lock_resource_admission(s)
             account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
@@ -473,8 +498,10 @@ class ProfilePairingService:
             )
             if existing is not None:
                 return existing
+            self._require_application_actor(s, principal)
             for row in rows:
                 row.revoked_at = now
+            terminate_resource_authority(s, principal.user_id, now, device_sessions_only=True)
             result = _lifecycle(operation_id, now, not rows)
             self._store_lifecycle(
                 s,
@@ -509,6 +536,9 @@ class ProfilePairingService:
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
+            # Serialize with account recovery and self-service before device/session locks.
+            lock_resource_admission(s)
+            s.get(UserAccountRow, principal.user_id, with_for_update=True)
             device = s.scalar(
                 select(DeviceRow)
                 .where(DeviceRow.user_id == principal.user_id, DeviceRow.device_id == device_id)
@@ -537,6 +567,7 @@ class ProfilePairingService:
             )
             if existing is not None:
                 return existing
+            self._require_application_actor(s, principal)
             terminal_at = device.revoked_at or now
             if not already_terminal:
                 device.revoked_at = now
@@ -585,6 +616,7 @@ class ProfilePairingService:
             # account, invitation/receipt, device, session.  Immutable IDs are
             # discovered before this transaction and every value is revalidated.
             instance = self._instance(s, now)
+            lock_resource_admission(s)
             if account_id is None:
                 raise ProfilePairingError("enrollment_invitation_unavailable")
             account = s.get(UserAccountRow, account_id, with_for_update=True)
@@ -622,6 +654,7 @@ class ProfilePairingService:
             device_id, session_id = uuid4(), uuid4()
             refresh_hash = bytes.fromhex(str(request["next_refresh_token_sha256"]))
             expires_at = now + timedelta(days=90)
+            _require_device_slot(s, account.user_id)
             device = DeviceRow(
                 device_id=device_id,
                 user_id=account.user_id,
@@ -698,6 +731,7 @@ class ProfilePairingService:
         locator, bearer = _secret(), _secret()
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
+            lock_resource_admission(s)
             if not _admission_binding_matches(request, instance):
                 raise ProfilePairingError("admission_request_unavailable")
             _transaction_lock(s, b"admission-key", thumb)
@@ -776,6 +810,7 @@ class ProfilePairingService:
             raise ProfilePairingError("admission_request_unavailable")
         now = _now()
         with self._sessions.begin() as s:
+            account, now = self._lock_admin_actor(s, actor, web_session_id=web_session_id)
             _transaction_lock(s, b"web-operation", operation_id.bytes)
             replay = self._web_operation_replay(
                 s,
@@ -799,7 +834,6 @@ class ProfilePairingService:
                 )
                 .with_for_update()
             )
-            account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
             if row is None or account is None or account.status != "ACTIVE" or account.deleted_at:
                 raise ProfilePairingError("admission_request_unavailable")
             bound_count = s.scalar(
@@ -852,6 +886,9 @@ class ProfilePairingService:
             raise ProfilePairingError("admission_request_unavailable")
         now = _now()
         with self._sessions.begin() as s:
+            account, now = self._lock_admin_actor(
+                s, actor, web_session_id=web_session_id, mutation=False
+            )
             row = s.scalar(
                 select(DeviceAdmissionRow)
                 .where(
@@ -862,7 +899,6 @@ class ProfilePairingService:
                 .order_by(DeviceAdmissionRow.created_at, DeviceAdmissionRow.request_id)
                 .with_for_update()
             )
-            account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
             if row is None or account is None or account.status != "ACTIVE" or account.deleted_at:
                 raise ProfilePairingError("admission_request_unavailable")
             return {
@@ -930,6 +966,8 @@ class ProfilePairingService:
         now = _now()
         request_id = UUID(str(request["request_id"]))
         with self._sessions.begin() as s:
+            instance = self._instance(s, now)
+            lock_resource_admission(s)
             row = s.get(DeviceAdmissionRow, request_id, with_for_update=True)
             if row is None or row.state != "PENDING" or row.expires_at <= now:
                 raise ProfilePairingError("admission_request_unavailable")
@@ -937,7 +975,7 @@ class ProfilePairingService:
                 row.request_sha256.hex() != str(request["request_sha256"])
                 or row.device_key_thumbprint_sha256.hex()
                 != str(request["device_key_thumbprint_sha256"])
-                or not _admission_binding_matches(request, self._instance(s, now))
+                or not _admission_binding_matches(request, instance)
                 or row.recovery_count >= 3
                 or (row.last_recovery_at and now - row.last_recovery_at < timedelta(seconds=2))
             ):
@@ -995,8 +1033,8 @@ class ProfilePairingService:
             raise ProfilePairingError("unauthorized")
         now = _now()
         with self._sessions.begin() as s:
+            account, now = self._lock_admin_actor(s, actor, web_session_id=web_session_id)
             _transaction_lock(s, b"web-operation", operation_id.bytes)
-            account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("admission_request_unavailable")
             session_id = web_session_id or UUID(int=0)
@@ -1082,11 +1120,25 @@ class ProfilePairingService:
         now = _now()
         request_id = UUID(str(request["request_id"]))
         with self._sessions.begin() as s:
-            row = s.get(DeviceAdmissionRow, request_id, with_for_update=True)
-            if row is None or row.approved_user_id is None:
+            account_id = s.scalar(
+                select(DeviceAdmissionRow.approved_user_id).where(
+                    DeviceAdmissionRow.request_id == request_id
+                )
+            )
+            if account_id is None:
+                raise ProfilePairingError("admission_request_unavailable")
+            instance = self._instance(s, now)
+            lock_resource_admission(s)
+            account = s.get(UserAccountRow, account_id, with_for_update=True)
+            row = s.scalar(
+                select(DeviceAdmissionRow)
+                .where(DeviceAdmissionRow.request_id == request_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if row is None or row.approved_user_id != account_id:
                 raise ProfilePairingError("admission_request_unavailable")
             request_hash = canonical_sha256(request, omit=frozenset({"proof_b64url"}))
-            instance = self._instance(s, now)
             if (
                 row.request_sha256.hex() != str(request["request_sha256"])
                 or row.poll_bearer_hash != _hash_secret(poll_bearer)
@@ -1117,10 +1169,10 @@ class ProfilePairingService:
                     or existing.request_sha256 != request_hash
                 ):
                     raise ProfilePairingError("operation_conflict")
+                s.get(DeviceRow, existing.device_id, with_for_update=True)
                 session = s.get(UserSessionRow, existing.session_id, with_for_update=True)
                 if session is None:
                     raise ProfilePairingError("session_revoked")
-                account = s.get(UserAccountRow, session.user_id, with_for_update=True)
                 self._validate_admission_exchange_authority(s, account, session, now)
                 if account is None:  # Narrowed by the authority helper for static analysis.
                     raise ProfilePairingError("auth_attention_required")
@@ -1133,7 +1185,6 @@ class ProfilePairingService:
                     now,
                     True,
                 ), True
-            account = s.get(UserAccountRow, row.approved_user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
             blocked = s.get(
@@ -1149,6 +1200,7 @@ class ProfilePairingService:
                 raise ProfilePairingError("operation_conflict")
             if row.state != "APPROVED":
                 raise ProfilePairingError("admission_request_unavailable")
+            _require_device_slot(s, account.user_id)
             device_id, session_id = uuid4(), uuid4()
             session = UserSessionRow(
                 session_id=session_id,
@@ -1241,8 +1293,8 @@ class ProfilePairingService:
             raise ProfilePairingError("unauthorized")
         now = _now()
         with self._sessions.begin() as s:
+            account, now = self._lock_admin_actor(s, principal)
             _transaction_lock(s, b"web-operation", operation_id.bytes)
-            account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
             session_id = (
@@ -1419,7 +1471,10 @@ class ProfilePairingService:
         """Return one bounded challenge only for an active exact-key trust."""
         now = _now()
         with self._sessions.begin() as s:
+            instance = self._instance(s, now)
+            lock_resource_admission(s)
             _transaction_lock(s, b"trusted-challenge-request", challenge_id.bytes)
+            account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             existing = s.get(
                 TrustedDeviceReenrollmentChallengeRow,
                 challenge_id,
@@ -1441,7 +1496,6 @@ class ProfilePairingService:
                 TrustedDeviceKeyRow, (principal.user_id, thumbprint), with_for_update=True
             )
             block = s.get(DeviceKeyBlockRow, (principal.user_id, thumbprint), with_for_update=True)
-            account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             if (
                 trust is None
                 or trust.removed_at is not None
@@ -1497,7 +1551,6 @@ class ProfilePairingService:
                     created_at=now,
                 )
             )
-            instance = self._instance(s, now)
             return {
                 "challenge_id": str(challenge_id),
                 "challenge": secret,
@@ -1542,10 +1595,23 @@ class ProfilePairingService:
         )
         digest = canonical_sha256(request, omit=frozenset({"proof_b64url"}))
         with self._sessions.begin() as s:
-            challenge = s.get(
-                TrustedDeviceReenrollmentChallengeRow, challenge_id, with_for_update=True
+            account_id = s.scalar(
+                select(TrustedDeviceReenrollmentChallengeRow.user_id).where(
+                    TrustedDeviceReenrollmentChallengeRow.challenge_id == challenge_id
+                )
             )
-            if challenge is None:
+            if account_id is None:
+                raise ProfilePairingError("trusted_key_unavailable")
+            instance = self._instance(s, now)
+            lock_resource_admission(s)
+            account = s.get(UserAccountRow, account_id, with_for_update=True)
+            challenge = s.scalar(
+                select(TrustedDeviceReenrollmentChallengeRow)
+                .where(TrustedDeviceReenrollmentChallengeRow.challenge_id == challenge_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if challenge is None or challenge.user_id != account_id:
                 raise ProfilePairingError("trusted_key_unavailable")
             trust = s.get(
                 TrustedDeviceKeyRow,
@@ -1557,8 +1623,6 @@ class ProfilePairingService:
                 (challenge.user_id, challenge.device_key_thumbprint_sha256),
                 with_for_update=True,
             )
-            account = s.get(UserAccountRow, challenge.user_id, with_for_update=True)
-            instance = self._instance(s, now)
             if (
                 trust is None
                 or trust.removed_at
@@ -1585,6 +1649,7 @@ class ProfilePairingService:
             if existing is not None:
                 if existing.request_sha256 != digest:
                     raise ProfilePairingError("operation_conflict")
+                s.get(DeviceRow, existing.device_id, with_for_update=True)
                 session = s.get(UserSessionRow, existing.session_id, with_for_update=True)
                 if session is None:
                     raise ProfilePairingError("session_revoked")
@@ -1600,6 +1665,7 @@ class ProfilePairingService:
                 ), True
             if challenge.consumed_at or challenge.expires_at <= now:
                 raise ProfilePairingError("trusted_key_unavailable")
+            _require_device_slot(s, account.user_id)
             device_id, session_id = uuid4(), uuid4()
             approved = s.get(DeviceAdmissionRow, trust.approved_request_id)
             known_device = s.scalar(
@@ -1683,6 +1749,7 @@ class ProfilePairingService:
             raise ProfilePairingError("session_revoked")
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
+            lock_resource_admission(s)
             account = s.get(UserAccountRow, candidate.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
@@ -1826,6 +1893,72 @@ class ProfilePairingService:
             )
             return self._rotation_response(s, receipt, successor, now, False), False
 
+    @staticmethod
+    def _require_application_actor(s: Session, actor: Principal) -> UserAccountRow:
+        """Caller holds admission; validate after locks, before a new command takes effect."""
+        account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
+        device = s.get(DeviceRow, actor.device_id, with_for_update=True)
+        credential = s.get(UserSessionRow, actor.session_id, with_for_update=True)
+        now = _now()
+        if (
+            account is None
+            or account.status != "ACTIVE"
+            or account.deleted_at is not None
+            or account.role != actor.role.value
+            or device is None
+            or device.user_id != actor.user_id
+            or device.revoked_at is not None
+            or credential is None
+            or credential.user_id != actor.user_id
+            or credential.device_id != actor.device_id
+            or credential.revoked_at is not None
+            or credential.expires_at <= now
+        ):
+            raise ProfilePairingError("session_revoked")
+        return account
+
+    def _lock_admin_actor(
+        self,
+        s: Session,
+        actor: Principal | WebActor,
+        *,
+        web_session_id: UUID | None = None,
+        mutation: bool = True,
+    ) -> tuple[UserAccountRow, datetime]:
+        """Recheck typed S1 authority in identity/admission/account/session lock order."""
+        if (
+            isinstance(actor, WebActor)
+            and s.get(ServerInstanceRow, actor.server_instance_id, with_for_update=True) is None
+        ):
+            raise ProfilePairingError("admission_request_unavailable")
+        lock_resource_admission(s)
+        if isinstance(actor, Principal):
+            principal_account = self._require_application_actor(s, actor)
+            if principal_account.role not in {"OWNER", "ADMIN"}:
+                raise ProfilePairingError("unauthorized")
+            return principal_account, _now()
+        account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
+        web = s.get(WebSessionRow, actor.web_session_id, with_for_update=True)
+        now = _now()
+        if (
+            account is None
+            or account.status != "ACTIVE"
+            or account.deleted_at is not None
+            or account.role not in {"OWNER", "ADMIN"}
+            or account.role != actor.role.value
+            or (web_session_id is not None and web_session_id != actor.web_session_id)
+            or web is None
+            or web.user_id != actor.user_id
+            or web.server_instance_id != actor.server_instance_id
+            or web.token_generation != actor.token_generation
+            or web.revoked_at is not None
+            or web.idle_expires_at <= now
+            or web.absolute_expires_at <= now
+            or (mutation and web.token_issued_at <= now - timedelta(minutes=15))
+        ):
+            raise ProfilePairingError("admission_request_unavailable")
+        return account, now
+
     def _web_operation_replay(
         self,
         s: Session,
@@ -1863,10 +1996,15 @@ class ProfilePairingService:
         s: Session, account: UserAccountRow | None, session: UserSessionRow, now: datetime
     ) -> None:
         """Reload mutable account/device/session authority before minting a replay token."""
-        if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
+        if (
+            account is None
+            or account.status != "ACTIVE"
+            or account.deleted_at is not None
+            or session.user_id != account.user_id
+        ):
             raise ProfilePairingError("auth_attention_required")
         device = s.get(DeviceRow, session.device_id, with_for_update=True)
-        if device is None or device.revoked_at is not None:
+        if device is None or device.user_id != account.user_id or device.revoked_at is not None:
             raise ProfilePairingError("device_revoked")
         if session.revoked_at is not None or session.expires_at <= now:
             raise ProfilePairingError("session_revoked")
@@ -2095,6 +2233,7 @@ class ProfilePairingService:
         ).all()
         for row in rows:
             row.revoked_at = now
+        terminate_resource_authority(s, user_id, now, device_id=device_id)
 
     def _existing_lifecycle(
         self,
@@ -2313,6 +2452,13 @@ class ProfilePairingService:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _require_device_slot(session: Session, user_id: UUID) -> None:
+    try:
+        require_device_capacity(session, user_id)
+    except ResourceAdmissionError as error:
+        raise ProfilePairingError(error.code) from error
 
 
 def _secret() -> str:

@@ -1,0 +1,1858 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay self-device pairing",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/account/device-pairings": {
+      "post": {
+        "operationId": "selfPairingStart",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "SOURCE_ACCOUNT_DEVICE_V2_FAMILY_ANY_ROLE",
+        "responses": {
+          "200": {
+            "description": "Pairing result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/start-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192
+      }
+    },
+    "/account/device-pairings/{ceremony_id}": {
+      "get": {
+        "operationId": "selfPairingStatus",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "SOURCE_ACCOUNT_DEVICE_V2_FAMILY_ANY_ROLE",
+        "responses": {
+          "200": {
+            "description": "Pairing result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ceremony_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ]
+      }
+    },
+    "/account/device-pairings/{ceremony_id}/decision": {
+      "post": {
+        "operationId": "selfPairingDecision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "SOURCE_ACCOUNT_DEVICE_V2_FAMILY_ANY_ROLE",
+        "responses": {
+          "200": {
+            "description": "Pairing result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ceremony_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/decision-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192
+      }
+    },
+    "/pairing/self-service/{ceremony_id}/claim": {
+      "post": {
+        "operationId": "selfPairingClaim",
+        "security": [
+          {
+            "pairingSecret": []
+          }
+        ],
+        "x-autplay-authorization": "POSSESSION_AND_DEVICE_ES256_PROOF",
+        "responses": {
+          "200": {
+            "description": "Pairing result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ceremony_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/claim-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192,
+        "x-autplay-proof-domain": "autplay:self-device-pairing:claim:v1\n",
+        "x-autplay-secret-boundary": "HEADER_ONLY_NO_URL_NO_LOG_NO_REDIRECT"
+      }
+    },
+    "/pairing/self-service/{ceremony_id}/poll": {
+      "post": {
+        "operationId": "selfPairingPoll",
+        "security": [
+          {
+            "pairingSecret": []
+          }
+        ],
+        "x-autplay-authorization": "POSSESSION_AND_DEVICE_ES256_PROOF",
+        "responses": {
+          "200": {
+            "description": "Pairing result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ceremony_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/poll-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192,
+        "x-autplay-proof-domain": "autplay:self-device-pairing:poll:v1\n",
+        "x-autplay-secret-boundary": "HEADER_ONLY_NO_URL_NO_LOG_NO_REDIRECT"
+      }
+    },
+    "/pairing/self-service/{ceremony_id}/exchange": {
+      "post": {
+        "operationId": "selfPairingExchange",
+        "security": [
+          {
+            "pairingSecret": []
+          }
+        ],
+        "x-autplay-authorization": "POSSESSION_AND_DEVICE_ES256_PROOF",
+        "responses": {
+          "200": {
+            "description": "Pairing result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/exchange-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ceremony_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/exchange-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192,
+        "x-autplay-proof-domain": "autplay:self-device-pairing:exchange:v1\n",
+        "x-autplay-secret-boundary": "HEADER_ONLY_NO_URL_NO_LOG_NO_REDIRECT"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "pairingSecret": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AutPlay-Pairing-Secret"
+      }
+    },
+    "schemas": {
+      "start-request": {
+        "title": "start-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "rendezvous_secret_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "expected_server_instance_id",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_api_origin",
+          "expected_stream_origin",
+          "ceremony_id",
+          "requested_at",
+          "request_sha256",
+          "operation_id",
+          "rendezvous_secret_sha256"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "claim-request": {
+        "title": "claim-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "claim_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "poll_secret_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "device_public_key_spki_b64": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 344,
+            "contentEncoding": "base64"
+          },
+          "device_key_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "device_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\u0000-\\u001f]+$"
+          },
+          "platform": {
+            "const": "ANDROID"
+          },
+          "app_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "device_signature_b64url": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "expected_server_instance_id",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_api_origin",
+          "expected_stream_origin",
+          "ceremony_id",
+          "requested_at",
+          "request_sha256",
+          "claim_id",
+          "poll_secret_sha256",
+          "device_public_key_spki_b64",
+          "device_key_thumbprint_sha256",
+          "device_name",
+          "platform",
+          "app_version",
+          "device_signature_b64url"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "poll-request": {
+        "title": "poll-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "claim_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "claim_request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "device_signature_b64url": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "expected_server_instance_id",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_api_origin",
+          "expected_stream_origin",
+          "ceremony_id",
+          "requested_at",
+          "request_sha256",
+          "claim_id",
+          "claim_request_sha256",
+          "device_signature_b64url"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "decision-request": {
+        "title": "decision-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "action": {
+            "enum": [
+              "APPROVE",
+              "REJECT",
+              "CANCEL"
+            ]
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "claim_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claim_request_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comparison_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "expected_server_instance_id",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_api_origin",
+          "expected_stream_origin",
+          "ceremony_id",
+          "requested_at",
+          "request_sha256",
+          "operation_id",
+          "action",
+          "expected_revision",
+          "claim_id",
+          "claim_request_sha256",
+          "comparison_code"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "APPROVE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "claim_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+                },
+                "claim_request_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "comparison_code": {
+                  "type": "string",
+                  "pattern": "^[0-9]{12}$"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "comparison_code": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "claim_id": {
+                  "type": "null"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "claim_request_sha256": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "claim_request_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "exchange-request": {
+        "title": "exchange-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "exchange_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "binding_commit_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "claim_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "claim_request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "approval_operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "confirmed_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "next_refresh_token_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "device_signature_b64url": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "expected_server_instance_id",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_api_origin",
+          "expected_stream_origin",
+          "ceremony_id",
+          "requested_at",
+          "request_sha256",
+          "exchange_id",
+          "binding_commit_id",
+          "claim_id",
+          "claim_request_sha256",
+          "approval_operation_id",
+          "confirmed_account_id",
+          "next_refresh_token_sha256",
+          "device_signature_b64url"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "status-response": {
+        "title": "status-response",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "EXCHANGED",
+              "CANCELLED",
+              "REJECTED",
+              "EXPIRED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "retry_after_seconds": {
+            "const": 2
+          },
+          "claim_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "claim_request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "device_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "device_key_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "comparison_code": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "account_label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "approval_operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "ceremony_id",
+          "state",
+          "revision",
+          "expires_at",
+          "retry_after_seconds"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED",
+        "dependentRequired": {
+          "account_id": [
+            "account_label"
+          ],
+          "account_label": [
+            "account_id"
+          ],
+          "claim_id": [
+            "claim_request_sha256",
+            "device_name",
+            "device_key_thumbprint_sha256",
+            "comparison_code"
+          ]
+        }
+      },
+      "exchange-response": {
+        "title": "exchange-response",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "exchange_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "binding_commit_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "refresh_generation": {
+            "type": "integer",
+            "const": 0
+          },
+          "refresh_absolute_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "receipt_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "access_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "exchange_id",
+          "binding_commit_id",
+          "server_instance_id",
+          "user_id",
+          "device_id",
+          "session_id",
+          "refresh_generation",
+          "refresh_absolute_expires_at",
+          "receipt_expires_at",
+          "access_token",
+          "access_expires_at",
+          "replayed"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "qr-document": {
+        "title": "qr-document",
+        "type": "object",
+        "properties": {
+          "format": {
+            "const": "autplay-self-device-pairing"
+          },
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "rendezvous_secret": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+          }
+        },
+        "required": [
+          "format",
+          "version",
+          "ceremony_id",
+          "rendezvous_secret",
+          "expected_server_instance_id",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_api_origin",
+          "expected_stream_origin",
+          "expires_at"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "error": {
+        "title": "error",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "error_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "safe_message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "error_code",
+          "safe_message",
+          "request_id",
+          "retryable"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      }
+    }
+  },
+  "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+}

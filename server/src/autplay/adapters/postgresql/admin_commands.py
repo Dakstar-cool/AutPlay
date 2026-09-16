@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.models import (
@@ -19,6 +19,11 @@ from autplay.adapters.postgresql.models.profile_pairing import (
     ServerInstanceRow,
 )
 from autplay.adapters.postgresql.models.web_admin import WebSessionRow, WebTerminalReceiptRow
+from autplay.adapters.postgresql.resource_limits import (
+    lock_resource_admission,
+    terminate_resource_authority,
+    terminate_retired_session,
+)
 from autplay.domain.admin_commands import AdminCommand
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import WebAdminError
@@ -31,14 +36,17 @@ class SqlAlchemyAdminCommandRepository:
         self._sessions = sessions
 
     def execute(self, command: AdminCommand, *, action: str, target_type: str) -> dict[str, object]:
-        now = datetime.now(UTC)
         with self._sessions.begin() as session:
-            # Global lock order: server instance, account, browser session, target, receipt.
+            # Lock order: server instance, admission, account, browser session, target, receipt.
             instance = session.get(
                 ServerInstanceRow, command.actor.server_instance_id, with_for_update=True
             )
+            lock_resource_admission(session)
             account = session.get(UserAccountRow, command.actor.user_id, with_for_update=True)
             web = session.get(WebSessionRow, command.actor.web_session_id, with_for_update=True)
+            now = session.scalar(select(func.clock_timestamp()))
+            if not isinstance(now, datetime):
+                raise WebAdminError("authentication_required")
             if (
                 instance is None
                 or account is None
@@ -52,6 +60,7 @@ class SqlAlchemyAdminCommandRepository:
                 or web.revoked_at is not None
                 or web.idle_expires_at <= now
                 or web.absolute_expires_at <= now
+                or web.token_issued_at <= now - timedelta(minutes=15)
             ):
                 raise WebAdminError("authentication_required")
 
@@ -89,8 +98,15 @@ class SqlAlchemyAdminCommandRepository:
                         .with_for_update()
                     ).all():
                         row.revoked_at = now
+                    terminate_resource_authority(
+                        session,
+                        command.actor.user_id,
+                        now,
+                        device_id=command.target_id,
+                    )
                 else:
                     target.revoked_at = now
+                    terminate_retired_session(session, target, now)
                 terminal_at = now
             outcome = "ALREADY_TERMINAL" if already_terminal else "APPLIED"
             session.add(

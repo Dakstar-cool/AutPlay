@@ -54,7 +54,8 @@ class M5SessionRotationClient(
         val successor = ByteArray(32).also(java.security.SecureRandom()::nextBytes)
         try {
             val successorToken = b64(successor)
-            keys.ensure(context.deviceKeyAlias)
+            // Renewal must use the bound key. Never create a replacement after key loss.
+            keys.publicKeyThumbprintSha256(context.deviceKeyAlias)
             val fields = linkedMapOf<String, Any>(
                 "contract_version" to "v1", "schema_version" to 1,
                 "rotation_id" to UUID.randomUUID().toString(),

@@ -21,6 +21,7 @@ from autplay.domain.auth import (
 from autplay.ports.auth import (
     AccessTokenCodec,
     AuditRecord,
+    AuthRepository,
     AuthUnitOfWorkFactory,
     NewOwnerBundle,
     NewSession,
@@ -274,8 +275,9 @@ class AuthService:
     def logout_all(self, principal: Principal, *, request_id: UUID | None = None) -> int:
         """Revoke all sessions for the authenticated user, but not devices."""
 
-        now = _aware(self.clock.now())
         with self.unit_of_work_factory() as unit_of_work:
+            repository = unit_of_work.auth
+            now = self._lock_actor(repository, principal)
             revoked = unit_of_work.auth.revoke_active_sessions_for_user(
                 principal.user_id, revoked_at=now
             )
@@ -301,9 +303,9 @@ class AuthService:
     ) -> int:
         """Revoke an owned device and all its sessions without cross-user leakage."""
 
-        now = _aware(self.clock.now())
         with self.unit_of_work_factory() as unit_of_work:
             repository = unit_of_work.auth
+            now = self._lock_actor(repository, principal)
             if not repository.lock_owned_device(principal.user_id, device_id):
                 raise OwnedObjectNotFoundError
             repository.revoke_device(principal.user_id, device_id, revoked_at=now)
@@ -324,6 +326,23 @@ class AuthService:
             )
             unit_of_work.commit()
         return revoked_sessions
+
+    def _lock_actor(self, repository: AuthRepository, principal: Principal) -> datetime:
+        """Serialize with revocation and reject an actor cached by an earlier HTTP transaction."""
+        if not repository.lock_owned_device(principal.user_id, principal.device_id):
+            raise InvalidAccessTokenError
+        now = _aware(self.clock.now())
+        if (
+            repository.load_active_principal(
+                user_id=principal.user_id,
+                device_id=principal.device_id,
+                session_id=principal.session_id,
+                now=now,
+            )
+            is None
+        ):
+            raise InvalidAccessTokenError
+        return now
 
     def _issue_pair(
         self,

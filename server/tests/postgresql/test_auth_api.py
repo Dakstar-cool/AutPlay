@@ -12,17 +12,18 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from autplay.adapters.postgresql.readiness import ReadinessResult
-from autplay.application.auth import AuthService, BootstrapOwnerCommand
-from autplay.domain.auth import DeviceDescription, DevicePlatform
-from autplay.entrypoints.api import create_app
-from autplay.entrypoints.composition import build_auth_service
-from autplay.runtime.settings import ApiSettings, RuntimeProfile
 from fastapi import FastAPI
 from psycopg import Connection
 from pydantic import SecretStr
 from sqlalchemy import create_engine
 from starlette.testclient import TestClient
+
+from autplay.adapters.postgresql.readiness import ReadinessResult
+from autplay.application.auth import AuthService, BootstrapOwnerCommand
+from autplay.domain.auth import DeviceDescription, DevicePlatform, Principal
+from autplay.entrypoints.api import create_app
+from autplay.entrypoints.composition import build_auth_service
+from autplay.runtime.settings import ApiSettings, RuntimeProfile
 
 AUTH_SECRET = "p03-http-test-signing-secret-at-least-32-bytes"
 
@@ -115,6 +116,43 @@ def test_refresh_logout_and_auth_responses_are_real_bounded_and_no_store(
     assert first.refresh_token not in rendered_logs
     assert rotated.json()["access_token"] not in rendered_logs
     assert rotated.json()["refresh_token"] not in rendered_logs
+
+
+@pytest.mark.parametrize("action", ["logout_all", "revoke_device"])
+def test_revocation_between_http_authentication_and_mutation_returns_401(
+    auth_http_runtime: tuple[FastAPI, AuthService],
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    app, service = auth_http_runtime
+    pair = service.bootstrap_owner(
+        BootstrapOwnerCommand(
+            display_name="Race owner",
+            device=DeviceDescription(
+                name="Race phone", platform=DevicePlatform.ANDROID, app_version="race-test"
+            ),
+        )
+    )
+    authenticate = AuthService.authenticate_access
+
+    def authenticate_then_revoke(instance: AuthService, token: str) -> Principal:
+        actor = authenticate(instance, token)
+        if instance is service:
+            instance.logout(actor)
+        return actor
+
+    monkeypatch.setattr(AuthService, "authenticate_access", authenticate_then_revoke)
+    path = (
+        "/api/v1/auth/logout-all"
+        if action == "logout_all"
+        else f"/api/v1/devices/{uuid.uuid4()}/revoke"
+    )
+    with TestClient(app) as client:
+        response = client.post(path, headers={"Authorization": f"Bearer {pair.access_token}"})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["www-authenticate"] == "Bearer"
 
 
 def test_refresh_replay_revokes_replacement_and_device_authorization_hides_ownership(

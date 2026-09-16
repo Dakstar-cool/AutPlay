@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% macro tokens(operation) %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="operation_id" value="{{ operation }}">
+<input type="hidden" name="expected_global_revision" value="{{ view.policy.global_revision }}">
+{% endmacro %}
+{% block content %}
+<header class="page-heading"><div><h1>{{ t("nav_quotas") }}{% if view.target %}: {{ view.target.display_name }}{% endif %}</h1><p class="page-summary">{{ t("quota_intro") }}</p></div></header>
+{% if view.target %}<p><a href="/admin/quotas?lang={{ locale }}">{{ t("quota_back") }}</a></p>{% endif %}
+<section aria-labelledby="usage-title">
+  <h2 id="usage-title">{{ t("quota_usage") }}</h2>
+  <dl class="facts">
+    <div><dt>{{ t("quota_devices") }}</dt><dd>{{ format_count(view.usage.devices) }}{% if view.target %} / {{ format_count(view.policy.effective.devices) }}{% endif %}</dd></div>
+    {% for name in ("playbacks", "transfers") %}
+    <div><dt>{{ t("quota_" ~ name) }}</dt><dd>{{ format_count(view.usage|attr(name)) }} / {% if view.target %}{{ format_count(view.policy.effective|attr(name)) }}{% elif (view.policy|attr("global_" ~ name)) is not none %}{{ format_count(view.policy|attr("global_" ~ name)) }}{% else %}{{ t("quota_unconfigured") }}{% endif %}</dd></div>
+    <div><dt>{{ t("quota_waiting_" ~ name) }}</dt><dd>{{ format_count(view.usage|attr("waiting_" ~ name)) }}</dd></div>
+    {% endfor %}
+  </dl>
+  <p>{{ t("quota_draining") }}</p>
+</section>
+<section class="section-card" aria-labelledby="limits-title">
+  <h2 id="limits-title">{{ t("quota_override" if view.target else "quota_defaults") }}</h2>
+  <p>{{ t("quota_inheritance" if view.target else "quota_defaults_intro") }}</p>
+  <form method="post" action="{% if view.target %}/admin/quotas/accounts/{{ view.target.user_id }}{% else %}/admin/quotas/defaults{% endif %}?lang={{ locale }}">
+    {{ tokens(operation_id) }}
+    {% if view.target %}<input type="hidden" name="expected_account_revision" value="{{ view.policy.account_revision }}">{% endif %}
+    {% for name in ("devices", "playbacks", "transfers") %}
+    <label for="limit-{{ name }}">{{ t("quota_" ~ name) }}</label>
+    <input id="limit-{{ name }}" name="{{ name }}" type="number" min="1" max="1000000" step="1" inputmode="numeric"{% if not view.target %} required{% endif %} value="{% if view.target %}{{ (view.policy.override|attr(name)) if (view.policy.override|attr(name)) is not none else '' }}{% else %}{{ view.policy.defaults|attr(name) }}{% endif %}"{% if view.target %} aria-describedby="inherited-{{ name }}"{% endif %}>
+    {% if view.target %}<p id="inherited-{{ name }}">{{ t("quota_inherited_value") }}: {{ format_count(view.policy.defaults|attr(name)) }}</p>{% endif %}
+    {% endfor %}
+    <p>{{ t("quota_lowering") }}</p>
+    <button type="submit">{{ t("quota_save") }}</button>
+  </form>
+</section>
+{% if not view.target %}
+<section class="section-card" aria-labelledby="budget-title">
+  <h2 id="budget-title">{{ t("quota_budget") }}</h2>
+  <p>{{ t("quota_budget_intro") }}</p>
+  {% set configured = view.policy.playback_ceiling is not none and view.policy.transfer_ceiling is not none %}
+  {% if not configured %}<p class="notice" role="status">{{ t("quota_measure_first") }}</p>{% endif %}
+  <form method="post" action="/admin/quotas/budget?lang={{ locale }}">
+    {{ tokens(budget_operation_id) }}
+    <fieldset{% if not configured %} disabled{% endif %}>
+      <legend>{{ t("quota_server_limits") }}</legend>
+      {% for name, ceiling in (("playbacks", view.policy.playback_ceiling), ("transfers", view.policy.transfer_ceiling)) %}
+      <label for="budget-{{ name }}">{{ t("quota_" ~ name) }}</label>
+      <input id="budget-{{ name }}" name="{{ name }}" type="number" min="1" max="{{ ceiling if configured else 1 }}" step="1" inputmode="numeric" required value="{{ (view.policy|attr('global_' ~ name)) if (view.policy|attr('global_' ~ name)) is not none else '' }}">
+      {% endfor %}
+      <p>{{ t("quota_lowering") }}</p>
+      <button type="submit">{{ t("quota_save") }}</button>
+    </fieldset>
+  </form>
+</section>
+<section aria-labelledby="accounts-title">
+  <h2 id="accounts-title">{{ t("quota_accounts") }}</h2>
+  <p>{{ t("quota_accounts_scope") }}</p>
+  <div class="section-grid section-destinations">
+    {% for item in accounts.items %}<a class="section-card section-destination" href="/admin/quotas/accounts/{{ item.user_id }}?lang={{ locale }}"><h3>{{ item.display_name }}</h3><span aria-hidden="true">→</span></a>{% endfor %}
+  </div>
+  {% if accounts.next_cursor %}<p><a class="button" href="/admin/quotas?after={{ accounts.next_cursor }}&amp;lang={{ locale }}">{{ t("quota_next") }}</a></p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -23,7 +23,7 @@ sealed interface PairingNetworkResult<out T> { data class Success<T>(val value: 
 data class DiscoveryDocument(val identity: TrustedServerIdentity, val labelHint: String, val apiOrigin: String, val streamOrigin: String, val supportedApiMajors: Set<Int>, val expiresAt: Instant, val identityPublicKeySpki: ByteArray)
 data class CapabilityDocument(val state: CapabilityState, val signedPayload: ByteArray, val payloadSha256: String)
 data class EnrollmentExchangeCommand(val snapshot: PairingFlowSnapshot, val invitationId: String, val invitationSecret: ByteArray, val deviceName: String, val nextRefreshToken: ByteArray, val nextRefreshTokenSha256: String, val clientNonceB64Url: String)
-data class SessionRotationCommand(val snapshot: PairingFlowSnapshot, val parentSessionId: String, val parentGeneration: Long, val nextRefreshToken: ByteArray, val nextRefreshTokenSha256: String)
+data class SessionRotationCommand(val snapshot: PairingFlowSnapshot, val parentSessionId: String, val parentGeneration: Long, val nextRefreshToken: ByteArray, val nextRefreshTokenSha256: String, val deviceKeyAlias: String? = null)
 data class EnrollmentSession(val deviceId: DeviceId, val sessionId: String, val sessionFamilyId: String, val sessionGeneration: Long, val accessToken: ByteArray, val refreshToken: ByteArray)
 /** Secret-bearing invitation returned only for volatile display. Callers must wipe [secret] after use. */
 data class ManagedInvitation(val invitationId: String, val expiresAt: String, val secret: ByteArray, val envelopeJson: String) {

@@ -86,10 +86,21 @@ class OkHttpProfilePairingPortTest {
                         """{"contract_version":"v1","schema_version":1,"access_token":"${"b".repeat(32)}","parent_session_id":"33333333-3333-4333-8333-333333333333","session_id":"55555555-5555-4555-8555-555555555555","family_id":"44444444-4444-4444-8444-444444444444","generation":1}""",
                     ),
             )
+            val keyAlias = "autplay.self.pairing.66666666-6666-4666-8666-666666666666"
             val port = OkHttpProfilePairingPort(
                 { if (it == profile) server.url("/").toString().trimEnd('/') else null },
                 credentials,
-                SigningKeys,
+                object : M5DeviceKeyStore by SigningKeys {
+                    override fun publicKeyThumbprintSha256(alias: String): String {
+                        assertEquals(keyAlias, alias)
+                        return SigningKeys.publicKeyThumbprintSha256(alias)
+                    }
+                    override fun signP1363(alias: String, domainSeparator: String, payloadSha256: ByteArray): ByteArray {
+                        assertEquals(keyAlias, alias)
+                        return SigningKeys.signP1363(alias, domainSeparator, payloadSha256)
+                    }
+                    override fun ensure(alias: String) = error("Rotation must not create a replacement key")
+                },
                 allowUnsafeDevelopmentHttp = true,
             )
             val snapshot = PairingFlowSnapshot(
@@ -114,6 +125,7 @@ class OkHttpProfilePairingPortTest {
                     0,
                     next.copyOf(),
                     MessageDigest.getInstance("SHA-256").digest(next).joinToString("") { "%02x".format(it.toInt() and 0xff) },
+                    deviceKeyAlias = keyAlias,
                 ),
             )
 

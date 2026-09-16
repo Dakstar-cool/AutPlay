@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="self_pairing_title">Подключение телефонов</string>
+    <string name="self_pairing_add">Добавить другой телефон</string>
+    <string name="self_pairing_scan">Сканировать QR с другого телефона</string>
+    <string name="self_pairing_hint">Медиатека, история прослушивания и предпочтения хранятся в вашем аккаунте. Остальные телефоны останутся подключёнными.</string>
+    <string name="self_pairing_qr_hint">Отсканируйте QR в AutPlay на новом телефоне. Держите оба телефона рядом.</string>
+    <string name="self_pairing_compare">Убедитесь, что на обоих телефонах одинаковый код:</string>
+    <string name="self_pairing_codes_match">Коды совпадают — разрешить подключение</string>
+    <string name="self_pairing_reject">Отклонить подключение</string>
+    <string name="self_pairing_wait_approval">Подтвердите этот код на другом телефоне.</string>
+    <string name="self_pairing_approved">Подключение разрешено. Подтвердите аккаунт на новом телефоне.</string>
+    <string name="self_pairing_trust">Подключиться к этому серверу?</string>
+    <string name="self_pairing_trust_confirm">Доверять серверу и продолжить</string>
+    <string name="self_pairing_account">Подключить этот телефон к аккаунту «%1$s»?</string>
+    <string name="self_pairing_account_confirm">Подключить к этому аккаунту</string>
+    <string name="self_pairing_working">Подключение…</string>
+    <string name="self_pairing_complete">Этот телефон подключён.</string>
+    <string name="self_pairing_source_complete">Новый телефон подключён.</string>
+    <string name="self_pairing_cancel">Отменить привязку</string>
+    <string name="self_pairing_done">Закрыть</string>
+    <string name="self_pairing_retry">Проверить и продолжить</string>
+    <string name="self_pairing_expires">Действует до: %1$s</string>
+    <string name="self_pairing_expired">Срок привязки истёк. Начните заново на другом телефоне.</string>
+    <string name="self_pairing_cancelled">Привязка отменена.</string>
+    <string name="self_pairing_error">Не удалось завершить подключение. Нажмите «Проверить и продолжить», чтобы восстановить сохранённый запрос.</string>
+    <string name="self_pairing_source_changed">Исходный вход изменился. Закройте эту привязку и начните заново.</string>
+    <string name="self_pairing_busy">Другое подключение ещё не завершено. Завершите или отмените его.</string>
+    <string name="self_pairing_limit">Достигнут лимит устройств для аккаунта.</string>
+    <string name="self_pairing_unavailable">На этом сервере привязка телефонов пока не включена.</string>
+    <string name="self_pairing_cancel_other">Отмените привязку на другом телефоне, затем проверьте её состояние здесь.</string>
+    <string name="self_pairing_key_lost">Сохранённый ключ телефона недоступен. Требуется восстановление аккаунта.</string>
+</resources>

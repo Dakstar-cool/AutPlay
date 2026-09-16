@@ -108,9 +108,10 @@ class OkHttpProfilePairingPort(
     }
 
     override suspend fun rotate(request: SessionRotationCommand): PairingNetworkResult<EnrollmentSession> {
-        val s = request.snapshot; val alias = keyAliasForProfile(s.serverProfileId); deviceKeys.ensure(alias)
+        val s = request.snapshot; val alias = request.deviceKeyAlias ?: keyAliasForProfile(s.serverProfileId)
         val material = credentials.read(s.serverProfileId) ?: return PairingNetworkResult.Failure("auth_attention_required")
         return try {
+            if (deviceKeys.publicKeyThumbprintSha256(alias) != s.deviceKeyThumbprintSha256) return PairingNetworkResult.Failure("auth_attention_required")
             val refresh = SessionCredentialEnvelopeCodec.decode(material).refreshToken?.toByteArray(StandardCharsets.US_ASCII) ?: return PairingNetworkResult.Failure("auth_attention_required")
             try {
                 val currentRefreshToken = refresh.toString(StandardCharsets.US_ASCII)

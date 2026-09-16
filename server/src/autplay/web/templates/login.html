@@ -1,11 +1,20 @@
 {% extends "base.html" %}
+{% block head %}{% if passkeys_enabled|default(false) %}<script src="/admin/static/passkeys-v1.js" defer></script>{% endif %}{% endblock %}
 {% block content %}
 <section class="auth-card" aria-labelledby="login-title">
   <p class="eyebrow">AutPlay Admin</p>
   <h1 id="login-title">{{ t("login_title") }}</h1>
-  <p>{{ t("login_intro") }}</p>
+  <p>{{ t("passkey_login_intro") if passkeys_enabled|default(false) else t("login_intro") }}</p>
+  {% if passkeys_enabled|default(false) %}
+  <form data-passkey="login" data-error="{{ t('passkey_error') }}" data-unsupported="{{ t('passkey_unsupported') }}">
+    <input type="hidden" name="preauth_nonce" value="{{ preauth_nonce }}">
+    <button type="submit">{{ t("passkey_sign_in") }}</button>
+    <p data-passkey-status role="status" aria-live="polite"></p>
+  </form>
+  <details><summary>{{ t("passkey_operator_access") }}</summary>
+  {% endif %}
   {% if error_code %}<div class="error" role="alert"><strong>{{ t("terminal_error_title") }}</strong><br>{{ t("diagnostic_code") }}: <code>{{ error_code }}</code></div>{% endif %}
-  <form method="post" action="/admin/login" autocomplete="off">
+  <form method="post" action="/admin/login" autocomplete="off"{% if passkeys_enabled|default(false) %} data-passkey-navigation data-error="{{ t('passkey_action_error') }}"{% endif %}>
     <input type="hidden" name="preauth_nonce" value="{{ preauth_nonce }}">
     <input type="hidden" name="challenge_id" value="{{ challenge_id }}">
     <input type="hidden" name="operation_id" value="{{ operation_id }}">
@@ -13,6 +22,8 @@
     <input id="browser-invitation" name="browser_invitation" type="password" required minlength="40" maxlength="128" autocomplete="off" spellcheck="false">
     <p class="field-help">{{ t("secret_warning") }}</p>
     <button type="submit">{{ t("sign_in") }}</button>
+    {% if passkeys_enabled|default(false) %}<p data-passkey-status role="status"></p>{% endif %}
   </form>
+  {% if passkeys_enabled|default(false) %}</details>{% endif %}
 </section>
 {% endblock %}

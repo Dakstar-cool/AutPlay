@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="self_pairing_title">Connect your phones</string>
+    <string name="self_pairing_add">Add another phone</string>
+    <string name="self_pairing_scan">Scan QR from your other phone</string>
+    <string name="self_pairing_hint">Your library, listening history and preferences belong to your account. Your other phones stay connected.</string>
+    <string name="self_pairing_qr_hint">Scan this QR in AutPlay on the new phone. Keep both phones nearby.</string>
+    <string name="self_pairing_compare">Check that both phones show the same code:</string>
+    <string name="self_pairing_codes_match">Codes match — approve this phone</string>
+    <string name="self_pairing_reject">Reject this phone</string>
+    <string name="self_pairing_wait_approval">Confirm this code on your other phone.</string>
+    <string name="self_pairing_approved">Approved. Confirm your account on the new phone.</string>
+    <string name="self_pairing_trust">Connect to this server?</string>
+    <string name="self_pairing_trust_confirm">Trust this server and continue</string>
+    <string name="self_pairing_account">Connect this phone to %1$s?</string>
+    <string name="self_pairing_account_confirm">Connect to this account</string>
+    <string name="self_pairing_working">Connecting…</string>
+    <string name="self_pairing_complete">This phone is connected.</string>
+    <string name="self_pairing_source_complete">The new phone is connected.</string>
+    <string name="self_pairing_cancel">Cancel pairing</string>
+    <string name="self_pairing_done">Close</string>
+    <string name="self_pairing_retry">Check and continue</string>
+    <string name="self_pairing_expires">Expires: %1$s</string>
+    <string name="self_pairing_expired">This pairing has expired. Start again from your other phone.</string>
+    <string name="self_pairing_cancelled">Pairing was cancelled.</string>
+    <string name="self_pairing_error">The connection could not be completed. Check and continue to recover the saved request.</string>
+    <string name="self_pairing_source_changed">The original sign-in has changed. Close this pairing and start again.</string>
+    <string name="self_pairing_busy">Another connection is unfinished. Complete or cancel it first.</string>
+    <string name="self_pairing_limit">Your account has reached its device limit.</string>
+    <string name="self_pairing_unavailable">This server has not enabled phone pairing.</string>
+    <string name="self_pairing_cancel_other">Cancel this pairing on your other phone, then check its status here.</string>
+    <string name="self_pairing_key_lost">The saved phone key is unavailable. Account recovery is required.</string>
+</resources>

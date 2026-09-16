@@ -18,6 +18,7 @@ from autplay.adapters.postgresql.vault_uow import SqlAlchemyVaultUnitOfWorkFacto
 from autplay.application.auth import AuthService, BootstrapOwnerCommand
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.vault_reconciliation import ReconcileMode, VaultReconciliationService
+from autplay.application.web_passkeys import WebPasskeyService
 from autplay.domain.auth import (
     AuthenticationError,
     DeviceDescription,
@@ -29,6 +30,7 @@ from autplay.entrypoints.composition import (
     build_auth_service,
     build_profile_pairing_service,
     build_web_admin_service,
+    build_web_passkey_service,
 )
 from autplay.runtime.settings import SettingsLoadError, load_api_settings, load_worker_settings
 
@@ -102,7 +104,58 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web_revoke_all.add_argument("--user-id", required=True)
     web_revoke_all.add_argument("--operation-id", required=True)
+    passkey_list = subcommands.add_parser("web-passkey-list", help="list public passkey metadata")
+    passkey_list.add_argument("--user-id", required=True)
+    passkey_revoke = subcommands.add_parser(
+        "web-passkey-revoke", help="revoke a passkey and its browser sessions"
+    )
+    passkey_revoke.add_argument("--user-id", required=True)
+    passkey_revoke.add_argument("--passkey-id", required=True)
+    passkey_revoke.add_argument("--operation-id", required=True)
+    passkey_cleanup = subcommands.add_parser(
+        "web-passkey-cleanup", help="remove expired passkey ceremonies"
+    )
+    passkey_cleanup.add_argument("--limit", type=int, default=1000)
     return parser
+
+
+def run_web_passkey_recovery(
+    service: WebPasskeyService,
+    arguments: Sequence[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    namespace = build_parser().parse_args(list(arguments))
+    try:
+        document: dict[str, object]
+        if namespace.command == "web-passkey-list":
+            rows = service.list_local(UUID(namespace.user_id))
+            document = {
+                "passkeys": [
+                    {
+                        "passkey_id": str(row.passkey_id),
+                        "created_at": row.created_at.isoformat(),
+                        "state": "REVOKED" if row.revoked_at is not None else "ACTIVE",
+                    }
+                    for row in rows
+                ]
+            }
+        elif namespace.command == "web-passkey-revoke":
+            service.revoke_local(
+                UUID(namespace.user_id), UUID(namespace.passkey_id), UUID(namespace.operation_id)
+            )
+            document = {"outcome": "PASSKEY_REVOKED"}
+        elif namespace.command == "web-passkey-cleanup":
+            document = {"deleted": service.cleanup(namespace.limit)}
+        else:
+            _write_error(stderr, "unknown_admin_command")
+            return 2
+    except ValueError, RuntimeError:
+        _write_error(stderr, "passkey_recovery_unavailable")
+        return 4
+    stdout.write(json.dumps(document, separators=(",", ":"), sort_keys=True) + "\n")
+    return 0
 
 
 def run_web_session_invite(
@@ -346,6 +399,9 @@ def main(
         "web-session-list",
         "web-session-revoke",
         "web-session-revoke-all",
+        "web-passkey-list",
+        "web-passkey-revoke",
+        "web-passkey-cleanup",
     }:
         try:
             api_settings = load_api_settings()
@@ -354,6 +410,17 @@ def main(
             return 2
         engine = create_runtime_engine(api_settings)
         try:
+            if command.startswith("web-passkey-"):
+                passkeys = build_web_passkey_service(api_settings, engine)
+                if passkeys is None:
+                    _write_error(sys.stderr, "passkey_configuration_missing")
+                    return 2
+                return run_web_passkey_recovery(
+                    passkeys,
+                    command_arguments,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                )
             if command == "web-session-invite":
                 web_service = build_web_admin_service(api_settings, engine)
                 if web_service is None:

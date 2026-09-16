@@ -13,7 +13,10 @@ from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescap
 
 SUPPORTED_LOCALES: Final = ("en", "ru")
 STATIC_ASSET_DIGESTS: Final = {
-    "admin-v1.css": "b3c13018b1db8ec4c083b6f708ce473b1bf18aec620f73df81f7cbfc27d6b9ec"
+    "admin-forms-v1.js": "c45e542994f975ecc2810ac14078a69cdb59db8e4914e4d72f7e794b50127f60",
+    "admin-v1.css": "b3c13018b1db8ec4c083b6f708ce473b1bf18aec620f73df81f7cbfc27d6b9ec",
+    "admin-v2.css": "2de236351cc41064c92b80a7eafece345b1dccb03eaf959852cc339c64454df9",
+    "passkeys-v1.js": "0e680bd5de574d07a0f728104ec11a962fdef5c0fc81e0849cf1ba5ed4acc2e5",
 }
 _MONTHS: Final = {
     "en": (

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
+
 from autplay.runtime.settings import (
     ApiSettings,
     RuntimeProfile,
@@ -13,11 +15,46 @@ from autplay.runtime.settings import (
     load_api_settings,
     load_worker_settings,
 )
-from pydantic import SecretStr
 
 DATABASE_URL = "postgresql+psycopg://runtime_user:database-password@127.0.0.1:5432/autplay"
 AUTH_SECRET = "api-signing-secret-with-at-least-thirty-two-bytes"
 PUBLIC_SOURCE_SECRET = "public-access-source-hmac-secret-at-least-thirty-two-bytes"
+
+
+@pytest.mark.parametrize(
+    "enabled,origin,valid",
+    [
+        (True, "https://admin.example.test", True),
+        (False, "https://admin.example.test", False),
+        (True, "http://127.0.0.1:8787", False),
+    ],
+)
+def test_passkeys_environment_switch_requires_enabled_https_admin(
+    enabled: bool,
+    origin: str,
+    valid: bool,
+) -> None:
+    overrides = {
+        "database_url": DATABASE_URL,
+        "auth_signing_secret": AUTH_SECRET,
+        "public_access_source_hmac_secret": PUBLIC_SOURCE_SECRET,
+        "admin_web_enabled": enabled,
+        "admin_web_origin": origin,
+        "admin_web_source_hmac_secret": "b" * 32,
+        "admin_web_csrf_hmac_secret": "c" * 32,
+    }
+    if valid:
+        assert load_api_settings(
+            overrides=overrides,
+            environ={"AUTPLAY_ADMIN_PASSKEYS_ENABLED": "true"},
+        ).admin_passkeys_enabled
+        assert not load_api_settings(overrides=overrides, environ={}).admin_passkeys_enabled
+    else:
+        with pytest.raises(SettingsLoadError):
+            load_api_settings(
+                overrides=overrides,
+                environ={"AUTPLAY_ADMIN_PASSKEYS_ENABLED": "true"},
+            )
 
 
 def test_missing_required_settings_raise_one_sanitized_error() -> None:

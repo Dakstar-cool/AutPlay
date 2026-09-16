@@ -70,9 +70,17 @@ class UserAccountRow(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
     )
+    authority_generation: Mapped[int] = mapped_column(
+        BigInteger(),
+        nullable=False,
+        server_default=text("1"),
+    )
 
     __table_args__ = (
         PrimaryKeyConstraint("user_id", name="user_account_pkey"),
+        CheckConstraint(
+            "authority_generation >= 1", name="user_account_authority_generation_check"
+        ),
         CheckConstraint(
             "length(display_name) BETWEEN 1 AND 200",
             name="user_account_display_name_check",

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/resource-admission/v1/acquire-transfer-request.schema.json",
+  "title": "acquire-transfer-request",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "x-autplay-integer-token-only": true,
+      "const": 1
+    },
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "resource_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "kind": {
+      "const": "TRANSFER"
+    },
+    "resource_type": {
+      "enum": [
+        "UPLOAD_INTENT",
+        "DOWNLOAD_INTENT"
+      ]
+    },
+    "target_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "operation_id",
+    "resource_id",
+    "kind",
+    "resource_type",
+    "target_id"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+}

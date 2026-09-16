@@ -3,30 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response, StreamingResponse
 
+from autplay.application.vault_streaming import AuthorizedStream
 from autplay.domain.auth import OwnedObjectNotFoundError, Principal
-from autplay.domain.vault import ByteRange, OpaqueStorageKey, Sha256Digest, VaultError
+from autplay.domain.resource_admission import ResourceAdmissionError
+from autplay.domain.vault import ByteRange, VaultError
+from autplay.entrypoints.resource_admission_http import resource_admission_error
+from autplay.entrypoints.resource_io_http import IoScopedResponse, require_resource_io_headers
+from autplay.entrypoints.resource_stream_http import ProcessStreamGateway
 from autplay.entrypoints.stream import select_range
 from autplay.ports.vault import RangeReader, VaultStorage
 from autplay.runtime.http import ApiError
-
-
-@dataclass(frozen=True, slots=True)
-class AuthorizedStream:
-    """Authorized stream metadata, returned only after owner filtering."""
-
-    storage_key: OpaqueStorageKey
-    sha256: Sha256Digest
-    byte_size: int
-    media_type: str
-    verified_at: datetime
 
 
 class StreamLookup(Protocol):
@@ -38,9 +32,10 @@ class StreamLookup(Protocol):
 
 def create_stream_router(
     lookup: StreamLookup,
-    storage: VaultStorage,
+    storage: VaultStorage | None,
     *,
     authenticated: Callable[[Request], None],
+    process_gateway: ProcessStreamGateway | None = None,
 ) -> APIRouter:
     """Build streaming routes; parsing never occurs before authorization."""
 
@@ -50,7 +45,7 @@ def create_stream_router(
     async def stream_audio_variant(audio_variant_id: UUID, request: Request) -> Response:
         principal = _principal(request)
         try:
-            authorized = lookup.resolve(principal, audio_variant_id)
+            authorized = await run_in_threadpool(lookup.resolve, principal, audio_variant_id)
         except OwnedObjectNotFoundError as error:
             raise _not_found() from error
         except Exception as error:
@@ -94,12 +89,38 @@ def create_stream_router(
                 media_type=authorized.media_type,
             )
         try:
+            if process_gateway is not None:
+                resource_headers = require_resource_io_headers(
+                    request, allowed=frozenset({"PLAY_INSTANCE", "DOWNLOAD_INTENT"})
+                )
+                body = await process_gateway.open(
+                    principal,
+                    resource_headers,
+                    audio_variant_id,
+                    authorized,
+                    ByteRange(start=selected.start, end=selected.end),
+                )
+                return IoScopedResponse(
+                    StreamingResponse(
+                        body,
+                        status_code=status_code,
+                        headers=headers,
+                        media_type=authorized.media_type,
+                    ),
+                    body.io,
+                )
+            if storage is None:
+                raise RuntimeError("stream storage dependency is missing")
             reader = storage.open_range(
                 authorized.storage_key,
                 ByteRange(start=selected.start, end=selected.end),
                 expected_size=authorized.byte_size,
                 verified_at=authorized.verified_at,
             )
+        except ResourceAdmissionError as error:
+            raise resource_admission_error(error.code) from None
+        except SQLAlchemyError:
+            raise resource_admission_error("resource_service_unavailable") from None
         except VaultError as error:
             raise ApiError(
                 code="vault_stream_unavailable",

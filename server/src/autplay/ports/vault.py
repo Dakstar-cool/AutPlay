@@ -35,6 +35,20 @@ class RangeReader(Protocol):
         ...
 
 
+class ReconciledChunkWriter(Protocol):
+    """One complete filesystem write under an already locked upload transaction."""
+
+    def append_reconciled_chunk(
+        self,
+        key: OpaqueStorageKey,
+        *,
+        committed_size: int,
+        offset: int,
+        payload: bytes,
+        payload_sha256: Sha256Digest,
+    ) -> ChunkWriteResult: ...
+
+
 class VaultStorage(Protocol):
     """Crash-safe local/NAS immutable-byte storage operations."""
 

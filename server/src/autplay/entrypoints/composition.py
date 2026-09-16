@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
+from autplay.adapters.filesystem.vault_process_upload import ProcessVaultChunkWriter
 from autplay.adapters.jamendo import JamendoProvider
 from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
 from autplay.adapters.postgresql.admin_views_runtime import SqlAlchemyAdminViewService
@@ -20,11 +21,14 @@ from autplay.adapters.postgresql.recommendations import (
     SqlAlchemyOfflinePackRepository,
     SqlAlchemyRecommendationRuntime,
 )
+from autplay.adapters.postgresql.self_device_pairing import SqlAlchemySelfPairingUnitOfWorkFactory
 from autplay.adapters.postgresql.vault_uow import SqlAlchemyVaultUnitOfWorkFactory
 from autplay.adapters.postgresql.wave import SqlAlchemyWaveService
 from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
+from autplay.adapters.postgresql.web_passkeys import SqlAlchemyWebPasskeyUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec, OpaqueRefreshTokenCodec
 from autplay.adapters.system import SystemClock, Uuid7Generator
+from autplay.adapters.webauthn import DuoWebPasskeyVerifier
 from autplay.application.admin_commands import AdminCommandService
 from autplay.application.auth import AuthService
 from autplay.application.bulk_discovery import BulkDiscoveryService
@@ -40,6 +44,7 @@ from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
 )
+from autplay.application.self_device_pairing import SelfDevicePairingService
 from autplay.application.social import SocialService
 from autplay.application.sync import SyncService
 from autplay.application.vault_uploads import (
@@ -50,12 +55,14 @@ from autplay.application.vault_uploads import (
     VaultUploadService,
 )
 from autplay.application.web_admin import WebAdminService
+from autplay.application.web_passkeys import WebPasskeyService
 from autplay.domain.auth import Principal
 from autplay.domain.profile_pairing import load_private_key
 from autplay.domain.vault import OpaqueStorageKey, Sha256Digest, VaultLimits
 from autplay.entrypoints.stream_http import AuthorizedStream
-from autplay.entrypoints.vault_http import UploadView
+from autplay.entrypoints.vault_http import AdmittedChunk, UploadView
 from autplay.runtime.settings import ApiSettings, StreamSettings
+from autplay.runtime.vault_io import VaultIoSession
 
 
 def build_auth_service(settings: ApiSettings, engine: Engine) -> AuthService:
@@ -99,6 +106,7 @@ def build_profile_pairing_service(
             max_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
         ),
         access_ttl=timedelta(seconds=settings.access_token_ttl_seconds),
+        self_device_pairing_enabled=settings.self_device_pairing_enabled,
     )
 
 
@@ -119,6 +127,27 @@ def build_public_access_service(settings: ApiSettings, engine: Engine) -> Public
     )
 
 
+def build_self_device_pairing_service(
+    settings: ApiSettings, engine: Engine
+) -> SelfDevicePairingService | None:
+    if not settings.self_device_pairing_enabled:
+        return None
+    ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    return SelfDevicePairingService(
+        SqlAlchemySelfPairingUnitOfWorkFactory(
+            sessionmaker(engine, class_=Session, expire_on_commit=False)
+        ),
+        Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=ttl,
+        ),
+        ttl,
+        settings.public_access_source_hmac_secret.get_secret_value().encode(),
+    )
+
+
 def build_web_admin_service(settings: ApiSettings, engine: Engine) -> WebAdminService | None:
     """Assemble optional browser authority with its dedicated CSRF derivation secret."""
 
@@ -130,6 +159,22 @@ def build_web_admin_service(settings: ApiSettings, engine: Engine) -> WebAdminSe
             sessionmaker(engine, class_=Session, expire_on_commit=False)
         ),
         csrf_secret=secret.get_secret_value().encode("utf-8"),
+    )
+
+
+def build_web_passkey_service(settings: ApiSettings, engine: Engine) -> WebPasskeyService | None:
+    if not settings.admin_passkeys_enabled:
+        return None
+    secret = settings.admin_web_csrf_hmac_secret
+    origin = settings.admin_web_origin
+    if secret is None or origin is None:
+        raise ValueError("passkey configuration unavailable")
+    return WebPasskeyService(
+        SqlAlchemyWebPasskeyUnitOfWorkFactory(
+            sessionmaker(engine, class_=Session, expire_on_commit=False)
+        ),
+        DuoWebPasskeyVerifier(origin),
+        secret.get_secret_value().encode("utf-8"),
     )
 
 
@@ -190,6 +235,7 @@ class _VaultHttpService:
         )
         self._storage = FilesystemVaultStorage(settings.vault_root, limits=_vault_limits(settings))
         self._limits = _vault_limits(settings)
+        self._root = settings.vault_root
         self._minimum_free_bytes = settings.vault_low_disk_bytes
         self._clock = SystemClock()
         self._ids = Uuid7Generator()
@@ -283,6 +329,36 @@ class _VaultHttpService:
         if expired is not None:
             self._quarantine_expired(upload_id, expired[1])
             raise UploadStateError()
+        return result.next_offset
+
+    def append_admitted(self, command: AdmittedChunk, io: VaultIoSession) -> int:
+        """Run wholly inside the retained pipe worker, with no nested admission UoW."""
+        io.deadline.check()
+        with self._uows.for_upload(io.registered) as unit:
+            info = unit.vault.get_owned_for_update(
+                _vault_principal(command.principal), command.upload_id
+            )
+            if info.expires_at <= self._clock.now():
+                raise UploadStateError()
+            service = VaultUploadService(
+                repository=unit.vault,
+                storage=self._storage,
+                limits=self._limits,
+                chunk_writer=ProcessVaultChunkWriter(
+                    io.child, io.registered, root=self._root, limits=self._limits
+                ),
+            )
+            result = service.append(
+                _vault_principal(command.principal),
+                command.upload_id,
+                offset=command.offset,
+                chunk_index=command.chunk_index,
+                payload=command.payload,
+                payload_sha256=Sha256Digest(bytes.fromhex(command.payload_sha256)),
+            )
+            unit.commit_admitted_upload(
+                command.principal, command.upload_id, stopped=io.deadline.stopped
+            )
         return result.next_offset
 
     def complete(self, principal: Principal, upload_id: UUID) -> UploadView:

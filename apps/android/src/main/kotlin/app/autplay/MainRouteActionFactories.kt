@@ -29,6 +29,7 @@ import app.autplay.ui.ServerFeaturesUiState
 import app.autplay.ui.UiDestination
 import app.autplay.ui.profilepairing.ExistingLocalDataChoice
 import app.autplay.ui.profilepairing.ProfilePairingActions
+import app.autplay.ui.profilepairing.SelfPairingActions
 import app.autplay.ui.profilepairing.ProfileRemoteAction
 import app.autplay.ui.social.SocialActions
 import app.autplay.ui.playlist.ManualPlaylistActions
@@ -524,6 +525,7 @@ internal fun buildLegacySecondaryRouteActions(
     social: SocialActions,
     manualPlaylists: ManualPlaylistActions,
     openPlaylist: (String) -> Unit,
+    selfPairingActions: SelfPairingActions = SelfPairingActions(),
 ): LegacySecondaryRouteActions = LegacySecondaryRouteActions(
     manualPlaylists = manualPlaylists,
     openPlaylist = openPlaylist,
@@ -609,6 +611,7 @@ internal fun buildLegacySecondaryRouteActions(
         }
     },
     profilePairing = ProfilePairingActions(
+        selfPairing = selfPairingActions,
         startDiscovery = profilePairingRuntime::startDiscovery,
         confirmTrust = profilePairingRuntime::confirmTrust,
         cancelPairing = {

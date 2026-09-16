@@ -1,0 +1,1508 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay resource admission",
+    "version": "1.0.0",
+    "description": "Device admission adapter. Rollout remains disabled until every byte path enforces permits."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/account/resource-admissions": {
+      "post": {
+        "operationId": "resourceAcquire",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "CURRENT_ACCOUNT_DEVICE_SESSION_FAMILY",
+        "responses": {
+          "200": {
+            "description": "Current admission, including normal queue waiting",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 4096,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/acquire-playback-request"
+                  },
+                  {
+                    "$ref": "#/components/schemas/acquire-transfer-request"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account/resource-admissions/{operation_id}": {
+      "get": {
+        "operationId": "resourcePoll",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "CURRENT_ACCOUNT_DEVICE_SESSION_FAMILY",
+        "responses": {
+          "200": {
+            "description": "Current admission, including normal queue waiting",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ]
+      }
+    },
+    "/account/resource-admissions/{operation_id}/renew": {
+      "post": {
+        "operationId": "resourceRenew",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "CURRENT_ACCOUNT_DEVICE_SESSION_FAMILY",
+        "responses": {
+          "200": {
+            "description": "Current admission, including normal queue waiting",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "x-autplay-max-request-bytes": 4096,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/renew-request"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account/resource-admissions/{operation_id}/release": {
+      "post": {
+        "operationId": "resourceRelease",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "CURRENT_ACCOUNT_DEVICE_SESSION_FAMILY",
+        "responses": {
+          "200": {
+            "description": "Current admission, including normal queue waiting",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "x-autplay-max-request-bytes": 4096,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/release-request"
+                  },
+                  {
+                    "$ref": "#/components/schemas/cancel-waiting-request"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account/resource-admissions/{operation_id}/attachments": {
+      "post": {
+        "operationId": "resourceAttachments",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-authorization": "CURRENT_ACCOUNT_DEVICE_SESSION_FAMILY",
+        "responses": {
+          "200": {
+            "description": "Current admission, including normal queue waiting",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sanitized bounded failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "const": "5"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "x-autplay-max-request-bytes": 4096,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/attachments-request"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "acquire-playback-request": {
+        "title": "acquire-playback-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "kind": {
+            "const": "PLAYBACK"
+          },
+          "resource_type": {
+            "const": "PLAY_INSTANCE"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "operation_id",
+          "resource_id",
+          "kind",
+          "resource_type"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      },
+      "acquire-transfer-request": {
+        "title": "acquire-transfer-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "kind": {
+            "const": "TRANSFER"
+          },
+          "resource_type": {
+            "enum": [
+              "UPLOAD_INTENT",
+              "DOWNLOAD_INTENT"
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "operation_id",
+          "resource_id",
+          "kind",
+          "resource_type",
+          "target_id"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      },
+      "renew-request": {
+        "title": "renew-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "activation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "activation_id",
+          "generation"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      },
+      "release-request": {
+        "title": "release-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "activation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "reason": {
+            "enum": [
+              "COMPLETE",
+              "CANCEL"
+            ]
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "activation_id",
+          "generation",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      },
+      "cancel-waiting-request": {
+        "title": "cancel-waiting-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "operation_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "reason": {
+            "const": "CANCEL"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "operation_sha256",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      },
+      "attachments-request": {
+        "title": "attachments-request",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "activation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "expected_attachment_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "current_recording_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "next_recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "activation_id",
+          "generation",
+          "expected_attachment_revision",
+          "current_recording_id",
+          "next_recording_id"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      },
+      "status-response": {
+        "title": "status-response",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "x-autplay-integer-token-only": true,
+            "const": 1
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "kind": {
+            "enum": [
+              "PLAYBACK",
+              "TRANSFER"
+            ]
+          },
+          "resource_type": {
+            "enum": [
+              "PLAY_INSTANCE",
+              "DOWNLOAD_INTENT",
+              "UPLOAD_INTENT"
+            ]
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "state": {
+            "enum": [
+              "WAITING",
+              "ACTIVE",
+              "RELEASED",
+              "EXPIRED"
+            ]
+          },
+          "activation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991,
+                "x-autplay-integer-token-only": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claim_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lease_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attachment_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "current_recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "account_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "x-autplay-integer-token-only": true
+          },
+          "device_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2,
+            "x-autplay-integer-token-only": true
+          },
+          "server_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "x-autplay-integer-token-only": true
+          },
+          "account_usage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "device_usage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "server_usage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-autplay-integer-token-only": true
+          },
+          "waiting_reason": {
+            "enum": [
+              "ACCOUNT_CAPACITY",
+              "DEVICE_CAPACITY",
+              "SERVER_CAPACITY",
+              null
+            ]
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 15,
+            "x-autplay-integer-token-only": true
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "operation_id",
+          "kind",
+          "resource_type",
+          "resource_id",
+          "target_id",
+          "operation_sha256",
+          "state",
+          "activation_id",
+          "generation",
+          "waiting_until",
+          "claim_until",
+          "lease_until",
+          "attachment_revision",
+          "current_recording_id",
+          "next_recording_id",
+          "account_limit",
+          "device_limit",
+          "server_limit",
+          "account_usage",
+          "device_usage",
+          "server_usage",
+          "waiting_reason",
+          "retry_after_seconds"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "WAITING"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "activation_id": {
+                  "type": "null"
+                },
+                "generation": {
+                  "type": "null"
+                },
+                "waiting_until": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+                },
+                "waiting_reason": {
+                  "enum": [
+                    "ACCOUNT_CAPACITY",
+                    "DEVICE_CAPACITY",
+                    "SERVER_CAPACITY"
+                  ]
+                },
+                "retry_after_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 15,
+                  "x-autplay-integer-token-only": true
+                },
+                "claim_until": {
+                  "type": "null"
+                },
+                "lease_until": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "ACTIVE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "activation_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "x-autplay-integer-token-only": true
+                },
+                "claim_until": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+                },
+                "lease_until": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?Z$"
+                },
+                "waiting_reason": {
+                  "type": "null"
+                },
+                "retry_after_seconds": {
+                  "const": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "error": {
+        "title": "error",
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "request_id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable",
+              "request_id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+      }
+    }
+  }
+}

@@ -1,5 +1,7 @@
 package app.autplay.application.publicaccess
 
+import app.autplay.application.selfpairing.hasSelfDevicePairingPendingRecipient
+
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
@@ -99,7 +101,7 @@ class AccountRegistrationRuntime(
             signed.close()
             return Result.failure(IllegalStateException("FIRST_BIND_CEREMONY_BUSY"))
         }
-        if (activeProfileGate.hasActiveProfile()) {
+        if (activeProfileGate.hasActiveProfile() || credentials.hasSelfDevicePairingPendingRecipient()) {
             firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
             signed.close()
             return Result.failure(IllegalStateException("ACCOUNT_REGISTRATION_ACTIVE_PROFILE_FORBIDDEN"))

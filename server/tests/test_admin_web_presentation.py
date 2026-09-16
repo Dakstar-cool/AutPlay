@@ -155,8 +155,14 @@ def test_dashboard_names_all_bounded_health_components() -> None:
 
 
 def test_discovery_navigation_exposes_only_enabled_surfaces() -> None:
-    default_hrefs = {item.href for item in navigation("dashboard")}
-    manual_hrefs = {item.href for item in navigation("discovery", discovery_enabled=True)}
+    default_hrefs = {
+        child.href for section in navigation("dashboard") for child in section.children
+    }
+    manual_hrefs = {
+        child.href
+        for section in navigation("discovery", discovery_enabled=True)
+        for child in section.children
+    }
     enabled = navigation(
         "discovery-automation",
         discovery_enabled=True,
@@ -167,4 +173,7 @@ def test_discovery_navigation_exposes_only_enabled_surfaces() -> None:
     assert "/admin/discovery/automation" not in default_hrefs
     assert "/admin/discovery" in manual_hrefs
     assert "/admin/discovery/automation" not in manual_hrefs
-    assert [item.href for item in enabled if item.current] == ["/admin/discovery/automation"]
+    assert [item.href for item in enabled if item.current] == ["/admin/music"]
+    assert [child.href for item in enabled for child in item.children if child.current] == [
+        "/admin/discovery/automation"
+    ]

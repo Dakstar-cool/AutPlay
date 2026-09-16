@@ -25,6 +25,7 @@ from autplay.runtime.metrics import RuntimeMetrics
 from autplay.runtime.settings import SettingsLoadError, StreamSettings, load_stream_settings
 
 if TYPE_CHECKING:
+    from autplay.entrypoints.resource_stream_http import ProcessStreamGateway
     from autplay.entrypoints.stream_http import StreamLookup
 
 
@@ -92,17 +93,28 @@ def create_stream_app(
     auth_service: AuthService,
     metrics: RuntimeMetrics | None = None,
     storage: VaultStorage | None = None,
+    process_gateway: ProcessStreamGateway | None = None,
 ) -> FastAPI:
     """Create an isolated stream process with no worker/tool imports."""
 
     runtime_metrics = metrics or RuntimeMetrics()
-    resolved_storage = storage or FilesystemVaultStorage(settings.vault_root)
+    resolved_storage = (
+        storage
+        if process_gateway is not None
+        else storage or FilesystemVaultStorage(settings.vault_root)
+    )
     from autplay.entrypoints.stream_http import create_stream_router
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         del application
-        yield
+        if process_gateway is not None:
+            process_gateway.coordinator.start()
+        try:
+            yield
+        finally:
+            if process_gateway is not None:
+                await process_gateway.coordinator.shutdown()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings
@@ -114,6 +126,7 @@ def create_stream_app(
             lookup,
             resolved_storage,
             authenticated=bearer_authentication(auth_service),
+            process_gateway=process_gateway,
         ),
         prefix="/api/v1",
     )

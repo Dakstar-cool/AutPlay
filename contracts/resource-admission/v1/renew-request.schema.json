@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/resource-admission/v1/renew-request.schema.json",
+  "title": "renew-request",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "x-autplay-integer-token-only": true,
+      "const": 1
+    },
+    "activation_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "x-autplay-integer-token-only": true
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "activation_id",
+    "generation"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+}

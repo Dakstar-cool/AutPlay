@@ -22,6 +22,12 @@ from autplay.ports.auth import (
 
 from .models import AuditEventRow, DeviceRow, UserAccountRow, UserSessionRow
 from .models.types import JsonValue
+from .resource_limits import (
+    lock_resource_admission,
+    require_device_capacity,
+    terminate_resource_authority,
+    terminate_retired_session,
+)
 
 # Stable signed int64 key spelling "AUTPLAY" plus the phase number. It only
 # coordinates owner bootstrap transactions and has no authorization meaning.
@@ -37,6 +43,7 @@ class SqlAlchemyAuthRepository:
     def acquire_owner_bootstrap_lock(self) -> None:
         """Acquire a transaction-scoped lock before checking the empty account table."""
 
+        lock_resource_admission(self._session)
         self._session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
             {"lock_key": OWNER_BOOTSTRAP_ADVISORY_LOCK},
@@ -64,6 +71,7 @@ class SqlAlchemyAuthRepository:
         self._session.add(owner)
         self._session.flush([owner])
 
+        require_device_capacity(self._session, bundle.user_id)
         device = DeviceRow(
             device_id=bundle.device_id,
             user_id=bundle.user_id,
@@ -110,6 +118,7 @@ class SqlAlchemyAuthRepository:
             return None
 
         session_id, user_id, device_id = identity
+        lock_resource_admission(self._session)
         account = self._session.scalar(
             select(UserAccountRow).where(UserAccountRow.user_id == user_id).with_for_update()
         )
@@ -150,15 +159,24 @@ class SqlAlchemyAuthRepository:
 
     def revoke_session(self, session_id: UUID, *, revoked_at: datetime) -> None:
         """Revoke one generation while preserving its hash for replay detection."""
-
+        user_id = self._session.scalar(
+            select(UserSessionRow.user_id).where(UserSessionRow.session_id == session_id)
+        )
+        if user_id is None:
+            return
+        self._lock_account(user_id)
         self._session.execute(
             update(UserSessionRow)
             .where(
                 UserSessionRow.session_id == session_id,
+                UserSessionRow.user_id == user_id,
                 UserSessionRow.revoked_at.is_(None),
             )
             .values(revoked_at=revoked_at)
         )
+        row = self._session.get(UserSessionRow, session_id, populate_existing=True)
+        if row is not None:
+            terminate_retired_session(self._session, row, revoked_at)
 
     def create_session(self, session: NewSession) -> None:
         """Stage a replacement refresh-token generation."""
@@ -170,7 +188,7 @@ class SqlAlchemyAuthRepository:
         self, user_id: UUID, device_id: UUID, *, revoked_at: datetime
     ) -> int:
         """Revoke every active generation for one user/device pair."""
-
+        self._lock_account(user_id)
         # Device-row locking serializes rotation, replay response, and device
         # revoke so an active generation cannot be inserted after this update.
         self._session.execute(
@@ -188,11 +206,13 @@ class SqlAlchemyAuthRepository:
             .values(revoked_at=revoked_at)
             .returning(UserSessionRow.session_id)
         ).all()
+        terminate_resource_authority(self._session, user_id, revoked_at, device_id=device_id)
         return len(revoked_session_ids)
 
     def revoke_active_sessions_for_user(self, user_id: UUID, *, revoked_at: datetime) -> int:
         """Revoke every active generation belonging to one user."""
 
+        lock_resource_admission(self._session)
         self._session.execute(
             select(UserAccountRow.user_id)
             .where(UserAccountRow.user_id == user_id)
@@ -204,11 +224,12 @@ class SqlAlchemyAuthRepository:
             .values(revoked_at=revoked_at)
             .returning(UserSessionRow.session_id)
         ).all()
+        terminate_resource_authority(self._session, user_id, revoked_at, device_sessions_only=True)
         return len(revoked_session_ids)
 
     def lock_owned_device(self, user_id: UUID, device_id: UUID) -> bool:
         """Lock an owned device without revealing cross-user existence."""
-
+        self._lock_account(user_id)
         row = self._session.execute(
             select(DeviceRow.device_id)
             .where(DeviceRow.user_id == user_id, DeviceRow.device_id == device_id)
@@ -218,7 +239,7 @@ class SqlAlchemyAuthRepository:
 
     def revoke_device(self, user_id: UUID, device_id: UUID, *, revoked_at: datetime) -> None:
         """Revoke one owned device idempotently."""
-
+        self._lock_account(user_id)
         self._session.execute(
             update(DeviceRow)
             .where(
@@ -228,6 +249,16 @@ class SqlAlchemyAuthRepository:
             )
             .values(revoked_at=revoked_at)
         )
+        terminate_resource_authority(self._session, user_id, revoked_at, device_id=device_id)
+
+    def _lock_account(self, user_id: UUID) -> None:
+        """All auth mutations precede device/session locks with the account lock."""
+        lock_resource_admission(self._session)
+        self._session.execute(
+            select(UserAccountRow.user_id)
+            .where(UserAccountRow.user_id == user_id)
+            .with_for_update()
+        ).one_or_none()
 
     def load_active_principal(
         self,

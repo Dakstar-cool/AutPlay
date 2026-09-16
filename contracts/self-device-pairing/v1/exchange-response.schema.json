@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/self-device-pairing/v1/exchange-response.schema.json",
+  "title": "exchange-response",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "exchange_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "binding_commit_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "server_instance_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "device_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "session_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "refresh_generation": {
+      "type": "integer",
+      "const": 0
+    },
+    "refresh_absolute_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    },
+    "receipt_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    },
+    "access_token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "access_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    },
+    "replayed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "exchange_id",
+    "binding_commit_id",
+    "server_instance_id",
+    "user_id",
+    "device_id",
+    "session_id",
+    "refresh_generation",
+    "refresh_absolute_expires_at",
+    "receipt_expires_at",
+    "access_token",
+    "access_expires_at",
+    "replayed"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+}
