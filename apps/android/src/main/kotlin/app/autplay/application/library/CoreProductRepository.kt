@@ -4,6 +4,8 @@ import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.RecordingProjectionEntity
 import app.autplay.data.local.entity.ReleaseTrackProjectionEntity
 import app.autplay.domain.ServerId
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
@@ -22,7 +24,7 @@ class CoreProductRepository(
     fun libraryEntries(profileId: String?, limit: Int = 5_000): Flow<List<CoreLibraryEntrySummary>> {
         require(limit in 1..5_000)
         val effectiveProfileId = effectiveProfile(profileId)
-        return database.libraryDao().entriesForProfile(effectiveProfileId, limit).mapLatest { entries ->
+        return combine(database.libraryDao().entriesForProfile(effectiveProfileId, limit), database.trackMetadataDao().changes(effectiveProfileId)) { entries, _ -> entries }.mapLatest { entries ->
             val tracks = resolveTrackRefs(entries.map { it.localUserTrackRefId }, effectiveProfileId)
             entries.map { entry ->
                 val track = tracks[entry.localUserTrackRefId]
@@ -45,7 +47,7 @@ class CoreProductRepository(
 
     fun recentlyAdded(profileId: String?, limit: Int = 12): Flow<List<CoreHomeTrackSummary>> {
         require(limit in 1..50)
-        return database.libraryDao().activeEntriesForProfile(effectiveProfile(profileId), limit).mapLatest { entries ->
+        return combine(database.libraryDao().activeEntriesForProfile(effectiveProfile(profileId), limit), database.trackMetadataDao().changes(effectiveProfile(profileId))) { entries, _ -> entries }.mapLatest { entries ->
             val tracks = resolveTrackRefs(entries.map { it.localUserTrackRefId }, effectiveProfile(profileId))
             entries.mapNotNull { entry ->
                 tracks[entry.localUserTrackRefId]?.let { track ->
@@ -62,7 +64,7 @@ class CoreProductRepository(
 
     fun recentlyPlayed(profileId: String?, limit: Int = 12): Flow<List<CoreHomeTrackSummary>> {
         require(limit in 1..50)
-        return database.historyDao().recentForProfile(effectiveProfile(profileId), limit).mapLatest { events ->
+        return combine(database.historyDao().recentForProfile(effectiveProfile(profileId), limit), database.trackMetadataDao().changes(effectiveProfile(profileId))) { events, _ -> events }.mapLatest { events ->
             val tracks = resolveTrackRefs(events.map { it.localUserTrackRefId }, effectiveProfile(profileId))
             events.mapNotNull { event ->
                 tracks[event.localUserTrackRefId]?.let { track ->
@@ -95,12 +97,12 @@ class CoreProductRepository(
     }
 
     fun activeQueue(profileId: String?): Flow<CoreResumeQueueSummary?> =
-        database.queueDao().activeSnapshot().mapLatest { snapshot ->
+        combine(database.queueDao().activeSnapshot(), database.trackMetadataDao().changes(effectiveProfile(profileId))) { snapshot, _ -> snapshot }.mapLatest { snapshot ->
             if (snapshot == null || snapshot.serverProfileId != profileId) return@mapLatest null
             val entry = snapshot.currentEntryId?.let { database.queueDao().entry(it) }
                 ?: database.queueDao().entries(snapshot.queueSnapshotId, 1).firstOrNull()
                 ?: return@mapLatest null
-            val track = database.libraryDao().trackRef(entry.localUserTrackRefId) ?: return@mapLatest null
+            val track = resolveTrackRefs(listOf(entry.localUserTrackRefId), effectiveProfile(profileId))[entry.localUserTrackRefId] ?: return@mapLatest null
             if (track.serverProfileId != effectiveProfile(profileId)) return@mapLatest null
             CoreResumeQueueSummary(
                 queueSnapshotId = snapshot.queueSnapshotId,
@@ -135,7 +137,8 @@ class CoreProductRepository(
     fun localAudio(profileId: String?, limit: Int = 2_000): Flow<List<CoreLocalAudioSummary>> {
         require(limit in 1..5_000)
         return database.localAudioDao().statesForProfile(effectiveProfile(profileId), limit).map { rows ->
-            rows.map { CoreLocalAudioSummary(it.localUserTrackRefId, it.status, it.persistedUriPermission) }
+            rows.map { CoreLocalAudioSummary(it.localUserTrackRefId, it.status, it.persistedUriPermission,
+                requiresPersistedUriPermission = !it.contentUri.startsWith("content://media/")) }
         }
     }
 
@@ -170,6 +173,8 @@ class CoreProductRepository(
         return track.serverRecordingId
     }
 
+    fun trackMetadataChanges(trackId: String, profileId: String?): Flow<String?> = database.trackMetadataDao().observe(effectiveProfile(profileId), trackId).map { it?.payloadJson }.distinctUntilChanged()
+
     suspend fun trackDetail(localUserTrackRefId: String, profileId: String?): CoreTrackDetail? {
         val track = database.libraryDao().trackRef(localUserTrackRefId) ?: return null
         if (track.serverProfileId != effectiveProfile(profileId)) return null
@@ -180,19 +185,22 @@ class CoreProductRepository(
         val preference = database.libraryDao().preference(localUserTrackRefId)
         val audioStates = database.localAudioDao().statesForPlayback(localUserTrackRefId, MAX_AUDIO_STATES)
         val downloads = database.localAudioDao().downloadIntentsForTrack(localUserTrackRefId, MAX_DOWNLOAD_INTENTS)
-        val audioCapabilityStates = audioStates.map { CoreAudioCapabilityState(it.status, it.persistedUriPermission) }
+        val audioCapabilityStates = audioStates.map { CoreAudioCapabilityState(it.status, it.persistedUriPermission,
+            requiresPersistedUriPermission = !it.contentUri.startsWith("content://media/")) }
         val hasServerPlaybackCandidate = profileId != null &&
             track.serverUserTrackRefId != null &&
             track.serverRecordingId != null &&
             track.resolutionStatus == "RESOLVED" &&
             track.deletedAtMs == null
+        val metadata = database.trackMetadataDao().get(track.serverProfileId, localUserTrackRefId)?.decoded()
         return CoreTrackDetail(
             localUserTrackRefId = track.localUserTrackRefId,
             localRecordingId = track.localRecordingId,
             serverRecordingId = track.serverRecordingId?.let(::ServerId),
-            title = recording?.title ?: track.rawTitle,
-            artistName = recording?.displayArtist ?: track.rawArtist,
-            albumName = track.rawAlbum,
+            title = if (metadata == null) recording?.title ?: track.rawTitle else metadata.text("title", recording?.title ?: track.rawTitle),
+            artistName = if (metadata == null) recording?.displayArtist ?: track.rawArtist else metadata.text("artist", recording?.displayArtist ?: track.rawArtist),
+            albumName = if (metadata == null) track.rawAlbum else metadata.text("album", track.rawAlbum),
+            metadata = metadata,
             durationMs = recording?.durationMs ?: track.rawDurationMs,
             artworkRef = recording?.artworkRef,
             preference = CoreTrackPreferenceState(
@@ -263,6 +271,7 @@ class CoreProductRepository(
         val recordings = recordingIds.chunked(MAX_IN_QUERY_BINDINGS).flatMap { ids ->
             database.catalogProjectionDao().recordings(localIds = ids, limit = ids.size)
         }.associateBy { it.localRecordingId }
+        val metadata = trackRefIds.chunked(MAX_IN_QUERY_BINDINGS).flatMap { database.trackMetadataDao().forTracks(effectiveProfile(profileId), it) }.associateBy { it.localUserTrackRefId }
         return CorePlaylistDetail(
             localPlaylistId = playlist.localPlaylistId,
             name = playlist.name,
@@ -271,12 +280,13 @@ class CoreProductRepository(
             entries = entries.map { entry ->
                 val track = trackRefs[entry.localUserTrackRefId]
                 val recording = track?.localRecordingId?.let(recordings::get)
+                val description = metadata[entry.localUserTrackRefId]?.decoded()
                 CorePlaylistDetailEntry(
                     // This is the UI identity. Do not substitute the repeated track-ref ID.
                     localPlaylistEntryId = entry.localPlaylistEntryId,
                     localUserTrackRefId = entry.localUserTrackRefId,
-                    title = recording?.title ?: track?.rawTitle,
-                    artistName = recording?.displayArtist ?: track?.rawArtist,
+                    title = if (description == null) recording?.title ?: track?.rawTitle else description.text("title", recording?.title ?: track?.rawTitle),
+                    artistName = if (description == null) recording?.displayArtist ?: track?.rawArtist else description.text("artist", recording?.displayArtist ?: track?.rawArtist),
                     durationMs = recording?.durationMs ?: track?.rawDurationMs,
                     unavailable = track == null || track.deletedAtMs != null,
                 )
@@ -284,10 +294,16 @@ class CoreProductRepository(
         )
     }
 
-    private suspend fun resolveTrackRefs(ids: List<String>, profileId: String): Map<String, app.autplay.data.local.entity.UserTrackRefEntity> =
-        ids.distinct().chunked(MAX_IN_QUERY_BINDINGS).flatMap { chunk ->
-            database.libraryDao().trackRefs(chunk, chunk.size)
-        }.filter { it.serverProfileId == profileId && it.deletedAtMs == null }.associateBy { it.localUserTrackRefId }
+    private suspend fun resolveTrackRefs(ids: List<String>, profileId: String): Map<String, app.autplay.data.local.entity.UserTrackRefEntity> {
+        val chunks = ids.distinct().chunked(MAX_IN_QUERY_BINDINGS)
+        val metadata = chunks.flatMap { database.trackMetadataDao().forTracks(profileId, it) }.associateBy { it.localUserTrackRefId }
+        return chunks.flatMap { database.libraryDao().trackRefs(it, it.size) }
+            .filter { it.serverProfileId == profileId && it.deletedAtMs == null }.map { track ->
+                val values = metadata[track.localUserTrackRefId]?.decoded()
+                if (values == null) track else track.copy(rawTitle = values.text("title", track.rawTitle),
+                    rawArtist = values.text("artist", track.rawArtist), rawAlbum = values.text("album", track.rawAlbum))
+            }.associateBy { it.localUserTrackRefId }
+    }
 
     private fun ReleaseTrackProjectionEntity.toDetailRow(
         recording: RecordingProjectionEntity?,
@@ -352,7 +368,10 @@ data class CoreLocalAudioSummary(
     val stableId: String,
     val status: String,
     val persistedUriPermission: Boolean,
-)
+    val requiresPersistedUriPermission: Boolean = true,
+) {
+    val hasReadAccess: Boolean get() = persistedUriPermission || !requiresPersistedUriPermission
+}
 data class CoreAvailableAudio(
     val localUserTrackRefId: String,
     val serverRecordingId: String,
@@ -374,6 +393,7 @@ data class CoreTrackDetail(
     val availability: CoreTrackAvailability,
     val capabilities: Set<CoreTrackDetailCapability>,
     val technicalDetails: CoreTechnicalDetails,
+    val metadata: TrackMetadata? = null,
 )
 
 data class CoreTrackPreferenceState(
@@ -428,7 +448,7 @@ data class CoreTechnicalDetails(
     val versionText: String?,
 )
 
-enum class CoreTrackAvailability { PLAYABLE_LOCAL, PLAYABLE_SERVER, PERMISSION_REVOKED, UNAVAILABLE, NO_LOCAL_SOURCE }
+enum class CoreTrackAvailability { PLAYABLE_LOCAL, SERVER_CANDIDATE, PERMISSION_REVOKED, UNAVAILABLE, NO_LOCAL_SOURCE }
 
 enum class CoreTrackDetailCapability {
     PLAY,
@@ -453,7 +473,11 @@ data class CoreLibraryMembership(val isRemoved: Boolean)
 data class CoreAudioCapabilityState(
     val status: String,
     val persistedUriPermission: Boolean,
-)
+    // MediaStore access is verified on open; it does not use persistable SAF grants.
+    val requiresPersistedUriPermission: Boolean = true,
+) {
+    val hasReadAccess: Boolean get() = persistedUriPermission || !requiresPersistedUriPermission
+}
 
 /** Pure policy seam: test it without Room or Android runtime. */
 object CoreProductDetailPolicy {
@@ -461,9 +485,9 @@ object CoreProductDetailPolicy {
         audioStates: List<CoreAudioCapabilityState>,
         hasServerPlaybackCandidate: Boolean = false,
     ): CoreTrackAvailability = when {
-        audioStates.any { it.status == "AVAILABLE" && it.persistedUriPermission } -> CoreTrackAvailability.PLAYABLE_LOCAL
-        hasServerPlaybackCandidate -> CoreTrackAvailability.PLAYABLE_SERVER
-        audioStates.any { it.status == "PERMISSION_REVOKED" || !it.persistedUriPermission } -> CoreTrackAvailability.PERMISSION_REVOKED
+        audioStates.any { it.status == "AVAILABLE" && it.hasReadAccess } -> CoreTrackAvailability.PLAYABLE_LOCAL
+        hasServerPlaybackCandidate -> CoreTrackAvailability.SERVER_CANDIDATE
+        audioStates.any { it.status == "PERMISSION_REVOKED" || !it.hasReadAccess } -> CoreTrackAvailability.PERMISSION_REVOKED
         audioStates.isNotEmpty() -> CoreTrackAvailability.UNAVAILABLE
         else -> CoreTrackAvailability.NO_LOCAL_SOURCE
     }
@@ -471,7 +495,7 @@ object CoreProductDetailPolicy {
     fun capabilities(input: CoreTrackCapabilityInput): Set<CoreTrackDetailCapability> = buildSet {
         if (
             availability(input.audioStates, input.hasServerPlaybackCandidate) in
-            setOf(CoreTrackAvailability.PLAYABLE_LOCAL, CoreTrackAvailability.PLAYABLE_SERVER)
+            setOf(CoreTrackAvailability.PLAYABLE_LOCAL, CoreTrackAvailability.SERVER_CANDIDATE)
         ) {
             add(CoreTrackDetailCapability.PLAY)
         }

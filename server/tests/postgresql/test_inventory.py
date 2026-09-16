@@ -12,6 +12,26 @@ from .schema_contract import (
     snapshot_schema,
 )
 
+MUSIC_TABLES = frozenset(
+    {
+        ("discovery", "internet_search"),
+        ("discovery", "internet_acquisition"),
+        ("library", "metadata_artwork"),
+        ("library", "track_metadata"),
+        ("library", "track_metadata_revision"),
+    }
+)
+MUSIC_INDEXES = frozenset({"internet_search_owner_time"})
+MUSIC_FUNCTIONS = frozenset({"protect_music_snapshot", "protect_metadata_evidence"})
+MUSIC_TRIGGERS = frozenset(
+    {
+        "internet_search_immutable",
+        "internet_selection_immutable",
+        "metadata_revision_immutable",
+        "metadata_artwork_immutable",
+    }
+)
+
 A1B_TABLES = frozenset(
     {
         ("discovery", "bulk_operation"),
@@ -238,6 +258,7 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_TABLES
         | PA2_TABLES
         | R1B_TABLES
+        | MUSIC_TABLES
     )
     assert index_names == (
         expected.indexes
@@ -248,10 +269,16 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_INDEXES
         | PA2_INDEXES
         | R1B_INDEXES
+        | MUSIC_INDEXES
     )
-    assert function_names == expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS
+    assert function_names == expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS | MUSIC_FUNCTIONS
     assert trigger_names == (
-        expected.triggers | S1C_TRIGGERS | A1C_TRIGGERS | S1D_TRIGGERS | R1B_TRIGGERS
+        expected.triggers
+        | S1C_TRIGGERS
+        | A1C_TRIGGERS
+        | S1D_TRIGGERS
+        | R1B_TRIGGERS
+        | MUSIC_TRIGGERS
     )
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0

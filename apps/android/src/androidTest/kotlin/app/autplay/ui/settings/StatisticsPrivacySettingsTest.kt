@@ -92,6 +92,7 @@ class StatisticsPrivacySettingsTest {
                 }
             }
         }
+        compose.onNodeWithText(context.getString(R.string.settings_statistics_privacy)).performScrollTo().performClick()
     }
 
     private companion object {

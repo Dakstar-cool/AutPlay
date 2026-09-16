@@ -163,90 +163,43 @@ class AdaptiveShellTest {
 
     @Test
     fun activeHomePlaybackRemainsReachableAfterHeroScrollsAway() {
-        composeRule.setContent {
-            AutPlayTheme {
-                HomeProductScreen(
-                    state = HomeScreenUiState(
-                        localMode = true,
-                        recommendationLoading = false,
-                        offlineFallback = false,
-                        releases = listOf(HomeReleaseUiItem("release", "Long page release", "Artist", null)),
-                        recommendations = listOf(
-                            HomeRecommendationUiItem("recommendation", "Recommended track", "Artist", "For you", true),
-                        ),
-                        recentlyPlayed = listOf(HomeTrackUiItem("recent", "Recent track", "Artist")),
-                    ),
-                    contentPadding = PaddingValues(),
-                    onOpenListenTogether = {},
-                    onRecommendationVisible = {},
-                    onLike = {},
-                    onDislike = {},
-                    playerState = PlaybackPresentationState(
-                        mediaId = "active-entry",
-                        title = "Active track",
-                        artist = "Active artist",
-                        isPlaying = true,
-                    ),
-                    currentTrackRefId = "active-track",
-                )
-            }
-        }
-
-        scrollPastHomeHeroAndAwaitStickyPlayback()
-        composeRule.onNode(hasText("Active track") and hasAnyAncestor(hasTestTag("home-sticky-playback"))).assertIsDisplayed()
+        renderHomeWithPersistentPlayer(PlaybackPresentationState(mediaId = "active-entry", title = "Active track", artist = "Artist"))
+        scrollHomeWithUserGestures()
+        // The clickable player merges its text; inspect the child to verify its visible bounds.
+        composeRule.onNode(hasText("Active track") and hasAnyAncestor(hasTestTag("persistent-mini-player")), useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
-    fun stickyHomePlaybackAppearsWhenPlaybackStartsAfterScrolling() {
-        var startPlayback: (() -> Unit)? = null
-        composeRule.setContent {
-            var playerState by remember { mutableStateOf(PlaybackPresentationState()) }
-            startPlayback = {
-                playerState = PlaybackPresentationState(
-                    mediaId = "late-entry",
-                    title = "Late playback",
-                    artist = "Current artist",
-                    isPlaying = true,
-                )
-            }
-            AutPlayTheme {
-                HomeProductScreen(
-                    state = HomeScreenUiState(
-                        localMode = true,
-                        recommendationLoading = false,
-                        offlineFallback = false,
-                        releases = listOf(HomeReleaseUiItem("release", "Long page release", "Artist", null)),
-                        recommendations = listOf(
-                            HomeRecommendationUiItem("recommendation", "Recommended track", "Artist", "For you", true),
-                        ),
-                        recentlyPlayed = listOf(HomeTrackUiItem("recent", "Recent track", "Artist")),
-                    ),
-                    contentPadding = PaddingValues(),
-                    onOpenListenTogether = {},
-                    onRecommendationVisible = {},
-                    onLike = {},
-                    onDislike = {},
-                    playerState = playerState,
-                    currentTrackRefId = null,
-                )
-            }
-        }
-
+    fun bottomHomePlaybackAppearsWhenPlaybackStartsAfterScrolling() {
+        val startPlayback = renderHomeWithPersistentPlayer(PlaybackPresentationState())
         scrollHomeWithUserGestures()
-        composeRule.runOnIdle { checkNotNull(startPlayback).invoke() }
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("home-sticky-playback").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
-        composeRule.onNode(hasText("Late playback") and hasAnyAncestor(hasTestTag("home-sticky-playback"))).assertIsDisplayed()
+        composeRule.runOnIdle { startPlayback(PlaybackPresentationState(mediaId = "late-entry", title = "Late playback", artist = "Artist")) }
+        composeRule.onNodeWithTag("persistent-mini-player").assertIsDisplayed()
+        composeRule.onNode(hasText("Late playback") and hasAnyAncestor(hasTestTag("persistent-mini-player")), useUnmergedTree = true).assertIsDisplayed()
     }
 
-    private fun scrollPastHomeHeroAndAwaitStickyPlayback() {
-        scrollHomeWithUserGestures()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithTag("home-sticky-playback").fetchSemanticsNodes().isNotEmpty()
+    private fun renderHomeWithPersistentPlayer(initial: PlaybackPresentationState): (PlaybackPresentationState) -> Unit {
+        var update: (PlaybackPresentationState) -> Unit = {}
+        composeRule.setContent {
+            var player by remember { mutableStateOf(initial) }
+            update = { player = it }
+            AutPlayTheme {
+                AutPlayAdaptiveShell(
+                    selectedDestination = UiDestination.Home, onDestinationSelected = {},
+                    nowPlayingBar = {
+                        if (player.mediaId != null) app.autplay.ui.player.PlaybackMiniPlayer(player, {}, {}, {})
+                    },
+                ) { _, padding, _ ->
+                    HomeProductScreen(
+                        state = HomeScreenUiState(true, false, false, emptyList(), emptyList(),
+                            recentlyPlayed = (1..30).map { HomeTrackUiItem("$it", "Recent $it", "Artist") }),
+                        contentPadding = padding, onOpenListenTogether = {}, onRecommendationVisible = {},
+                        onLike = {}, onDislike = {}, playerState = player,
+                    )
+                }
+            }
         }
-        composeRule.onNodeWithTag("home-sticky-playback").assertIsDisplayed()
+        return { update(it) }
     }
 
     private fun scrollHomeWithUserGestures() {

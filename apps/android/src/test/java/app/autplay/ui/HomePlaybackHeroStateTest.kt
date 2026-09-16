@@ -11,6 +11,15 @@ import org.junit.Test
 
 class HomePlaybackHeroStateTest {
     @Test
+    fun fallbackLikeReflectsStoredPreferenceBeforePlaybackStarts() {
+        val home = homeState(HomeContinueUiItem("fallback", "Title", "Artist", "0:00"))
+        val liked = buildHomePlaybackHeroUiState(home.copy(likedTrackIds = setOf("fallback")), PlaybackPresentationState(), null, false)
+        val neutral = buildHomePlaybackHeroUiState(home, PlaybackPresentationState(), null, false)
+        assertTrue(liked.liked)
+        assertFalse(neutral.liked)
+    }
+
+    @Test
     fun activePlaybackWinsOverHomeFallback() {
         val result = buildHomePlaybackHeroUiState(
             homeState = homeState(

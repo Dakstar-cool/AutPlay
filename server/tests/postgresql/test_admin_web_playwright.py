@@ -80,9 +80,16 @@ def _seed_owner(connection: Connection[Any], now: datetime) -> UUID:
 
 
 def _free_loopback_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    # Avoid Chromium's restricted service ports when Windows assigns a low ephemeral port.
+    for _ in range(100):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            port = 49152 + uuid4().int % 16384
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("No browser-safe loopback port available")
 
 
 def _wait_until_started(server: uvicorn.Server) -> None:

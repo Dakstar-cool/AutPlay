@@ -23,7 +23,7 @@ class RoomSchemaExportTest {
             val expectedTables = when (version) {
                 8 -> APPROVED_TABLES + P09_TABLES + P10_TABLES
                 9 -> APPROVED_TABLES + P09_TABLES + P10_TABLES + P11_TABLES
-                15 -> APPROVED_TABLES + P09_TABLES + P10_TABLES + P11_TABLES + P12_TO_P15_TABLES
+                15, 16 -> APPROVED_TABLES + P09_TABLES + P10_TABLES + P11_TABLES + P12_TO_P15_TABLES
                 else -> APPROVED_TABLES
             }
             assertEquals(expectedTables, tableNames)
@@ -52,6 +52,7 @@ class RoomSchemaExportTest {
             8 to "7639eb1f005957e057a76812ec4a1a7a2699ed5c451443b4883dda309d73f82c",
             9 to "f7764762cdc29efe25c285e53b0cce6c513dfba0e4a491dfc9ffd2bdcb915d62",
             15 to "23659cec8bc0df1acc7ce8bc6b561de22694f63d71f4b65602e31ac99efcfadd",
+            16 to "e97b8b27b944f77dcd25ce76080ec13d3cfe593f4a2c235205c5b447fb56578d",
         )
 
         val APPROVED_TABLES = setOf(

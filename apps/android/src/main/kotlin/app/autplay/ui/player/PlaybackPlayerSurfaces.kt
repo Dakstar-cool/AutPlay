@@ -76,6 +76,8 @@ import app.autplay.ui.AutPlayStateKind
 import app.autplay.ui.AutPlayStateSurface
 import app.autplay.ui.AutPlayTokens
 import app.autplay.ui.playbackVisualPalette
+import app.autplay.ui.TrackChangeAnimation
+import app.autplay.ui.TrackDisplayInfo
 
 public enum class PlaybackPreferenceUiState {
     Neutral,
@@ -89,6 +91,9 @@ public fun PlaybackMiniPlayer(
     onOpen: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onObservingChanged: (Boolean) -> Unit,
+    liked: Boolean = false,
+    likeEnabled: Boolean = false,
+    onLike: () -> Unit = {},
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -102,7 +107,7 @@ public fun PlaybackMiniPlayer(
             shadowElevation = 14.dp,
             shape = MaterialTheme.shapes.large,
             border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+            modifier = Modifier.fillMaxWidth().testTag("persistent-mini-player").clickable(onClick = onOpen),
         ) {
             Column {
                 Row(
@@ -110,19 +115,41 @@ public fun PlaybackMiniPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    AutPlayArtwork(state.title ?: stringResource(R.string.player_nothing_playing), size = 44.dp)
-                    Column(Modifier.weight(1f)) {
-                        Text(
+                    TrackChangeAnimation(
+                        track = TrackDisplayInfo(
+                            state.mediaId,
                             state.title ?: stringResource(R.string.player_nothing_playing),
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
                             state.artist ?: stringResource(R.string.player_unknown_artist),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        ),
+                        modifier = Modifier.weight(1f).testTag("mini-player-track"),
+                    ) { displayed ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            AutPlayArtwork(displayed.title, size = 44.dp, trackId = state.localTrackRefId)
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    displayed.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    displayed.artist,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                    IconButton(
+                        onClick = onLike,
+                        enabled = likeEnabled,
+                        modifier = Modifier.testTag("mini-player-like"),
+                    ) {
+                        AutPlayPlatformIcon(
+                            AutPlayIcon.Favorite,
+                            stringResource(if (liked) R.string.action_liked else R.string.action_like),
+                            tint = if (liked) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.onMiniPlayer,
                         )
                     }
                     AutPlayIconButton(
@@ -171,6 +198,8 @@ public fun NowPlayingScreen(
     tasteExclusionError: String? = null,
     onSetCurrentListenTasteExcluded: (Boolean) -> Unit = {},
     onSetSessionTasteExcluded: (Boolean) -> Unit = {},
+    onDownload: () -> Unit = {},
+    downloadState: String? = null,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -283,6 +312,7 @@ public fun NowPlayingScreen(
                 AutPlayArtwork(
                     title = state.title ?: stringResource(R.string.player_nothing_playing),
                     size = artworkSize,
+                    trackId = state.localTrackRefId,
                 )
                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
                     Text(
@@ -343,7 +373,7 @@ public fun NowPlayingScreen(
                     AutPlayIcon.Previous,
                     R.string.action_previous,
                     onPrevious,
-                    enabled = queueState.canPrevious && state.controls is PlaybackControlGate.Allowed,
+                    enabled = state.previousMediaId != null && state.controls is PlaybackControlGate.Allowed,
                 )
                 PrimaryTransportButton(
                     icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
@@ -355,7 +385,7 @@ public fun NowPlayingScreen(
                     AutPlayIcon.Next,
                     R.string.action_next,
                     onNext,
-                    enabled = queueState.canNext && state.controls is PlaybackControlGate.Allowed,
+                    enabled = state.nextMediaId != null && state.controls is PlaybackControlGate.Allowed,
                 )
                 AutPlayIconButton(
                     AutPlayIcon.Repeat,
@@ -364,6 +394,19 @@ public fun NowPlayingScreen(
                     enabled = state.repeatEnabled,
                 )
             }
+            if (state.source == PlaybackSourcePresentation.Vault || downloadState != null) PlayerFeatureCard(
+                icon = AutPlayIcon.Download,
+                title = stringResource(when (downloadState) {
+                    "COMPLETED" -> R.string.music_saved_offline
+                    "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> R.string.music_downloading
+                    else -> R.string.music_download_track
+                }),
+                body = stringResource(R.string.music_download_body),
+                onClick = onDownload,
+                enabled = state.source == PlaybackSourcePresentation.Vault &&
+                    downloadState !in setOf("COMPLETED", "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED"),
+                modifier = Modifier.testTag("player-download-track"),
+            )
             PlayerFeatureCard(
                 icon = AutPlayIcon.Timer,
                 title = stringResource(R.string.player_sleep_timer),

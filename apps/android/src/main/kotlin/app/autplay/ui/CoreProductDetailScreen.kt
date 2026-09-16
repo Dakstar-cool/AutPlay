@@ -116,6 +116,7 @@ public fun CoreProductDetailScreen(
             }
             state.track != null -> {
                 val detail = state.track
+                item { AutPlayArtwork(detail.title.orEmpty(), size = 220.dp, trackId = detail.localUserTrackRefId) }
                 item {
                     DetailHeading(
                         detail.title ?: stringResource(R.string.player_nothing_playing),
@@ -123,6 +124,7 @@ public fun CoreProductDetailScreen(
                     )
                 }
                 detail.albumName?.let { album -> item { DetailValue(stringResource(R.string.detail_album), album) } }
+                item(key = "track-metadata") { TrackMetadataPanel(detail) }
                 detail.durationMs?.let { duration -> item { DetailValue(stringResource(R.string.detail_duration), formatDuration(duration)) } }
                 artistCreditItems(state.subjectArtistCredits, onOpenDetail)
                 item { DetailValue(stringResource(R.string.detail_availability), availabilityLabel(detail.availability)) }
@@ -137,7 +139,6 @@ public fun CoreProductDetailScreen(
                         if (CoreTrackDetailCapability.LIKE in detail.capabilities) {
                             OutlinedButton(
                                 onClick = { onLike(detail.localUserTrackRefId) },
-                                enabled = detail.preference.preference != "LIKED",
                                 modifier = Modifier.heightIn(min = 48.dp),
                             ) {
                                 Text(
@@ -433,7 +434,7 @@ private fun humanize(value: String): String = value.replace('_', ' ').lowercase(
 private fun availabilityLabel(availability: CoreTrackAvailability): String = stringResource(
     when (availability) {
         CoreTrackAvailability.PLAYABLE_LOCAL -> R.string.detail_availability_local
-        CoreTrackAvailability.PLAYABLE_SERVER -> R.string.detail_availability_server
+        CoreTrackAvailability.SERVER_CANDIDATE -> R.string.detail_availability_server
         CoreTrackAvailability.PERMISSION_REVOKED -> R.string.detail_availability_permission
         CoreTrackAvailability.UNAVAILABLE -> R.string.detail_availability_unavailable
         CoreTrackAvailability.NO_LOCAL_SOURCE -> R.string.detail_availability_metadata

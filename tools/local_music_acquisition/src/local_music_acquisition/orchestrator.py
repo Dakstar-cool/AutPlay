@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -50,11 +51,15 @@ class _Attempt:
 
 @dataclass(slots=True)
 class _ProviderLane:
-    """Serialize one provider while allowing different providers to overlap."""
+    """Bound provider I/O separately from synchronized circuit and metrics state."""
 
     provider: AcquisitionProvider
     failure_threshold: int | None
+    parallelism: int = 1
     lock: threading.Lock = field(default_factory=threading.Lock)
+    slots: threading.BoundedSemaphore = field(init=False)
+    probe_active: bool = False
+    epoch: int = 0
     consecutive_failures: int = 0
     terminal_failures: int = 0
     circuit_open: bool = False
@@ -66,61 +71,91 @@ class _ProviderLane:
     deferred: int = 0
     request_seconds: float = 0.0
     wait_seconds: float = 0.0
+    cached_misses: int = 0
+
+    def __post_init__(self) -> None:
+        self.slots = threading.BoundedSemaphore(self.parallelism)
 
     def invoke(self, item: PlaylistItem, output_directory: Path) -> _Attempt:
+        cached = getattr(self.provider, "cached_miss", None)
+        if callable(cached) and cached(item):
+            with self.lock:
+                self.cached_misses += 1
+            return _Attempt(
+                "miss", self.provider.name, f"{self.provider.name}.exact_match_not_found"
+            )
         waiting = time.monotonic()
-        with self.lock:
-            self.wait_seconds += time.monotonic() - waiting
-            if self.circuit_open:
-                if self.cooldown_seconds is None or time.monotonic() < (
-                    self.opened_at + self.cooldown_seconds
-                ):
-                    self.deferred += 1
-                    return _Attempt(
-                        "deferred", self.provider.name, f"{self.provider.name}.circuit_open"
-                    )
-                self.circuit_open = False
-                self.consecutive_failures = 0
-            self.requests += 1
+        with self.slots:
+            with self.lock:
+                self.wait_seconds += time.monotonic() - waiting
+                probe = self.circuit_open
+                if probe:
+                    if (
+                        self.probe_active
+                        or self.cooldown_seconds is None
+                        or time.monotonic() < (self.opened_at + self.cooldown_seconds)
+                    ):
+                        self.deferred += 1
+                        return _Attempt(
+                            "deferred", self.provider.name, f"{self.provider.name}.circuit_open"
+                        )
+                    self.probe_active = True
+                epoch = self.epoch
+                self.requests += 1
             started = time.monotonic()
             try:
-                return self._acquire(item, output_directory)
+                attempt = self._acquire(item, output_directory)
+                with self.lock:
+                    self._record(attempt, probe=probe, epoch=epoch)
+                return attempt
             finally:
-                self.request_seconds += time.monotonic() - started
+                with self.lock:
+                    self.request_seconds += time.monotonic() - started
+                    if probe:
+                        self.probe_active = False
 
     def _acquire(self, item: PlaylistItem, output_directory: Path) -> _Attempt:
         try:
             artifact = self.provider.acquire(item, output_directory)
         except ProviderMiss as error:
             if error.provider != self.provider.name or error.code not in PROVIDER_MISS_CODES:
-                return self._failure("result_invalid")
-            self.consecutive_failures = 0
-            self.misses += 1
+                return _Attempt(
+                    "failure", self.provider.name, f"{self.provider.name}.result_invalid"
+                )
             return _Attempt("miss", self.provider.name, str(error))
         except ProviderFailure as error:
             code = error.code if error.provider == self.provider.name else "result_invalid"
-            return self._failure(code)
+            return _Attempt("failure", self.provider.name, f"{self.provider.name}.{code}")
         except OSError:
-            return self._failure("operational_failure")
+            return _Attempt(
+                "failure", self.provider.name, f"{self.provider.name}.operational_failure"
+            )
         if (
             artifact.provider != self.provider.name
             or re.fullmatch(r"sha256:[0-9a-f]{12}", artifact.artifact_ref) is None
         ):
-            return self._failure("result_invalid")
-        self.consecutive_failures = 0
-        self.downloaded += 1
+            return _Attempt("failure", self.provider.name, f"{self.provider.name}.result_invalid")
         return _Attempt("downloaded", self.provider.name, artifact=artifact)
 
-    def _failure(self, code: str) -> _Attempt:
+    def _record(self, attempt: _Attempt, *, probe: bool, epoch: int) -> None:
+        if attempt.status != "failure":
+            if self.epoch == epoch and (not self.circuit_open or probe):
+                self.consecutive_failures = 0
+                self.circuit_open = False
+            if attempt.status == "miss":
+                self.misses += 1
+            else:
+                self.downloaded += 1
+            return
         self.consecutive_failures += 1
         self.terminal_failures += 1
-        if (
+        if probe or (
             self.failure_threshold is not None
             and self.consecutive_failures >= self.failure_threshold
         ):
             self.circuit_open = True
             self.opened_at = time.monotonic()
-        return _Attempt("failure", self.provider.name, f"{self.provider.name}.{code}")
+            self.epoch += 1
 
 
 class DownloadSession:
@@ -133,6 +168,7 @@ class DownloadSession:
         *,
         failure_threshold: int = 2,
         cooldown_seconds: float = 60,
+        provider_concurrency: Mapping[str, int] | None = None,
     ) -> None:
         if not providers:
             raise PlaylistDownloadError("providers_empty")
@@ -146,8 +182,22 @@ class DownloadSession:
         for provider in providers:
             if provider.requires_rights_confirmation and provider.name not in rights_confirmed:
                 raise PlaylistDownloadError(f"{provider.name}_rights_confirmation_required")
+        concurrency = dict(provider_concurrency or {})
+        if set(concurrency) - set(names) or any(
+            type(concurrency.get(provider.name, 1)) is not int
+            or not 1
+            <= concurrency.get(provider.name, 1)
+            <= min(2, getattr(provider, "max_parallelism", 1))
+            for provider in providers
+        ):
+            raise PlaylistDownloadError("provider_concurrency_invalid")
         self.lanes = tuple(
-            _ProviderLane(provider, failure_threshold, cooldown_seconds=cooldown_seconds)
+            _ProviderLane(
+                provider,
+                failure_threshold,
+                parallelism=concurrency.get(provider.name, 1),
+                cooldown_seconds=cooldown_seconds,
+            )
             for provider in providers
         )
 
@@ -174,6 +224,8 @@ class DownloadSession:
                 "circuit_open": lane.circuit_open,
                 "request_seconds": round(lane.request_seconds, 3),
                 "wait_seconds": round(lane.wait_seconds, 3),
+                "cached_misses": lane.cached_misses,
+                "parallelism": lane.parallelism,
             }
             for lane in self.lanes
         }

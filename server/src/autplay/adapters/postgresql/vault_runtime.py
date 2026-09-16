@@ -1095,6 +1095,7 @@ def _mime(container: str) -> str:
         "mp4": "audio/mp4",
         "ogg": "audio/ogg",
         "webm": "audio/webm",
+        "wav": "audio/wav",
     }[container.lower()]
 
 

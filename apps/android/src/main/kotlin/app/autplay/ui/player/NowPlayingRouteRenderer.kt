@@ -25,6 +25,7 @@ internal data class NowPlayingRouteActions(
     val cancelSleepTimer: () -> Unit,
     val observingChanged: (Boolean) -> Unit,
     val queue: QueueEditorUiActions = QueueEditorUiActions(),
+    val download: () -> Unit = {},
 )
 
 internal data class NowPlayingTasteUiState(
@@ -46,6 +47,7 @@ internal fun NowPlayingRouteRenderer(
     queueState: QueueEditorUiState,
     actions: NowPlayingRouteActions,
     modifier: Modifier = Modifier,
+    downloadState: String? = null,
 ) {
     NowPlayingScreen(
         state = state,
@@ -77,6 +79,8 @@ internal fun NowPlayingRouteRenderer(
         onObservingChanged = actions.observingChanged,
         queueState = queueState,
         queueActions = actions.queue,
+        onDownload = actions.download,
+        downloadState = downloadState,
         modifier = modifier,
     )
 }

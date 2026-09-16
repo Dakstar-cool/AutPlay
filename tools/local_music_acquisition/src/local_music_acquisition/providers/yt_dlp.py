@@ -19,6 +19,7 @@ from ..models import (
     ProviderFailure,
     ProviderMiss,
 )
+from ..related import RelatedCandidate
 from ..source_catalog import SourceCatalog
 from ..source_client import read_client_id
 from ..xray import XrayError, XrayManager
@@ -75,6 +76,7 @@ class YtDlpProvider:
     name = "yt_dlp"
     requires_rights_confirmation = True
     worker_module = "local_music_acquisition.providers._yt_dlp_worker"
+    max_parallelism = 2
 
     def __init__(
         self,
@@ -137,6 +139,83 @@ class YtDlpProvider:
             request["soundcloud_client_id"] = self._client_id
         if proxy_url is not None:
             request["proxy_url"] = proxy_url
+        response = self._call_worker(request)
+        code = response.get("code")
+        if (
+            response.get("status") == "miss"
+            and isinstance(code, str)
+            and code in PROVIDER_MISS_CODES
+        ):
+            raise ProviderMiss(self.name, code)
+        if response.get("status") != "downloaded":
+            code = response.get("code")
+            if not isinstance(code, str) or _SAFE_CODE.fullmatch(code) is None:
+                code = "worker_failed"
+            raise ProviderFailure(self.name, code)
+        artifact_ref = response.get("artifact_ref")
+        if (
+            not isinstance(artifact_ref, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{12}", artifact_ref) is None
+        ):
+            raise ProviderFailure(self.name, "worker_response_invalid")
+        expected = response.get("expected_duration_seconds", expected_duration)
+        if expected is not None and (
+            isinstance(expected, bool)
+            or not isinstance(expected, (int, float))
+            or not math.isfinite(expected)
+            or expected <= 0
+        ):
+            raise ProviderFailure(self.name, "worker_response_invalid")
+        return AcquiredArtifact(
+            self.name,
+            artifact_ref,
+            identity_version=f"reviewed-source-v1:{source.fingerprint}"
+            if source
+            else "recording-match-v2",
+            expected_duration_seconds=expected_duration or expected,
+        )
+
+    def discover(self, item: PlaylistItem) -> list[RelatedCandidate]:
+        if not self.requires_proxy:
+            return self._discover(item)
+        if self._xray is None:
+            raise ProviderFailure(self.name, "xray_not_configured")
+        try:
+            with self._xray.lease() as proxy_url:
+                return self._discover(item, proxy_url)
+        except XrayError as error:
+            raise ProviderFailure(self.name, str(error)) from None
+
+    def _discover(self, item: PlaylistItem, proxy_url: str | None = None) -> list[RelatedCandidate]:
+        request: dict[str, object] = {
+            "provider": self.name,
+            "artist": item.artist,
+            "title": item.title,
+        }
+        if proxy_url is not None:
+            request["proxy_url"] = proxy_url
+        if self._client_id:
+            request["soundcloud_client_id"] = self._client_id
+        response = self._call_worker(request, "local_music_acquisition.providers._discovery_worker")
+        if response.get("status") != "discovered":
+            code = response.get("code")
+            raise ProviderFailure(
+                self.name,
+                code
+                if isinstance(code, str) and _SAFE_CODE.fullmatch(code)
+                else "discovery_failed",
+            )
+        candidates = response.get("candidates")
+        if not isinstance(candidates, list) or len(candidates) > 20:
+            raise ProviderFailure(self.name, "discovery_response_invalid")
+        try:
+            return [RelatedCandidate.parse(c, self.name) for c in candidates]
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ProviderFailure(self.name, "discovery_response_invalid") from error
+
+    def _call_worker(
+        self, request: dict[str, object], module: str | None = None
+    ) -> dict[str, object]:
         environment = {
             key: value
             for key, value in os.environ.items()
@@ -151,7 +230,7 @@ class YtDlpProvider:
         )
         try:
             process = subprocess.Popen(
-                [sys.executable, "-m", self.worker_module],
+                [sys.executable, "-m", module or self.worker_module],
                 text=True,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -183,37 +262,4 @@ class YtDlpProvider:
             raise ProviderFailure(self.name, "worker_response_invalid") from error
         if process.returncode != 0 or not isinstance(response, dict):
             raise ProviderFailure(self.name, "worker_response_invalid")
-        code = response.get("code")
-        if (
-            response.get("status") == "miss"
-            and isinstance(code, str)
-            and code in PROVIDER_MISS_CODES
-        ):
-            raise ProviderMiss(self.name, code)
-        if response.get("status") != "downloaded":
-            code = response.get("code")
-            if not isinstance(code, str) or _SAFE_CODE.fullmatch(code) is None:
-                code = "worker_failed"
-            raise ProviderFailure(self.name, code)
-        artifact_ref = response.get("artifact_ref")
-        if (
-            not isinstance(artifact_ref, str)
-            or re.fullmatch(r"sha256:[0-9a-f]{12}", artifact_ref) is None
-        ):
-            raise ProviderFailure(self.name, "worker_response_invalid")
-        expected = response.get("expected_duration_seconds", expected_duration)
-        if expected is not None and (
-            isinstance(expected, bool)
-            or not isinstance(expected, (int, float))
-            or not math.isfinite(expected)
-            or expected <= 0
-        ):
-            raise ProviderFailure(self.name, "worker_response_invalid")
-        return AcquiredArtifact(
-            self.name,
-            artifact_ref,
-            identity_version=(
-                f"reviewed-source-v1:{source.fingerprint}" if source else "recording-match-v2"
-            ),
-            expected_duration_seconds=expected_duration or expected,
-        )
+        return response

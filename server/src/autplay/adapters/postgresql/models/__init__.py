@@ -55,6 +55,7 @@ from .importing import (
     ImportJobRow,
     WebImportOperationReceiptRow,
 )
+from .internet_music import InternetAcquisitionRow, InternetSearchRow
 from .jobs import (
     JobAttemptRow,
     JobDependencyRow,
@@ -139,6 +140,7 @@ from .sync import (
     TombstoneRow,
     UserInteractionEventRow,
 )
+from .track_metadata import MetadataArtworkRow, TrackMetadataRevisionRow, TrackMetadataRow
 from .vault import (
     AcquisitionRecordRow,
     AudioFingerprintRow,
@@ -168,6 +170,11 @@ from .web_admin import (
 )
 
 MAPPED_ROWS: tuple[type[Base], ...] = (
+    MetadataArtworkRow,
+    TrackMetadataRevisionRow,
+    TrackMetadataRow,
+    InternetSearchRow,
+    InternetAcquisitionRow,
     UserAccountRow,
     DeviceRow,
     UserSessionRow,
@@ -355,6 +362,8 @@ __all__ = (
     "IdempotencyRecordRow",
     "ImportEntryRow",
     "ImportJobRow",
+    "InternetAcquisitionRow",
+    "InternetSearchRow",
     "JobAttemptRow",
     "JobDependencyRow",
     "JobRow",
@@ -365,6 +374,7 @@ __all__ = (
     "MatchPolicyActivationRow",
     "MatcherReleaseRow",
     "MediumRow",
+    "MetadataArtworkRow",
     "OfflineRecommendationPackRow",
     "PlaylistEntryRow",
     "PlaylistRow",
@@ -401,6 +411,8 @@ __all__ = (
     "TasteClusterRow",
     "ThresholdSetRow",
     "TombstoneRow",
+    "TrackMetadataRevisionRow",
+    "TrackMetadataRow",
     "TrustedDeviceKeyRow",
     "TrustedDeviceReenrollmentChallengeRow",
     "UploadChunkRow",

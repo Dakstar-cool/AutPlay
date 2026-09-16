@@ -14,6 +14,9 @@ import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
 import app.autplay.data.local.AutPlayDatabase
+import app.autplay.AutPlayRuntime
+import app.autplay.application.sync.ClientEventBinding
+import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.data.local.entity.DownloadIntentEntity
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
@@ -38,6 +41,7 @@ import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /** Maps user intent to Media3 commands and reconciles only coarse state back into Room. */
@@ -125,6 +129,7 @@ class DownloadIntentRepository(
         val variantId = preferredState?.serverAudioVariantId
             ?: database.localAudioDao().downloadIntentsForTrack(trackRefId.value, 32)
                 .firstNotNullOfOrNull { it.serverAudioVariantId }
+            ?: lookupOwnedVaultVariant(trackRefId, profileId)
             ?: error("VAULT_VARIANT_UNKNOWN")
         return requestVaultDownload(
             trackRefId,
@@ -134,6 +139,19 @@ class DownloadIntentRepository(
             nowMs,
             preferredState?.byteSize,
         )
+    }
+
+    private suspend fun lookupOwnedVaultVariant(trackRefId: LocalId, profileId: ServerProfileId): String? {
+        val active = applicationNonSecretSettingsStore(applicationContext).settings.first()
+        check(active.activeServerProfileId == profileId) { "DOWNLOAD_PROFILE_MISMATCH" }
+        val user = active.activeUserId ?: error("SERVER_PROFILE_NOT_ACTIVE")
+        val device = active.deviceId ?: error("SERVER_PROFILE_NOT_ACTIVE")
+        val track = database.libraryDao().trackRef(trackRefId.value) ?: return null
+        if (track.deletedAtMs != null) return null
+        val serverRef = track.serverUserTrackRefId ?: return null
+        // The authenticated endpoint verifies ownership; a cached hash/ID is not authority.
+        return AutPlayRuntime.serverFeatures(applicationContext, ClientEventBinding(user, device, profileId))
+            .playbackVariantId(serverRef)
     }
 
     suspend fun requestVaultDownload(

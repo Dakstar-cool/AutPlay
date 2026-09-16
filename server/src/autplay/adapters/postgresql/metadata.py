@@ -28,6 +28,11 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
     ]
 )
 EXPECTED_TABLE_KEYS: tuple[str, ...] = (
+    "discovery.internet_search",
+    "discovery.internet_acquisition",
+    "library.metadata_artwork",
+    "library.track_metadata",
+    "library.track_metadata_revision",
     "account.user_account",
     "account.device",
     "account.user_session",
@@ -159,6 +164,11 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.guest_rate_window",
 )
 EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
+    "discovery.internet_search": 7,
+    "discovery.internet_acquisition": 14,
+    "library.metadata_artwork": 3,
+    "library.track_metadata": 10,
+    "library.track_metadata_revision": 6,
     "account.user_account": 9,
     "account.device": 12,
     "account.user_session": 11,
@@ -291,6 +301,7 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
 }
 EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
     {
+        "internet_search_owner_time",
         "ix_device_user_active",
         "ix_user_session_user_active",
         "ix_enrollment_invitation_user_active",
@@ -414,7 +425,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 1436
+EXPECTED_COLUMN_COUNT = 1476
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

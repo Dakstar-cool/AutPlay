@@ -25,6 +25,10 @@ data class PlaybackPresentationState(
     val shuffleModeEnabled: Boolean = false,
     val repeatMode: RepeatModePresentation = RepeatModePresentation.Off,
     val seekPreviewPositionMs: Long? = null,
+    /** Queue-entry identities in the controller's actual shuffle/repeat navigation order. */
+    val previousMediaId: String? = null,
+    val nextMediaId: String? = null,
+    val localTrackRefId: String? = null,
 )
 
 val PlaybackPresentationState.canSeek: Boolean

@@ -146,6 +146,42 @@ def test_ffprobe_rejects_codec_container_outside_allowlist() -> None:
         FfprobeInspector("ffprobe", runner=runner).inspect(Path("input"))
 
 
+@pytest.mark.parametrize(
+    "codec", ["pcm_u8", "pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_f64le"]
+)
+def test_ffprobe_accepts_phone_pcm_only_in_wav(codec: str) -> None:
+    import json
+
+    runner = FakeRunner(
+        ProcessResult(
+            0,
+            json.dumps(
+                {
+                    "format": {"format_name": "wav", "duration": "20"},
+                    "streams": [
+                        {
+                            "codec_type": "audio",
+                            "codec_name": codec,
+                            "sample_rate": "22050",
+                            "channels": 1,
+                        }
+                    ],
+                }
+            ).encode(),
+            b"",
+        )
+    )
+    if codec == "pcm_f64le":
+        # Media3 cannot decode float64 WAV; do not advertise it as playable Vault audio.
+        with pytest.raises(MediaValidationError):
+            FfprobeInspector("ffprobe", runner=runner).inspect(Path("phone.wav"))
+        return
+    result = FfprobeInspector("ffprobe", runner=runner).inspect(Path("phone.wav"))
+    assert result.codec == codec
+    assert result.container == "wav"
+    assert result.duration_ms == 20000
+
+
 def test_subprocess_runner_enforces_output_bound_without_unbounded_capture() -> None:
     runner = SubprocessExecutableRunner()
     with pytest.raises(MediaToolOutputError):

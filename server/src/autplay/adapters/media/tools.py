@@ -412,6 +412,11 @@ def _normalize_container(codec: str, raw_container: str) -> str:
         "flac": frozenset({"flac", "ogg"}),
         "mp3": frozenset({"mp3"}),
         "opus": frozenset({"ogg", "matroska", "webm"}),
+        "pcm_u8": frozenset({"wav"}),
+        "pcm_s16le": frozenset({"wav"}),
+        "pcm_s24le": frozenset({"wav"}),
+        "pcm_s32le": frozenset({"wav"}),
+        "pcm_f32le": frozenset({"wav"}),
     }
     allowed = allowed_by_codec.get(codec)
     if allowed is None:

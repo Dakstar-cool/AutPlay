@@ -81,8 +81,9 @@ class HomeRecommendationScreenTest {
     fun profileHomeShowsRelevantReleaseAndOfflineRecommendationWithoutDuplicateImpression() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         openHome()
+        scrollHomeTo(hasText("Relevant release"))
+        composeRule.onNodeWithText("Relevant release").assertIsDisplayed()
         scrollHomeTo(hasTestTag("home-recommendation"))
-        composeRule.onNodeWithText("Relevant release").performScrollTo().assertIsDisplayed()
         composeRule.onAllNodesWithTag("home-recommendation")[0].performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking { AutPlayRuntime.database(context).journalDao().eventCount() == 1 }

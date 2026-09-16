@@ -1,0 +1,50 @@
+{
+  "apk_sha256": "950c503fc97c2453d062d56909995a156b451f44c001cb019f2e40c09a5d2529",
+  "integrity": "ok",
+  "user_version": 15,
+  "counts": {
+    "user_track_ref": 57,
+    "library_entry": 56,
+    "playlist": 0,
+    "playlist_entry": 0,
+    "user_track_preference": 1,
+    "listening_event": 23
+  },
+  "preserved": {
+    "user_track_ref": {
+      "before": 57,
+      "after": 57,
+      "all_original_rows_preserved": true
+    },
+    "library_entry": {
+      "before": 56,
+      "after": 56,
+      "all_original_rows_preserved": true
+    },
+    "playlist": {
+      "before": 0,
+      "after": 0,
+      "all_original_rows_preserved": true
+    },
+    "playlist_entry": {
+      "before": 0,
+      "after": 0,
+      "all_original_rows_preserved": true
+    },
+    "user_track_preference": {
+      "before": 1,
+      "after": 1,
+      "all_original_rows_preserved": true
+    },
+    "listening_event": {
+      "before": 23,
+      "after": 23,
+      "all_original_rows_preserved": true
+    }
+  },
+  "installed_apk_matches_build": true,
+  "preferences_unchanged": true,
+  "settings_preserved": true,
+  "unchanged_settings_count": 26,
+  "automatically_refreshed_session_keys": []
+}

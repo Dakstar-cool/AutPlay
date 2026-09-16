@@ -81,10 +81,12 @@ class ServerFeatureStateRepository(private val database: AutPlayDatabase) {
         knownSha256: ByteArray?,
         knownSize: Long?,
         nowMs: Long,
+        operationId: String? = null,
     ): VaultUploadIntentEntity {
         val intentId = UUID.nameUUIDFromBytes(
-            "vault-upload:${profileId.value}:$localAudioStateId:$serverRecordingId".toByteArray(StandardCharsets.UTF_8),
+            ("vault-upload:${profileId.value}:$localAudioStateId:$serverRecordingId" + (operationId?.let { ":$it" } ?: "")).toByteArray(StandardCharsets.UTF_8),
         ).toString()
+        dao.vaultUploadIntent(intentId)?.let { return it }
         val row = VaultUploadIntentEntity(
             uploadIntentId = intentId,
             serverProfileId = profileId.value,

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="section_expanded">Развёрнуто</string>
+    <string name="section_collapsed">Свёрнуто</string>
+    <string name="profile_my_music">Моя музыка</string>
+    <string name="profile_friends">Друзья</string>
+    <string name="profile_friends_summary">Слушайте вместе и делитесь музыкой</string>
+    <string name="profile_friends_local">Подключите личный сервер, чтобы добавлять друзей и слушать вместе.</string>
+    <string name="profile_account_devices">Аккаунт и устройства</string>
+    <string name="profile_account_devices_summary">Подключение, устройства и безопасность аккаунта</string>
+    <string name="profile_connect_optional">Подключить личный сервер</string>
+    <string name="profile_connect_optional_summary">По желанию: синхронизация коллекции и музыка с друзьями</string>
+    <string name="settings_appearance_summary">Язык, тема и цвет оформления</string>
+    <string name="settings_library_summary">Папка с музыкой и обновление медиатеки</string>
+    <string name="settings_connection_summary">Личный сервер, синхронизация и мобильная сеть</string>
+    <string name="settings_wave_summary">Совместное прослушивание и загрузка следующих треков</string>
+    <string name="settings_privacy_summary">Кто видит статистику ваших прослушиваний</string>
+    <string name="settings_transfer_summary">Сохранение и восстановление ваших настроек</string>
+    <string name="settings_music_navigation">Музыка и история</string>
+    <string name="settings_music_summary">Плейлисты, загрузки, история и импорт</string>
+    <string name="settings_about">О приложении</string>
+    <string name="settings_about_summary">Версия и режим разработчика</string>
+    <string name="settings_app_version">AutPlay %1$s</string>
+    <string name="settings_developer_mode">Режим разработчика</string>
+    <string name="settings_developer_description">Показывать технические сведения и инструменты диагностики на этом устройстве.</string>
+    <string name="settings_developer_enabled">Технические сведения включены</string>
+    <string name="settings_diagnostics">Диагностика сервера</string>
+    <string name="profile_registration_failed">Не удалось завершить подключение. Проверьте приглашение или попробуйте ещё раз.</string>
+    <string name="profile_first_device_note">Восстановление аккаунта и добавление другого устройства пока недоступны. Сохраните этот телефон и данные приложения.</string>
+    <string name="profile_connecting_note">Не закрывайте AutPlay до завершения подключения.</string>
+    <string name="profile_invite_friend_note">Пригласите друга создать аккаунт и подключить его телефон.</string>
+    <string name="profile_change_preference">Отметка трека</string>
+    <string name="profile_change_library">Изменение медиатеки</string>
+    <string name="profile_status_active">Активен</string>
+    <string name="profile_status_expired">Срок истёк</string>
+    <string name="profile_status_cancelled">Отменён</string>
+    <string name="profile_status_used">Использован</string>
+    <string name="profile_status_disabled">Отключён</string>
+    <string name="profile_status_unavailable">Недоступен</string>
+</resources>

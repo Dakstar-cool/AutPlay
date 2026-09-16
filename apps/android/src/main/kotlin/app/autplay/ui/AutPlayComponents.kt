@@ -82,7 +82,9 @@ public fun AutPlayArtwork(
     modifier: Modifier = Modifier,
     size: Dp = 56.dp,
     painter: Painter? = null,
+    trackId: String? = null,
 ) {
+    val artworkPainter = painter ?: rememberTrackArtwork(trackId)
     val shape = MaterialTheme.shapes.small
     Box(
         modifier = modifier
@@ -91,10 +93,10 @@ public fun AutPlayArtwork(
             .semantics { contentDescription = title },
         contentAlignment = Alignment.Center,
     ) {
-        if (painter == null) {
+        if (artworkPainter == null) {
             AutPlayArtworkPlaceholder(title, Modifier.fillMaxSize())
         } else {
-            Image(painter = painter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Image(painter = artworkPainter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
     }
 }

@@ -153,6 +153,36 @@ def test_no_match_is_not_retried_without_explicit_request(tmp_path: Path, audio:
     assert queue.run_queue(root, providers=(provider,))["downloaded"] == 1
 
 
+def test_persistent_miss_cache_skips_only_previous_miss_on_retry(
+    tmp_path: Path, audio: bytes
+) -> None:
+    root, _ = setup_queue(tmp_path)
+    missing = Provider(audio, action="miss")
+    missing.name = "missing"
+    recovering = Provider(audio, action="fail")
+    settings = {"miss_cache_ttl_seconds": 3600, "miss_cache_namespace": "a" * 64}
+    assert queue.run_queue(root, providers=(missing, recovering), **settings)["retry"] == 1
+    state_path = next((root / "jobs").glob("*.json"))
+    state = read_json(state_path)
+    state["next_retry"] = 0
+    write_json(state_path, state)
+    recovering.action = "ok"
+    assert queue.run_queue(root, providers=(missing, recovering), **settings)["downloaded"] == 1
+    assert missing.calls == 1
+    assert recovering.calls == 2
+    assert read_json(root / "runtime.json")["miss_cache"]["hits"] == 1
+
+
+def test_explicit_retry_invalidates_cached_miss(tmp_path: Path, audio: bytes) -> None:
+    root, _ = setup_queue(tmp_path)
+    provider = Provider(audio, action="miss")
+    settings = {"miss_cache_ttl_seconds": 3600, "miss_cache_namespace": "a" * 64}
+    assert queue.run_queue(root, providers=(provider,), **settings)["not_found"] == 1
+    queue.retry_unsuccessful(root, include_not_found=True)
+    provider.action = "ok"
+    assert queue.run_queue(root, providers=(provider,), **settings)["downloaded"] == 1
+
+
 def test_pause_resume_and_read_only_status(tmp_path: Path, audio: bytes, capsys) -> None:
     root, _output = setup_queue(tmp_path)
     provider = Provider(audio)

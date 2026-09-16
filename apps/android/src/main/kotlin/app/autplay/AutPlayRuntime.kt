@@ -118,7 +118,9 @@ object AutPlayRuntime {
                     "SYNC_NETWORK_POLICY_BLOCKED"
                 }
             },
-        ))
+        ), afterSync = { completed ->
+            app.autplay.work.TrackMetadataWork.artwork(context.applicationContext, completed.serverProfileId.value)
+        })
     }
 
     /** Wave is available only for the active authenticated profile; local playback remains independent. */

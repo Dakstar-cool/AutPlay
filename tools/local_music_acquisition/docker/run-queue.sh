@@ -34,6 +34,14 @@ mounts=(--mount "type=bind,src=$playlist,dst=/input/playlist.txt,readonly"
         --mount "type=bind,src=$music,dst=/music")
 options=(--output-dir /music --queue-dir /queue --normalize-numbered --workers "$workers"
          --index-recheck-seconds "$index_recheck")
+if [[ -n "${ACQUISITION_EXPAND_SOURCE:-}" ]]; then
+    source_queue=$(realpath -e -- "$ACQUISITION_EXPAND_SOURCE")
+    [[ "$source_queue" != *','* && "$source_queue" != *$'\n'* ]]
+    [[ "$source_queue" != "$queue" ]]
+    test -f "$source_queue/queue.json"
+    mounts+=(--mount "type=bind,src=$source_queue,dst=/source-queue,readonly")
+    options+=(--expand-missing-from /source-queue --candidate-limit "${ACQUISITION_CANDIDATE_LIMIT:-3}")
+fi
 container_options=()
 if [[ -n "${ACQUISITION_CONTAINER_NAME:-}" ]]; then
     container_options+=(--name "$ACQUISITION_CONTAINER_NAME")

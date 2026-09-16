@@ -1,0 +1,57 @@
+{
+  "apk_sha256": "8445d5b13d0aa9bf600c72aad2867e3b55e7b4f2169d986090970fc5cfc16765",
+  "integrity": "ok",
+  "user_version": 16,
+  "counts": {
+    "user_track_ref": 57,
+    "library_entry": 56,
+    "playlist": 0,
+    "playlist_entry": 0,
+    "user_track_preference": 1,
+    "listening_event": 24
+  },
+  "preserved": {
+    "user_track_ref": {
+      "before": 57,
+      "after": 57,
+      "all_original_rows_preserved": true
+    },
+    "library_entry": {
+      "before": 56,
+      "after": 56,
+      "all_original_rows_preserved": true
+    },
+    "playlist": {
+      "before": 0,
+      "after": 0,
+      "all_original_rows_preserved": true
+    },
+    "playlist_entry": {
+      "before": 0,
+      "after": 0,
+      "all_original_rows_preserved": true
+    },
+    "user_track_preference": {
+      "before": 1,
+      "after": 1,
+      "all_original_rows_preserved": true
+    },
+    "listening_event": {
+      "before": 23,
+      "after": 24,
+      "all_original_rows_preserved": true
+    }
+  },
+  "search_content_count": 57,
+  "remaining_ambiguous_null_albums": 28,
+  "installed_apk_matches_build": true,
+  "preferences_unchanged": true,
+  "settings_preserved": true,
+  "unchanged_settings_count": 22,
+  "automatically_refreshed_session_keys": [
+    "m5_capability_payload_b64",
+    "m5_capability_payload_sha256",
+    "m5_session_generation",
+    "m5_session_id"
+  ]
+}

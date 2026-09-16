@@ -1,0 +1,18 @@
+{
+  "scope": "Existing active M52 server/device journal binding; not reset or replayed automatically",
+  "before": [
+    {
+      "state": "DEAD_LETTER",
+      "code": "JOURNAL_RESET_REQUIRED",
+      "count": 26
+    }
+  ],
+  "after": [
+    {
+      "state": "DEAD_LETTER",
+      "code": "JOURNAL_RESET_REQUIRED",
+      "count": 27
+    }
+  ],
+  "runtime_code": "SYNC_HTTP_409"
+}

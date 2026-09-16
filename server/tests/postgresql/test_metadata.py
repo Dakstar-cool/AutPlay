@@ -24,9 +24,9 @@ from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 def test_complete_table_and_column_inventory() -> None:
     """Every reference table and column is present exactly once."""
     assert set(metadata.tables) == set(EXPECTED_TABLE_KEYS)
-    assert len(metadata.tables) == 129
+    assert len(metadata.tables) == 134
     assert sum(len(table.columns) for table in metadata.tables.values()) == EXPECTED_COLUMN_COUNT
-    assert EXPECTED_COLUMN_COUNT == 1436
+    assert EXPECTED_COLUMN_COUNT == 1476
     assert {
         key: len(table.columns) for key, table in metadata.tables.items()
     } == EXPECTED_TABLE_COLUMN_COUNTS
@@ -36,7 +36,7 @@ def test_complete_table_and_column_inventory() -> None:
 def test_all_rows_are_typed_mappers_without_relationship_behavior() -> None:
     """Mappings are storage rows, not a second domain model."""
     configure_mappers()
-    assert len(MAPPED_ROWS) == 129
+    assert len(MAPPED_ROWS) == 134
     assert {str(row.__table__) for row in MAPPED_ROWS} == set(EXPECTED_TABLE_KEYS)
     assert all(not list(sa_inspect(row).relationships) for row in MAPPED_ROWS)
 
@@ -67,7 +67,7 @@ def test_explicit_index_inventory_and_no_python_defaults() -> None:
     """All reference indexes are mapped and defaults remain database-owned."""
     indexes = {index.name for table in metadata.tables.values() for index in table.indexes}
     assert indexes == EXPECTED_EXPLICIT_INDEX_NAMES
-    assert len(indexes) == 121
+    assert len(indexes) == 122
     assert all(
         column.default is None for table in metadata.tables.values() for column in table.columns
     )
@@ -114,4 +114,4 @@ def test_complete_mapping_definition_fingerprint() -> None:
     )
     fingerprint = hashlib.sha256("\n".join(statements).encode()).hexdigest()
 
-    assert fingerprint == "beef08ba9e49de4da84444dfae513d1d30e3122f3662af123d1c0b143cb7690d"
+    assert fingerprint == "2ec9676b53e0ba7dc311ba9f5695bf50ae293749a05d1a9e3bee68069588cd5d"

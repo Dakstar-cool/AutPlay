@@ -1,0 +1,13 @@
+{
+  "serial": "emulator-5580",
+  "stages": [
+    "stage1_seedServiceAndWaitForPeriodicCheckpoint",
+    "stage2_verifyServiceRestoresPersistedQueueAfterFreshConnection"
+  ],
+  "status": "PASS",
+  "apk_sha256": {
+    "android-debug.apk": "950c503fc97c2453d062d56909995a156b451f44c001cb019f2e40c09a5d2529",
+    "android-debug-androidTest.apk": "85ed4f33ac8da85cc34c4496511616b6cd7d44379aca67afa81659ce5d8a13cb"
+  },
+  "verified_process_boundary": true
+}

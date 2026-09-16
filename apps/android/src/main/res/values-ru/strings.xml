@@ -37,7 +37,7 @@
     <string name="home_my_wave">Моя волна</string>
     <string name="home_hero_personal_flow">Ваш персональный поток</string>
     <string name="home_hero_open_player">Открыть полный плеер</string>
-    <string name="home_hero_playing">Сейчас играет · кольцо движется вместе с воспроизведением</string>
+    <string name="home_hero_playing">Сейчас играет</string>
     <string name="home_hero_ready">Готово к воспроизведению</string>
     <string name="home_hero_control_locked">Управление недоступно для текущего режима воспроизведения</string>
     <string name="home_hero_empty">Выберите локальный трек, чтобы запустить поток</string>
@@ -173,7 +173,7 @@
     <string name="detail_duration">Длительность</string>
     <string name="detail_availability">Доступность</string>
     <string name="detail_availability_local">Можно воспроизвести на этом устройстве</string>
-    <string name="detail_availability_server">Можно воспроизвести с вашего сервера</string>
+    <string name="detail_availability_server">Трек связан с вашим сервером. Наличие аудио проверится при воспроизведении.</string>
     <string name="detail_availability_permission">Нужно восстановить доступ к папке</string>
     <string name="detail_availability_unavailable">Локальный источник недоступен</string>
     <string name="detail_availability_metadata">Только метаданные</string>
@@ -240,6 +240,7 @@
     <string name="queue_play_next">Играть следующим</string>
     <string name="queue_add_to_end">Добавить в очередь</string>
     <string name="action_failed_friendly">Не удалось выполнить действие. Попробуйте ещё раз.</string>
+    <string name="action_dismiss_error">Закрыть</string>
     <string name="action_in_progress">Выполняем…</string>
     <string name="action_refresh">Обновить</string>
     <string name="action_cancel">Отменить</string>
@@ -507,7 +508,7 @@
     <string name="settings_folder_selected">Папка с музыкой выбрана</string>
     <string name="settings_choose_folder">Выбрать папку с музыкой</string>
     <string name="settings_scan_folder">Просканировать папку снова</string>
-    <string name="settings_folder_privacy">AutPlay видит только выбранную папку. Доступ можно отозвать в любой момент.</string>
+    <string name="settings_folder_privacy">Папка используется для обновления медиатеки. Поиск музыки на телефоне запрашивает отдельный доступ к аудиофайлам. Разрешения можно отозвать в настройках Android.</string>
     <string name="settings_network">Личный сервер и совместное прослушивание</string>
     <string name="settings_personal_server_body">Подключайте и управляйте личным сервером в едином доверенном сценарии подключения.</string>
     <string name="settings_open_personal_server">Открыть личный сервер</string>
@@ -520,7 +521,6 @@
     <string name="settings_export">Сохранить настройки в файл</string>
     <string name="settings_import">Загрузить настройки из файла</string>
     <string name="settings_export_privacy">Пароли, личные адреса и подключения устройств в файл не попадут.</string>
-    <string name="settings_more">Другие возможности</string>
     <string name="player_sleep_timer">Таймер сна</string>
     <plurals name="player_sleep_timer_active">
         <item quantity="one">Отключение примерно через %1$d минуту</item>

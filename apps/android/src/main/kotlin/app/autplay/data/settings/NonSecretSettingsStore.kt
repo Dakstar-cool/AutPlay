@@ -56,6 +56,8 @@ data class NonSecretSettings(
     val appLanguage: String = "SYSTEM",
     val appearanceMode: String = "DARK",
     val accentPalette: String = "CORAL",
+    /** Device-local presentation preference; never exported or synced. */
+    val developerMode: Boolean = false,
     val libraryRootTreeUri: String? = null,
     val wavePrefetchMode: String = "NEXT",
     /** Versioned first-run education checkpoint. It is device-local and is never transferred. */
@@ -169,6 +171,7 @@ class DataStoreNonSecretSettingsStore(
         preferences.remove(LEGACY_SERVER_BASE_URL)
         preferences[SYNC_ON_METERED_NETWORK] = settings.syncOnMeteredNetwork
         preferences[APP_LANGUAGE] = settings.appLanguage
+        preferences[DEVELOPER_MODE] = settings.developerMode
         preferences[APPEARANCE_MODE] = settings.appearanceMode
         preferences[ACCENT_PALETTE] = settings.accentPalette
         settings.libraryRootTreeUri?.let { preferences[LIBRARY_ROOT_TREE_URI] = it }
@@ -220,6 +223,7 @@ class DataStoreNonSecretSettingsStore(
         streamBaseUrl = preferences[STREAM_SERVICE_BASE_URL] ?: legacyOrigin ?: apiOrigin,
         syncOnMeteredNetwork = preferences[SYNC_ON_METERED_NETWORK] ?: false,
         appLanguage = preferences[APP_LANGUAGE] ?: "SYSTEM",
+        developerMode = preferences[DEVELOPER_MODE] ?: false,
         appearanceMode = preferences[APPEARANCE_MODE] ?: "DARK",
         accentPalette = preferences[ACCENT_PALETTE] ?: "CORAL",
         libraryRootTreeUri = preferences[LIBRARY_ROOT_TREE_URI],
@@ -317,6 +321,7 @@ class DataStoreNonSecretSettingsStore(
         val STREAM_SERVICE_BASE_URL = stringPreferencesKey("stream_service_base_url")
         val SYNC_ON_METERED_NETWORK = booleanPreferencesKey("sync_on_metered_network")
         val APP_LANGUAGE = stringPreferencesKey("app_language")
+        val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
         val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
         val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
         val LIBRARY_ROOT_TREE_URI = stringPreferencesKey("library_root_tree_uri")

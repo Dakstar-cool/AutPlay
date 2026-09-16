@@ -55,6 +55,85 @@ class SyncCoordinatorAcceptanceTest {
     private val binding = ClientEventBinding(UserId("33333333-3333-4333-8333-333333333333"), DeviceId("44444444-4444-4444-8444-444444444444"), profile, LocalId("55555555-5555-4555-8555-555555555555"))
     @After fun close() = db.close()
 
+    @Test fun openStatusUpdatesForBindingBootstrapFailureAndSuccess() = runBlocking {
+        val updates = kotlinx.coroutines.channels.Channel<SyncStatus>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val collector = launch { SyncStatusRepository(db).observe(binding).collect { updates.send(it) } }
+        suspend fun nextMatching(predicate: (SyncStatus) -> Boolean): SyncStatus = kotlinx.coroutines.withTimeout(5_000) {
+            suspend fun next(): SyncStatus = updates.receive().also {
+                assertFalse(it.lastErrorCode == "OTHER_PROFILE_ERROR" || it.lastSuccessAtMs == 999L)
+            }
+            var status = next()
+            while (!predicate(status)) status = next()
+            status
+        }
+        try {
+            nextMatching { it.bootstrapState == "NOT_BOUND" }
+            seed(profile, "cursor-a")
+            nextMatching { it.bootstrapState == "READY" }
+            val cursor = requireNotNull(db.syncDao().cursor(profile.value))
+            db.syncDao().upsertCursor(cursor.copy(bootstrapState = "RESET_REQUIRED"))
+            nextMatching { it.bootstrapState == "RESET_REQUIRED" }
+            db.syncDao().upsertRuntimeStatus(app.autplay.data.local.entity.SyncRuntimeStatusEntity(
+                profile.value, "NETWORK_UNAVAILABLE", 10, null))
+            nextMatching { it.lastErrorCode == "NETWORK_UNAVAILABLE" }
+            db.syncDao().upsertRuntimeStatus(app.autplay.data.local.entity.SyncRuntimeStatusEntity(
+                otherProfile.value, "OTHER_PROFILE_ERROR", 20, 999))
+            db.syncDao().upsertRuntimeStatus(app.autplay.data.local.entity.SyncRuntimeStatusEntity(
+                profile.value, null, 30, 30))
+            val success = nextMatching { it.lastSuccessAtMs == 30L }
+            assertEquals(null, success.lastErrorCode)
+            assertEquals(0, success.pending)
+        } finally { collector.cancelAndJoin(); updates.close() }
+    }
+
+    @Test fun bindRecoversOnlyResetDeadLettersWithoutChangingIdentity() = runBlocking {
+        seed(profile, "cursor-a")
+        val recoverable = pending(1).copy(state = "DEAD_LETTER", lastErrorCode = "JOURNAL_RESET_REQUIRED")
+        val unrelated = pending(2).copy(state = "DEAD_LETTER", lastErrorCode = "NETWORK_UNAVAILABLE")
+        db.journalDao().insert(recoverable)
+        db.journalDao().insert(unrelated)
+        var bound = false
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun bind(binding: ClientEventBinding) { bound = true }
+            override suspend fun push(binding: ClientEventBinding, events: List<OfflineJournalEventEntity>): List<SyncAck> {
+                org.junit.Assert.assertTrue(bound)
+                assertEquals(listOf(recoverable.eventId), events.map { it.eventId })
+                org.junit.Assert.assertArrayEquals(recoverable.requestHash, events.single().requestHash)
+                assertEquals(recoverable.payloadJson, events.single().payloadJson)
+                assertEquals(recoverable.deviceSequence, events.single().deviceSequence)
+                return emptyList()
+            }
+        }
+        SyncCoordinator(db, transport).run(binding)
+        assertEquals("PENDING", db.journalDao().event(recoverable.eventId)?.state)
+        assertEquals("DEAD_LETTER", db.journalDao().event(unrelated.eventId)?.state)
+    }
+
+    @Test fun failedBindingPreservesDeadLettersAndNeverPushes() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1).copy(state = "DEAD_LETTER", lastErrorCode = "JOURNAL_RESET_REQUIRED")
+        db.journalDao().insert(event)
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun bind(binding: ClientEventBinding) { error("SYNC_BINDING_MISMATCH") }
+            override suspend fun push(binding: ClientEventBinding, events: List<OfflineJournalEventEntity>): List<SyncAck> = error("MUST_NOT_PUSH")
+        }
+        assertEquals("SYNC_BINDING_MISMATCH", runCatching { SyncCoordinator(db, transport).run(binding) }.exceptionOrNull()?.message)
+        assertEquals("DEAD_LETTER", db.journalDao().event(event.eventId)?.state)
+        org.junit.Assert.assertArrayEquals(event.requestHash, db.journalDao().event(event.eventId)?.requestHash)
+    }
+
+    @Test fun resetAcknowledgementPreservesPendingIntent() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1)
+        db.journalDao().insert(event)
+        val transport = FakeTransport(acks = listOf(SyncAck(event.eventId, "REJECTED", errorCode = "JOURNAL_RESET_REQUIRED")))
+        assertEquals("JOURNAL_RESET_REQUIRED", runCatching { SyncCoordinator(db, transport).run(binding) }.exceptionOrNull()?.message)
+        val saved = db.journalDao().event(event.eventId)!!
+        assertEquals("PENDING", saved.state)
+        assertEquals(event.attemptCount, saved.attemptCount)
+        org.junit.Assert.assertArrayEquals(event.requestHash, saved.requestHash)
+    }
+
     @Test fun unknownPageIsDeferredWithoutCursorAdvance() = runBlocking {
         seed(profile, "cursor-a")
         val coordinator = SyncCoordinator(db, FakeTransport(pull = PullPage("cursor-b", false, listOf(RemoteEvent("66666666-6666-4666-8666-666666666666", 1, "FUTURE_EVENT", 99, "{}")))))
@@ -116,6 +195,30 @@ class SyncCoordinatorAcceptanceTest {
             assertEquals("ACKED", persisted.state)
             org.junit.Assert.assertArrayEquals(original.requestHash, persisted.requestHash)
         }
+    }
+
+    @Test fun replacementCannotFinishWhilePreviousWorkerStillOwnsALease() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1).copy(aggregateType = "LISTENING_EVENT", eventType = "LISTENING_EVENT_RECORDED",
+            state = "SENDING", attemptCount = 1, leaseToken = "previous-worker", leaseExpiresAtMs = 10_000)
+        db.journalDao().insert(event)
+        val transport = FakeTransport(acks = listOf(SyncAck(event.eventId, "APPLIED",
+            aggregateType = event.aggregateType, aggregateLocalId = event.aggregateLocalId,
+            aggregateServerId = event.eventId, serverRowVersion = 1)))
+        val coordinator = SyncCoordinator(db, transport, nowMs = { 1_000 })
+        assertFalse(coordinator.run(binding))
+        val sending = requireNotNull(db.journalDao().event(event.eventId))
+        assertEquals("SENDING", sending.state)
+        assertEquals(1, sending.attemptCount)
+        assertEquals("previous-worker", sending.leaseToken)
+        assertEquals(0, transport.sent.size)
+        assertEquals("PUSH_DRAIN_PENDING", db.syncDao().runtimeStatus(profile.value)?.lastErrorCode)
+        db.journalDao().releaseCancelledLease(event.journalLineageId, "previous-worker")
+        assertEquals(true, coordinator.run(binding))
+        val acknowledged = requireNotNull(db.journalDao().event(event.eventId))
+        assertEquals("ACKED", acknowledged.state)
+        org.junit.Assert.assertArrayEquals(event.requestHash, acknowledged.requestHash)
+        assertEquals(listOf(event.eventId), transport.sent.map { it.eventId })
     }
 
     @Test fun cancelledPushReleasesLeaseWithoutSpendingRetryBudgetOrChangingIdentity() = runBlocking {
@@ -516,6 +619,84 @@ class SyncCoordinatorAcceptanceTest {
         }
     }
 
+    @Test fun syncedMetadataMaintainsSearchAndDistinguishesNullFromMissing() = runBlocking {
+        seed(profile, "before")
+        val serverId = "aaaaaaaa-0000-4000-8000-000000000001"
+        var sequence = 0L
+        suspend fun apply(payload: String, type: String = "USER_TRACK_REF_PATCHED", operation: String = "UPSERT") {
+            sequence++
+            val event = RemoteEvent(UUID.randomUUID().toString(), sequence, type, 1, payload, "USER_TRACK_REF", serverId, sequence, operation)
+            assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("cursor-$sequence", false, listOf(event)))).run(binding))
+        }
+        apply("""{"title":"Before","artist":"Artist","album":"Album"}""")
+        val search = LocalTrackSearchRepository(db)
+        val track = db.libraryDao().trackRefByServerId(profile.value, serverId)!!
+        assertEquals(listOf(track.localUserTrackRefId), search.search("Before", profile.value).map { it.localUserTrackRefId })
+        assertEquals(0, search.search("Before", otherProfile.value).size)
+        val content = db.searchDao().contentForTrack(track.localUserTrackRefId)!!
+        db.searchDao().updateContent(content.copy(aliases = "Nickname", transliterations = "Alias"))
+        apply("""{"title":"After","album":null}""")
+        val updated = db.libraryDao().trackRef(track.localUserTrackRefId)!!
+        assertEquals("Artist", updated.rawArtist)
+        assertEquals(null, updated.rawAlbum)
+        assertEquals(0, search.search("Before", profile.value).size)
+        assertEquals(1, search.search("After", profile.value).size)
+        assertEquals(1, search.search("Nickname", profile.value).size)
+        assertEquals(content.rowId, db.searchDao().contentForTrack(track.localUserTrackRefId)?.rowId)
+        apply("""{"title":null,"artist":null,"album":"null"}""")
+        val cleared = db.libraryDao().trackRef(track.localUserTrackRefId)!!
+        assertEquals(null, cleared.rawTitle)
+        assertEquals(null, cleared.rawArtist)
+        assertEquals("null", cleared.rawAlbum)
+        apply("{}", "AGGREGATE_DELETED", "DELETE")
+        assertEquals(0, search.search("Nickname", profile.value).size)
+    }
+
+    @Test fun authoritativeBootstrapRepairsOldNullTextAndPreservesLiteralText() = runBlocking {
+        seed(profile, "before")
+        val serverId = "aaaaaaaa-0000-4000-8000-000000000003"
+        val original = RemoteEvent(UUID.randomUUID().toString(), 1, "USER_TRACK_REF_PATCHED", 1,
+            """{"title":"Title","artist":"Artist","album":"null"}""", "USER_TRACK_REF", serverId, 1)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("old", false, listOf(original)))).run(binding))
+        db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(bootstrapState = "RESET_REQUIRED"))
+        val snapshotEvent = original.copy(eventId = UUID.randomUUID().toString(), sequence = 0,
+            payloadJson = """{"title":"Title","artist":"null","album":null}""")
+        val page = BootstrapPage(UUID.randomUUID().toString(), null, "repaired", false, listOf(snapshotEvent))
+        assertEquals(true, SyncCoordinator(db, FakeTransport(bootstrapPages = listOf(page))).run(binding))
+        val repaired = db.libraryDao().trackRefByServerId(profile.value, serverId)!!
+        assertEquals(null, repaired.rawAlbum)
+        assertEquals("null", repaired.rawArtist)
+        assertEquals(1L, repaired.serverRowVersion)
+        assertEquals(null, db.searchDao().contentForTrack(repaired.localUserTrackRefId)?.album)
+    }
+
+    @Test fun playlistDescriptionCanBeClearedWithoutClearingMissingFields() = runBlocking {
+        seed(profile, "before")
+        val id = "aaaaaaaa-0000-4000-8000-000000000004"
+        val original = RemoteEvent(UUID.randomUUID().toString(), 1, "PLAYLIST_CREATED", 1,
+            """{"name":"Playlist","description":"Details"}""", "PLAYLIST", id, 1)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("one", false, listOf(original)))).run(binding))
+        val patch = original.copy(eventId = UUID.randomUUID().toString(), sequence = 2, eventType = "PLAYLIST_METADATA_PATCHED",
+            payloadJson = """{"description":null}""", serverRowVersion = 2)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("two", false, listOf(patch)))).run(binding))
+        val playlist = db.playlistDao().playlistByServerId(profile.value, id)!!
+        assertEquals("Playlist", playlist.name)
+        assertEquals(null, playlist.description)
+    }
+
+    @Test fun invalidTextRollsBackTheWholePageIncludingSearchAndCursor() = runBlocking {
+        seed(profile, "before")
+        val serverId = "aaaaaaaa-0000-4000-8000-000000000002"
+        val first = RemoteEvent(UUID.randomUUID().toString(), 1, "USER_TRACK_REF_PATCHED", 1,
+            """{"title":"Rollback","artist":"Artist"}""", "USER_TRACK_REF", serverId, 1)
+        val second = first.copy(eventId = UUID.randomUUID().toString(), sequence = 2, serverRowVersion = 2,
+            payloadJson = """{"album":["invalid"]}""")
+        runCatching { SyncCoordinator(db, FakeTransport(pull = PullPage("bad", false, listOf(first, second)))).run(binding) }
+        assertEquals("before", db.syncDao().cursor(profile.value)?.opaqueCursor)
+        assertEquals(null, db.libraryDao().trackRefByServerId(profile.value, serverId))
+        assertEquals(0, LocalTrackSearchRepository(db).search("Rollback", profile.value).size)
+    }
+
     private suspend fun seed(id: ServerProfileId, cursor: String) {
         val lineage = JournalLineageEntity("77777777-7777-4777-8777-777777777777", binding.userId.value, binding.deviceId.value, binding.journalEpoch!!.value, 1, 1)
         if (db.journalDao().lineageById(lineage.lineageId) == null) db.journalDao().insertLineage(lineage)
@@ -588,6 +769,7 @@ class SyncCoordinatorAcceptanceTest {
     }
 
     private class AckLosingTransport(private val delegate: SyncTransport) : SyncTransport {
+        override suspend fun bind(binding: ClientEventBinding) = delegate.bind(binding)
         private var loseFirstAck = true
         var serverAggregateId: String? = null
             private set
@@ -617,6 +799,7 @@ class SyncCoordinatorAcceptanceTest {
     }
 
     private class CrashAfterCommitRelay : SyncTransport {
+        override suspend fun bind(binding: ClientEventBinding) = Unit
         val serverAggregateId = "20000000-0000-4000-8000-000000000001"
         private val accepted = linkedMapOf<String, AcceptedEvent>()
         private var loseFirstAck = true
@@ -695,6 +878,7 @@ class SyncCoordinatorAcceptanceTest {
         private val bootstrapPages: List<BootstrapPage> = emptyList(),
         private val throwSessionRequired: Boolean = false,
     ) : SyncTransport {
+        override suspend fun bind(binding: ClientEventBinding) = Unit
         val sent = mutableListOf<app.autplay.data.local.entity.OfflineJournalEventEntity>()
         val sentBatchSizes = mutableListOf<Int>()
         override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {

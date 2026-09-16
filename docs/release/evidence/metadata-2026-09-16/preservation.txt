@@ -1,0 +1,5 @@
+{"metadata_tables": ["android_metadata", "track_metadata_projection", "metadata_artwork_cache"], "history_tables": ["listening_event"], "user_ref_tables": ["user_track_ref"]}
+{"table": "user_track_ref", "before": 3113, "after": 3115, "missing_ids": 0}
+{"table": "listening_event", "before": 28, "after": 32, "missing_ids": 0}
+{"original_audio_hashes": 0, "changed_or_missing_audio_hashes": 0}
+{"phone_metadata_rows": 1001, "phone_cached_artwork": 173}

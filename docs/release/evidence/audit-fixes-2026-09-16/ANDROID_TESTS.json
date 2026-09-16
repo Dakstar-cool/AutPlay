@@ -1,0 +1,1215 @@
+{
+  "registered": 241,
+  "passed": 238,
+  "assumption_skipped": 3,
+  "failed": 0,
+  "provisioning_opt_in_noop": 1,
+  "apk_sha256": "8445d5b13d0aa9bf600c72aad2867e3b55e7b4f2169d986090970fc5cfc16765",
+  "cases": [
+    {
+      "class": "app.autplay.HomeRecommendationScreenTest",
+      "test": "activeOwnerSwitchClearsPreviousHomeFeedBeforeRenderingNewOwner",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.HomeRecommendationScreenTest",
+      "test": "profileHomeShowsRelevantReleaseAndOfflineRecommendationWithoutDuplicateImpression",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.LanguageRegressionTest",
+      "test": "languageSwitchRecreationAndColdActivityLaunchRetainAllOwners",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.LocalServerProvisioningTest",
+      "test": "provisionTrustedLocalServerOnlyWhenExplicitlyEnabled",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.OfflineLibraryScreenTest",
+      "test": "freshLaunchWithoutServerConfigurationPersistsStandaloneChangeAcrossRecreation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.OfflineLibraryScreenTest",
+      "test": "completedLocalSearchRestoresResultsAfterActivityRecreation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.OfflineLibraryScreenTest",
+      "test": "offlineCommandRemainsVisibleAfterActivityRecreation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.OfflineLibraryScreenTest",
+      "test": "importScreenExplainsAmbiguousCandidatesAndAppliesManualAccept",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.history.HistoryRepositoryTest",
+      "test": "keysetPagesAreBoundedStableAndKeepDuplicateListens",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "reviewFailureRollsBackDecisionProjectionAndStandaloneOutbox",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "identicalVerifiedBytesFromDistinctUrisPreserveBothSourceIntents",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "duplicateRowsRetryAndManualAcceptSurviveOfflineRestart",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "recoverableProviderIoFailurePersistsUnavailableUriIntent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "hardConflictAllowsOnlyKeepUnresolvedAndRetainsMissingSafIntent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "shadowRescoreNeverAdvancesAppliedProjectionAndStartsSeparateLineageAfterReject",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "createRecordingFromNoMatchIsManualLocalProjectionWithoutGlobalMerge",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.importing.LocalImportReviewRepositoryTest",
+      "test": "pausedAndCancelledJobsCannotBeResurrectedByEntryMutations",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "offlineRemoveAndRestoreCommitAsDistinctAtomicIntents",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "everyP07AggregateUsesTheSharedRollbackBoundary",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "coreProductDetailsRejectForeignProfileTargets",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "duplicatePlaylistEntriesRemainDistinctAcrossReorder",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "listeningUsesTheSameSpecializedAggregateAndEventId",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "revokedContentPermissionIsARepairableState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "organicAndAttributedOwningEventsRemainDistinctAfterRestart",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "largeSearchAndPlaylistQueriesMeetApi26Baseline",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "standaloneMutationRollsBackAggregateAndOutboxOnInjectedFailure",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "playbackFeedbackPreservesExclusionInBothRowAndImmutableIntent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "boundPreferenceProducesOneJournalEventAndNoDuplicateInteractionFact",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "importedUriCreatesUnresolvedIntentAndIsSearchable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "coreProductListProjectionsAreOwnerScopedAndPresentationSafe",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "boundMutationsRejectForeignProfileAggregatesWithoutJournalWrites",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.library.LibraryVerticalSliceRepositoryTest",
+      "test": "downloadPresentationAndOfflineIdsAreProfileScoped",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "startupRecoveryFinalizesInactiveSessionAfterQueueReplacementCrashWindow",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "pausedSelectionPersistsExactEntryWithoutInventingListeningSession",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "tasteExclusionSurvivesRestartAndSessionFlagAppliesToLaterListen",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "replacedQueueFinalizesAgainstCapturedOwnerAndOriginalSnapshot",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "delayedSessionStartCannotMutateAReplacementQueue",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "shutdownCheckpointCannotResurrectFinalizedOrReplaceNewSession",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "queueCanStartFromSelectedDuplicateOccurrenceWithoutChangingOrder",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.PlaybackPersistenceRepositoryTest",
+      "test": "repeatedTrackQueueAndAttributionSessionRestoreFinalizeExactlyOnce",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.QueueEditorRepositoryTest",
+      "test": "createsQueueAndPreservesDuplicateStableEntriesAcrossPromotionAndReopen",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.QueueEditorRepositoryTest",
+      "test": "duplicateAttributedEntriesSurviveMoveRemoveClearAndReopenInEditedOrder",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.playback.QueueEditorRepositoryTest",
+      "test": "addNextPromotesSearchAndRejectsCurrentPastWaveProfileStaleAndLimit",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "relevantArtistReleaseDoesNotRequireOwningItsTracksAndRemainsProfileScoped",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "temporalDeltaSurvivesRestartCreatesImpressionOnlyOnVisibilityAndPurgesOnUnbind",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "mockedProductionTransportRefreshesAndStoresVerifiedPack",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "samePresentationRecompositionAndRestartReuseFirstStableEventId",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "ownerIsolationAndLocallyAvailablePackMappingFailClosed",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "refreshRevalidatesBindingBeforeCommittingDownloadedPack",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "expiredDeltaFallsBackWithoutChangingExistingPresentationAttribution",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.recommendation.OfflineRecommendationRepositoryTest",
+      "test": "mappingAndJournalRollBackTogetherWhenJournalStepFails",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.statistics.ProfileStatisticsRepositoryTest",
+      "test": "ownerStatisticsAreProfileScopedBoundedAndIncludeTasteExcludedEvents",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.statistics.ProfileStatisticsRepositoryTest",
+      "test": "defaultRepositoryRecomputesThroughCutoffAfterListeningEventInvalidation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.statistics.ProfileStatisticsRepositoryTest",
+      "test": "ownerStatisticsRefreshForListeningEventsAndLocalDayRolloverWhileObserved",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "ftsSearchIsProfileScopedAndStandaloneIsExplicitlyLegacyOnly",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "invalidCursorPreservesPendingJournalAndRequestsReset",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "artistCreditMemberBoundaryAcceptsOneThousandAndRejectsOverflowAtomically",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "duplicateOriginalConflictLeavesJournalRecoverable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "malformedAppliedAckIsRetriedBeforeAnyProfileOrVersionMutation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "backlogDrainsInBoundedHundredEventBatchesAndSignalsRetry",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "catalogArtistReplayAndStaleVersionCannotReplaceNewerIdentity",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "invalidTextRollsBackTheWholePageIncludingSearchAndCursor",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "openStatusUpdatesForBindingBootstrapFailureAndSuccess",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "pagedOwnerScopeStaysHiddenUntilItsFinalBoundedPage",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "serverFormatArtistBootstrapAndPullReachTypedOwnedPort",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "cancelledPushReleasesLeaseWithoutSpendingRetryBudgetOrChangingIdentity",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "replacementCannotFinishWhilePreviousWorkerStillOwnsALease",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "profileStateIsIsolated",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "offlineRoomJournalSurvivesProcessDeathAndProjectsExactlyOnceToSecondDevice",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "playlistDescriptionCanBeClearedWithoutClearingMissingFields",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "reorderedPageRollsBackCursor",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "bootstrapDeleteWithoutLiveParentsPersistsTombstonesAndRecordingRedirect",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "bootstrapCutsOverOnlyOnFinalPageAndKeepsPendingJournal",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "sessionRequiredReleasesJournalWithoutConsumingRetryBudget",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "validAcknowledgementsDrain101EventsWithOriginalIdentitiesAndHashes",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "unknownPageIsDeferredWithoutCursorAdvance",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "authoritativeBootstrapRepairsOldNullTextAndPreservesLiteralText",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "sameServerAggregateIdMaterializesSeparatelyPerProfile",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "syncedMetadataMaintainsSearchAndDistinguishesNullFromMissing",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.sync.SyncCoordinatorAcceptanceTest",
+      "test": "dirtyRemoteDeleteCreatesConflictWithoutOverwrite",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.wave.WaveCoordinatorHostTransferTest",
+      "test": "serverRejectionDoesNotApplyMemberSnapshotOrChangeRole",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.wave.WaveCoordinatorHostTransferTest",
+      "test": "successfulTransferUsesFreshSnapshotBeforeChangingRole",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.application.wave.WaveCoordinatorHostTransferTest",
+      "test": "staleTargetIsRejectedBeforeTransportAndKeepsHostState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AndroidUiParityRoomMigrationTest",
+      "test": "migration14To15PreservesQueueAndAddsIndependentTasteFlags",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.ArtistIdProjectionTest",
+      "test": "typedPortKeepsSameNamesDistinctAndBuildsOnlyOwnerVisibleLocalTargets",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.ArtistIdProjectionTest",
+      "test": "distinctNamesOrderedUnknownMembersEmptyAndLinksRemainProfileScoped",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.ArtistIdRoomMigrationTest",
+      "test": "migration11To12PreservesExistingServerFeatureProjection",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "standaloneFailureRollsBackDomainSearchAndOutbox",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "duplicatePlaylistTrackIsAllowedButActiveOrderIsUnique",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "freshStandaloneCommandCommitsDomainAndOutboxAcrossRestart",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "compositeForeignKeysRejectEventAndCursorBindingMismatch",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "ftsRowIdsAreAllocatedWithoutUuidDerivedCollisions",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "tenThousandRowLibraryFixtureUsesBoundedDaoReads",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "materializationFailureRollsBackEventCounterDomainAndLinkThenRetryUsesSequenceOne",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "failureBetweenDomainWritesAndJournalRollsBackEverything",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "unsafeAndUnknownOutboxPayloadsRemainPreservedAndCannotMaterialize",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "ftsExternalContentTracksInsertUpdateDeleteRebuildAndHostileInput",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "expiredJournalLeaseRecoversWithoutChangingIdentityOrHash",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "unknownStringAndMissingUriStateRoundTripWithoutDeletion",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "differentDevicesHaveIndependentSequenceOneAndSameDeviceEpochMismatchFailsClosed",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "freshOpenCommandCommitAndRestartPreserveDomainAndJournal",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "materializationIsAtomicIdempotentAndUsesImmutableStoredPayload",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "onlyOneQueueSnapshotCanOwnTheActiveSlot",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "bundledDriverSupportsWalForeignKeysAndFts5OnMinimumSdk",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.AutPlayDatabaseTest",
+      "test": "recreatedProfilesShareOneDeviceLineageAndMonotonicSequence",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.GuestRoomMigrationTest",
+      "test": "migration12To13PreservesExistingWaveAndStoresNoGuestBearerColumn",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P08RoomMigrationTest",
+      "test": "v1ToV2PreservesQueueAndAddsNullablePlaybackState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P09RoomMigrationTest",
+      "test": "v2ToV7PreservesPendingJournalAndAddsProfileState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P09RoomMigrationTest",
+      "test": "v6ToV7PreservesLegacyProjectionRowsAndReplacesGlobalServerIdentity",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P10RoomMigrationTest",
+      "test": "v7ToV8PreservesP09JournalProfileTombstoneAndConflictRows",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P11RoomMigrationTest",
+      "test": "v8ToV9PreservesLegacyPackAndAddsOwnerScopedPresentationMapping",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P11RoomMigrationTest",
+      "test": "freshV9CreatesBothRecommendationTables",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P13RoomMigrationTest",
+      "test": "v11ServerFeatureProjectionDaoRoundTripsMetadataOnlyRows",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P13RoomMigrationTest",
+      "test": "v9ToV10PreservesQueueAndCreatesWaveTables",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.P13RoomMigrationTest",
+      "test": "v10ToV11PreservesWaveAndCreatesServerFeatureMetadataTables",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.R1BRoomMigrationTest",
+      "test": "migration13To14PreservesP11RowsAndAddsCascadingDeltaTable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.local.SearchRepairMigrationTest",
+      "test": "repairsDerivedIndexWithoutRewritingUserDataOrUnknownStates",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.security.M5DeviceKeyStoreTest",
+      "test": "api26KeyIsNonExportableAndSignsFixedWidthP1363Proof",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.data.settings.DataStoreDeveloperModeDeviceTest",
+      "test": "developerModeDefaultsOffAndSurvivesRecreationAndUnrelatedUpdates",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.domain.wave.P13WaveRuntimeTest",
+      "test": "threeDeviceSessionsConvergeAcrossLocalDownloadAndVaultSources",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.domain.wave.P13WaveRuntimeTest",
+      "test": "unavailableAndHighLatencySessionsFailClosed",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.download.Media3DownloadRuntimeTest",
+      "test": "interruptedProgressiveDownloadResumesFromCachedRangeAndCompletes",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.download.Media3DownloadRuntimeTest",
+      "test": "productionDownloadRuntimeIsSingletonAndBackgroundServiceIsRegistered",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.download.Media3DownloadRuntimeTest",
+      "test": "realDownloadServiceReconcilesCompletionAfterServiceRecreation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.AndroidPlaybackSourceResolverTest",
+      "test": "serverOnlyTrackResolvesCanonicalVariantAtPlaybackTime",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.AndroidPlaybackSourceResolverTest",
+      "test": "revokedUriFallsBackToStableVaultReferenceWithoutDeletingTrack",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.AndroidPlaybackSourceResolverTest",
+      "test": "slowProviderKeepsMainResponsiveAndReceivesCancellationWithoutPersistingMissing",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.AndroidPlaybackSourceResolverTest",
+      "test": "readableLocalWinsBeforeConfiguredVault",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.AndroidPlaybackSourceResolverTest",
+      "test": "slowProviderTimeoutIsTransientAndCancelsBinderProbe",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.Media3PlaybackDeviceTest",
+      "test": "unresolvedNextDoesNotFailCurrentAndCanBeReplacedDuringPlayback",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.Media3PlaybackDeviceTest",
+      "test": "media3PreparesAndPlaysReadableLocalAudio",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.Media3PlaybackDeviceTest",
+      "test": "reactiveRendererProjectsDecodedPcmWithoutAudioCapturePermission",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.Media3PlaybackDeviceTest",
+      "test": "media3PreparesVaultAudioThroughStableReferenceAndAuthorizedOpen",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.Media3PlaybackDeviceTest",
+      "test": "pauseAtEndStopsAtArmedItemBoundaryBeforeSuccessorPlayback",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.Media3PlaybackDeviceTest",
+      "test": "untrustedExternalControllerIsRejectedBySessionPolicy",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.PlaybackServiceLifecycleTest",
+      "test": "blockedRemoteNextNeverDelaysCurrentAndCannotEnterReplacementQueue",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.PlaybackServiceLifecycleTest",
+      "test": "nextDuringSlowInitialProbeBecomesPlayableAndDestroyCancelsBinder",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.PlaybackServiceLifecycleTest",
+      "test": "missingNextHasExplicitTerminalStateWithoutBufferingForever",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.PlaybackServiceLifecycleTest",
+      "test": "destroyWithHeldRoomWriterKeepsMainResponsiveAndOrdersSuccessorRestore",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.playback.PlaybackServiceProcessStageTest",
+      "test": "stage1_seedServiceAndWaitForPeriodicCheckpoint",
+      "code": -4
+    },
+    {
+      "class": "app.autplay.playback.PlaybackServiceProcessStageTest",
+      "test": "stage2_verifyServiceRestoresPersistedQueueAfterFreshConnection",
+      "code": -4
+    },
+    {
+      "class": "app.autplay.playback.VaultPlaybackDataSourceTest",
+      "test": "rejectedGenerationRefreshesOnceAndNeverPlacesTokenInUri",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.profilepairing.M5bProfilePairingE2eTest",
+      "test": "enrollsCapabilitiesSyncsAndRevokesWithoutSecretInstrumentationArguments",
+      "code": -4
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "searchRestoresStableRowAnchorAfterRowsReload",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "artistDetailLinksCanonicalMemberAndOwnerVisibleRelease",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "searchFailureIsTruthfulAndRetryable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "directNowPlayingWithoutBackStackDoesNotExposeADeadBackAction",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "completedEmptyVaultSearchHasItsOwnEmptyState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "vaultRowsShowMetadataAndOnlyPlayableRowInvokesPlayback",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "bottomHomePlaybackAppearsWhenPlaybackStartsAfterScrolling",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "compactNavigationRoutesEveryPrimaryActionToContent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "homeFailureIsTruthfulAndRetryable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "currentTrackFeedbackRemainsReachableAt320Dp",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "vaultFailureDoesNotReplaceLocalSearchRows",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "libraryRestoresStableRowAnchorAfterRowsReload",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "activeHomePlaybackRemainsReachableAfterHeroScrollsAway",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "artistBrowseKeepsSameNamesAsSeparateCanonicalTargets",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "homeLocalSectionsRemainPresentWhenRecommendationsFail",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "mediumLibrarySelectionOpensFullPageDetail",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AdaptiveShellTest",
+      "test": "libraryFailureRemainsVisibleWithLocalContent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AuditUiRegressionTest",
+      "test": "failuresAreVisibleAndDismissibleOnPlayerAndDownloads",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AuditUiRegressionTest",
+      "test": "libraryLikedTrackCanBeUnlikedAndLikedAgain",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AuditUiRegressionTest",
+      "test": "failureArrivingWithNavigationSurvivesTheNextFrame",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.AuditUiRegressionTest",
+      "test": "detailLikedTrackCanBeUnlikedAndLikedAgain",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.DiscoveryAutomationPanelTest",
+      "test": "unresolvedOperationSurvivesSavedStateRestoration",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.DiscoveryAutomationPanelTest",
+      "test": "changingArtistClearsProviderMappingAndReturnsToSafeModes",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.DiscoveryAutomationPanelTest",
+      "test": "policyEditorStaysLockedUntilAuthoritativeSnapshotLoads",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.DiscoveryAutomationPanelTest",
+      "test": "autoImportIsNotSubmittedUntilTheConsequenceIsConfirmed",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.DiscoveryAutomationPanelTest",
+      "test": "unknownPolicyModesCannotBeOverwrittenByKnownEditorControls",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeInteractionTest",
+      "test": "headerAndBottomPlayerStayInPlaceAfterScrollingAndLikeCanBeRemoved",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeInteractionTest",
+      "test": "horizontalSwipesSwitchDirectionAndVerticalScrollDoesNotSkip",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomePlaybackHeroTest",
+      "test": "restoredPlaybackWithoutLocalTrackMappingStillOpensAndToggles",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomePlaybackHeroTest",
+      "test": "fallbackHeroKeepsItsArtworkDecorativeInsteadOfClaimingPausedPlayback",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomePlaybackHeroTest",
+      "test": "lockedPlaybackKeepsDirectPauseDisabled",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomePlaybackHeroTest",
+      "test": "resumableFallbackStartsItsTrackBeforeAPlayerExists",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomePlaybackHeroTest",
+      "test": "russianHeroStacksHeaderAndActionAtTwoHundredPercentFontScale",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomePlaybackHeroTest",
+      "test": "activeHeroKeepsPlayerTransportArtworkAndLikeInteractiveAtCompactWidth",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "missingNeighborAndLockedControlsDoNotSkip",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "aShortGestureDuringTheReturnAnimationDoesNotInheritThePreviousTravel",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "adjacentCoverEntersFromEachSideAndCommitsExactlyOnce",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "movingTheFingerDoesNotRecomposeTheScreenEveryFrame",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "systemReducedMotionStillSwitchesWithoutMovingTheCover",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "shortDiagonalVerticalAndCancelledGesturesDoNotSkip",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "aPendingPlaybackCommandCannotBeSentTwice",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.HomeSwipeAnimationTest",
+      "test": "changingTheQueueOrCurrentTrackCancelsAnUncommittedGesture",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.LegacyImportRouteTest",
+      "test": "pausedJobShowsResumeAndConfirmedCancelWithoutDuplicateSubmission",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.LegacyImportRouteTest",
+      "test": "cancellationRequiresExplicitConfirmation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.ServerFeaturesScreenTest",
+      "test": "candidateAcceptanceIsAbsentWhenServerDoesNotExposeEvidence",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.ServerFeaturesScreenTest",
+      "test": "searchAndRecommendationRowsExposeAuthoritativeReplayWithTruthfulLabel",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.WaveHostTransferControlsTest",
+      "test": "rejectedTransferReportsSafeErrorWithoutOptimisticRoleChange",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.WaveHostTransferControlsTest",
+      "test": "memberDoesNotSeeHostTransferAction",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.WaveHostTransferControlsTest",
+      "test": "hostConfirmsNamedTargetAndRoleChangesOnlyFromAuthoritativeState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.WelcomeOnboardingScreenTest",
+      "test": "educationEndsWithOptionalServerChoice",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.downloads.DownloadsScreenTest",
+      "test": "allCoarseStatesRenderTogetherAndActionsUseIntentIdentity",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.guestroom.GuestRoomScreenTest",
+      "test": "activeGuestSeesGuestBoundaryAndCanLeave",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.guestroom.GuestRoomScreenTest",
+      "test": "invalidDocumentCannotAttemptRedemption",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.guestroom.GuestRoomScreenTest",
+      "test": "invitationCollectsTrimmedDisplayNameBeforeJoining",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.history.HistoryScreenTest",
+      "test": "duplicateEventsRemainSeparateAndLoadMoreIsActionable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.history.HistoryScreenTest",
+      "test": "emptyHistoryOffersLibraryAction",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "ordinaryMiniPlayerShowsMetadataAndEnabledTransport",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "tasteExclusionControlsExposeIndependentDurableIntents",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "selectedFeedbackCanReturnToNeutralAndTimerUsesMinuteDial",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "fullPlayerUsesActualNeighboursEvenAtLinearQueueBoundary",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "nowPlayingShowsAccessibleResonanceLensWithoutReplacingArtwork",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "resonanceLensKeepsItsRigAspectRatio",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "endedMediaIsIdleRatherThanFalselyPaused",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "waveTimelineAndDirectTransportFailClosed",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.player.PlaybackPlayerSurfacesTest",
+      "test": "timerCanStopAfterCurrentTrack",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.playlist.ManualPlaylistEditorComposeTest",
+      "test": "largePlaylistKeepsLastExactEntryReachable",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.playlist.ManualPlaylistEditorComposeTest",
+      "test": "hubOpensExactExistingPlaylistFromBoundedList",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "authenticatedInvitationManagementUsesBoundedExpiryAndClearsOnCancel",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "enrollmentConfirmationShowsAccountDeviceAndLocalChoiceBeforeExchange",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "connectedLogoutAllRequiresConfirmationAndSuppressesDuplicateAction",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "localDataNeedsExplicitSelectionThenSecondApplyConfirmation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "trustStepShowsNormalizedOriginAndFullIdentityFingerprint",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "localModeKeepsMusicAvailableAndOffersTrustedCheck",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "cancellingLocalDataReviewDoesNotApplyAnyEvent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "pendingLifecycleActionDisablesAllDestructiveControls",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "approvedAdmissionRequiresExplicitAccountConfirmation",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "invitationQrHasOnlyGenericAccessibilitySemantics",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.profilepairing.ProfilePairingScreenTest",
+      "test": "localDataApplyIsSuppressedAfterFirstConfirmationWhilePending",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.settings.DeveloperModeSettingsTest",
+      "test": "developerControlsAppearOnlyAfterExplicitToggleAndDisappearAgain",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.settings.StatisticsPrivacySettingsTest",
+      "test": "standaloneSharingIsUnavailableButExplainsThatOwnerStatisticsStayOffline",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.settings.StatisticsPrivacySettingsTest",
+      "test": "failedOffRemainsVisuallyOnWithAnExplicitError",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.social.SocialPanelTest",
+      "test": "friendStatisticsDenialIsNonDisclosing",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.social.SocialPanelTest",
+      "test": "inviteControlsExposeOnlyAllowedActionsAndTerminalStates",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.social.SocialPanelTest",
+      "test": "presenceIsPrivateByDefaultAndEachOptInIsExplicit",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.social.SocialPanelTest",
+      "test": "friendStatisticsActionShowsVisibleAndUnavailableBoundedStates",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.ui.statistics.ProfileStatisticsCardTest",
+      "test": "ownerCardRendersLocalStatisticsWithoutAnyServerState",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersFenceProfileReplacementBetweenRequestAndRefresh",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersReplayExactPendingRotationAfterTemporaryServerFailure",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersRejectInactiveProfileBeforeHttp",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersUseFreshM5CredentialEnvelope",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersStopAfterTerminalRotationFailure",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersStopAfterRepeatedUnauthorized",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.ServerWorkersAuthenticationTest",
+      "test": "bothWorkersRotateRejectedM5GenerationExactlyOnce",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.SyncWorkerLifecycleTest",
+      "test": "connectedReplacementRetainsAndAcknowledgesInFlightIntent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.SyncWorkerLifecycleTest",
+      "test": "manualRetryReplacesBackoffAndRunsImmediately",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.SyncWorkerLifecycleTest",
+      "test": "historyCommitRetriesSocketFailureAndAutomaticallyAcknowledgesOriginalEvent",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.SyncWorkerLifecycleTest",
+      "test": "historyEnqueuedDuringRunAndAfterCompletionHasDurableSuccessors",
+      "code": 0
+    },
+    {
+      "class": "app.autplay.work.SyncWorkerLifecycleTest",
+      "test": "policyReconciliationCancelsActiveLeaseAndWaitsForRealUnmeteredNetwork",
+      "code": 0
+    }
+  ]
+}

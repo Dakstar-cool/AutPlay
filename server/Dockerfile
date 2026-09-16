@@ -1,3 +1,5 @@
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS music-js
+
 FROM ghcr.io/astral-sh/uv:0.12.3-python3.14-trixie-slim@sha256:93035a1ae478ef905cc75b107bfe1fde62cdebf5b1996206dd4e5089a9f0a6d3 AS media-tools
 
 ADD --checksum=sha256:fc16cd37a70168040bc9ceb45f1d4d1216f5a75bc4c9cf8564bea70ac6a45733 \
@@ -40,6 +42,7 @@ COPY --from=builder --chown=autplay:autplay /opt/autplay /opt/autplay
 COPY --from=media-tools --chown=root:root /opt/chromaprint/fpcalc /usr/local/bin/fpcalc
 COPY --from=ffmpeg-tools --chown=root:root /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=ffmpeg-tools --chown=root:root /ffprobe /usr/local/bin/ffprobe
+COPY --from=music-js --chown=root:root /usr/local/bin/node /usr/local/bin/node
 
 RUN test "$(sha256sum /usr/local/bin/ffmpeg | cut -d ' ' -f 1)" = \
         "7b3fb9508c20166ab3ba236a9585c3e22e903880723c1a6448e69ae6e4cd88d2" \

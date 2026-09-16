@@ -11,6 +11,7 @@ from typing import Any, Final
 
 import uvicorn
 from fastapi import APIRouter, FastAPI, Request
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
@@ -22,8 +23,10 @@ from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.auth import AuthService
 from autplay.application.discovery_automation import DiscoveryAutomationService
 from autplay.application.guest_room import GuestRoomService
+from autplay.application.internet_music import InternetMusicService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
+from autplay.application.track_metadata import TrackMetadataService
 from autplay.application.web_admin import WebAdminService
 from autplay.entrypoints.admin_web_http import (
     AdminCommandsHttp,
@@ -65,6 +68,8 @@ from autplay.entrypoints.discovery_automation_http import create_discovery_autom
 from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
+from autplay.entrypoints.metadata_http import create_metadata_router
+from autplay.entrypoints.music_http import create_music_router
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.entrypoints.public_access_http import (
     build_exact_proxy_source_resolver,
@@ -167,6 +172,21 @@ def create_app(
     app.add_middleware(RequestRuntimeMiddleware, metrics=runtime_metrics)
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
+    api_router.include_router(
+        create_metadata_router(
+            TrackMetadataService(sessionmaker(engine, class_=Session, expire_on_commit=False)),
+            authenticated=bearer_authentication(authentication),
+        )
+    )
+    api_router.include_router(
+        create_music_router(
+            InternetMusicService(
+                sessionmaker(engine, class_=Session, expire_on_commit=False), uploads
+            ),
+            authenticated=bearer_authentication(authentication),
+            internet_enabled=resolved_settings.internet_music_enabled,
+        )
+    )
     api_router.include_router(
         create_profile_pairing_router(
             pairing,

@@ -633,7 +633,10 @@ internal fun localizedAppContext(baseContext: Context, language: AppLanguage): C
     val configuration = Configuration(baseContext.resources.configuration).apply {
         setLocales(LocaleList(locale))
     }
-    return baseContext.createConfigurationContext(configuration)
+    // Keep the Activity in the ContextWrapper chain for Activity Result and other owners.
+    return android.view.ContextThemeWrapper(baseContext, 0).apply {
+        applyOverrideConfiguration(configuration)
+    }
 }
 
 @Composable
@@ -662,10 +665,11 @@ private fun OfflineLibraryScreen(
     initialDestination: UiDestination = UiDestination.Home,
     clearPairingSafeError: () -> Unit,
 ) {
+    val activeProfileId = binding?.serverProfileId?.value
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val ownerProvisioningCoordinator = remember(
-        binding?.serverProfileId?.value,
+        activeProfileId,
         settings.serverBaseUrl,
         context,
     ) {
@@ -731,7 +735,27 @@ private fun OfflineLibraryScreen(
         }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
-    var socialRuntime by remember(binding?.serverProfileId?.value, settings.serverBaseUrl, waveCoordinator) {
+    LaunchedEffect(binding, lifecycleOwner) {
+        val active = binding ?: return@LaunchedEffect
+        val scheduler = AutPlayRuntime.syncScheduler(context)
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                try {
+                    scheduler.enqueueIfIdle(app.autplay.work.DeferredWorkRequest(
+                        app.autplay.work.DeferredWorkKind.SYNC,
+                        app.autplay.work.DeferredWorkSubject.Device(active.deviceId),
+                        active.serverProfileId,
+                    ))
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // Room retains intent and the next bounded foreground tick can retry.
+                }
+                delay(5_000L)
+            }
+        }
+    }
+    var socialRuntime by remember(activeProfileId, settings.serverBaseUrl, waveCoordinator) {
         mutableStateOf<SocialRuntime?>(null)
     }
     LaunchedEffect(binding, settings.serverBaseUrl, waveCoordinator) {
@@ -761,13 +785,13 @@ private fun OfflineLibraryScreen(
     val profileStatisticsRepository = remember(context) {
         ProfileStatisticsRepository(AutPlayRuntime.database(context))
     }
-    val ownerStatistics by remember(profileStatisticsRepository, binding?.serverProfileId?.value) {
-        profileStatisticsRepository.observe(binding?.serverProfileId?.value)
+    val ownerStatistics by remember(profileStatisticsRepository, activeProfileId) {
+        profileStatisticsRepository.observe(activeProfileId)
             .map<OwnerProfileStatistics, OwnerProfileStatistics?> { it }
     }.collectAsState(initial = null)
     val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
-    val libraryEntries by remember(coreProductRepository, binding?.serverProfileId?.value) {
-        coreProductRepository.libraryEntries(binding?.serverProfileId?.value)
+    val libraryEntries by remember(coreProductRepository, activeProfileId) {
+        coreProductRepository.libraryEntries(activeProfileId)
     }.collectAsState(initial = emptyList())
     val activeQueueContextRepository = remember(context, scope) {
         ActiveQueueContextRepository.fromDatabase(AutPlayRuntime.database(context), scope)
@@ -788,14 +812,14 @@ private fun OfflineLibraryScreen(
     val queueEditorRepository = remember(context, playbackOwner) {
         QueueEditorRepository(AutPlayRuntime.database(context), playbackOwner)
     }
-    val queueProjection by remember(queueEditorRepository, binding?.serverProfileId?.value) {
-        queueEditorRepository.observeActive(binding?.serverProfileId?.value)
+    val queueProjection by remember(queueEditorRepository, activeProfileId) {
+        queueEditorRepository.observeActive(activeProfileId)
     }.collectAsState(initial = null)
     val navigation = rememberAutPlayNavigationState(initialDestination)
     val destination = navigation.current
     val historyRepository = remember(context) { HistoryRepository(AutPlayRuntime.database(context)) }
-    var historyState by remember(binding?.serverProfileId?.value) { mutableStateOf(HistoryUiState()) }
-    var historyGeneration by remember(binding?.serverProfileId?.value) { mutableIntStateOf(0) }
+    var historyState by remember(activeProfileId) { mutableStateOf(HistoryUiState()) }
+    var historyGeneration by remember(activeProfileId) { mutableIntStateOf(0) }
     fun requestHistory(reset: Boolean) {
         if (historyState.loadingMore || (historyState.loading && historyState.items.isNotEmpty())) return
         val cursor = if (reset) null else historyState.nextCursor ?: return
@@ -808,7 +832,7 @@ private fun OfflineLibraryScreen(
         }
         scope.launch {
             runCatching {
-                historyRepository.loadPage(binding?.serverProfileId?.value, cursor)
+                historyRepository.loadPage(activeProfileId, cursor)
             }.onSuccess { page ->
                 if (historyGeneration == requestGeneration) {
                     historyState = HistoryUiState(
@@ -826,14 +850,14 @@ private fun OfflineLibraryScreen(
             }
         }
     }
-    LaunchedEffect(destination, binding?.serverProfileId?.value) {
+    LaunchedEffect(destination, activeProfileId) {
         if (destination == UiDestination.History) requestHistory(reset = true)
     }
     LaunchedEffect(destination, socialRuntime) {
         if (destination != UiDestination.Profile) socialRuntime?.clearFriendProfileStatistics()
     }
     val view = legacyView(destination)
-    val coreProductState = rememberCoreProductUiState(binding?.serverProfileId?.value)
+    val coreProductState = rememberCoreProductUiState(activeProfileId)
     val coreActionGate = remember { SingleFlightActionGate() }
     var searchCompleted by rememberSaveable { mutableStateOf(false) }
     var searchSessionId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -847,18 +871,19 @@ private fun OfflineLibraryScreen(
     val searchResultStore = remember { SearchResultStore<LocalTrackSearchResult>() }
     val vaultSearchResultStore = remember { SearchResultStore<VaultSearchResult>() }
     val vaultSearchProjector = remember(context) { VaultSearchProjector(AutPlayRuntime.database(context)) }
-    var stableError by remember { mutableStateOf<String?>(null) }
+    val commandErrorState = app.autplay.ui.rememberCommandErrorState(activeProfileId, destination, coreProductState.selectedDetail)
+    var stableError by commandErrorState
     LaunchedEffect(pairingSafeError) {
         pairingSafeError?.let {
             stableError = it
             clearPairingSafeError()
         }
     }
-    var homeError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
-    var searchError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
-    var libraryError by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
-    var libraryImportInProgress by remember(binding?.serverProfileId?.value) { mutableStateOf(false) }
-    var lastImportedTitle by remember(binding?.serverProfileId?.value) { mutableStateOf<String?>(null) }
+    var homeError by remember(activeProfileId) { mutableStateOf(false) }
+    var searchError by remember(activeProfileId) { mutableStateOf(false) }
+    var libraryError by remember(activeProfileId) { mutableStateOf(false) }
+    var libraryImportInProgress by remember(activeProfileId) { mutableStateOf(false) }
+    var lastImportedTitle by remember(activeProfileId) { mutableStateOf<String?>(null) }
     var homeRetryNonce by remember { mutableStateOf(false) }
     val playbackState by PlaybackRuntimeState.state.collectAsState()
     var selectedImportEntryId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -892,19 +917,19 @@ private fun OfflineLibraryScreen(
     val selectedImportItem = repositorySnapshot.selectedImportItem
     val importCandidates = repositorySnapshot.importCandidates
     var homeFeed by remember(
-        binding?.serverProfileId?.value,
+        activeProfileId,
         binding?.userId?.value,
         binding?.deviceId?.value,
     ) { mutableStateOf<HomeFeed?>(null) }
     val presentationResults = remember(
-        binding?.serverProfileId?.value,
+        activeProfileId,
         binding?.userId?.value,
         binding?.deviceId?.value,
     ) { mutableStateMapOf<String, RecommendationPresentationResult>() }
-    val coreBindingKey = binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID
+    val coreBindingKey = activeProfileId ?: LEGACY_PROFILE_ID
     var playlistMutationNonce by remember(coreBindingKey) { mutableIntStateOf(0) }
     val detailContextKey = "$coreBindingKey:$playlistMutationNonce"
-    val playlistMutationActions = remember(scope, sliceRepository, coreBindingKey) {
+    val playlistMutationActions = remember(scope, sliceRepository, coreBindingKey, commandErrorState) {
         buildManualPlaylistActions(
             scope = scope,
             binding = { binding },
@@ -924,7 +949,7 @@ private fun OfflineLibraryScreen(
         repository = coreProductRepository,
         artistCatalogPort = artistCatalogPort,
         target = coreProductState.selectedDetail,
-        profileId = binding?.serverProfileId?.value,
+        profileId = activeProfileId,
         contextKey = detailContextKey,
         reportError = { stableError = it },
     )
@@ -937,9 +962,9 @@ private fun OfflineLibraryScreen(
         if (hasVisibleCoreDetail) closeCoreDetail() else navigation.navigateBack()
     }
     var selectedUploadCandidate by remember { mutableStateOf<VaultUploadCandidate?>(null) }
-    var remoteImportJobId by rememberSaveable(binding?.serverProfileId?.value) { mutableStateOf<String?>(null) }
+    var remoteImportJobId by rememberSaveable(activeProfileId) { mutableStateOf<String?>(null) }
     var serverUiState by rememberSaveable(
-        binding?.serverProfileId?.value,
+        activeProfileId,
         stateSaver = ServerFeaturesUiStateSaver,
     ) { mutableStateOf(ServerFeaturesUiState()) }
     val serverStateRepository = remember { ServerFeatureStateRepository(AutPlayRuntime.database(context)) }
@@ -962,8 +987,8 @@ private fun OfflineLibraryScreen(
     LaunchedEffect(durableVaultUploads) {
         serverUiState = serverUiState.copy(
             uploadStatus = durableVaultUploads.firstOrNull()?.let { upload ->
-                "${upload.state} · ${upload.remoteOffset}/${upload.expectedSize} bytes" +
-                    (upload.lastErrorCode?.let { " · $it" } ?: "")
+                "${upload.state} В· ${upload.remoteOffset}/${upload.expectedSize} bytes" +
+                    (upload.lastErrorCode?.let { " В· $it" } ?: "")
             },
         )
     }
@@ -1001,7 +1026,7 @@ private fun OfflineLibraryScreen(
         setVaultSearched = { vaultSearchCompleted = it },
         reportError = { stableError = it },
     )
-    LaunchedEffect(selectedTrackRefId, binding?.serverProfileId?.value) {
+    LaunchedEffect(selectedTrackRefId, activeProfileId) {
         val trackRefId = selectedTrackRefId
         selectedUploadCandidate = if (trackRefId == null || binding == null) {
             null
@@ -1095,7 +1120,7 @@ private fun OfflineLibraryScreen(
             RecommendationPackWorkScheduler.enqueue(context, binding.serverProfileId.value)
         }
     }
-    LaunchedEffect(view, remoteImportJobId, binding?.serverProfileId?.value) {
+    LaunchedEffect(view, remoteImportJobId, activeProfileId) {
         val jobId = remoteImportJobId
         if (view == "Server" && jobId != null && serverUiState.importReport?.importJobId != jobId) {
             launchServerAction("SERVER_IMPORT_REFRESH") { server ->
@@ -1219,103 +1244,23 @@ private fun OfflineLibraryScreen(
     val visibleSearchResults = searchResultStore.visibleFor(
         coreProductState.query,
         coreProductState.scopes + SearchScope.Local,
-        binding?.serverProfileId?.value,
+        activeProfileId,
     )
     val searchContextIsCurrent = searchResultStore.matchesContext(
         coreProductState.query,
         coreProductState.scopes + SearchScope.Local,
-        binding?.serverProfileId?.value,
+        activeProfileId,
     )
     val visibleVaultSearchResults = vaultSearchResultStore.visibleFor(
         coreProductState.query,
         coreProductState.scopes + SearchScope.Local,
-        binding?.serverProfileId?.value,
+        activeProfileId,
     )
     val untitledTrack = stringResource(R.string.player_nothing_playing)
-    val queueEditorState = QueueEditorUiState(
-        entries = queueProjection?.entries.orEmpty().map { entry ->
-            QueueEditorUiEntry(
-                queueEntryId = entry.queueEntryId.value,
-                title = entry.title ?: untitledTrack,
-                artist = entry.artist,
-                isCurrent = entry.isCurrent,
-                isUpcoming = entry.isUpcoming,
-            )
-        },
-        editable = queueProjection?.queueType in setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST"),
-        canPrevious = queueProjection?.canPrevious == true,
-        canNext = queueProjection?.canNext == true,
-    )
-    fun launchQueueEdit(operation: suspend () -> Unit) {
-        scope.launch {
-            runCatching { operation() }.onFailure { failure ->
-                stableError = (failure as? QueueEditFailure)?.code ?: "QUEUE_EDIT_UNAVAILABLE"
-            }
-        }
-    }
-    fun addTrackToQueue(trackRefId: String, playNext: Boolean) {
-        launchQueueEdit {
-            val entry = NewPlaybackQueueEntry(
-                queueEntryId = LocalId.random(),
-                trackRefId = LocalId(trackRefId),
-                sourceOrigin = "ORGANIC",
-                sourceAudioPolicy = "LOCAL_THEN_VAULT",
-            )
-            val expectedSnapshotId = queueProjection?.snapshotId
-            val result = if (playNext) {
-                queueEditorRepository.addNext(entry, binding?.serverProfileId?.value, expectedSnapshotId)
-            } else {
-                queueEditorRepository.addToEnd(entry, binding?.serverProfileId?.value, expectedSnapshotId)
-            }
-            if (result.created) {
-                playbackOwner.dispatch(
-                    if (playNext) PlaybackCommand.StartQueue(result.snapshotId)
-                    else PlaybackCommand.PrepareQueue(result.snapshotId),
-                )
-            }
-        }
-    }
-    val queueEditorActions = QueueEditorUiActions(
-        moveUp = { entryId ->
-            queueProjection?.let { projection ->
-                val upcoming = projection.entries.filter { it.isUpcoming }
-                val index = upcoming.indexOfFirst { it.queueEntryId.value == entryId }
-                val before = upcoming.getOrNull(index - 1)?.queueEntryId
-                if (index > 0 && before != null) launchQueueEdit {
-                    queueEditorRepository.moveUpcoming(
-                        LocalId(entryId), before, binding?.serverProfileId?.value, projection.snapshotId,
-                    )
-                }
-            }
-        },
-        moveDown = { entryId ->
-            queueProjection?.let { projection ->
-                val upcoming = projection.entries.filter { it.isUpcoming }
-                val index = upcoming.indexOfFirst { it.queueEntryId.value == entryId }
-                if (index in 0 until upcoming.lastIndex) launchQueueEdit {
-                    queueEditorRepository.moveUpcoming(
-                        LocalId(entryId), upcoming.getOrNull(index + 2)?.queueEntryId,
-                        binding?.serverProfileId?.value, projection.snapshotId,
-                    )
-                }
-            }
-        },
-        remove = { entryId ->
-            queueProjection?.let { projection ->
-                launchQueueEdit {
-                    queueEditorRepository.removeUpcoming(
-                        LocalId(entryId), binding?.serverProfileId?.value, projection.snapshotId,
-                    )
-                }
-            }
-        },
-        clearUpcoming = {
-            queueProjection?.let { projection ->
-                launchQueueEdit {
-                    queueEditorRepository.clearUpcoming(binding?.serverProfileId?.value, projection.snapshotId)
-                }
-            }
-        },
+    val queueControls = buildOfflineQueueControls(
+        scope, { queueProjection }, queueEditorRepository, playbackOwner,
+        activeProfileId, untitledTrack,
+        reportError = { stableError = it },
     )
     val allLibraryTrackSummaries = buildLibraryTrackSummaries(
         entries = libraryEntries,
@@ -1468,8 +1413,8 @@ private fun OfflineLibraryScreen(
         playPlaylistEntry = coreCommandActions.startPlaylistEntry,
         downloadTrack = coreCommandActions.downloadTrack,
         repairAccess = { activityLaunchers.chooseLibraryRoot.launch(null) },
-        playNext = { addTrackToQueue(it, true) },
-        addToQueue = { addTrackToQueue(it, false) },
+        playNext = { queueControls.addTrack(it, true) },
+        addToQueue = { queueControls.addTrack(it, false) },
         manualPlaylists = playlists.map { ManualPlaylistUi(it.stableId, it.title, it.description) },
         manualPlaylistActions = manualPlaylistActions,
     )
@@ -1485,7 +1430,8 @@ private fun OfflineLibraryScreen(
         sliceRepository = sliceRepository,
         binding = { binding },
         reportError = { stableError = it },
-        queueActions = queueEditorActions,
+        queueActions = queueControls.actions,
+        downloadTrack = coreCommandActions.downloadTrack,
     )
     val historyActions = HistoryUiActions(
         retry = { requestHistory(reset = true) },
@@ -1517,7 +1463,7 @@ private fun OfflineLibraryScreen(
                     runCatching {
                         downloadRepository.cancel(
                             download.stableId,
-                            binding?.serverProfileId?.value,
+                            activeProfileId,
                             System.currentTimeMillis(),
                         )
                     }.onFailure { stableError = "DOWNLOAD_CANCEL_UNAVAILABLE" }
@@ -1532,7 +1478,7 @@ private fun OfflineLibraryScreen(
                     runCatching {
                         downloadRepository.retry(
                             download.stableId,
-                            binding?.serverProfileId?.value,
+                            activeProfileId,
                             System.currentTimeMillis(),
                         )
                     }.onFailure { stableError = "DOWNLOAD_RETRY_UNAVAILABLE" }
@@ -1726,7 +1672,7 @@ private fun OfflineLibraryScreen(
         downloadRepository = downloadRepository,
         syncScheduler = syncScheduler,
         resolveServerRecordingId = { trackRefId ->
-            coreProductRepository.serverRecordingId(trackRefId, binding?.serverProfileId?.value)
+            coreProductRepository.serverRecordingId(trackRefId, activeProfileId)
         },
         playbackActions = playbackActions,
         reportError = { stableError = it },
@@ -1768,6 +1714,9 @@ private fun OfflineLibraryScreen(
         manualPlaylists = manualPlaylistActions,
         openPlaylist = { openCoreDetail(DetailTarget(DetailKind.Playlist, it)) },
     )
+    val homeSwipeTargets = app.autplay.ui.buildHomeSwipeTargets(
+        playerState, playbackState.localUserTrackRefId, homeScreenState, queueProjection, allLibraryTrackSummaries,
+    )
     MainAdaptiveShell(
         state = MainAdaptiveShellState(
             destination = destination,
@@ -1782,12 +1731,13 @@ private fun OfflineLibraryScreen(
             coreDetailState = coreDetailUiState,
             selectedDetail = coreProductState.selectedDetail,
             homeState = homeScreenState,
+            homeSwipeTargets = homeSwipeTargets,
             searchState = searchScreenState,
             libraryState = libraryScreenState,
             searchListAnchor = coreProductState.searchListAnchor,
             libraryListAnchor = coreProductState.libraryListAnchor,
             coreRouteActions = coreRouteActions,
-            queueState = queueEditorState,
+            queueState = queueControls.state,
             nowPlayingFeedbackEnabled = playbackState.localUserTrackRefId != null,
             nowPlayingPreference = when {
                 currentTrackPreference?.loved == true -> PlaybackPreferenceUiState.Liked
@@ -1804,6 +1754,9 @@ private fun OfflineLibraryScreen(
             sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
             stopAfterCurrentTrackActive = playbackState.stopAfterQueueEntryId == playbackState.queueEntryId,
             nowPlayingActions = nowPlayingRouteActions,
+            nowPlayingDownloadState = downloads.firstOrNull {
+                it.localUserTrackRefId == playbackState.localUserTrackRefId
+            }?.state,
             historyState = historyState,
             historyActions = historyActions,
             downloadsPendingIntentId = pendingDownloadIntentId,
@@ -1815,10 +1768,21 @@ private fun OfflineLibraryScreen(
             legacyActions = legacySecondaryActions,
         ),
         actions = MainAdaptiveShellActions(
+            dismissCommandError = { stableError = null },
             navigate = navigation::navigate,
             navigateBack = navigation::navigateBack,
             closeCoreDetail = ::closeCoreDetail,
             togglePlayPause = playbackActions::toggleDirectPlayPause,
+            skipHomeTrack = { forward ->
+                if (playerState.mediaId == null || playerState.controls is app.autplay.playback.presentation.PlaybackControlGate.Allowed) {
+                    val target = if (forward) homeSwipeTargets.next else homeSwipeTargets.previous
+                    if (target?.queueEntryId != null) {
+                        if (forward) nowPlayingRouteActions.next() else nowPlayingRouteActions.previous()
+                    } else if (target != null) {
+                        coreCommandActions.startTrack(target.trackRefId, "HOME", "USER", null)
+                    }
+                }
+            },
             setMiniPlayerObserving = { playerAdapter.setSurfaceObserving("mini", it) },
             playTrack = { coreCommandActions.startTrack(it, "LIBRARY", "LIBRARY", null) },
             playPlaylistEntry = coreCommandActions.startPlaylistEntry,
@@ -2448,7 +2412,7 @@ private fun VisibleRecommendation(
         },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("${item.displayPosition}. ${item.title} — ${item.artist}")
+        Text("${item.displayPosition}. ${item.title} вЂ” ${item.artist}")
         Text(stringResource(R.string.recommendation_for_you))
     }
 }

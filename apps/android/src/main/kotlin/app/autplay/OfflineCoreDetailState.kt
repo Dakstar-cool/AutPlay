@@ -21,6 +21,7 @@ import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 import app.autplay.domain.ServerProfileId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
 
 internal data class OfflineDetailRequestKey(
     val generation: Long,
@@ -76,7 +77,7 @@ internal class OfflineCoreDetailState {
         reportError: (String) -> Unit,
     ) {
         val request = requestGuard.begin(contextKey, profileId, target)
-        reset(target)
+        if (!matches(contextKey, target)) reset(target)
         if (target == null) return
         try {
             when (target.kind) {
@@ -185,7 +186,11 @@ internal fun rememberOfflineCoreDetailState(
 ): OfflineCoreDetailState {
     val state = remember(contextKey) { OfflineCoreDetailState() }
     LaunchedEffect(target, profileId, contextKey) {
-        state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
+        if (target?.kind == DetailKind.Track) {
+            repository.trackMetadataChanges(target.stableId, profileId).collectLatest {
+                state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
+            }
+        } else state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
     }
     return state
 }

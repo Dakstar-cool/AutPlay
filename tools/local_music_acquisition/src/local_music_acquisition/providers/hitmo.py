@@ -67,6 +67,7 @@ class _RunState:
         self.run_dir = run_dir
         self.screenshots = run_dir / "screenshots"
         self.capture_screenshots = capture_screenshots
+        self.candidate_sink: list[dict[str, object]] | None = None
         if capture_screenshots:
             self.screenshots.mkdir(parents=True, exist_ok=True)
         self.log_path = run_dir / "final_script_log.txt"
@@ -105,6 +106,7 @@ def download_hitmo_tracks(
     browser: str = "firefox",
     cdp_endpoint: str = "http://127.0.0.1:9222",
     evidence_screenshots: bool = False,
+    candidate_sink: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Find exact Hitmo matches and gate sequential authorized downloads.
 
@@ -164,6 +166,7 @@ def download_hitmo_tracks(
             browser=browser,
             cdp_endpoint=cdp_endpoint,
             evidence_screenshots=evidence_screenshots,
+            candidate_sink=candidate_sink,
         )
     )
 
@@ -256,9 +259,11 @@ async def _run(
     browser: str,
     cdp_endpoint: str,
     evidence_screenshots: bool,
+    candidate_sink: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     run_dir = _prepare_run_dir()
     state = _RunState(run_dir, capture_screenshots=evidence_screenshots)
+    state.candidate_sink = candidate_sink
     state.params(
         {
             "title": _private_value(requests[0][1]),
@@ -573,6 +578,8 @@ async def _process_one(
     await _screenshot(page, state, "search_results")
 
     candidates = await _extract_candidates(page, result_limit)
+    if state.candidate_sink is not None:
+        state.candidate_sink.extend(candidates)
     state.action(
         f"queue={queue_position} query_ref={query_ref} scanned={len(candidates)} "
         f"limit={result_limit}"

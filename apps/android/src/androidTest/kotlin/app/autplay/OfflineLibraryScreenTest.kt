@@ -167,6 +167,7 @@ class OfflineLibraryScreenTest {
             composeRule.onAllNodesWithContentDescription(settingsLabel).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithContentDescription(settingsLabel).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.settings_music_navigation)).performScrollTo().performClick()
         composeRule.onNodeWithText(context.getString(R.string.nav_import_review)).performScrollTo().performClick()
         val importSummary = context.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {

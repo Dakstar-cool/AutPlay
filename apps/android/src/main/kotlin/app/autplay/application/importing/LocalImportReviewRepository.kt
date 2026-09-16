@@ -1,5 +1,7 @@
 package app.autplay.application.importing
 
+import app.autplay.application.search.refreshTrackSearch
+
 import android.content.ContentResolver
 import androidx.core.net.toUri
 import androidx.room3.withWriteTransaction
@@ -244,6 +246,7 @@ class LocalImportReviewRepository(
             )
             database.importReviewDao().insertJob(job)
             database.libraryDao().upsertTrackRefs(prepared.map { it.trackRef })
+            prepared.forEach { database.refreshTrackSearch(it.trackRef.localUserTrackRefId) }
             database.importReviewDao().insertEntries(prepared.map { it.entry })
             job
         }

@@ -66,6 +66,9 @@ internal fun CoreProductRouteRenderer(
     currentTrackLiked: Boolean = false,
     onOpenNowPlaying: () -> Unit = {},
     onTogglePlayPause: () -> Unit = {},
+    onPreviousTrack: () -> Unit = {},
+    onNextTrack: () -> Unit = {},
+    homeSwipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
 ) {
     when (destination) {
         UiDestination.Home -> HomeProductScreen(
@@ -86,6 +89,9 @@ internal fun CoreProductRouteRenderer(
             onOpenPlayer = onOpenNowPlaying,
             onTogglePlayPause = onTogglePlayPause,
             onLikeHeroTrack = actions.likeTrack,
+            onPreviousTrack = onPreviousTrack,
+            onNextTrack = onNextTrack,
+            swipeTargets = homeSwipeTargets,
         )
         UiDestination.Search -> SearchProductScreen(
             state = searchState,

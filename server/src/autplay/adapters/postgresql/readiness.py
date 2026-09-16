@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0030_temporal_snapshot_retention"
+EXPECTED_MIGRATION_HEAD: Final = "0032_track_metadata"
 
 
 @dataclass(frozen=True, slots=True)

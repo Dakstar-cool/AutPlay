@@ -385,7 +385,10 @@ class PostgresJobRepository:
                 outcome=JobAttemptOutcome.RETRYABLE_ERROR,
                 state=JobState.RETRY_WAIT,
                 error=error,
-                retry_delay=policy.delay_for(fence.job_id, fence.attempt_no),
+                retry_delay=max(
+                    policy.delay_for(fence.job_id, fence.attempt_no),
+                    timedelta(seconds=_retry_after_seconds(error)),
+                ),
             )
         return LeaseTransition.APPLIED
 
@@ -836,6 +839,13 @@ def _mapping_optional_datetime(row: RowMapping, field: str) -> datetime | None:
     if value is None:
         return None
     return _mapping_datetime(row, field)
+
+
+def _retry_after_seconds(error: JobError) -> int:
+    value = error.detail.get("retry_after_seconds", 0)
+    return (
+        min(86400, max(0, value)) if isinstance(value, int) and not isinstance(value, bool) else 0
+    )
 
 
 __all__ = ("PostgresJobRepository",)

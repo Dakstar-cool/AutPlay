@@ -113,6 +113,41 @@ class SyncWorkerLifecycleTest {
         } finally { fixture.close() }
     }
 
+    @Test fun manualRetryReplacesBackoffAndRunsImmediately() = runBlocking {
+        val fixture = Fixture()
+        try {
+            fixture.start()
+            fixture.disconnectPull = true
+            fixture.scheduler.enqueue(fixture.request)
+            fixture.await { fixture.work().any { it.runAttemptCount >= 1 && it.state == WorkInfo.State.ENQUEUED } }
+            val original = fixture.work().single().id
+            fixture.disconnectPull = false
+            fixture.scheduler.reconcile(fixture.request)
+            fixture.await { fixture.work().any { it.id != original && it.state == WorkInfo.State.SUCCEEDED } }
+            val replacement = fixture.work().single { it.id != original }
+            // WorkInfo includes the first execution; the Worker's input count starts at zero.
+            assertEquals(1, replacement.runAttemptCount)
+            assertEquals(NetworkType.CONNECTED, replacement.constraints.requiredNetworkType)
+        } finally { fixture.close() }
+    }
+
+    @Test fun connectedReplacementRetainsAndAcknowledgesInFlightIntent() = runBlocking {
+        val fixture = Fixture()
+        try {
+            fixture.start()
+            fixture.holdPush = true
+            val event = fixture.record()
+            fixture.await { fixture.pushEntered.count == 0L }
+            assertEquals("SENDING", fixture.database.journalDao().event(event)?.state)
+            fixture.scheduler.reconcile(fixture.request)
+            fixture.release.countDown()
+            fixture.awaitAck(event)
+            fixture.await { fixture.work().all { it.state.isFinished } }
+            assertTrue(fixture.sentIds.all { it == event })
+            assertEquals(1, fixture.sentHashes.distinct().size)
+        } finally { fixture.close() }
+    }
+
     private class Fixture {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -130,6 +165,7 @@ class SyncWorkerLifecycleTest {
         private val workName = "autplay-deferred-sync-device-${ids[2]}-${ids[0]}"
         private lateinit var original: NonSecretSettings
         @Volatile var disconnect = false
+        @Volatile var disconnectPull = false
         @Volatile var holdPush = false
         @Volatile var holdPull = false
         val release = CountDownLatch(1)
@@ -160,6 +196,7 @@ class SyncWorkerLifecycleTest {
                         return json("""{"acks":[${acks.joinToString(",") }]}""")
                     }
                     pullEntered.countDown()
+                    if (disconnectPull) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
                     if (holdPull) { holdPull = false; check(release.await(40, TimeUnit.SECONDS)) }
                     return json("""{"next_cursor":"fixture-cursor","has_more":false,"events":[]}""")
                 }

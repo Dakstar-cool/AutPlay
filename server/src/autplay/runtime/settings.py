@@ -43,6 +43,9 @@ _COMMON_ENV_FIELDS: Final = {
     "vault_low_disk_bytes": "VAULT_LOW_DISK_BYTES",
 }
 _API_ENV_FIELDS: Final = {
+    "acoustid_client_key": "ACOUSTID_CLIENT_KEY",
+    "metadata_proxy": "METADATA_PROXY",
+    "internet_music_enabled": "INTERNET_MUSIC_ENABLED",
     "host": "API_HOST",
     "port": "API_PORT",
     "auth_signing_secret": "AUTH_SIGNING_SECRET",
@@ -102,9 +105,10 @@ _SECRET_FIELDS: Final = frozenset(
         "admin_web_source_hmac_secret",
         "admin_web_csrf_hmac_secret",
         "jamendo_client_id",
+        "acoustid_client_key",
     }
 )
-_FILE_ONLY_SECRET_FIELDS: Final = frozenset({"jamendo_client_id"})
+_FILE_ONLY_SECRET_FIELDS: Final = frozenset({"jamendo_client_id", "acoustid_client_key"})
 
 
 class RuntimeProfile(StrEnum):
@@ -204,6 +208,10 @@ class _ExplicitSettings(BaseSettings):
 
 class ApiSettings(_ExplicitSettings):
     """Validated settings available only to the HTTP API process."""
+
+    internet_music_enabled: bool = False
+    acoustid_client_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    metadata_proxy: SecretStr | None = Field(default=None, repr=False)
 
     host: str = "127.0.0.1"
     port: int = Field(default=8787, ge=1, le=65_535)

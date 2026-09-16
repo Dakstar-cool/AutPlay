@@ -44,7 +44,7 @@ class ServerFeaturesScreenTest {
             errorCode = null,
         )
         compose.setContent {
-            MaterialTheme {
+            androidx.compose.runtime.CompositionLocalProvider(LocalDeveloperMode provides true) { MaterialTheme {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     ServerFeaturesScreen(
                         isBound = true,
@@ -71,7 +71,7 @@ class ServerFeaturesScreenTest {
                         ),
                     )
                 }
-            }
+            } }
         }
 
         compose.onNodeWithText(context.getString(R.string.server_import_needs_choice))
@@ -89,7 +89,7 @@ class ServerFeaturesScreenTest {
         val exact = AtomicBoolean(false)
         val algorithmic = AtomicBoolean(false)
         compose.setContent {
-            MaterialTheme {
+            androidx.compose.runtime.CompositionLocalProvider(LocalDeveloperMode provides true) { MaterialTheme {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     ServerFeaturesScreen(
                         isBound = true,
@@ -111,7 +111,7 @@ class ServerFeaturesScreenTest {
                         ),
                     )
                 }
-            }
+            } }
         }
 
         compose.onNodeWithText("UPLOAD · AVAILABLE").performScrollTo().assertIsDisplayed()

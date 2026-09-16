@@ -61,6 +61,7 @@ public fun AutPlayAdaptiveShell(
     nowPlayingAvailable: Boolean = false,
     nowPlayingBar: @Composable () -> Unit = {},
     detailPane: @Composable (UiWidthClass) -> Unit = {},
+    snackbarHost: @Composable () -> Unit = {},
     content: @Composable (
         destination: UiDestination,
         contentPadding: PaddingValues,
@@ -82,6 +83,7 @@ public fun AutPlayAdaptiveShell(
         }
         if (selectedDestination == UiDestination.NowPlaying) {
             Scaffold(
+                snackbarHost = snackbarHost,
                 topBar = {
                     AutPlayTopBar(
                         destination = selectedDestination,
@@ -107,6 +109,7 @@ public fun AutPlayAdaptiveShell(
                 onNowPlayingClick,
                 nowPlayingAvailable,
                 nowPlayingBar,
+                snackbarHost,
                 routeContent,
             )
         } else {
@@ -123,6 +126,7 @@ public fun AutPlayAdaptiveShell(
                 nowPlayingAvailable,
                 nowPlayingBar,
                 detailPane,
+                snackbarHost,
                 routeContent,
             )
         }
@@ -150,9 +154,11 @@ private fun CompactShell(
     onNowPlayingClick: () -> Unit,
     nowPlayingAvailable: Boolean,
     nowPlayingBar: @Composable () -> Unit,
+    snackbarHost: @Composable () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
+        snackbarHost = snackbarHost,
         topBar = {
             AutPlayTopBar(
                 selectedDestination,
@@ -200,6 +206,7 @@ private fun RailShell(
     nowPlayingAvailable: Boolean,
     nowPlayingBar: @Composable () -> Unit,
     detailPane: @Composable (UiWidthClass) -> Unit,
+    snackbarHost: @Composable () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Row(Modifier.fillMaxSize()) {
@@ -224,6 +231,7 @@ private fun RailShell(
         }
         Scaffold(
             modifier = Modifier.weight(1f),
+            snackbarHost = snackbarHost,
             topBar = {
                 AutPlayTopBar(
                     selectedDestination,
@@ -279,7 +287,7 @@ private fun AutPlayTopBar(
             }
         },
         navigationIcon = {
-            if (canNavigateBack) {
+            if (canNavigateBack && destination != UiDestination.Home) {
                 AutPlayIconButton(AutPlayIcon.Back, R.string.action_back, onNavigateBack)
             } else if (!immersive) {
                 AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
@@ -287,15 +295,12 @@ private fun AutPlayTopBar(
         },
         actions = {
             if (!immersive) {
-                if (nowPlayingAvailable) {
-                    AutPlayIconButton(AutPlayIcon.Play, R.string.nav_now_playing, onNowPlayingClick)
-                }
                 AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = when {
-                immersive || destination == UiDestination.Home -> Color.Transparent
+                immersive -> Color.Transparent
                 else -> MaterialTheme.colorScheme.background.copy(alpha = 0.96f)
             },
         ),
@@ -329,7 +334,7 @@ private fun topBarTitle(destination: UiDestination): Int = when (destination) {
     UiDestination.Home -> R.string.home_my_wave
     UiDestination.Search -> R.string.nav_search
     UiDestination.Library -> R.string.library_title
-    else -> R.string.app_name
+    else -> destination.labelRes
 }
 
 @Composable
