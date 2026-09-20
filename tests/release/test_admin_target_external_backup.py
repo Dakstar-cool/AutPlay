@@ -40,6 +40,37 @@ def test_remote_command_is_single_fail_closed_shell_argument() -> None:
     assert "gzip -1" in command
 
 
+def test_volume_stream_disables_docker_binary_logging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: list[str] = []
+
+    def remote_to_file(
+        ssh_target: str,
+        command: str,
+        destination: Path,
+        *,
+        budget: object,
+        minimum_bytes: int = 1,
+    ) -> None:
+        del ssh_target, destination, budget, minimum_bytes
+        observed.append(command)
+
+    monkeypatch.setattr(tool, "_remote_to_file", remote_to_file)
+    tool._archive_remote_volume(
+        "operator@example",
+        "autplay-production_vault-data",
+        tmp_path / "vault-volume.tar",
+        tool.TransferBudget(1024**3, 90, 0),
+        compress=False,
+        helper_image="autplay-admin-acceptance:current",
+    )
+
+    assert len(observed) == 1
+    assert "docker run --rm --log-driver none" in observed[0]
+    assert " -cf - ." in observed[0]
+
+
 def test_backup_id_is_strict() -> None:
     assert tool.BACKUP_ID.fullmatch("admin-target-20260920T180629Z")
     assert tool.BACKUP_ID.fullmatch(r"..\production") is None
@@ -181,5 +212,7 @@ def test_remote_control_helper_reads_owner_only_spool(
 
     assert reporter.request_is_pending() is True
     assert len(observed) == 1
-    assert observed[0].startswith("docker run --rm --network none --user 999:999 --volume ")
+    assert observed[0].startswith(
+        "docker run --rm --log-driver none --network none --user 999:999 --volume "
+    )
     assert "--entrypoint cat autplay-admin-acceptance:504cf8310f3f" in observed[0]
