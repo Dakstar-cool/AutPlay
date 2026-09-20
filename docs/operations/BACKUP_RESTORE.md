@@ -82,6 +82,15 @@ non-secret record pins the deployed migration, live image/container-set digests,
 archive, helper image and rollback image; routine backups therefore fail closed after an unreviewed
 deployment instead of silently backing up a changed target.
 
+After placing the reviewed baseline on the chosen disk, run
+`scripts/install_admin_backup_agent.ps1`. With no `-DriveLetter`, it selects the only eligible
+non-system USB/NTFS disk or displays the eligible disks and asks for a choice. The installer maps
+that drive to an opaque Admin target ID, registers a once-per-minute per-user Scheduled Task and
+uses `IgnoreNew`, so a long backup cannot be started a second time by the scheduler. Use
+`-DriveLetter E -TargetId windows-usb-e` for a non-interactive installation, or `-Uninstall` to
+remove the task. The Admin page chooses among the registered target IDs and remains unable to
+supply an arbitrary Windows path.
+
 ## Isolated restore
 
 1. Provision a clean PostgreSQL 18.4/pgvector 0.8.6 instance with no production routing.

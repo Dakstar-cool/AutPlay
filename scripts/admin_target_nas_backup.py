@@ -88,6 +88,8 @@ CONFIG_PATHS = (
     "srv/autplay/production/metadata-20260916/runtime-specs-r2.json",
     "srv/autplay/production/music-library-20260916/final-runtime-specs.json",
     "srv/autplay/production/sync-vault-20260916/bridge-running-spec.json",
+    "srv/autplay/production/admin-target-e74694e107a7",
+    "srv/autplay/operator/backup-control",
     "srv/autplay/secrets/production",
 )
 BACKUP_ID = re.compile(r"^admin-target-[0-9]{8}T[0-9]{6}Z$")
