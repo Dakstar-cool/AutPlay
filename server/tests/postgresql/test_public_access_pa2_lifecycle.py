@@ -5,15 +5,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier, Lock
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-from psycopg import Connection
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-
 from autplay.adapters.postgresql.models import (
     DeviceRow,
     FriendshipRow,
@@ -21,14 +16,20 @@ from autplay.adapters.postgresql.models import (
     UserSessionRow,
 )
 from autplay.application.public_access import PublicAccessError
+from cryptography.hazmat.primitives.asymmetric import ec
+from psycopg import Connection
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from .test_public_access_pa2 import _owner_and_server, _request, _service
 
 
 @pytest.mark.parametrize("gate", ["device", "session", "expired"])
 def test_cached_owner_principal_cannot_mutate_or_replay_after_revocation(
-    database_url, database_connection, gate
-):
+    database_url: str,
+    database_connection: Connection[object],
+    gate: Literal["device", "session", "expired"],
+) -> None:
     service, engine = _service(database_url)
     try:
         owner, _ = _owner_and_server(database_connection)
@@ -45,9 +46,12 @@ def test_cached_owner_principal_cannot_mutate_or_replay_after_revocation(
         )
         with Session(engine) as session, session.begin():
             if gate == "device":
-                session.get(DeviceRow, owner.device_id).revoked_at = datetime.now(UTC)
+                device = session.get(DeviceRow, owner.device_id)
+                assert device is not None
+                device.revoked_at = datetime.now(UTC)
             else:
                 row = session.get(UserSessionRow, owner.session_id)
+                assert row is not None
                 if gate == "session":
                     row.revoked_at = datetime.now(UTC)
                 else:

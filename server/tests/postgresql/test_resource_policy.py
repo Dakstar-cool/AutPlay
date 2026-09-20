@@ -10,11 +10,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from psycopg import Connection
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
 from autplay.adapters.postgresql.models import UserAccountRow
 from autplay.adapters.postgresql.models.public_access import (
@@ -46,6 +41,10 @@ from autplay.domain.resource_admission import (
 )
 from autplay.domain.resource_policy import GlobalResourceLimits, QuotaChange
 from autplay.domain.web_admin import WebActor, WebAdminError
+from psycopg import Connection
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
 
 from .test_resource_admission_runtime import AdmissionHarness, fence, play, present
 from .test_web_admin_m6 import _seed_owner
@@ -175,6 +174,10 @@ def test_policy_revalidates_exact_authority_inside_transaction_even_on_replay(
             web.issued_at = now - timedelta(hours=12)
             web.absolute_expires_at = now - timedelta(seconds=1)
         else:
+            session.add(
+                UserAccountRow(user_id=uuid4(), display_name="Replacement owner", role="OWNER")
+            )
+            session.flush()
             present(session.get(UserAccountRow, policy.actor.user_id)).role = "ADMIN"
     with pytest.raises(WebAdminError, match="authentication_required"):
         policy.service.apply(policy.actor, change)

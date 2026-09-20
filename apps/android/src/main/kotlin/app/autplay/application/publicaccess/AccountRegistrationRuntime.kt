@@ -1,8 +1,11 @@
 package app.autplay.application.publicaccess
 
+import app.autplay.application.accountrecovery.hasAccountRecoveryPendingRecipient
+
 import app.autplay.application.selfpairing.hasSelfDevicePairingPendingRecipient
 
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.isReservedCredentialProfile
 import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.security.M5DeviceKeyStore
@@ -64,6 +67,7 @@ class AccountRegistrationRuntime(
      * pointer: `null` means no pending exchange, `true` exact match, and `false` fail-closed conflict.
      */
     suspend fun pendingMatches(profileId: ServerProfileId, invitation: AccountInvitation): Boolean? {
+        if (profileId.isReservedCredentialProfile()) return false
         val encrypted = credentials.read(profileId) ?: return null
         return try {
             val envelope = SessionCredentialEnvelopeCodec.decode(encrypted)
@@ -97,11 +101,16 @@ class AccountRegistrationRuntime(
     }
 
     suspend fun redeem(signed: SignedAccountRegistrationRequest): Result<Unit> {
+        val profile = ServerProfileId(signed.registration.invitation.serverInstanceId)
+        if (profile.isReservedCredentialProfile()) {
+            signed.close()
+            return Result.failure(IllegalArgumentException("RESERVED_CREDENTIAL_PROFILE"))
+        }
         if (!firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS)) {
             signed.close()
             return Result.failure(IllegalStateException("FIRST_BIND_CEREMONY_BUSY"))
         }
-        if (activeProfileGate.hasActiveProfile() || credentials.hasSelfDevicePairingPendingRecipient()) {
+        if (activeProfileGate.hasActiveProfile() || credentials.hasSelfDevicePairingPendingRecipient() || credentials.hasAccountRecoveryPendingRecipient()) {
             firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
             signed.close()
             return Result.failure(IllegalStateException("ACCOUNT_REGISTRATION_ACTIVE_PROFILE_FORBIDDEN"))
@@ -117,7 +126,6 @@ class AccountRegistrationRuntime(
                 signed.close()
                 return Result.failure(IllegalStateException("ACCOUNT_REGISTRATION_DISCOVERY_CONTEXT_MISSING"))
         }
-        val profile = ServerProfileId(signed.registration.invitation.serverInstanceId)
         val pendingCanonical = Base64.getUrlEncoder().withoutPadding().encodeToString(signed.canonicalJson)
         val pendingRefresh = Base64.getUrlEncoder().withoutPadding()
             .encodeToString(signed.registration.successorRefreshToken)
@@ -171,6 +179,7 @@ class AccountRegistrationRuntime(
 
     /** Replays an uncertain exchange only from encrypted PA2 state; it never creates a new key/id. */
     suspend fun resumePending(profileId: ServerProfileId, keys: M5DeviceKeyStore): Result<Unit> {
+        if (profileId.isReservedCredentialProfile()) return Result.failure(IllegalArgumentException("RESERVED_CREDENTIAL_PROFILE"))
         val encrypted = credentials.read(profileId) ?: return Result.failure(IllegalStateException("ACCOUNT_REGISTRATION_PENDING_MISSING"))
         return try {
             val envelope = SessionCredentialEnvelopeCodec.decode(encrypted)

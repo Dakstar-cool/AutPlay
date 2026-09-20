@@ -1,11 +1,15 @@
 package app.autplay.application.selfpairing
 
+import app.autplay.application.accountrecovery.hasAccountRecoveryPendingRecipient
+
 import app.autplay.application.profilepairing.FirstBindCeremonyGate
 import app.autplay.application.profilepairing.FirstBindCeremonyOwner
 import app.autplay.application.profilepairing.PairingNetworkResult
 import app.autplay.application.profilepairing.ProfilePairingPort
 import app.autplay.application.publicaccess.ActiveProfileGate
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.isReservedCredentialProfile
+import app.autplay.domain.ServerProfileId
 import app.autplay.data.security.M5DeviceKeyStore
 import java.time.Instant
 import java.util.Base64
@@ -70,7 +74,7 @@ class SelfPairingRecipientRuntime(
         requireUnbound()
         val qr = SelfPairingQr.parse(raw, now(), allowDevelopmentHttp)
         try {
-            require(SelfPairingRole.entries.none { it.slot.value == qr.identity.serverInstanceId })
+            require(!ServerProfileId(qr.identity.serverInstanceId).isReservedCredentialProfile()) { "RESERVED_CREDENTIAL_PROFILE" }
             val discovered = discovery.discovery(qr.identity.apiOrigin)
             require(discovered is PairingNetworkResult.Success) { "SELF_PAIRING_DISCOVERY_REQUIRED" }
             val doc = discovered.value
@@ -282,7 +286,7 @@ class SelfPairingRecipientRuntime(
     }
 
     private suspend fun requireUnbound() {
-        require(!activeProfile.hasActiveProfile() && !credentials.hasPublicAccessPendingRegistration()) { "SELF_PAIRING_ACTIVE_PROFILE_FORBIDDEN" }
+        require(!activeProfile.hasActiveProfile() && !credentials.hasPublicAccessPendingRegistration() && !credentials.hasAccountRecoveryPendingRecipient()) { "SELF_PAIRING_ACTIVE_PROFILE_FORBIDDEN" }
     }
 
     private fun validatePending(pending: JsonObject) {
@@ -293,7 +297,7 @@ class SelfPairingRecipientRuntime(
             return
         }
         val identity = identity(pending)
-        require(SelfPairingRole.entries.none { it.slot.value == identity.serverInstanceId })
+        require(!ServerProfileId(identity.serverInstanceId).isReservedCredentialProfile()) { "RESERVED_CREDENTIAL_PROFILE" }
         val claim = claim(pending)
         require(SelfPairingIdentity.parse(claim, allowDevelopmentHttp) == identity)
         require(claim.text("ceremony_id") == pending.text("ceremony_id"))

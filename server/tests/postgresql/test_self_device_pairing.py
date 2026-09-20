@@ -15,13 +15,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.models import DeviceRow, UserAccountRow, UserSessionRow
+from autplay.adapters.postgresql.models.account_recovery import AccountRecoveryCredentialRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
 from autplay.adapters.postgresql.resource_limits import lock_resource_admission
 from autplay.adapters.postgresql.self_device_pairing import (
@@ -39,6 +34,11 @@ from autplay.domain.profile_pairing import (
     sign_p1363,
 )
 from autplay.domain.self_device_pairing import SelfDevicePairing, SelfPairingError
+from cryptography.hazmat.primitives.asymmetric import ec
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
 
 from .conftest import DatabaseHarness
 from .test_profile_pairing_m5b import _exchange_request
@@ -262,6 +262,65 @@ def test_user_requires_both_confirmations_and_keeps_existing_device(pair: Pairin
             )
             is None
         )
+
+
+def test_every_active_role_self_pairs_without_spending_recovery_code(
+    pair: PairingHarness,
+) -> None:
+    now = datetime.now(UTC)
+    verifier = b"r" * 32
+    with Session(pair.engine) as session, session.begin():
+        session.add(
+            UserAccountRow(
+                user_id=uuid4(),
+                display_name="Remaining owner",
+                role=AccountRole.OWNER.value,
+            )
+        )
+        session.add(
+            AccountRecoveryCredentialRow(
+                user_id=pair.actor.user_id,
+                server_instance_id=UUID(pair.identity["expected_server_instance_id"]),
+                identity_epoch=1,
+                identity_thumbprint_sha256=bytes.fromhex(
+                    pair.identity["expected_identity_thumbprint_sha256"]
+                ),
+                generation=1,
+                verifier_sha256=verifier,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    for role in (AccountRole.OWNER, AccountRole.ADMIN, AccountRole.USER):
+        with Session(pair.engine) as session, session.begin():
+            account = session.get(UserAccountRow, pair.actor.user_id)
+            assert account is not None
+            account.role = role.value
+        pair.actor = replace(pair.actor, role=role)
+        pair.ceremony_id = uuid4()
+        pair.rendezvous = secrets.token_urlsafe(32)
+        pair.poll_secret = secrets.token_urlsafe(32)
+        pair.key = ec.generate_private_key(ec.SECP256R1())
+
+        _, exchange = pair.ready()
+        result = pair.service.exchange(pair.poll_secret, exchange)
+        assert result["user_id"] == str(pair.actor.user_id)
+        with Session(pair.engine) as session:
+            credential = session.get(AccountRecoveryCredentialRow, pair.actor.user_id)
+            assert credential is not None
+            assert credential.generation == 1
+            assert credential.verifier_sha256 == verifier
+            assert (
+                session.scalar(
+                    text(
+                        "SELECT count(*) FROM account.account_recovery_operation "
+                        "WHERE user_id=:user"
+                    ),
+                    {"user": pair.actor.user_id},
+                )
+                == 0
+            )
 
 
 def test_concurrent_exchange_replays_one_binding_and_survives_source_logout(
@@ -550,8 +609,11 @@ def test_m5_and_self_pairing_cannot_both_take_last_device_slot(pair: PairingHarn
     sessions = sessionmaker(pair.engine, expire_on_commit=False)
     with sessions.begin() as session:
         lock_resource_admission(session)
-        session.get(UserAccountRow, pair.actor.user_id).role = "OWNER"
+        account = session.get(UserAccountRow, pair.actor.user_id)
+        assert account is not None
+        account.role = "OWNER"
         row = session.get(ServerInstanceRow, UUID(pair.identity["expected_server_instance_id"]))
+        assert row is not None
         row.identity_public_key_spki, row.identity_thumbprint_sha256 = spki, digest
         session.execute(text("UPDATE account.resource_quota_policy SET default_devices=2"))
     pair.actor = replace(pair.actor, role=AccountRole.OWNER)

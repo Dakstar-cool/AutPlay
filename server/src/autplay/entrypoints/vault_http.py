@@ -19,8 +19,9 @@ from autplay.domain.auth import OwnedObjectNotFoundError, Principal
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.vault import ChunkIntegrityError, UploadLimitError, UploadOffsetError
 from autplay.entrypoints.resource_admission_http import resource_admission_error
-from autplay.entrypoints.resource_io_http import IoScopedResponse, require_resource_io_headers
+from autplay.entrypoints.resource_io_http import require_resource_io_headers
 from autplay.runtime.http import ApiError
+from autplay.runtime.resource_io_scope import resource_io_scope
 from autplay.runtime.vault_io import VaultIoCoordinator, VaultIoSession
 
 _MAX_OBJECT_BYTES = 2 * 1024 * 1024 * 1024
@@ -157,6 +158,8 @@ def create_vault_router(
             raise _chunk_error()
         io: VaultIoSession | None = None
         try:
+            if coordinator is None and isinstance(service, AdmittedUploadService):
+                raise ResourceAdmissionError("capability_missing")
             if coordinator is not None:
                 resource = require_resource_io_headers(
                     request, allowed=frozenset({"UPLOAD_INTENT"})
@@ -166,9 +169,9 @@ def create_vault_router(
                     resource.fence,
                     resource_type=resource.resource_type,
                     target_id=upload_id,
+                    on_bind=resource_io_scope(request.scope).bind,
                 )
-                bounded = Request(request.scope, receive=lambda: io.deadline.run(request.receive))
-                payload = await io.deadline.run(bounded.body)
+                payload = await io.deadline.run(request.body)
             else:
                 payload = await request.body()
             if len(payload) != content_length or hashlib.sha256(payload).hexdigest() != chunk_hash:
@@ -191,9 +194,11 @@ def create_vault_router(
             response = Response(
                 status_code=204, headers={**_no_store(), "Upload-Offset": str(next_offset)}
             )
-            return response if io is None else IoScopedResponse(response, io)
+            return response
         except BaseException as error:
             if io is not None:
+                if isinstance(error, Exception):
+                    io.deadline.freeze_error()
                 io.finish()
             if isinstance(error, Exception):
                 _raise_upload_error(error)

@@ -49,7 +49,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 
 class _FailingCatalogPublisher(CatalogArtistSyncPublisher):
-    def publish(self, session: Session, owner_user_id: UUID) -> int:
+    def publish(
+        self, session: Session, owner_user_id: UUID, *, ref_ids: tuple[UUID, ...] | None = None
+    ) -> int:
         del session, owner_user_id
         raise RuntimeError("injected catalog publisher failure")
 

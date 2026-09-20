@@ -110,6 +110,94 @@ def _rehash(value: dict[str, object]) -> None:
     ).hexdigest()
 
 
+def test_projected_track_ids_replay_and_remain_owner_scoped(database_url: str) -> None:
+    from autplay.adapters.postgresql.models import ListeningEventRow, UserTrackPreferenceRow
+
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            owner, other = _principal(session, "owner"), _principal(session, "other")
+            ref_id, foreign_id = uuid4(), uuid4()
+            for principal, ref in ((owner, ref_id), (other, foreign_id)):
+                session.add(
+                    UserTrackRefRow(
+                        user_track_ref_id=ref,
+                        user_id=principal.user_id,
+                        raw_title="Track",
+                        raw_artist="Artist",
+                    )
+                )
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"test-only-sync-secret-with-32-bytes")
+        body = _bind(service, owner, uuid4())
+        profile = str(body["server_profile_id"])
+        local = UUID(
+            bytes=hashlib.md5(f"{profile}:{ref_id}".encode(), usedforsecurity=False).digest(),
+            version=3,
+        )
+        listening = _event(
+            owner,
+            uuid4(),
+            1,
+            "LISTENING_EVENT_RECORDED",
+            "LISTENING_EVENT",
+            {
+                "interaction_type": "LISTENING_EVENT_RECORDED",
+                "local_user_track_ref_id": str(local),
+                "server_user_track_ref_id": str(ref_id),
+                "recording_id": None,
+                "played_ms": 100,
+                "track_duration_ms": 1000,
+                "completion_ratio": 0.1,
+                "event_origin": "ORGANIC",
+                "context": "GENERAL",
+                "explicit_feedback": "NONE",
+                "excluded_from_taste": False,
+            },
+        )
+        preference = _event(
+            owner,
+            uuid4(),
+            2,
+            "USER_TRACK_PREFERENCE_SET",
+            "USER_TRACK_PREFERENCE",
+            {
+                "local_user_track_ref_id": str(local),
+                "preference": "LIKED",
+                "excluded_from_taste": False,
+            },
+        )
+        for event in (listening, preference):
+            event["server_profile_id"] = profile
+            _rehash(event)
+        pushed = service.push(owner, {**body, "events": [listening, preference]}, uuid4())
+        assert [ack["outcome"] for ack in pushed["acks"]] == ["APPLIED", "APPLIED"]
+        replay = service.push(owner, {**body, "events": [listening, preference]}, uuid4())
+        assert [ack["outcome"] for ack in replay["acks"]] == ["DUPLICATE", "DUPLICATE"]
+        with Session(engine) as session:
+            row = session.get(ListeningEventRow, UUID(str(listening["event_id"])))
+            assert row is not None and row.user_track_ref_id == ref_id
+            preference_row = session.get(UserTrackPreferenceRow, ref_id)
+            assert preference_row is not None and preference_row.preference == "LIKED"
+        for sequence, invalid in enumerate((foreign_id, uuid4()), start=3):
+            denied = _event(
+                owner,
+                uuid4(),
+                sequence,
+                "LISTENING_EVENT_RECORDED",
+                "LISTENING_EVENT",
+                dict(
+                    cast(dict[str, object], listening["payload"]),
+                    server_user_track_ref_id=str(invalid),
+                ),
+            )
+            response = service.push(owner, {**body, "events": [denied]}, uuid4())
+            assert response["acks"][0]["outcome"] == "REJECTED"
+            assert response["acks"][0]["error"]["code"] == "REQUEST_VALIDATION_FAILED"
+    finally:
+        engine.dispose()
+
+
 def _recommendation_fixture(session: Session, user_id: UUID) -> tuple[UUID, UUID]:
     """Insert the minimum immutable recommendation ledger using the real P05 tables."""
     credit_id, recording_id, request_id = uuid4(), uuid4(), uuid4()

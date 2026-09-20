@@ -1,5 +1,9 @@
 package app.autplay.application.profilepairing
 
+import app.autplay.application.accountrecovery.hasAccountRecoveryPendingRecipient
+import app.autplay.application.accountrecovery.hasAccountDeletionPendingRecipient
+import app.autplay.application.accountrecovery.hasOrdinaryAccountRecoveryPendingRecipient
+
 import app.autplay.application.selfpairing.hasSelfDevicePairingPendingRecipient
 
 import app.autplay.application.profilebinding.LocalDataBindingDecision
@@ -7,6 +11,7 @@ import app.autplay.application.profilebinding.M5BindingMaterializationCoordinato
 import app.autplay.application.profilebinding.M5MaterializationConsent
 import app.autplay.data.security.BindingAuthorityWriteGate
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.isReservedCredentialProfile
 import app.autplay.data.security.M5DeviceKeyStore
 import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.RefreshingSessionCredentials
@@ -15,6 +20,7 @@ import app.autplay.data.security.SessionRequiredException
 import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.settings.M5BindingCheckpoint
+import app.autplay.data.settings.AccountRecoverySetupCheckpoint
 import app.autplay.data.settings.M5TrustEvidence
 import app.autplay.data.settings.NonSecretSettings
 import app.autplay.data.settings.NonSecretSettingsStore
@@ -27,6 +33,7 @@ import java.security.SecureRandom
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -625,7 +632,7 @@ class ProfilePairingRuntime(
                         m5TrustEvidence = if (clearPending && cleared.m5Binding == null) null else cleared.m5TrustEvidence,
                     )
                 }
-                profile?.let { runCatching { credentials.clear(it) } }
+                profile?.let { runCatching { clearProfileCredentials(it) } }
                 (alias ?: profile?.let(::keyAlias))?.let { runCatching { deviceKeys.delete(it) } }
             }
         }
@@ -674,7 +681,26 @@ class ProfilePairingRuntime(
         }
         registerOrigin(snapshot.serverProfileId, snapshot.apiOrigin)
         mutableState.value = ProfilePairingRuntimeState(pairing = PairingState.ExchangingInvitation(snapshot))
-        val stored = persistBinding(snapshot, keyAlias, session, verifiedIdentitySpki, "KEEP_LOCAL", externalSelfPairing = true)
+        val stored = persistBinding(snapshot, keyAlias, session, verifiedIdentitySpki, "KEEP_LOCAL", externalCeremony = FirstBindCeremonyOwner.SELF_DEVICE_PAIRING)
+        if (stored) refreshCapabilities(snapshot, session.sessionId, false)
+        return stored
+    }
+
+    suspend fun completeAccountRecovery(
+        snapshot: PairingFlowSnapshot, keyAlias: String, session: EnrollmentSession,
+        verifiedIdentitySpki: ByteArray,
+        ceremony: FirstBindCeremonyOwner = FirstBindCeremonyOwner.ACCOUNT_RECOVERY,
+    ): Boolean {
+        require(ceremony in setOf(FirstBindCeremonyOwner.ACCOUNT_RECOVERY, FirstBindCeremonyOwner.ACCOUNT_DELETE_CANCEL))
+        requireNotNull(snapshot.expectedUserId); requireNotNull(snapshot.expectedDeviceId); requireNotNull(snapshot.bindingCommitId)
+        if (!firstBindGate.isReservedBy(ceremony)) {
+            session.accessToken.fill(0); session.refreshToken.fill(0)
+            return false
+        }
+        registerOrigin(snapshot.serverProfileId, snapshot.apiOrigin)
+        mutableState.value = ProfilePairingRuntimeState(pairing = PairingState.ExchangingInvitation(snapshot))
+        val stored = persistBinding(snapshot, keyAlias, session, verifiedIdentitySpki, "KEEP_LOCAL",
+            externalCeremony = ceremony)
         if (stored) refreshCapabilities(snapshot, session.sessionId, false)
         return stored
     }
@@ -686,7 +712,7 @@ class ProfilePairingRuntime(
         identitySpki: ByteArray?,
         localDecision: String,
         preservePublicRegistration: Boolean = false,
-        externalSelfPairing: Boolean = false,
+        externalCeremony: FirstBindCeremonyOwner? = null,
     ): Boolean = BindingAuthorityWriteGate.serialized {
         persistBindingLocked(
             snapshot,
@@ -695,7 +721,7 @@ class ProfilePairingRuntime(
             identitySpki,
             localDecision,
             preservePublicRegistration,
-            externalSelfPairing,
+            externalCeremony,
         )
     }
 
@@ -706,12 +732,14 @@ class ProfilePairingRuntime(
         identitySpki: ByteArray?,
         localDecision: String,
         preservePublicRegistration: Boolean,
-        externalSelfPairing: Boolean,
+        externalCeremony: FirstBindCeremonyOwner?,
     ): Boolean {
         val commit = requireNotNull(snapshot.bindingCommitId)
+        val preserveReplay = preservePublicRegistration || externalCeremony != null
         return try {
-            if (externalSelfPairing) {
-                if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.SELF_DEVICE_PAIRING)) return false
+            require(!snapshot.serverProfileId.isReservedCredentialProfile()) { "RESERVED_CREDENTIAL_PROFILE" }
+            if (externalCeremony != null) {
+                if (!firstBindGate.isReservedBy(externalCeremony)) return false
                 val current = settings.settings.first()
                 val binding = current.m5Binding
                 val sameBinding = binding?.bindingCommitId == commit &&
@@ -722,7 +750,13 @@ class ProfilePairingRuntime(
                     current.activeUserId == null && current.deviceId == null &&
                     current.m5PendingExchangeCheckpoint == null && current.m5AdmissionCheckpoint == null
                 if (!empty && !sameBinding) return false
-                if (!credentials.hasSelfDevicePairingPendingRecipient()) return false
+                val pending = when (externalCeremony) {
+                    FirstBindCeremonyOwner.SELF_DEVICE_PAIRING -> credentials.hasSelfDevicePairingPendingRecipient()
+                    FirstBindCeremonyOwner.ACCOUNT_RECOVERY -> credentials.hasOrdinaryAccountRecoveryPendingRecipient()
+                    FirstBindCeremonyOwner.ACCOUNT_DELETE_CANCEL -> credentials.hasAccountDeletionPendingRecipient()
+                    else -> false
+                }
+                if (!pending) return false
             }
             val publicPending = if (preservePublicRegistration) {
                 val encrypted = requireNotNull(credentials.read(snapshot.serverProfileId)) {
@@ -764,12 +798,12 @@ class ProfilePairingRuntime(
             // until the non-secret binding is durably committed below.
             val encodedEnvelope = SessionCredentialEnvelopeCodec.encode(envelope)
             try {
-                credentials.write(snapshot.serverProfileId, encodedEnvelope)
+                writeProfileCredentials(snapshot.serverProfileId, encodedEnvelope)
             } finally {
                 encodedEnvelope.fill(0)
             }
             if (!isCurrentExchange(snapshot)) {
-                if (!preservePublicRegistration) credentials.clear(snapshot.serverProfileId)
+                if (!preserveReplay) clearProfileCredentials(snapshot.serverProfileId)
                 return false
             }
             val spki = requireNotNull(identitySpki) { "M5_IDENTITY_EVIDENCE_MISSING" }
@@ -806,15 +840,21 @@ class ProfilePairingRuntime(
                             serverLabelHint = mutableState.value.serverLabel,
                         ),
                         m5LocalDataDecision = localDecision,
+                        accountRecoverySetup = current.accountRecoverySetup?.takeIf {
+                            it.serverInstanceId == snapshot.expectedServerInstanceId &&
+                                it.accountId == requireNotNull(snapshot.expectedUserId).value && it.bindingCommitId == commit
+                        } ?: if (preservePublicRegistration) AccountRecoverySetupCheckpoint(
+                            snapshot.expectedServerInstanceId, requireNotNull(snapshot.expectedUserId).value, commit,
+                        ) else null,
                         m5PendingExchangeCheckpoint = null,
                     )
                 }
             }
-            if (!stored && !preservePublicRegistration) credentials.clear(snapshot.serverProfileId)
+            if (!stored && !preserveReplay) clearProfileCredentials(snapshot.serverProfileId)
             if (stored && !isCurrentExchange(snapshot)) {
-                if (preservePublicRegistration) return false
+                if (preserveReplay) return false
                 settings.mutate { current -> current.clearBinding(snapshot) }
-                credentials.clear(snapshot.serverProfileId)
+                clearProfileCredentials(snapshot.serverProfileId)
                 runCatching { deviceKeys.delete(alias) }
                 return false
             }
@@ -827,15 +867,18 @@ class ProfilePairingRuntime(
                 )
                 val encodedClean = SessionCredentialEnvelopeCodec.encode(cleanEnvelope)
                 try {
-                    credentials.write(snapshot.serverProfileId, encodedClean)
+                    writeProfileCredentials(snapshot.serverProfileId, encodedClean)
                 } finally {
                     encodedClean.fill(0)
                 }
             }
             stored
-        } catch (_: Exception) {
-            if (!preservePublicRegistration) {
-                runCatching { credentials.clear(snapshot.serverProfileId) }
+        } catch (failure: Exception) {
+            // A cancelled or failed settings write may already have committed. Journal-backed
+            // ceremonies reconcile the credential-first pair locally before any server replay.
+            if (failure is CancellationException) throw failure
+            if (!preserveReplay) {
+                runCatching { clearProfileCredentials(snapshot.serverProfileId) }
             }
             blocked(PairingFailure.SERVER_UNAVAILABLE)
             false
@@ -923,7 +966,7 @@ class ProfilePairingRuntime(
     private suspend fun reserveM5FirstBind(): Boolean {
         if (!firstBindGate.reserve(FirstBindCeremonyOwner.M5)) return false
         val publicPending = runCatching {
-            credentials.hasPublicAccessPendingRegistration() || credentials.hasSelfDevicePairingPendingRecipient()
+            credentials.hasPublicAccessPendingRegistration() || credentials.hasSelfDevicePairingPendingRecipient() || credentials.hasAccountRecoveryPendingRecipient()
         }.getOrElse {
             firstBindGate.release(FirstBindCeremonyOwner.M5)
             blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
@@ -974,7 +1017,7 @@ class ProfilePairingRuntime(
                 )
                 val encoded = SessionCredentialEnvelopeCodec.encode(clean)
                 try {
-                    credentials.write(profile, encoded)
+                    writeProfileCredentials(profile, encoded)
                     true
                 } finally {
                     encoded.fill(0)
@@ -982,7 +1025,7 @@ class ProfilePairingRuntime(
             } catch (_: Exception) {
                 // Corrupt active authority is an unbinding boundary, not merely a UI error.
                 purgeRecommendationContext(profile)
-                credentials.clear(profile)
+                clearProfileCredentials(profile)
                 settings.mutate { latest ->
                     if (latest.activeServerProfileId == profile && latest.m5Binding == binding) {
                         latest.copy(
@@ -1060,7 +1103,7 @@ class ProfilePairingRuntime(
             // Purge while the old binding is still known. The shared gate prevents an in-flight
             // pack fetch from committing until settings have become inactive below.
             purgeRecommendationContext(profile)
-            credentials.clear(profile)
+            clearProfileCredentials(profile)
             settings.mutate { current ->
                 if (current.activeServerProfileId == profile) {
                     current.copy(
@@ -1087,6 +1130,7 @@ class ProfilePairingRuntime(
         localDecision: String,
         selectedLocalChangeIds: List<String>,
     ): Boolean = try {
+        require(!snapshot.serverProfileId.isReservedCredentialProfile()) { "RESERVED_CREDENTIAL_PROFILE" }
         if (!isCurrentExchange(snapshot)) return false
         val request = buildJsonObject {
             put("invitation_id", invitation.id)
@@ -1113,9 +1157,9 @@ class ProfilePairingRuntime(
             m5PendingExchangeSuccessorRefreshToken = command.nextRefreshToken.toString(StandardCharsets.US_ASCII),
         )
         val encoded = SessionCredentialEnvelopeCodec.encode(encrypted)
-        try { credentials.write(snapshot.serverProfileId, encoded) } finally { encoded.fill(0) }
+        try { writeProfileCredentials(snapshot.serverProfileId, encoded) } finally { encoded.fill(0) }
         if (!isCurrentExchange(snapshot)) {
-            credentials.clear(snapshot.serverProfileId)
+            clearProfileCredentials(snapshot.serverProfileId)
             return false
         }
         val checkpoint = "v1|${snapshot.serverProfileId.value}|${snapshot.generationId}|${snapshot.apiOrigin}|${snapshot.streamOrigin}|${snapshot.expectedServerInstanceId}|${snapshot.expectedIdentityEpoch}|${snapshot.expectedIdentityThumbprintSha256}|${snapshot.expectedUserId?.value}|$alias|${snapshot.bindingCommitId}|${snapshot.operationId}"
@@ -1140,10 +1184,10 @@ class ProfilePairingRuntime(
                 )
             }
         }
-        if (!stored) credentials.clear(snapshot.serverProfileId)
+        if (!stored) clearProfileCredentials(snapshot.serverProfileId)
         stored
     } catch (_: Exception) {
-        runCatching { credentials.clear(snapshot.serverProfileId) }
+        runCatching { clearProfileCredentials(snapshot.serverProfileId) }
         settings.mutate { current ->
             val currentGeneration = current.m5PendingExchangeCheckpoint?.split('|')?.getOrNull(2)
             if (currentGeneration == snapshot.generationId) {
@@ -1164,6 +1208,7 @@ class ProfilePairingRuntime(
         return try {
         val p = checkpoint.split('|'); require(p.size == 12 && p[0] == "v1")
         val profile = ServerProfileId(p[1]); pendingProfile = profile
+        require(!profile.isReservedCredentialProfile()) { "RESERVED_CREDENTIAL_PROFILE" }
         if (current.m5CancelledPairingGenerationId == p[2]) return clearPending(profile)
         val material = credentials.read(profile) ?: return clearPending(profile)
         val pending = try { SessionCredentialEnvelopeCodec.decode(material) } finally { material.fill(0) }
@@ -1226,8 +1271,22 @@ class ProfilePairingRuntime(
         }
     }
 
+    private suspend fun writeProfileCredentials(profile: ServerProfileId, material: ByteArray) {
+        require(!profile.isReservedCredentialProfile()) { "RESERVED_CREDENTIAL_PROFILE" }
+        credentials.write(profile, material)
+    }
+
+    fun acknowledgeAccountDeletionDetach(bindingCommitId: String) {
+        val connected = mutableState.value.pairing as? PairingState.Connected
+        if (connected?.snapshot?.bindingCommitId == bindingCommitId) mutableState.value = ProfilePairingRuntimeState()
+    }
+
+    private suspend fun clearProfileCredentials(profile: ServerProfileId) {
+        if (!profile.isReservedCredentialProfile()) credentials.clear(profile)
+    }
+
     private suspend fun clearPending(profile: ServerProfileId?): Boolean {
-        profile?.let { runCatching { credentials.clear(it) } }
+        profile?.let { runCatching { clearProfileCredentials(it) } }
         settings.mutate {
             it.copy(
                 m5PendingExchangeCheckpoint = null,
@@ -1342,7 +1401,7 @@ class ProfilePairingRuntime(
                 current.copy(m5PendingMaterializationRequest = null),
             )
             try {
-                credentials.write(snapshot.serverProfileId, encoded)
+                writeProfileCredentials(snapshot.serverProfileId, encoded)
             } finally {
                 encoded.fill(0)
             }

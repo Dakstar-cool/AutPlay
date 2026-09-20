@@ -89,6 +89,9 @@ class ProfilePairingService:
         access_tokens: AccessTokenCodec,
         access_ttl: timedelta,
         self_device_pairing_enabled: bool = False,
+        account_recovery_enabled: bool = False,
+        account_deletion_enabled: bool = False,
+        shared_training_consent_enabled: bool = False,
     ) -> None:
         self._sessions, self._key, self._label, self._api, self._stream = (
             sessions,
@@ -99,6 +102,9 @@ class ProfilePairingService:
         )
         self._access, self._access_ttl = access_tokens, access_ttl
         self._self_device_pairing_enabled = self_device_pairing_enabled
+        self._account_recovery_enabled = account_recovery_enabled
+        self._account_deletion_enabled = account_deletion_enabled
+        self._shared_training_consent_enabled = shared_training_consent_enabled
 
     def discovery(self) -> dict[str, object]:
         now = _now()
@@ -148,7 +154,10 @@ class ProfilePairingService:
                 "api_major": 1,
                 "capability_revision": instance.capability_revision,
                 "operations": _capability_operations(principal.role, trusted_key_available)
-                + (["self_device_pairing"] if self._self_device_pairing_enabled else []),
+                + (["self_device_pairing"] if self._self_device_pairing_enabled else [])
+                + (["account_recovery"] if self._account_recovery_enabled else [])
+                + (["account_deletion"] if self._account_deletion_enabled else [])
+                + (["shared_training_consent"] if self._shared_training_consent_enabled else []),
                 "limits": {
                     "device_list_max": 100,
                     "session_list_max": 200,

@@ -333,7 +333,12 @@ class PlaybackPersistenceRepository(
         )
         val finalized = requireNotNull(event)
         val queueEntry = requireNotNull(database.queueDao().entry(finalized.queueEntryId.value))
-        val origin = queueEntry.sourceOrigin
+        // UI queue sources are not wire origins. Normalize known presentation aliases
+        // before creating the immutable listening event; preserve future unknown values.
+        val origin = when (queueEntry.sourceOrigin) {
+            "HOME", "LIBRARY" -> "ORGANIC"
+            else -> queueEntry.sourceOrigin
+        }
         val snapshot = requireNotNull(database.queueDao().snapshot(queueEntry.queueSnapshotId))
         val result = history.recordListening(
             binding = current.ownerBinding?.toClientBinding(),

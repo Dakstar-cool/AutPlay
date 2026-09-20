@@ -11,16 +11,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response, StreamingResponse
 
+from autplay.adapters.filesystem.vault_child import ChildProtocolError
 from autplay.application.vault_streaming import AuthorizedStream
 from autplay.domain.auth import OwnedObjectNotFoundError, Principal
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.vault import ByteRange, VaultError
 from autplay.entrypoints.resource_admission_http import resource_admission_error
-from autplay.entrypoints.resource_io_http import IoScopedResponse, require_resource_io_headers
+from autplay.entrypoints.resource_io_http import require_resource_io_headers
 from autplay.entrypoints.resource_stream_http import ProcessStreamGateway
 from autplay.entrypoints.stream import select_range
 from autplay.ports.vault import RangeReader, VaultStorage
 from autplay.runtime.http import ApiError
+from autplay.runtime.resource_io_scope import resource_io_scope
 
 
 class StreamLookup(Protocol):
@@ -99,15 +101,13 @@ def create_stream_router(
                     audio_variant_id,
                     authorized,
                     ByteRange(start=selected.start, end=selected.end),
+                    on_bind=resource_io_scope(request.scope).bind,
                 )
-                return IoScopedResponse(
-                    StreamingResponse(
-                        body,
-                        status_code=status_code,
-                        headers=headers,
-                        media_type=authorized.media_type,
-                    ),
-                    body.io,
+                return StreamingResponse(
+                    body,
+                    status_code=status_code,
+                    headers=headers,
+                    media_type=authorized.media_type,
                 )
             if storage is None:
                 raise RuntimeError("stream storage dependency is missing")
@@ -121,11 +121,12 @@ def create_stream_router(
             raise resource_admission_error(error.code) from None
         except SQLAlchemyError:
             raise resource_admission_error("resource_service_unavailable") from None
-        except VaultError as error:
+        except (VaultError, ChildProtocolError) as error:
             raise ApiError(
                 code="vault_stream_unavailable",
                 message="The requested audio representation is temporarily unavailable.",
                 status_code=503,
+                retryable=True,
             ) from error
         return StreamingResponse(
             _stream(reader, request),

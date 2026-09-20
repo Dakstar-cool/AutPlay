@@ -15,6 +15,7 @@ from autplay.domain.vault import (
     StorageOperationError,
     UploadLimitError,
     UploadOffsetError,
+    VaultCapacityError,
     VaultLimits,
 )
 
@@ -38,16 +39,21 @@ class ProcessVaultChunkWriter:
         *,
         root: Path,
         limits: VaultLimits,
+        minimum_free_bytes: int = 0,
     ) -> None:
+        if type(minimum_free_bytes) is not int or not 0 <= minimum_free_bytes <= 1024**4:
+            raise ValueError("invalid free-space reserve")
         child.allow_go(registered)
         self._child, self._registered = child, registered
         self._root, self._limits = root, limits
+        self._minimum_free_bytes = minimum_free_bytes
 
     def append_reconciled_chunk(
         self,
         key: OpaqueStorageKey,
         *,
         committed_size: int,
+        expected_size: int,
         offset: int,
         payload: bytes,
         payload_sha256: Sha256Digest,
@@ -74,6 +80,8 @@ class ProcessVaultChunkWriter:
                         "max_chunks": self._limits.max_chunks,
                         "io_block_bytes": self._limits.io_block_bytes,
                         "committed_size": committed_size,
+                        "expected_size": expected_size,
+                        "minimum_free_bytes": self._minimum_free_bytes,
                         "offset": offset,
                         "payload_sha256": payload_sha256.hex,
                     },
@@ -86,6 +94,7 @@ class ProcessVaultChunkWriter:
                         "upload_chunk_hash_mismatch": ChunkIntegrityError,
                         "upload_offset_mismatch": UploadOffsetError,
                         "upload_limit_exceeded": UploadLimitError,
+                        "vault_capacity_low": VaultCapacityError,
                     }.get(str(result.get("code")), StorageOperationError)
                     raise error()
                 if (
@@ -96,6 +105,7 @@ class ProcessVaultChunkWriter:
                 ):
                     raise ChildProtocolError()
             except BaseException:
+                child.deadline.freeze_error()
                 child.request_stop()
                 raise
             finally:

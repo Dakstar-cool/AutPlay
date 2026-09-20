@@ -39,6 +39,26 @@ class OkHttpSyncTransport(
     private val client = client.withAutPlayRedirectPolicy()
     private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client, m5Rotation = m5Rotation, beforeRequest = beforeRequest)
 
+    override suspend fun bind(binding: ClientEventBinding) {
+        val epoch = binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")
+        val values = mapOf(
+            "user_id" to binding.userId.value,
+            "device_id" to binding.deviceId.value,
+            "server_profile_id" to binding.serverProfileId.value,
+            "journal_epoch" to epoch,
+            "device_name" to (android.os.Build.MODEL ?: "Android device"),
+            "platform" to "ANDROID",
+            "app_version" to app.autplay.BuildConfig.VERSION_NAME,
+        )
+        val body = JsonObject(values.mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) } +
+            ("protocol_version" to kotlinx.serialization.json.JsonPrimitive(1)))
+        val response = execute(binding.serverProfileId, "/devices/bind", body.toString()).jsonObject
+        check(response["protocol_version"]?.jsonPrimitive?.int == 1) { "SYNC_BINDING_MISMATCH" }
+        for (key in listOf("user_id", "device_id", "server_profile_id", "journal_epoch")) {
+            check(response[key]?.jsonPrimitive?.content == values[key]) { "SYNC_BINDING_MISMATCH" }
+        }
+    }
+
     override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {
         require(events.size in 1..100)
         val body = buildString {

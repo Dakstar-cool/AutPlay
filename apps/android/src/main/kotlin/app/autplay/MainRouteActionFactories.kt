@@ -1,5 +1,8 @@
 package app.autplay
 
+import app.autplay.ui.profilepairing.AccountRecoveryActions
+import app.autplay.ui.profilepairing.AccountDeletionActions
+
 import android.content.Context
 import app.autplay.application.download.DownloadIntentRepository
 import app.autplay.application.importing.LocalImportReviewRepository
@@ -526,6 +529,8 @@ internal fun buildLegacySecondaryRouteActions(
     manualPlaylists: ManualPlaylistActions,
     openPlaylist: (String) -> Unit,
     selfPairingActions: SelfPairingActions = SelfPairingActions(),
+    accountRecoveryActions: AccountRecoveryActions = AccountRecoveryActions(),
+    accountDeletionActions: AccountDeletionActions = AccountDeletionActions(),
 ): LegacySecondaryRouteActions = LegacySecondaryRouteActions(
     manualPlaylists = manualPlaylists,
     openPlaylist = openPlaylist,
@@ -612,6 +617,8 @@ internal fun buildLegacySecondaryRouteActions(
     },
     profilePairing = ProfilePairingActions(
         selfPairing = selfPairingActions,
+        accountRecovery = accountRecoveryActions,
+        accountDeletion = accountDeletionActions,
         startDiscovery = profilePairingRuntime::startDiscovery,
         confirmTrust = profilePairingRuntime::confirmTrust,
         cancelPairing = {

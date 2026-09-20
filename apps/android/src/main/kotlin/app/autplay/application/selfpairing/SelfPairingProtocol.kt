@@ -39,6 +39,8 @@ data class SelfPairingIdentity(
         "expected_stream_origin" to JsonPrimitive(streamOrigin),
     )
 
+    override fun toString(): String = "ServerIdentity($serverInstanceId, epoch=$epoch, origins=<redacted>)"
+
     companion object {
         internal val HEX = Regex("[0-9a-f]{64}")
         fun parse(value: JsonObject, allowDevelopmentHttp: Boolean = false): SelfPairingIdentity {
@@ -97,7 +99,8 @@ class SelfPairingQr(
 
 /** A bounded flat object parser rejects duplicates before kotlinx serialization can discard them. */
 internal object SelfPairingJson {
-    fun parse(bytes: ByteArray, maxBytes: Int = 8192): JsonObject {
+    fun parse(bytes: ByteArray, maxBytes: Int = 8192, maxDepth: Int = 1): JsonObject {
+        require(maxDepth in 1..2)
         require(bytes.size in 2..maxBytes) { "SELF_PAIRING_DOCUMENT_INVALID" }
         val raw = Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
         var quoted = false
@@ -108,8 +111,8 @@ internal object SelfPairingJson {
                 if (escaped) escaped = false else if (char == '\\') escaped = true else if (char == '"') quoted = false
             } else when (char) {
                 '"' -> quoted = true
-                '{' -> { depth++; require(depth == 1) { "SELF_PAIRING_DOCUMENT_INVALID" } }
-                '}' -> { depth--; require(depth == 0) { "SELF_PAIRING_DOCUMENT_INVALID" } }
+                '{' -> { depth++; require(depth <= maxDepth) { "SELF_PAIRING_DOCUMENT_INVALID" } }
+                '}' -> { depth--; require(depth >= 0) { "SELF_PAIRING_DOCUMENT_INVALID" } }
                 '[', ']' -> throw IllegalArgumentException("SELF_PAIRING_DOCUMENT_INVALID")
             }
         }

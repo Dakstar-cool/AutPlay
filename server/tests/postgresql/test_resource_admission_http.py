@@ -11,12 +11,6 @@ from threading import Event
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
-from pydantic import SecretStr
-from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
-from starlette.testclient import TestClient
-
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.auth import AuthService
 from autplay.domain.auth import Principal
@@ -26,6 +20,11 @@ from autplay.entrypoints.composition import build_auth_service
 from autplay.entrypoints.resource_admission_http import create_resource_admission_router
 from autplay.runtime.http import install_error_handlers
 from autplay.runtime.settings import ApiSettings
+from fastapi import FastAPI
+from pydantic import SecretStr
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from starlette.testclient import TestClient
 
 from .test_resource_admission_runtime import AdmissionHarness
 from .test_resource_admission_runtime import admission as admission

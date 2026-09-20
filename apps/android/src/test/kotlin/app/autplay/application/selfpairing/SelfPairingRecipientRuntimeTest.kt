@@ -1,17 +1,31 @@
 package app.autplay.application.selfpairing
 
+import app.autplay.application.accountrecovery.AccountRecoveryPendingStore
+import app.autplay.application.accountrecovery.AccountRecoverySlot
+import app.autplay.application.profilebinding.M5BindingMaterializationCoordinator
+import app.autplay.application.profilebinding.M5LocalIntentMaterializer
+import app.autplay.application.profilebinding.PendingLocalIntentSummary
 import app.autplay.application.profilepairing.*
 import app.autplay.application.publicaccess.ActiveProfileGate
+import app.autplay.application.sync.ClientEventBinding
+import app.autplay.data.security.CredentialJournalSlots
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.M5DeviceKeyStore
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
+import app.autplay.data.settings.NonSecretSettings
+import app.autplay.data.settings.NonSecretSettingsStore
 import app.autplay.domain.DeviceId
+import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
 import java.io.IOException
 import java.security.KeyPairGenerator
 import java.security.spec.ECGenParameterSpec
 import java.time.Instant
 import java.util.Base64
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -19,6 +33,96 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SelfPairingRecipientRuntimeTest {
+    @Test fun committedSettingsFailureRetainsCredentialsAndRestartFinishesWithoutReplay() = runBlocking {
+        assertUncertainBindingFinishesLocally(this, IOException("settings committed before failure"))
+    }
+
+    @Test fun committedSettingsCancellationPropagatesAndRestartFinishesWithoutReplay() = runBlocking {
+        assertUncertainBindingFinishesLocally(this, CancellationException("settings committed before cancellation"))
+    }
+
+    @Test fun inspectRejectsEveryReservedServerBeforeDiscoveryOrJournalOverwrite() = runBlocking {
+        for (slot in CredentialJournalSlots.all) {
+            val h = Harness(serverId = slot.value)
+            h.seedSourceJournals()
+            val saved = h.store.values.mapValues { it.value.copyOf() }
+            val writes = h.store.writes
+            val runtime = h.runtime()
+            runtime.inspectQr(h.qr())
+            assertTrue(runtime.state.value is SelfPairingRecipientState.Blocked)
+            assertEquals(0, h.discoveryCalls)
+            assertEquals(0, h.calls)
+            assertEquals(0, h.keys.created)
+            assertEquals(writes, h.store.writes)
+            assertEquals(0, h.store.clears)
+            assertEquals(saved.keys, h.store.values.keys)
+            saved.forEach { (profile, material) -> assertArrayEquals(material, h.store.values[profile]) }
+            assertFalse(h.gate.isReservedBy(FirstBindCeremonyOwner.SELF_DEVICE_PAIRING))
+        }
+    }
+
+    @Test fun resumeRejectsEveryReservedServerBeforeTransportAndPreservesExactJournal() = runBlocking {
+        for (slot in CredentialJournalSlots.all) {
+            val h = Harness(serverId = slot.value)
+            h.seedSourceJournals()
+            h.seedLegacyClaim()
+            val saved = h.store.values.mapValues { it.value.copyOf() }
+            val writes = h.store.writes
+            val runtime = h.restart()
+            runtime.resume()
+            assertTrue((runtime.state.value as SelfPairingRecipientState.Blocked).pending)
+            assertEquals(0, h.discoveryCalls)
+            assertEquals(0, h.calls)
+            assertEquals(writes, h.store.writes)
+            assertEquals(0, h.store.clears)
+            assertEquals(saved.keys, h.store.values.keys)
+            saved.forEach { (profile, material) -> assertArrayEquals(material, h.store.values[profile]) }
+        }
+    }
+
+    private suspend fun assertUncertainBindingFinishesLocally(scope: CoroutineScope, failure: Exception) {
+        val h = Harness(bindingScope = scope)
+        val runtime = h.ready()
+        h.settings.failureAfterCommit = failure
+        val outcome = runCatching { runtime.confirmAccount(USER) }
+        if (failure is CancellationException) {
+            assertSame(failure, outcome.exceptionOrNull())
+        } else {
+            assertTrue(outcome.isSuccess)
+            assertTrue((runtime.state.value as SelfPairingRecipientState.Blocked).pending)
+        }
+        val journal = h.store.values.getValue(SelfPairingRole.RECIPIENT.slot).copyOf()
+        assertArrayEquals(requireNotNull(h.journalBeforeCommit), journal)
+        val pending = requireNotNull(SelfPairingPendingStore(h.store).read(SelfPairingRole.RECIPIENT))
+        assertEquals("EXCHANGE_PENDING", pending.text("stage"))
+        assertEquals(SERVER, h.settings.settings.value.activeServerProfileId?.value)
+        assertEquals(USER, h.settings.settings.value.activeUserId?.value)
+        assertEquals(DEVICE, h.settings.settings.value.deviceId?.value)
+        val checkpoint = requireNotNull(h.settings.settings.value.m5Binding)
+        val material = h.store.values.getValue(ServerProfileId(SERVER)).copyOf()
+        val envelope = SessionCredentialEnvelopeCodec.decode(material)
+        assertEquals(checkpoint.bindingCommitId, envelope.bindingCommitId)
+        assertEquals(checkpoint.sessionId, envelope.sessionId)
+        assertEquals(checkpoint.sessionFamilyId, envelope.sessionFamilyId)
+        assertEquals(checkpoint.sessionGeneration, envelope.sessionGeneration)
+        assertEquals(pending.text("next_refresh_token"), envelope.refreshToken)
+        assertEquals(1, h.exchanges.size)
+        val calls = h.calls
+        val discoveries = h.discoveryCalls
+        val mutations = h.settings.mutations
+        h.clock = h.clock.plusSeconds(172800)
+        h.offline = true
+        val resumed = h.restart()
+        resumed.resume()
+        assertEquals(SelfPairingRecipientState.Connected, resumed.state.value)
+        assertEquals(calls, h.calls)
+        assertEquals(discoveries, h.discoveryCalls)
+        assertEquals(mutations, h.settings.mutations)
+        assertArrayEquals(material, h.store.values[ServerProfileId(SERVER)])
+        assertFalse(h.store.hasSelfDevicePairingPendingRecipient())
+        assertFalse(h.gate.isReservedBy(FirstBindCeremonyOwner.SELF_DEVICE_PAIRING))
+    }
+
     @Test fun cancelledOrExpiredUncommittedExchangeReconcilesBeforeDiscarding() = runBlocking {
         for (terminal in listOf("CANCELLED", "EXPIRED")) {
             val h = Harness()
@@ -136,14 +240,17 @@ class SelfPairingRecipientRuntimeTest {
         assertFalse(h.store.hasSelfDevicePairingPendingRecipient())
     }
 
-    private class Harness {
+    private class Harness(private val bindingScope: CoroutineScope? = null, serverId: String = SERVER) {
         val store = MemoryStore()
         val keys = Keys()
+        val settings = CommitThenThrowSettings()
         var gate = FirstBindCeremonyGate()
         var clock = Instant.now()
         val expiry = clock.plusSeconds(900)
-        val identity = SelfPairingIdentity(SERVER, 1, SelfPairingProof.hash(keys.spki), "https://api.test.invalid", "https://stream.test.invalid")
+        val identity = SelfPairingIdentity(serverId, 1, SelfPairingProof.hash(keys.spki), "https://api.test.invalid", "https://stream.test.invalid")
         var calls = 0
+        var discoveryCalls = 0
+        var offline = false
         var approved = false
         var loseClaim = false
         var loseExchange = false
@@ -151,21 +258,63 @@ class SelfPairingRecipientRuntimeTest {
         var activeForeign = false
         var terminal: String? = null
         var committedIntent: SelfPairingBindingIntent? = null
+        var journalBeforeCommit: ByteArray? = null
         val claims = mutableListOf<String>()
         val exchanges = mutableListOf<String>()
         var claimed: JsonObject? = null
         fun qr(): ByteArray = SelfPairingQr(CEREMONY, identity, expiry, SelfPairingProof.secret()).use { it.encode() }
-        fun runtime() = SelfPairingRecipientRuntime(store, keys, transport, discovery, committer,
-            ActiveProfileGate { bound || activeForeign }, gate, "New phone", "fixture-1", { clock })
+        fun runtime() = SelfPairingRecipientRuntime(store, keys, transport, discovery, binding(),
+            ActiveProfileGate { bound || activeForeign || settings.settings.value.activeServerProfileId != null }, gate, "New phone", "fixture-1", { clock })
         fun restart(): SelfPairingRecipientRuntime { gate = FirstBindCeremonyGate(); return runtime() }
         suspend fun ready(): SelfPairingRecipientRuntime = runtime().also {
             it.inspectQr(qr()); it.confirmTrust(); approved = true; it.poll()
             assertTrue(it.state.value is SelfPairingRecipientState.AwaitingAccountConfirmation)
         }
+        suspend fun seedSourceJournals() {
+            val saved = JsonObject(mapOf("stage" to JsonPrimitive("SAVED")))
+            SelfPairingPendingStore(store).write(SelfPairingRole.SOURCE, saved)
+            AccountRecoveryPendingStore(store).write(AccountRecoverySlot.SOURCE, saved)
+        }
+        suspend fun seedLegacyClaim() {
+            val alias = "autplay.self.pairing.fixture"
+            keys.ensure(alias)
+            SelfPairingQr.parse(qr(), clock).use { qr ->
+                val secret = SelfPairingProof.secret()
+                try {
+                    val claim = SelfPairingProof.claim(qr, secret, "New phone", "fixture-1", keys, alias)
+                    try {
+                        SelfPairingPendingStore(store).write(SelfPairingRole.RECIPIENT, JsonObject(identity.fields() + mapOf(
+                            "schema_version" to JsonPrimitive(1), "stage" to JsonPrimitive("CLAIM_PENDING"),
+                            "ceremony_id" to JsonPrimitive(CEREMONY), "generation_id" to JsonPrimitive(UUID.randomUUID().toString()),
+                            "key_alias" to JsonPrimitive(alias), "identity_spki_b64" to JsonPrimitive(Base64.getEncoder().encodeToString(keys.spki)),
+                            "expires_at" to JsonPrimitive(expiry.toString()),
+                            "claim_request_b64" to JsonPrimitive(Base64.getEncoder().encodeToString(claim)),
+                            "poll_secret" to JsonPrimitive(secret.toString(Charsets.US_ASCII)),
+                            "rendezvous_secret" to JsonPrimitive(qr.rendezvousSecret.toString(Charsets.US_ASCII)),
+                        )))
+                    } finally { claim.fill(0) }
+                } finally { secret.fill(0) }
+            }
+        }
+        private fun binding(): SelfPairingBindingCommitter {
+            val scope = bindingScope ?: return committer
+            val materializer = object : M5LocalIntentMaterializer {
+                override suspend fun pending(limit: Int): List<PendingLocalIntentSummary> = error("unexpected local review")
+                override suspend fun materialize(binding: ClientEventBinding, localChangeId: LocalId, eventId: LocalId, materializedAtMs: Long): LocalId = error("unexpected materialization")
+            }
+            val pairing = ProfilePairingRuntime(scope, settings, store, keys, discovery,
+                M5BindingMaterializationCoordinator(settings, store, keys, materializer),
+                "New phone", {}, firstBindGate = gate)
+            return ProfilePairingSelfBindingCommitter(pairing, discovery, settings, store, keys)
+        }
         private val discovery = object : UnsupportedDiscoveryPort() {
-            override suspend fun discovery(apiOrigin: String): PairingNetworkResult<DiscoveryDocument> = PairingNetworkResult.Success(
-                DiscoveryDocument(TrustedServerIdentity(SERVER, 1, identity.thumbprint), "Test server", identity.apiOrigin, identity.streamOrigin, setOf(1), clock.plusSeconds(60), keys.spki.copyOf()),
-            )
+            override suspend fun discovery(apiOrigin: String): PairingNetworkResult<DiscoveryDocument> {
+                discoveryCalls++
+                check(!offline)
+                return PairingNetworkResult.Success(
+                    DiscoveryDocument(TrustedServerIdentity(identity.serverInstanceId, 1, identity.thumbprint), "Test server", identity.apiOrigin, identity.streamOrigin, setOf(1), clock.plusSeconds(60), keys.spki.copyOf()),
+                )
+            }
         }
         private val committer = object : SelfPairingBindingCommitter {
             override suspend fun isDurable(intent: SelfPairingBindingIntent): Boolean = bound && !activeForeign && committedIntent == intent
@@ -180,6 +329,7 @@ class SelfPairingRecipientRuntimeTest {
             override suspend fun recipient(identity: SelfPairingIdentity, kind: String, ceremonyId: String, secret: ByteArray, request: ByteArray): JsonObject {
                 assertTrue(store.hasSelfDevicePairingPendingRecipient())
                 calls++
+                check(!offline)
                 val value = SelfPairingJson.parse(request)
                 return when (kind) {
                     "claim" -> {
@@ -190,6 +340,7 @@ class SelfPairingRecipientRuntimeTest {
                     "poll" -> status()
                     else -> {
                         exchanges += request.toString(Charsets.UTF_8)
+                        journalBeforeCommit = store.values.getValue(SelfPairingRole.RECIPIENT.slot).copyOf()
                         if (terminal != null) throw SelfPairingRemoteFailure("self_pairing_unavailable")
                         if (loseExchange) { loseExchange = false; throw IOException("lost") }
                         JsonObject(mapOf(
@@ -219,12 +370,30 @@ class SelfPairingRecipientRuntimeTest {
         }
     }
 
+    private class CommitThenThrowSettings : NonSecretSettingsStore {
+        override val settings = MutableStateFlow(NonSecretSettings())
+        var failureAfterCommit: Exception? = null
+        var mutations = 0
+        override suspend fun update(settings: NonSecretSettings) { this.settings.value = settings }
+        override suspend fun mutate(transform: (NonSecretSettings) -> NonSecretSettings) {
+            mutations++
+            settings.value = transform(settings.value)
+            if (settings.value.m5Binding != null) failureAfterCommit?.let {
+                failureAfterCommit = null
+                throw it
+            }
+        }
+    }
+
     private class MemoryStore : CredentialStore {
         val values = mutableMapOf<ServerProfileId, ByteArray>()
         var failClear = false
+        var writes = 0
+        var clears = 0
         override suspend fun read(profileId: ServerProfileId): ByteArray? = values[profileId]?.copyOf()
-        override suspend fun write(profileId: ServerProfileId, material: ByteArray) { values[profileId] = material.copyOf() }
+        override suspend fun write(profileId: ServerProfileId, material: ByteArray) { writes++; values[profileId] = material.copyOf() }
         override suspend fun clear(profileId: ServerProfileId) {
+            clears++
             if (failClear) { failClear = false; throw IOException("clear failed") }
             values.remove(profileId)?.fill(0)
         }

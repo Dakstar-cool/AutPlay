@@ -12,18 +12,17 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
-from psycopg import Connection
-from pydantic import SecretStr
-from sqlalchemy import create_engine
-from starlette.testclient import TestClient
-
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.application.auth import AuthService, BootstrapOwnerCommand
 from autplay.domain.auth import DeviceDescription, DevicePlatform, Principal
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_auth_service
 from autplay.runtime.settings import ApiSettings, RuntimeProfile
+from fastapi import FastAPI
+from psycopg import Connection
+from pydantic import SecretStr
+from sqlalchemy import create_engine
+from starlette.testclient import TestClient
 
 AUTH_SECRET = "p03-http-test-signing-secret-at-least-32-bytes"
 

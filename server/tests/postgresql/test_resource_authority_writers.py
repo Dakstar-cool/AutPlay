@@ -7,10 +7,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from psycopg import Connection
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from autplay.adapters.postgresql.models import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.profile_pairing import DeviceAdmissionRow, DeviceKeyBlockRow
 from autplay.adapters.postgresql.models.web_admin import WebSessionRow
@@ -18,6 +14,9 @@ from autplay.application.profile_pairing import ProfilePairingService
 from autplay.domain.auth import AccountRole, InvalidAccessTokenError, Principal
 from autplay.domain.profile_pairing import ProfilePairingError
 from autplay.domain.resource_admission import AdmissionState, ResourceAdmissionError
+from psycopg import Connection
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .test_auth_runtime import AuthRuntime, _bootstrap, _insert_user_device_session
 from .test_auth_runtime import auth_runtime as auth_runtime
@@ -27,6 +26,11 @@ from .test_profile_pairing_m5b import _exchange_request, _owner
 from .test_profile_pairing_m5b import pairing_service as pairing_service
 from .test_resource_admission_runtime import AdmissionHarness, fence, play, present
 from .test_resource_admission_runtime import admission as admission
+
+
+def _add_replacement_owner(session: Session) -> None:
+    session.add(UserAccountRow(user_id=uuid4(), display_name="Replacement owner", role="OWNER"))
+    session.flush()
 
 
 @pytest.mark.parametrize("gate", ["revoked", "generation", "token_age", "idle", "absolute", "role"])
@@ -62,6 +66,7 @@ def test_s1_rechecks_browser_after_authentication_before_commands_or_replay(
             row.issued_at = now - timedelta(hours=12)
             row.absolute_expires_at = now - timedelta(seconds=1)
         else:
+            _add_replacement_owner(session)
             present(session.get(UserAccountRow, actor.user_id)).role = "USER"
     actions: tuple[Callable[[], object], ...] = (
         lambda: runtime.service.bind_device_admission_review(
@@ -135,6 +140,7 @@ def test_m5_cached_actor_cannot_issue_or_target_other_devices_after_revocation(
         elif gate == "session":
             present(session.get(UserSessionRow, actor.session_id)).revoked_at = datetime.now(UTC)
         else:
+            _add_replacement_owner(session)
             present(session.get(UserAccountRow, actor.user_id)).role = "USER"
     actions: tuple[Callable[[], object], ...] = (
         lambda: pairing_service.issue_invitation(actor, uuid4(), 60),

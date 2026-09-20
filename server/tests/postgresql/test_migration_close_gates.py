@@ -12,6 +12,36 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0060_local_bridge_authority", "0059_training_publication_seal"),
+    ("0059_training_publication_seal", "0058_training_privacy_fence"),
+    ("0058_training_privacy_fence", "0057_training_execution"),
+    ("0057_training_execution", "0056_training_checkpoint"),
+    ("0056_training_checkpoint", "0055_training_work"),
+    ("0055_training_work", "0054_training_consent"),
+    ("0054_training_consent", "0053_privacy_purge"),
+    ("0053_privacy_purge", "0052_account_deletion"),
+    ("0052_account_deletion", "0051_account_recovery"),
+    ("0051_account_recovery", "0050_metadata_execution"),
+    ("0050_metadata_execution", "0049_internal_io_budget"),
+    ("0049_internal_io_budget", "0048_ingest_cleanup"),
+    ("0048_ingest_cleanup", "0047_ingest_execution"),
+    ("0047_ingest_execution", "0046_upload_cleanup"),
+    ("0046_upload_cleanup", "0045_orphan_missing"),
+    ("0045_orphan_missing", "0044_inventory_maintenance"),
+    ("0044_inventory_maintenance", "0043_orphan_object_claim"),
+    ("0043_orphan_object_claim", "0042_provider_maintenance"),
+    ("0042_provider_maintenance", "0041_provider_scratch"),
+    ("0041_provider_scratch", "0040_provider_staging"),
+    ("0040_provider_staging", "0039_internet_ingest_lineage"),
+    ("0039_internet_ingest_lineage", "0038_worker_resource_wait"),
+    ("0038_worker_resource_wait", "0037_acquisition_authority"),
+    ("0037_acquisition_authority", "0036_resource_io_execution"),
+    ("0036_resource_io_execution", "0035_resource_admission"),
+    ("0035_resource_admission", "0034_self_device_pairing"),
+    ("0034_self_device_pairing", "0033_web_passkeys"),
+    ("0033_web_passkeys", "0032_track_metadata"),
+    ("0032_track_metadata", "0031_music_library"),
+    ("0031_music_library", "0030_temporal_snapshot_retention"),
     ("0030_temporal_snapshot_retention", "0029_sona_shadow_binding"),
     ("0029_sona_shadow_binding", "0028_adaptive_recommend_shadow"),
     ("0028_adaptive_recommend_shadow", "0027_public_access_invite_only"),
@@ -163,8 +193,46 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == (
-        "0030_temporal_snapshot_retention"
+    assert _current_revision(database_harness, database_name) == ("0060_local_bridge_authority")
+
+
+def test_local_bridge_downgrade_refuses_durable_admission(
+    database_harness: DatabaseHarness, empty_database_name: str
+) -> None:
+    database_harness.upgrade(empty_database_name)
+    with database_harness.connect(empty_database_name) as connection:
+        owner = connection.execute(
+            "INSERT INTO account.user_account (display_name,role) "
+            "VALUES ('bridge-downgrade','OWNER') RETURNING user_id"
+        ).fetchone()
+        assert owner is not None
+        device = connection.execute(
+            "INSERT INTO account.device "
+            "(user_id,device_name,platform,app_version) "
+            "VALUES (%s,'Bridge','OTHER','test') RETURNING device_id",
+            (owner[0],),
+        ).fetchone()
+        assert device is not None
+        connection.execute(
+            """
+            INSERT INTO account.resource_admission (
+              operation_id,user_id,authority_generation,authority_kind,device_id,
+              kind,resource_type,resource_id,target_id,request_sha256,state,
+              generation,created_at,updated_at,enqueued_at,terminal_at,attachment_revision
+            ) VALUES (
+              gen_random_uuid(),%s,1,'LOCAL_BRIDGE',%s,'TRANSFER','UPLOAD_INTENT',
+              gen_random_uuid(),gen_random_uuid(),%s,'RELEASED',0,
+              now(),now(),now(),now(),0
+            )
+            """,
+            (owner[0], device[0], b"b" * 32),
+        )
+        connection.commit()
+
+    with pytest.raises(DBAPIError, match="refusing local bridge authority downgrade"):
+        database_harness.downgrade(empty_database_name, "0059_training_publication_seal")
+    assert _current_revision(database_harness, empty_database_name) == (
+        "0060_local_bridge_authority"
     )
 
 

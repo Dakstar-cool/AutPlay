@@ -18,10 +18,10 @@ class AccountInvitationRow(Base):
 
     __tablename__ = "account_invitation"
     invitation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    issued_by_user_id: Mapped[UUID] = mapped_column(
+    issued_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("account.user_account.user_id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     secret_sha256: Mapped[bytes] = mapped_column(BYTEA, nullable=False, unique=True)
@@ -108,10 +108,10 @@ class AccountProvisioningLinkRow(Base):
         nullable=False,
         unique=True,
     )
-    issued_by_user_id: Mapped[UUID] = mapped_column(
+    issued_by_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("account.user_account.user_id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     __table_args__ = ({"schema": "account"},)

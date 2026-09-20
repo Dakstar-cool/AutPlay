@@ -18,11 +18,13 @@ from autplay.domain.resource_admission import (
     RESERVATION_TTL,
     TERMINAL_RETENTION,
     AccountLimits,
+    AcquisitionClaim,
     ActivationFence,
     AdmissionState,
     AdmissionStatus,
     AuthorityKind,
     IoPermit,
+    LocalBridgeClaim,
     ResourceAdmission,
     ResourceAdmissionError,
     ResourceAuthority,
@@ -36,6 +38,7 @@ from autplay.ports.resource_admission import (
 )
 from autplay.ports.resource_execution import ResourceExecutionRepository
 
+from .models.jobs import JobRow
 from .models.resource_admission import (
     QuotaOperationReceiptRow,
     ResourceAdmissionRow,
@@ -70,7 +73,13 @@ LEFT JOIN account.account_quota_override q ON q.user_id=a.user_id
 LEFT JOIN account.resource_grant_cursor g ON g.user_id=a.user_id AND g.kind=a.kind
 LEFT JOIN account_usage au ON au.user_id=a.user_id
 LEFT JOIN device_usage du ON du.device_id=a.device_id
-WHERE a.kind=:kind AND a.state='WAITING' AND a.waiting_until>:now
+WHERE a.kind=:kind AND a.state='WAITING'
+  AND (a.waiting_until>:now OR (a.job_id IS NOT NULL AND a.waiting_until IS NULL))
+  AND (a.job_id IS NULL OR EXISTS (
+      SELECT 1 FROM jobs.job j WHERE j.job_id=a.job_id AND j.cancel_requested_at IS NULL
+        AND ((j.state='RUNNING' AND j.lease_deadline>:now)
+             OR (j.state='RETRY_WAIT' AND j.resource_waiting
+                 AND (j.resource_wake_until IS NULL OR j.resource_wake_until>:now)))))
   AND NOT EXISTS (SELECT 1 FROM account.resource_io_permit p
                   WHERE p.operation_id=a.operation_id AND p.expires_at>:now)
   AND NOT EXISTS (SELECT 1 FROM account.resource_io_execution e
@@ -93,6 +102,9 @@ class SqlAlchemyResourceAdmissionRepository:
 
     def lock(self) -> datetime:
         lock_resource_admission(self._s)
+        return self.current_time()
+
+    def current_time(self) -> datetime:
         # Transaction start/client time can precede a contended lock by an arbitrary interval.
         now = self._s.scalar(select(func.clock_timestamp()))
         if not isinstance(now, datetime):
@@ -101,6 +113,12 @@ class SqlAlchemyResourceAdmissionRepository:
 
     def authenticate(self, actor: Principal, now: datetime) -> ResourceAuthority:
         return self._gate.authenticate(actor, now)
+
+    def authenticate_acquisition(self, actor: AcquisitionClaim, now: datetime) -> ResourceAuthority:
+        return self._gate.authenticate_acquisition(actor, now)
+
+    def authenticate_bridge(self, actor: LocalBridgeClaim, now: datetime) -> ResourceAuthority:
+        return self._gate.authenticate_bridge(actor, now)
 
     def require_authority(self, authority: ResourceAuthority, now: datetime) -> None:
         self._gate.require(authority, now)
@@ -197,11 +215,20 @@ class SqlAlchemyResourceAdmissionRepository:
                 .where(
                     ResourceAdmissionRow.user_id == user_id,
                     ResourceAdmissionRow.kind == kind,
-                    ResourceAdmissionRow.state == "WAITING",
-                    ResourceAdmissionRow.waiting_until > now,
+                    self.waiting(now),
                 )
             )
             or 0
+        )
+
+    @staticmethod
+    def waiting(now: datetime) -> ColumnElement[bool]:
+        row = ResourceAdmissionRow
+        return and_(
+            row.state == "WAITING",
+            or_(
+                row.waiting_until > now, and_(row.job_id.is_not(None), row.waiting_until.is_(None))
+            ),
         )
 
     @staticmethod
@@ -279,6 +306,28 @@ class SqlAlchemyResourceAdmissionRepository:
                 if operation is None:
                     raise ResourceAdmissionError()
                 try:
+                    if operation.authority.job_id is not None:
+                        self._gate.require_intent(operation.authority, operation.request, now)
+                        job = self._s.get(JobRow, operation.authority.job_id)
+                        if job is None:
+                            raise ResourceAdmissionError()
+                        if (
+                            job.state != "RUNNING"
+                            or job.lease_owner != operation.authority.job_worker_id
+                            or job.attempt_count != operation.authority.job_attempt
+                        ):
+                            # Wake the fair winner before letting a younger intent grant.
+                            # This hint gives no I/O authority; the next claim must rebind.
+                            if (
+                                job.state == "RETRY_WAIT"
+                                and job.resource_waiting
+                                and job.resource_wake_until is None
+                            ):
+                                job.resource_wake_until = now + RESERVATION_TTL
+                                job.scheduled_at = now
+                                self._s.flush()
+                                changed += 1
+                            break
                     self.require_authority(operation.authority, now)
                     self.require_target(operation.authority, operation.request, now)
                 except ResourceAdmissionError:
@@ -438,6 +487,27 @@ class SqlAlchemyResourceAdmissionRepository:
         )
 
     def cleanup(self, now: datetime, maximum: int) -> int:
+        # Touch validated intents so the bounded scan progresses beyond a valid prefix.
+        # This changes scan recency only; enqueued_at remains the fairness authority.
+        row = ResourceAdmissionRow
+        worker_waits = self._s.scalars(
+            select(row.operation_id)
+            .where(row.state == "WAITING", row.job_id.is_not(None))
+            .order_by(row.updated_at, row.operation_id)
+            .limit(maximum)
+        ).all()
+        invalidated = 0
+        for identifier in worker_waits:
+            operation = self.find(identifier)
+            if operation is None:
+                continue
+            try:
+                self._gate.require_intent(operation.authority, operation.request, now)
+            except ResourceAdmissionError:
+                operation.state, operation.terminal_at = AdmissionState.EXPIRED, now
+                invalidated += 1
+            operation.updated_at = now
+            self.save(operation)
         expired_permits = (
             select(ResourceIoPermitRow.permit_id)
             .where(
@@ -506,7 +576,7 @@ class SqlAlchemyResourceAdmissionRepository:
                     QuotaOperationReceiptRow.operation_id.in_(receipts)
                 )
             )
-        return len(expired) + len(removable) + len(receipts)
+        return invalidated + len(expired) + len(removable) + len(receipts)
 
 
 class SqlAlchemyResourceAdmissionUnitOfWork:

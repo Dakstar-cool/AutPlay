@@ -8,8 +8,15 @@ from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
-from autplay.domain.vault import ChunkWriteResult, OpaqueStorageKey, Sha256Digest, VaultLimits
-from autplay.ports.vault import ReconciledChunkWriter, VaultStorage
+from autplay.domain.resource_admission import ResourceAdmissionError
+from autplay.domain.vault import (
+    ChunkWriteResult,
+    OpaqueStorageKey,
+    Sha256Digest,
+    VaultCapacityError,
+    VaultLimits,
+)
+from autplay.ports.vault import ReconciledChunkWriter
 
 
 class VaultNotFoundError(RuntimeError):
@@ -28,12 +35,6 @@ class UploadStateError(RuntimeError):
     """The request is not permitted in the upload's durable state."""
 
     code = "upload_invalid_state"
-
-
-class VaultCapacityError(RuntimeError):
-    """The configured safety reserve would be violated by a new upload."""
-
-    code = "vault_capacity_low"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,30 +122,24 @@ class UploadRepository(Protocol):
 class VaultUploadService:
     """Coordinates durable staging bytes with owner-scoped receipt rows.
 
-    The storage write is intentionally performed before the receipt commit. A
-    retry reconciles any uncommitted suffix via ``truncate_staging`` supplied by
-    the P06 filesystem port before appending further bytes.
+    Creation commits metadata without touching storage. An admitted writer creates
+    staging on the first chunk and reconciles uncommitted suffixes before appending.
+    Its exact process exit must precede the chunk receipt commit.
     """
 
     def __init__(
         self,
         *,
         repository: UploadRepository,
-        storage: VaultStorage,
         limits: VaultLimits | None = None,
         ttl: timedelta = timedelta(hours=24),
-        minimum_free_bytes: int = 0,
         chunk_writer: ReconciledChunkWriter | None = None,
     ) -> None:
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive")
-        if minimum_free_bytes < 0:
-            raise ValueError("minimum_free_bytes must not be negative")
         self._repository = repository
-        self._storage = storage
         self._limits = limits or VaultLimits()
         self._ttl = ttl
-        self._minimum_free_bytes = minimum_free_bytes
         self._chunk_writer = chunk_writer
 
     def create(
@@ -155,25 +150,15 @@ class VaultUploadService:
         now: datetime,
         staging_key: OpaqueStorageKey,
     ) -> tuple[UploadInfo, bool]:
-        """Create/replay an authorized session and its private staging file."""
+        """Create/replay an authorized session before any staging bytes exist."""
 
         if command.expected_size > self._limits.max_object_bytes:
             raise ValueError("expected_size exceeds vault limit")
-        if self._storage.available_bytes() - command.expected_size < self._minimum_free_bytes:
-            raise VaultCapacityError()
         if not self._repository.authorize_target(principal, command.recording_id):
             raise VaultNotFoundError()
-        info, created = self._repository.create_or_replay(
+        return self._repository.create_or_replay(
             principal, command, staging_key, now + self._ttl, self._limits
         )
-        if created:
-            try:
-                self._storage.create_staging(staging_key)
-            except Exception:
-                # The DB session is deliberately left OPEN for reconciliation;
-                # callers receive a stable storage failure from the adapter.
-                raise
-        return info, created
 
     def append(
         self,
@@ -191,8 +176,7 @@ class VaultUploadService:
         if info.state != "OPEN":
             raise UploadStateError()
         if offset != info.received_size:
-            # A duplicate retry is still delegated to the storage implementation
-            # after the database repository verifies the matching chunk receipt.
+            # A duplicate retry verifies the durable receipt without storage access.
             return self._repository.record_chunk(
                 principal,
                 upload_session_id,
@@ -205,18 +189,15 @@ class VaultUploadService:
             raise UploadStateError()
         key = self._repository.staging_key_for_owned(principal, upload_session_id)
         if self._chunk_writer is None:
-            self._storage.truncate_staging(key, info.received_size)
-            self._storage.write_chunk(
-                key, offset=offset, payload=payload, payload_sha256=payload_sha256
-            )
-        else:
-            self._chunk_writer.append_reconciled_chunk(
-                key,
-                committed_size=info.received_size,
-                offset=offset,
-                payload=payload,
-                payload_sha256=payload_sha256,
-            )
+            raise ResourceAdmissionError("capability_missing")
+        self._chunk_writer.append_reconciled_chunk(
+            key,
+            committed_size=info.received_size,
+            expected_size=info.expected_size,
+            offset=offset,
+            payload=payload,
+            payload_sha256=payload_sha256,
+        )
         return self._repository.record_chunk(
             principal,
             upload_session_id,
@@ -234,8 +215,6 @@ class VaultUploadService:
             return info
         if info.state != "OPEN" or info.received_size != info.expected_size:
             raise UploadStateError()
-        if self._storage.available_bytes() < self._minimum_free_bytes:
-            raise VaultCapacityError()
         return self._repository.seal_and_enqueue(principal, upload_session_id)
 
     def expire_if_due(

@@ -24,9 +24,9 @@ from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 def test_complete_table_and_column_inventory() -> None:
     """Every reference table and column is present exactly once."""
     assert set(metadata.tables) == set(EXPECTED_TABLE_KEYS)
-    assert len(metadata.tables) == 129
+    assert len(metadata.tables) == 170
     assert sum(len(table.columns) for table in metadata.tables.values()) == EXPECTED_COLUMN_COUNT
-    assert EXPECTED_COLUMN_COUNT == 1436
+    assert EXPECTED_COLUMN_COUNT == 1921
     assert {
         key: len(table.columns) for key, table in metadata.tables.items()
     } == EXPECTED_TABLE_COLUMN_COUNTS
@@ -36,7 +36,7 @@ def test_complete_table_and_column_inventory() -> None:
 def test_all_rows_are_typed_mappers_without_relationship_behavior() -> None:
     """Mappings are storage rows, not a second domain model."""
     configure_mappers()
-    assert len(MAPPED_ROWS) == 129
+    assert len(MAPPED_ROWS) == 170
     assert {str(row.__table__) for row in MAPPED_ROWS} == set(EXPECTED_TABLE_KEYS)
     assert all(not list(sa_inspect(row).relationships) for row in MAPPED_ROWS)
 
@@ -56,6 +56,10 @@ def test_constraint_and_foreign_key_names_are_explicit_and_qualified() -> None:
         for element in constraint.elements
     )
     assert {constraint.name for constraint in foreign_keys if constraint.use_alter} == {
+        "ingest_cleanup_claim_completed_execution_id_fkey",
+        "orphan_object_claim_completed_execution_id_fkey",
+        "upload_cleanup_claim_completed_execution_id_fkey",
+        "upload_session_source_internet_acquisition_id_fkey",
         "discovery_candidate_current_attempt_fkey",
         "fk_import_entry_current_match_decision",
         "fk_match_decision_reviewed_evidence",
@@ -67,7 +71,7 @@ def test_explicit_index_inventory_and_no_python_defaults() -> None:
     """All reference indexes are mapped and defaults remain database-owned."""
     indexes = {index.name for table in metadata.tables.values() for index in table.indexes}
     assert indexes == EXPECTED_EXPLICIT_INDEX_NAMES
-    assert len(indexes) == 121
+    assert len(indexes) == 156
     assert all(
         column.default is None for table in metadata.tables.values() for column in table.columns
     )
@@ -114,4 +118,4 @@ def test_complete_mapping_definition_fingerprint() -> None:
     )
     fingerprint = hashlib.sha256("\n".join(statements).encode()).hexdigest()
 
-    assert fingerprint == "beef08ba9e49de4da84444dfae513d1d30e3122f3662af123d1c0b143cb7690d"
+    assert fingerprint == "f3f1f8db5c44bb46d1f8d07a6df85618b6b4af04fa568d2933696f327b893215"

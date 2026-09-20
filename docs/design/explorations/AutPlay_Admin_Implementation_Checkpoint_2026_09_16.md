@@ -41,7 +41,7 @@ Latest selected checks on the combined working directory:
 Earlier successful evidence includes schema migration roundtrips, policy and authority races,
 root contracts, synthetic HTTPS layouts, Android selected unit tests/APK builds/lint and five
 self-pairing UI cases on the owned API26 emulator. These are scoped checks, not full acceptance.
-The laptop/M55/private-network acceptance and actual capacity measurements remain unverified.
+The laptop/A55/private-network acceptance and actual capacity measurements remain unverified.
 
 ## Start continuation with these open findings
 
@@ -104,7 +104,7 @@ verified loopback port is 4142 after an external Docker restart. Recheck the own
 before tests. Existing bounded probe scripts are in the local checkpoint directory.
 Use locked Python dependencies and `python -m pytest/mypy/ruff`; Gradle runs sequentially
 with one worker and the standard 2 GiB heap. The owned emulator is `emulator-5584`.
-The connected M52 is not an authorized replacement for M55 acceptance.
+The connected M52 is not an authorized replacement for A55 acceptance.
 
 No push, deployment, production migration, real credential registration, or adjacent-task
 commit is authorized by this checkpoint request. New feature work resumes only in the new task.

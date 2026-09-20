@@ -64,6 +64,11 @@ class WorkManagerDeferredWorkScheduler(
         enqueue(request, ExistingWorkPolicy.APPEND_OR_REPLACE)
     }
 
+    /** Foreground polling must not accumulate a chain while offline or while sync is running. */
+    suspend fun enqueueIfIdle(request: DeferredWorkRequest) {
+        enqueue(request, ExistingWorkPolicy.KEEP)
+    }
+
     override suspend fun reconcile(request: DeferredWorkRequest) {
         // One-time unique work has no UPDATE policy. Replacing it is safe because sync intent
         // lives in Room; it also cancels a running worker whose network policy just changed.

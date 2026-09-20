@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, select, true
 from sqlalchemy.orm import Session
 
+from autplay.domain.ingest_execution import IngestExecutionStatus
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.resource_execution import ExecutionKind, ExecutionState, ExecutionStatus
 
+from .ingest_execution_guard import require_ingest_execution
+from .models.ingest_cleanup import IngestCleanupExecutionRow
+from .models.ingest_execution import IngestExecutionRow
 from .models.resource_admission import ResourceIoExecutionRow
 
 
@@ -50,7 +54,9 @@ def matches_upload_execution(row: ResourceIoExecutionRow, expected: ExecutionSta
     )
 
 
-def upload_has_unclosed_writer(session: Session, upload_id: UUID) -> bool:
+def upload_has_unclosed_writer(
+    session: Session, upload_id: UUID, *, exclude_cleanup: UUID | None = None
+) -> bool:
     return (
         session.scalar(
             select(ResourceIoExecutionRow.execution_id)
@@ -58,6 +64,27 @@ def upload_has_unclosed_writer(session: Session, upload_id: UUID) -> bool:
                 ResourceIoExecutionRow.kind == "VAULT_UPLOAD",
                 ResourceIoExecutionRow.actual_target_id == upload_id,
                 ResourceIoExecutionRow.closed_at.is_(None),
+            )
+            .limit(1)
+        )
+        is not None
+        or session.scalar(
+            select(IngestCleanupExecutionRow.execution_id)
+            .where(
+                IngestCleanupExecutionRow.claim_id == upload_id,
+                IngestCleanupExecutionRow.closed_at.is_(None),
+                IngestCleanupExecutionRow.execution_id != exclude_cleanup
+                if exclude_cleanup is not None
+                else true(),
+            )
+            .limit(1)
+        )
+        is not None
+        or session.scalar(
+            select(IngestExecutionRow.execution_id)
+            .where(
+                IngestExecutionRow.upload_session_id == upload_id,
+                IngestExecutionRow.closed_at.is_(None),
             )
             .limit(1)
         )
@@ -73,7 +100,11 @@ def unclosed_upload_targets() -> Select[tuple[UUID]]:
 
 
 def require_upload_writer(
-    session: Session, upload_id: UUID, *, expected: ExecutionStatus | None = None
+    session: Session,
+    upload_id: UUID,
+    *,
+    expected: ExecutionStatus | None = None,
+    ingest: IngestExecutionStatus | None = None,
 ) -> None:
     """Call after upload FOR UPDATE and before any staging mutation or child GO.
 
@@ -82,7 +113,20 @@ def require_upload_writer(
     the independent renewal/stop coordinator must remain able to update that row.
     A missing heartbeat, expired permit or terminal admission never proves exit.
     """
+    require_ingest_execution(session, upload_id, ingest)
     with session.no_autoflush:
+        if (
+            session.scalar(
+                select(IngestCleanupExecutionRow.execution_id)
+                .where(
+                    IngestCleanupExecutionRow.claim_id == upload_id,
+                    IngestCleanupExecutionRow.closed_at.is_(None),
+                )
+                .limit(1)
+            )
+            is not None
+        ):
+            raise ResourceAdmissionError("ingest_cleanup_busy")
         row = session.scalar(
             select(ResourceIoExecutionRow)
             .where(

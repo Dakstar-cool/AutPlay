@@ -17,6 +17,11 @@ from autplay.domain.resource_execution import (
 )
 
 from .models.resource_admission import ResourceIoExecutionRow, ResourceIoPermitRow
+from .provider_staging_runtime import (
+    preserve_provider_exit,
+    register_provider_staging,
+    require_provider_staging,
+)
 
 
 class SqlAlchemyResourceExecutionRepository:
@@ -92,6 +97,7 @@ class SqlAlchemyResourceExecutionRepository:
     def prepare(self, ticket: ExecutionTicket, now: datetime) -> ExecutionStatus:
         self._live_permit(ticket, now)
         if self._s.get(ResourceIoExecutionRow, ticket.execution_id) is not None:
+            require_provider_staging(self._s, self._find(ticket))
             return self.inspect(ticket)
         if (
             self._s.scalar(
@@ -129,6 +135,7 @@ class SqlAlchemyResourceExecutionRepository:
             heartbeat_at=now,
         )
         self._s.add(row)
+        register_provider_staging(self._s, row)
         self._s.flush()
         return self._status(row, ticket)
 
@@ -137,6 +144,7 @@ class SqlAlchemyResourceExecutionRepository:
     ) -> ExecutionStatus:
         row = self._find(ticket)
         self._live_permit(ticket, now)
+        require_provider_staging(self._s, row)
         status = self._status(row, ticket)
         if status.state == ExecutionState.RUNNING and status.child == child:
             return status
@@ -206,5 +214,6 @@ class SqlAlchemyResourceExecutionRepository:
             proof.evidence_sha256,
             proof.exit_code,
         )
+        preserve_provider_exit(self._s, row, now)
         self._s.flush()
         return self._status(row, ticket)

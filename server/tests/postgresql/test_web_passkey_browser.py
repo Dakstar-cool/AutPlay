@@ -9,6 +9,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import uvicorn
+from autplay.adapters.postgresql.web_passkeys import SqlAlchemyWebPasskeyUnitOfWorkFactory
+from autplay.adapters.webauthn import DuoWebPasskeyVerifier
+from autplay.application.web_passkeys import WebPasskeyService
+from autplay.runtime.web_security import apply_admin_security_headers, require_exact_origin
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -18,11 +22,6 @@ from playwright.sync_api import BrowserContext, Page, expect, sync_playwright
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.datastructures import UploadFile
 from starlette.responses import HTMLResponse, Response
-
-from autplay.adapters.postgresql.web_passkeys import SqlAlchemyWebPasskeyUnitOfWorkFactory
-from autplay.adapters.webauthn import DuoWebPasskeyVerifier
-from autplay.application.web_passkeys import WebPasskeyService
-from autplay.runtime.web_security import apply_admin_security_headers, require_exact_origin
 
 from .test_web_passkey_http import _client
 from .test_web_passkeys import SECRET, Harness
@@ -92,7 +91,7 @@ def _virtual_page(context: BrowserContext, origin: str, harness: Harness) -> Pag
 
 def _register(page: Page, origin: str, label: str) -> None:
     page.goto(origin + "/admin/passkeys?lang=en")
-    page.get_by_label("Key name, such as Laptop or M55").fill(label)
+    page.get_by_label("Key name, such as Laptop or A55").fill(label)
     page.get_by_role("button", name="Add a key on this device").click()
     expect(page.get_by_role("heading", name=label, exact=True)).to_be_visible(timeout=15_000)
 
@@ -187,7 +186,7 @@ def test_two_passkeys_sign_in_independently_and_revocation_closes_sessions(
             first = _virtual_page(laptop, origin, harness)
             second = _virtual_page(phone, origin, harness)
             _register(first, origin, "Laptop fixture")
-            _register(second, origin, "M55 fixture")
+            _register(second, origin, "A55 fixture")
             _login(first, laptop, origin)
             EVIDENCE.mkdir(parents=True, exist_ok=True)
             first.screenshot(path=str(EVIDENCE / "desktop-dashboard.png"), full_page=True)

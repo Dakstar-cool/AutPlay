@@ -1,0 +1,1460 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay account recovery",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/account/recovery": {
+      "get": {
+        "operationId": "accountRecoveryStatus",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recovery result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/status-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "accountRecoveryConfigure",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recovery result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/configure-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/configure-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192
+      }
+    },
+    "/recovery/preview": {
+      "post": {
+        "operationId": "accountRecoveryPreview",
+        "security": [
+          {
+            "recoveryCode": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recovery result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/preview-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/preview-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192,
+        "x-autplay-proof-domain": "autplay:account-recovery:preview:v1\n"
+      }
+    },
+    "/recovery/commit": {
+      "post": {
+        "operationId": "accountRecoveryRecover",
+        "security": [
+          {
+            "recoveryCode": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recovery result",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/recover-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/recover-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192,
+        "x-autplay-proof-domain": "autplay:account-recovery:recover:v1\n"
+      }
+    },
+    "/recovery/outcome": {
+      "post": {
+        "operationId": "accountRecoveryOutcome",
+        "security": [
+          {
+            "recoveryRefresh": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact committed recovery outcome; cannot create a new binding.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/recover-response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded sanitized failure",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/recover-request"
+              }
+            }
+          }
+        },
+        "x-autplay-max-request-bytes": 8192,
+        "x-autplay-proof-domain": "autplay:account-recovery:recover:v1\n"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "recoveryCode": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AutPlay-Recovery-Code",
+        "description": "Exactly one bounded code header; additionally requires signed new-device proof."
+      },
+      "recoveryRefresh": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AutPlay-Recovery-Refresh",
+        "description": "Exact client-created refresh secret bound by the signed original request; used only to recover an already committed lost reply."
+      }
+    },
+    "schemas": {
+      "error": {
+        "title": "error",
+        "type": "object",
+        "properties": {
+          "contract_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "error_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "safe_message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "schema_version",
+          "error_code",
+          "safe_message",
+          "request_id",
+          "retryable"
+        ],
+        "additionalProperties": false,
+        "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+      },
+      "configure-request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "contract_version",
+          "expected_api_origin",
+          "expected_code_generation",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_server_instance_id",
+          "expected_stream_origin",
+          "next_code_verifier_sha256",
+          "operation_id",
+          "request_sha256",
+          "requested_at",
+          "schema_version"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "expected_code_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "next_code_verifier_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          }
+        }
+      },
+      "preview-request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "app_version",
+          "contract_version",
+          "device_key_thumbprint_sha256",
+          "device_name",
+          "device_public_key_spki_b64",
+          "device_signature_b64url",
+          "expected_api_origin",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_server_instance_id",
+          "expected_stream_origin",
+          "operation_id",
+          "platform",
+          "request_sha256",
+          "requested_at",
+          "schema_version"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "app_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "device_key_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "device_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "device_public_key_spki_b64": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical base64 DER P-256 SubjectPublicKeyInfo, at most 256 decoded bytes."
+          },
+          "device_signature_b64url": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "platform": {
+            "type": "string",
+            "const": "ANDROID"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          }
+        }
+      },
+      "recover-request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "app_version",
+          "binding_commit_id",
+          "confirmed_account_id",
+          "contract_version",
+          "device_key_thumbprint_sha256",
+          "device_name",
+          "device_public_key_spki_b64",
+          "device_signature_b64url",
+          "expected_api_origin",
+          "expected_code_generation",
+          "expected_identity_epoch",
+          "expected_identity_thumbprint_sha256",
+          "expected_server_instance_id",
+          "expected_stream_origin",
+          "next_code_verifier_sha256",
+          "next_refresh_token_sha256",
+          "operation_id",
+          "platform",
+          "request_sha256",
+          "requested_at",
+          "schema_version"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "app_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "binding_commit_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "confirmed_account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "device_key_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "device_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "device_public_key_spki_b64": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical base64 DER P-256 SubjectPublicKeyInfo, at most 256 decoded bytes."
+          },
+          "device_signature_b64url": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{86}$"
+          },
+          "expected_api_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "expected_code_generation": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expected_server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "expected_stream_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "next_code_verifier_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "next_refresh_token_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "platform": {
+            "type": "string",
+            "const": "ANDROID"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          }
+        }
+      },
+      "status-response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "code_generation",
+          "configured",
+          "contract_version",
+          "schema_version",
+          "account_label"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "code_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "account_label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "configure-response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "code_generation",
+          "configured",
+          "contract_version",
+          "operation_id",
+          "replayed",
+          "schema_version"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "code_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          }
+        }
+      },
+      "preview-response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "account_label",
+          "code_generation",
+          "confirmation_required",
+          "contract_version",
+          "identity_epoch",
+          "operation_id",
+          "role",
+          "schema_version",
+          "server_instance_id"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "account_label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "code_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "confirmation_required": {
+            "type": "boolean"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "USER"
+            ]
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      },
+      "recover-response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "access_expires_at",
+          "access_token",
+          "account_label",
+          "binding_commit_id",
+          "code_generation",
+          "contract_version",
+          "device_id",
+          "operation_id",
+          "receipt_expires_at",
+          "refresh_absolute_expires_at",
+          "refresh_generation",
+          "replayed",
+          "schema_version",
+          "server_instance_id",
+          "session_id",
+          "user_id"
+        ],
+        "properties": {
+          "access_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+          },
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          },
+          "account_label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "binding_commit_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "code_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "receipt_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+          },
+          "refresh_absolute_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+          },
+          "refresh_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      },
+      "recovery-file": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "account_label",
+          "api_origin",
+          "code",
+          "format",
+          "identity_epoch",
+          "identity_thumbprint_sha256",
+          "server_instance_id",
+          "stream_origin",
+          "version"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "account_label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "api_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "code": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 96,
+            "writeOnly": true,
+            "description": "Exactly 32 Crockford alphabet characters after documented ASCII normalization."
+          },
+          "format": {
+            "type": "string",
+            "const": "autplay-account-recovery"
+          },
+          "identity_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "identity_thumbprint_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "server_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "stream_origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Canonical http(s) origin; no path, userinfo, query, fragment or controls."
+          },
+          "version": {
+            "type": "integer",
+            "const": 1
+          }
+        }
+      }
+    }
+  }
+}

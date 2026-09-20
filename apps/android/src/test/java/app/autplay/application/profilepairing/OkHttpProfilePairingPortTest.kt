@@ -145,7 +145,7 @@ class OkHttpProfilePairingPortTest {
     private object EmptyKeys : M5DeviceKeyStore { override fun publicKeySpki(alias: String) = error("unused"); override fun publicKeyThumbprintSha256(alias: String) = error("unused"); override fun signP1363(alias: String, domainSeparator: String, payloadSha256: ByteArray) = error("unused"); override fun ensure(alias: String) = Unit; override fun delete(alias: String) = Unit }
     private class StoredCredentials(material: ByteArray) : CredentialStore {
         private var value: ByteArray? = material.copyOf()
-        override suspend fun read(profileId: ServerProfileId) = value?.copyOf()
+        override suspend fun read(profileId: ServerProfileId) = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else value?.copyOf()
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) { value?.fill(0); value = material.copyOf() }
         override suspend fun clear(profileId: ServerProfileId) { value?.fill(0); value = null }
     }

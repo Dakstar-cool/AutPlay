@@ -1,0 +1,12 @@
+# Optional privilege-separated Admin backup control spool. The API can only write
+# bounded policy/request JSON; an independently launched operator agent owns Docker,
+# SSH and destination-storage access.
+services:
+  api:
+    environment:
+      AUTPLAY_ADMIN_BACKUP_TARGETS_JSON: "${AUTPLAY_ADMIN_BACKUP_TARGETS_JSON:?set a JSON array of approved opaque backup targets}"
+      AUTPLAY_ADMIN_BACKUP_CONTROL_ROOT: /var/lib/autplay/backup-control
+    volumes:
+      - type: bind
+        source: "${AUTPLAY_RUNTIME_BACKUP_CONTROL_ROOT:?set an owner-controlled host spool directory}"
+        target: /var/lib/autplay/backup-control

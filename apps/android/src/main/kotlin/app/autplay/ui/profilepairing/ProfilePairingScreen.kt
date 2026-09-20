@@ -78,6 +78,8 @@ internal data class ProfilePairingUiState(
     /** Exact S1B checkpoint availability; PA2 USER first-bind creates no trusted-key recovery path. */
     val canReenrollTrustedDevice: Boolean = false,
     val selfPairing: SelfPairingUiState? = null,
+    val accountRecovery: AccountRecoveryUiState? = null,
+    val accountDeletion: AccountDeletionUiState? = null,
 )
 
 internal data class PublicAccountTrustPresentation(
@@ -181,6 +183,8 @@ internal data class ProfilePairingActions(
     val shareOwnerAccountInvitation: (AccountInvitation) -> Unit = {},
     val admission: AdmissionActions = AdmissionActions(),
     val selfPairing: SelfPairingActions = SelfPairingActions(),
+    val accountRecovery: AccountRecoveryActions = AccountRecoveryActions(),
+    val accountDeletion: AccountDeletionActions = AccountDeletionActions(),
 )
 
 @Composable
@@ -196,7 +200,8 @@ internal fun ProfilePairingScreen(
     var pendingConfirmation by rememberSaveable { mutableStateOf<ProfileRemoteAction?>(null) }
     val publicFirstBindReserved = publicRegistrationBlocksOrdinaryFirstBind(
         state.publicAccountRegistration,
-    ) || selfPairingBlocksFirstBind(state.selfPairing)
+    ) || selfPairingBlocksFirstBind(state.selfPairing) || accountRecoveryBlocksFirstBind(state.accountRecovery) ||
+        accountDeletionBlocksFirstBind(state.accountDeletion)
 
     SecureWindowWhileVisible(
         enabled = requiresSecureProfileWindow(state, publicInvitationDocument.isNotBlank()),
@@ -208,7 +213,10 @@ internal fun ProfilePairingScreen(
     ) {
         PersonalServerHero(state)
         state.selfPairing?.let { SelfPairingCard(it, actions.selfPairing) }
-        if (!selfPairingBlocksFirstBind(state.selfPairing)) when (val pairing = state.pairing) {
+        state.accountRecovery?.let { AccountRecoveryCard(it, actions.accountRecovery) }
+        state.accountDeletion?.let { AccountDeletionCard(it, actions.accountDeletion) }
+        if (!selfPairingBlocksFirstBind(state.selfPairing) && !accountRecoveryBlocksFirstBind(state.accountRecovery) &&
+            !accountDeletionBlocksFirstBind(state.accountDeletion)) when (val pairing = state.pairing) {
             PairingState.NotConnected, PairingState.Cancelled -> {
                 if (!publicFirstBindReserved) Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -294,7 +302,7 @@ internal fun ProfilePairingScreen(
             state.admission?.let { AdmissionPanel(it, actions.admission) }
         }
 
-        if (!selfPairingBlocksFirstBind(state.selfPairing) && state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
+        if (!publicFirstBindReserved && state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
             OutlinedTextField(
                 value = invitation,
                 onValueChange = { invitation = it.take(4096) },
@@ -313,7 +321,9 @@ internal fun ProfilePairingScreen(
                 Text(stringResource(R.string.profile_connect_device))
             }
         }
-        state.publicAccountRegistration?.takeIf { state.pairing is PairingState.NotConnected && !selfPairingBlocksFirstBind(state.selfPairing) }?.let { registration ->
+        state.publicAccountRegistration?.takeIf { state.pairing is PairingState.NotConnected &&
+            !selfPairingBlocksFirstBind(state.selfPairing) && !accountRecoveryBlocksFirstBind(state.accountRecovery) &&
+            !accountDeletionBlocksFirstBind(state.accountDeletion) }?.let { registration ->
             PublicAccountRegistrationPanel(
                 state = registration,
                 invitationDocument = publicInvitationDocument,
@@ -380,6 +390,12 @@ internal fun requiresSecureProfileWindow(
     hasTypedPublicInvitation: Boolean = false,
 ): Boolean =
     (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) ||
+        state.accountDeletion?.let { it.canManage || it.cancellation.canRecover ||
+            it.source != app.autplay.application.accountrecovery.AccountDeletionSourceState.Idle ||
+            it.cancellation.recipient != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
+        state.accountRecovery?.let { it.canManage || it.canRecover ||
+            it.source is app.autplay.application.accountrecovery.AccountRecoverySourceState.Ready ||
+            it.recipient != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
         state.pairing is PairingState.AwaitingConfirmation ||
         state.pairing is PairingState.ExchangingInvitation ||
         state.invitationManagement?.createdSecret != null ||
@@ -476,7 +492,7 @@ private fun PublicAccountRegistrationPanel(
                     Text(stringResource(R.string.profile_connection_exchanging), style = MaterialTheme.typography.titleMedium)
                     Text("Keep AutPlay open while the first account, device, and session are committed.")
                 }
-                PublicAccountRegistrationState.Connected -> Text("Account created and connected.")
+                PublicAccountRegistrationState.Connected -> Text(stringResource(R.string.recovery_account_created))
             }
         }
     }

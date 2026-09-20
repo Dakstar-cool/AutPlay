@@ -66,6 +66,7 @@ internal data class LegacySecondaryRouteState(
     val social: SocialRuntimeState,
     val socialAvailable: Boolean,
     val stableError: String?,
+    val trainingConsent: TrainingConsentUi = TrainingConsentUi(),
 )
 
 internal data class LegacySecondaryRouteActions(
@@ -203,6 +204,7 @@ internal fun LegacySecondaryRouteRenderer(
                 statisticsSettings = state.social.statisticsSettings,
                 statisticsSettingsErrorCode = state.social.statisticsSettingsErrorCode,
                 onStatisticsVisibilityChange = actions.social.setProfileStatisticsVisibility,
+                trainingConsent = state.trainingConsent,
                 onNavigate = actions.navigate,
             )
             else -> Text(stringResource(R.string.state_unavailable_body))

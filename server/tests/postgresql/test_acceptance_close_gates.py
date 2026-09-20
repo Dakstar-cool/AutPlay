@@ -63,13 +63,13 @@ def test_full_head_snapshot_is_restored_after_clean_downgrade_to_base(
         first_extensions = _reference_extensions(connection)
         first_revision = _alembic_revision(connection)
 
-    assert len(first_head.tables) == 122
-    assert len(first_head.explicit_indexes) == 119
-    assert len(first_head.functions) == 27
-    assert len(first_head.triggers) == 62
+    assert len(first_head.tables) == 163
+    assert len(first_head.explicit_indexes) == 154
+    assert len(first_head.functions) == 59
+    assert len(first_head.triggers) == 118
     assert first_schemas == APPLICATION_SCHEMAS
     assert first_extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}
-    assert first_revision == "0030_temporal_snapshot_retention"
+    assert first_revision == "0060_local_bridge_authority"
 
     database_harness.downgrade(empty_database_name, "base")
     with database_harness.connect(empty_database_name) as connection:

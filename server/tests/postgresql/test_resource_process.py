@@ -11,7 +11,6 @@ from time import monotonic, sleep
 from typing import Any
 
 import pytest
-
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_child import (
     ChildProtocolError,
@@ -64,6 +63,8 @@ def test_durable_registration_then_go_and_confirmed_exit_control_charge(
             "max_chunks": 4096,
             "io_block_bytes": 128 * 1024,
             "committed_size": 0,
+            "expected_size": 5,
+            "minimum_free_bytes": 0,
             "offset": 0,
             "payload_sha256": hashlib.sha256(b"hello").hexdigest(),
         }

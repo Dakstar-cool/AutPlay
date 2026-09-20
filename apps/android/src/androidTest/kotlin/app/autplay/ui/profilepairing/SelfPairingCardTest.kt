@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
@@ -92,6 +93,32 @@ class SelfPairingCardTest {
     }
 
     @Test
+    fun quotaRefusalIsLocalizedPendingAndRetryable() {
+        var retries = 0
+        val state = SelfPairingUiState(
+            recipient = SelfPairingRecipientState.Blocked(
+                "account_device_limit_reached",
+                pending = true,
+            ),
+        )
+        val actions = SelfPairingActions(retryRecipient = { retries += 1 })
+        val locale = mutableStateOf("ru")
+
+        render(state, actions, localeTag = { locale.value })
+        compose.onNodeWithText("Достигнут лимит устройств для аккаунта.").assertIsDisplayed()
+        compose.onNodeWithText("Закрыть").assertDoesNotExist()
+        capture("self-pairing-quota-ru-dark.png")
+        compose.onNodeWithText("Проверить и продолжить").performClick()
+        compose.runOnIdle { assertEquals(1, retries) }
+
+        compose.runOnIdle { locale.value = "en" }
+        settle()
+        compose.onNodeWithText("Your account has reached its device limit.").assertIsDisplayed()
+        compose.onNodeWithText("Close").assertDoesNotExist()
+        capture("self-pairing-quota-en-dark.png", title = "Connect your phones")
+    }
+
+    @Test
     fun pendingRecipientProtectsWindowAndHidesCompetingFirstBind() {
         compose.setContent {
             MaterialTheme {
@@ -119,10 +146,16 @@ class SelfPairingCardTest {
         compose.runOnIdle { assertTrue(dismissed) }
     }
 
-    private fun render(state: SelfPairingUiState, actions: SelfPairingActions = SelfPairingActions()) {
-        val config = Configuration(compose.activity.resources.configuration).apply { setLocale(Locale.forLanguageTag("ru")) }
-        val localized = compose.activity.createConfigurationContext(config)
+    private fun render(
+        state: SelfPairingUiState,
+        actions: SelfPairingActions = SelfPairingActions(),
+        localeTag: () -> String = { "ru" },
+    ) {
         compose.setContent {
+            val config = Configuration(compose.activity.resources.configuration).apply {
+                setLocale(Locale.forLanguageTag(localeTag()))
+            }
+            val localized = compose.activity.createConfigurationContext(config)
             CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config) {
                 MaterialTheme(colorScheme = darkColorScheme()) {
                     Surface(Modifier.fillMaxSize()) {
@@ -139,8 +172,8 @@ class SelfPairingCardTest {
         compose.waitForIdle()
     }
 
-    private fun capture(name: String) {
-        compose.onNodeWithText("Подключение телефонов").performScrollTo()
+    private fun capture(name: String, title: String = "Подключение телефонов") {
+        compose.onNodeWithText(title).performScrollTo()
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
         File(compose.activity.getExternalFilesDir(null), name).outputStream().use {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))

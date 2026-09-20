@@ -249,6 +249,26 @@ def test_admin_web_requires_distinct_source_and_csrf_hmac_secrets() -> None:
         )
 
 
+def test_production_shared_training_accepts_independent_consent_evidence(
+    tmp_path: Path,
+) -> None:
+    settings = ApiSettings(
+        profile=RuntimeProfile.PRODUCTION,
+        privacy_ledger_path=tmp_path / "deletion.sqlite3",
+        privacy_ledger_key=SecretStr("privacy-ledger-fixture-secret-at-least-32bytes"),
+        privacy_ledger_key_id="fixture-v1",
+        training_consent_ledger_path=tmp_path / "consent.sqlite3",
+        training_consent_ledger_key=SecretStr("consent-ledger-fixture-secret-at-least-32bytes"),
+        training_consent_ledger_key_id="fixture-v1",
+        database_url=SecretStr(DATABASE_URL),
+        auth_signing_secret=SecretStr(AUTH_SECRET),
+        public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
+        shared_training_consent_enabled=True,
+    )
+
+    assert settings.shared_training_consent_enabled
+
+
 @pytest.mark.parametrize(
     ("origin", "profile", "expected"),
     (
@@ -260,10 +280,16 @@ def test_admin_web_requires_distinct_source_and_csrf_hmac_secrets() -> None:
     ),
 )
 def test_profile_origins_are_normalized_by_transport_contract(
-    origin: str, profile: RuntimeProfile, expected: str
+    origin: str, profile: RuntimeProfile, expected: str, tmp_path: Path
 ) -> None:
     settings = ApiSettings(
         profile=profile,
+        privacy_ledger_path=tmp_path / "independent.sqlite3",
+        privacy_ledger_key=SecretStr("privacy-ledger-fixture-secret-at-least-32bytes"),
+        privacy_ledger_key_id="fixture-v1",
+        training_consent_ledger_path=tmp_path / "consent.sqlite3",
+        training_consent_ledger_key=SecretStr("consent-ledger-fixture-secret-at-least-32bytes"),
+        training_consent_ledger_key_id="fixture-v1",
         database_url=SecretStr(DATABASE_URL),
         auth_signing_secret=SecretStr(AUTH_SECRET),
         public_access_source_hmac_secret=SecretStr(PUBLIC_SOURCE_SECRET),
@@ -378,6 +404,42 @@ def test_jamendo_is_disabled_by_default_and_requires_non_vault_staging(tmp_path:
     assert enabled.jamendo_enabled is True
     assert enabled.discovery_automation_enabled is False
     assert "private-client-id" not in repr(enabled)
+
+
+def test_admin_backup_control_requires_web_targets_and_absolute_spool(tmp_path: Path) -> None:
+    base = {
+        "database_url": SecretStr(DATABASE_URL),
+        "auth_signing_secret": SecretStr(AUTH_SECRET),
+        "public_access_source_hmac_secret": SecretStr(PUBLIC_SOURCE_SECRET),
+    }
+    targets = (
+        '[{"id":"workstation-usb-e","label":"External USB E",'
+        '"kind":"external-agent"}]'
+    )
+    with pytest.raises(ValueError, match="targets and a control root"):
+        ApiSettings.model_validate(base | {"admin_backup_targets_json": targets})
+    with pytest.raises(ValueError, match="enabled Admin Web"):
+        ApiSettings.model_validate(
+            base
+            | {
+                "admin_backup_targets_json": targets,
+                "admin_backup_control_root": tmp_path / "control",
+            }
+        )
+    enabled = ApiSettings.model_validate(
+        base
+        | {
+            "admin_web_enabled": True,
+            "admin_web_origin": "http://127.0.0.1:8787",
+            "admin_web_source_hmac_secret": SecretStr("b" * 32),
+            "admin_web_csrf_hmac_secret": SecretStr("c" * 32),
+            "admin_backup_targets_json": targets,
+            "admin_backup_control_root": tmp_path / "control",
+        }
+    )
+
+    assert enabled.admin_backup_control_root == tmp_path / "control"
+    assert enabled.admin_backup_targets_json == targets
 
 
 def test_worker_settings_never_receive_api_signing_secret() -> None:

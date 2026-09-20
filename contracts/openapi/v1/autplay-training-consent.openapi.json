@@ -1,0 +1,551 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutPlay caller-owned shared-training consent",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/privacy/shared-training": {
+      "get": {
+        "operationId": "sharedTrainingConsentStatus",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current caller-owned policy, including on exact operation replay. Applied revision may precede current revision.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/policy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current application actor required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation or consent revision conflict",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Strict bounded command rejected",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Consent capability disabled",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "sharedTrainingConsentDecision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-autplay-max-request-bytes": 1024,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/decision-command"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current caller-owned policy, including on exact operation replay. Applied revision may precede current revision.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/decision-response"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Current application actor required",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation or consent revision conflict",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Strict bounded command rejected",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Consent capability disabled",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "decision-command": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "account_id",
+          "expected_revision",
+          "decision",
+          "policy_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740990
+          },
+          "decision": {
+            "enum": [
+              "GRANTED",
+              "DENIED",
+              "WITHDRAWN"
+            ]
+          },
+          "policy_version": {
+            "type": "integer",
+            "const": 1
+          }
+        }
+      },
+      "policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "account_id",
+          "decision",
+          "revision",
+          "policy_version",
+          "changed_at"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decision": {
+            "enum": [
+              "UNKNOWN",
+              "GRANTED",
+              "DENIED",
+              "WITHDRAWN"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "policy_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "changed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "UNKNOWN"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "revision": {
+                  "const": 0
+                },
+                "changed_at": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "revision": {
+                  "minimum": 1
+                },
+                "changed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "revision": {
+                  "const": 9007199254740991
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "DENIED",
+                    "WITHDRAWN"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "decision-response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "account_id",
+          "decision",
+          "revision",
+          "policy_version",
+          "changed_at",
+          "operation_id",
+          "applied_decision",
+          "applied_revision"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decision": {
+            "enum": [
+              "UNKNOWN",
+              "GRANTED",
+              "DENIED",
+              "WITHDRAWN"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "policy_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "changed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applied_decision": {
+            "enum": [
+              "GRANTED",
+              "DENIED",
+              "WITHDRAWN"
+            ]
+          },
+          "applied_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "UNKNOWN"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "revision": {
+                  "const": 0
+                },
+                "changed_at": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "revision": {
+                  "minimum": 1
+                },
+                "changed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "revision": {
+                  "const": 9007199254740991
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "DENIED",
+                    "WITHDRAWN"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

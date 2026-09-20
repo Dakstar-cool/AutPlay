@@ -562,6 +562,9 @@ interface JournalDao {
     @Query("UPDATE offline_journal_event SET state = 'PENDING', lease_token = NULL, lease_expires_at_ms = NULL WHERE journal_lineage_id = :lineageId AND state = 'SENDING' AND lease_expires_at_ms <= :nowMs")
     suspend fun recoverExpiredLeases(lineageId: String, nowMs: Long): Int
 
+    @Query("UPDATE offline_journal_event SET state = 'PENDING', attempt_count = 0, next_attempt_at_ms = NULL, last_error_code = NULL, lease_token = NULL, lease_expires_at_ms = NULL WHERE journal_lineage_id = :lineageId AND state = 'DEAD_LETTER' AND last_error_code = 'JOURNAL_RESET_REQUIRED'")
+    suspend fun recoverUnboundJournal(lineageId: String): Int
+
     @Query("UPDATE offline_journal_event SET state = 'SENDING', lease_token = :leaseToken, lease_expires_at_ms = :leaseExpiresAtMs, attempt_count = attempt_count + 1 WHERE journal_lineage_id = :lineageId AND event_id = :eventId AND state = 'PENDING'")
     suspend fun lease(lineageId: String, eventId: String, leaseToken: String, leaseExpiresAtMs: Long): Int
 

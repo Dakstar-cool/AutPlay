@@ -1,5 +1,27 @@
 package app.autplay
 
+import app.autplay.application.accountrecovery.AccountRecoveryRecipientRuntime
+import app.autplay.application.accountrecovery.AccountRecoverySourceRuntime
+import app.autplay.application.accountrecovery.ProfilePairingRecoveryBindingCommitter
+import app.autplay.application.accountrecovery.hasAccountRecoveryPendingRecipient
+import app.autplay.application.accountrecovery.AccountDeletionSourceRuntime
+import app.autplay.application.accountrecovery.AccountDeletionCancellationTransport
+import app.autplay.application.accountrecovery.AccountRestorationPurpose
+import app.autplay.application.accountrecovery.SettingsAccountDeletionBindingPort
+import app.autplay.ui.profilepairing.accountDeletionBlocksFirstBind
+import app.autplay.ui.profilepairing.AccountRecoveryUiState
+import app.autplay.ui.profilepairing.accountRecoveryBlocksFirstBind
+
+import app.autplay.application.selfpairing.hasSelfDevicePairingPendingRecipient
+import app.autplay.application.selfpairing.SelfPairingRecipientRuntime
+import app.autplay.application.selfpairing.SelfPairingRecipientState
+import app.autplay.application.selfpairing.SelfPairingSourceRuntime
+import app.autplay.application.selfpairing.SelfPairingSourceState
+import app.autplay.application.selfpairing.SettingsSelfPairingSourceContext
+import app.autplay.application.selfpairing.ProfilePairingSelfBindingCommitter
+import app.autplay.ui.profilepairing.SelfPairingActions
+import app.autplay.ui.profilepairing.SelfPairingUiState
+
 import android.app.LocaleManager
 import android.content.Context
 import android.content.Intent
@@ -433,7 +455,9 @@ internal fun AutPlayBootstrap(
                             current.deviceId != null ||
                             current.m5Binding != null ||
                             current.m5PendingExchangeCheckpoint != null ||
-                            current.m5AdmissionCheckpoint != null
+                            current.m5AdmissionCheckpoint != null ||
+                            pairingCredentialStore.hasSelfDevicePairingPendingRecipient() ||
+                            pairingCredentialStore.hasAccountRecoveryPendingRecipient()
                     }
                 }
                 val registrationRuntime = AccountRegistrationRuntime(
@@ -462,6 +486,74 @@ internal fun AutPlayBootstrap(
                 )
             }
             val publicRegistrationState by publicRegistrationCoordinator.state.collectAsState()
+            val selfPairingTransport = remember(context, pairingCredentialStore) {
+                AutPlayRuntime.selfPairingTransport(context, pairingCredentialStore, allowUnsafePairingHttp)
+            }
+            val selfPairingSource = remember(selfPairingTransport, settingsStore, pairingCredentialStore) {
+                SelfPairingSourceRuntime(pairingCredentialStore,
+                    SettingsSelfPairingSourceContext(settingsStore, pairingCredentialStore), selfPairingTransport)
+            }
+            val selfPairingRecipient = remember(selfPairingTransport, pairingRuntime, pairingPort, firstBindCeremonyGate) {
+                SelfPairingRecipientRuntime(
+                    pairingCredentialStore, pairingDeviceKeys, selfPairingTransport, pairingPort,
+                    ProfilePairingSelfBindingCommitter(pairingRuntime, pairingPort, settingsStore, pairingCredentialStore, pairingDeviceKeys),
+                    // This gate deliberately excludes the recipient journal owned by this runtime.
+                    ActiveProfileGate {
+                        settingsStore.settings.first().let { current ->
+                            current.activeServerProfileId != null || current.activeUserId != null ||
+                                current.deviceId != null || current.m5Binding != null ||
+                                current.m5PendingExchangeCheckpoint != null || current.m5AdmissionCheckpoint != null
+                        }
+                    },
+                    firstBindCeremonyGate, android.os.Build.MODEL ?: "Android device", BuildConfig.VERSION_NAME,
+                    allowDevelopmentHttp = allowUnsafePairingHttp,
+                )
+            }
+            val accountRecoveryTransport = remember(context, pairingCredentialStore) {
+                AutPlayRuntime.accountRecoveryTransport(context, pairingCredentialStore, allowUnsafePairingHttp)
+            }
+            val accountRecoverySource = remember(accountRecoveryTransport, settingsStore, pairingCredentialStore) {
+                AccountRecoverySourceRuntime(pairingCredentialStore,
+                    SettingsSelfPairingSourceContext(settingsStore, pairingCredentialStore), accountRecoveryTransport,
+                    allowDevelopmentHttp = allowUnsafePairingHttp, settings = settingsStore)
+            }
+            val accountRecoveryRecipient = remember(accountRecoveryTransport, pairingRuntime, pairingPort, firstBindCeremonyGate) {
+                AccountRecoveryRecipientRuntime(pairingCredentialStore, pairingDeviceKeys, accountRecoveryTransport, pairingPort,
+                    ProfilePairingRecoveryBindingCommitter(pairingRuntime, pairingPort, settingsStore, pairingCredentialStore, pairingDeviceKeys),
+                    ActiveProfileGate {
+                        settingsStore.settings.first().let { current ->
+                            current.activeServerProfileId != null || current.activeUserId != null || current.deviceId != null ||
+                                current.m5Binding != null || current.m5PendingExchangeCheckpoint != null || current.m5AdmissionCheckpoint != null
+                        }
+                    }, firstBindCeremonyGate, android.os.Build.MODEL ?: "Android device", BuildConfig.VERSION_NAME,
+                    allowDevelopmentHttp = allowUnsafePairingHttp)
+            }
+            val deletionTransport = remember(context, pairingCredentialStore) {
+                AutPlayRuntime.accountDeletionTransport(context, pairingCredentialStore, allowUnsafePairingHttp)
+            }
+            val deletionSource = remember(deletionTransport, pairingRuntime, settingsStore) {
+                AccountDeletionSourceRuntime(pairingCredentialStore,
+                    SettingsSelfPairingSourceContext(settingsStore, pairingCredentialStore),
+                    SettingsAccountDeletionBindingPort(settingsStore, pairingCredentialStore,
+                        { profile -> recommendationRepository.purgeLocalRecommendationContext(profile.value) },
+                        pairingRuntime::acknowledgeAccountDeletionDetach), pairingDeviceKeys, deletionTransport,
+                    android.os.Build.MODEL ?: "Android device", BuildConfig.VERSION_NAME,
+                    allowDevelopmentHttp = allowUnsafePairingHttp)
+            }
+            val deletionCancellation = remember(deletionTransport, pairingRuntime, pairingPort, firstBindCeremonyGate) {
+                AccountRecoveryRecipientRuntime(pairingCredentialStore, pairingDeviceKeys,
+                    AccountDeletionCancellationTransport(deletionTransport), pairingPort,
+                    ProfilePairingRecoveryBindingCommitter(pairingRuntime, pairingPort, settingsStore,
+                        pairingCredentialStore, pairingDeviceKeys,
+                        app.autplay.application.profilepairing.FirstBindCeremonyOwner.ACCOUNT_DELETE_CANCEL),
+                    ActiveProfileGate {
+                        settingsStore.settings.first().let { current ->
+                            current.activeServerProfileId != null || current.activeUserId != null || current.deviceId != null ||
+                                current.m5Binding != null || current.m5PendingExchangeCheckpoint != null || current.m5AdmissionCheckpoint != null
+                        }
+                    }, firstBindCeremonyGate, android.os.Build.MODEL ?: "Android device", BuildConfig.VERSION_NAME,
+                    allowDevelopmentHttp = allowUnsafePairingHttp, purpose = AccountRestorationPurpose.DELETE_CANCEL)
+            }
             LaunchedEffect(publicRegistrationCoordinator, pendingPublicAccountInvitation) {
                 pendingPublicAccountInvitation?.collect { bytes ->
                     if (bytes != null && pendingPublicAccountInvitation.compareAndSet(bytes, null)) {
@@ -510,6 +602,11 @@ internal fun AutPlayBootstrap(
                 onboardingComplete,
             ) {
                 if (!onboardingComplete) return@LaunchedEffect
+                deletionSource.resume()
+                deletionCancellation.resume()
+                accountRecoveryRecipient.resume()
+                selfPairingRecipient.resume()
+                selfPairingSource.resume()
                 val restoredBinding = admissionRecoveryBootstrap.restoreExistingBindingIfPresent(
                     pairingRuntime,
                 ) {
@@ -575,6 +672,12 @@ internal fun AutPlayBootstrap(
                                 admissionState,
                                 publicRegistrationCoordinator,
                                 publicRegistrationState,
+                                selfPairingSource,
+                                selfPairingRecipient,
+                                accountRecoverySource,
+                                accountRecoveryRecipient,
+                                deletionSource,
+                                deletionCancellation,
                                 pairingSafeError,
                                 initialDestination = initialDestination,
                                 clearPairingSafeError = { pairingSafeError = null },
@@ -658,12 +761,28 @@ private fun OfflineLibraryScreen(
     admissionState: app.autplay.application.profilepairing.AdmissionState,
     publicRegistrationCoordinator: PublicAccountRegistrationCoordinator,
     publicRegistrationState: PublicAccountRegistrationState,
+    selfPairingSource: SelfPairingSourceRuntime,
+    selfPairingRecipient: SelfPairingRecipientRuntime,
+    accountRecoverySource: AccountRecoverySourceRuntime,
+    accountRecoveryRecipient: AccountRecoveryRecipientRuntime,
+    deletionSource: AccountDeletionSourceRuntime,
+    deletionCancellation: AccountRecoveryRecipientRuntime,
     pairingSafeError: String?,
     initialDestination: UiDestination = UiDestination.Home,
     clearPairingSafeError: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val selfSourceState by selfPairingSource.state.collectAsState()
+    val selfRecipientState by selfPairingRecipient.state.collectAsState()
+    val ordinaryRecoveryState by accountRecoveryRecipient.state.collectAsState()
+    val deletionUi = rememberAccountDeletionUi(deletionSource, deletionCancellation, accountRecoverySource,
+        ordinaryRecoveryState, settings, pairingRuntimeState.pairing, publicRegistrationState, selfRecipientState, binding != null)
+    val recoveryUi = rememberAccountRecoveryUi(accountRecoverySource, accountRecoveryRecipient,
+        settings, pairingRuntimeState.pairing, publicRegistrationState, selfRecipientState, binding != null,
+        externallyBlocked = accountDeletionBlocksFirstBind(deletionUi.state))
+    val recoveryRecipientState = recoveryUi.state.recipient
+    val trainingConsentUi = rememberTrainingConsentUi(settings, pairingRuntimeState.pairing)
     val ownerProvisioningCoordinator = remember(
         binding?.serverProfileId?.value,
         settings.serverBaseUrl,
@@ -730,7 +849,33 @@ private fun OfflineLibraryScreen(
             }
         }
     }
+    val selfPairingQrScanner = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) scope.launch {
+            val bytes = runCatching { decodePublicInvitationQr(bitmap) }.getOrElse { ByteArray(0) }
+            try { selfPairingRecipient.inspectQr(bytes) } finally { bytes.fill(0) }
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(binding, lifecycleOwner) {
+        val active = binding ?: return@LaunchedEffect
+        val scheduler = AutPlayRuntime.syncScheduler(context)
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                try {
+                    scheduler.enqueueIfIdle(app.autplay.work.DeferredWorkRequest(
+                        app.autplay.work.DeferredWorkKind.SYNC,
+                        app.autplay.work.DeferredWorkSubject.Device(active.deviceId),
+                        active.serverProfileId,
+                    ))
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // Room retains intent and the next bounded foreground tick can retry.
+                }
+                delay(5_000L)
+            }
+        }
+    }
     var socialRuntime by remember(binding?.serverProfileId?.value, settings.serverBaseUrl, waveCoordinator) {
         mutableStateOf<SocialRuntime?>(null)
     }
@@ -792,6 +937,13 @@ private fun OfflineLibraryScreen(
         queueEditorRepository.observeActive(binding?.serverProfileId?.value)
     }.collectAsState(initial = null)
     val navigation = rememberAutPlayNavigationState(initialDestination)
+    var recoverySetupShown by remember(settings.accountRecoverySetup?.bindingCommitId) { mutableStateOf(false) }
+    LaunchedEffect(settings.accountRecoverySetup?.bindingCommitId, recoveryUi.state.setupRequired) {
+        if (recoveryUi.state.setupRequired && !recoverySetupShown) {
+            recoverySetupShown = true
+            navigation.navigate(UiDestination.Profile)
+        }
+    }
     val destination = navigation.current
     val historyRepository = remember(context) { HistoryRepository(AutPlayRuntime.database(context)) }
     var historyState by remember(binding?.serverProfileId?.value) { mutableStateOf(HistoryUiState()) }
@@ -1672,6 +1824,15 @@ private fun OfflineLibraryScreen(
         settings = settings,
         profilePairing = ProfilePairingUiState(
             pairing = pairingRuntimeState.pairing,
+            accountRecovery = recoveryUi.state,
+            accountDeletion = deletionUi.state,
+            selfPairing = SelfPairingUiState(selfSourceState, selfRecipientState,
+                canAddPhone = !accountDeletionBlocksFirstBind(deletionUi.state) &&
+                    (pairingRuntimeState.pairing as? PairingState.Connected)?.capabilities?.supportedOperations?.contains("self_device_pairing") == true,
+                canScan = binding == null && settings.m5Binding == null &&
+                    !accountDeletionBlocksFirstBind(deletionUi.state) &&
+                    !accountRecoveryBlocksFirstBind(AccountRecoveryUiState(recipient = recoveryRecipientState)) &&
+                    !app.autplay.ui.profilepairing.publicRegistrationBlocksOrdinaryFirstBind(publicRegistrationState)),
             publicAccountRegistration = publicRegistrationState.takeIf { binding == null },
             ownerProvisioning = ownerProvisioningState.takeIf { ownerProvisioningCoordinator != null },
             canReenrollTrustedDevice = pairingRuntimeState.canReenrollTrustedDevice,
@@ -1715,6 +1876,7 @@ private fun OfflineLibraryScreen(
         social = socialState,
         socialAvailable = socialRuntime != null,
         stableError = stableError,
+        trainingConsent = trainingConsentUi,
     )
     val legacySecondaryActions = buildLegacySecondaryRouteActions(
         scope = scope,
@@ -1745,6 +1907,25 @@ private fun OfflineLibraryScreen(
             )
         },
         scanPublicAccountInvitation = { publicInvitationQrScanner.launch(null) },
+        selfPairingActions = SelfPairingActions(
+            start = { scope.launch { selfPairingSource.start() } },
+            scan = { selfPairingQrScanner.launch(null) },
+            trust = { scope.launch { selfPairingRecipient.confirmTrust() } },
+            confirmAccount = { account -> scope.launch { selfPairingRecipient.confirmAccount(account) } },
+            decide = { action, code -> scope.launch { selfPairingSource.decide(action, code) } },
+            retrySource = { scope.launch { selfPairingSource.resume() } },
+            retryRecipient = { scope.launch { selfPairingRecipient.resume() } },
+            dismissSource = { scope.launch { selfPairingSource.dismiss() } },
+            dismissRecipient = { scope.launch { selfPairingRecipient.dismiss() } },
+            poll = {
+                selfPairingSource.poll()
+                selfPairingRecipient.poll()
+                if (selfPairingSource.state.value is SelfPairingSourceState.Blocked ||
+                    selfPairingRecipient.state.value is SelfPairingRecipientState.Blocked) 15 else 2
+            },
+        ),
+        accountRecoveryActions = recoveryUi.actions,
+        accountDeletionActions = deletionUi.actions,
         shareOwnerAccountInvitation = { invitation ->
             val share = Intent(Intent.ACTION_SEND).apply {
                 type = app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE
@@ -2240,6 +2421,7 @@ internal fun SettingsFrontendScreen(
     statisticsSettingsErrorCode: String?,
     onStatisticsVisibilityChange: (Boolean) -> Unit,
     onNavigate: (UiDestination) -> Unit,
+    trainingConsent: TrainingConsentUi = TrainingConsentUi(),
 ) {
     SettingsProductScreen(
         settings = settings,
@@ -2253,6 +2435,7 @@ internal fun SettingsFrontendScreen(
         statisticsSettingsErrorCode = statisticsSettingsErrorCode,
         onStatisticsVisibilityChange = onStatisticsVisibilityChange,
         onNavigate = onNavigate,
+        trainingConsent = trainingConsent,
     )
 }
 

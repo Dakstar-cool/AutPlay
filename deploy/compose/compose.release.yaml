@@ -3,6 +3,14 @@ services:
     image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
     build: !reset null
 
+  privacy-ledger-init:
+    image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
+    build: !reset null
+
+  training-consent-ledger-init:
+    image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
+    build: !reset null
+
   api:
     image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
     build: !reset null

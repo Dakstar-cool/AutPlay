@@ -167,7 +167,7 @@ def test_admin_ssr_browser_qualification_real_postgresql(
             assert page.locator("form[action='/admin/login']").count() == 1
             page.locator("#browser-invitation").fill(invitation.bearer.decode())
             page.locator("button[type='submit']").click()
-            page.wait_for_timeout(250)
+            page.wait_for_url(f"{base_url}/admin/")
             assert page.url == f"{base_url}/admin/", page.locator("body").inner_text()
             _assert_semantics(page, require_table=False)
             assert page.locator("html").get_attribute("lang") == "en"

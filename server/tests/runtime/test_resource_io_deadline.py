@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from time import monotonic
 
 import pytest
-
 from autplay.runtime.resource_io_deadline import IoStopped, ResourceIoDeadline
 
 
@@ -31,6 +30,25 @@ def test_initial_and_renewed_deadlines_are_anchored_before_database_rpc() -> Non
     assert guard.stopped()
     with pytest.raises(IoStopped):
         guard.check()
+
+
+def test_short_server_grant_is_anchored_before_rpc_and_never_extended_to_five_seconds() -> None:
+    clock = Clock(1)
+    guard = ResourceIoDeadline(0, clock=clock)
+    sequence = guard.begin_renewal()
+    clock.now = 1.2
+    assert guard.finish_renewal(sequence, succeeded=True, authorized_seconds=0.5)
+    assert guard.remaining() == pytest.approx(0.3)
+    clock.now = 1.5
+    assert guard.stopped()
+
+
+@pytest.mark.parametrize("duration", [0.0, -1.0, 5.1, float("inf"), float("nan")])
+def test_invalid_server_grant_stops_locally(duration: float) -> None:
+    guard = ResourceIoDeadline(0, clock=Clock(1))
+    sequence = guard.begin_renewal()
+    assert not guard.finish_renewal(sequence, succeeded=True, authorized_seconds=duration)
+    assert guard.stopped()
 
 
 @pytest.mark.parametrize("reason", ["deadline", "explicit", "failure"])

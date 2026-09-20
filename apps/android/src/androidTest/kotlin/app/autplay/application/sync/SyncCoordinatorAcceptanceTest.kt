@@ -12,6 +12,8 @@ import app.autplay.data.local.entity.PlaylistEntity
 import app.autplay.data.local.entity.TrackSearchContentEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.SessionCredentialEnvelope
+import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.application.library.AddLocalTrackCommand
 import app.autplay.application.library.AddLocalTrackResult
@@ -38,6 +40,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -54,6 +57,54 @@ class SyncCoordinatorAcceptanceTest {
     private val otherProfile = ServerProfileId("22222222-2222-4222-8222-222222222222")
     private val binding = ClientEventBinding(UserId("33333333-3333-4333-8333-333333333333"), DeviceId("44444444-4444-4444-8444-444444444444"), profile, LocalId("55555555-5555-4555-8555-555555555555"))
     @After fun close() = db.close()
+
+    @Test fun bindRecoversOnlyResetDeadLettersWithoutChangingIdentity() = runBlocking {
+        seed(profile, "cursor-a")
+        val recoverable = pending(1).copy(state = "DEAD_LETTER", lastErrorCode = "JOURNAL_RESET_REQUIRED")
+        val unrelated = pending(2).copy(state = "DEAD_LETTER", lastErrorCode = "NETWORK_UNAVAILABLE")
+        db.journalDao().insert(recoverable)
+        db.journalDao().insert(unrelated)
+        var bound = false
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun bind(binding: ClientEventBinding) { bound = true }
+            override suspend fun push(binding: ClientEventBinding, events: List<OfflineJournalEventEntity>): List<SyncAck> {
+                org.junit.Assert.assertTrue(bound)
+                assertEquals(listOf(recoverable.eventId), events.map { it.eventId })
+                org.junit.Assert.assertArrayEquals(recoverable.requestHash, events.single().requestHash)
+                assertEquals(recoverable.payloadJson, events.single().payloadJson)
+                assertEquals(recoverable.deviceSequence, events.single().deviceSequence)
+                return emptyList()
+            }
+        }
+        SyncCoordinator(db, transport).run(binding)
+        assertEquals("PENDING", db.journalDao().event(recoverable.eventId)?.state)
+        assertEquals("DEAD_LETTER", db.journalDao().event(unrelated.eventId)?.state)
+    }
+
+    @Test fun failedBindingPreservesDeadLettersAndNeverPushes() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1).copy(state = "DEAD_LETTER", lastErrorCode = "JOURNAL_RESET_REQUIRED")
+        db.journalDao().insert(event)
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun bind(binding: ClientEventBinding) { error("SYNC_BINDING_MISMATCH") }
+            override suspend fun push(binding: ClientEventBinding, events: List<OfflineJournalEventEntity>): List<SyncAck> = error("MUST_NOT_PUSH")
+        }
+        assertEquals("SYNC_BINDING_MISMATCH", runCatching { SyncCoordinator(db, transport).run(binding) }.exceptionOrNull()?.message)
+        assertEquals("DEAD_LETTER", db.journalDao().event(event.eventId)?.state)
+        org.junit.Assert.assertArrayEquals(event.requestHash, db.journalDao().event(event.eventId)?.requestHash)
+    }
+
+    @Test fun resetAcknowledgementPreservesPendingIntent() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1)
+        db.journalDao().insert(event)
+        val transport = FakeTransport(acks = listOf(SyncAck(event.eventId, "REJECTED", errorCode = "JOURNAL_RESET_REQUIRED")))
+        assertEquals("JOURNAL_RESET_REQUIRED", runCatching { SyncCoordinator(db, transport).run(binding) }.exceptionOrNull()?.message)
+        val saved = db.journalDao().event(event.eventId)!!
+        assertEquals("PENDING", saved.state)
+        assertEquals(event.attemptCount, saved.attemptCount)
+        org.junit.Assert.assertArrayEquals(event.requestHash, saved.requestHash)
+    }
 
     @Test fun unknownPageIsDeferredWithoutCursorAdvance() = runBlocking {
         seed(profile, "cursor-a")
@@ -410,19 +461,32 @@ class SyncCoordinatorAcceptanceTest {
         context.deleteDatabase(firstDatabaseName)
         context.deleteDatabase(secondDatabaseName)
         val arguments = InstrumentationRegistry.getArguments()
-        val realBaseUrl = arguments.getString("p14BaseUrl")
+        val handoff = arguments.getString("p14E2eBaseUrl")?.let { fetchP14Handoff(it) }
+        val realBaseUrl = handoff?.getString("base_url") ?: arguments.getString("p14BaseUrl")
         val firstProfile = ServerProfileId("10000000-0000-4000-8000-000000000001")
         val secondProfile = ServerProfileId("10000000-0000-4000-8000-000000000002")
-        val user = UserId(arguments.getString("p14UserId") ?: "10000000-0000-4000-8000-000000000003")
+        val user = UserId(
+            handoff?.getString("user_id")
+                ?: arguments.getString("p14UserId")
+                ?: "10000000-0000-4000-8000-000000000003",
+        )
         val firstBinding = ClientEventBinding(
             user,
-            DeviceId(arguments.getString("p14FirstDeviceId") ?: "10000000-0000-4000-8000-000000000004"),
+            DeviceId(
+                handoff?.getString("first_device_id")
+                    ?: arguments.getString("p14FirstDeviceId")
+                    ?: "10000000-0000-4000-8000-000000000004",
+            ),
             firstProfile,
             LocalId("10000000-0000-4000-8000-000000000005"),
         )
         val secondBinding = ClientEventBinding(
             user,
-            DeviceId(arguments.getString("p14SecondDeviceId") ?: "10000000-0000-4000-8000-000000000006"),
+            DeviceId(
+                handoff?.getString("second_device_id")
+                    ?: arguments.getString("p14SecondDeviceId")
+                    ?: "10000000-0000-4000-8000-000000000006",
+            ),
             secondProfile,
             LocalId("10000000-0000-4000-8000-000000000007"),
         )
@@ -430,16 +494,18 @@ class SyncCoordinatorAcceptanceTest {
             val relay = CrashAfterCommitRelay()
             SyncScenario(relay, relay, { relay.serverAggregateId }, { relay.acceptedEventCount })
         } else {
-            val firstToken = requireNotNull(arguments.getString("p14FirstToken"))
-            val secondToken = requireNotNull(arguments.getString("p14SecondToken"))
+            val firstToken = handoff?.getString("first_token")
+                ?: requireNotNull(arguments.getString("p14FirstToken"))
+            val secondToken = handoff?.getString("second_token")
+                ?: requireNotNull(arguments.getString("p14SecondToken"))
             bindDevice(realBaseUrl, firstToken, firstBinding)
             bindDevice(realBaseUrl, secondToken, secondBinding)
             val first = AckLosingTransport(
-                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(firstToken)),
+                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(firstProfile, firstToken)),
             )
             SyncScenario(
                 first,
-                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(secondToken)),
+                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(secondProfile, secondToken)),
                 { requireNotNull(first.serverAggregateId) },
                 { null },
             )
@@ -573,6 +639,17 @@ class SyncCoordinatorAcceptanceTest {
         }
     }
 
+    private suspend fun fetchP14Handoff(baseUrl: String): JSONObject = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(baseUrl.trimEnd('/') + "/p14-e2e/one-shot-handoff")
+            .get()
+            .build()
+        OkHttpClient().newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "P14_E2E_HANDOFF_HTTP_${response.code}" }
+            JSONObject(requireNotNull(response.body).string())
+        }
+    }
+
     private data class SyncScenario(
         val firstTransport: SyncTransport,
         val secondTransport: SyncTransport,
@@ -580,14 +657,21 @@ class SyncCoordinatorAcceptanceTest {
         val acceptedEventCount: () -> Int?,
     )
 
-    private class StaticCredentialStore(token: String) : CredentialStore {
-        private val tokenBytes = token.toByteArray()
-        override suspend fun read(profileId: ServerProfileId): ByteArray = tokenBytes.copyOf()
+    private class StaticCredentialStore(
+        private val expectedProfile: ServerProfileId,
+        token: String,
+    ) : CredentialStore {
+        private val tokenBytes = SessionCredentialEnvelopeCodec.encode(
+            SessionCredentialEnvelope(token, refreshToken = null, generation = 0),
+        )
+        override suspend fun read(profileId: ServerProfileId): ByteArray? =
+            if (profileId == expectedProfile) tokenBytes.copyOf() else null
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
         override suspend fun clear(profileId: ServerProfileId) = Unit
     }
 
     private class AckLosingTransport(private val delegate: SyncTransport) : SyncTransport {
+        override suspend fun bind(binding: ClientEventBinding) = delegate.bind(binding)
         private var loseFirstAck = true
         var serverAggregateId: String? = null
             private set
@@ -617,6 +701,7 @@ class SyncCoordinatorAcceptanceTest {
     }
 
     private class CrashAfterCommitRelay : SyncTransport {
+        override suspend fun bind(binding: ClientEventBinding) = Unit
         val serverAggregateId = "20000000-0000-4000-8000-000000000001"
         private val accepted = linkedMapOf<String, AcceptedEvent>()
         private var loseFirstAck = true
@@ -695,6 +780,7 @@ class SyncCoordinatorAcceptanceTest {
         private val bootstrapPages: List<BootstrapPage> = emptyList(),
         private val throwSessionRequired: Boolean = false,
     ) : SyncTransport {
+        override suspend fun bind(binding: ClientEventBinding) = Unit
         val sent = mutableListOf<app.autplay.data.local.entity.OfflineJournalEventEntity>()
         val sentBatchSizes = mutableListOf<Int>()
         override suspend fun push(binding: ClientEventBinding, events: List<app.autplay.data.local.entity.OfflineJournalEventEntity>): List<SyncAck> {

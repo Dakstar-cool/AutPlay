@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -21,9 +22,19 @@ import rfc8785
 import torch
 from autplay.domain.recommendations import JsonValue
 from autplay.domain.sona import SONA_MAX_CANDIDATES, SONA_MAX_HISTORY_EVENTS, SONA_SID_DEPTH
+from autplay.domain.training_work import TrainingInputProvenance
 from torch import Tensor
 
-from .dataset import SONA_MAX_DATASET_EXAMPLES, SonaTensorDataset, load_sona_dataset
+from .authority import SonaSharedTrainingAuthority, SonaTrainingInputBinding
+from .dataset import (
+    SONA_MAX_DATASET_EXAMPLES,
+    SONA_SOURCE_KIND_OWNER_APPROVED,
+    SONA_SOURCE_KIND_SYNTHETIC,
+    SonaDatasetHeader,
+    SonaTensorDataset,
+    load_sona_dataset,
+)
+from .fixture import verify_synthetic_fixture_header, verify_synthetic_fixture_identity
 from .model import SonaLiteConfig, SonaLiteModel
 from .npy import read_canonical_npy
 from .objective import compute_torch_sona_losses
@@ -33,7 +44,7 @@ from .quality_bundle import (
 )
 from .tokenizer import SONA_MAX_ACTIVE_TOKENIZER_CODES
 
-SONA_CHECKPOINT_SCHEMA_VERSION = 3
+SONA_CHECKPOINT_SCHEMA_VERSION = 4
 SONA_MAX_TRAINING_EPOCHS = 100
 SONA_MAX_TRAINING_BATCH = 64
 SONA_MAX_CHECKPOINT_MANIFEST_BYTES = 1_048_576
@@ -91,6 +102,8 @@ class SonaTrainingResult:
     device_type: str
     quality_provenance_eligible: bool
     quality_eligible: bool
+    source_kind: str | None
+    training_authority: TrainingInputProvenance | None
 
 
 def train_sona_checkpoint(
@@ -99,10 +112,37 @@ def train_sona_checkpoint(
     *,
     model_config: SonaLiteConfig,
     training_config: SonaTrainingConfig,
+    shared_training_authority: SonaSharedTrainingAuthority | None = None,
+    maximum_checkpoint_bytes: int | None = None,
+    before_seal: Callable[[Path], object] | None = None,
+    checkpoint_staging_directory: Path | None = None,
 ) -> SonaTrainingResult:
     """Train one bounded model and write a hash-verified, pickle-free checkpoint."""
 
-    dataset = load_sona_dataset(dataset_directory)
+    check_current: Callable[[], None] | None = None
+    provenance: TrainingInputProvenance | None = None
+
+    def authorize_header(header: SonaDatasetHeader) -> Callable[[], None] | None:
+        nonlocal check_current, provenance
+        if header.source_kind == SONA_SOURCE_KIND_SYNTHETIC:
+            verify_synthetic_fixture_header(header)
+        elif header.source_kind == SONA_SOURCE_KIND_OWNER_APPROVED:
+            check_current, provenance = _authorize_owner_binding(
+                SonaTrainingInputBinding(
+                    header.source_manifest_sha256,
+                    header.manifest_sha256,
+                    header.owner_lineage_key_id,
+                    header.owner_lineage_tokens,
+                ),
+                shared_training_authority,
+            )
+        return check_current
+
+    dataset = load_sona_dataset(dataset_directory, before_payload=authorize_header)
+    if dataset.source_kind == SONA_SOURCE_KIND_SYNTHETIC:
+        check_current, provenance = _authorize_training_inputs(dataset, shared_training_authority)
+    elif provenance is None:
+        raise ValueError("Current shared-training input provenance is invalid")
     return _train_sona_dataset(
         dataset,
         checkpoint_directory,
@@ -112,6 +152,14 @@ def train_sona_checkpoint(
         dataset_bundle_sha256=None,
         source_approval_sha256=None,
         before_publish=None,
+        check_current=check_current,
+        training_authority=provenance,
+        maximum_checkpoint_bytes=maximum_checkpoint_bytes,
+        before_seal=before_seal,
+        checkpoint_staging_directory=checkpoint_staging_directory,
+        seal_checkpoint=(
+            shared_training_authority.seal_checkpoint if shared_training_authority else None
+        ),
     )
 
 
@@ -121,6 +169,10 @@ def train_quality_sona_checkpoint(
     *,
     model_config: SonaLiteConfig,
     training_config: SonaTrainingConfig,
+    shared_training_authority: SonaSharedTrainingAuthority | None = None,
+    maximum_checkpoint_bytes: int | None = None,
+    before_seal: Callable[[Path], object] | None = None,
+    checkpoint_staging_directory: Path | None = None,
 ) -> SonaTrainingResult:
     """Train only from an atomically verified quality bundle, yielding a candidate artifact."""
 
@@ -128,8 +180,27 @@ def train_quality_sona_checkpoint(
         not bundle.train.quality_eligible
         or bundle.train.quality_approval_sha256 != bundle.dataset_approval.approval_sha256
         or bundle.dataset_approval.source_approval_sha256 != bundle.source_approval.approval_sha256
+        or any(
+            split.source_kind != SONA_SOURCE_KIND_OWNER_APPROVED
+            for split in (bundle.train, bundle.validation, bundle.test)
+        )
     ):
         raise ValueError("Sona quality training bundle approval binding is invalid")
+    contributors = tuple(
+        sorted(
+            {
+                token
+                for split in (bundle.train, bundle.validation, bundle.test)
+                for token in split.owner_lineage_tokens
+            }
+        )
+    )
+    check_current, provenance = _authorize_training_inputs(
+        bundle.train,
+        shared_training_authority,
+        dataset_sha256=bundle.dataset_approval.dataset_bundle_sha256,
+        owner_tokens=contributors,
+    )
     return _train_sona_dataset(
         bundle.train,
         checkpoint_directory,
@@ -141,8 +212,51 @@ def train_quality_sona_checkpoint(
         before_publish=lambda: reverify_quality_approved_sona_dataset_bundle(
             bundle,
             at_ms=time_ns() // 1_000_000,
+            shared_training_authority=shared_training_authority,
+        ),
+        check_current=check_current,
+        training_authority=provenance,
+        maximum_checkpoint_bytes=maximum_checkpoint_bytes,
+        before_seal=before_seal,
+        checkpoint_staging_directory=checkpoint_staging_directory,
+        seal_checkpoint=(
+            shared_training_authority.seal_checkpoint if shared_training_authority else None
         ),
     )
+
+
+def _authorize_training_inputs(
+    dataset: SonaTensorDataset,
+    authority: SonaSharedTrainingAuthority | None,
+    *,
+    dataset_sha256: str | None = None,
+    owner_tokens: tuple[str, ...] | None = None,
+) -> tuple[Callable[[], None] | None, TrainingInputProvenance | None]:
+    if dataset.source_kind == SONA_SOURCE_KIND_SYNTHETIC:
+        verify_synthetic_fixture_identity(dataset)
+        return None, None
+    if dataset.source_kind != SONA_SOURCE_KIND_OWNER_APPROVED:
+        raise ValueError("Unknown Sona training source authority")
+    return _authorize_owner_binding(
+        SonaTrainingInputBinding(
+            dataset.source_manifest_sha256,
+            dataset_sha256 or dataset.manifest_sha256,
+            dataset.owner_lineage_key_id,
+            owner_tokens if owner_tokens is not None else dataset.owner_lineage_tokens,
+        ),
+        authority,
+    )
+
+
+def _authorize_owner_binding(
+    binding: SonaTrainingInputBinding, authority: SonaSharedTrainingAuthority | None
+) -> tuple[Callable[[], None], TrainingInputProvenance]:
+    if authority is None:
+        raise ValueError("Current shared-training authority is required for owner-derived inputs")
+    provenance = authority.authorize(binding)
+    if not isinstance(provenance, TrainingInputProvenance):
+        raise ValueError("Current shared-training input provenance is invalid")
+    return authority.check_running, provenance
 
 
 def _train_sona_dataset(
@@ -155,7 +269,19 @@ def _train_sona_dataset(
     dataset_bundle_sha256: str | None,
     source_approval_sha256: str | None,
     before_publish: Callable[[], object] | None,
+    check_current: Callable[[], None] | None,
+    training_authority: TrainingInputProvenance | None,
+    maximum_checkpoint_bytes: int | None,
+    before_seal: Callable[[Path], object] | None,
+    checkpoint_staging_directory: Path | None,
+    seal_checkpoint: Callable[[TrainingInputProvenance, str], None] | None,
 ) -> SonaTrainingResult:
+    if maximum_checkpoint_bytes is not None and (
+        type(maximum_checkpoint_bytes) is not int or not 1 <= maximum_checkpoint_bytes <= 2**63 - 1
+    ):
+        raise ValueError("Sona checkpoint byte bound is invalid")
+    if check_current is not None:
+        check_current()
     _validate_model_compatibility(dataset, model_config)
     device = _select_device(training_config.device)
     _configure_determinism(device, training_config.seed)
@@ -175,6 +301,8 @@ def _train_sona_dataset(
         weighted_loss_sum = 0.0
         sample_count = 0
         for start in range(0, dataset.example_count, training_config.batch_size):
+            if check_current is not None:
+                check_current()
             indices = order[start : start + training_config.batch_size]
             tensors = _batch_to_torch(dataset, indices=indices, device=device)
             optimizer.zero_grad(set_to_none=True)
@@ -208,6 +336,15 @@ def _train_sona_dataset(
             sample_count += batch_count
             optimizer_steps += 1
         epoch_losses.append(weighted_loss_sum / sample_count)
+    if check_current is not None:
+        check_current()
+
+    def before_candidate() -> None:
+        if before_publish is not None:
+            before_publish()
+        if check_current is not None:
+            check_current()
+
     return _write_checkpoint(
         model,
         checkpoint_directory,
@@ -219,7 +356,12 @@ def _train_sona_dataset(
         dataset_approval_sha256=dataset_approval_sha256,
         dataset_bundle_sha256=dataset_bundle_sha256,
         source_approval_sha256=source_approval_sha256,
-        before_publish=before_publish,
+        before_publish=before_candidate,
+        training_authority=training_authority,
+        maximum_checkpoint_bytes=maximum_checkpoint_bytes,
+        before_seal=before_seal,
+        checkpoint_staging_directory=checkpoint_staging_directory,
+        seal_checkpoint=seal_checkpoint,
     )
 
 
@@ -277,11 +419,23 @@ def _load_sona_checkpoint(
     _validate_sha256(manifest_sha256, "checkpoint manifest_sha256")
     if sha256(rfc8785.dumps(document)).hexdigest() != manifest_sha256:
         raise ValueError("Sona checkpoint manifest hash mismatch")
-    if (
-        _expect_int(document.get("schema_version"), "schema_version")
-        != SONA_CHECKPOINT_SCHEMA_VERSION
-    ):
+    schema_version = _expect_int(document.get("schema_version"), "schema_version")
+    if schema_version not in (3, SONA_CHECKPOINT_SCHEMA_VERSION):
         raise ValueError("Sona checkpoint schema version is unsupported")
+    source_kind: str | None = None
+    authority: TrainingInputProvenance | None = None
+    if schema_version == SONA_CHECKPOINT_SCHEMA_VERSION:
+        source_kind = _expect_string(document.get("source_kind"), "source_kind")
+        if "training_authority" not in document:
+            raise ValueError("Sona checkpoint training authority is missing")
+        if document["training_authority"] is not None:
+            authority = TrainingInputProvenance.parse(document["training_authority"])
+        if source_kind not in (SONA_SOURCE_KIND_OWNER_APPROVED, SONA_SOURCE_KIND_SYNTHETIC) or (
+            source_kind == SONA_SOURCE_KIND_OWNER_APPROVED
+        ) != (authority is not None):
+            raise ValueError("Sona checkpoint source authority is invalid")
+    elif "training_authority" in document or "source_kind" in document:
+        raise ValueError("Legacy Sona checkpoint cannot claim current training authority")
     if _expect_string(document.get("format"), "format") != _CHECKPOINT_FORMAT:
         raise ValueError("Sona checkpoint format is unsupported")
     if _expect_string(document.get("architecture"), "architecture") != _CHECKPOINT_ARCHITECTURE:
@@ -435,6 +589,8 @@ def _load_sona_checkpoint(
             document.get("quality_provenance_eligible"), "quality_provenance_eligible"
         ),
         quality_eligible=_expect_bool(document.get("quality_eligible"), "quality_eligible"),
+        source_kind=source_kind,
+        training_authority=authority,
     )
     for digest in (
         result.dataset_manifest_sha256,
@@ -558,24 +714,53 @@ def _write_checkpoint(
     dataset_bundle_sha256: str | None,
     source_approval_sha256: str | None,
     before_publish: Callable[[], object] | None,
+    training_authority: TrainingInputProvenance | None,
+    maximum_checkpoint_bytes: int | None,
+    before_seal: Callable[[Path], object] | None,
+    checkpoint_staging_directory: Path | None,
+    seal_checkpoint: Callable[[TrainingInputProvenance, str], None] | None,
 ) -> SonaTrainingResult:
     if checkpoint_directory.exists():
         raise FileExistsError(f"Sona checkpoint output already exists: {checkpoint_directory}")
     checkpoint_directory.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(
-        tempfile.mkdtemp(prefix=f".{checkpoint_directory.name}.", dir=checkpoint_directory.parent)
-    )
+    if checkpoint_staging_directory is None:
+        temporary = Path(
+            tempfile.mkdtemp(
+                prefix=f".{checkpoint_directory.name}.", dir=checkpoint_directory.parent
+            )
+        )
+    else:
+        temporary = checkpoint_staging_directory
+        metadata = temporary.stat(follow_symlinks=False)
+        if (
+            temporary.parent != checkpoint_directory.parent
+            or temporary.name != f".{checkpoint_directory.name}.staging"
+            or not stat.S_ISDIR(metadata.st_mode)
+            or temporary.is_symlink()
+            or getattr(metadata, "st_file_attributes", 0) & 0x400
+            or any(temporary.iterdir())
+        ):
+            raise ValueError("Sona checkpoint staging reservation is invalid")
     try:
         weights_directory = temporary / "weights"
         weights_directory.mkdir()
         weight_entries: list[JsonValue] = []
         overall_weights = sha256()
+        checkpoint_bytes = 0
         for index, (name, tensor) in enumerate(sorted(model.state_dict().items())):
             path = weights_directory / f"{index:04d}.npy"
             array = tensor.detach().cpu().contiguous().numpy()
-            with path.open("wb") as stream:
-                np.save(stream, array, allow_pickle=False)
-            digest = sha256(path.read_bytes()).hexdigest()
+            payload = BytesIO()
+            np.save(payload, array, allow_pickle=False)
+            serialized = payload.getvalue()
+            if (
+                maximum_checkpoint_bytes is not None
+                and checkpoint_bytes + len(serialized) > maximum_checkpoint_bytes
+            ):
+                raise ValueError("Sona checkpoint exceeds the admitted byte bound")
+            path.write_bytes(serialized)
+            checkpoint_bytes += len(serialized)
+            digest = sha256(serialized).hexdigest()
             overall_weights.update(name.encode("utf-8"))
             overall_weights.update(bytes.fromhex(digest))
             weight_entries.append(
@@ -611,6 +796,10 @@ def _write_checkpoint(
             "schema_version": SONA_CHECKPOINT_SCHEMA_VERSION,
             "format": _CHECKPOINT_FORMAT,
             "architecture": _CHECKPOINT_ARCHITECTURE,
+            "source_kind": dataset.source_kind,
+            "training_authority": (
+                training_authority.document() if training_authority is not None else None
+            ),
             "dataset_manifest_sha256": dataset.manifest_sha256,
             "dataset_example_count": dataset.example_count,
             "tokenizer_sha256": dataset.tokenizer_sha256,
@@ -636,9 +825,21 @@ def _write_checkpoint(
             "manifest": document,
             "manifest_sha256": manifest_sha256,
         }
-        (temporary / "manifest.json").write_bytes(rfc8785.dumps(envelope))
+        manifest_payload = rfc8785.dumps(envelope)
+        if (
+            maximum_checkpoint_bytes is not None
+            and checkpoint_bytes + len(manifest_payload) > maximum_checkpoint_bytes
+        ):
+            raise ValueError("Sona checkpoint exceeds the admitted byte bound")
+        (temporary / "manifest.json").write_bytes(manifest_payload)
+        if before_seal is not None:
+            before_seal(temporary)
         if before_publish is not None:
             before_publish()
+        if training_authority is not None:
+            if seal_checkpoint is None:
+                raise ValueError("Current Sona checkpoint seal authority is required")
+            seal_checkpoint(training_authority, manifest_sha256)
         os.replace(temporary, checkpoint_directory)
         return SonaTrainingResult(
             checkpoint_manifest_sha256=manifest_sha256,
@@ -656,6 +857,8 @@ def _write_checkpoint(
             device_type=device_type,
             quality_provenance_eligible=quality_provenance_eligible,
             quality_eligible=False,
+            source_kind=dataset.source_kind,
+            training_authority=training_authority,
         )
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)

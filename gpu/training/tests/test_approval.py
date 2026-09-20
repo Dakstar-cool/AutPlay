@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TypedDict, cast
+from uuid import UUID
 
 import numpy as np
 import pytest
@@ -22,6 +23,7 @@ from autplay.application.sona_source_acceptance import (
     materialize_sona_source_provenance_acceptance,
 )
 from autplay.application.sona_source_planning import SONA_SOURCE_REKEY_PLAN_KIND
+from autplay.application.training_work import TrainingWorkError
 from autplay.domain.profile_pairing import public_key_thumbprint, public_spki, sign_p1363
 from autplay.domain.recommendations import JsonValue
 from autplay.domain.sona_approval import (
@@ -48,8 +50,10 @@ from autplay_sona_training.model import SonaLiteConfig
 from autplay_sona_training.quality_bundle import (
     SONA_CATALOG_MANIFEST_KIND,
     SONA_SOURCE_MANIFEST_KIND,
+    SonaQualityBundleVerificationInputs,
     compute_sona_leakage_audit_sha256,
     compute_sona_owner_lineage_manifest_sha256,
+    load_current_sona_training_bundle,
     load_quality_approved_sona_dataset_bundle,
 )
 from autplay_sona_training.quality_trust import (
@@ -74,6 +78,7 @@ from autplay_sona_training.trainer import (
     train_quality_sona_checkpoint,
 )
 from cryptography.hazmat.primitives.asymmetric import ec
+from training_authority_fixtures import RecordingAuthority
 
 DAY_MS = 24 * 60 * 60 * 1_000
 CUTOFF_BASE_MS = 1_788_400_000_000
@@ -108,6 +113,23 @@ class BundleArguments(TypedDict):
     source_approval_path: Path
     dataset_approval_path: Path
     at_ms: int
+
+
+def _verification_inputs(arguments: BundleArguments) -> SonaQualityBundleVerificationInputs:
+    return SonaQualityBundleVerificationInputs(
+        train_directory=arguments["train_directory"],
+        validation_directory=arguments["validation_directory"],
+        test_directory=arguments["test_directory"],
+        tokenizer_directory=arguments["tokenizer_directory"],
+        source_manifest_path=arguments["source_manifest_path"],
+        catalog_manifest_path=arguments["catalog_manifest_path"],
+        source_rekey_plan_path=arguments["source_rekey_plan_path"],
+        source_provenance_acceptance_path=arguments["source_provenance_acceptance_path"],
+        teacher_calibration_path=arguments["teacher_calibration_path"],
+        teacher_manifest_path=arguments["teacher_manifest_path"],
+        source_approval_path=arguments["source_approval_path"],
+        dataset_approval_path=arguments["dataset_approval_path"],
+    )
 
 
 def _digest(value: str) -> str:
@@ -159,6 +181,7 @@ def _source_payload(
     request_set_sha256: str,
     recording_set_sha256: str,
     recording_count: int = 16,
+    owner_count: int = 1,
 ) -> dict[str, JsonValue]:
     return {
         "schema_version": 1,
@@ -171,7 +194,7 @@ def _source_payload(
         "embedding_snapshot_sha256": embedding_snapshot_sha256,
         "catalog_snapshot_sha256": catalog_snapshot_sha256,
         "owner_lineage_key_id": LINEAGE_KEY_ID,
-        "owner_count": 1,
+        "owner_count": owner_count,
         "recording_count": recording_count,
         "request_count": 24,
         "request_set_sha256": request_set_sha256,
@@ -236,12 +259,17 @@ def _dataset_payload(
 
 
 def _shift_examples(
-    examples: tuple[SonaTrainingExample, ...], *, split: str, shift_ms: int
+    examples: tuple[SonaTrainingExample, ...],
+    *,
+    split: str,
+    shift_ms: int,
+    owner_user_id: UUID | None = None,
 ) -> tuple[SonaTrainingExample, ...]:
     shifted = []
     for index, example in enumerate(examples):
         request = replace(
             example.request,
+            owner_user_id=owner_user_id or example.request.owner_user_id,
             cutoff_at_ms=example.request.cutoff_at_ms + shift_ms,
             request_sha256="0" * 64,
         )
@@ -270,20 +298,23 @@ def _build_bundle(
     *,
     synthetic_materializer: bool = False,
     recording_count_delta: int = 0,
+    distinct_split_owners: bool = False,
 ) -> BundleArguments:
     fixture_root = root / "fixture-source"
     materialize_synthetic_fixture_bundle(fixture_root)
     tokenizer = load_sona_tokenizer(fixture_root / "tokenizer")
     examples = _synthetic_training_examples(tokenizer.mapping(), tokenizer.manifest_sha256)
     source_model_manifest_sha256 = examples[0].request.model_manifest_sha256
-    raw_split_examples = tuple(
-        _shift_examples(examples, split=split, shift_ms=shift_ms)
-        for split, shift_ms in (
-            ("train", 0),
-            ("validation", 9 * DAY_MS),
-            ("test", 18 * DAY_MS),
-        )
+    split_definitions = (
+        ("train", 0, UUID(int=1)),
+        ("validation", 9 * DAY_MS, UUID(int=2) if distinct_split_owners else UUID(int=1)),
+        ("test", 18 * DAY_MS, UUID(int=3) if distinct_split_owners else UUID(int=1)),
     )
+    raw_split_examples = tuple(
+        _shift_examples(examples, split=split, shift_ms=shift_ms, owner_user_id=owner_user_id)
+        for split, shift_ms, owner_user_id in split_definitions
+    )
+    owner_count = 3 if distinct_split_owners else 1
     calibration = build_sona_teacher_calibration_set(
         tuple(
             SonaTeacherCalibrationExample(
@@ -370,7 +401,7 @@ def _build_bundle(
         "quality_eligible": False,
         "selected_request_count": len(approved_request_sha256s),
         "owner_lineage_key_id": LINEAGE_KEY_ID,
-        "owner_count": 1,
+        "owner_count": owner_count,
         "request_set_sha256": _set_digest(approved_request_sha256s),
         "request_hash_overlap_count": 0,
         "owner_time_ordering_violation_count": 0,
@@ -389,7 +420,7 @@ def _build_bundle(
         "embedding_snapshot_sha256": tokenizer.source_embeddings_sha256,
         "catalog_snapshot_sha256": catalog_manifest_sha256,
         "owner_lineage_key_id": LINEAGE_KEY_ID,
-        "owner_count": 1,
+        "owner_count": owner_count,
         "recording_count": len(recording_ids) + recording_count_delta,
         "request_count": len(approved_request_sha256s),
         "request_set_sha256": _set_digest(approved_request_sha256s),
@@ -413,6 +444,7 @@ def _build_bundle(
             request_set_sha256=_set_digest(approved_request_sha256s),
             recording_set_sha256=recording_set_sha256,
             recording_count=len(recording_ids) + recording_count_delta,
+            owner_count=owner_count,
         ),
         key,
         SONA_SOURCE_APPROVAL_DOMAIN,
@@ -523,6 +555,7 @@ def test_verified_bundle_provenance_flows_through_candidate_checkpoint_and_onnx(
             encoder_layers=1,
         ),
         training_config=SonaTrainingConfig(batch_size=8, seed=31, device="cpu"),
+        shared_training_authority=RecordingAuthority(),
     )
 
     assert result.dataset_approval_sha256 == bundle.dataset_approval.approval_sha256
@@ -668,6 +701,40 @@ def test_verified_bundle_provenance_flows_through_candidate_checkpoint_and_onnx(
     assert cast(dict[str, JsonValue], quality_evidence["evidence"])["cuda_only_execution"] is True
 
 
+def test_current_quality_authority_binds_all_contributors_before_payload_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arguments = _build_bundle(tmp_path / "approved", distinct_split_owners=True)
+    authority = RecordingAuthority(refuse_start=True)
+
+    def forbid_payload(*_: object, **__: object) -> bytes:
+        pytest.fail("Quality owner payload was read before current contributor authorization")
+
+    monkeypatch.setattr("autplay_sona_training.dataset.read_canonical_npy", forbid_payload)
+    with pytest.raises(TrainingWorkError, match="training_input_binding_mismatch"):
+        load_current_sona_training_bundle(
+            _verification_inputs(arguments),
+            at_ms=arguments["at_ms"],
+            shared_training_authority=authority,
+        )
+    assert len(authority.bindings) == 1
+    assert len(authority.bindings[0].owner_tokens) == 3
+
+
+def test_current_quality_loader_rechecks_authority_while_reading_payloads(tmp_path: Path) -> None:
+    arguments = _build_bundle(tmp_path / "approved", distinct_split_owners=True)
+    authority = RecordingAuthority()
+    bundle = load_current_sona_training_bundle(
+        _verification_inputs(arguments),
+        at_ms=arguments["at_ms"],
+        shared_training_authority=authority,
+    )
+    assert len(authority.bindings) == 1
+    assert len(authority.bindings[0].owner_tokens) == 3
+    assert authority.checks > 3
+    assert bundle.dataset_approval.dataset_bundle_sha256 == authority.bindings[0].dataset_sha256
+
+
 def test_synthetic_source_kind_is_permanently_disqualifying(tmp_path: Path) -> None:
     arguments = _build_bundle(tmp_path / "synthetic", synthetic_materializer=True)
 
@@ -694,6 +761,7 @@ def test_quality_checkpoint_reverifies_expiry_immediately_before_publish(
                 encoder_layers=1,
             ),
             training_config=SonaTrainingConfig(batch_size=8, seed=37, device="cpu"),
+            shared_training_authority=RecordingAuthority(),
         )
 
     assert not checkpoint.exists()

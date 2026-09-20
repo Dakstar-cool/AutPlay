@@ -56,6 +56,7 @@ class JobAttemptOutcome(StrEnum):
     RETRYABLE_ERROR = "RETRYABLE_ERROR"
     TERMINAL_ERROR = "TERMINAL_ERROR"
     LEASE_EXPIRED = "LEASE_EXPIRED"
+    RESOURCE_WAIT = "RESOURCE_WAIT"
     CANCELLED = "CANCELLED"
 
 
@@ -74,6 +75,16 @@ class CancelRequestResult(StrEnum):
     CANCELLED = "CANCELLED"
     ALREADY_TERMINAL = "ALREADY_TERMINAL"
     NOT_FOUND = "NOT_FOUND"
+
+
+class ResourceWaitTransition(StrEnum):
+    """Atomic resource recheck and release of one CPU job claim."""
+
+    GRANTED = "GRANTED"
+    RECHECK = "RECHECK"
+    DEFERRED = "DEFERRED"
+    CANCELLED = "CANCELLED"
+    LOST_LEASE = "LOST_LEASE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,13 +130,21 @@ class JobLease:
     checkpoint: dict[str, JsonValue] | None
     lease_deadline: datetime
     cancel_requested_at: datetime | None
+    resource_wait_count: int = 0
 
     def __post_init__(self) -> None:
+        if not 0 <= self.resource_wait_count < self.fence.attempt_no:
+            raise ValueError("resource_wait_count must precede the current attempt")
         if not 0 <= self.priority <= 4:
             raise ValueError("priority must be between zero and four")
         _require_aware(self.lease_deadline, "lease_deadline")
         if self.cancel_requested_at is not None:
             _require_aware(self.cancel_requested_at, "cancel_requested_at")
+
+    @property
+    def retry_attempt_no(self) -> int:
+        """Retry ordinal excludes quota waits while the fence remains monotonic."""
+        return self.fence.attempt_no - self.resource_wait_count
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +369,7 @@ __all__ = (
     "JsonValue",
     "LeaseFence",
     "LeaseTransition",
+    "ResourceWaitTransition",
     "RetryPolicy",
     "RetryableJobError",
     "TerminalJobError",

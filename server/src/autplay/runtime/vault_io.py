@@ -12,10 +12,22 @@ from time import monotonic
 from typing import cast
 from uuid import UUID, uuid4
 
-from autplay.adapters.filesystem.vault_process import RetainedVaultProcess, VaultProcessSupervisor
-from autplay.application.resource_admission import ResourceAdmissionService
+from autplay.adapters.child_process import provider_child_launch
+from autplay.adapters.filesystem.vault_process import (
+    ChildLaunch,
+    ProcessTreeFactory,
+    RetainedVaultProcess,
+    VaultProcessSupervisor,
+)
+from autplay.application.resource_admission import ResourceActor, ResourceAdmissionService
 from autplay.domain.auth import Principal
-from autplay.domain.resource_admission import ActivationFence, IoPermit, ResourceAdmissionError
+from autplay.domain.resource_admission import (
+    AcquisitionClaim,
+    ActivationFence,
+    IoPermit,
+    LocalBridgeClaim,
+    ResourceAdmissionError,
+)
 from autplay.domain.resource_execution import (
     ExecutionKind,
     ExecutionState,
@@ -39,8 +51,10 @@ def _launch(target: Callable[[], None], name: str) -> None:
     thread = threading.Thread(target=guarded, name=name, daemon=True)
     try:
         thread.start()
-    except BaseException:
+    except BaseException as error:
         gate.set()
+        if isinstance(error, RuntimeError):
+            raise ResourceAdmissionError("resource_execution_busy") from error
         raise
     granted = True
     gate.set()
@@ -76,21 +90,26 @@ class VaultIoSession:
     def __init__(
         self,
         coordinator: VaultIoCoordinator,
-        actor: Principal,
+        actor: ResourceActor,
         fence: ActivationFence,
         resource_type: str,
         target_id: UUID,
+        *,
+        tree_factory: ProcessTreeFactory | None = None,
+        launch: ChildLaunch | None = None,
     ) -> None:
         self.identifier = uuid4()
         self.deadline = ResourceIoDeadline(monotonic())
         self._coordinator, self._actor = coordinator, actor
         self._fence, self._resource_type, self._target_id = fence, resource_type, target_id
+        self._tree_factory, self._launch = tree_factory, launch
         self._permit: IoPermit | None = None
         self._child: RetainedVaultProcess | None = None
         self._ready: Future[None] = Future()
         self._identity: Future[ProcessIdentity] = Future()
         self._registered: Future[ExecutionStatus] = Future()
         self._worker_done: Future[None] = Future()
+        self._closed: Future[None] = Future()
         self._worker_started = False
         self._worker_error: BaseException | None = None
         self._stop = threading.Event()
@@ -112,6 +131,11 @@ class VaultIoSession:
         return self._registered.result()
 
     @property
+    def actor(self) -> ResourceActor:
+        """Authority retained with this execution; it is never derived from a caller payload."""
+        return self._actor
+
+    @property
     def reconciliation_code(self) -> str | None:
         """Stable diagnostic code only; no paths, principals or exception text."""
         return self._reconciliation_code
@@ -128,10 +152,47 @@ class VaultIoSession:
 
     def finish(self) -> None:
         """End HTTP authority immediately; cleanup remains coordinator-owned."""
-        self.deadline.stop()
+        self.deadline.stop(preserve_error=True)
         self._stop.set()
         if self._child is not None:
             self._child.request_stop()
+
+    async def close(self, *, timeout: float = 5) -> None:
+        """Stop caller authority and wait for durable child-exit reconciliation."""
+        if not 0 < timeout <= 5:
+            raise ValueError("invalid resource I/O close timeout")
+        self.finish()
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(asyncio.wrap_future(self._closed)), timeout=timeout
+            )
+        except TimeoutError:
+            raise ResourceAdmissionError("resource_execution_unconfirmed") from None
+
+    async def finish_provider(self, *, timeout: float = 5) -> None:
+        """Accept success only after natural tree exit and durable acknowledgement.
+
+        A provider result frame is not exit evidence. Unresolved descendants or
+        cleanup stay retained after this bounded caller gives up.
+        """
+        if not isinstance(self._actor, AcquisitionClaim) or not 0 < timeout <= 5:
+            raise ResourceAdmissionError("resource_request_invalid")
+        until = monotonic() + timeout
+        try:
+            while True:
+                self.deadline.check()
+                proof = self.child.exit_evidence(self.registered.child)
+                if proof is not None:
+                    if proof.exit_code != 0:
+                        raise ResourceAdmissionError("resource_provider_failed")
+                    break
+                if monotonic() >= until:
+                    raise ResourceAdmissionError("resource_execution_unconfirmed")
+                await asyncio.sleep(0.02)
+        finally:
+            self.finish()
+        # Shield the retained future from cancellation or timeout of this waiter.
+        await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(self._closed)), timeout)
 
     def _start(self) -> None:
         _launch(self._control, "vault-io-control")
@@ -147,12 +208,18 @@ class VaultIoSession:
             uuid4(),
             self._coordinator.owner_run_id,
             self._permit,
-            ExecutionKind.VAULT_UPLOAD
-            if self._resource_type == "UPLOAD_INTENT"
-            else ExecutionKind.VAULT_STREAM,
+            ExecutionKind.PROVIDER
+            if isinstance(self._actor, AcquisitionClaim)
+            else (
+                ExecutionKind.VAULT_UPLOAD
+                if self._resource_type == "UPLOAD_INTENT"
+                else ExecutionKind.VAULT_STREAM
+            ),
             self._target_id,
         )
-        self._child = self._coordinator.supervisor.retain(ticket, self.deadline)
+        self._child = self._coordinator.supervisor.retain(
+            ticket, self.deadline, tree_factory=self._tree_factory, launch=self._launch
+        )
         service.prepare_execution(self._actor, ticket)
         self.deadline.check()
         self._worker_started = True
@@ -160,6 +227,7 @@ class VaultIoSession:
             _launch(self._work, "vault-io-worker")
         except BaseException:
             # The launch gate proves no worker code can have run on this path.
+            self.deadline.freeze_error()
             self._worker_started = False
             self.child.seal_without_spawn()
             raise
@@ -180,9 +248,11 @@ class VaultIoSession:
                     self.deadline.check()
                     command.result.set_result(command.action())
                 except BaseException as error:
+                    self.deadline.freeze_error()
                     command.result.set_exception(error)
                     raise
         except BaseException as error:
+            self.deadline.freeze_error()
             self._worker_error = error
         finally:
             self.finish()
@@ -202,6 +272,7 @@ class VaultIoSession:
         try:
             self._prepare()
             renew_at = monotonic() + 2
+            operation_renew_at = monotonic() + 10
             while not self.deadline.stopped():
                 if self._identity.done() and not self._registered.done():
                     registered = self._coordinator.service.start_execution(
@@ -214,6 +285,13 @@ class VaultIoSession:
                 if self._registered.done() and monotonic() >= renew_at:
                     sequence = self.deadline.begin_renewal()
                     try:
+                        if (
+                            isinstance(self._actor, (AcquisitionClaim, LocalBridgeClaim))
+                            and monotonic() >= operation_renew_at
+                        ):
+                            self._coordinator.service.renew(self._actor, self._fence)
+                            self.deadline.check()
+                            operation_renew_at = monotonic() + 10
                         self._coordinator.service.renew_execution_io(self._actor, self.child.ticket)
                     except BaseException:
                         self.deadline.finish_renewal(sequence, succeeded=False)
@@ -223,6 +301,7 @@ class VaultIoSession:
                     renew_at = monotonic() + 2
                 self._stop.wait(0.05)
         except BaseException as error:
+            self.deadline.freeze_error()
             self._fail_ready(error)
         finally:
             self.finish()
@@ -287,11 +366,18 @@ class VaultIoCoordinator:
     verified supervisor reconciliation. Shutdown reports unresolved reservations.
     """
 
-    def __init__(self, service: ResourceAdmissionService, *, maximum: int) -> None:
+    def __init__(
+        self,
+        service: ResourceAdmissionService,
+        *,
+        maximum: int,
+        on_drained: Callable[[], None] | None = None,
+    ) -> None:
         self.service = service
         self.supervisor = VaultProcessSupervisor(maximum=maximum)
         self.owner_run_id = uuid4()
         self._maximum = maximum
+        self._on_drained = on_drained
         self._lock = threading.Lock()
         self._entries: dict[UUID, VaultIoSession] = {}
         self._started = self._closing = False
@@ -311,17 +397,66 @@ class VaultIoCoordinator:
         *,
         resource_type: str,
         target_id: UUID,
+        on_bind: Callable[[VaultIoSession], None] | None = None,
     ) -> VaultIoSession:
         if resource_type not in {"UPLOAD_INTENT", "PLAY_INSTANCE", "DOWNLOAD_INTENT"}:
             raise ResourceAdmissionError("resource_request_invalid")
+        return await self._open(
+            VaultIoSession(self, actor, fence, resource_type, target_id), on_bind=on_bind
+        )
+
+    async def open_provider(
+        self,
+        claim: AcquisitionClaim,
+        fence: ActivationFence,
+        *,
+        tree_factory: ProcessTreeFactory,
+        launch: ChildLaunch = provider_child_launch,
+        on_bind: Callable[[VaultIoSession], None] | None = None,
+    ) -> VaultIoSession:
+        """Internal worker authority only; never a device HTTP purpose extension."""
+        return await self._open(
+            VaultIoSession(
+                self,
+                claim,
+                fence,
+                claim.resource_type,
+                claim.acquisition_id,
+                tree_factory=tree_factory,
+                launch=launch,
+            ),
+            on_bind=on_bind,
+        )
+
+    async def open_bridge(
+        self,
+        claim: LocalBridgeClaim,
+        fence: ActivationFence,
+        *,
+        target_id: UUID,
+        on_bind: Callable[[VaultIoSession], None] | None = None,
+    ) -> VaultIoSession:
+        """Local bridge authority is limited to retained upload processes."""
+        return await self._open(
+            VaultIoSession(self, claim, fence, "UPLOAD_INTENT", target_id), on_bind=on_bind
+        )
+
+    async def _open(
+        self,
+        entry: VaultIoSession,
+        *,
+        on_bind: Callable[[VaultIoSession], None] | None,
+    ) -> VaultIoSession:
         with self._lock:
             if not self._started or self._closing or len(self._entries) >= self._maximum:
                 raise ResourceAdmissionError("resource_execution_busy")
-            entry = VaultIoSession(self, actor, fence, resource_type, target_id)
             self._entries[entry.identifier] = entry
         try:
+            if on_bind is not None:
+                on_bind(entry)
             entry._start()
         except BaseException:
+            entry.deadline.freeze_error()
             entry.finish()
             # The denied launch gate proves no admission RPC or child can exist.
             self._forget(entry)
@@ -337,13 +472,18 @@ class VaultIoCoordinator:
         with self._lock:
             return tuple(self._entries.values())
 
-    async def shutdown(self, *, timeout: float = 5) -> tuple[UUID, ...]:
-        if not 0 <= timeout <= 5:
-            raise ValueError("invalid shutdown reconciliation timeout")
+    def request_stop(self) -> None:
+        """Latch admission closed and interrupt bytes independently of the caller."""
         with self._lock:
             self._closing = True
         for entry in self.pending():
             entry.finish()
+        self._wake.set()
+
+    async def shutdown(self, *, timeout: float = 5) -> tuple[UUID, ...]:
+        if not 0 <= timeout <= 5:
+            raise ValueError("invalid shutdown reconciliation timeout")
+        self.request_stop()
         until = monotonic() + timeout
         while self.pending() and monotonic() < until:
             await asyncio.sleep(0.05)
@@ -352,8 +492,12 @@ class VaultIoCoordinator:
 
     def _watch(self) -> None:
         while True:
-            entries = self.pending()
-            if self._closing and not entries:
+            with self._lock:
+                entries = tuple(self._entries.values())
+                drained = self._closing and not entries
+            if drained:
+                if self._on_drained is not None:
+                    self._on_drained()
                 return
             for entry in entries:
                 if entry.deadline.stopped():
@@ -366,3 +510,4 @@ class VaultIoCoordinator:
             if self._entries.get(entry.identifier) is not entry:
                 raise ResourceAdmissionError("resource_execution_stale")
             del self._entries[entry.identifier]
+            entry._closed.set_result(None)

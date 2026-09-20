@@ -5,12 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
-
 from autplay.adapters.postgresql.models import UserAccountRow
 from autplay.adapters.postgresql.models.resource_admission import ResourceAdmissionRow
 from autplay.adapters.postgresql.models.web_admin import WebSessionRow
 from autplay.domain.web_admin import WebAdminError
+from sqlalchemy import select
 
 from .test_resource_admission_runtime import fence, play, present
 from .test_resource_policy import PolicyHarness

@@ -11,6 +11,7 @@ from typing import Any, Final
 
 import uvicorn
 from fastapi import APIRouter, FastAPI, Request
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
@@ -20,11 +21,20 @@ from autplay.adapters.postgresql.readiness import (
 )
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.auth import AuthService
+from autplay.application.backup_control import (
+    BackupControlService,
+    parse_backup_targets,
+)
 from autplay.application.discovery_automation import DiscoveryAutomationService
 from autplay.application.guest_room import GuestRoomService
+from autplay.application.internet_music import InternetMusicService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
+from autplay.application.track_metadata import TrackMetadataService
+from autplay.application.training_consent import TrainingConsentService
 from autplay.application.web_admin import WebAdminService
+from autplay.entrypoints.account_deletion_http import create_account_deletion_router
+from autplay.entrypoints.account_recovery_http import create_account_recovery_router
 from autplay.entrypoints.admin_web_http import (
     AdminCommandsHttp,
     AdminViewsHttp,
@@ -32,7 +42,10 @@ from autplay.entrypoints.admin_web_http import (
     create_admin_web_router,
 )
 from autplay.entrypoints.auth_http import bearer_authentication, create_auth_router
+from autplay.entrypoints.backup_control_http import create_backup_control_router
 from autplay.entrypoints.composition import (
+    build_account_deletion_service,
+    build_account_recovery_service,
     build_admin_command_service,
     build_admin_view_service,
     build_auth_service,
@@ -45,12 +58,15 @@ from autplay.entrypoints.composition import (
     build_profile_pairing_service,
     build_public_access_service,
     build_recommendation_service,
+    build_self_device_pairing_service,
     build_social_service,
     build_stream_lookup,
     build_sync_service,
+    build_training_consent_service,
     build_vault_http_service,
     build_wave_service,
     build_web_admin_service,
+    build_web_passkey_service,
 )
 from autplay.entrypoints.device_admission_http import create_device_admission_router
 from autplay.entrypoints.device_admission_web import DeviceAdmissionWebAdapter
@@ -65,6 +81,8 @@ from autplay.entrypoints.discovery_automation_http import create_discovery_autom
 from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
+from autplay.entrypoints.metadata_http import create_metadata_router
+from autplay.entrypoints.music_http import create_music_router
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.entrypoints.public_access_http import (
     build_exact_proxy_source_resolver,
@@ -74,10 +92,15 @@ from autplay.entrypoints.recommendation_http import (
     RecommendationHttpService,
     create_recommendation_router,
 )
+from autplay.entrypoints.resource_admission_http import create_resource_admission_router
+from autplay.entrypoints.resource_composition import ResourceIoRuntime
+from autplay.entrypoints.self_device_pairing_http import create_self_device_pairing_router
 from autplay.entrypoints.social_http import create_social_router
 from autplay.entrypoints.sync_http import create_sync_router
-from autplay.entrypoints.vault_http import UploadService, create_vault_router
+from autplay.entrypoints.training_consent_http import create_training_consent_router
+from autplay.entrypoints.vault_http import AdmittedUploadService, UploadService, create_vault_router
 from autplay.entrypoints.wave_http import WaveBroadcaster, create_wave_router
+from autplay.entrypoints.web_passkey_http import create_web_passkey_router
 from autplay.runtime.http import (
     RequestRuntimeMiddleware,
     error_response,
@@ -85,7 +108,10 @@ from autplay.runtime.http import (
 )
 from autplay.runtime.logging import configure_json_logging
 from autplay.runtime.metrics import RuntimeMetrics
+from autplay.runtime.resource_io_scope import ResourceIoFastAPI
+from autplay.runtime.resource_io_transport import ResourceIoH11Protocol
 from autplay.runtime.settings import ApiSettings, SettingsLoadError, load_api_settings
+from autplay.runtime.vault_io import VaultIoCoordinator
 from autplay.runtime.web_security import AdminWebSecurityMiddleware
 from autplay.web.renderer import AdminTemplateRenderer
 
@@ -107,17 +133,25 @@ def create_app(
     wave_service: Any | None = None,
     guest_room_service: GuestRoomService | None = None,
     social_service: Any | None = None,
+    training_consent_service: TrainingConsentService | None = None,
     profile_pairing_service: ProfilePairingService | None = None,
     public_access_service: PublicAccessService | None = None,
     admin_web_service: WebAdminService | None = None,
     admin_view_service: AdminViewsHttp | None = None,
     admin_command_service: AdminCommandsHttp | None = None,
+    backup_control_service: BackupControlService | None = None,
     admin_renderer: Renderer | None = None,
     discovery_service: ManualDiscoveryHttp | None = None,
     discovery_automation_service: DiscoveryAutomationService | None = None,
+    resource_io: VaultIoCoordinator | None = None,
+    resource_runtime: ResourceIoRuntime | None = None,
 ) -> FastAPI:
     """Create one API instance without connecting to PostgreSQL at import time."""
 
+    if resource_runtime is not None:
+        if resource_io is not None:
+            raise ValueError("resource runtime and coordinator are mutually exclusive")
+        resource_io = resource_runtime.coordinator
     resolved_settings = settings or load_api_settings()
     runtime_metrics = metrics or RuntimeMetrics()
     engine = create_runtime_engine(resolved_settings)
@@ -131,6 +165,9 @@ def create_app(
     wave = wave_service or build_wave_service(engine)
     guest_room = guest_room_service or build_guest_room_service(engine)
     social = social_service or build_social_service(resolved_settings, engine)
+    training_consent = training_consent_service or build_training_consent_service(
+        resolved_settings, engine
+    )
     pairing = (
         profile_pairing_service
         if profile_pairing_service is not None
@@ -145,13 +182,23 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        del application
+        from autplay.entrypoints.privacy_deletion import enforce_privacy_restore_guard
+
+        enforce_privacy_restore_guard(resolved_settings, engine)
+        if resource_runtime is not None:
+            resource_runtime.start()
+        elif resource_io is not None:
+            resource_io.start()
         try:
             yield
         finally:
+            if resource_runtime is not None:
+                application.state.unconfirmed_resource_io = await resource_runtime.shutdown()
+            elif resource_io is not None:
+                application.state.unconfirmed_resource_io = await resource_io.shutdown()
             engine.dispose()
 
-    app = FastAPI(
+    app = ResourceIoFastAPI(
         title="AutPlay API",
         version="0.0.0",
         docs_url=None,
@@ -168,6 +215,21 @@ def create_app(
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
     api_router.include_router(
+        create_metadata_router(
+            TrackMetadataService(sessionmaker(engine, class_=Session, expire_on_commit=False)),
+            authenticated=bearer_authentication(authentication),
+        )
+    )
+    api_router.include_router(
+        create_music_router(
+            InternetMusicService(
+                sessionmaker(engine, class_=Session, expire_on_commit=False), uploads
+            ),
+            authenticated=bearer_authentication(authentication),
+            internet_enabled=resolved_settings.internet_music_enabled,
+        )
+    )
+    api_router.include_router(
         create_profile_pairing_router(
             pairing,
             authenticated=bearer_authentication(authentication),
@@ -175,6 +237,33 @@ def create_app(
         )
     )
     api_router.include_router(create_device_admission_router(pairing))
+    api_router.include_router(
+        create_account_deletion_router(
+            build_account_deletion_service(resolved_settings, engine),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=build_exact_proxy_source_resolver(
+                resolved_settings.public_access_trusted_proxy_ip
+            ),
+        )
+    )
+    api_router.include_router(
+        create_account_recovery_router(
+            build_account_recovery_service(resolved_settings, engine),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=build_exact_proxy_source_resolver(
+                resolved_settings.public_access_trusted_proxy_ip
+            ),
+        )
+    )
+    api_router.include_router(
+        create_self_device_pairing_router(
+            build_self_device_pairing_service(resolved_settings, engine),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=build_exact_proxy_source_resolver(
+                resolved_settings.public_access_trusted_proxy_ip
+            ),
+        )
+    )
     api_router.include_router(
         create_public_access_router(
             public_access,
@@ -185,8 +274,21 @@ def create_app(
         )
     )
     api_router.include_router(
-        create_vault_router(uploads, authenticated=bearer_authentication(authentication))
+        create_vault_router(
+            uploads,
+            authenticated=bearer_authentication(authentication),
+            coordinator=resource_io,
+            admitted=uploads
+            if resource_io is not None and isinstance(uploads, AdmittedUploadService)
+            else None,
+        )
     )
+    if resource_io is not None:
+        api_router.include_router(
+            create_resource_admission_router(
+                resource_io.service, authenticated=bearer_authentication(authentication)
+            )
+        )
     api_router.include_router(
         create_library_router(library, authenticated=bearer_authentication(authentication))
     )
@@ -222,6 +324,11 @@ def create_app(
     )
     api_router.include_router(
         create_social_router(social, authenticated=bearer_authentication(authentication))
+    )
+    api_router.include_router(
+        create_training_consent_router(
+            training_consent, authenticated=bearer_authentication(authentication)
+        )
     )
     if discovery_automation is not None:
         api_router.include_router(
@@ -263,6 +370,45 @@ def create_app(
                         origin=origin,
                     )
                 )
+        passkeys = build_web_passkey_service(resolved_settings, engine)
+        if passkeys is not None:
+            app.include_router(
+                create_web_passkey_router(
+                    web=web,
+                    passkeys=passkeys,
+                    renderer=admin_renderer or AdminTemplateRenderer(),
+                    origin=origin,
+                    source_secret=source_secret.get_secret_value().encode("utf-8"),
+                    discovery_enabled=discovery is not None,
+                    discovery_automation_enabled=(
+                        discovery is not None and resolved_settings.discovery_automation_enabled
+                    ),
+                )
+            )
+        backups = backup_control_service
+        if backups is None and resolved_settings.admin_backup_control_root is not None:
+            targets_json = resolved_settings.admin_backup_targets_json
+            if targets_json is None:
+                raise RuntimeError("Admin backup target configuration is unavailable")
+            backups = BackupControlService(
+                resolved_settings.admin_backup_control_root,
+                parse_backup_targets(targets_json),
+            )
+        if backups is not None:
+            app.include_router(
+                create_backup_control_router(
+                    web=web,
+                    backups=backups,
+                    renderer=admin_renderer or AdminTemplateRenderer(),
+                    origin=origin,
+                    passkeys_enabled=passkeys is not None,
+                    discovery_enabled=discovery is not None,
+                    discovery_automation_enabled=(
+                        discovery is not None
+                        and resolved_settings.discovery_automation_enabled
+                    ),
+                )
+            )
         app.include_router(
             create_admin_web_router(
                 web=web,
@@ -278,6 +424,7 @@ def create_app(
                 device_admission=(
                     DeviceAdmissionWebAdapter(pairing) if pairing is not None else None
                 ),
+                passkeys_enabled=passkeys is not None,
             )
         )
 
@@ -335,6 +482,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_json_logging(service=SERVICE_NAME, level=settings.log_level)
     uvicorn.run(
         create_app(settings),
+        http=ResourceIoH11Protocol,
         host=settings.host,
         port=settings.port,
         access_log=False,

@@ -11,9 +11,6 @@ from multiprocessing import get_context
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Engine, create_engine, func, select, text
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.models import (
     AudioVariantRow,
     DeviceRow,
@@ -41,6 +38,8 @@ from autplay.domain.resource_admission import (
     ResourceKind,
     ResourceRequest,
 )
+from sqlalchemy import Engine, create_engine, func, select, text
+from sqlalchemy.orm import Session, sessionmaker
 
 
 @dataclass

@@ -10,8 +10,6 @@ from threading import Event
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import event, select, text
-
 from autplay.adapters.postgresql.models import (
     DeviceRow,
     LibraryEntryRow,
@@ -33,6 +31,7 @@ from autplay.domain.resource_admission import (
     ResourceKind,
     ResourceRequest,
 )
+from sqlalchemy import event, select, text
 
 from .test_resource_admission_runtime import AdmissionHarness, fence, present
 from .test_resource_admission_runtime import admission as admission

@@ -1,6 +1,9 @@
 package app.autplay.application.profilepairing
 
+import app.autplay.application.accountrecovery.accountDeletionVetoes
+
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.isReservedCredentialProfile
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.security.BindingAuthorityWriteGate
 import app.autplay.data.settings.M5BindingCheckpoint
@@ -18,6 +21,8 @@ class BindingRecovery(
         val initial = settings.settings.first()
         val checkpoint = initial.m5Binding ?: return BindingRecoveryResult.NoM5Binding
         if (initial.activeServerProfileId != profileId) return BindingRecoveryResult.NoM5Binding
+        if (profileId.isReservedCredentialProfile()) return clearPartial(profileId, checkpoint)
+        if (credentials.accountDeletionVetoes(profileId, checkpoint.bindingCommitId)) return clearPartial(profileId, checkpoint)
         val material = credentials.read(profileId) ?: return clearPartial(profileId, checkpoint)
         return try {
             val secret = runCatching { SessionCredentialEnvelopeCodec.decode(material) }
@@ -59,7 +64,7 @@ class BindingRecovery(
         // Purge while the rejected binding is still visible. This also fences a downloaded pack
         // from being committed between recovery cleanup and the settings deactivation below.
         purgeRecommendationContext(profileId)
-        credentials.clear(profileId)
+        if (!profileId.isReservedCredentialProfile()) credentials.clear(profileId)
         // Origins remain a non-active trust bookmark; credentials and active authority do not.
         settings.mutate { latest ->
             if (latest.activeServerProfileId == profileId && latest.m5Binding == expectedCheckpoint) {

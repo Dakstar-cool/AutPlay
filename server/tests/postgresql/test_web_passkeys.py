@@ -12,13 +12,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-from psycopg import Connection
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from test_webauthn import ORIGIN, _vector
-
 from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
 from autplay.adapters.postgresql.web_passkeys import SqlAlchemyWebPasskeyUnitOfWorkFactory
 from autplay.adapters.webauthn import DuoWebPasskeyVerifier
@@ -26,6 +19,12 @@ from autplay.application.web_admin import WebAdminService
 from autplay.application.web_passkeys import PasskeyOptions, WebPasskeyService
 from autplay.domain.web_admin import WebAdminError, WebSessionCredentials
 from autplay.entrypoints.admin import run_web_passkey_recovery
+from cryptography.hazmat.primitives.asymmetric import ec
+from psycopg import Connection
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from test_webauthn import ORIGIN, _vector
 
 from .test_web_admin_m6 import _seed_owner
 
@@ -297,7 +296,17 @@ def test_account_disable_and_expired_ceremony_reject_login(harness: Harness) -> 
             now=datetime.now(UTC) + timedelta(minutes=6),
         )
     with harness.engine.begin() as connection:
-        connection.execute(text("UPDATE account.user_account SET status='DISABLED'"))
+        connection.execute(
+            text(
+                "INSERT INTO account.user_account(user_id,display_name,role) "
+                "VALUES (:id,'Replacement owner','OWNER')"
+            ),
+            {"id": uuid4()},
+        )
+        connection.execute(
+            text("UPDATE account.user_account SET status='DISABLED' WHERE user_id=:user"),
+            {"user": harness.bootstrap.actor.user_id},
+        )
     with pytest.raises(WebAdminError, match="passkey_invalid"):
         _finish(harness, options, payload)
 

@@ -10,8 +10,10 @@ from uuid import UUID
 from autplay.domain.auth import Principal
 from autplay.domain.resource_admission import (
     AccountLimits,
+    AcquisitionClaim,
     AdmissionStatus,
     IoPermit,
+    LocalBridgeClaim,
     ResourceAdmission,
     ResourceAuthority,
     ResourceKind,
@@ -23,7 +25,12 @@ from autplay.ports.resource_execution import ResourceExecutionRepository
 
 class ResourceAdmissionRepository(Protocol):
     def lock(self) -> datetime: ...
+    def current_time(self) -> datetime: ...
     def authenticate(self, actor: Principal, now: datetime) -> ResourceAuthority: ...
+    def authenticate_acquisition(
+        self, actor: AcquisitionClaim, now: datetime
+    ) -> ResourceAuthority: ...
+    def authenticate_bridge(self, actor: LocalBridgeClaim, now: datetime) -> ResourceAuthority: ...
     def require_authority(self, authority: ResourceAuthority, now: datetime) -> None: ...
     def require_target(
         self,

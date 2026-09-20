@@ -13,13 +13,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi.testclient import TestClient
-from psycopg import Connection
-from pydantic import SecretStr
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.auth import BootstrapOwnerCommand
@@ -36,6 +29,12 @@ from autplay.domain.resource_admission import AdmissionState, ResourceAdmissionE
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_auth_service
 from autplay.runtime.settings import ApiSettings, RuntimeProfile
+from cryptography.hazmat.primitives.asymmetric import ec
+from fastapi.testclient import TestClient
+from psycopg import Connection
+from pydantic import SecretStr
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from .test_resource_admission_runtime import AdmissionHarness, fence, play
 from .test_resource_admission_runtime import admission as admission
@@ -198,6 +197,34 @@ def test_self_pairing_capability_requires_feature_flag_for_user(
     payload = signed["payload"]
     assert isinstance(payload, dict)
     assert ("self_device_pairing" in payload["operations"]) is enabled
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("role", [AccountRole.OWNER, AccountRole.ADMIN, AccountRole.USER])
+def test_deletion_capability_requires_feature_flag_for_all_roles(
+    pairing_service: ProfilePairingService,
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    role: AccountRole,
+) -> None:
+    monkeypatch.setattr(pairing_service, "_account_deletion_enabled", enabled)
+    payload = pairing_service.capabilities(Principal(uuid4(), uuid4(), uuid4(), role))["payload"]
+    assert isinstance(payload, dict)
+    assert ("account_deletion" in payload["operations"]) is enabled
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("role", [AccountRole.OWNER, AccountRole.ADMIN, AccountRole.USER])
+def test_training_consent_capability_requires_feature_flag_for_all_roles(
+    pairing_service: ProfilePairingService,
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    role: AccountRole,
+) -> None:
+    monkeypatch.setattr(pairing_service, "_shared_training_consent_enabled", enabled)
+    payload = pairing_service.capabilities(Principal(uuid4(), uuid4(), uuid4(), role))["payload"]
+    assert isinstance(payload, dict)
+    assert ("shared_training_consent" in payload["operations"]) is enabled
 
 
 def test_discovery_reconciles_configured_origins_without_rotating_identity(

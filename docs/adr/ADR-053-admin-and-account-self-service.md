@@ -1,6 +1,6 @@
 # ADR-053: Admin Web and account self-service extensions
 
-- Status: Accepted product direction; implementation and verification in progress
+- Status: Implemented locally; target deployment and physical acceptance in progress
 - Date: 2026-09-16
 - Authorization: user requested implementation of the accepted decisions in
   `docs/design/explorations/AutPlay_Admin_And_Account_Onboarding_Draft_v1.md`.
@@ -23,7 +23,7 @@ local implementation; it is not production rollout or acceptance evidence.
    keys or replayable browser cookie values. Bounded bundled JS uses existing self-only CSP.
 3. Passkey registration/revocation is separate from device pairing and account recovery.
    A synchronized passkey does not prove physical-device admission. Private network policy
-   must independently admit only the configured laptop and M55. Canonical HTTPS origin/RP
+   must independently admit only the configured laptop and A55. Canonical HTTPS origin/RP
    and network admission must be verified before real credential registration/rollout.
 4. Extend ADR-046 through a separate self-service ceremony for all ACTIVE account roles.
    Bind the ceremony to the initiating account/device/session, exact new key, comparison code,
@@ -42,6 +42,12 @@ local implementation; it is not production rollout or acceptance evidence.
    cleanup trigger so suspension does not delete friendships/settings prematurely. Final
    purge includes independently retained deletion evidence, reapplied before serving a restored
    backup. Existing sync entity tombstones are not sufficient backup deletion evidence.
+   User decision, 2026-09-18: reject deletion of the last ACTIVE, nondeleted OWNER.
+   Another account must already hold effective OWNER authority before an OWNER may
+   enter deletion pending. Check this inside the serialized lifecycle transaction;
+   concurrent requests must not remove the final owner. Pending, disabled or deleted
+   OWNER rows do not count. Do not auto-promote another account or reopen bootstrap.
+   Ownership transfer is a separate operation, not an implicit side effect of deletion.
 7. Shared-model training is opt-in at account level with monotonic consent revision. Unknown,
    denied, withdrawn and deletion-pending accounts cannot contribute to new shared training.
    Validate consent before source preparation, job start and publication; invalidate and remove
@@ -104,7 +110,7 @@ mutations automatically. Session material remains HttpOnly and is never browser 
 - Test Android encrypted pending-state recovery, bounded polling, document parsing, local playback
   independence, consent refusal and quota messages. Use a single Gradle worker.
 - Verify Web UI in EN/RU, keyboard, narrow/mobile and desktop modes. Virtual authenticators prove
-  WebAuthn protocol behavior; physical Windows Hello/M55 and network exclusion remain separate
+  WebAuthn protocol behavior; physical Windows Hello/A55 and network exclusion remain separate
   acceptance evidence.
 - Do not migrate production, modify live network admission, publish or deploy as part of local
   implementation without the user's separate authorization for the prepared result.

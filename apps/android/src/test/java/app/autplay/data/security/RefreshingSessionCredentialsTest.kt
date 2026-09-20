@@ -118,11 +118,12 @@ class RefreshingSessionCredentialsTest {
 
     private class MutableStore(initial: ByteArray) : CredentialStore {
         private var material = initial.copyOf()
-        override suspend fun read(profileId: ServerProfileId): ByteArray = synchronized(this) { material.copyOf() }
+        override suspend fun read(profileId: ServerProfileId): ByteArray? = synchronized(this) { if (profileId == PROFILE) material.copyOf() else null }
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = synchronized(this) {
+            require(profileId == PROFILE)
             this.material = material.copyOf()
         }
-        override suspend fun clear(profileId: ServerProfileId) = synchronized(this) { material.fill(0) }
+        override suspend fun clear(profileId: ServerProfileId) = synchronized(this) { if (profileId == PROFILE) material.fill(0) }
         fun decoded(): SessionCredentialEnvelope = synchronized(this) {
             SessionCredentialEnvelopeCodec.decode(material.copyOf())
         }

@@ -5,16 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from fastapi import FastAPI
-from pydantic import SecretStr
-from starlette.testclient import TestClient
-
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.entrypoints.auth_http import bearer_authentication
 from autplay.entrypoints.composition import build_auth_service
 from autplay.entrypoints.self_device_pairing_http import create_self_device_pairing_router
 from autplay.runtime.http import install_error_handlers
 from autplay.runtime.settings import ApiSettings
+from fastapi import FastAPI
+from pydantic import SecretStr
+from starlette.testclient import TestClient
 
 from .test_self_device_pairing import PairingHarness
 from .test_self_device_pairing import pair as pair
@@ -23,7 +22,7 @@ from .test_self_device_pairing import pair as pair
 def _client(pair: PairingHarness, *, enabled: bool = True) -> tuple[TestClient, str]:
     secret = b"self-pairing-test-secret-at-least-32-bytes"
     settings = ApiSettings(
-        database_url=pair.engine.url.render_as_string(hide_password=False),
+        database_url=SecretStr(pair.engine.url.render_as_string(hide_password=False)),
         auth_signing_secret=SecretStr(secret.decode()),
         auth_issuer="test",
         auth_audience="test",

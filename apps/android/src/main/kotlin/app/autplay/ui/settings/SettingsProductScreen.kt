@@ -48,6 +48,7 @@ internal fun SettingsProductScreen(
     statisticsSettingsErrorCode: String? = null,
     onStatisticsVisibilityChange: (Boolean) -> Unit = {},
     onNavigate: (UiDestination) -> Unit,
+    trainingConsent: app.autplay.TrainingConsentUi = app.autplay.TrainingConsentUi(),
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -139,6 +140,8 @@ internal fun SettingsProductScreen(
                 }
             }
         }
+
+        TrainingConsentCard(trainingConsent)
 
         SettingsSection(icon = AutPlayIcon.Privacy, titleRes = R.string.settings_statistics_privacy) {
             Text(

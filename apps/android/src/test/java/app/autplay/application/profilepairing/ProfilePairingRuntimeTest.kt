@@ -5,6 +5,7 @@ import app.autplay.application.profilebinding.M5LocalIntentMaterializer
 import app.autplay.application.profilebinding.PendingLocalIntentSummary
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.CredentialJournalSlots
 import app.autplay.data.security.M5DeviceKeyStore
 import app.autplay.data.security.M5SessionRotationClient
 import app.autplay.data.security.SettingsM5RotationContextResolver
@@ -18,6 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.settings.M5TrustEvidence
+import app.autplay.data.settings.AccountRecoverySetupCheckpoint
 import app.autplay.data.settings.M5BindingCheckpoint
 import app.autplay.data.settings.NonSecretSettings
 import app.autplay.data.settings.NonSecretSettingsStore
@@ -47,6 +49,65 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProfilePairingRuntimeTest {
+    @Test fun staleActiveBindingDeactivatesWithoutErasingReservedJournal() = runBlocking {
+        for (slot in CredentialJournalSlots.all + listOf(CredentialJournalSlots.trainingConsentProfile(PROFILE, USER.value, API_ORIGIN), ServerProfileId("ad5c0e5e-0000-8000-8000-000000000001"))) {
+            val fixture = Fixture(initialSettings = NonSecretSettings(
+                activeServerProfileId = slot, activeUserId = USER, deviceId = DEVICE,
+                m5Binding = M5BindingCheckpoint(BINDING_COMMIT_ID, slot.value, 1, IDENTITY_THUMBPRINT,
+                    KEY_ALIAS, SESSION_ID, SESSION_FAMILY_ID, 0),
+            ))
+            val journal = SessionCredentialEnvelopeCodec.encode(SessionCredentialEnvelope(
+                accessToken = "journal-fixture", refreshToken = null, generation = 0, refreshPending = true,
+                accountRecoveryRole = "SOURCE", accountRecoveryPending = "{}",
+            ))
+            fixture.credentials.write(slot, journal)
+            fixture.runtime.recoverAndRefresh()
+            assertNull(fixture.settings.value.activeServerProfileId)
+            assertNull(fixture.settings.value.m5Binding)
+            assertArrayEquals(journal, fixture.credentials.read(slot))
+            assertEquals(0, fixture.port.exchangeCalls)
+        }
+    }
+
+    @Test fun sharedBindingRejectsAllReservedProfilesWithoutOverwriteOrExceptionCleanup() = runBlocking {
+        for (slot in CredentialJournalSlots.all + listOf(CredentialJournalSlots.trainingConsentProfile(PROFILE, USER.value, API_ORIGIN), ServerProfileId("ad5c0e5e-0000-8000-8000-000000000001"))) {
+            for (owner in listOf(FirstBindCeremonyOwner.PUBLIC_ACCESS, FirstBindCeremonyOwner.SELF_DEVICE_PAIRING, FirstBindCeremonyOwner.ACCOUNT_RECOVERY)) {
+                val fixture = Fixture()
+                val original = "saved-journal-fixture".toByteArray()
+                fixture.credentials.write(slot, original)
+                assertTrue(fixture.firstBindGate.reserve(owner))
+                val snapshot = publicSnapshot().copy(serverProfileId = slot, expectedServerInstanceId = slot.value)
+                val session = publicSession()
+                val result = when (owner) {
+                    FirstBindCeremonyOwner.PUBLIC_ACCESS -> fixture.runtime.completePublicAccountRegistration(snapshot, KEY_ALIAS, session, IDENTITY_SPKI.copyOf())
+                    FirstBindCeremonyOwner.SELF_DEVICE_PAIRING -> fixture.runtime.completeSelfDevicePairing(snapshot, KEY_ALIAS, session, IDENTITY_SPKI.copyOf())
+                    else -> fixture.runtime.completeAccountRecovery(snapshot, KEY_ALIAS, session, IDENTITY_SPKI.copyOf())
+                }
+                assertFalse(result)
+                assertArrayEquals(original, fixture.credentials.read(slot))
+                assertNull(fixture.settings.value.m5Binding)
+                assertTrue(session.accessToken.all { it == 0.toByte() })
+                assertTrue(session.refreshToken.all { it == 0.toByte() })
+            }
+        }
+    }
+
+    @Test fun staleM5CheckpointCannotReplayOrEraseAnyReservedJournal() = runBlocking {
+        for (slot in CredentialJournalSlots.all + listOf(CredentialJournalSlots.trainingConsentProfile(PROFILE, USER.value, API_ORIGIN), ServerProfileId("ad5c0e5e-0000-8000-8000-000000000001"))) {
+            val pending = pendingFixture()
+            val checkpoint = requireNotNull(pending.settings.m5PendingExchangeCheckpoint).replace(PROFILE.value, slot.value)
+            for (cancel in listOf(false, true)) {
+                val fixture = Fixture(initialSettings = pending.settings.copy(m5PendingExchangeCheckpoint = checkpoint))
+                val original = "saved-journal-fixture".toByteArray()
+                fixture.credentials.write(slot, original)
+                if (cancel) fixture.runtime.cancel() else fixture.runtime.recoverAndRefresh()
+                assertArrayEquals(original, fixture.credentials.read(slot))
+                assertEquals(0, fixture.port.exchangeCalls)
+                assertNull(fixture.settings.value.m5Binding)
+            }
+        }
+    }
+
     @Test
     fun publicReservationPreventsOrdinaryM5DiscoveryFromStarting() = runBlocking {
         val fixture = Fixture()
@@ -143,6 +204,7 @@ class ProfilePairingRuntimeTest {
         assertEquals(1, fixture.port.exchangeCalls)
         assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
         assertEquals("KEEP_LOCAL", fixture.settings.value.m5LocalDataDecision)
+        assertNull(fixture.settings.value.accountRecoverySetup)
     }
 
     @Test
@@ -635,6 +697,9 @@ class ProfilePairingRuntimeTest {
         )
 
         assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
+        assertEquals(AccountRecoverySetupCheckpoint(SERVER_INSTANCE_ID, USER.value, BINDING_COMMIT_ID),
+            fixture.settings.value.accountRecoverySetup)
+        assertTrue(requireNotNull(fixture.settings.value.accountRecoverySetup).matches(fixture.settings.value))
         assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
         val material = requireNotNull(fixture.credentials.read(PROFILE))
         val stored = try { SessionCredentialEnvelopeCodec.decode(material) } finally { material.fill(0) }
@@ -642,6 +707,34 @@ class ProfilePairingRuntimeTest {
         assertNull(stored.publicAccessPendingRegistrationId)
         assertNull(stored.publicAccessPendingCanonicalRequest)
         assertNull(stored.publicAccessPendingSuccessorRefreshToken)
+    }
+
+    @Test fun exactPublicBindingReplayPreservesVerifiedRecoverySave() = runBlocking {
+        val saved = AccountRecoverySetupCheckpoint(SERVER_INSTANCE_ID, USER.value, BINDING_COMMIT_ID,
+            savedCodeGeneration = 2, savedDocumentSha256 = "a".repeat(64))
+        val fixture = Fixture(initialSettings = NonSecretSettings(accountRecoverySetup = saved))
+        assertTrue(fixture.firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS))
+        fixture.credentials.write(PROFILE, publicPendingEnvelope())
+        assertTrue(fixture.runtime.completePublicAccountRegistration(publicSnapshot(), KEY_ALIAS,
+            publicSession(), IDENTITY_SPKI.copyOf()))
+        assertEquals(saved, fixture.settings.value.accountRecoverySetup)
+    }
+
+    @Test fun publicBindingCommitThenThrowCannotLoseRequiredRecoverySetupOnRestart() = runBlocking {
+        val fixture = Fixture()
+        fixture.settings.failAfterBindingCommit = true
+        assertTrue(fixture.firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS))
+        fixture.credentials.write(PROFILE, publicPendingEnvelope())
+        assertFalse(fixture.runtime.completePublicAccountRegistration(publicSnapshot(), KEY_ALIAS,
+            publicSession(), IDENTITY_SPKI.copyOf()))
+        val marker = requireNotNull(fixture.settings.value.accountRecoverySetup)
+        assertTrue(marker.matches(fixture.settings.value))
+        assertNull(marker.savedCodeGeneration)
+        val restarted = Fixture(initialSettings = fixture.settings.value, credentials = fixture.credentials)
+        restarted.runtime.recoverAndRefresh()
+        assertTrue(restarted.runtime.state.value.pairing is PairingState.Connected)
+        assertEquals(marker, restarted.settings.value.accountRecoverySetup)
+        assertEquals(0, restarted.port.exchangeCalls)
     }
 
     @Test
@@ -661,6 +754,7 @@ class ProfilePairingRuntimeTest {
         )
 
         assertEquals(BINDING_COMMIT_ID, fixture.settings.value.m5Binding?.bindingCommitId)
+        assertTrue(requireNotNull(fixture.settings.value.accountRecoverySetup).matches(fixture.settings.value))
         val material = requireNotNull(fixture.credentials.read(PROFILE))
         val stored = try { SessionCredentialEnvelopeCodec.decode(material) } finally { material.fill(0) }
         assertTrue(stored.refreshPending)
@@ -674,6 +768,7 @@ class ProfilePairingRuntimeTest {
         restarted.runtime.recoverAndRefresh()
 
         assertTrue(restarted.runtime.state.value.pairing is PairingState.Connected)
+        assertEquals(fixture.settings.value.accountRecoverySetup, restarted.settings.value.accountRecoverySetup)
         val cleanedMaterial = requireNotNull(credentials.read(PROFILE))
         val cleaned = try {
             SessionCredentialEnvelopeCodec.decode(cleanedMaterial)
@@ -774,9 +869,16 @@ class ProfilePairingRuntimeTest {
 
     private class FakeSettings(initial: NonSecretSettings) : NonSecretSettingsStore {
         private val state = MutableStateFlow(initial)
+        var failAfterBindingCommit = false
         override val settings: Flow<NonSecretSettings> = state
         val value: NonSecretSettings get() = state.value
-        override suspend fun update(settings: NonSecretSettings) { state.value = settings }
+        override suspend fun update(settings: NonSecretSettings) {
+            state.value = settings
+            if (failAfterBindingCommit && settings.m5Binding != null) {
+                failAfterBindingCommit = false
+                error("settings committed before failure")
+            }
+        }
     }
 
     private class FakeCredentials : CredentialStore {
@@ -815,14 +917,16 @@ class ProfilePairingRuntimeTest {
     private class FailOnThirdWriteCredentials : CredentialStore {
         private var value: ByteArray? = null
         private var writes = 0
-        override suspend fun read(profileId: ServerProfileId) = value?.copyOf()
+        override suspend fun read(profileId: ServerProfileId) = if (profileId == PROFILE) value?.copyOf() else null
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) {
+            require(profileId == PROFILE)
             writes += 1
             if (writes == 3) error("simulated process death after binding")
             value?.fill(0)
             value = material.copyOf()
         }
         override suspend fun clear(profileId: ServerProfileId) {
+            if (profileId != PROFILE) return
             value?.fill(0)
             value = null
         }

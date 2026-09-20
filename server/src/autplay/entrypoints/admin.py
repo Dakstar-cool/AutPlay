@@ -6,15 +6,19 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
 from typing import Protocol, TextIO
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from autplay.adapters.filesystem.vault import FilesystemVaultStorage
-from autplay.adapters.postgresql.runtime_database import create_runtime_engine
-from autplay.adapters.postgresql.vault_uow import SqlAlchemyVaultUnitOfWorkFactory
+from autplay.adapters.postgresql.internal_io import PostgresInternalIoBudget
+from autplay.adapters.postgresql.resource_measurements import SqlAlchemyResourceBudgetInitializer
+from autplay.adapters.postgresql.runtime_database import (
+    create_resource_control_engine,
+    create_runtime_engine,
+)
 from autplay.application.auth import AuthService, BootstrapOwnerCommand
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.vault_reconciliation import ReconcileMode, VaultReconciliationService
@@ -25,6 +29,7 @@ from autplay.domain.auth import (
     DevicePlatform,
     TokenPair,
 )
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.web_admin import BrowserInvitation, WebSessionMetadata
 from autplay.entrypoints.composition import (
     build_auth_service,
@@ -32,6 +37,16 @@ from autplay.entrypoints.composition import (
     build_web_admin_service,
     build_web_passkey_service,
 )
+from autplay.entrypoints.internal_io_budget import (
+    configure_internal_io_parser,
+    run_internal_io_budget,
+)
+from autplay.entrypoints.resource_measurements import (
+    configure_resource_budget_parser,
+    run_resource_budget_initialize,
+)
+from autplay.entrypoints.upload_cleanup import build_upload_cleanup_service
+from autplay.entrypoints.vault_reconciliation import build_vault_reconciliation_service
 from autplay.runtime.settings import SettingsLoadError, load_api_settings, load_worker_settings
 
 SERVICE_NAME = "autplay-admin"
@@ -69,10 +84,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bootstrap.add_argument("--app-version", required=True)
     reconcile = subcommands.add_parser(
-        "vault-reconcile", help="run bounded Vault reconciliation without revealing storage keys"
+        "vault-reconcile",
+        help="scan Vault in bounded pages and retire claimed unregistered CAS",
+        description=(
+            "Keep one scanner alive through a full pass; --limit bounds each page, not the "
+            "whole pass. Dry-run records process ownership but does not claim or move bytes. "
+            "Tracked CAS and staging are preserved; their reconciliation remains pending."
+        ),
     )
-    reconcile.add_argument("--apply", action="store_true", help="apply safe metadata repairs")
-    reconcile.add_argument("--limit", type=int, default=100)
+    reconcile.add_argument("--apply", action="store_true", help="claim and retire unregistered CAS")
+    reconcile.add_argument(
+        "--limit", type=int, default=100, help="work per live scan page / pending query (1-100)"
+    )
+    reconcile.add_argument(
+        "--drain-only",
+        action="store_true",
+        help="with --apply, resume durable claims without scanning",
+    )
+    upload_cleanup = subcommands.add_parser(
+        "vault-upload-cleanup",
+        help="retire terminal device upload staging through retained maintenance",
+        description=(
+            "Drain cancelled/expired device upload claims with exact process exit. "
+            "Preserve present bytes in quarantine; absent directories defer cleanup. "
+            "--limit bounds each metadata query, not the entire pass."
+        ),
+    )
+    upload_cleanup.add_argument("--limit", type=int, default=100)
     invitation = subcommands.add_parser(
         "issue-recovery-invitation",
         help="issue one bounded invitation for an explicitly selected active account",
@@ -116,6 +154,25 @@ def build_parser() -> argparse.ArgumentParser:
         "web-passkey-cleanup", help="remove expired passkey ceremonies"
     )
     passkey_cleanup.add_argument("--limit", type=int, default=1000)
+    configure_resource_budget_parser(
+        subcommands.add_parser(
+            "resource-budget-initialize",
+            help="initialize global ceilings once from an explicitly reviewed measurement report",
+        )
+    )
+    configure_internal_io_parser(
+        subcommands.add_parser(
+            "internal-io-budget-apply", help="apply reviewed joint internal byte-work measurements"
+        ),
+        measurement=True,
+    )
+    configure_internal_io_parser(
+        subcommands.add_parser(
+            "internal-io-limit-set",
+            help="change internal byte-work concurrency within its measured ceiling",
+        ),
+        measurement=False,
+    )
     return parser
 
 
@@ -266,7 +323,7 @@ def run_vault_reconcile(
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    """Execute the bounded P06 local reconciliation command with aggregate output."""
+    """Drive bounded live steps in one invocation; dry-run records control receipts."""
 
     namespace = build_parser().parse_args(list(arguments))
     if namespace.command != "vault-reconcile":
@@ -276,23 +333,26 @@ def run_vault_reconcile(
         report = service.run(
             mode=ReconcileMode.APPLY if namespace.apply else ReconcileMode.DRY_RUN,
             limit=int(namespace.limit),
+            drain_only=bool(namespace.drain_only),
         )
     except ValueError:
         _write_error(stderr, "invalid_admin_input")
         return 4
+    except ResourceAdmissionError as error:
+        _write_error(stderr, error.code)
+        return 5
     json.dump(
         {
-            "inspected": report.inspected,
-            "repaired": report.repaired,
-            "quarantined": report.quarantined,
-            "remaining": report.remaining,
+            **asdict(report),
+            "scope": "unregistered_cas",
+            "tracked_reconciliation_pending": True,
         },
         stdout,
         ensure_ascii=True,
         separators=(",", ":"),
     )
     stdout.write("\n")
-    return 0
+    return 5 if report.pending_claims else 0
 
 
 def run_recovery_invitation(
@@ -364,28 +424,76 @@ def main(
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
-    if command == "vault-reconcile":
+    if command in {"internal-io-budget-apply", "internal-io-limit-set"}:
+        parsed = build_parser().parse_args(list(command_arguments))
+        try:
+            internal_settings = load_worker_settings()
+        except SettingsLoadError as error:
+            _write_error(sys.stderr, error.code)
+            return 2
+        internal_engine = create_resource_control_engine(internal_settings)
+        try:
+            return run_internal_io_budget(
+                PostgresInternalIoBudget(sessionmaker(internal_engine, expire_on_commit=False)),
+                parsed,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
+        except SQLAlchemyError:
+            _write_error(sys.stderr, "database_unavailable")
+            return 3
+        finally:
+            internal_engine.dispose()
+    if command == "resource-budget-initialize":
+        parsed = build_parser().parse_args(list(command_arguments))
+        try:
+            api_settings = load_api_settings()
+        except SettingsLoadError as error:
+            _write_error(sys.stderr, error.code)
+            return 2
+        engine = create_runtime_engine(api_settings)
+        try:
+            return run_resource_budget_initialize(
+                SqlAlchemyResourceBudgetInitializer(sessionmaker(engine, expire_on_commit=False)),
+                parsed,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
+        except SQLAlchemyError:
+            _write_error(sys.stderr, "database_unavailable")
+            return 3
+        finally:
+            engine.dispose()
+    if command in {"vault-reconcile", "vault-upload-cleanup"}:
         try:
             settings = load_worker_settings()
         except SettingsLoadError as error:
             _write_error(sys.stderr, error.code)
             return 2
-        engine = create_runtime_engine(settings)
+        engine = create_resource_control_engine(settings)
         try:
             sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
-            with SqlAlchemyVaultUnitOfWorkFactory(sessions)() as unit:
-                result = run_vault_reconcile(
-                    VaultReconciliationService(
-                        repository=unit.vault,
-                        storage=FilesystemVaultStorage(settings.vault_root),
-                    ),
-                    command_arguments,
-                    stdout=sys.stdout,
-                    stderr=sys.stderr,
-                )
-                if result == 0:
-                    unit.commit()
-                return result
+            if command == "vault-upload-cleanup":
+                parsed = build_parser().parse_args(list(command_arguments))
+                try:
+                    report = build_upload_cleanup_service(sessions, settings.vault_root).run(
+                        limit=parsed.limit
+                    )
+                except ValueError:
+                    _write_error(sys.stderr, "invalid_admin_input")
+                    return 4
+                except ResourceAdmissionError as error:
+                    _write_error(sys.stderr, error.code)
+                    return 5
+                json.dump(asdict(report), sys.stdout, separators=(",", ":"))
+                sys.stdout.write("\n")
+                return 5 if report.pending else 0
+            return run_vault_reconcile(
+                build_vault_reconciliation_service(sessions, settings.vault_root),
+                command_arguments,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
         except SQLAlchemyError:
             _write_error(sys.stderr, "database_unavailable")
             return 3

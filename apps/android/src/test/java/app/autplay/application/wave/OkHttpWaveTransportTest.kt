@@ -37,7 +37,7 @@ class OkHttpWaveTransportTest {
     @Test fun snapshotUsesAuthorizationHeaderAndNoTokenUrl() = runBlocking {
         val server = MockWebServer(); server.enqueue(MockResponse().setBody("{\"room_id\":\"$ROOM_ID\",\"role\":\"MEMBER\",\"state\":\"OPEN\",\"sequence\":1,\"entries\":[]}")); server.start()
         val token = "secret".toByteArray()
-        val credentials = object : CredentialStore { override suspend fun read(profileId: ServerProfileId) = token; override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit; override suspend fun clear(profileId: ServerProfileId) = Unit }
+        val credentials = object : CredentialStore { override suspend fun read(profileId: ServerProfileId) = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else token; override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit; override suspend fun clear(profileId: ServerProfileId) = Unit }
         try {
             OkHttpWaveTransport(server.url("/api").toString(), ServerProfileId(PROFILE), credentials).snapshot(ROOM_ID)
             val request = server.takeRequest()
@@ -60,7 +60,7 @@ class OkHttpWaveTransportTest {
         )
         server.start()
         val credentials = object : CredentialStore {
-            override suspend fun read(profileId: ServerProfileId) = "secret".toByteArray()
+            override suspend fun read(profileId: ServerProfileId) = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else "secret".toByteArray()
             override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
             override suspend fun clear(profileId: ServerProfileId) = Unit
         }
@@ -86,7 +86,7 @@ class OkHttpWaveTransportTest {
         server.start()
         val token = "secret".toByteArray()
         val credentials = object : CredentialStore {
-            override suspend fun read(profileId: ServerProfileId) = token.copyOf()
+            override suspend fun read(profileId: ServerProfileId) = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else token.copyOf()
             override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
             override suspend fun clear(profileId: ServerProfileId) = Unit
         }
@@ -130,7 +130,7 @@ class OkHttpWaveTransportTest {
         server.enqueue(MockResponse().setResponseCode(204))
         server.start()
         val credentials = object : CredentialStore {
-            override suspend fun read(profileId: ServerProfileId) = "secret".toByteArray()
+            override suspend fun read(profileId: ServerProfileId) = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else "secret".toByteArray()
             override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
             override suspend fun clear(profileId: ServerProfileId) = Unit
         }
@@ -158,7 +158,7 @@ class OkHttpWaveTransportTest {
         server.enqueue(MockResponse().setBody("{\"sequence\":3,\"state\":\"PLAYING\",\"started\":true}"))
         server.start()
         val credentials = object : CredentialStore {
-            override suspend fun read(profileId: ServerProfileId) = "secret".toByteArray()
+            override suspend fun read(profileId: ServerProfileId) = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else "secret".toByteArray()
             override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
             override suspend fun clear(profileId: ServerProfileId) = Unit
         }
@@ -185,7 +185,7 @@ class OkHttpWaveTransportTest {
 
     private class MutableCredentialStore(initial: ByteArray) : CredentialStore {
         private var value = initial.copyOf()
-        override suspend fun read(profileId: ServerProfileId): ByteArray = value.copyOf()
+        override suspend fun read(profileId: ServerProfileId): ByteArray? = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else value.copyOf()
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) { value = material.copyOf() }
         override suspend fun clear(profileId: ServerProfileId) { value.fill(0) }
     }

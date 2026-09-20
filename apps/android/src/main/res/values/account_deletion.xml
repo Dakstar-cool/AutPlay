@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="deletion_title">Delete account</string>
+    <string name="deletion_check">Check deletion availability</string>
+    <string name="deletion_initializing">Account deletion is being prepared on the server. Try again later.</string>
+    <string name="deletion_request">Request account deletion</string>
+    <string name="deletion_warning">All devices, browser sessions, passkeys and invitations will lose access. You can cancel within 30 days using your current recovery TXT or code. After that, server account data is permanently erased. Local music stays on this phone.</string>
+    <string name="deletion_confirm_id">Type the account ID to confirm</string>
+    <string name="deletion_last_owner">The last active owner cannot be deleted. Add another active owner first.</string>
+    <string name="deletion_recorded">Deletion requested. This phone has been disconnected from the account.</string>
+    <string name="deletion_historical">This deletion request has already changed on the server.</string>
+    <string name="deletion_not_accepted">The server confirmed that this exact deletion request was not accepted and cannot be accepted later. This phone remains disconnected. You can connect an account again.</string>
+    <string name="deletion_deadline">Cancellation deadline (UTC): %1$s</string>
+    <string name="deletion_unknown">The result is unknown. This phone is disconnected, and the exact request is saved. Retry it before connecting an account. Do not clear app data.</string>
+    <string name="deletion_unavailable">Account deletion is unavailable. Check the server and your recovery code.</string>
+    <string name="deletion_cancel_title">Cancel account deletion</string>
+    <string name="deletion_cancel_description">Use the current recovery TXT or code before the 30-day deadline to cancel deletion and reconnect this phone.</string>
+    <string name="deletion_confirm_cancel">Cancel deletion of account “%1$s”?</string>
+    <string name="deletion_cancel_warning">Your account data will remain. This phone will receive a new sign-in and recovery code. Previous devices and browser access remain revoked.</string>
+    <string name="deletion_cancel_commit">Cancel deletion and reconnect</string>
+    <string name="deletion_cancelled">Deletion cancelled. Save the new recovery TXT; the old code no longer works.</string>
+</resources>

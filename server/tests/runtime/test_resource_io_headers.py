@@ -5,11 +5,10 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from starlette.requests import Request
-from starlette.types import Scope
-
 from autplay.entrypoints.resource_io_http import require_resource_io_headers
 from autplay.runtime.http import ApiError
+from starlette.requests import Request
+from starlette.types import Scope
 
 _HEADERS = [
     (b"autplay-resource-type", b"PLAY_INSTANCE"),

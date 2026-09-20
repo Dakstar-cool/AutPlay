@@ -242,7 +242,7 @@ class ServerFeatureRepositoryTest {
 
     private class MutableStore(initial: ByteArray) : CredentialStore {
         private var value: ByteArray? = initial.copyOf()
-        override suspend fun read(profileId: ServerProfileId): ByteArray? = value?.copyOf()
+        override suspend fun read(profileId: ServerProfileId): ByteArray? = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else value?.copyOf()
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) { value = material.copyOf() }
         override suspend fun clear(profileId: ServerProfileId) { value?.fill(0); value = null }
         fun decoded() = SessionCredentialEnvelopeCodec.decode(requireNotNull(value).copyOf())

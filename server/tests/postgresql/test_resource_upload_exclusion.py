@@ -9,11 +9,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.models import UploadSessionRow
 from autplay.adapters.postgresql.resource_commit_guard import require_device_upload_commit
 from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
+from autplay.application.vault_reconciliation import ReconcileMode
 from autplay.application.vault_uploads import VaultPrincipal
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.resource_execution import (
@@ -23,6 +23,7 @@ from autplay.domain.resource_execution import (
     ProcessIdentity,
 )
 from autplay.domain.vault import OpaqueStorageKey, Sha256Digest
+from autplay.entrypoints.vault_reconciliation import build_vault_reconciliation_service
 
 from .test_resource_admission_runtime import AdmissionHarness, admission, present
 from .test_resource_execution import shift_clock, upload_ticket
@@ -78,7 +79,8 @@ def test_no_mutation_may_assume_unclosed_upload_writer_has_exited(
 
 
 @pytest.mark.parametrize("file_present", [False, True])
-def test_reconciliation_skips_orphan_writer_until_independent_exit_confirmation(
+@pytest.mark.usefixtures("internal_io_budget")
+def test_reconciliation_preserves_upload_before_and_after_exact_writer_exit(
     admission: AdmissionHarness,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -101,25 +103,23 @@ def test_reconciliation_skips_orphan_writer_until_independent_exit_confirmation(
         row = present(session.get(UploadSessionRow, ticket.actual_target_id))
         row.created_at = datetime.now(UTC) - timedelta(hours=2)
         row.expires_at = datetime.now(UTC) - timedelta(hours=1)
-    inventory = storage.inventory()
-    with admission.sessions.begin() as session:
-        report = PostgresVaultRuntime(session).reconcile_inventory(
-            inventory, storage, apply=True, limit=10
-        )
-        assert report.repaired == report.quarantined == 0
+    report = build_vault_reconciliation_service(admission.sessions, tmp_path).run(
+        mode=ReconcileMode.APPLY, limit=10
+    )
+    assert report.quarantined == report.missing == 0
+    with admission.sessions() as session:
         assert present(session.get(UploadSessionRow, ticket.actual_target_id)).state == "OPEN"
     assert (key in storage.inventory().staging_keys) == file_present
     admission.service.confirm_execution_exit(
         ticket, ProcessExitEvidence(ExitKind.SUPERVISOR_EXIT, b"e" * 32, 0, identity)
     )
-    with admission.sessions.begin() as session:
-        report = PostgresVaultRuntime(session).reconcile_inventory(
-            inventory, storage, apply=True, limit=10
-        )
-        assert report.repaired == 1
-        assert report.quarantined == int(file_present)
-        assert present(session.get(UploadSessionRow, ticket.actual_target_id)).state == "EXPIRED"
-    assert key not in storage.inventory().staging_keys
+    report = build_vault_reconciliation_service(admission.sessions, tmp_path).run(
+        mode=ReconcileMode.APPLY, limit=10
+    )
+    assert report.quarantined == report.missing == 0
+    with admission.sessions() as session:
+        assert present(session.get(UploadSessionRow, ticket.actual_target_id)).state == "OPEN"
+    assert (key in storage.inventory().staging_keys) == file_present
 
 
 @pytest.mark.parametrize("change", ["stop", "orphan", "identity", "owner", "permit"])
@@ -186,7 +186,8 @@ def test_successful_permit_renewal_preserves_exact_execution_commit_authority(
         )
 
 
-def test_oldest_orphan_does_not_starve_bounded_missing_upload_cleanup(
+@pytest.mark.usefixtures("internal_io_budget")
+def test_missing_inventory_does_not_cancel_either_owned_upload(
     admission: AdmissionHarness, tmp_path: Path
 ) -> None:
     admission.budget()
@@ -198,16 +199,18 @@ def test_oldest_orphan_does_not_starve_bounded_missing_upload_cleanup(
         row = present(session.get(UploadSessionRow, ticket.actual_target_id))
         row.created_at = datetime.now(UTC) - timedelta(hours=1)
     storage = FilesystemVaultStorage(tmp_path)
-    with admission.sessions.begin() as session:
-        report = PostgresVaultRuntime(session).reconcile_inventory(
-            storage.inventory(), storage, apply=True, limit=1
-        )
-        assert report.repaired == 1
+    report = build_vault_reconciliation_service(admission.sessions, tmp_path).run(
+        mode=ReconcileMode.APPLY, limit=1
+    )
+    assert report.quarantined == report.missing == 0
+    with admission.sessions() as session:
         assert present(session.get(UploadSessionRow, ticket.actual_target_id)).state == "OPEN"
-        assert present(session.get(UploadSessionRow, other_upload)).state == "CANCELLED"
+        assert present(session.get(UploadSessionRow, other_upload)).state == "OPEN"
+    assert not storage.inventory().staging_keys
 
 
 @pytest.mark.parametrize("registered", [False, True])
+@pytest.mark.usefixtures("internal_io_budget")
 def test_locked_upload_is_skipped_without_treating_its_staging_file_as_orphan(
     admission: AdmissionHarness, tmp_path: Path, registered: bool
 ) -> None:
@@ -229,18 +232,17 @@ def test_locked_upload_is_skipped_without_treating_its_staging_file_as_orphan(
             row.expires_at = datetime.now(UTC) - timedelta(hours=1)
 
     def reconcile() -> None:
-        with admission.sessions.begin() as session:
-            report = PostgresVaultRuntime(session).reconcile_inventory(
-                storage.inventory(), storage, apply=True, limit=10
-            )
-            assert report.repaired == report.quarantined == 1
+        report = build_vault_reconciliation_service(admission.sessions, tmp_path).run(
+            mode=ReconcileMode.APPLY, limit=10
+        )
+        assert report.quarantined == report.missing == 0
 
     # Release the lock before joining the pool even if the assertion fails.
     with ThreadPoolExecutor(max_workers=1) as pool, admission.sessions.begin() as blocked:
         blocked.get(UploadSessionRow, ticket.actual_target_id, with_for_update=True)
         future = pool.submit(reconcile)
         future.result(timeout=3)
-    assert storage.inventory().staging_keys == (protected_key,)
+    assert set(storage.inventory().staging_keys) == {protected_key, other_key}
     with admission.sessions() as session:
         assert present(session.get(UploadSessionRow, ticket.actual_target_id)).state == "OPEN"
-        assert present(session.get(UploadSessionRow, other_upload)).state == "EXPIRED"
+        assert present(session.get(UploadSessionRow, other_upload)).state == "OPEN"

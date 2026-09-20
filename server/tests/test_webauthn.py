@@ -8,11 +8,10 @@ from hashlib import sha256
 
 import cbor2
 import pytest
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-
 from autplay.adapters.webauthn import DuoWebPasskeyVerifier
 from autplay.domain.web_admin import WebAdminError
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 
 ORIGIN = "https://admin.example.test"
 CHALLENGE = b"challenge" * 4

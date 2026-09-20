@@ -9,28 +9,23 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
-from pydantic import SecretStr
-from sqlalchemy import Engine, func, select
-from sqlalchemy.orm import sessionmaker
-from starlette.testclient import TestClient
-from starlette.types import Message, Scope
-
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.models import DeviceRow, UploadChunkRow, UploadSessionRow
-from autplay.adapters.postgresql.resource_admission import (
-    SqlAlchemyResourceAdmissionUnitOfWorkFactory,
-)
-from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.auth import AuthService
-from autplay.application.resource_admission import ResourceAdmissionService
 from autplay.domain.auth import Principal
 from autplay.domain.vault import OpaqueStorageKey
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_vault_http_service
+from autplay.entrypoints.resource_composition import ResourceIoRuntime
 from autplay.runtime.settings import ApiSettings
 from autplay.runtime.vault_io import VaultIoCoordinator
+from fastapi import FastAPI
+from pydantic import SecretStr
+from sqlalchemy import Engine, func, select
+from starlette.testclient import TestClient
+from starlette.types import Message, Scope
 
+from .resource_io_support import InProcessResourceTransport
 from .test_resource_admission_runtime import AdmissionHarness, admission, present
 from .test_resource_stream_http import Authentication, idle
 
@@ -39,33 +34,26 @@ PAYLOAD = b"a" * 100
 
 
 def application(
-    harness: AdmissionHarness, actor: Principal, root: Path
+    harness: AdmissionHarness, actor: Principal, root: Path, *, minimum_free_bytes: int = 0
 ) -> tuple[FastAPI, VaultIoCoordinator, Engine]:
     settings = ApiSettings(
         database_url=SecretStr(harness.engine.url.render_as_string(hide_password=False)),
         auth_signing_secret=SecretStr("synthetic-upload-signing-secret-at-least-32"),
         public_access_source_hmac_secret=SecretStr("synthetic-upload-source-secret-at-least-32"),
         vault_root=root,
-        vault_low_disk_bytes=0,
+        vault_low_disk_bytes=minimum_free_bytes,
     )
     # Control transactions have their own connection pool even if every upload
     # worker retains a data transaction while waiting for child process exit.
-    control_engine = create_runtime_engine(settings)
-    coordinator = VaultIoCoordinator(
-        ResourceAdmissionService(
-            SqlAlchemyResourceAdmissionUnitOfWorkFactory(
-                sessionmaker(control_engine, expire_on_commit=False)
-            )
-        ),
-        maximum=2,
-    )
+    runtime = ResourceIoRuntime(settings, maximum=2)
     app = create_app(
         settings,
         auth_service=cast(AuthService, Authentication(actor)),
         upload_service=build_vault_http_service(settings, harness.engine),
-        resource_io=coordinator,
+        resource_runtime=runtime,
     )
-    return app, coordinator, control_engine
+    app.add_middleware(InProcessResourceTransport)
+    return app, runtime.coordinator, runtime.engine
 
 
 def chunk_headers() -> dict[str, str]:
@@ -112,7 +100,6 @@ def test_real_api_chunk_and_exact_retry_commit_one_receipt_with_separate_control
     upload_id = admission.upload(actor)
     storage = FilesystemVaultStorage(tmp_path)
     key = OpaqueStorageKey(upload_id.hex)
-    storage.create_staging(key)
     app, coordinator, control = application(admission, actor, tmp_path)
     try:
         with TestClient(app) as client:
@@ -192,5 +179,36 @@ def test_rejected_upload_does_not_receive_body_or_start_child(
             asyncio.run(request())
             idle(coordinator)
             assert not coordinator.supervisor.snapshot()
+    finally:
+        control.dispose()
+
+
+@pytest.mark.parametrize("failure", ["hash", "storage"])
+def test_admitted_upload_error_retains_only_bounded_diagnostic_time(
+    admission: AdmissionHarness,
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    admission.budget()
+    actor = admission.actor()
+    upload_id = admission.upload(actor)
+    # A directory at the exact staging leaf triggers a storage error after GO.
+    if failure == "storage":
+        (tmp_path / "staging" / upload_id.hex).mkdir(parents=True)
+    app, coordinator, control = application(admission, actor, tmp_path)
+    try:
+        with TestClient(app) as client:
+            headers = {**chunk_headers(), **acquire(client, upload_id)}
+            if failure == "hash":
+                headers["X-Chunk-Sha256"] = "0" * 64
+            response = client.patch(
+                f"/api/v1/vault/uploads/{upload_id}", headers=headers, content=PAYLOAD
+            )
+            assert response.status_code == (422 if failure == "hash" else 503)
+            expected = "upload_chunk_invalid" if failure == "hash" else "vault_storage_unavailable"
+            assert response.json()["error"]["code"] == expected
+            idle(coordinator)
+        with admission.sessions() as session:
+            assert session.scalar(select(func.count()).select_from(UploadChunkRow)) == 0
     finally:
         control.dispose()

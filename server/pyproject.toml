@@ -21,6 +21,9 @@ dependencies = [
     "rfc8785==0.1.4",
     "sqlalchemy==2.0.52",
     "uvicorn==0.51.0",
+    "yt-dlp[default,pin]==2026.8.19",
+    "httpx2[socks]==2.12.0",
+    "webauthn==3.0.0",
 ]
 
 [project.scripts]
@@ -55,6 +58,9 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "RUF", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"server/migrations/versions/*.py" = ["E501", "RUF100"]
 
 [tool.ruff.format]
 line-ending = "lf"

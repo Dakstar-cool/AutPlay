@@ -198,6 +198,11 @@ class ResourceAdmissionRow(Base):
             "session_family_id IS NOT NULL "
             "AND session_mode IS NOT NULL AND session_mode IN ('V2','LEGACY') AND "
             "acquisition_attempt_id IS NULL) OR "
+            "(authority_kind='LOCAL_BRIDGE' AND kind='TRANSFER' AND device_id IS NOT NULL "
+            "AND session_family_id IS NULL AND session_mode IS NULL AND job_id IS NULL "
+            "AND acquisition_attempt_id IS NULL AND source_authorization_id IS NULL "
+            "AND source_authorization_revision IS NULL AND policy_id IS NULL "
+            "AND policy_revision IS NULL) OR "
             "(authority_kind='SERVER_ACQUISITION' AND kind='TRANSFER' AND device_id IS NULL "
             "AND session_family_id IS NULL AND session_mode IS NULL AND "
             "acquisition_attempt_id IS NOT NULL "
@@ -222,6 +227,7 @@ class ResourceAdmissionRow(Base):
             "(resource_type<>'DISCOVERY_ACQUISITION' OR "
             "(authority_kind='SERVER_ACQUISITION' AND target_id=acquisition_attempt_id)) "
             "AND (authority_kind<>'SERVER_ACQUISITION' OR resource_type='DISCOVERY_ACQUISITION') "
+            "AND (authority_kind<>'LOCAL_BRIDGE' OR resource_type='UPLOAD_INTENT') "
             "AND (resource_type<>'INTERNET_ACQUISITION' OR "
             "(authority_kind='DEVICE_SESSION' AND job_id IS NOT NULL))",
             name="admission_worker_target_check",
@@ -237,7 +243,9 @@ class ResourceAdmissionRow(Base):
             name="admission_active_shape_check",
         ),
         CheckConstraint(
-            "state<>'WAITING' OR waiting_until IS NOT NULL", name="admission_waiting_shape_check"
+            "state<>'WAITING' OR (job_id IS NULL AND waiting_until IS NOT NULL) OR "
+            "(job_id IS NOT NULL AND waiting_until IS NULL)",
+            name="admission_waiting_shape_check",
         ),
         CheckConstraint(
             "state NOT IN ('RELEASED','EXPIRED') OR terminal_at IS NOT NULL",

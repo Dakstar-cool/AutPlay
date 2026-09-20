@@ -241,6 +241,11 @@ object AutPlayRuntime {
 
     private fun apiV1BaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api/v1"
 
+    internal fun trainingConsentPort(context: Context, origin: String,
+        profile: app.autplay.domain.ServerProfileId, credentials: app.autplay.data.security.CredentialStore)
+        = app.autplay.application.trainingconsent.OkHttpTrainingConsentPort(
+            apiV1BaseUrl(origin), profile, credentials, m5Rotation = m5Rotation(context))
+
     internal fun selfPairingTransport(
         context: Context,
         credentials: app.autplay.data.security.CredentialStore,
@@ -255,10 +260,27 @@ object AutPlayRuntime {
             allowDevelopmentHttp = allowDevelopmentHttp,
         )
 
+    internal fun accountRecoveryTransport(
+        context: Context, credentials: app.autplay.data.security.CredentialStore, allowDevelopmentHttp: Boolean,
+    ): app.autplay.application.accountrecovery.AccountRecoveryTransport =
+        app.autplay.application.accountrecovery.OkHttpAccountRecoveryTransport(
+            credentials = { identity, _ ->
+                app.autplay.data.security.RefreshingSessionCredentials(
+                    apiV1BaseUrl(identity.apiOrigin), credentials, m5Rotation = m5Rotation(context))
+            }, allowDevelopmentHttp = allowDevelopmentHttp,
+        )
+
     private fun m5Rotation(context: Context): M5SessionRotationClient = M5SessionRotationClient(
         SettingsM5RotationContextResolver(applicationNonSecretSettingsStore(context.applicationContext)),
         AndroidM5DeviceKeyStore(),
     )
+
+    internal fun accountDeletionTransport(context: Context, credentials: app.autplay.data.security.CredentialStore,
+        allowDevelopmentHttp: Boolean): app.autplay.application.accountrecovery.AccountDeletionTransport =
+        app.autplay.application.accountrecovery.OkHttpAccountDeletionTransport(
+            credentials = { identity, _ -> app.autplay.data.security.RefreshingSessionCredentials(
+                apiV1BaseUrl(identity.apiOrigin), credentials, m5Rotation = m5Rotation(context)) },
+            allowDevelopmentHttp = allowDevelopmentHttp)
 
     // Wave's P13 transport owns the `/v1/wave` suffix and therefore receives the `/api` root.
     private fun apiRootBaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api"

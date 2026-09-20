@@ -7,7 +7,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
+
+from autplay.domain.jobs import LeaseFence
 
 # Wire integers remain bounded independently of deployment-specific measured ceilings.
 MAX_LIMIT = 1_000_000
@@ -34,12 +36,52 @@ class AdmissionState(StrEnum):
 class AuthorityKind(StrEnum):
     DEVICE_SESSION = "DEVICE_SESSION"
     SERVER_ACQUISITION = "SERVER_ACQUISITION"
+    LOCAL_BRIDGE = "LOCAL_BRIDGE"
 
 
 class ResourceAdmissionError(Exception):
     def __init__(self, code: str = "resource_admission_unavailable") -> None:
         super().__init__(code)
         self.code = code
+
+
+@dataclass(frozen=True, slots=True)
+class AcquisitionClaim:
+    """Internal worker input; repository derives owner and authority from durable rows."""
+
+    fence: LeaseFence
+    resource_type: str
+    acquisition_id: UUID
+
+    def __post_init__(self) -> None:
+        if self.resource_type not in {"INTERNET_ACQUISITION", "DISCOVERY_ACQUISITION"}:
+            raise ResourceAdmissionError("resource_request_invalid")
+
+    @property
+    def request(self) -> ResourceRequest:
+        operation_id = uuid5(
+            NAMESPACE_URL, f"autplay:resource-worker:v1:{self.resource_type}:{self.acquisition_id}"
+        )
+        return ResourceRequest(
+            operation_id,
+            ResourceKind.TRANSFER,
+            self.resource_type,
+            self.acquisition_id,
+            self.acquisition_id,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalBridgeClaim:
+    """Explicit local operator authority for the deterministic acquisition bridge device."""
+
+    user_id: UUID
+    device_id: UUID
+
+    def __post_init__(self) -> None:
+        expected = uuid5(self.user_id, "autplay-acquisition-vault-bridge-v1")
+        if self.device_id != expected:
+            raise ResourceAdmissionError("resource_request_invalid")
 
 
 def positive_limit(value: object) -> int:
@@ -209,7 +251,10 @@ class ResourceAdmission:
         if self.state in {AdmissionState.WAITING, AdmissionState.ACTIVE} and (
             not self.active_at(now)
             if self.state == AdmissionState.ACTIVE
-            else (self.waiting_until is None or self.waiting_until <= now)
+            else (
+                self.authority.job_id is None
+                and (self.waiting_until is None or self.waiting_until <= now)
+            )
         ):
             self.state, self.terminal_at, self.updated_at = AdmissionState.EXPIRED, now, now
 

@@ -7,10 +7,6 @@ import json
 from typing import cast
 
 import pytest
-from fastapi import Depends, FastAPI, Request
-from starlette.responses import Response
-from starlette.types import Message, Scope
-
 from autplay.runtime.http import (
     MAX_REQUEST_BODY_FRAMES,
     ApiError,
@@ -18,6 +14,9 @@ from autplay.runtime.http import (
     install_error_handlers,
 )
 from autplay.runtime.metrics import RuntimeMetrics
+from fastapi import Depends, FastAPI, Request
+from starlette.responses import Response
+from starlette.types import Message, Scope
 
 UPLOAD_PATH = "/api/v1/vault/uploads/018f47bc-2f9d-7cc2-8e39-01b4ce17cc88"
 RESOURCE_PATH = "/api/v1/account/resource-admissions"

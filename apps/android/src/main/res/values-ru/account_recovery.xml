@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recovery_title">Восстановление аккаунта</string>
+    <string name="recovery_new_account_incomplete">Настройка аккаунта не завершена. Создайте и сохраните TXT восстановления, чтобы закончить. Локальная музыка остаётся доступной.</string>
+    <string name="recovery_account_created">Аккаунт создан. Завершите настройку восстановления в профиле.</string>
+    <string name="recovery_working">Подключение…</string>
+    <string name="recovery_save_required">Сохраните TXT восстановления в надёжном месте. Он понадобится, если вы потеряете доступ к устройствам.</string>
+    <string name="recovery_existing_code">Код восстановления создан на другом устройстве. Сохраните тот файл или замените код здесь.</string>
+    <string name="recovery_setup_required">Защитите аккаунт: создайте и сохраните код восстановления.</string>
+    <string name="recovery_export">Сохранить TXT восстановления</string>
+    <string name="recovery_rotate">Заменить код восстановления</string>
+    <string name="recovery_create">Создать код восстановления</string>
+    <string name="recovery_setup">Настроить восстановление</string>
+    <string name="recovery_unavailable">Восстановление недоступно. Проверьте сервер, аккаунт и код, затем повторите попытку.</string>
+    <string name="recovery_retry">Повторить сохранённую операцию</string>
+    <string name="recovery_description">Используйте сохранённый TXT или код, чтобы вернуть доступ к аккаунту.</string>
+    <string name="recovery_import">Открыть TXT восстановления</string>
+    <string name="recovery_manual">Ввести код вручную</string>
+    <string name="recovery_server">Адрес сервера</string>
+    <string name="recovery_account_id">ID аккаунта из TXT</string>
+    <string name="recovery_code">Код восстановления</string>
+    <string name="recovery_inspect_server">Проверить сервер</string>
+    <string name="recovery_confirm_server">Подтвердите сервер и аккаунт перед отправкой кода восстановления.</string>
+    <string name="recovery_trust">Подтвердить сервер</string>
+    <string name="recovery_cancel">Отмена</string>
+    <string name="recovery_confirm_account">Восстановить аккаунт «%1$s»?</string>
+    <string name="recovery_revoke_warning">Все прежние устройства, сессии браузера, passkeys и приглашения потеряют доступ. Данные аккаунта сохранятся.</string>
+    <string name="recovery_commit">Восстановить этот аккаунт</string>
+    <string name="recovery_pending">Результат ещё не подтверждён. Новый код и данные входа сохранены на телефоне. Повторите эту операцию; не очищайте данные приложения.</string>
+    <string name="recovery_connected">Аккаунт восстановлен. Сохраните новый TXT: прежний код больше не действует.</string>
+    <string name="recovery_saved">TXT восстановления сохранён.</string>
+    <string name="recovery_file_failed">Не удалось прочитать или сохранить файл. Данные восстановления остаются на телефоне.</string>
+    <string name="recovery_rotation_warning">Прежний код перестанет работать. После замены сохраните новый TXT.</string>
+</resources>

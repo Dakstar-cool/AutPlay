@@ -11,10 +11,15 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from autplay.domain.auth import Principal
-from autplay.domain.resource_admission import IoPermit, ResourceAdmissionError
+from autplay.domain.resource_admission import (
+    IoPermit,
+    LocalBridgeClaim,
+    ResourceAdmissionError,
+)
 from autplay.domain.resource_execution import ExecutionStatus
 
 from .models.account import DeviceRow, UserAccountRow, UserSessionRow
+from .models.audit import AuditEventRow
 from .models.catalog import RecordingRow
 from .models.identity import RecordingRedirectRow
 from .models.library import LibraryEntryRow, UserTrackRefRow
@@ -29,7 +34,7 @@ from .resource_upload_guard import matches_upload_execution
 
 def require_device_upload_commit(
     session: Session,
-    actor: Principal,
+    actor: Principal | LocalBridgeClaim,
     upload_id: UUID,
     permit: IoPermit,
     *,
@@ -57,8 +62,31 @@ def require_device_upload_commit(
             device = session.get(
                 DeviceRow, actor.device_id, with_for_update=mode, populate_existing=True
             )
-            credential = session.get(
-                UserSessionRow, actor.session_id, with_for_update=mode, populate_existing=True
+            credential = (
+                session.get(
+                    UserSessionRow,
+                    actor.session_id,
+                    with_for_update=mode,
+                    populate_existing=True,
+                )
+                if isinstance(actor, Principal)
+                else None
+            )
+            bridge_grant = (
+                session.scalar(
+                    select(AuditEventRow.audit_event_id)
+                    .where(
+                        AuditEventRow.actor_user_id == actor.user_id,
+                        AuditEventRow.action == "acquisition_bridge.enabled",
+                        AuditEventRow.target_type == "device",
+                        AuditEventRow.target_id == actor.device_id,
+                        AuditEventRow.reason_code == "OWNER_AUTHORIZED_COMPLETED_DOWNLOAD_IMPORT",
+                    )
+                    .limit(1)
+                    .with_for_update(read=True, nowait=True)
+                )
+                if isinstance(actor, LocalBridgeClaim)
+                else None
             )
             operation = session.get(
                 ResourceAdmissionRow,
@@ -83,22 +111,46 @@ def require_device_upload_commit(
                 or device is None
                 or device.user_id != actor.user_id
                 or device.revoked_at is not None
-                or credential is None
-                or credential.user_id != actor.user_id
-                or credential.device_id != actor.device_id
-                or credential.revoked_at is not None
-                or credential.expires_at <= now
+                or (
+                    isinstance(actor, Principal)
+                    and (
+                        credential is None
+                        or credential.user_id != actor.user_id
+                        or credential.device_id != actor.device_id
+                        or credential.revoked_at is not None
+                        or credential.expires_at <= now
+                    )
+                )
+                or (
+                    isinstance(actor, LocalBridgeClaim)
+                    and (account.role != "OWNER" or bridge_grant is None)
+                )
                 or operation is None
-                or operation.authority_kind != "DEVICE_SESSION"
+                or operation.authority_kind
+                != ("DEVICE_SESSION" if isinstance(actor, Principal) else "LOCAL_BRIDGE")
                 or operation.user_id != actor.user_id
                 or operation.device_id != actor.device_id
                 or operation.authority_generation != account.authority_generation
-                or operation.session_mode != credential.session_mode
-                or operation.session_family_id
-                != (
-                    credential.family_id or credential.session_id
-                    if credential.session_mode == "V2"
-                    else credential.session_id
+                or (
+                    isinstance(actor, Principal)
+                    and credential is not None
+                    and (
+                        operation.session_mode != credential.session_mode
+                        or operation.session_family_id
+                        != (
+                            credential.family_id or credential.session_id
+                            if credential.session_mode == "V2"
+                            else credential.session_id
+                        )
+                    )
+                )
+                or (
+                    isinstance(actor, LocalBridgeClaim)
+                    and (
+                        operation.session_mode is not None
+                        or operation.session_family_id is not None
+                        or operation.job_id is not None
+                    )
                 )
                 or operation.kind != "TRANSFER"
                 or operation.resource_type != "UPLOAD_INTENT"
@@ -149,7 +201,9 @@ def _lock_execution(
         raise ResourceAdmissionError("resource_io_stale")
 
 
-def _lock_upload_target(session: Session, actor: Principal, upload_id: UUID) -> datetime:
+def _lock_upload_target(
+    session: Session, actor: Principal | LocalBridgeClaim, upload_id: UUID
+) -> datetime:
     # Column projections preserve the caller's dirty received_size/chunk_count.
     upload = session.execute(
         select(UploadSessionRow.target_recording_id, UploadSessionRow.expires_at)

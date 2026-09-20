@@ -15,6 +15,7 @@ import urllib.request
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import uvicorn
@@ -41,6 +42,8 @@ TEST_SELECTOR = (
     "offlineRoomJournalSurvivesProcessDeathAndProjectsExactlyOnceToSecondDevice"
 )
 AUTH_SECRET = "p14-disposable-android-server-e2e-signing-secret-v1"
+QA_APPLICATION_ID = "app.autplay.qa"
+QA_TEST_APPLICATION_ID = "app.autplay.qa.test"
 
 
 def _free_port() -> int:
@@ -60,6 +63,73 @@ def _wait_ready(port: int) -> None:
         except OSError:
             time.sleep(0.2)
     raise RuntimeError("P14 API did not become ready")
+
+
+def _serial_sha256(serial: str) -> str:
+    return hashlib.sha256(serial.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _assert_apk_package(aapt: Path, apk: Path, expected: str) -> None:
+    result = subprocess.run(
+        [str(aapt), "dump", "badging", str(apk)],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    if f"package: name='{expected}' " not in first_line:
+        raise RuntimeError("P14 side-by-side APK identity mismatch")
+
+
+class _OneShotHandoffApp:
+    """Serve disposable joined-test credentials once, then retain no copy."""
+
+    def __init__(self, app: Any, handoff: dict[str, object]) -> None:
+        self._app = app
+        self._handoff: bytes | None = json.dumps(handoff, separators=(",", ":")).encode("utf-8")
+        self._lock = threading.Lock()
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and scope["path"] == "/p14-e2e/one-shot-handoff":
+            if scope["method"] != "GET":
+                await send({"type": "http.response.start", "status": 405, "headers": []})
+                await send({"type": "http.response.body", "body": b""})
+                return
+            with self._lock:
+                body, self._handoff = self._handoff, None
+            if body is None:
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 410,
+                        "headers": [(b"cache-control", b"no-store"), (b"pragma", b"no-cache")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b""})
+                return
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"cache-control", b"no-store"),
+                        (b"pragma", b"no-cache"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self._app(scope, receive, send)
 
 
 def _insert_second_session(
@@ -118,15 +188,11 @@ def _run_gradle(
     android_home: Path,
     serial: str,
     port: int,
-    user_id: uuid.UUID,
-    first_device_id: uuid.UUID,
-    second_device_id: uuid.UUID,
-    first_token: str,
-    second_token: str,
-) -> None:
+) -> dict[str, str]:
     adb = android_home / "platform-tools" / "adb.exe"
-    if not adb.is_file():
-        raise RuntimeError("adb.exe is unavailable")
+    aapt = android_home / "build-tools" / "36.1.0" / "aapt.exe"
+    if not adb.is_file() or not aapt.is_file():
+        raise RuntimeError("Android platform/build tools are unavailable")
     subprocess.run(
         [str(adb), "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"],
         cwd=REPOSITORY_ROOT,
@@ -142,19 +208,60 @@ def _run_gradle(
                 f"-Dorg.gradle.java.home={java_home}",
                 "--no-daemon",
                 "--console=plain",
-                ":apps:android:connectedDebugAndroidTest",
-                f"-Pandroid.testInstrumentationRunnerArguments.class={TEST_SELECTOR}",
-                f"-Pandroid.testInstrumentationRunnerArguments.p14BaseUrl=http://127.0.0.1:{port}/api/v1",
-                f"-Pandroid.testInstrumentationRunnerArguments.p14UserId={user_id}",
-                f"-Pandroid.testInstrumentationRunnerArguments.p14FirstDeviceId={first_device_id}",
-                f"-Pandroid.testInstrumentationRunnerArguments.p14SecondDeviceId={second_device_id}",
-                f"-Pandroid.testInstrumentationRunnerArguments.p14FirstToken={first_token}",
-                f"-Pandroid.testInstrumentationRunnerArguments.p14SecondToken={second_token}",
+                "-Pautplay.qaSideBySide=true",
+                ":apps:android:assembleDebug",
+                ":apps:android:assembleDebugAndroidTest",
             ],
             cwd=REPOSITORY_ROOT,
             env=environment,
             check=True,
         )
+        apk_root = REPOSITORY_ROOT / "apps" / "android" / "build" / "outputs" / "apk"
+        target_apk = apk_root / "debug" / "android-debug.apk"
+        test_apk = apk_root / "androidTest" / "debug" / "android-debug-androidTest.apk"
+        for apk, expected_package in (
+            (target_apk, QA_APPLICATION_ID),
+            (test_apk, QA_TEST_APPLICATION_ID),
+        ):
+            _assert_apk_package(aapt, apk, expected_package)
+            subprocess.run(
+                [str(adb), "-s", serial, "install", "-r", "-t", str(apk)],
+                cwd=REPOSITORY_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        instrumentation = subprocess.run(
+            [
+                str(adb),
+                "-s",
+                serial,
+                "shell",
+                "am",
+                "instrument",
+                "-w",
+                "-e",
+                "class",
+                TEST_SELECTOR,
+                "-e",
+                "p14E2eBaseUrl",
+                f"http://127.0.0.1:{port}",
+                f"{QA_TEST_APPLICATION_ID}/androidx.test.runner.AndroidJUnitRunner",
+            ],
+            cwd=REPOSITORY_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if instrumentation.returncode != 0 or "OK (1 test)" not in instrumentation.stdout:
+            safe_output = instrumentation.stdout.replace(f"http://127.0.0.1:{port}", "<loopback>")[
+                -4_000:
+            ]
+            raise RuntimeError("P14 Android instrumentation failed:\n" + safe_output)
+        return {
+            QA_APPLICATION_ID: _file_sha256(target_apk),
+            QA_TEST_APPLICATION_ID: _file_sha256(test_apk),
+        }
     finally:
         subprocess.run(
             [str(adb), "-s", serial, "reverse", "--remove", f"tcp:{port}"],
@@ -234,9 +341,17 @@ def run(
             finally:
                 engine.dispose()
 
+            handoff = {
+                "base_url": f"http://127.0.0.1:{port}/api/v1",
+                "user_id": str(first.user_id),
+                "first_device_id": str(first.device_id),
+                "second_device_id": str(second_device_id),
+                "first_token": first.access_token,
+                "second_token": second_token,
+            }
             server = uvicorn.Server(
                 uvicorn.Config(
-                    create_app(settings),
+                    _OneShotHandoffApp(create_app(settings), handoff),
                     host="127.0.0.1",
                     port=port,
                     access_log=False,
@@ -246,16 +361,11 @@ def run(
             server_thread = threading.Thread(target=server.run, name="p14-api", daemon=True)
             server_thread.start()
             _wait_ready(port)
-            _run_gradle(
+            apk_sha256 = _run_gradle(
                 java_home=java_home,
                 android_home=android_home,
                 serial=serial,
                 port=port,
-                user_id=first.user_id,
-                first_device_id=first.device_id,
-                second_device_id=second_device_id,
-                first_token=first.access_token,
-                second_token=second_token,
             )
 
             with psycopg.connect(dsn) as connection:
@@ -278,9 +388,10 @@ def run(
                 "started_at": started_at.isoformat(),
                 "finished_at": finished_at.isoformat(),
                 "duration_seconds": round((finished_at - started_at).total_seconds(), 3),
-                "device_serial": serial,
+                "device_serial_sha256": _serial_sha256(serial),
                 "transport": "Android OkHttpSyncTransport -> FastAPI HTTP -> PostgreSQL 18.4",
                 "android_database": "two independent file-backed Room databases",
+                "apk_sha256": apk_sha256,
                 "process_recovery": [
                     "close/reopen after offline transaction",
                     "server commit followed by simulated ACK loss",
@@ -293,6 +404,9 @@ def run(
                     "device_sync_cursor": row[3],
                 },
                 "credentials_persisted": False,
+                "one_shot_handoff": (
+                    "loopback-only, consumed once, no bearer or account IDs in Gradle arguments"
+                ),
                 "compose_cleanup": "verified by scoped finalizer",
             }
             output.parent.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from uuid import UUID
 
@@ -97,17 +97,23 @@ class ProcessStreamGateway:
         audio_variant_id: UUID,
         authorized: AuthorizedStream,
         selected: ByteRange,
+        *,
+        on_bind: Callable[[VaultIoSession], None],
     ) -> ProcessStreamBody:
         io = await self.coordinator.open(
             actor,
             headers.fence,
             resource_type=headers.resource_type,
             target_id=audio_variant_id,
+            on_bind=on_bind,
         )
         body = ProcessStreamBody(io, authorized, selected, root=self._root, limits=self._limits)
         try:
             await io.perform(body.open_in_worker)
             return body
+        except ChildProtocolError:
+            io.finish()
+            raise StorageOperationError() from None
         except BaseException:
             io.finish()
             raise

@@ -14,6 +14,21 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class OkHttpSyncTransportRefreshTest {
+    @Test fun bindingValidatesExactIdentityBeforeSync() = runBlocking {
+        MockWebServer().use { server ->
+            val document = "{\"protocol_version\":1,\"user_id\":\"${BINDING.userId.value}\",\"device_id\":\"${BINDING.deviceId.value}\",\"server_profile_id\":\"${BINDING.serverProfileId.value}\",\"journal_epoch\":\"${BINDING.journalEpoch!!.value}\"}"
+            server.enqueue(MockResponse().setBody(document))
+            server.enqueue(MockResponse().setBody(document.replace(BINDING.deviceId.value, "other-device")))
+            server.start()
+            val store = MutableCredentialStore(SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope("valid-access", "valid-refresh", 0),
+            ))
+            val transport = OkHttpSyncTransport(server.url("/api/v1").toString(), store)
+            transport.bind(BINDING)
+            assertEquals("/api/v1/devices/bind", server.takeRequest().path)
+            assertEquals("SYNC_BINDING_MISMATCH", runCatching { transport.bind(BINDING) }.exceptionOrNull()?.message)
+        }
+    }
     @Test fun repeatedUnauthorizedIsTerminalAfterExactlyOneRefresh() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(401))
@@ -78,7 +93,7 @@ class OkHttpSyncTransportRefreshTest {
 
     private class MutableCredentialStore(initial: ByteArray) : CredentialStore {
         private var value = initial.copyOf()
-        override suspend fun read(profileId: ServerProfileId): ByteArray = value.copyOf()
+        override suspend fun read(profileId: ServerProfileId): ByteArray? = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else value.copyOf()
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) { value = material.copyOf() }
         override suspend fun clear(profileId: ServerProfileId) { value.fill(0) }
     }

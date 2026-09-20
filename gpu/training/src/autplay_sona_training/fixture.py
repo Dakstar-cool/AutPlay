@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
+from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
@@ -29,7 +30,12 @@ from autplay.domain.sona_training import (
     SonaTrainingExample,
 )
 
-from .dataset import materialize_sona_dataset
+from .dataset import (
+    SONA_SOURCE_KIND_SYNTHETIC,
+    SonaDatasetHeader,
+    SonaTensorDataset,
+    materialize_sona_dataset,
+)
 from .tokenizer import (
     compute_source_embeddings_sha256,
     fit_residual_tokenizer,
@@ -108,6 +114,55 @@ def _synthetic_embeddings(count: int) -> np.ndarray:
             )
         )
     return np.asarray(rows, dtype=np.float32)
+
+
+def verify_synthetic_fixture_header(header: SonaDatasetHeader) -> None:
+    """Establish trusted synthetic provenance before reading caller tensor files.
+
+    Only manifests produced by the bounded deterministic generator are accepted. Its
+    cached identities are computed from generated data, never from caller payloads.
+    """
+
+    if header.source_kind != SONA_SOURCE_KIND_SYNTHETIC or not any(
+        header.manifest_sha256 == _generated_fixture_manifest_sha256(recording_count)
+        for recording_count in range(1, 17)
+    ):
+        raise ValueError("Standalone Sona training requires exact generated synthetic fixtures")
+
+
+def verify_synthetic_fixture_identity(dataset: SonaTensorDataset) -> None:
+    """Allow standalone training only for exact tensors produced by this trusted generator.
+
+    The input loader already verifies the manifest against every tensor file. A caller-written
+    source label or a newly computed unsigned hash cannot establish synthetic provenance.
+    """
+
+    if (
+        dataset.source_kind != SONA_SOURCE_KIND_SYNTHETIC
+        or dataset.data_classification != "SYNTHETIC_FIXTURE"
+        or dataset.split != "fixture"
+        or dataset.quality_eligible
+        or dataset.quality_approval_sha256 is not None
+        or dataset.example_count != 8
+    ):
+        raise ValueError("Standalone Sona training requires exact generated synthetic fixtures")
+    candidate_counts = dataset.candidate_mask.sum(axis=1)
+    recording_count = int(candidate_counts[0])
+    if (
+        not 1 <= recording_count <= 16
+        or not np.all(candidate_counts == recording_count)
+        or dataset.manifest_sha256 != _generated_fixture_manifest_sha256(recording_count)
+    ):
+        raise ValueError("Standalone Sona training requires exact generated synthetic fixtures")
+
+
+@lru_cache(maxsize=16)
+def _generated_fixture_manifest_sha256(recording_count: int) -> str:
+    # Only the deterministic generator receives data here; no caller tensors are materialized.
+    with tempfile.TemporaryDirectory(prefix="autplay-sona-fixture-identity-") as temporary:
+        return materialize_synthetic_fixture_bundle(
+            Path(temporary) / "fixture", recording_count=recording_count
+        ).dataset_manifest_sha256
 
 
 def _synthetic_training_examples(
@@ -207,4 +262,9 @@ def _digest(value: str) -> str:
     return sha256(value.encode("ascii")).hexdigest()
 
 
-__all__ = ("SonaFixtureBundle", "materialize_synthetic_fixture_bundle")
+__all__ = (
+    "SonaFixtureBundle",
+    "materialize_synthetic_fixture_bundle",
+    "verify_synthetic_fixture_header",
+    "verify_synthetic_fixture_identity",
+)

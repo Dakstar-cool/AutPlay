@@ -9,7 +9,6 @@ from time import monotonic
 from uuid import uuid4
 
 import pytest
-
 from autplay.adapters.filesystem.vault_process import RetainedVaultProcess
 from autplay.application.resource_admission import ResourceAdmissionService
 from autplay.domain.resource_admission import ActivationFence, IoPermit, ResourceAdmissionError
@@ -57,14 +56,14 @@ def test_failed_thread_launch_cannot_authorize_work_or_leak_a_reservation(
                 patch.setattr(threading.Thread, "start", failed_start)
                 if phase == "watch":
                     other = VaultIoCoordinator(admission.service, maximum=1)
-                    with pytest.raises(RuntimeError, match="synthetic thread start failure"):
+                    with pytest.raises(ResourceAdmissionError, match="resource_execution_busy"):
                         other.start()
                     with pytest.raises(ResourceAdmissionError, match="resource_execution_busy"):
                         await other.open(
                             actor, active, resource_type="UPLOAD_INTENT", target_id=upload_id
                         )
                 else:
-                    with pytest.raises(RuntimeError, match="synthetic thread start failure"):
+                    with pytest.raises(ResourceAdmissionError, match="resource_execution_busy"):
                         await coordinator.open(
                             actor, active, resource_type="UPLOAD_INTENT", target_id=upload_id
                         )

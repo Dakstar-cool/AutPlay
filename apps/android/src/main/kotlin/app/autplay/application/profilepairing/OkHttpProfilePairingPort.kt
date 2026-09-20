@@ -1,5 +1,7 @@
 package app.autplay.application.profilepairing
 
+import app.autplay.application.accountrecovery.accountDeletionVetoes
+
 import android.util.Base64
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.M5DeviceKeyStore
@@ -111,8 +113,10 @@ class OkHttpProfilePairingPort(
         val s = request.snapshot; val alias = request.deviceKeyAlias ?: keyAliasForProfile(s.serverProfileId)
         val material = credentials.read(s.serverProfileId) ?: return PairingNetworkResult.Failure("auth_attention_required")
         return try {
+            val envelope = SessionCredentialEnvelopeCodec.decode(material)
+            if (credentials.accountDeletionVetoes(s.serverProfileId, envelope.bindingCommitId)) return PairingNetworkResult.Failure("auth_attention_required")
             if (deviceKeys.publicKeyThumbprintSha256(alias) != s.deviceKeyThumbprintSha256) return PairingNetworkResult.Failure("auth_attention_required")
-            val refresh = SessionCredentialEnvelopeCodec.decode(material).refreshToken?.toByteArray(StandardCharsets.US_ASCII) ?: return PairingNetworkResult.Failure("auth_attention_required")
+            val refresh = envelope.refreshToken?.toByteArray(StandardCharsets.US_ASCII) ?: return PairingNetworkResult.Failure("auth_attention_required")
             try {
                 val currentRefreshToken = refresh.toString(StandardCharsets.US_ASCII)
                 require(Regex("^[A-Za-z0-9_-]{43}$").matches(currentRefreshToken))

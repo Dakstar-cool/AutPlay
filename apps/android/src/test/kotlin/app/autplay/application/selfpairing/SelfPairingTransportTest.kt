@@ -54,6 +54,18 @@ class SelfPairingTransportTest {
                 server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error_code":"self_pairing_revision_conflict"}"""))
                 val conflict = runCatching { port.recipient(identity, "poll", ID, secret, "{}".toByteArray()) }.exceptionOrNull()
                 assertEquals("self_pairing_revision_conflict", (conflict as SelfPairingRemoteFailure).code)
+                server.enqueue(
+                    MockResponse().setResponseCode(409).setBody(
+                        """{"error":{"code":"account_device_limit_reached","message":"safe","retryable":false,"request_id":"request"}}"""
+                    )
+                )
+                val quota = runCatching {
+                    port.recipient(identity, "exchange", ID, secret, "{}".toByteArray())
+                }.exceptionOrNull()
+                assertEquals(
+                    "account_device_limit_reached",
+                    (quota as SelfPairingRemoteFailure).code,
+                )
             } finally { secret.fill(0) }
         } finally { server.shutdown() }
     }

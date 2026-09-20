@@ -16,17 +16,22 @@ from pathlib import Path
 from typing import BinaryIO, cast
 
 import pytest
-
 from autplay.adapters.child_process import vault_child_launch
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_child import (
     ChildProtocolError,
     decode_document,
     encode_document,
+    execute_command,
     read_frame,
     write_frame,
 )
-from autplay.domain.vault import OpaqueStorageKey, Sha256Digest
+from autplay.domain.vault import (
+    OpaqueStorageKey,
+    Sha256Digest,
+    StorageSafetyError,
+    VaultCapacityError,
+)
 
 
 @dataclass
@@ -98,6 +103,8 @@ def upload_command(root: Path, key: str, payload: bytes, *, offset: int = 0) -> 
     return {
         **command(root, key),
         "committed_size": offset,
+        "expected_size": offset + len(payload),
+        "minimum_free_bytes": 0,
         "offset": offset,
         "payload_sha256": hashlib.sha256(payload).hexdigest(),
     }
@@ -117,6 +124,144 @@ def test_no_storage_initialization_before_complete_go_and_payload(tmp_path: Path
         with pytest.raises(ChildProtocolError):
             pending.result(timeout=5)
     assert not root.exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_first_chunk_creates_or_reconciles_zero_receipt_staging(
+    tmp_path: Path, existing: bool
+) -> None:
+    root = tmp_path / "vault"
+    path = root / "staging" / "first-chunk"
+    if existing:
+        storage = FilesystemVaultStorage(root)
+        storage.create_staging(OpaqueStorageKey("first-chunk"))
+        path.write_bytes(b"uncommitted suffix from a dead child")
+    with child() as worker:
+        worker.send(b"G", encode_document(upload_command(root, "first-chunk", b"new")))
+        worker.send(b"D", b"new")
+        tag, payload = worker.read()
+        assert tag == b"R" and decode_document(payload) == {"next_offset": 3}
+        assert worker.process.wait(timeout=5) == 0
+    assert path.read_bytes() == b"new"
+
+
+def test_missing_confirmed_prefix_is_never_recreated(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    with child() as worker:
+        worker.send(b"G", encode_document(upload_command(root, "lost-prefix", b"new", offset=4)))
+        worker.send(b"D", b"new")
+        tag, payload = worker.read()
+        assert tag == b"E" and decode_document(payload) == {"code": "staged_file_not_found"}
+        assert worker.process.wait(timeout=5) == 2
+    assert not (root / "staging" / "lost-prefix").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("expected_size", 0),
+        ("expected_size", True),
+        ("expected_size", 1024 * 1024 + 1),
+        ("minimum_free_bytes", -1),
+        ("minimum_free_bytes", True),
+        ("minimum_free_bytes", 1024**4 + 1),
+    ],
+)
+def test_invalid_upload_bounds_never_initialize_storage(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    root = tmp_path / "vault"
+    document = upload_command(root, "first-chunk", b"new")
+    document[field] = value
+    with pytest.raises(ChildProtocolError):
+        execute_command(document, io.BytesIO(), io.BytesIO())
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("free", [12, 13])
+@pytest.mark.parametrize("committed", [0, 4])
+def test_reserve_check_uses_remaining_bytes_before_any_staging_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, free: int, committed: int
+) -> None:
+    storage = FilesystemVaultStorage(tmp_path)
+    key = OpaqueStorageKey("reserve")
+    path = tmp_path / "staging" / key.value
+    if committed:
+        storage.create_staging(key)
+        path.write_bytes(b"kept-uncommitted")
+    document = upload_command(tmp_path, key.value, b"new", offset=committed)
+    document["minimum_free_bytes"] = 10
+    source, destination = io.BytesIO(), io.BytesIO()
+    write_frame(source, b"D", b"new")
+    source.seek(0)
+    monkeypatch.setattr(FilesystemVaultStorage, "available_bytes", lambda _: free)
+    if free == 12:
+        with pytest.raises(VaultCapacityError):
+            execute_command(document, source, destination)
+        assert path.read_bytes() == b"kept-uncommitted" if committed else not path.exists()
+    else:
+        execute_command(document, source, destination)
+        assert path.read_bytes() == (b"keptnew" if committed else b"new")
+
+
+def test_reserve_covers_all_remaining_upload_bytes_not_only_current_chunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = upload_command(tmp_path, "reserve", b"new")
+    document.update({"expected_size": 100, "minimum_free_bytes": 10})
+    source = io.BytesIO()
+    write_frame(source, b"D", b"new")
+    source.seek(0)
+    monkeypatch.setattr(FilesystemVaultStorage, "available_bytes", lambda _: 13)
+    with pytest.raises(VaultCapacityError):
+        execute_command(document, source, io.BytesIO())
+    assert not (tmp_path / "staging" / "reserve").exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_first_child_initialization_syncs_directory_entries_including_prior_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool
+) -> None:
+    root = tmp_path / "new-parent" / "vault"
+    if existing:
+        (root / "staging").mkdir(parents=True)
+    synced: list[Path] = []
+    monkeypatch.setattr(FilesystemVaultStorage, "_fsync_parent", staticmethod(synced.append))
+    FilesystemVaultStorage(root)
+    # The first call publishes all three subdirectories in root; subsequent
+    # calls durably publish root and every parent, including after a prior crash.
+    expected = [root / "staging", root, *root.parents[:-1]]
+    assert synced == expected
+
+
+def test_retry_zero_offset_resyncs_directory_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = FilesystemVaultStorage(tmp_path)
+    key = OpaqueStorageKey("created-before-crash")
+    path = tmp_path / "staging" / key.value
+    path.write_bytes(b"uncommitted")
+    synced: list[Path] = []
+    monkeypatch.setattr(storage, "_fsync_parent", synced.append)
+    storage.prepare_upload_staging(key, 0)
+    assert path.read_bytes() == b"" and synced == [path]
+
+
+def test_first_create_rejects_a_replaced_staging_directory(tmp_path: Path) -> None:
+    storage = FilesystemVaultStorage(tmp_path)
+    staging, outside = tmp_path / "staging", tmp_path / "other-directory"
+    outside.mkdir()
+    staging.rmdir()
+    try:
+        staging.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this host")
+    key = OpaqueStorageKey("new-upload")
+    with pytest.raises(StorageSafetyError):
+        storage.create_staging(key)
+    with pytest.raises(StorageSafetyError):
+        storage.prepare_upload_staging(key, 0)
+    assert not (outside / key.value).exists()
 
 
 def test_truncate_and_write_reconcile_only_the_uncommitted_suffix(tmp_path: Path) -> None:
@@ -151,7 +296,7 @@ def test_bad_hash_never_truncates_existing_staging(tmp_path: Path) -> None:
     )
     with child() as worker:
         worker.send(b"G", encode_document(upload_command(tmp_path, key.value, b"expected")))
-        worker.send(b"D", b"different")
+        worker.send(b"D", b"mismatch")
         tag, payload = worker.read()
         assert tag == b"E" and decode_document(payload) == {"code": "upload_chunk_hash_mismatch"}
         assert worker.process.wait(timeout=5) == 2

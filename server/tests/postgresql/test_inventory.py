@@ -184,6 +184,182 @@ R1B_TRIGGERS = frozenset(
         "tr_recommendation_temporal_snapshot_immutable",
     }
 )
+POST_0030_TABLES = frozenset(
+    {
+        ("account", "account_deletion_hold"),
+        ("account", "account_deletion_request"),
+        ("account", "account_purge_receipt"),
+        ("account", "account_quota_override"),
+        ("account", "account_recovery_credential"),
+        ("account", "account_recovery_operation"),
+        ("account", "internal_io_policy"),
+        ("account", "quota_operation_receipt"),
+        ("account", "resource_admission"),
+        ("account", "resource_grant_cursor"),
+        ("account", "resource_io_execution"),
+        ("account", "resource_io_permit"),
+        ("account", "resource_quota_policy"),
+        ("account", "self_device_pairing"),
+        ("account", "self_pairing_command"),
+        ("account", "self_pairing_rate"),
+        ("account", "training_consent"),
+        ("account", "training_consent_operation"),
+        ("account", "web_passkey"),
+        ("account", "web_passkey_ceremony"),
+        ("account", "web_passkey_revocation"),
+        ("discovery", "internet_acquisition"),
+        ("discovery", "internet_search"),
+        ("library", "metadata_artwork"),
+        ("library", "metadata_execution"),
+        ("library", "metadata_provider_gate"),
+        ("library", "track_metadata"),
+        ("library", "track_metadata_revision"),
+        ("ml", "training_checkpoint"),
+        ("ml", "training_cleanup_claim"),
+        ("ml", "training_execution"),
+        ("ml", "training_participant"),
+        ("ml", "training_publication_revocation"),
+        ("ml", "training_run"),
+        ("vault", "ingest_cleanup_claim"),
+        ("vault", "ingest_cleanup_execution"),
+        ("vault", "ingest_execution"),
+        ("vault", "orphan_object_claim"),
+        ("vault", "provider_maintenance"),
+        ("vault", "provider_staging"),
+        ("vault", "upload_cleanup_claim"),
+    }
+)
+POST_0030_INDEXES = frozenset(
+    {
+        "internet_search_owner_time",
+        "ix_admission_account_state",
+        "ix_admission_lease_expiry",
+        "ix_admission_waiting",
+        "ix_deletion_request_deadline",
+        "ix_deletion_request_pending_user",
+        "ix_ingest_cleanup_pending",
+        "ix_io_execution_owner",
+        "ix_io_execution_unclosed",
+        "ix_io_execution_writer",
+        "ix_io_permit_expiry",
+        "ix_io_permit_operation",
+        "ix_provider_staging_cleanup",
+        "ix_provider_staging_scratch_pending",
+        "ix_provider_staging_target",
+        "ix_quota_receipt_created",
+        "ix_recovery_operation_expiry",
+        "ix_recovery_operation_user",
+        "ix_self_pairing_command_ceremony",
+        "ix_self_pairing_expiry",
+        "ix_self_pairing_rate_expiry",
+        "ix_self_pairing_user_expiry",
+        "ix_training_participant_owner",
+        "ix_upload_cleanup_pending",
+        "ix_web_passkey_ceremony_expiry",
+        "ix_web_passkey_ceremony_user",
+        "ix_web_passkey_user",
+        "ix_web_session_passkey",
+        "uq_ingest_cleanup_execution_claim",
+        "uq_ingest_execution_staging",
+        "uq_ingest_execution_upload",
+        "uq_metadata_execution_ref",
+        "uq_orphan_object_claim_active",
+        "uq_provider_maintenance_active",
+        "uq_training_execution_run_open",
+    }
+)
+POST_0030_FUNCTIONS = frozenset(
+    {
+        "admit_internal_io",
+        "advance_training_cleanup_claim",
+        "authorize_training_execution_transition",
+        "exclude_ingest_cleanup_writer",
+        "guard_catalog_actor_erasure",
+        "guard_purge_receipt",
+        "lock_training_execution_identity",
+        "privacy_entity_allowed",
+        "privacy_owner_allowed",
+        "privacy_request_for_owner",
+        "protect_acquisition_authority",
+        "protect_finalized_ingest_upload",
+        "protect_ingest_cleanup_claim",
+        "protect_ingest_cleanup_execution",
+        "protect_ingest_execution",
+        "protect_ingest_upload",
+        "protect_internal_io_workload",
+        "protect_internet_ingest_lineage",
+        "protect_metadata_evidence",
+        "protect_metadata_execution",
+        "protect_metadata_provider_gate",
+        "protect_music_snapshot",
+        "protect_orphan_object_claim",
+        "protect_provider_maintenance",
+        "protect_provider_scratch",
+        "protect_provider_staging",
+        "protect_training_execution",
+        "protect_training_publication_seal",
+        "protect_upload_cleanup_claim",
+        "protect_upload_cleanup_owner",
+        "protect_upload_maintenance_target",
+        "queue_ingest_cleanup",
+    }
+)
+POST_0030_TRIGGERS = frozenset(
+    {
+        "a_internal_io_admission",
+        "a_training_execution_identity",
+        "acquisition_attempt_authority_guard",
+        "advance_training_cleanup_claim",
+        "check_account_deletion",
+        "check_deletion_account",
+        "finalized_ingest_upload_guard",
+        "guard_catalog_actor_erasure",
+        "guard_deletion_request",
+        "guard_last_owner",
+        "guard_purge_receipt",
+        "guard_recovery_credential",
+        "guard_recovery_operation",
+        "guard_training_checkpoint",
+        "guard_training_cleanup_claim",
+        "guard_training_consent",
+        "guard_training_consent_operation",
+        "guard_training_participant",
+        "guard_training_publication_revocation",
+        "guard_training_run",
+        "ingest_cleanup_claim_guard",
+        "ingest_cleanup_execution_guard",
+        "ingest_cleanup_queue",
+        "ingest_cleanup_writer_guard",
+        "ingest_execution_guard",
+        "ingest_upload_guard",
+        "internal_io_workload_guard",
+        "internet_acquisition_authority_guard",
+        "internet_acquisition_lineage_guard",
+        "internet_search_immutable",
+        "internet_selection_immutable",
+        "internet_upload_lineage_guard",
+        "lock_owner_lifecycle",
+        "m_training_io_admission",
+        "metadata_artwork_immutable",
+        "metadata_execution_guard",
+        "metadata_provider_gate_guard",
+        "metadata_revision_immutable",
+        "orphan_object_claim_guard",
+        "provider_maintenance_guard",
+        "provider_scratch_guard",
+        "provider_staging_guard",
+        "require_training_checkpoint_publication",
+        "resource_io_execution_guard",
+        "training_consent_work_changed",
+        "training_execution_guard",
+        "training_owner_unavailable",
+        "upload_cleanup_claim_guard",
+        "upload_cleanup_owner_guard",
+        "upload_maintenance_target_guard",
+        "verify_training_registration",
+        "z_training_publication_seal_guard",
+    }
+)
 
 
 def test_migrated_database_has_exact_named_inventory(
@@ -227,7 +403,9 @@ def test_migrated_database_has_exact_named_inventory(
     assert len(table_names) == EXPECTED_TABLE_COUNT
     assert len(index_names) == EXPECTED_EXPLICIT_INDEX_COUNT
     assert len(function_names) == EXPECTED_FUNCTION_COUNT
-    assert len(trigger_names) == EXPECTED_TRIGGER_COUNT
+    # Trigger names are table-scoped and four names are intentionally reused;
+    # the contract count covers catalog rows while the set below covers names.
+    assert len(snapshot.triggers) == EXPECTED_TRIGGER_COUNT
     assert table_names == (
         expected.tables
         | A1B_TABLES
@@ -238,6 +416,7 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_TABLES
         | PA2_TABLES
         | R1B_TABLES
+        | POST_0030_TABLES
     )
     assert index_names == (
         expected.indexes
@@ -248,10 +427,18 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_INDEXES
         | PA2_INDEXES
         | R1B_INDEXES
+        | POST_0030_INDEXES
     )
-    assert function_names == expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS
+    assert function_names == (
+        expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS | POST_0030_FUNCTIONS
+    )
     assert trigger_names == (
-        expected.triggers | S1C_TRIGGERS | A1C_TRIGGERS | S1D_TRIGGERS | R1B_TRIGGERS
+        expected.triggers
+        | S1C_TRIGGERS
+        | A1C_TRIGGERS
+        | S1D_TRIGGERS
+        | R1B_TRIGGERS
+        | POST_0030_TRIGGERS
     )
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0

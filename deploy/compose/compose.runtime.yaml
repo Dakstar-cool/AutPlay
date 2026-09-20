@@ -37,6 +37,30 @@ services:
     mem_limit: 512m
     cpus: 1.0
 
+  privacy-ledger-init:
+    <<: *autplay-runtime
+    profiles: [ledger-bootstrap]
+    command: [python, -m, autplay.entrypoints.privacy_admin, initialize-ledger]
+    environment: *autplay-database-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+
+  training-consent-ledger-init:
+    <<: *autplay-runtime
+    profiles: [ledger-bootstrap]
+    command: [python, -m, autplay.entrypoints.training_consent_restore, initialize-ledger]
+    environment: *autplay-database-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+
   api:
     <<: *autplay-runtime
     command: [autplay-api]
@@ -80,7 +104,13 @@ services:
 
   worker-cpu:
     <<: *autplay-runtime
-    command: [autplay-worker-cpu]
+    command: [python, -m, autplay.entrypoints.worker_cgroup_bootstrap]
+    user: "0:0"
+    cgroup: private
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID, SYS_ADMIN]
+    security_opt: !override
+      - no-new-privileges:true
+      - apparmor=unconfined
     environment:
       <<: *autplay-database-environment
       AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
@@ -93,7 +123,8 @@ services:
     volumes:
       - vault-data:/var/lib/autplay/vault
     healthcheck:
-      test: [CMD, autplay-worker-cpu, --check-readiness]
+      test:
+        [CMD, python, -m, autplay.entrypoints.worker_cgroup_bootstrap, --check-readiness]
       interval: 10s
       timeout: 5s
       retries: 6

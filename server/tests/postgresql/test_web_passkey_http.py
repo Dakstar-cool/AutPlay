@@ -8,16 +8,15 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
+from autplay.entrypoints.admin_web_http import create_admin_web_router
+from autplay.entrypoints.web_passkey_http import create_web_passkey_router
+from autplay.runtime.web_security import encode_request_integrity_token
+from autplay.web.renderer import AdminTemplateRenderer
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import FastAPI
 from runtime.test_admin_web_http import _Commands, _Views
 from starlette.testclient import TestClient
 from test_webauthn import ORIGIN, _vector
-
-from autplay.entrypoints.admin_web_http import create_admin_web_router
-from autplay.entrypoints.web_passkey_http import create_web_passkey_router
-from autplay.runtime.web_security import encode_request_integrity_token
-from autplay.web.renderer import AdminTemplateRenderer
 
 from .test_web_passkeys import Harness, _decode, _register
 from .test_web_passkeys import harness as harness

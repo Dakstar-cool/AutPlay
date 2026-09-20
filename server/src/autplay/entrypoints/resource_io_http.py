@@ -6,12 +6,9 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from starlette.requests import Request
-from starlette.responses import Response
-from starlette.types import Message, Receive, Scope, Send
 
 from autplay.domain.resource_admission import ActivationFence
 from autplay.runtime.http import ApiError
-from autplay.runtime.vault_io import VaultIoSession
 
 _NAMES = (
     "autplay-resource-type",
@@ -58,26 +55,3 @@ def require_resource_io_headers(request: Request, *, allowed: frozenset[str]) ->
 
 def _invalid() -> ApiError:
     return ApiError("resource_request_invalid", "The resource headers are invalid.", 400)
-
-
-class IoScopedResponse(Response):
-    """Keep renewal/ownership across the complete ASGI send and disconnect scope."""
-
-    def __init__(self, response: Response, io: VaultIoSession) -> None:
-        super().__init__(status_code=response.status_code, media_type=response.media_type)
-        self.raw_headers = response.raw_headers
-        self._response, self._io = response, io
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        deadline = self._io.deadline
-
-        async def bounded_receive() -> Message:
-            return await deadline.run(receive, stop_on_cancel=False)
-
-        async def bounded_send(message: Message) -> None:
-            await deadline.run(lambda: send(message), stop_on_cancel=False)
-
-        try:
-            await deadline.run(lambda: self._response(scope, bounded_receive, bounded_send))
-        finally:
-            self._io.finish()

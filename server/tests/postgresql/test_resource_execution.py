@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -9,16 +10,14 @@ from multiprocessing import get_context
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import sessionmaker
-
+from autplay.adapters.offline_process_evidence import OfflineProcessEvidenceProbe
 from autplay.adapters.postgresql.models import AudioVariantRow, DeviceRow
 from autplay.adapters.postgresql.models.resource_admission import (
     ResourceAdmissionRow,
     ResourceIoExecutionRow,
     ResourceIoPermitRow,
 )
+from autplay.adapters.postgresql.offline_execution_drain import PostgresOfflineExecutionDrain
 from autplay.adapters.postgresql.resource_admission import (
     SqlAlchemyResourceAdmissionRepository,
     SqlAlchemyResourceAdmissionUnitOfWork,
@@ -40,6 +39,9 @@ from autplay.domain.resource_execution import (
     ProcessExitEvidence,
     ProcessIdentity,
 )
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import sessionmaker
 
 from .conftest import DatabaseHarness
 from .test_resource_admission_runtime import AdmissionHarness, admission, fence, play, present
@@ -60,12 +62,13 @@ def upload_ticket(
 
 
 def shift_clock(monkeypatch: pytest.MonkeyPatch, seconds: int) -> None:
-    original = SqlAlchemyResourceAdmissionRepository.lock
+    # Shift both lock-time and post-authority reads through the same clock boundary.
+    original = SqlAlchemyResourceAdmissionRepository.current_time
 
     def shifted(repo: SqlAlchemyResourceAdmissionRepository) -> datetime:
         return original(repo) + timedelta(seconds=seconds)
 
-    monkeypatch.setattr(SqlAlchemyResourceAdmissionRepository, "lock", shifted)
+    monkeypatch.setattr(SqlAlchemyResourceAdmissionRepository, "current_time", shifted)
 
 
 def never_started() -> ProcessExitEvidence:
@@ -105,6 +108,58 @@ def test_stop_requires_exact_process_exit_and_replay_cannot_reopen(
     admission.service.close_io(ticket.permit)
     # A confirmed writer frees the single permit bound on this still-active lease.
     assert admission.service.open_io(actor, ticket.permit.fence, ticket.actual_target_id)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows offline process evidence")
+def test_offline_restore_drain_closes_absent_resource_writer_with_supervisor_evidence(
+    admission: AdmissionHarness,
+) -> None:
+    admission.budget()
+    actor = admission.actor()
+    ticket = upload_ticket(admission, actor)
+    admission.service.prepare_execution(actor, ticket)
+    admission.service.start_execution(
+        actor,
+        ticket,
+        ProcessIdentity(4_000_000_000, b"o" * 32),
+    )
+
+    report = PostgresOfflineExecutionDrain(
+        admission.sessions,
+        OfflineProcessEvidenceProbe(None),
+    ).close_restored_reservations()
+
+    assert report.resource_executions == report.checked_pids == 1
+    assert admission.service.inspect_execution(ticket).state == ExecutionState.CLOSED
+    with admission.sessions() as session:
+        row = present(session.get(ResourceIoExecutionRow, ticket.execution_id))
+        assert row.closure_kind == "SUPERVISOR_EXIT" and row.exit_code == 137
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows offline process evidence")
+def test_offline_restore_drain_is_atomic_when_a_persisted_writer_is_still_alive(
+    admission: AdmissionHarness,
+) -> None:
+    admission.budget()
+    actor = admission.actor()
+    ticket = upload_ticket(admission, actor)
+    child = ProcessIdentity(os.getpid(), b"l" * 32)
+    admission.service.prepare_execution(actor, ticket)
+    admission.service.start_execution(actor, ticket, child)
+
+    with pytest.raises(ResourceAdmissionError, match="offline_process_still_running"):
+        PostgresOfflineExecutionDrain(
+            admission.sessions,
+            OfflineProcessEvidenceProbe(None),
+        ).close_restored_reservations()
+
+    execution = admission.service.inspect_execution(ticket)
+    assert execution.state == ExecutionState.RUNNING
+    assert execution.closed_at is None
+
+    proof = ProcessExitEvidence(ExitKind.SUPERVISOR_EXIT, b"x" * 32, 137, child)
+    admission.service.confirm_execution_exit(ticket, proof)
+    admission.service.close_io(ticket.permit)
 
 
 def test_expired_permit_keeps_transfer_request_bound_and_same_upload_writer_exclusion(

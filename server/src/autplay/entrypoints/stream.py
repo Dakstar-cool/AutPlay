@@ -22,9 +22,12 @@ from autplay.ports.vault import VaultStorage
 from autplay.runtime.http import RequestRuntimeMiddleware, install_error_handlers
 from autplay.runtime.logging import configure_json_logging
 from autplay.runtime.metrics import RuntimeMetrics
+from autplay.runtime.resource_io_scope import ResourceIoFastAPI
+from autplay.runtime.resource_io_transport import ResourceIoH11Protocol
 from autplay.runtime.settings import SettingsLoadError, StreamSettings, load_stream_settings
 
 if TYPE_CHECKING:
+    from autplay.entrypoints.resource_composition import ResourceIoRuntime
     from autplay.entrypoints.resource_stream_http import ProcessStreamGateway
     from autplay.entrypoints.stream_http import StreamLookup
 
@@ -94,29 +97,42 @@ def create_stream_app(
     metrics: RuntimeMetrics | None = None,
     storage: VaultStorage | None = None,
     process_gateway: ProcessStreamGateway | None = None,
+    resource_runtime: ResourceIoRuntime | None = None,
 ) -> FastAPI:
     """Create an isolated stream process with no worker/tool imports."""
 
+    if resource_runtime is not None and (
+        process_gateway is None or process_gateway.coordinator is not resource_runtime.coordinator
+    ):
+        raise ValueError("stream gateway must use the owned resource coordinator")
     runtime_metrics = metrics or RuntimeMetrics()
     resolved_storage = (
         storage
         if process_gateway is not None
-        else storage or FilesystemVaultStorage(settings.vault_root)
+        else storage or FilesystemVaultStorage.open_existing(settings.vault_root)
     )
     from autplay.entrypoints.stream_http import create_stream_router
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        del application
-        if process_gateway is not None:
+        from autplay.entrypoints.privacy_deletion import enforce_privacy_restore_guard
+
+        enforce_privacy_restore_guard(settings)
+        if resource_runtime is not None:
+            resource_runtime.start()
+        elif process_gateway is not None:
             process_gateway.coordinator.start()
         try:
             yield
         finally:
-            if process_gateway is not None:
-                await process_gateway.coordinator.shutdown()
+            if resource_runtime is not None:
+                application.state.unconfirmed_resource_io = await resource_runtime.shutdown()
+            elif process_gateway is not None:
+                application.state.unconfirmed_resource_io = (
+                    await process_gateway.coordinator.shutdown()
+                )
 
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app = ResourceIoFastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.metrics = runtime_metrics
     install_error_handlers(app)
@@ -169,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         uvicorn.run(
             app,
+            http=ResourceIoH11Protocol,
             host=settings.host,
             port=settings.port,
             access_log=False,

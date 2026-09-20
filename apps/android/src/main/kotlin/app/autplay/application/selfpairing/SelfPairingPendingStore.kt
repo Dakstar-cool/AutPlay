@@ -1,6 +1,7 @@
 package app.autplay.application.selfpairing
 
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.CredentialJournalSlots
 import app.autplay.data.security.SessionCredentialEnvelope
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.domain.ServerProfileId
@@ -8,8 +9,8 @@ import kotlinx.serialization.json.JsonObject
 
 /** Stable private slots in the existing encrypted store, never active server profile IDs. */
 enum class SelfPairingRole(val slot: ServerProfileId) {
-    SOURCE(ServerProfileId("a89a7ef3-fb5a-46aa-a827-1bf120d55dab")),
-    RECIPIENT(ServerProfileId("14c2edb0-f9ef-43d0-af74-63dc06373bfb")),
+    SOURCE(CredentialJournalSlots.selfPairingSource),
+    RECIPIENT(CredentialJournalSlots.selfPairingRecipient),
 }
 
 /** The runtime serializes journal writes and network effects through a single-flight mutex. */

@@ -499,7 +499,7 @@ class PublicAccessService:
                 account = session.get(UserAccountRow, target_id, with_for_update=True)
                 if link is None or account is None or link.issued_by_user_id != actor.user_id:
                     raise PublicAccessError("not_found")
-                if account.status == "ACTIVE":
+                if account.status in {"ACTIVE", "DELETION_PENDING"}:
                     account.status, account.updated_at = "DISABLED", now
                     session.query(UserSessionRow).filter(
                         UserSessionRow.user_id == target_id, UserSessionRow.revoked_at.is_(None)

@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from autplay.domain.self_device_pairing import SelfPairingError, parse_request, verify_proof
 
 VECTORS = Path(__file__).resolve().parents[2] / "tests/fixtures/self-device-pairing/v1"

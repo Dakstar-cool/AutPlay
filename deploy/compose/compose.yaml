@@ -6,7 +6,10 @@ services:
       POSTGRES_PASSWORD: autplay_dev_only
       POSTGRES_USER: autplay
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U autplay -d autplay"]
+      # The official entrypoint uses a socket-only temporary server while initializing an
+      # empty volume. Requiring TCP prevents Compose --wait from accepting that transient
+      # server immediately before the entrypoint stops it and starts the final postmaster.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U autplay -d autplay"]
       interval: 2s
       timeout: 3s
       retries: 30

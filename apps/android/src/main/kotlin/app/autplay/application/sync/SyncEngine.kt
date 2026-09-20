@@ -54,6 +54,7 @@ data class BootstrapPage(val snapshotId: String, val nextPageToken: String?, val
 
 /** The port makes process-death and timeout behavior testable without a real network. */
 interface SyncTransport {
+    suspend fun bind(binding: ClientEventBinding)
     suspend fun push(binding: ClientEventBinding, events: List<OfflineJournalEventEntity>): List<SyncAck>
     suspend fun pull(binding: ClientEventBinding, cursor: String?): PullPage
     suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage
@@ -75,6 +76,10 @@ class SyncCoordinator(
         val cursor = requireCursor(binding)
         database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), null))
         try {
+            transport.bind(binding)
+            database.withWriteTransaction {
+                database.journalDao().recoverUnboundJournal(cursor.journalLineageId)
+            }
             var pushed: Int
             var pushBatches = 0
             do {
@@ -170,6 +175,12 @@ class SyncCoordinator(
             throw error
         }
         val acknowledgements = response.associateBy { it.eventId }
+        if (response.any { it.errorCode == "JOURNAL_RESET_REQUIRED" }) {
+            database.withWriteTransaction {
+                journal.releaseCancelledLease(cursor.journalLineageId, lease)
+            }
+            throw IllegalStateException("JOURNAL_RESET_REQUIRED")
+        }
         database.withWriteTransaction {
             leased.forEach { event ->
                 val ack = acknowledgements[event.eventId]

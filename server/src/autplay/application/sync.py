@@ -16,7 +16,7 @@ from typing import Any, Final
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import rfc8785
-from sqlalchemy import Engine, delete, func, select, text
+from sqlalchemy import Engine, String, cast, delete, func, select, text, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -47,6 +47,8 @@ from autplay.adapters.postgresql.models import (
     UserTrackPreferenceRow,
     UserTrackRefRow,
 )
+from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
+from autplay.application.metadata_projection import metadata_view
 from autplay.domain.auth import Principal
 
 _MAX_PAYLOAD_BYTES: Final = 262_144
@@ -107,7 +109,9 @@ class CatalogArtistProjection:
 class CatalogArtistSyncPublisher:
     """Publish deterministic catalog closure events without deriving identity from names."""
 
-    def publish(self, session: Session, owner_user_id: UUID) -> int:
+    def publish(
+        self, session: Session, owner_user_id: UUID, *, ref_ids: tuple[UUID, ...] | None = None
+    ) -> int:
         _acquire_sync_owner_publish_lock(session, owner_user_id)
         resolved_refs = list(
             session.scalars(
@@ -116,13 +120,30 @@ class CatalogArtistSyncPublisher:
                     UserTrackRefRow.user_id == owner_user_id,
                     UserTrackRefRow.deleted_at.is_(None),
                     UserTrackRefRow.recording_id.is_not(None),
+                    true() if ref_ids is None else UserTrackRefRow.user_track_ref_id.in_(ref_ids),
                 )
                 .order_by(UserTrackRefRow.user_track_ref_id)
             )
         )
+        descriptive_rows = {
+            row.user_track_ref_id: row
+            for row in session.scalars(
+                select(TrackMetadataRow)
+                .join(
+                    UserTrackRefRow,
+                    UserTrackRefRow.user_track_ref_id == TrackMetadataRow.user_track_ref_id,
+                )
+                .where(
+                    UserTrackRefRow.user_id == owner_user_id,
+                    UserTrackRefRow.deleted_at.is_(None),
+                    UserTrackRefRow.recording_id.is_not(None),
+                    true() if ref_ids is None else UserTrackRefRow.user_track_ref_id.in_(ref_ids),
+                )
+            )
+        }
         candidates: list[dict[str, Any]] = []
         for ref in resolved_refs:
-            payload = {
+            payload: dict[str, Any] = {
                 "recording_id": str(ref.recording_id),
                 "title": ref.raw_title,
                 "artist": ref.raw_artist,
@@ -130,6 +151,9 @@ class CatalogArtistSyncPublisher:
                 "duration_ms": ref.raw_duration_ms,
                 "resolution_status": ref.resolution_status,
             }
+            descriptive = descriptive_rows.get(ref.user_track_ref_id)
+            if descriptive is not None:
+                payload["metadata_v1"] = metadata_view(descriptive)
             payload_digest = hashlib.sha256(_canonical_payload_bytes(payload)).hexdigest()
             event_id = uuid5(
                 NAMESPACE_URL,
@@ -150,7 +174,25 @@ class CatalogArtistSyncPublisher:
                     "payload": payload,
                 }
             )
-        projections = _catalog_artist_projections(session, owner_user_id)
+        recording_scope = (
+            None
+            if ref_ids is None
+            else tuple(ref.recording_id for ref in resolved_refs if ref.recording_id is not None)
+        )
+        # Release proofs describe the owner's complete reachable release closure. Keep
+        # full publication for recordings attached to releases; fresh standalone imports
+        # can publish just their own closure without rescanning the accumulated library.
+        if (
+            recording_scope
+            and session.scalar(
+                select(ReleaseTrackRow.release_track_id)
+                .where(ReleaseTrackRow.recording_id.in_(recording_scope))
+                .limit(1)
+            )
+            is not None
+        ):
+            recording_scope = None
+        projections = _catalog_artist_projections(session, owner_user_id, recording_scope)
         for projection in projections:
             # A release's source row_version can stay unchanged while this owner's
             # reachable recording closure changes.  Bind event identity to the full
@@ -580,11 +622,7 @@ class SyncService:
         """Persist the canonical listening projection as well as its sync event."""
         payload = event["payload"]
         try:
-            local_ref = _uuid(payload, "local_user_track_ref_id")
-            ref = _owned_row(session, UserTrackRefRow, local_ref, principal)
-            stated_server_ref = _uuid_optional(payload, "server_user_track_ref_id")
-            if stated_server_ref is not None and stated_server_ref != ref.user_track_ref_id:
-                raise ValueError("ref mismatch")
+            ref = _resolve_track_ref(session, principal, event)
             recording = _uuid_optional(payload, "recording_id")
             if (
                 recording is not None
@@ -608,7 +646,7 @@ class SyncService:
                 raise ValueError("ratio")
             if not isinstance(payload.get("excluded_from_taste"), bool):
                 raise ValueError("excluded")
-        except KeyError, TypeError, ValueError, SyncError:
+        except KeyError, TypeError, ValueError, SyncError, _ProjectionConflict:
             return _rejected(event, "REQUEST_VALIDATION_FAILED", request_id)
         session.add(
             ListeningEventRow(
@@ -858,10 +896,7 @@ class SyncService:
                 row.row_version += 1
             return row, "UPSERT", ()
         if kind == "USER_TRACK_PREFERENCE_SET":
-            ref_id = _uuid_optional_alias(payload, "user_track_ref_id", "local_user_track_ref_id")
-            if ref_id is None:
-                ref_id = aggregate_id
-            _owned_row(session, UserTrackRefRow, ref_id, principal)
+            ref_id = _resolve_track_ref(session, principal, event).user_track_ref_id
             preference = _enum(payload, "preference", {"NEUTRAL", "LIKED", "DISLIKED"})
             excluded_from_taste = _boolean(payload, "excluded_from_taste")
             row = session.get(UserTrackPreferenceRow, ref_id)
@@ -1265,6 +1300,8 @@ def _event(principal: Principal, device_id: UUID, value: dict[str, Any]) -> dict
     payload = value["payload"]
     if not isinstance(payload, dict) or not _safe(payload):
         raise SyncError("REQUEST_VALIDATION_FAILED")
+    if "metadata_v1" in payload:
+        raise SyncError("REQUEST_VALIDATION_FAILED")
     _canonical_payload_bytes(payload)
     omitted = {key: item for key, item in value.items() if key != "request_hash"}
     digest = hashlib.sha256(rfc8785.dumps(omitted)).hexdigest()
@@ -1280,6 +1317,7 @@ def _event(principal: Principal, device_id: UUID, value: dict[str, Any]) -> dict
         "schema_version": _positive(value, "schema_version"),
         "aggregate_type": _string(value, "aggregate_type", 100),
         "aggregate_local_id": _uuid(value, "aggregate_local_id"),
+        "server_profile_id": _uuid_optional(value, "server_profile_id"),
         "aggregate_id": server_id or _uuid(value, "aggregate_local_id"),
         "base_version": value["base_server_row_version"]
         if isinstance(value["base_server_row_version"], int)
@@ -1288,6 +1326,48 @@ def _event(principal: Principal, device_id: UUID, value: dict[str, Any]) -> dict
         "payload": payload,
         "request_hash": bytes.fromhex(digest),
     }
+
+
+def _resolve_track_ref(
+    session: Session, principal: Principal, event: dict[str, Any]
+) -> UserTrackRefRow:
+    """Resolve explicit server identity or the exact Android profile projection UUID.
+
+    Legacy events are immutable, so retain their hash and local ID. Names and metadata are
+    never identity evidence; all candidate rows are scoped to the authenticated owner.
+    """
+    payload = event["payload"]
+    explicit = _uuid_optional(payload, "server_user_track_ref_id")
+    if explicit is not None:
+        return _owned_row(session, UserTrackRefRow, explicit, principal)
+    local_id = _uuid_optional_alias(payload, "user_track_ref_id", "local_user_track_ref_id")
+    local_id = local_id or event["aggregate_id"]
+    row = session.get(UserTrackRefRow, local_id)
+    if row is not None:
+        return _owned_row(session, UserTrackRefRow, local_id, principal)
+    profile = event.get("server_profile_id")
+    if profile is not None:
+        # PostgreSQL MD5 + UUID version/variant bits matches UUID.nameUUIDFromBytes exactly.
+        projection = func.md5(str(profile) + ":" + cast(UserTrackRefRow.user_track_ref_id, String))
+        compact = str(local_id).replace("-", "")
+        candidates = session.scalars(
+            select(UserTrackRefRow)
+            .where(
+                UserTrackRefRow.user_id == principal.user_id,
+                UserTrackRefRow.deleted_at.is_(None),
+                func.substr(projection, 1, 12) == compact[:12],
+                func.substr(projection, 14, 3) == compact[13:16],
+                func.substr(projection, 18, 15) == compact[17:],
+            )
+            .limit(2)
+        ).all()
+        for candidate in candidates:
+            digest = hashlib.md5(
+                f"{profile}:{candidate.user_track_ref_id}".encode(), usedforsecurity=False
+            ).digest()
+            if UUID(bytes=digest, version=3) == local_id:
+                return candidate
+    raise _ProjectionConflict
 
 
 def _ensure_ascending(events: list[Any]) -> None:
@@ -1357,7 +1437,7 @@ def _owner(row: object, principal: Principal) -> None:
         raise _ProjectionConflict
 
 
-def _owned_row(session: Session, model: type[Any], identifier: UUID, principal: Principal) -> Any:
+def _owned_row[T](session: Session, model: type[T], identifier: UUID, principal: Principal) -> T:
     row = session.get(model, identifier)
     if row is None:
         raise _ProjectionConflict
@@ -1657,6 +1737,17 @@ def _bootstrap_projections(
 ) -> list[tuple[str, UUID, int, Any]]:
     """Materialize live owner projections, never replaying patch event payloads."""
     values: list[tuple[str, UUID, int, Any]] = []
+    metadata_by_ref = {
+        row.user_track_ref_id: metadata_view(row)
+        for row in session.scalars(
+            select(TrackMetadataRow)
+            .join(
+                UserTrackRefRow,
+                UserTrackRefRow.user_track_ref_id == TrackMetadataRow.user_track_ref_id,
+            )
+            .where(UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None))
+        )
+    }
     for ref_row in session.scalars(
         select(UserTrackRefRow).where(
             UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None)
@@ -1676,6 +1767,11 @@ def _bootstrap_projections(
                     "album": ref_row.raw_album,
                     "duration_ms": ref_row.raw_duration_ms,
                     "resolution_status": ref_row.resolution_status,
+                    **(
+                        {"metadata_v1": metadata_by_ref[ref_row.user_track_ref_id]}
+                        if ref_row.user_track_ref_id in metadata_by_ref
+                        else {}
+                    ),
                 },
             )
         )
@@ -1836,7 +1932,9 @@ def _owner_recording_pages(recording_ids: set[UUID] | list[UUID]) -> list[dict[s
     ]
 
 
-def _catalog_artist_projections(session: Session, user_id: UUID) -> list[CatalogArtistProjection]:
+def _catalog_artist_projections(
+    session: Session, user_id: UUID, recording_scope: tuple[UUID, ...] | None = None
+) -> list[CatalogArtistProjection]:
     """Return the catalog closure reachable from one owner's resolved tracks.
 
     Names are display evidence only.  The canonical UUID from catalog.artist is the
@@ -1849,6 +1947,9 @@ def _catalog_artist_projections(session: Session, user_id: UUID) -> list[Catalog
                     UserTrackRefRow.user_id == user_id,
                     UserTrackRefRow.deleted_at.is_(None),
                     UserTrackRefRow.recording_id.is_not(None),
+                    true()
+                    if recording_scope is None
+                    else UserTrackRefRow.recording_id.in_(recording_scope),
                 )
             )
         ),

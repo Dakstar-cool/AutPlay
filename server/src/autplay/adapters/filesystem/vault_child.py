@@ -23,6 +23,7 @@ from autplay.domain.vault import (
     ChunkIntegrityError,
     OpaqueStorageKey,
     Sha256Digest,
+    VaultCapacityError,
     VaultError,
     VaultLimits,
 )
@@ -72,11 +73,11 @@ def write_frame(stream: BinaryIO, tag: bytes, payload: bytes) -> None:
     stream.flush()
 
 
-def encode_document(document: dict[str, object]) -> bytes:
+def encode_document(document: dict[str, object], *, maximum: int = MAX_COMMAND_BYTES) -> bytes:
     result = json.dumps(document, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode(
         "ascii"
     )
-    if len(result) > MAX_COMMAND_BYTES:
+    if not 1 <= maximum <= MAX_FRAME_BYTES or len(result) > maximum:
         raise ChildProtocolError()
     return result
 
@@ -90,8 +91,8 @@ def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def decode_document(payload: bytes) -> dict[str, object]:
-    if len(payload) > MAX_COMMAND_BYTES:
+def decode_document(payload: bytes, *, maximum: int = MAX_COMMAND_BYTES) -> dict[str, object]:
+    if not 1 <= maximum <= MAX_FRAME_BYTES or len(payload) > maximum:
         raise ChildProtocolError()
     try:
         value = json.loads(payload, object_pairs_hook=_unique)
@@ -130,7 +131,7 @@ def execute_command(command: dict[str, object], source: BinaryIO, destination: B
     }
     kind = _string(command, "kind")
     extra = (
-        {"committed_size", "offset", "payload_sha256"}
+        {"committed_size", "expected_size", "minimum_free_bytes", "offset", "payload_sha256"}
         if kind == "UPLOAD"
         else {"start", "end", "expected_size", "verified_at"}
     )
@@ -155,17 +156,21 @@ def execute_command(command: dict[str, object], source: BinaryIO, destination: B
     if kind == "UPLOAD":
         offset = _integer(command, "offset", maximum=max_object)
         committed_size = _integer(command, "committed_size", maximum=max_object)
-        if offset != committed_size:
+        expected_size = _integer(command, "expected_size", maximum=max_object)
+        minimum_free = _integer(command, "minimum_free_bytes", maximum=1024**4)
+        if offset != committed_size or not 0 <= committed_size < expected_size:
             raise ChildProtocolError()
         declared = Sha256Digest(bytes.fromhex(_string(command, "payload_sha256")))
         tag, payload = read_frame(source, maximum=limits.max_chunk_bytes)
-        if tag != b"D" or not payload or offset + len(payload) > max_object:
+        if tag != b"D" or not payload or offset + len(payload) > expected_size:
             raise ChildProtocolError()
         if hashlib.sha256(payload).digest() != declared.value:
             raise ChunkIntegrityError()
         storage = FilesystemVaultStorage(root, limits=limits)
+        if storage.available_bytes() - (expected_size - committed_size) < minimum_free:
+            raise VaultCapacityError()
         # These operations are inseparable under the parent's upload row lock.
-        storage.truncate_staging(key, committed_size)
+        storage.prepare_upload_staging(key, committed_size)
         result = storage.write_chunk(key, offset=offset, payload=payload, payload_sha256=declared)
         write_frame(destination, b"R", encode_document({"next_offset": result.next_offset}))
     elif kind == "STREAM":

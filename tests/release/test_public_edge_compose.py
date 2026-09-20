@@ -16,6 +16,17 @@ COMPOSE_FILES = (
 )
 
 
+def test_server_image_precreates_private_ledger_mountpoints_for_non_root_runtime() -> None:
+    dockerfile = (REPOSITORY_ROOT / "server" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "install -d -o autplay -g autplay -m 0700" in dockerfile
+    assert "/var/lib/autplay/privacy-ledger" in dockerfile
+    assert "/var/lib/autplay/training-consent-ledger" in dockerfile
+    assert "/var/lib/autplay/vault/staging" in dockerfile
+    assert "/var/lib/autplay/vault/objects" in dockerfile
+    assert "/var/lib/autplay/vault/quarantine" in dockerfile
+
+
 def _config(tmp_path: Path) -> dict[str, object]:
     secret_names = (
         "AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE",
@@ -25,6 +36,8 @@ def _config(tmp_path: Path) -> dict[str, object]:
         "AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE",
         "AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE",
         "AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE",
+        "AUTPLAY_RUNTIME_PRIVACY_LEDGER_KEY_FILE",
+        "AUTPLAY_RUNTIME_TRAINING_CONSENT_LEDGER_KEY_FILE",
     )
     environment = os.environ.copy()
     for index, name in enumerate(secret_names):
@@ -32,6 +45,8 @@ def _config(tmp_path: Path) -> dict[str, object]:
         path.write_text(chr(ord("a") + index) * 48, encoding="utf-8")
         environment[name] = str(path)
     environment["AUTPLAY_ACME_EMAIL"] = "operator@example.test"
+    environment["AUTPLAY_PRIVACY_LEDGER_KEY_ID"] = "deletion-ledger-v1"
+    environment["AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID"] = "consent-ledger-v1"
     (tmp_path / "secret-0.txt").write_text("database-password", encoding="utf-8")
     (tmp_path / "secret-1.txt").write_text(
         "postgresql+psycopg://autplay:database-password@postgres:5432/autplay",
@@ -42,7 +57,17 @@ def _config(tmp_path: Path) -> dict[str, object]:
     for compose_file in COMPOSE_FILES:
         command.extend(("-f", compose_file))
     command.extend(
-        ("--profile", "runtime", "--profile", "public-edge", "config", "--format", "json")
+        (
+            "--profile",
+            "runtime",
+            "--profile",
+            "public-edge",
+            "--profile",
+            "ledger-bootstrap",
+            "config",
+            "--format",
+            "json",
+        )
     )
     result = subprocess.run(
         command,
@@ -90,6 +115,10 @@ def test_public_edge_is_the_only_non_loopback_listener(tmp_path: Path) -> None:
     assert mobile_api["environment"]["AUTPLAY_PROFILE_STREAM_ORIGIN"] == (
         "https://stream.autplay.win"
     )
+    assert mobile_api["environment"]["AUTPLAY_SELF_DEVICE_PAIRING_ENABLED"] == "true"
+    assert mobile_api["environment"]["AUTPLAY_ACCOUNT_RECOVERY_ENABLED"] == "true"
+    assert mobile_api["environment"]["AUTPLAY_ACCOUNT_DELETION_ENABLED"] == "true"
+    assert mobile_api["environment"]["AUTPLAY_SHARED_TRAINING_CONSENT_ENABLED"] == "true"
     assert "POSTGRES_PASSWORD" not in postgres["environment"]
     assert postgres["environment"]["POSTGRES_PASSWORD_FILE"] == (
         "/run/secrets/autplay-postgres-password"
@@ -103,22 +132,128 @@ def test_public_edge_is_the_only_non_loopback_listener(tmp_path: Path) -> None:
         "autplay-auth-signing-secret",
         "autplay-public-access-source-hmac",
         "autplay-database-url",
+        "autplay-privacy-ledger-key",
+        "autplay-training-consent-ledger-key",
     }
     assert {secret["source"] for secret in mobile_api["secrets"]} == {
         "autplay-auth-signing-secret",
         "autplay-public-access-source-hmac",
         "autplay-profile-identity-key",
         "autplay-database-url",
+        "autplay-privacy-ledger-key",
+        "autplay-training-consent-ledger-key",
     }
     assert {secret["source"] for secret in stream["secrets"]} == {
         "autplay-auth-signing-secret",
         "autplay-database-url",
+        "autplay-privacy-ledger-key",
+        "autplay-training-consent-ledger-key",
     }
+    worker = services["worker-cpu"]  # type: ignore[index]
+    assert worker["command"] == [
+        "python",
+        "-m",
+        "autplay.entrypoints.worker_cgroup_bootstrap",
+    ]
+    assert worker["user"] == "0:0"
+    assert worker["cgroup"] == "private"
+    assert worker["cap_drop"] == ["ALL"]
+    assert worker["cap_add"] == [
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "SETGID",
+        "SETUID",
+        "SYS_ADMIN",
+    ]
+    assert worker["security_opt"] == ["no-new-privileges:true", "apparmor=unconfined"]
+    assert worker["healthcheck"]["test"] == [
+        "CMD",
+        "python",
+        "-m",
+        "autplay.entrypoints.worker_cgroup_bootstrap",
+        "--check-readiness",
+    ]
+    assert {secret["source"] for secret in worker["secrets"]} == {
+        "autplay-database-url",
+        "autplay-privacy-ledger-key",
+        "autplay-training-consent-ledger-key",
+    }
+    bootstrap_commands = {
+        "privacy-ledger-init": [
+            "python",
+            "-m",
+            "autplay.entrypoints.privacy_admin",
+            "initialize-ledger",
+        ],
+        "training-consent-ledger-init": [
+            "python",
+            "-m",
+            "autplay.entrypoints.training_consent_restore",
+            "initialize-ledger",
+        ],
+    }
+    for name, command in bootstrap_commands.items():
+        bootstrap = services[name]  # type: ignore[index]
+        assert bootstrap["profiles"] == ["ledger-bootstrap"]
+        assert bootstrap["command"] == command
+        assert bootstrap["restart"] == "no"
+        assert bootstrap["read_only"] is True
+        assert "ports" not in bootstrap
+        assert bootstrap["environment"]["AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES"] == "262144"
+        assert bootstrap["depends_on"]["migrate"]["condition"] == ("service_completed_successfully")
+        assert {secret["source"] for secret in bootstrap["secrets"]} == {
+            "autplay-database-url",
+            "autplay-privacy-ledger-key",
+            "autplay-training-consent-ledger-key",
+        }
+        mounts = {mount["target"]: mount for mount in bootstrap["volumes"]}
+        assert mounts["/var/lib/autplay/privacy-ledger"]["source"] == ("privacy-ledger-data")
+        assert mounts["/var/lib/autplay/training-consent-ledger"]["source"] == (
+            "training-consent-ledger-data"
+        )
+    for service in (api, mobile_api, worker, stream):
+        assert service["environment"]["AUTPLAY_PRIVACY_LEDGER_PATH"] == (
+            "/var/lib/autplay/privacy-ledger/deletion.sqlite3"
+        )
+        assert service["environment"]["AUTPLAY_PRIVACY_LEDGER_KEY_FILE"] == (
+            "/run/secrets/autplay-privacy-ledger-key"
+        )
+        assert service["environment"]["AUTPLAY_PRIVACY_LEDGER_KEY_ID"] == "deletion-ledger-v1"
+        assert service["environment"]["AUTPLAY_TRAINING_CONSENT_LEDGER_PATH"] == (
+            "/var/lib/autplay/training-consent-ledger/consent.sqlite3"
+        )
+        assert service["environment"]["AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_FILE"] == (
+            "/run/secrets/autplay-training-consent-ledger-key"
+        )
+        assert service["environment"]["AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID"] == (
+            "consent-ledger-v1"
+        )
+        mounts = {mount["target"]: mount for mount in service["volumes"]}
+        assert mounts["/var/lib/autplay/privacy-ledger"]["source"] == "privacy-ledger-data"
+        assert mounts["/var/lib/autplay/training-consent-ledger"]["source"] == (
+            "training-consent-ledger-data"
+        )
+        assert mounts["/var/lib/autplay/privacy-ledger"].get("read_only", False) is (
+            service is stream
+        )
+        assert mounts["/var/lib/autplay/training-consent-ledger"].get("read_only", False) is (
+            service is stream
+        )
+    assert worker["environment"]["AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES"] == "262144"
     assert config["volumes"]["postgres-data"]["labels"]["app.autplay.purpose"] == (  # type: ignore[index]
         "persistent-production-postgresql"
     )
     assert config["volumes"]["vault-data"]["labels"]["app.autplay.purpose"] == (  # type: ignore[index]
         "persistent-production-vault"
+    )
+    assert config["volumes"]["privacy-ledger-data"]["labels"]["app.autplay.purpose"] == (  # type: ignore[index]
+        "persistent-production-deletion-ledger"
+    )
+    assert (
+        config["volumes"]["training-consent-ledger-data"]["labels"][  # type: ignore[index]
+            "app.autplay.purpose"
+        ]
+        == "persistent-production-training-consent-ledger"
     )
 
 

@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0030_temporal_snapshot_retention"
+EXPECTED_MIGRATION_HEAD: Final = "0060_local_bridge_authority"
 
 
 @dataclass(frozen=True, slots=True)

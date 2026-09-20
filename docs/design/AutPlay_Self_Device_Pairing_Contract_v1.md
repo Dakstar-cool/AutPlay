@@ -91,4 +91,4 @@ Verify USER and OWNER pairing, wrong account/device/family/key/SAS/account confi
 double claim/exchange, refresh/revoke/recovery races, response loss and process death,
 fixed expiry/cleanup and quota lowering in real PostgreSQL. Android must retain local
 library/Journal isolation, first-bind gate ownership and encrypted pending state. Physical
-QR scanning and the laptop/M55 network admission remain separate acceptance evidence.
+QR scanning and the laptop/A55 network admission remain separate acceptance evidence.

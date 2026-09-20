@@ -12,12 +12,6 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-from psycopg import Connection
-from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.models.profile_pairing import (
     ServerInstanceRow,
     TrustedDeviceKeyRow,
@@ -31,6 +25,11 @@ from autplay.domain.profile_pairing import (
     public_spki,
     sign_p1363,
 )
+from cryptography.hazmat.primitives.asymmetric import ec
+from psycopg import Connection
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _service(database_url: str) -> tuple[PublicAccessService, Engine]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections.abc import Mapping
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +28,7 @@ from autplay.domain.sona import (
     SonaRankedCandidate,
     SonaSemanticId,
 )
+from autplay.domain.training_work import TrainingInputProvenance
 from autplay_gpu.embedding import ModelArtifactError
 from autplay_gpu.sona_artifacts import (
     SonaArtifactStore,
@@ -43,6 +45,36 @@ OWNER = UUID("00000000-0000-7000-8000-000000000001")
 TEMPORAL = UUID("00000000-0000-7000-8000-000000000002")
 BASELINE = UUID("00000000-0000-7000-8000-000000000003")
 TRACK = UUID("00000000-0000-7000-8000-000000000004")
+INPUT_PROVENANCE = TrainingInputProvenance(UUID(int=555), UUID(int=777), 1, "f" * 64)
+
+
+class _PublicationAuthority:
+    def __init__(self, artifact: str, manifest: str, *, available: bool = True) -> None:
+        self.hashes = {
+            "artifact_sha256": artifact,
+            "manifest_sha256": manifest,
+            "checkpoint_sha256": "d" * 64,
+            "tokenizer_manifest_sha256": "e" * 64,
+            "tokenizer_sha256": TOKENIZER,
+        }
+        self.available = available
+        self.calls = 0
+
+    def is_published(
+        self,
+        run_id: UUID,
+        hashes: Mapping[str, str],
+        *,
+        input_provenance: TrainingInputProvenance | None = None,
+    ) -> bool:
+        self.calls += 1
+        if not self.available:
+            raise RuntimeError("current registry unavailable")
+        return (
+            run_id == INPUT_PROVENANCE.run_id
+            and input_provenance == INPUT_PROVENANCE
+            and dict(hashes) == self.hashes
+        )
 
 
 def _install_artifact(root: Path, payload: bytes) -> tuple[Path, str, str]:
@@ -51,12 +83,15 @@ def _install_artifact(root: Path, payload: bytes) -> tuple[Path, str, str]:
     path.parent.mkdir(parents=True)
     path.write_bytes(payload)
     manifest: dict[str, JsonValue] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "architecture": "SONA_LITE_SHARED_GRU_V1",
         "artifact_sha256": artifact_sha256,
         "training_provenance": {
             "tokenizer_sha256": TOKENIZER,
             "quality_eligible": False,
+            "checkpoint_manifest_sha256": "d" * 64,
+            "tokenizer_artifact_manifest_sha256": "e" * 64,
+            "training_authority": INPUT_PROVENANCE.document(),
         },
     }
     model_manifest_sha256 = sha256(rfc8785.dumps(manifest)).hexdigest()
@@ -81,7 +116,8 @@ def _install_artifact(root: Path, payload: bytes) -> tuple[Path, str, str]:
 
 def test_artifact_store_requires_exact_graph_manifest_tokenizer_and_commit(tmp_path: Path) -> None:
     path, artifact_sha256, model_manifest_sha256 = _install_artifact(tmp_path, b"fixture-onnx")
-    store = SonaArtifactStore(tmp_path.resolve())
+    authority = _PublicationAuthority(artifact_sha256, model_manifest_sha256)
+    store = SonaArtifactStore(tmp_path.resolve(), publication_authority=authority)
 
     verified = store.resolve(
         artifact_sha256=artifact_sha256,
@@ -92,6 +128,7 @@ def test_artifact_store_requires_exact_graph_manifest_tokenizer_and_commit(tmp_p
     assert verified.path == path.resolve()
     assert verified.payload == b"fixture-onnx"
     assert not verified.quality_eligible
+    assert authority.calls == 1
     with pytest.raises(ModelArtifactError, match="tokenizer provenance"):
         store.resolve(
             artifact_sha256=artifact_sha256,
@@ -106,6 +143,61 @@ def test_artifact_store_requires_exact_graph_manifest_tokenizer_and_commit(tmp_p
             model_manifest_sha256=model_manifest_sha256,
             tokenizer_sha256=TOKENIZER,
         )
+
+
+@pytest.mark.parametrize("mode", ["absent", "unavailable", "unpublished"])
+def test_local_committed_marker_never_substitutes_current_publication(
+    tmp_path: Path, mode: str
+) -> None:
+    _, artifact, manifest = _install_artifact(tmp_path, b"inert-candidate")
+    authority = _PublicationAuthority(artifact, manifest, available=mode != "unavailable")
+    if mode == "unpublished":
+        authority.hashes["checkpoint_sha256"] = "0" * 64
+    store = SonaArtifactStore(
+        tmp_path.resolve(), publication_authority=None if mode == "absent" else authority
+    )
+    with pytest.raises(ModelArtifactError, match=r"authority|publication|published"):
+        store.resolve(
+            artifact_sha256=artifact,
+            model_manifest_sha256=manifest,
+            tokenizer_sha256=TOKENIZER,
+        )
+
+
+def test_legacy_or_changed_compact_authority_rejected_even_with_rehashed_markers(
+    tmp_path: Path,
+) -> None:
+    path, artifact, manifest = _install_artifact(tmp_path, b"candidate")
+    authority = _PublicationAuthority(artifact, manifest)
+    envelope = json.loads(Path(f"{path}.manifest.json").read_bytes())
+    for change in ("legacy", "changed"):
+        document = envelope["manifest"]
+        if change == "legacy":
+            document["schema_version"] = 1
+        else:
+            document["schema_version"] = 2
+            document["training_provenance"]["training_authority"]["binding_sha256"] = "0" * 64
+        altered = sha256(rfc8785.dumps(document)).hexdigest()
+        envelope["manifest_sha256"] = altered
+        Path(f"{path}.manifest.json").write_bytes(rfc8785.dumps(envelope))
+        commit: dict[str, JsonValue] = {
+            "schema_version": 1,
+            "state": "COMMITTED",
+            "artifact_sha256": artifact,
+            "model_manifest_sha256": altered,
+        }
+        Path(f"{path}.commit.json").write_bytes(
+            rfc8785.dumps(
+                {"commit": commit, "commit_sha256": sha256(rfc8785.dumps(commit)).hexdigest()}
+            )
+        )
+        authority.hashes["manifest_sha256"] = altered
+        with pytest.raises(ModelArtifactError, match=r"publication|published"):
+            SonaArtifactStore(tmp_path.resolve(), publication_authority=authority).resolve(
+                artifact_sha256=artifact,
+                model_manifest_sha256=altered,
+                tokenizer_sha256=TOKENIZER,
+            )
 
 
 def test_artifact_bounded_read_rejects_file_growth_after_stat() -> None:

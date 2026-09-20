@@ -10,9 +10,6 @@ from pathlib import Path
 from time import monotonic
 
 import pytest
-from sqlalchemy import func, select
-from sqlalchemy.exc import DBAPIError
-
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_process import RetainedVaultProcess, VaultProcessSupervisor
 from autplay.adapters.filesystem.vault_process_upload import ProcessVaultChunkWriter
@@ -30,6 +27,8 @@ from autplay.domain.resource_execution import (
 )
 from autplay.domain.vault import OpaqueStorageKey, Sha256Digest, VaultLimits
 from autplay.runtime.resource_io_deadline import IoStopped, ResourceIoDeadline
+from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 
 from .test_resource_admission_runtime import AdmissionHarness, admission, present
 from .test_resource_execution import upload_ticket
@@ -68,7 +67,6 @@ def prepare(harness: AdmissionHarness, root: Path) -> Upload:
     identity = child.spawn()
     registered = harness.service.start_execution(actor, ticket, identity)
     storage = FilesystemVaultStorage(root)
-    storage.create_staging(OpaqueStorageKey(ticket.actual_target_id.hex))
     writer = ProcessVaultChunkWriter(child, registered, root=root, limits=VaultLimits())
     return Upload(actor, ticket, child, registered, supervisor, storage, writer)
 
@@ -77,7 +75,6 @@ def append(harness: AdmissionHarness, upload: Upload, *, revoke: bool = False) -
     with harness.sessions() as session:
         service = VaultUploadService(
             repository=PostgresVaultRuntime(session, upload_execution=upload.registered),
-            storage=upload.storage,
             chunk_writer=upload.writer,
         )
         result = service.append(

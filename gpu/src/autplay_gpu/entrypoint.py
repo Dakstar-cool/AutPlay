@@ -11,6 +11,9 @@ import uvicorn
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.application.enrichment import AcceleratorOutOfMemory
+from autplay.domain.privacy_deletion import DeletionEvidenceError
+from autplay.domain.training_consent import TrainingConsentEvidenceError
+from autplay.entrypoints.privacy_deletion import enforce_privacy_restore_guard
 from autplay.runtime.logging import configure_json_logging
 from autplay.runtime.settings import SettingsLoadError, load_worker_settings
 from sqlalchemy.exc import SQLAlchemyError
@@ -25,8 +28,6 @@ from .devices import (
 from .embedding import ModelArtifactError
 from .settings import load_gpu_settings
 from .sona_http import create_sona_shadow_app
-from .sona_worker import SonaWorkerCompositionError, compose_sona_shadow_worker
-from .worker import GpuWorkerCompositionError, compose_gpu_worker, run_gpu_worker
 
 SERVICE_NAME = "autplay-ml-gpu"
 
@@ -81,27 +82,54 @@ def main(arguments: Sequence[str] | None = None) -> int:
         )
 
     if namespace.serve_sona_shadow:
-        configure_json_logging(service=SERVICE_NAME, level="INFO")
-        try:
-            sona = compose_sona_shadow_worker(gpu, selection)
-        except SonaWorkerCompositionError as error:
-            return _error(error.code, 4)
-        except ModelArtifactError:
-            return _error("gpu_sona_artifact_invalid", 4)
-        except AcceleratorOutOfMemory:
-            return _error("gpu_accelerator_out_of_memory", 4)
-        uvicorn.run(
-            create_sona_shadow_app(
-                sona.runtime,
-                sona.artifact,
-                max_admitted_inferences=gpu.sona_max_admitted_inferences,
-                inference_timeout_seconds=gpu.sona_inference_timeout_seconds,
-            ),
-            host="127.0.0.1",
-            port=gpu.sona_bind_port,
-            workers=1,
-            access_log=False,
+        from autplay.adapters.postgresql.training_publication import (
+            PostgresTrainingPublicationAuthority,
         )
+
+        from .sona_worker import SonaWorkerCompositionError, compose_sona_shadow_worker
+
+        try:
+            worker_settings = load_worker_settings()
+        except SettingsLoadError:
+            return _error("gpu_database_config_invalid", 2)
+        configure_json_logging(service=SERVICE_NAME, level=worker_settings.log_level)
+        engine = create_runtime_engine(worker_settings)
+        try:
+            enforce_privacy_restore_guard(worker_settings, engine)
+            readiness = PostgreSQLReadinessProbe(engine).check()
+            if not readiness.ready:
+                return _error(readiness.code or "gpu_database_unavailable", 3)
+            sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+            try:
+                sona = compose_sona_shadow_worker(
+                    gpu,
+                    selection,
+                    publication_authority=PostgresTrainingPublicationAuthority(sessions),
+                )
+            except SonaWorkerCompositionError as error:
+                return _error(error.code, 4)
+            except ModelArtifactError:
+                return _error("gpu_sona_artifact_invalid", 4)
+            except AcceleratorOutOfMemory:
+                return _error("gpu_accelerator_out_of_memory", 4)
+            uvicorn.run(
+                create_sona_shadow_app(
+                    sona.runtime,
+                    sona.artifact,
+                    max_admitted_inferences=gpu.sona_max_admitted_inferences,
+                    inference_timeout_seconds=gpu.sona_inference_timeout_seconds,
+                ),
+                host="127.0.0.1",
+                port=gpu.sona_bind_port,
+                workers=1,
+                access_log=False,
+            )
+        except (DeletionEvidenceError, TrainingConsentEvidenceError) as privacy_error:
+            return _error(str(privacy_error), 3)
+        except SQLAlchemyError:
+            return _error("gpu_database_unavailable", 3)
+        finally:
+            engine.dispose()
         return 0
 
     try:
@@ -111,6 +139,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     configure_json_logging(service=SERVICE_NAME, level=worker_settings.log_level)
     engine = create_runtime_engine(worker_settings)
     try:
+        enforce_privacy_restore_guard(worker_settings, engine)
         readiness = PostgreSQLReadinessProbe(engine).check()
         if not readiness.ready:
             return _error(readiness.code or "gpu_database_unavailable", 3)
@@ -125,6 +154,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 }
             )
         sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+        from .worker import GpuWorkerCompositionError, compose_gpu_worker, run_gpu_worker
+
         try:
             worker = compose_gpu_worker(
                 sessions=sessions,
@@ -152,6 +183,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
             run_gpu_worker(worker)
         except SQLAlchemyError:
             return _error("gpu_database_unavailable", 3)
+    except (DeletionEvidenceError, TrainingConsentEvidenceError) as privacy_error:
+        return _error(str(privacy_error), 3)
     finally:
         engine.dispose()
     return 0

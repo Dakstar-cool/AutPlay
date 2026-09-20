@@ -11,10 +11,6 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import SecretStr
-from sqlalchemy import func, select
-from starlette.testclient import TestClient
-
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.models import AudioVariantRow, VaultObjectRow, VaultReplicaRow
 from autplay.adapters.postgresql.models.resource_admission import ResourceIoPermitRow
@@ -27,7 +23,11 @@ from autplay.entrypoints.resource_stream_http import ProcessStreamGateway
 from autplay.entrypoints.stream import create_stream_app
 from autplay.runtime.settings import StreamSettings
 from autplay.runtime.vault_io import VaultIoCoordinator
+from pydantic import SecretStr
+from sqlalchemy import func, select
+from starlette.testclient import TestClient
 
+from .resource_io_support import InProcessResourceTransport
 from .test_resource_admission_runtime import AdmissionHarness, admission, fence, play
 
 __all__ = ["admission"]
@@ -126,6 +126,7 @@ def test_gated_http_preserves_ranges_and_heads_without_unadmitted_file_reads(
         auth_service=cast(AuthService, Authentication(actor)),
         process_gateway=gateway,
     )
+    app.add_middleware(InProcessResourceTransport)
     address = f"/api/v1/stream/audio-variants/{variant_id}"
     auth = {"Authorization": "Bearer synthetic-access"}
     headers = {

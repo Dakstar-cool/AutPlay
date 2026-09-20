@@ -10,9 +10,6 @@ from time import monotonic
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import func, select
-from sqlalchemy.exc import DBAPIError
-
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_process_upload import ProcessVaultChunkWriter
 from autplay.adapters.postgresql.models import UploadSessionRow
@@ -29,6 +26,8 @@ from autplay.domain.resource_execution import ExecutionStatus, ExecutionTicket, 
 from autplay.domain.vault import OpaqueStorageKey, VaultLimits
 from autplay.runtime.resource_io_deadline import IoStopped
 from autplay.runtime.vault_io import VaultIoCoordinator
+from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 
 from .test_resource_admission_runtime import AdmissionHarness, admission, fence, present
 from .test_resource_upload_process import Upload, append

@@ -8,6 +8,7 @@ No invitation, bearer, refresh token, or private endpoint is passed to Gradle.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -39,6 +40,8 @@ from pydantic import SecretStr
 
 AUTH_SECRET = "m5b-disposable-android-e2e-signing-secret-v1"
 TEST_SELECTOR = "app.autplay.profilepairing.M5bProfilePairingE2eTest"
+QA_APPLICATION_ID = "app.autplay.qa"
+QA_TEST_APPLICATION_ID = "app.autplay.qa.test"
 
 
 def _free_port() -> int:
@@ -61,6 +64,23 @@ def _wait_ready(port: int) -> None:
         except OSError:
             time.sleep(0.2)
     raise RuntimeError("M5B API did not become ready")
+
+
+def _serial_sha256(serial: str) -> str:
+    return hashlib.sha256(serial.encode("utf-8")).hexdigest()
+
+
+def _assert_apk_package(aapt: Path, apk: Path, expected: str) -> None:
+    result = subprocess.run(
+        [str(aapt), "dump", "badging", str(apk)],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    if f"package: name='{expected}' " not in first_line:
+        raise RuntimeError("M5B side-by-side APK identity mismatch")
 
 
 class _OneShotInvitationApp:
@@ -109,8 +129,9 @@ class _OneShotInvitationApp:
 
 def _run_gradle(java_home: Path, android_home: Path, serial: str, port: int) -> None:
     adb = android_home / "platform-tools" / "adb.exe"
-    if not adb.is_file():
-        raise RuntimeError("adb.exe is unavailable")
+    aapt = android_home / "build-tools" / "36.1.0" / "aapt.exe"
+    if not adb.is_file() or not aapt.is_file():
+        raise RuntimeError("Android platform/build tools are unavailable")
     subprocess.run(
         [str(adb), "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"],
         cwd=REPOSITORY_ROOT,
@@ -125,6 +146,7 @@ def _run_gradle(java_home: Path, android_home: Path, serial: str, port: int) -> 
                 f"-Dorg.gradle.java.home={java_home}",
                 "--no-daemon",
                 "--console=plain",
+                "-Pautplay.qaSideBySide=true",
                 ":apps:android:assembleDebug",
                 ":apps:android:assembleDebugAndroidTest",
             ],
@@ -135,7 +157,11 @@ def _run_gradle(java_home: Path, android_home: Path, serial: str, port: int) -> 
         apk_root = REPOSITORY_ROOT / "apps" / "android" / "build" / "outputs" / "apk"
         target_apk = apk_root / "debug" / "android-debug.apk"
         test_apk = apk_root / "androidTest" / "debug" / "android-debug-androidTest.apk"
-        for apk in (target_apk, test_apk):
+        for apk, expected_package in (
+            (target_apk, QA_APPLICATION_ID),
+            (test_apk, QA_TEST_APPLICATION_ID),
+        ):
+            _assert_apk_package(aapt, apk, expected_package)
             subprocess.run(
                 [str(adb), "-s", serial, "install", "-r", "-t", str(apk)],
                 cwd=REPOSITORY_ROOT,
@@ -158,7 +184,7 @@ def _run_gradle(java_home: Path, android_home: Path, serial: str, port: int) -> 
                 "-e",
                 "m5bE2eBaseUrl",
                 f"http://127.0.0.1:{port}",
-                "app.autplay.test/androidx.test.runner.AndroidJUnitRunner",
+                f"{QA_TEST_APPLICATION_ID}/androidx.test.runner.AndroidJUnitRunner",
             ],
             cwd=REPOSITORY_ROOT,
             check=False,
@@ -166,12 +192,10 @@ def _run_gradle(java_home: Path, android_home: Path, serial: str, port: int) -> 
             text=True,
         )
         if instrumentation.returncode != 0 or "OK (1 test)" not in instrumentation.stdout:
-            safe_output = instrumentation.stdout.replace(
-                f"http://127.0.0.1:{port}", "<loopback>"
-            )[-4_000:]
-            raise RuntimeError(
-                "M5B Android instrumentation failed:\n" + safe_output
-            )
+            safe_output = instrumentation.stdout.replace(f"http://127.0.0.1:{port}", "<loopback>")[
+                -4_000:
+            ]
+            raise RuntimeError("M5B Android instrumentation failed:\n" + safe_output)
     finally:
         subprocess.run(
             [str(adb), "-s", serial, "reverse", "--remove", f"tcp:{port}"],
@@ -265,7 +289,7 @@ def run(*, java_home: Path, android_home: Path, serial: str, output: Path) -> di
                 "started_at": started.isoformat(),
                 "finished_at": finished.isoformat(),
                 "duration_seconds": round((finished - started).total_seconds(), 3),
-                "device_serial": serial,
+                "device_serial_sha256": _serial_sha256(serial),
                 "transport": "Android OkHttp pairing/sync -> FastAPI -> PostgreSQL 18.4/pgvector",
                 "one_shot_handoff": (
                     "loopback-only, consumed once, no invitation or bearer in Gradle arguments"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from uuid import UUID
 
@@ -10,12 +11,15 @@ from autplay.domain.resource_admission import (
     LEASE_TTL,
     MAX_WAITING_PER_ACCOUNT,
     WAITING_TTL,
+    AcquisitionClaim,
     ActivationFence,
     AdmissionState,
     AdmissionStatus,
     IoPermit,
+    LocalBridgeClaim,
     ResourceAdmission,
     ResourceAdmissionError,
+    ResourceAuthority,
     ResourceKind,
     ResourceRequest,
 )
@@ -32,6 +36,8 @@ from autplay.ports.resource_admission import (
     ResourceAdmissionUnitOfWorkFactory,
 )
 
+type ResourceActor = Principal | AcquisitionClaim | LocalBridgeClaim
+
 
 class ResourceAdmissionService:
     def __init__(self, units: ResourceAdmissionUnitOfWorkFactory) -> None:
@@ -40,22 +46,58 @@ class ResourceAdmissionService:
     def acquire(self, actor: Principal, request: ResourceRequest) -> AdmissionStatus:
         if request.resource_type not in {"PLAY_INSTANCE", "DOWNLOAD_INTENT", "UPLOAD_INTENT"}:
             raise ResourceAdmissionError("resource_request_invalid")
+        return self._acquire(actor, request)
+
+    def acquire_worker(self, actor: AcquisitionClaim) -> AdmissionStatus:
+        """Rebind a stable internal acquisition to its currently fenced job attempt."""
+        return self._acquire(actor, actor.request)
+
+    def acquire_bridge(self, actor: LocalBridgeClaim, request: ResourceRequest) -> AdmissionStatus:
+        """Admit only a local bridge upload; this authority is never accepted by HTTP."""
+        if request.resource_type != "UPLOAD_INTENT":
+            raise ResourceAdmissionError("resource_request_invalid")
+        return self._acquire(actor, request)
+
+    def _acquire(self, actor: ResourceActor, request: ResourceRequest) -> AdmissionStatus:
         with self._units() as unit:
             repo = unit.admissions
             now = repo.lock()
-            authority = repo.authenticate(actor, now)
+            authority = self._authenticate(repo, actor, now)
+            now = repo.current_time()
             repo.server_limit(request.kind)
-            digest = request.digest(authority)
+            digest = request.digest(
+                replace(authority, job_worker_id=None, job_attempt=None)
+                if isinstance(actor, AcquisitionClaim)
+                else authority
+            )
             operation = repo.find(request.operation_id)
+            preserve_waiting_age = False
             if operation is not None:
                 if operation.request_sha256 != digest:
                     raise ResourceAdmissionError("resource_operation_conflict")
                 operation.expire(now)
+                preserve_waiting_age = isinstance(actor, AcquisitionClaim) and (
+                    operation.state == AdmissionState.WAITING
+                    or (
+                        operation.state == AdmissionState.EXPIRED
+                        and operation.waiting_until is not None
+                        and operation.waiting_until > now
+                    )
+                )
                 if operation.state == AdmissionState.RELEASED:
                     return repo.status(operation, now)
+                if isinstance(actor, AcquisitionClaim) and operation.authority != authority:
+                    operation.authority = authority
+                    # A new job claim cannot inherit the previous worker's live activation.
+                    # Existing executions keep the old target charged until confirmed exit.
+                    if operation.state == AdmissionState.ACTIVE:
+                        operation.state = AdmissionState.EXPIRED
             repo.require_target(authority, request, now)
             if operation is None or operation.state == AdmissionState.EXPIRED:
-                if repo.waiting_count(actor.user_id, request.kind, now) >= MAX_WAITING_PER_ACCOUNT:
+                if (
+                    repo.waiting_count(authority.user_id, request.kind, now)
+                    >= MAX_WAITING_PER_ACCOUNT
+                ):
                     raise ResourceAdmissionError("resource_queue_full")
                 if operation is None:
                     operation = ResourceAdmission(
@@ -71,35 +113,44 @@ class ResourceAdmissionService:
                     )
                 # An old activation may still be draining. The scheduler waits for its permits.
                 operation.state, operation.terminal_at = AdmissionState.WAITING, None
-                operation.enqueued_at = now
+                if not preserve_waiting_age:
+                    operation.enqueued_at = now
                 operation.current_recording_id = operation.next_recording_id = None
             if operation.state == AdmissionState.WAITING:
-                operation.waiting_until, operation.updated_at = now + WAITING_TTL, now
+                operation.waiting_until = (
+                    None if isinstance(actor, AcquisitionClaim) else now + WAITING_TTL
+                )
+                operation.updated_at = now
             repo.save(operation)
             repo.advance(now)
             result = repo.status(self._found(repo, request.operation_id), now)
             unit.commit()
             return result
 
-    def poll(self, actor: Principal, operation_id: UUID) -> AdmissionStatus:
+    def poll(self, actor: ResourceActor, operation_id: UUID) -> AdmissionStatus:
         with self._units() as unit:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, operation_id, now)
+            now = repo.current_time()
             operation.expire(now)
             if operation.state == AdmissionState.WAITING:
-                operation.waiting_until, operation.updated_at = now + WAITING_TTL, now
+                operation.waiting_until = (
+                    None if isinstance(actor, AcquisitionClaim) else now + WAITING_TTL
+                )
+                operation.updated_at = now
             repo.save(operation)
             repo.advance(now)
             result = repo.status(self._found(repo, operation_id), now)
             unit.commit()
             return result
 
-    def renew(self, actor: Principal, fence: ActivationFence) -> AdmissionStatus:
+    def renew(self, actor: ResourceActor, fence: ActivationFence) -> AdmissionStatus:
         with self._units() as unit:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, fence.operation_id, now)
+            now = repo.current_time()
             self._active(operation, fence, now)
             repo.require_target(operation.authority, operation.request, now)
             operation.claimed_at = operation.claimed_at or now
@@ -110,11 +161,12 @@ class ResourceAdmissionService:
             unit.commit()
             return result
 
-    def release(self, actor: Principal, fence: ActivationFence) -> AdmissionStatus:
+    def release(self, actor: ResourceActor, fence: ActivationFence) -> AdmissionStatus:
         with self._units() as unit:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, fence.operation_id, now)
+            now = repo.current_time()
             if operation.fence != fence or operation.state == AdmissionState.WAITING:
                 raise ResourceAdmissionError("resource_activation_stale")
             operation.state = AdmissionState.RELEASED
@@ -127,12 +179,13 @@ class ResourceAdmissionService:
             return result
 
     def cancel_waiting(
-        self, actor: Principal, operation_id: UUID, digest: bytes
+        self, actor: ResourceActor, operation_id: UUID, digest: bytes
     ) -> AdmissionStatus:
         with self._units() as unit:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, operation_id, now)
+            now = repo.current_time()
             if operation.request_sha256 != digest:
                 raise ResourceAdmissionError("resource_operation_conflict")
             if operation.state not in {AdmissionState.WAITING, AdmissionState.RELEASED}:
@@ -148,7 +201,7 @@ class ResourceAdmissionService:
 
     def attach(
         self,
-        actor: Principal,
+        actor: ResourceActor,
         fence: ActivationFence,
         expected_revision: int,
         current_recording_id: UUID,
@@ -158,6 +211,7 @@ class ResourceAdmissionService:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, fence.operation_id, now)
+            now = repo.current_time()
             self._active(operation, fence, now)
             if operation.request.kind != ResourceKind.PLAYBACK:
                 raise ResourceAdmissionError("resource_purpose_mismatch")
@@ -185,7 +239,7 @@ class ResourceAdmissionService:
 
     def open_io(
         self,
-        actor: Principal,
+        actor: ResourceActor,
         fence: ActivationFence,
         target_id: UUID,
         *,
@@ -201,9 +255,10 @@ class ResourceAdmissionService:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, fence.operation_id, now)
+            now = repo.current_time()
             self._active(operation, fence, now)
             if resource_type is not None:
-                target_id = self._device_io_target(repo, operation, resource_type, target_id)
+                target_id = self._io_target(repo, operation, resource_type, target_id)
             self._target(repo, operation, target_id, now)
             maximum = 3 if operation.request.kind == ResourceKind.PLAYBACK else 1
             if len(repo.permits(fence.operation_id, now)) >= maximum:
@@ -217,7 +272,7 @@ class ResourceAdmissionService:
 
     def renew_io(
         self,
-        actor: Principal,
+        actor: ResourceActor,
         permit: IoPermit,
         *,
         resource_type: str | None = None,
@@ -227,11 +282,11 @@ class ResourceAdmissionService:
             repo = unit.admissions
             now = repo.lock()
             operation = self._owned(repo, actor, permit.fence.operation_id, now)
+            now = repo.current_time()
             self._active(operation, permit.fence, now)
             if resource_type is not None and (
                 target_id is None
-                or self._device_io_target(repo, operation, resource_type, target_id)
-                != permit.target_id
+                or self._io_target(repo, operation, resource_type, target_id) != permit.target_id
             ):
                 raise ResourceAdmissionError("resource_target_mismatch")
             # Removed playback attachments may drain, but cannot extend their I/O deadline.
@@ -241,14 +296,21 @@ class ResourceAdmissionService:
             return result
 
     @staticmethod
-    def _device_io_target(
+    def _io_target(
         repo: ResourceAdmissionRepository,
         operation: ResourceAdmission,
         resource_type: str,
         target_id: UUID,
     ) -> UUID:
         if (
-            resource_type not in {"PLAY_INSTANCE", "DOWNLOAD_INTENT", "UPLOAD_INTENT"}
+            resource_type
+            not in {
+                "PLAY_INSTANCE",
+                "DOWNLOAD_INTENT",
+                "UPLOAD_INTENT",
+                "INTERNET_ACQUISITION",
+                "DISCOVERY_ACQUISITION",
+            }
             or operation.request.resource_type != resource_type
         ):
             raise ResourceAdmissionError("resource_purpose_mismatch")
@@ -265,17 +327,17 @@ class ResourceAdmissionService:
             repo.advance(now)
             unit.commit()
 
-    def prepare_execution(self, actor: Principal, ticket: ExecutionTicket) -> ExecutionStatus:
+    def prepare_execution(self, actor: ResourceActor, ticket: ExecutionTicket) -> ExecutionStatus:
         """Commit registration before spawning or allowing a child to touch bytes."""
         with self._units() as unit:
             now = unit.admissions.lock()
-            self._execution_authority(unit.admissions, actor, ticket, now)
+            now = self._execution_authority(unit.admissions, actor, ticket, now)
             result = unit.executions.prepare(ticket, now)
             unit.commit()
             return result
 
     def start_execution(
-        self, actor: Principal, ticket: ExecutionTicket, child: ProcessIdentity
+        self, actor: ResourceActor, ticket: ExecutionTicket, child: ProcessIdentity
     ) -> ExecutionStatus:
         """Register the spawned, still waiting child before the adapter may send GO.
 
@@ -284,7 +346,7 @@ class ResourceAdmissionService:
         """
         with self._units() as unit:
             now = unit.admissions.lock()
-            self._execution_authority(unit.admissions, actor, ticket, now)
+            now = self._execution_authority(unit.admissions, actor, ticket, now)
             result = unit.executions.started(ticket, child, now)
             unit.commit()
             return result
@@ -293,20 +355,23 @@ class ResourceAdmissionService:
     def _execution_authority(
         cls,
         repo: ResourceAdmissionRepository,
-        actor: Principal,
+        actor: ResourceActor,
         ticket: ExecutionTicket,
         now: datetime,
-    ) -> None:
+    ) -> datetime:
         operation = cls._owned(repo, actor, ticket.permit.fence.operation_id, now)
+        now = repo.current_time()
         cls._active(operation, ticket.permit.fence, now)
         expected = {
             "PLAY_INSTANCE": ExecutionKind.VAULT_STREAM,
             "DOWNLOAD_INTENT": ExecutionKind.VAULT_STREAM,
             "UPLOAD_INTENT": ExecutionKind.VAULT_UPLOAD,
+            "INTERNET_ACQUISITION": ExecutionKind.PROVIDER,
+            "DISCOVERY_ACQUISITION": ExecutionKind.PROVIDER,
         }.get(operation.request.resource_type)
         if expected != ticket.kind:
             raise ResourceAdmissionError("resource_purpose_mismatch")
-        target = cls._device_io_target(
+        target = cls._io_target(
             repo,
             operation,
             operation.request.resource_type,
@@ -315,6 +380,7 @@ class ResourceAdmissionService:
         if target != ticket.permit.target_id:
             raise ResourceAdmissionError("resource_target_mismatch")
         cls._target(repo, operation, target, now)
+        return now
 
     def inspect_execution(self, ticket: ExecutionTicket) -> ExecutionStatus:
         """Trusted local reconciliation only; no client-accessible execution endpoint."""
@@ -322,7 +388,7 @@ class ResourceAdmissionService:
             unit.admissions.lock()
             return unit.executions.inspect(ticket)
 
-    def renew_execution_io(self, actor: Principal, ticket: ExecutionTicket) -> IoPermit:
+    def renew_execution_io(self, actor: ResourceActor, ticket: ExecutionTicket) -> IoPermit:
         """Renew permission and owner heartbeat atomically for one exact execution.
 
         Callers still anchor their local deadline at the start of this RPC. This
@@ -330,7 +396,7 @@ class ResourceAdmissionService:
         """
         with self._units() as unit:
             now = unit.admissions.lock()
-            self._execution_authority(unit.admissions, actor, ticket, now)
+            now = self._execution_authority(unit.admissions, actor, ticket, now)
             status = unit.executions.inspect(ticket)
             if status.state not in {ExecutionState.PREPARED, ExecutionState.RUNNING}:
                 raise ResourceAdmissionError("resource_io_stale")
@@ -393,15 +459,25 @@ class ResourceAdmissionService:
             raise ResourceAdmissionError()
         return operation
 
+    @staticmethod
+    def _authenticate(
+        repo: ResourceAdmissionRepository, actor: ResourceActor, now: datetime
+    ) -> ResourceAuthority:
+        if isinstance(actor, AcquisitionClaim):
+            return repo.authenticate_acquisition(actor, now)
+        if isinstance(actor, LocalBridgeClaim):
+            return repo.authenticate_bridge(actor, now)
+        return repo.authenticate(actor, now)
+
     @classmethod
     def _owned(
         cls,
         repo: ResourceAdmissionRepository,
-        actor: Principal,
+        actor: ResourceActor,
         operation_id: UUID,
         now: datetime,
     ) -> ResourceAdmission:
-        authority = repo.authenticate(actor, now)
+        authority = cls._authenticate(repo, actor, now)
         operation = cls._found(repo, operation_id)
         if operation.authority != authority:
             raise ResourceAdmissionError()

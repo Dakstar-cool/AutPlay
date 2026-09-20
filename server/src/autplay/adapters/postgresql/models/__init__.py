@@ -8,6 +8,12 @@ from .account import (
     UserAccountRow,
     UserSessionRow,
 )
+from .account_deletion import (
+    AccountDeletionHoldRow,
+    AccountDeletionRequestRow,
+    AccountPurgeReceiptRow,
+)
+from .account_recovery import AccountRecoveryCredentialRow, AccountRecoveryOperationRow
 from .audit import (
     AuditEventRow,
     CatalogChangeItemRow,
@@ -55,6 +61,10 @@ from .importing import (
     ImportJobRow,
     WebImportOperationReceiptRow,
 )
+from .ingest_cleanup import IngestCleanupClaimRow, IngestCleanupExecutionRow
+from .ingest_execution import IngestExecutionRow
+from .internal_io import InternalIoPolicyRow
+from .internet_music import InternetAcquisitionRow, InternetSearchRow
 from .jobs import (
     JobAttemptRow,
     JobDependencyRow,
@@ -67,6 +77,7 @@ from .library import (
     UserTrackRefExternalReferenceRow,
     UserTrackRefRow,
 )
+from .metadata_execution import MetadataExecutionRow, MetadataProviderGateRow
 from .ml import (
     EmbeddingBenchmarkReportRow,
     EmbeddingModelActivationRow,
@@ -85,6 +96,7 @@ from .ml import (
     TasteClusterMemberRow,
     TasteClusterRow,
 )
+from .orphan_object_claim import OrphanObjectClaimRow
 from .playlist import (
     PlaylistEntryRow,
     PlaylistRow,
@@ -105,6 +117,8 @@ from .profile_pairing import (
     TrustedDeviceKeyRow,
     TrustedDeviceReenrollmentChallengeRow,
 )
+from .provider_maintenance import ProviderMaintenanceRow
+from .provider_staging import ProviderStagingRow
 from .public_access import (
     AccountInvitationRow,
     AccountProvisioningLinkRow,
@@ -112,6 +126,16 @@ from .public_access import (
     AccountProvisioningRateWindowRow,
     AccountRegistrationReceiptRow,
 )
+from .resource_admission import (
+    AccountQuotaOverrideRow,
+    QuotaOperationReceiptRow,
+    ResourceAdmissionRow,
+    ResourceGrantCursorRow,
+    ResourceIoExecutionRow,
+    ResourceIoPermitRow,
+    ResourceQuotaPolicyRow,
+)
+from .self_device_pairing import SelfDevicePairingRow, SelfPairingCommandRow, SelfPairingRateRow
 from .social import (
     FriendRequestRow,
     FriendRoomInvitationRow,
@@ -139,6 +163,17 @@ from .sync import (
     TombstoneRow,
     UserInteractionEventRow,
 )
+from .track_metadata import MetadataArtworkRow, TrackMetadataRevisionRow, TrackMetadataRow
+from .training_consent import TrainingConsentOperationRow, TrainingConsentRow
+from .training_work import (
+    TrainingCheckpointRow,
+    TrainingCleanupClaimRow,
+    TrainingExecutionRow,
+    TrainingParticipantRow,
+    TrainingPublicationRevocationRow,
+    TrainingRunRow,
+)
+from .upload_cleanup import UploadCleanupClaimRow
 from .vault import (
     AcquisitionRecordRow,
     AudioFingerprintRow,
@@ -166,8 +201,50 @@ from .web_admin import (
     WebSessionRow,
     WebTerminalReceiptRow,
 )
+from .web_passkeys import WebPasskeyCeremonyRow, WebPasskeyRevocationRow, WebPasskeyRow
 
 MAPPED_ROWS: tuple[type[Base], ...] = (
+    TrainingRunRow,
+    TrainingParticipantRow,
+    TrainingPublicationRevocationRow,
+    TrainingCleanupClaimRow,
+    TrainingCheckpointRow,
+    TrainingExecutionRow,
+    TrainingConsentRow,
+    TrainingConsentOperationRow,
+    AccountDeletionHoldRow,
+    AccountDeletionRequestRow,
+    AccountPurgeReceiptRow,
+    AccountRecoveryCredentialRow,
+    AccountRecoveryOperationRow,
+    MetadataExecutionRow,
+    MetadataProviderGateRow,
+    InternalIoPolicyRow,
+    IngestExecutionRow,
+    IngestCleanupClaimRow,
+    IngestCleanupExecutionRow,
+    ProviderStagingRow,
+    OrphanObjectClaimRow,
+    UploadCleanupClaimRow,
+    ProviderMaintenanceRow,
+    ResourceQuotaPolicyRow,
+    AccountQuotaOverrideRow,
+    ResourceGrantCursorRow,
+    ResourceAdmissionRow,
+    ResourceIoExecutionRow,
+    ResourceIoPermitRow,
+    QuotaOperationReceiptRow,
+    SelfDevicePairingRow,
+    SelfPairingCommandRow,
+    SelfPairingRateRow,
+    WebPasskeyRow,
+    WebPasskeyCeremonyRow,
+    WebPasskeyRevocationRow,
+    MetadataArtworkRow,
+    TrackMetadataRevisionRow,
+    TrackMetadataRow,
+    InternetSearchRow,
+    InternetAcquisitionRow,
     UserAccountRow,
     DeviceRow,
     UserSessionRow,
@@ -301,10 +378,16 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
 
 __all__ = (
     "MAPPED_ROWS",
+    "AccountDeletionHoldRow",
+    "AccountDeletionRequestRow",
     "AccountInvitationRow",
     "AccountProvisioningLinkRow",
     "AccountProvisioningOperationReceiptRow",
     "AccountProvisioningRateWindowRow",
+    "AccountPurgeReceiptRow",
+    "AccountQuotaOverrideRow",
+    "AccountRecoveryCredentialRow",
+    "AccountRecoveryOperationRow",
     "AccountRegistrationReceiptRow",
     "AcquisitionAttemptRow",
     "AcquisitionRecordRow",
@@ -355,6 +438,12 @@ __all__ = (
     "IdempotencyRecordRow",
     "ImportEntryRow",
     "ImportJobRow",
+    "IngestCleanupClaimRow",
+    "IngestCleanupExecutionRow",
+    "IngestExecutionRow",
+    "InternalIoPolicyRow",
+    "InternetAcquisitionRow",
+    "InternetSearchRow",
     "JobAttemptRow",
     "JobDependencyRow",
     "JobRow",
@@ -365,13 +454,20 @@ __all__ = (
     "MatchPolicyActivationRow",
     "MatcherReleaseRow",
     "MediumRow",
+    "MetadataArtworkRow",
+    "MetadataExecutionRow",
+    "MetadataProviderGateRow",
     "OfflineRecommendationPackRow",
+    "OrphanObjectClaimRow",
     "PlaylistEntryRow",
     "PlaylistRow",
     "PresenceHeartbeatRow",
     "PresenceSettingsRow",
     "ProfileLifecycleCommandRow",
     "ProfileStatisticsSettingsRow",
+    "ProviderMaintenanceRow",
+    "ProviderStagingRow",
+    "QuotaOperationReceiptRow",
     "RecommendationAdaptiveProfileRow",
     "RecommendationInputSnapshotRow",
     "RecommendationItemRow",
@@ -388,6 +484,14 @@ __all__ = (
     "ReleaseGroupRow",
     "ReleaseRow",
     "ReleaseTrackRow",
+    "ResourceAdmissionRow",
+    "ResourceGrantCursorRow",
+    "ResourceIoExecutionRow",
+    "ResourceIoPermitRow",
+    "ResourceQuotaPolicyRow",
+    "SelfDevicePairingRow",
+    "SelfPairingCommandRow",
+    "SelfPairingRateRow",
     "ServerInstanceRow",
     "SessionRotationReceiptRow",
     "SmartPlaylistRuleRow",
@@ -401,9 +505,20 @@ __all__ = (
     "TasteClusterRow",
     "ThresholdSetRow",
     "TombstoneRow",
+    "TrackMetadataRevisionRow",
+    "TrackMetadataRow",
+    "TrainingCheckpointRow",
+    "TrainingCleanupClaimRow",
+    "TrainingConsentOperationRow",
+    "TrainingConsentRow",
+    "TrainingExecutionRow",
+    "TrainingParticipantRow",
+    "TrainingPublicationRevocationRow",
+    "TrainingRunRow",
     "TrustedDeviceKeyRow",
     "TrustedDeviceReenrollmentChallengeRow",
     "UploadChunkRow",
+    "UploadCleanupClaimRow",
     "UploadSessionRow",
     "UserAccountRow",
     "UserBlockRow",
@@ -417,6 +532,9 @@ __all__ = (
     "WebImportOperationReceiptRow",
     "WebLoginChallengeRow",
     "WebLoginRateWindowRow",
+    "WebPasskeyCeremonyRow",
+    "WebPasskeyRevocationRow",
+    "WebPasskeyRow",
     "WebSessionInvitationRow",
     "WebSessionRotationEvidenceRow",
     "WebSessionRow",

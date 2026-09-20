@@ -43,13 +43,26 @@ class ReconciledChunkWriter(Protocol):
         key: OpaqueStorageKey,
         *,
         committed_size: int,
+        expected_size: int,
         offset: int,
         payload: bytes,
         payload_sha256: Sha256Digest,
     ) -> ChunkWriteResult: ...
 
 
-class VaultStorage(Protocol):
+class IngestStorage(Protocol):
+    """Narrow ports implemented by direct storage or a contained WORK stream."""
+
+    def available_bytes(self) -> int: ...
+    def verify_staging(self, key: OpaqueStorageKey) -> VerifiedStagedFile: ...
+    def staging_path_for_media(self, key: OpaqueStorageKey) -> Path: ...
+    def commit_staging(
+        self, key: OpaqueStorageKey, verified: VerifiedStagedFile
+    ) -> CommitResult: ...
+    def cleanup_staging(self, key: OpaqueStorageKey) -> None: ...
+
+
+class VaultStorage(IngestStorage, Protocol):
     """Crash-safe local/NAS immutable-byte storage operations."""
 
     def available_bytes(self) -> int:

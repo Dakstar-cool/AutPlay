@@ -133,7 +133,7 @@ class SqlAlchemyResourcePolicyRepository:
     def editor(self, target: UUID | None, now: datetime) -> QuotaEditorSnapshot:
         row = ResourceAdmissionRow
         charged = SqlAlchemyResourceAdmissionRepository.charged(now)
-        waiting = and_(row.state == "WAITING", row.waiting_until > now)
+        waiting = SqlAlchemyResourceAdmissionRepository.waiting(now)
         counts = select(
             func.count().filter(and_(row.kind == "PLAYBACK", charged)),
             func.count().filter(and_(row.kind == "TRANSFER", charged)),

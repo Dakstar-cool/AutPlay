@@ -98,7 +98,7 @@ class UserAccountRow(Base):
             name="ck_user_account_role",
         ),
         CheckConstraint(
-            "status IN ('ACTIVE', 'DISABLED')",
+            "status IN ('ACTIVE', 'DISABLED', 'DELETION_PENDING')",
             name="ck_user_account_status",
         ),
         {"schema": "account"},

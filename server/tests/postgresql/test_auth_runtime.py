@@ -15,10 +15,6 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from psycopg import Connection
-from sqlalchemy import Engine, create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.auth_runtime import SqlAlchemyAuthUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec, OpaqueRefreshTokenCodec
 from autplay.adapters.system import Uuid7Generator
@@ -36,6 +32,9 @@ from autplay.domain.auth import (
     TokenPair,
 )
 from autplay.entrypoints.admin import run_bootstrap
+from psycopg import Connection
+from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 ACCESS_SECRET = b"p03-test-access-secret-with-at-least-thirty-two-bytes"
 ISSUER = "autplay-p03-test"

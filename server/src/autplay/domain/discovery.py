@@ -20,8 +20,8 @@ class DiscoveryError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class DiscoveryCandidate:
-    """Bounded Jamendo evidence; it is never canonical Catalog identity."""
+class DiscoveryEvidence:
+    """Bounded provider metadata without a credential-bearing download address."""
 
     provider_track_id: str
     provider_artist_id: str
@@ -32,7 +32,6 @@ class DiscoveryCandidate:
     license_url: str
     share_url: str
     acquisition_allowed: bool
-    download_url: str | None = None
 
     def __post_init__(self) -> None:
         if _TRACK_ID.fullmatch(self.provider_track_id) is None:
@@ -50,6 +49,18 @@ class DiscoveryCandidate:
             raise ValueError("candidate license URL is invalid")
         if not _is_jamendo_share_url(self.share_url):
             raise ValueError("candidate share URL is invalid")
+        if type(self.acquisition_allowed) is not bool:
+            raise ValueError("candidate acquisition evidence is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryCandidate(DiscoveryEvidence):
+    """Provider-local download evidence; it is never canonical Catalog identity."""
+
+    download_url: str | None = None
+
+    def __post_init__(self) -> None:
+        DiscoveryEvidence.__post_init__(self)
         if self.acquisition_allowed != (self.download_url is not None):
             raise ValueError("candidate acquisition evidence is inconsistent")
         if self.download_url is not None and not _is_jamendo_download_url(
@@ -245,6 +256,7 @@ __all__ = (
     "BulkArtistResolution",
     "DiscoveryCandidate",
     "DiscoveryError",
+    "DiscoveryEvidence",
     "ProviderArtist",
     "ProviderArtistTracks",
     "ProviderTrackObservation",

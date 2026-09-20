@@ -46,7 +46,9 @@ quote-style = "double"
 python_version = "3.14"
 strict = true
 files = ["src", "tests"]
+mypy_path = "../server/src"
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
+pythonpath = ["src", "../server/src"]

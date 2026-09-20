@@ -14,6 +14,7 @@ from autplay.adapters.postgresql.import_runtime import (
     ImportStartResult,
     PostgresImportRepository,
 )
+from autplay.adapters.postgresql.models import ImportEntryRow
 from autplay.application.job_worker import JobExecutionContext
 from autplay.application.source_adapters import GenericUserExportSourceAdapter
 from autplay.application.sync import CatalogArtistSyncPublisher
@@ -168,7 +169,12 @@ class ImportService:
             # Review is the production boundary that can resolve/create a recording.
             # Publish its complete owner-visible catalog closure before this commit.
             if result.recording_id is not None:
-                self._catalog_publisher.publish(session, principal.user_id)
+                entry = session.get(ImportEntryRow, import_entry_id)
+                if entry is None or entry.user_track_ref_id is None:
+                    raise RuntimeError("resolved_import_missing_track_ref")
+                self._catalog_publisher.publish(
+                    session, principal.user_id, ref_ids=(entry.user_track_ref_id,)
+                )
             session.commit()
             return result
 

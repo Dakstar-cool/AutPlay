@@ -80,23 +80,49 @@ class FilesystemVaultStorage:
     _QUARANTINE = "quarantine"
     _BINARY = getattr(os, "O_BINARY", 0)
 
-    def __init__(self, root: Path, *, limits: VaultLimits | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        limits: VaultLimits | None = None,
+        _initialize: bool = True,
+    ) -> None:
         self._root = root.resolve(strict=False)
         self._limits = limits or VaultLimits()
         try:
-            self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if _initialize:
+                self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
             self._require_directory(self._root)
             for name in (self._STAGING, self._OBJECTS, self._QUARANTINE):
                 directory = self._root / name
-                directory.mkdir(mode=0o700, exist_ok=True)
+                if _initialize:
+                    directory.mkdir(mode=0o700, exist_ok=True)
                 self._require_directory(directory)
             if (
                 os.stat(self._root / self._STAGING).st_dev
                 != os.stat(self._root / self._OBJECTS).st_dev
             ):
                 raise StorageSafetyError()
+            if _initialize:
+                # Directory creation may be a retry after a child died before fsync.
+                # Sync entries even when mkdir found them present. Start with the
+                # three Vault subdirectories, then publish root and every ancestor
+                # that mkdir(parents=True) could have created on an earlier attempt.
+                self._fsync_parent(self._root / self._STAGING)
+                directory = self._root
+                while directory != directory.parent:
+                    self._fsync_parent(directory)
+                    directory = directory.parent
         except OSError as error:
             raise StorageOperationError() from error
+
+    @classmethod
+    def open_existing(
+        cls, root: Path, *, limits: VaultLimits | None = None
+    ) -> FilesystemVaultStorage:
+        """Open a provisioned Vault without issuing any filesystem write."""
+
+        return cls(root, limits=limits, _initialize=False)
 
     def available_bytes(self) -> int:
         """Return free bytes without exposing the configured filesystem path."""
@@ -113,6 +139,7 @@ class FilesystemVaultStorage:
         """Create a new zero-length staging file without replacing another upload."""
 
         path = self._staging_path(key)
+        self._require_safe_ancestors(path.parent)
         try:
             descriptor = os.open(
                 path,
@@ -128,6 +155,20 @@ class FilesystemVaultStorage:
             raise ImmutableObjectConflictError() from error
         except OSError as error:
             raise StorageOperationError() from error
+
+    def prepare_upload_staging(self, key: OpaqueStorageKey, committed_size: int) -> None:
+        """Reconcile a locked upload; only a zero receipt offset permits creation."""
+
+        try:
+            self.truncate_staging(key, committed_size)
+        except StagedFileNotFoundError:
+            if committed_size != 0:
+                raise
+            self.create_staging(key)
+        if committed_size == 0:
+            # A prior child may have died after O_EXCL but before directory fsync.
+            # Retrying its zero-offset file must make that entry durable as well.
+            self._fsync_parent(self._staging_path(key))
 
     def write_chunk(
         self,
@@ -228,8 +269,16 @@ class FilesystemVaultStorage:
         destination_key = OpaqueStorageKey(verified.sha256.hex)
         destination = self._object_path(destination_key)
         try:
-            destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self._require_directory(destination.parent)
+            # Do not descend through an existing intermediate link while creating
+            # shards: validation after link() is too late to protect other paths.
+            current = self._root / self._OBJECTS
+            self._require_safe_ancestors(current)
+            for part in destination.parent.relative_to(current).parts:
+                current = current / part
+                self._require_safe_ancestors(current.parent)
+                current.mkdir(mode=0o700, exist_ok=True)
+                self._require_directory(current)
+            self._require_safe_ancestors(destination.parent)
             try:
                 os.link(source, destination)
             except FileExistsError:
@@ -237,15 +286,23 @@ class FilesystemVaultStorage:
                 if existing != verified:
                     raise ImmutableObjectConflictError() from None
                 self._seal_immutable(destination)
-                self._fsync_parent(destination)
+                self._sync_publication(destination)
                 return CommitResult(storage_key=destination_key, already_present=True)
             self._seal_immutable(destination)
-            self._fsync_parent(destination)
+            self._sync_publication(destination)
             return CommitResult(storage_key=destination_key, already_present=False)
         except ImmutableObjectConflictError:
             raise
         except OSError as error:
             raise StorageOperationError() from error
+
+    def _sync_publication(self, destination: Path) -> None:
+        # Persist every shard entry, including exist_ok replay after an earlier
+        # crash, before staging can become eligible for durable deletion.
+        current = destination
+        while current != self._root:
+            self._fsync_parent(current)
+            current = current.parent
 
     def cleanup_staging(self, key: OpaqueStorageKey) -> None:
         """Unlink a verified staging entry only after application DB finalization."""
@@ -408,14 +465,14 @@ class FilesystemVaultStorage:
     def _assert_safe_file(self, path: Path, *, missing_as_staged: bool) -> None:
         self._require_safe_ancestors(path.parent)
         try:
-            mode = os.lstat(path).st_mode
+            observed = os.lstat(path)
         except FileNotFoundError as error:
             if missing_as_staged:
                 raise StagedFileNotFoundError() from error
             raise StorageSafetyError() from error
         except OSError as error:
             raise StorageOperationError() from error
-        if not stat.S_ISREG(mode):
+        if not stat.S_ISREG(observed.st_mode) or self._is_reparse(observed):
             raise StorageSafetyError()
 
     def _require_safe_ancestors(self, directory: Path) -> None:
@@ -432,11 +489,18 @@ class FilesystemVaultStorage:
     @staticmethod
     def _require_directory(path: Path) -> None:
         try:
-            mode = os.lstat(path).st_mode
+            observed = os.lstat(path)
         except OSError as error:
             raise StorageSafetyError() from error
-        if not stat.S_ISDIR(mode):
+        if not stat.S_ISDIR(observed.st_mode) or FilesystemVaultStorage._is_reparse(observed):
             raise StorageSafetyError()
+
+    @staticmethod
+    def _is_reparse(observed: os.stat_result) -> bool:
+        return bool(
+            getattr(observed, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        )
 
     def _verify_final(self, path: Path) -> VerifiedStagedFile:
         descriptor = self._open_regular(path, missing_as_staged=False, writable=False)

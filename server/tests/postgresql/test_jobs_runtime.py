@@ -41,6 +41,7 @@ TEST_KEY = JobKey("p03.test", 1)
 LEASE = timedelta(minutes=5)
 
 
+@pytest.mark.usefixtures("internal_io_budget")
 def test_worker_cli_readiness_and_once_use_the_migrated_database(
     database_url: str, tmp_path: Path
 ) -> None:

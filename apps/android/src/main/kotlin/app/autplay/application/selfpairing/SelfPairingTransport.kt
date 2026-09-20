@@ -78,8 +78,14 @@ class OkHttpSelfPairingTransport(
                     if (!source.request(4097)) {
                         val raw = source.readByteArray()
                         try {
-                            val document = runCatching { SelfPairingJson.parse(raw, 4096) }.getOrNull()
-                            val candidate = document?.let { runCatching { it.text("error_code") }.getOrNull() }
+                            val document = runCatching {
+                                SelfPairingJson.parse(raw, 4096, maxDepth = 2)
+                            }.getOrNull()
+                            val candidate = (document?.get("error") as? JsonObject)
+                                ?.let { runCatching { it.text("code") }.getOrNull() }
+                                ?: document?.let {
+                                    runCatching { it.text("error_code") }.getOrNull()
+                                }
                             if (candidate in setOf("self_pairing_revision_conflict", "operation_conflict", "account_device_limit_reached", "self_pairing_key_already_bound")) code = requireNotNull(candidate)
                         } finally { raw.fill(0) }
                     }

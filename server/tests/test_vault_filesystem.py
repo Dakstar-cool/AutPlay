@@ -34,6 +34,25 @@ def _storage(tmp_path: Path) -> FilesystemVaultStorage:
     )
 
 
+def test_open_existing_requires_provisioned_directories_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FilesystemVaultStorage(tmp_path)
+
+    def reject_write(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("read-only open attempted a filesystem write")
+
+    monkeypatch.setattr(Path, "mkdir", reject_write)
+    monkeypatch.setattr(FilesystemVaultStorage, "_fsync_parent", reject_write)
+    assert isinstance(FilesystemVaultStorage.open_existing(tmp_path), FilesystemVaultStorage)
+
+
+def test_open_existing_rejects_an_unprovisioned_vault(tmp_path: Path) -> None:
+    with pytest.raises(StorageSafetyError):
+        FilesystemVaultStorage.open_existing(tmp_path / "missing")
+
+
 def test_chunk_offset_hash_and_duplicate_retry_are_enforced(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     assert storage.available_bytes() > 0

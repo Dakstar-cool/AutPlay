@@ -6,10 +6,9 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
-
 from autplay.adapters.postgresql.models import AudioVariantRow, LibraryEntryRow
 from autplay.domain.resource_admission import ResourceAdmissionError, ResourceKind, ResourceRequest
+from sqlalchemy import select
 
 from .test_resource_admission_runtime import AdmissionHarness, fence, play, present
 from .test_resource_admission_runtime import admission as admission
