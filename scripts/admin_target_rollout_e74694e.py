@@ -10,7 +10,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path("/srv/autplay/production/admin-target-e74694e107a7")
 IMAGE = "autplay-admin-acceptance:e74694e107a7"
@@ -79,7 +79,8 @@ class DockerConnection(http.client.HTTPConnection):
         super().__init__("localhost", timeout=60)
 
     def connect(self) -> None:
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        unix_family = cast(socket.AddressFamily, socket.AF_UNIX)  # type: ignore[attr-defined]
+        self.sock = socket.socket(unix_family, socket.SOCK_STREAM)
         self.sock.connect("/var/run/docker.sock")
 
 
@@ -175,7 +176,7 @@ def common_runtime(spec: dict[str, Any], *, ledger_mode: str = "rw") -> None:
 
 def replacement(old: dict[str, Any]) -> dict[str, Any]:
     name = old["Name"].lstrip("/")
-    spec = copy.deepcopy(old["Config"])
+    spec = cast(dict[str, Any], copy.deepcopy(old["Config"]))
     spec["Image"] = IMAGE
     spec.setdefault("Labels", {})["com.autplay.admin-target"] = "e74694e107a7"
     spec["HostConfig"] = copy.deepcopy(old["HostConfig"])

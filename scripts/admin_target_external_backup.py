@@ -177,7 +177,7 @@ class RemoteControlReporter:
         self.helper_image = helper_image
 
     def _read_text(self, path: str) -> str:
-        arguments = ("cat", path)
+        arguments: tuple[str, ...] = ("cat", path)
         if self.helper_image is not None:
             arguments = (
                 "docker",
