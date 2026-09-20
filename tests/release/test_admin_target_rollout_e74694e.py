@@ -58,3 +58,23 @@ def test_inspected_specs_with_null_binds_transform_into_replacements() -> None:
     binds = migration["HostConfig"].get("Binds") or []
     assert all("privacy-ledger" not in bind for bind in binds)
     assert all("training-consent-ledger" not in bind for bind in binds)
+
+
+def test_private_storage_uses_utf8_safe_independent_keys(monkeypatch) -> None:
+    rollout = _load_rollout()
+    input_programs: list[str] = []
+
+    def fake_run(*arguments: str, input_text: str | None = None):
+        del arguments
+        if input_text is not None:
+            input_programs.append(input_text)
+
+    monkeypatch.setattr(rollout, "run", fake_run)
+    monkeypatch.setattr(rollout, "docker", lambda *arguments: "")
+
+    rollout.prepare_private_storage()
+
+    assert len(input_programs) == 1
+    compile(input_programs[0], "ledger-key-program", "exec")
+    assert "secrets.token_urlsafe(48).encode('ascii')" in input_programs[0]
+    assert "os.urandom" not in input_programs[0]
