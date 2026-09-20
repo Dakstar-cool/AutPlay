@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -216,3 +217,28 @@ def test_remote_control_helper_reads_owner_only_spool(
         "docker run --rm --log-driver none --network none --user 999:999 --volume "
     )
     assert "--entrypoint cat autplay-admin-acceptance:504cf8310f3f" in observed[0]
+
+
+def test_remote_control_missing_status_is_an_idle_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(ssh_target: str, command: str) -> str:
+        raise subprocess.CalledProcessError(
+            1,
+            command,
+            stderr=(
+                "cat: /srv/autplay/operator/backup-control/status.json: "
+                "No such file or directory"
+            ),
+        )
+
+    monkeypatch.setattr(tool, "_remote_output", missing)
+    reporter = tool.RemoteControlReporter(
+        "operator@example",
+        "/srv/autplay/operator/backup-control",
+        "windows-usb-e",
+        "admin-target-20260920T180629Z",
+        "autplay-admin-acceptance:504cf8310f3f",
+    )
+
+    assert reporter.request_is_pending() is False

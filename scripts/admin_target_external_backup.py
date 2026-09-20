@@ -221,6 +221,10 @@ class RemoteControlReporter:
         status_path = str(PurePosixPath(self.root) / "status.json")
         try:
             value = json.loads(self._read_text(status_path))
+        except subprocess.CalledProcessError as error:
+            if "No such file or directory" in (error.stderr or ""):
+                return False
+            raise ExternalBackupError("backup_status_unavailable") from error
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise ExternalBackupError("backup_status_invalid") from error
         if not isinstance(value, dict):
