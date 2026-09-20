@@ -248,6 +248,7 @@ def wait_healthy(name: str, attempts: int = 90) -> None:
 def prepare_private_storage() -> None:
     key_program = """
 import os
+import secrets
 from pathlib import Path
 for name in ('deletion-ledger-key', 'training-consent-ledger-key'):
     path = Path('/secrets') / name
@@ -255,7 +256,7 @@ for name in ('deletion-ledger-key', 'training-consent-ledger-key'):
         raise SystemExit('ledger_key_already_exists:' + name)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
     try:
-        os.write(descriptor, os.urandom(48))
+        os.write(descriptor, secrets.token_urlsafe(48).encode('ascii'))
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
