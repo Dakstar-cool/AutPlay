@@ -290,9 +290,7 @@ class BackupControlService:
                     else None
                 ),
                 message_code=(
-                    str(value["message_code"])
-                    if value.get("message_code") is not None
-                    else None
+                    str(value["message_code"]) if value.get("message_code") is not None else None
                 ),
                 updated_at=str(value["updated_at"]),
             )
@@ -301,20 +299,12 @@ class BackupControlService:
         if (
             status.state not in _STATUS_STATES
             or status.bytes_written < 0
-            or (
-                status.target_id is not None
-                and status.target_id not in self._target_ids
-            )
+            or (status.target_id is not None and status.target_id not in self._target_ids)
             or (
                 status.max_backup_bytes is not None
-                and not _MINIMUM_MAX_BYTES
-                <= status.max_backup_bytes
-                <= _MAXIMUM_MAX_BYTES
+                and not _MINIMUM_MAX_BYTES <= status.max_backup_bytes <= _MAXIMUM_MAX_BYTES
             )
-            or (
-                status.warning_percent is not None
-                and not 50 <= status.warning_percent <= 99
-            )
+            or (status.warning_percent is not None and not 50 <= status.warning_percent <= 99)
         ):
             raise WebAdminError("backup_control_unavailable")
         return status

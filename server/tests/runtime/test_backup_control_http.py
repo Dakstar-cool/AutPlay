@@ -6,24 +6,21 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from autplay.application.backup_control import BackupControlService, parse_backup_targets
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import AuthenticatedWebSession, WebActor, WebAdminError
 from autplay.entrypoints.admin_web_http import WebAdminHttp
 from autplay.entrypoints.backup_control_http import create_backup_control_router
 from autplay.web.renderer import AdminTemplateRenderer
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class _Web:
     def __init__(self) -> None:
         self.actor = WebActor(uuid4(), uuid4(), uuid4(), AccountRole.OWNER, 1)
 
-    def authenticate(
-        self, bearer: bytes, *, mutation: bool
-    ) -> AuthenticatedWebSession:
+    def authenticate(self, bearer: bytes, *, mutation: bool) -> AuthenticatedWebSession:
         del mutation
         if bearer != b"session":
             raise WebAdminError("authentication_required")
@@ -44,8 +41,7 @@ def _client(tmp_path: Path) -> tuple[TestClient, BackupControlService]:
     service = BackupControlService(
         tmp_path / "control",
         parse_backup_targets(
-            '[{"id":"workstation-usb-e","label":"External USB E",'
-            '"kind":"external-agent"}]'
+            '[{"id":"workstation-usb-e","label":"External USB E","kind":"external-agent"}]'
         ),
     )
     app = FastAPI()

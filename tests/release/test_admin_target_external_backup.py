@@ -266,9 +266,7 @@ def test_automatic_schedule_claims_one_weekly_slot(
         "automatic-slot.json": None,
     }
     writes: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(
-        reporter, "_read_optional_document", lambda name: documents.get(name)
-    )
+    monkeypatch.setattr(reporter, "_read_optional_document", lambda name: documents.get(name))
     monkeypatch.setattr(
         reporter, "_write_document", lambda name, payload: writes.append((name, payload))
     )
@@ -304,9 +302,7 @@ def test_automatic_schedule_does_not_repeat_claimed_slot(
             "schedule_slot": "2026-09-20T03",
         },
     }
-    monkeypatch.setattr(
-        reporter, "_read_optional_document", lambda name: documents.get(name)
-    )
+    monkeypatch.setattr(reporter, "_read_optional_document", lambda name: documents.get(name))
 
     assert reporter.resolve_run(tool.datetime(2026, 9, 20, 3, 59, tzinfo=tool.UTC)) is None
 
@@ -346,8 +342,7 @@ def test_remote_control_missing_status_is_an_idle_noop(
             1,
             command,
             stderr=(
-                "cat: /srv/autplay/operator/backup-control/status.json: "
-                "No such file or directory"
+                "cat: /srv/autplay/operator/backup-control/status.json: No such file or directory"
             ),
         )
 

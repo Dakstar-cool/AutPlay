@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import SecretStr
-
 from autplay.runtime.settings import (
     ApiSettings,
     RuntimeProfile,
@@ -15,6 +13,7 @@ from autplay.runtime.settings import (
     load_api_settings,
     load_worker_settings,
 )
+from pydantic import SecretStr
 
 DATABASE_URL = "postgresql+psycopg://runtime_user:database-password@127.0.0.1:5432/autplay"
 AUTH_SECRET = "api-signing-secret-with-at-least-thirty-two-bytes"
@@ -412,10 +411,7 @@ def test_admin_backup_control_requires_web_targets_and_absolute_spool(tmp_path: 
         "auth_signing_secret": SecretStr(AUTH_SECRET),
         "public_access_source_hmac_secret": SecretStr(PUBLIC_SOURCE_SECRET),
     }
-    targets = (
-        '[{"id":"workstation-usb-e","label":"External USB E",'
-        '"kind":"external-agent"}]'
-    )
+    targets = '[{"id":"workstation-usb-e","label":"External USB E","kind":"external-agent"}]'
     with pytest.raises(ValueError, match="targets and a control root"):
         ApiSettings.model_validate(base | {"admin_backup_targets_json": targets})
     with pytest.raises(ValueError, match="enabled Admin Web"):

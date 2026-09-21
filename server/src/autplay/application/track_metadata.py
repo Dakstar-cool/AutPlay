@@ -9,11 +9,16 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import rfc8785
-from sqlalchemy import String, cast, func, select, true
+from sqlalchemy import String, cast, select, true, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
+from autplay.adapters.postgresql.metadata_authority import lock_metadata_job
+from autplay.adapters.postgresql.metadata_execution import (
+    MetadataStatus,
+    require_metadata_execution,
+)
 from autplay.adapters.postgresql.models import (
     JobRow,
     LibraryEntryRow,
@@ -21,6 +26,8 @@ from autplay.adapters.postgresql.models import (
     SyncEventRow,
     UserTrackRefRow,
 )
+from autplay.adapters.postgresql.models.account import UserAccountRow
+from autplay.adapters.postgresql.models.metadata_execution import MetadataExecutionRow
 from autplay.adapters.postgresql.models.track_metadata import (
     MetadataArtworkRow,
     TrackMetadataRevisionRow,
@@ -32,6 +39,7 @@ from autplay.application.music_library import MusicError, MusicLibraryService
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.domain.auth import Principal
 from autplay.domain.jobs import JobKey
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.track_metadata import (
     FieldEvidence,
     MetadataDocument,
@@ -51,12 +59,17 @@ def document_from(row: TrackMetadataRow) -> MetadataDocument:
 
 
 class TrackMetadataService:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
-        self.sessions = sessions
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        execution: MetadataStatus | None = None,
+    ) -> None:
+        self.sessions, self.execution = sessions, execution
 
     def get(self, principal: Principal, ref_id: UUID) -> dict[str, Any]:
         with self.sessions.begin() as session:
-            MusicLibraryService._owned_ref(session, principal, ref_id)
+            MusicLibraryService._owned_ref(session, principal.user_id, ref_id)
             row = session.get(TrackMetadataRow, ref_id)
             return (
                 metadata_view(row)
@@ -99,7 +112,7 @@ class TrackMetadataService:
         ).digest()
         with self.sessions.begin() as session:
             _acquire_sync_owner_publish_lock(session, principal.user_id)
-            ref = MusicLibraryService._owned_ref(session, principal, ref_id)
+            ref = MusicLibraryService._owned_ref(session, principal.user_id, ref_id)
             receipt = session.scalar(
                 select(TrackMetadataRevisionRow).where(
                     TrackMetadataRevisionRow.user_track_ref_id == ref_id,
@@ -300,6 +313,13 @@ class TrackMetadataService:
                     payload={
                         "user_track_ref_id": str(ref.user_track_ref_id),
                         "generation": row.generation,
+                        "authority_generation": session.scalar(
+                            select(UserAccountRow.authority_generation).where(
+                                UserAccountRow.user_id == ref.user_id,
+                                UserAccountRow.status == "ACTIVE",
+                                UserAccountRow.deleted_at.is_(None),
+                            )
+                        ),
                     },
                     priority=0 if interactive else 3,
                     idempotency_scope=f"metadata:{ref.user_track_ref_id}",
@@ -311,7 +331,7 @@ class TrackMetadataService:
 
     def artwork(self, principal: Principal, ref_id: UUID, sha256: str) -> bytes:
         with self.sessions.begin() as session:
-            MusicLibraryService._owned_ref(session, principal, ref_id)
+            MusicLibraryService._owned_ref(session, principal.user_id, ref_id)
             row = session.get(TrackMetadataRow, ref_id)
             if row is None or row.artwork_sha256 != sha256:
                 raise MusicError("metadata_artwork_missing", "The artwork is unavailable.", 404)
@@ -367,52 +387,35 @@ class TrackMetadataService:
             )
         )
 
-    @staticmethod
     def locked_job(
-        session: Session, ref_id: UUID, generation: int, context: JobExecutionContext
+        self,
+        session: Session,
+        ref_id: UUID,
+        generation: int,
+        context: JobExecutionContext,
     ) -> tuple[UserTrackRefRow, TrackMetadataRow]:
-        fence = context.fence
-        # Same order as commands: owner publication lock, then job/track locks.
-        user_id = session.scalar(select(JobRow.user_id).where(JobRow.job_id == fence.job_id))
-        if user_id is None:
-            raise JobLeaseLost
-        _acquire_sync_owner_publish_lock(session, user_id)
-        job = session.scalar(
-            select(JobRow)
-            .where(
-                JobRow.job_id == fence.job_id,
-                JobRow.state == "RUNNING",
-                JobRow.lease_owner == fence.worker_id,
-                JobRow.attempt_count == fence.attempt_no,
-                JobRow.lease_deadline > func.now(),
-                JobRow.cancel_requested_at.is_(None),
+        ref, row, _ = lock_metadata_job(session, ref_id, generation, context.fence)
+        if self.execution is not None:
+            ticket = self.execution.ticket
+            if (ticket.user_track_ref_id, ticket.generation, ticket.fence) != (
+                ref_id,
+                generation,
+                context.fence,
+            ):
+                raise JobLeaseLost
+            require_metadata_execution(session, self.execution)
+        elif (
+            session.scalar(
+                select(MetadataExecutionRow.execution_id)
+                .where(
+                    MetadataExecutionRow.user_track_ref_id == ref_id,
+                    MetadataExecutionRow.closed_at.is_(None),
+                )
+                .limit(1)
             )
-            .with_for_update()
-        )
-        ref = session.scalar(
-            select(UserTrackRefRow)
-            .join(
-                LibraryEntryRow,
-                LibraryEntryRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
-            )
-            .where(
-                UserTrackRefRow.user_track_ref_id == ref_id,
-                UserTrackRefRow.user_id == user_id,
-                UserTrackRefRow.deleted_at.is_(None),
-                LibraryEntryRow.user_id == user_id,
-                LibraryEntryRow.removed_at.is_(None),
-            )
-            .with_for_update()
-        )
-        row = session.get(TrackMetadataRow, ref_id)
-        if (
-            job is None
-            or ref is None
-            or row is None
-            or row.job_id != fence.job_id
-            or row.generation != generation
+            is not None
         ):
-            raise JobLeaseLost
+            raise ResourceAdmissionError("metadata_execution_busy")
         return ref, row
 
     def apply_worker(
@@ -480,3 +483,12 @@ class TrackMetadataService:
                 row.state = state
             row.error_code = error_code
             self._publish(session, ref, row)
+            if self.execution is not None:
+                # Flush all publication first, then run the SQL authority/expiry
+                # guard without extending the grant. A late failure rolls it all back.
+                session.flush()
+                session.execute(
+                    update(MetadataExecutionRow)
+                    .where(MetadataExecutionRow.execution_id == self.execution.ticket.execution_id)
+                    .values(io_deadline_at=MetadataExecutionRow.io_deadline_at)
+                )

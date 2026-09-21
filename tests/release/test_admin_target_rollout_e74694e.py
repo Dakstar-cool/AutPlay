@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 
-def _load_rollout():
+def _load_rollout() -> ModuleType:
     path = Path(__file__).resolve().parents[2] / "scripts" / "admin_target_rollout_e74694e.py"
     spec = importlib.util.spec_from_file_location("admin_target_rollout_e74694e", path)
     assert spec is not None and spec.loader is not None
@@ -60,11 +63,13 @@ def test_inspected_specs_with_null_binds_transform_into_replacements() -> None:
     assert all("training-consent-ledger" not in bind for bind in binds)
 
 
-def test_private_storage_uses_utf8_safe_independent_keys(monkeypatch) -> None:
+def test_private_storage_uses_utf8_safe_independent_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     rollout = _load_rollout()
     input_programs: list[str] = []
 
-    def fake_run(*arguments: str, input_text: str | None = None):
+    def fake_run(*arguments: str, input_text: str | None = None) -> None:
         del arguments
         if input_text is not None:
             input_programs.append(input_text)
@@ -89,18 +94,14 @@ def test_processing_pause_covers_every_background_track_processor() -> None:
         "autplay-metadata-worker",
         "autplay-acquisition-vault-bridge",
     } == rollout.PROCESSING_CONTAINERS
-    assert set(
-        (*rollout.START_ORDER, *rollout.AUXILIARY_RESTART)
-    ) >= rollout.PROCESSING_CONTAINERS
+    assert set((*rollout.START_ORDER, *rollout.AUXILIARY_RESTART)) >= rollout.PROCESSING_CONTAINERS
     assert not rollout.PROCESSING_CONTAINERS & set(rollout.HEALTH_REQUIRED)
 
 
 def test_paused_rollout_has_no_music_proxy_precondition() -> None:
     rollout = _load_rollout()
 
-    assert rollout.expected_running_containers(leave_processing_stopped=True) == {
-        "open-webui"
-    }
+    assert rollout.expected_running_containers(leave_processing_stopped=True) == {"open-webui"}
     assert rollout.expected_running_containers(leave_processing_stopped=False) == {
         "autplay-music-proxy",
         "open-webui",

@@ -5,7 +5,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from autplay.application.backup_control import (
     BackupControlService,
     BackupSnapshot,
@@ -40,9 +39,7 @@ def _targets() -> tuple[BackupTarget, ...]:
 
 def test_registry_rejects_paths_and_duplicate_or_unknown_targets() -> None:
     with pytest.raises(ValueError, match="entry"):
-        parse_backup_targets(
-            '[{"id":"usb","label":"USB","kind":"mounted","path":"/media/usb"}]'
-        )
+        parse_backup_targets('[{"id":"usb","label":"USB","kind":"mounted","path":"/media/usb"}]')
     with pytest.raises(ValueError, match="identifier"):
         parse_backup_targets(
             '[{"id":"usb","label":"One","kind":"mounted"},'
@@ -190,9 +187,7 @@ def test_status_threshold_renders_assertive_alert_without_paths(tmp_path: Path) 
         "csrf_token": "safe-token",
     }
 
-    html = AdminTemplateRenderer().render(
-        "backup_control.html", locale="ru", context=context
-    )
+    html = AdminTemplateRenderer().render("backup_control.html", locale="ru", context=context)
 
     assert 'role="alert"' in html
     assert '<meta http-equiv="refresh" content="10;url=/admin/recovery?lang=ru">' in html

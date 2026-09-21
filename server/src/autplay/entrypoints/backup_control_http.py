@@ -74,9 +74,7 @@ def create_backup_control_router(
             "backup_already_active",
         }
         error_key = (
-            f"backup_error_{code}"
-            if code in allowed
-            else "backup_error_backup_request_invalid"
+            f"backup_error_{code}" if code in allowed else "backup_error_backup_request_invalid"
         )
         status = 403 if code == "forbidden" else 409
         if code == "backup_control_unavailable":
@@ -156,9 +154,7 @@ def create_backup_control_router(
             raise ValueError("missing fields")
         return value
 
-    def authorize(
-        request: Request, form: dict[str, str]
-    ) -> tuple[AuthenticatedWebSession, UUID]:
+    def authorize(request: Request, form: dict[str, str]) -> tuple[AuthenticatedWebSession, UUID]:
         operation_id = _uuid(form["operation_id"])
         authenticated = web.authenticate(
             request.cookies.get(cookies.session_name, "").encode(), mutation=True
@@ -192,14 +188,10 @@ def create_backup_control_router(
             authenticated, _ = authorize(request, form)
             schedule_mode = form["schedule_mode"]
             schedule_weekday = (
-                _integer(form["schedule_weekday"], 1, 7)
-                if schedule_mode == "automatic"
-                else None
+                _integer(form["schedule_weekday"], 1, 7) if schedule_mode == "automatic" else None
             )
             schedule_hour = (
-                _integer(form["schedule_hour"], 0, 23)
-                if schedule_mode == "automatic"
-                else None
+                _integer(form["schedule_hour"], 0, 23) if schedule_mode == "automatic" else None
             )
             await run_in_threadpool(
                 backups.configure,
@@ -223,9 +215,7 @@ def create_backup_control_router(
         try:
             form = await fields(
                 request,
-                frozenset(
-                    {"csrf_token", "operation_id", "expected_revision"}
-                ),
+                frozenset({"csrf_token", "operation_id", "expected_revision"}),
             )
             authenticated, operation_id = authorize(request, form)
             await run_in_threadpool(
@@ -237,9 +227,7 @@ def create_backup_control_router(
         except (KeyError, ValueError, WebAdminError) as error:
             return problem(request, error)
         return apply_admin_security_headers(
-            RedirectResponse(
-                f"/admin/recovery?lang={locale(request)}&requested=1", status_code=303
-            )
+            RedirectResponse(f"/admin/recovery?lang={locale(request)}&requested=1", status_code=303)
         )
 
     return router

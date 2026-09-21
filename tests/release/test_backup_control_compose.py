@@ -35,13 +35,13 @@ def test_backup_control_overlay_mounts_only_private_spool(tmp_path: Path) -> Non
     environment["AUTPLAY_RUNTIME_BACKUP_CONTROL_ROOT"] = str(control)
     environment["AUTPLAY_ADMIN_BACKUP_TARGETS_JSON"] = targets
     command = ["docker", "compose", "-p", "autplay-backup-control-test"]
-    for path in (
+    for compose_path in (
         "deploy/compose/compose.yaml",
         "deploy/compose/compose.runtime.yaml",
         "deploy/compose/compose.admin-local.yaml",
         "deploy/compose/compose.backup-control.yaml",
     ):
-        command.extend(("-f", path))
+        command.extend(("-f", compose_path))
     command.extend(("--profile", "runtime", "config", "--format", "json"))
 
     completed = subprocess.run(

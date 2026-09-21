@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -65,11 +66,22 @@ class InternetAcquisitionRow(Base):
             "state IN ('QUEUED','DOWNLOADING','UPLOADING','PROCESSING','READY','FAILED')",
             name="internet_acquisition_state_check",
         ),
+        CheckConstraint(
+            "(authority_generation IS NULL AND source_session_family_id IS NULL "
+            "AND source_session_mode IS NULL) OR "
+            "(authority_generation IS NOT NULL AND authority_generation >= 1 "
+            "AND source_session_family_id IS NOT NULL AND source_session_mode IS NOT NULL "
+            "AND source_session_mode IN ('LEGACY','V2'))",
+            name="internet_acquisition_authority_check",
+        ),
         {"schema": "discovery"},
     )
     acquisition_id: Mapped[UUID] = mapped_column(primary_key=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("account.user_account.user_id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("account.device.device_id"))
+    authority_generation: Mapped[int | None] = mapped_column(BigInteger)
+    source_session_family_id: Mapped[UUID | None] = mapped_column()
+    source_session_mode: Mapped[str | None] = mapped_column(Text)
     search_id: Mapped[UUID] = mapped_column()
     candidate_id: Mapped[str] = mapped_column(Text)
     selected_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
@@ -79,7 +91,7 @@ class InternetAcquisitionRow(Base):
         ForeignKey("library.user_track_ref.user_track_ref_id")
     )
     upload_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("vault.upload_session.upload_session_id")
+        ForeignKey("vault.upload_session.upload_session_id", deferrable=True, initially="IMMEDIATE")
     )
     audio_variant_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("vault.audio_variant.audio_variant_id")

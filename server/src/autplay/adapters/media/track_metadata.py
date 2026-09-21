@@ -1,9 +1,9 @@
 """Read embedded tags and decode artwork with bounded local CPU tools."""
 
 import json
-import tempfile
 from pathlib import Path
 
+from autplay.adapters.media.tools import SubprocessExecutableRunner
 from autplay.domain.track_metadata import MetadataFields, validate_fields
 from autplay.domain.vault import MediaValidationError
 from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError
@@ -103,36 +103,68 @@ class FfmpegMetadataReader:
     def normalize_artwork(self, payload: bytes) -> bytes:
         if not 1 <= len(payload) <= 4194304:
             raise MetadataProviderError("metadata_artwork_size", retryable=False)
-        with tempfile.TemporaryDirectory(prefix="autplay-art-") as directory:
-            path = Path(directory) / "image"
-            path.write_bytes(payload)
-            result = self.runner.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-protocol_whitelist",
-                    "file,pipe",
-                    "-show_entries",
-                    "stream=width,height",
-                    "-of",
-                    "json",
-                    str(path),
-                ],
-                timeout_seconds=10,
-                max_output_bytes=4096,
-            )
-            try:
-                streams = json.loads(result.stdout)["streams"]
-                if (
-                    result.returncode
-                    or len(streams) != 1
-                    or not all(0 < streams[0][axis] <= 4096 for axis in ("width", "height"))
-                ):
-                    raise ValueError("dimensions")
-            except (ValueError, TypeError, KeyError) as error:
-                raise MetadataProviderError("metadata_artwork_invalid", retryable=False) from error
-            return self._jpeg(path, 0)
+        if not isinstance(self.runner, SubprocessExecutableRunner):
+            raise MetadataProviderError("metadata_artwork_decoder_unavailable", retryable=False)
+        probe = self.runner.run_input(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "pipe",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "json",
+                "pipe:0",
+            ],
+            payload,
+            timeout_seconds=10,
+            max_output_bytes=4096,
+        )
+        try:
+            streams = json.loads(probe.stdout)["streams"]
+            if (
+                probe.returncode
+                or len(streams) != 1
+                or not all(0 < streams[0][axis] <= 4096 for axis in ("width", "height"))
+            ):
+                raise ValueError("dimensions")
+        except (ValueError, TypeError, KeyError) as error:
+            raise MetadataProviderError("metadata_artwork_invalid", retryable=False) from error
+        result = self.runner.run_input(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "pipe",
+                "-i",
+                "pipe:0",
+                "-map",
+                "0:0",
+                "-frames:v",
+                "1",
+                "-threads",
+                "1",
+                "-vf",
+                "scale=500:500:force_original_aspect_ratio=decrease",
+                "-c:v",
+                "mjpeg",
+                "-q:v",
+                "3",
+                "-f",
+                "image2pipe",
+                "pipe:1",
+            ],
+            payload,
+            timeout_seconds=20,
+            max_output_bytes=2097152,
+        )
+        if result.returncode or not result.stdout.startswith(b"\xff\xd8\xff"):
+            raise MetadataProviderError("metadata_artwork_invalid", retryable=False)
+        return result.stdout
 
     def _jpeg(self, path: Path, stream: int) -> bytes:
         result = self.runner.run(

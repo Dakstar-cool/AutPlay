@@ -7,25 +7,22 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from playwright.sync_api import Page, sync_playwright
-
 from autplay.application.backup_control import BackupControlService, parse_backup_targets
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import AuthenticatedWebSession, WebActor, WebAdminError
 from autplay.entrypoints.admin_web_http import WebAdminHttp
 from autplay.entrypoints.backup_control_http import create_backup_control_router
 from autplay.web.renderer import AdminTemplateRenderer
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from playwright.sync_api import Page, sync_playwright
 
 
 class _Web:
     def __init__(self, actor: WebActor) -> None:
         self.actor = actor
 
-    def authenticate(
-        self, bearer: bytes, *, mutation: bool
-    ) -> AuthenticatedWebSession:
+    def authenticate(self, bearer: bytes, *, mutation: bool) -> AuthenticatedWebSession:
         del bearer, mutation
         return AuthenticatedWebSession(self.actor, b"c" * 32)
 
@@ -74,8 +71,7 @@ def test_backup_control_is_responsive_localized_and_keyboard_accessible(
     backups = BackupControlService(
         tmp_path / "control",
         parse_backup_targets(
-            '[{"id":"workstation-usb-e","label":"External USB E",'
-            '"kind":"external-agent"}]'
+            '[{"id":"workstation-usb-e","label":"External USB E","kind":"external-agent"}]'
         ),
     )
     backups.configure(
@@ -94,11 +90,7 @@ def test_backup_control_is_responsive_localized_and_keyboard_accessible(
     app.mount(
         "/admin/static",
         StaticFiles(
-            directory=Path(__file__).resolve().parents[2]
-            / "src"
-            / "autplay"
-            / "web"
-            / "static"
+            directory=Path(__file__).resolve().parents[2] / "src" / "autplay" / "web" / "static"
         ),
         name="admin-static",
     )

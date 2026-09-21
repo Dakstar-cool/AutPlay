@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from autplay.adapters.child_process import provider_child_launch
-from autplay.adapters.filesystem.provider_media import options, stream_format
+from autplay.adapters.filesystem.provider_media import options, stream_format, validated_ffmpeg
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_child import decode_document
 from autplay.adapters.filesystem.vault_process import RetainedVaultProcess
@@ -33,6 +33,26 @@ from autplay.ports.vault import ProcessResult
 from autplay.runtime.resource_io_deadline import ResourceIoDeadline
 from process_tree_support import provider_ticket, wait_tree_exit
 from test_provider_child import command
+
+
+def _pinned_windows_media_tools() -> tuple[str, str]:
+    try:
+        ffmpeg = validated_ffmpeg()
+    except ValueError:
+        pytest.skip("pinned FFmpeg 8.1.2 is unavailable; the Linux proof image covers it")
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        pytest.skip("pinned ffprobe 8.1.2 is unavailable; the Linux proof image covers it")
+    version = subprocess.run(
+        [ffprobe, "-version"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if version.returncode != 0 or not version.stdout.startswith("ffprobe version 8.1.2"):
+        pytest.skip("pinned ffprobe 8.1.2 is unavailable; the Linux proof image covers it")
+    return ffmpeg, ffprobe
 
 
 @pytest.mark.parametrize("fault", ["missing", "protocol", "aes", "codec"])
@@ -157,8 +177,7 @@ def test_actual_media_stream_is_bounded_and_vault_compatible(
     kind: str,
     mode: str,
 ) -> None:
-    ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
-    assert ffmpeg and ffprobe, "real FFmpeg/ffprobe are required for this acceptance proof"
+    ffmpeg, ffprobe = _pinned_windows_media_tools()
     fixture = tmp_path / "fixture"
     fixture.mkdir()
     name = {"aac": "audio.m4a", "opus": "audio.webm", "hls": "audio.m3u8", "dash": "audio.mpd"}[

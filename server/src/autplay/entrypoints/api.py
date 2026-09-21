@@ -404,8 +404,7 @@ def create_app(
                     passkeys_enabled=passkeys is not None,
                     discovery_enabled=discovery is not None,
                     discovery_automation_enabled=(
-                        discovery is not None
-                        and resolved_settings.discovery_automation_enabled
+                        discovery is not None and resolved_settings.discovery_automation_enabled
                     ),
                 )
             )

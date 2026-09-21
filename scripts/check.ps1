@@ -101,9 +101,6 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Sona training Ruff format check failed" }
         & uv run --project gpu/training --frozen python -m mypy --config-file gpu/training/pyproject.toml gpu/training/src gpu/training/tests
         if ($LASTEXITCODE -ne 0) { throw "Sona training mypy failed" }
-        & uv run --project gpu/training --frozen python -m pytest -c gpu/training/pyproject.toml gpu/training/tests
-        if ($LASTEXITCODE -ne 0) { throw "Sona training tests failed" }
-
         & uv lock --project tools/local_music_acquisition --check
         if ($LASTEXITCODE -ne 0) { throw "Acquisition uv lock freshness check failed" }
         & uv run --project tools/local_music_acquisition --frozen python -m ruff check --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
@@ -182,6 +179,11 @@ try {
         "AUTPLAY_TEST_DATABASE_URL",
         "postgresql+psycopg://autplay:autplay_dev_only@127.0.0.1:$publishedPort/autplay"
     )
+
+    if (-not $ServerOnly) {
+        & uv run --project gpu/training --frozen python -m pytest -c gpu/training/pyproject.toml gpu/training/tests
+        if ($LASTEXITCODE -ne 0) { throw "Sona training tests failed" }
+    }
 
     & uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests
     if ($LASTEXITCODE -ne 0) { throw "pytest failed" }

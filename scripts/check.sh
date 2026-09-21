@@ -127,9 +127,6 @@ if [[ $server_only -eq 0 ]]; then
     --config gpu/training/pyproject.toml gpu/training
   uv run --project gpu/training --frozen python -m mypy \
     --config-file gpu/training/pyproject.toml gpu/training/src gpu/training/tests
-  uv run --project gpu/training --frozen python -m pytest \
-    -c gpu/training/pyproject.toml gpu/training/tests
-
   uv lock --project tools/local_music_acquisition --check
   uv run --project tools/local_music_acquisition --frozen python -m ruff check \
     --config tools/local_music_acquisition/pyproject.toml tools/local_music_acquisition
@@ -196,5 +193,10 @@ if (( published_port < 1 || published_port > 65535 )); then
   exit 1
 fi
 export AUTPLAY_TEST_DATABASE_URL="postgresql+psycopg://autplay:autplay_dev_only@127.0.0.1:${published_port}/autplay"
+
+if [[ $server_only -eq 0 ]]; then
+  uv run --project gpu/training --frozen python -m pytest \
+    -c gpu/training/pyproject.toml gpu/training/tests
+fi
 
 uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests
