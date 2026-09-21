@@ -19,6 +19,22 @@ jobs:
     name: SONA training / Linux CUDA environment
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      AUTPLAY_TEST_DATABASE_URL: postgresql+psycopg://autplay:autplay_dev_only@127.0.0.1:${{ job.services.postgres.ports[5432] }}/autplay
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:691673308c99d2161ba298736f3147f1f22d79de2fb7ec93ae9b4afcab870b62
+        env:
+          POSTGRES_DB: autplay
+          POSTGRES_PASSWORD: autplay_dev_only
+          POSTGRES_USER: autplay
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U autplay -d autplay"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
