@@ -139,6 +139,52 @@ class OkHttpProfilePairingPortTest {
         }
     }
 
+    @Test fun profileListsOnlyActiveAndroidDevicesAndActiveSessions() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        val profile = ServerProfileId("11111111-1111-4111-8111-111111111111")
+        val activeDevice = "22222222-2222-4222-8222-222222222222"
+        val revokedDevice = "33333333-3333-4333-8333-333333333333"
+        val serviceDevice = "44444444-4444-4444-8444-444444444444"
+        val credentials = StoredCredentials(
+            SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope(
+                    accessToken = "a".repeat(32),
+                    refreshToken = null,
+                    generation = 0,
+                ),
+            ),
+        )
+        val port = OkHttpProfilePairingPort(
+            { server.url("/").toString().trimEnd('/') },
+            credentials,
+            EmptyKeys,
+            allowUnsafeDevelopmentHttp = true,
+        )
+        try {
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"devices":[{"device_id":"$activeDevice","device_name":"Ptica · SM-A556E","platform":"ANDROID","revoked_at":null},{"device_id":"$revokedDevice","device_name":"Ptica · old","platform":"ANDROID","revoked_at":"2026-09-01T00:00:00Z"},{"device_id":"$serviceDevice","device_name":"Ptica · importer","platform":"OTHER","revoked_at":null}]}""",
+                ),
+            )
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"sessions":[{"session_id":"55555555-5555-4555-8555-555555555555","device_id":"$activeDevice","generation":0,"current":true,"absolute_expires_at":"2099-01-01T00:00:00Z","revoked_at":null},{"session_id":"66666666-6666-4666-8666-666666666666","device_id":"$revokedDevice","generation":0,"current":false,"absolute_expires_at":"2099-01-01T00:00:00Z","revoked_at":"2026-09-01T00:00:00Z"},{"session_id":"77777777-7777-4777-8777-777777777777","device_id":"$activeDevice","generation":0,"current":false,"absolute_expires_at":"2020-01-01T00:00:00Z","revoked_at":null}]}""",
+                ),
+            )
+
+            val devices = port.devices(profile) as PairingNetworkResult.Success<List<DeviceSummary>>
+            val sessions = port.sessions(profile) as PairingNetworkResult.Success<List<SessionSummary>>
+
+            assertEquals(listOf("Ptica · SM-A556E"), devices.value.map { it.label })
+            assertEquals(1, sessions.value.size)
+            assertTrue(sessions.value.single().current)
+        } finally {
+            credentials.clear(profile)
+            server.close()
+        }
+    }
+
     private fun port() = OkHttpProfilePairingPort({ _: ServerProfileId -> null }, EmptyCredentials, EmptyKeys, allowUnsafeDevelopmentHttp = true)
     private fun assertFails(block: () -> Unit) { try { block(); throw AssertionError("expected failure") } catch (_: IllegalArgumentException) {} }
     private object EmptyCredentials : CredentialStore { override suspend fun read(profileId: ServerProfileId): ByteArray? = null; override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit; override suspend fun clear(profileId: ServerProfileId) = Unit }

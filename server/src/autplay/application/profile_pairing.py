@@ -279,6 +279,9 @@ class ProfilePairingService:
 
     def list_devices(self, principal: Principal) -> dict[str, object]:
         with self._sessions() as s:
+            account = s.get(UserAccountRow, principal.user_id)
+            if account is None:
+                raise ProfilePairingError("unauthorized")
             rows = s.scalars(
                 select(DeviceRow)
                 .where(DeviceRow.user_id == principal.user_id)
@@ -291,7 +294,7 @@ class ProfilePairingService:
                 "devices": [
                     {
                         "device_id": str(r.device_id),
-                        "device_name": r.device_name,
+                        "device_name": _profile_device_label(account.display_name, r.device_name),
                         "platform": r.platform,
                         "key_thumbprint_sha256": None
                         if r.public_key_thumbprint_sha256 is None
@@ -1229,7 +1232,7 @@ class ProfilePairingService:
             device = DeviceRow(
                 device_id=device_id,
                 user_id=account.user_id,
-                device_name=row.nickname,
+                device_name=row.device_model_hint or row.nickname,
                 platform="ANDROID",
                 app_version=row.app_version,
                 public_key=row.device_public_key_spki,
@@ -2480,6 +2483,14 @@ def _secret() -> str:
 
 def _hash_secret(value: str) -> bytes:
     return hashlib.sha256(value.encode("ascii")).digest()
+
+
+def _profile_device_label(profile_name: str, device_name: str) -> str:
+    """Keep the owner visible while preserving the model within the v1 120-char contract."""
+    profile = profile_name.strip()
+    device = device_name.strip()[:96]
+    suffix = f" · {device}"
+    return f"{profile[: 120 - len(suffix)]}{suffix}"
 
 
 def _admission_binding_matches(request: dict[str, object], instance: ServerInstanceRow) -> bool:

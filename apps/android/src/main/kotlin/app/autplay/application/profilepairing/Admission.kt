@@ -148,6 +148,7 @@ class AdmissionRuntime(
     private val persistTrustedReenrollment: suspend (AdmissionCheckpoint, AdmissionAccount, String, EnrollmentSession) -> Boolean = { _, _, _, _ -> false },
     private val keyAlias: (ServerProfileId) -> String = { "autplay.m5.${it.value}" },
     private val appVersion: String = "0.1.0",
+    private val deviceName: String = "Android device",
 ) {
     private val stateFlow = MutableStateFlow<AdmissionState>(AdmissionState.RequestReady)
     val state: StateFlow<AdmissionState> = stateFlow.asStateFlow()
@@ -172,7 +173,8 @@ class AdmissionRuntime(
             "request_id" to JsonPrimitive(checkpoint.requestId), "expected_server_instance_id" to JsonPrimitive(checkpoint.serverInstanceId),
             "expected_identity_epoch" to JsonPrimitive(checkpoint.identityEpoch), "expected_identity_thumbprint_sha256" to JsonPrimitive(checkpoint.identityThumbprintSha256),
             "client_nonce_b64url" to JsonPrimitive(nonce), "api_major" to JsonPrimitive(1), "device_key_thumbprint_sha256" to JsonPrimitive(checkpoint.deviceKeyThumbprintSha256),
-            "device_public_key_jwk" to JsonObject(AdmissionProof.p256Jwk(keys.publicKeySpki(alias))), "nickname" to JsonPrimitive("Android device"),
+            "device_public_key_jwk" to JsonObject(AdmissionProof.p256Jwk(keys.publicKeySpki(alias))), "nickname" to JsonPrimitive(deviceName),
+            "device_model_hint" to JsonPrimitive(deviceName),
             "platform" to JsonPrimitive("ANDROID"), "app_version" to JsonPrimitive(appVersion), "requested_at" to JsonPrimitive(java.time.Instant.now().toString()),
         ))
         val exact = checkpoint.copy(requestSha256 = signed.sha256)

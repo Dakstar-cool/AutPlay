@@ -90,6 +90,23 @@ class AdmissionRuntimeTest {
         assertTrue(requireNotNull(persisted).requestId != stale.requestId)
     }
 
+    @Test fun admissionRequestCarriesTheRealDeviceModel() = runBlocking {
+        val port = FakePort()
+        val runtime = AdmissionRuntime(
+            CoroutineScope(Dispatchers.Unconfined),
+            FakeKeys,
+            port,
+            {},
+            deviceName = "SM-A556E",
+        )
+
+        runtime.request(snapshot()).join()
+
+        val request = requireNotNull(port.lastRequestWire)
+        assertTrue(request.contains("\"nickname\":\"SM-A556E\""))
+        assertTrue(request.contains("\"device_model_hint\":\"SM-A556E\""))
+    }
+
     @Test fun liveCheckpointEmissionIsNotAddedToColdRecoveryBootstrap() {
         val bootstrap = AdmissionRecoveryBootstrap(null)
         val emittedByLiveRequest = AdmissionCheckpointCodec.encode(
@@ -153,6 +170,7 @@ class AdmissionRuntimeTest {
     }
     private class FakePort : AdmissionPort {
         var requestCalls = 0
+        var lastRequestWire: String? = null
         var exchangeCalls = 0
         var lastExchangeRefreshToken: ByteArray? = null
         var lastRecoveryWire: String? = null
@@ -163,6 +181,7 @@ class AdmissionRuntimeTest {
         var recoveryFailure: String? = null
         override suspend fun request(request: AdmissionRequest): PairingNetworkResult<AdmissionCreated> {
             requestCalls++
+            lastRequestWire = request.wireJson
             return PairingNetworkResult.Success(AdmissionCreated("review", "poll-secret".encodeToByteArray(), "000000000001"))
         }
         override suspend fun recover(request: AdmissionRequest): PairingNetworkResult<AdmissionRecovery> {

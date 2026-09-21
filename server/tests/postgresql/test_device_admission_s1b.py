@@ -14,6 +14,13 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from psycopg import Connection
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
 from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.profile_pairing import (
@@ -39,12 +46,6 @@ from autplay.entrypoints.device_admission_http import (
 from autplay.entrypoints.device_admission_web import DeviceAdmissionWebAdapter
 from autplay.runtime.http import install_error_handlers
 from autplay.web.renderer import AdminTemplateRenderer
-from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from psycopg import Connection
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
 
 REQUEST_DOMAIN = "autplay:s1b:admission-request:v1\n"
 POLL_DOMAIN = "autplay:s1b:admission-poll:v1\n"
@@ -397,6 +398,17 @@ def test_actual_http_and_web_routers_complete_recovery_review_and_exchange(
     assert exchanged.status_code == 201
     assert exchanged.headers["cache-control"] == "no-store"
     assert exchanged.json()["binding_commit_id"] == exchange["binding_commit_id"]
+    enrolled = exchanged.json()
+    devices = admission_runtime.service.list_devices(
+        Principal(
+            owner_id,
+            UUID(str(enrolled["device_id"])),
+            UUID(str(enrolled["session_id"])),
+            AccountRole.OWNER,
+        )
+    )["devices"]
+    assert isinstance(devices, list)
+    assert devices[0]["device_name"] == f"S1B HTTP owner · {'M' * 96}"
 
 
 def test_fresh_submit_retires_an_expired_pending_request_for_the_same_key(

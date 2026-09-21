@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -126,8 +127,22 @@ class OkHttpProfilePairingPort(
         } catch (e: Protocol) { PairingNetworkResult.Failure(e.code, e.retryAfterMs) } catch (_: Exception) { PairingNetworkResult.Failure("server_unavailable") } finally { material.fill(0); request.nextRefreshToken.fill(0) }
     }
 
-    override suspend fun devices(profileId: ServerProfileId) = authenticated(profileId, "/account/devices", null, MAX_LIST_BYTES) { root -> root.array("devices").map { item -> item.jsonObject.let { DeviceSummary(DeviceId(it.string("device_id")), it.string("device_name"), false) } } }
-    override suspend fun sessions(profileId: ServerProfileId) = authenticated(profileId, "/account/sessions", null, MAX_LIST_BYTES) { root -> root.array("sessions").map { item -> item.jsonObject.let { SessionSummary(it.string("session_id"), DeviceId(it.string("device_id")), it.long("generation"), it.bool("current")) } } }
+    override suspend fun devices(profileId: ServerProfileId) = authenticated(profileId, "/account/devices", null, MAX_LIST_BYTES) { root ->
+        root.array("devices")
+            .map { it.jsonObject }
+            .filter { it["revoked_at"] == JsonNull && it.string("platform") == "ANDROID" }
+            .map { DeviceSummary(DeviceId(it.string("device_id")), it.string("device_name"), false) }
+    }
+    override suspend fun sessions(profileId: ServerProfileId) = authenticated(profileId, "/account/sessions", null, MAX_LIST_BYTES) { root ->
+        val now = Instant.now()
+        root.array("sessions")
+            .map { it.jsonObject }
+            .filter {
+                it["revoked_at"] == JsonNull &&
+                    Instant.parse(it.string("absolute_expires_at")).isAfter(now)
+            }
+            .map { SessionSummary(it.string("session_id"), DeviceId(it.string("device_id")), it.long("generation"), it.bool("current")) }
+    }
     override suspend fun lifecycle(profileId: ServerProfileId, command: LifecycleCommand): PairingNetworkResult<Unit> {
         val path = when (command.action) { LifecycleAction.LOGOUT_CURRENT -> "/account/sessions/current/logout"; LifecycleAction.LOGOUT_ALL -> "/account/sessions/logout-all"; LifecycleAction.REVOKE_DEVICE -> "/account/devices/${requireNotNull(command.targetDeviceId).value}/revoke" }
         val reason = command.reasonCode?.let { ",\"reason_code\":\"$it\"" }.orEmpty()

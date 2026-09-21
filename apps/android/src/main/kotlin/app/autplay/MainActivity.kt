@@ -493,6 +493,7 @@ internal fun AutPlayBootstrap(
                         pairingRuntime.completeTrustedReenrollment(checkpoint, account, bindingCommitId, session)
                     },
                     appVersion = BuildConfig.VERSION_NAME,
+                    deviceName = android.os.Build.MODEL.ifBlank { "Android device" },
                 )
             }
             val admissionState by admissionRuntime.state.collectAsState()
