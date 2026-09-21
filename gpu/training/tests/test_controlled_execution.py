@@ -404,6 +404,16 @@ def test_cli_composes_controlled_prepare_train_publish_and_exact_replay(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # The CLI intentionally refuses to launch a Linux worker without an
+    # explicitly delegated cgroup. Keep this real-process integration test on
+    # the same containment contract as the coordinator tests instead of
+    # mistaking that fail-closed return for the simulated publication failure.
+    process_tree_factory()
+    if os.name != "nt":
+        monkeypatch.setenv(
+            "AUTPLAY_WORKER_CGROUP_ROOT",
+            os.environ["AUTPLAY_TEST_CGROUP_ROOT"],
+        )
     service(pair).decide(pair.actor, consent_command(pair, "GRANTED"))
     run_id, execution_id, publication_id = uuid4(), uuid4(), uuid4()
     input_scope = (tmp_path / "production-input").absolute()
