@@ -70,6 +70,26 @@ class AdmissionRuntimeTest {
         assertFalse(requireNotNull(port.lastRecoveryWire).contains("\"client_nonce_b64url\""))
     }
 
+    @Test fun unavailableRecoveryFallsBackToOneFreshRequest() = runBlocking {
+        val port = FakePort().apply { recoveryFailure = "admission_request_unavailable" }
+        var persisted: AdmissionCheckpoint? = null
+        val runtime = AdmissionRuntime(
+            CoroutineScope(Dispatchers.Unconfined),
+            FakeKeys,
+            port,
+            { persisted = it },
+        )
+        val stale = checkpoint()
+
+        runtime.recover(stale).join()
+        assertEquals(AdmissionState.Unavailable, runtime.state.value)
+        runtime.retry(snapshot()).join()
+
+        assertEquals(1, port.requestCalls)
+        assertTrue(runtime.state.value is AdmissionState.AwaitingComparison)
+        assertTrue(requireNotNull(persisted).requestId != stale.requestId)
+    }
+
     @Test fun liveCheckpointEmissionIsNotAddedToColdRecoveryBootstrap() {
         val bootstrap = AdmissionRecoveryBootstrap(null)
         val emittedByLiveRequest = AdmissionCheckpointCodec.encode(
@@ -112,6 +132,18 @@ class AdmissionRuntimeTest {
     }
 
     private fun snapshot() = PairingFlowSnapshot("11111111-1111-4111-8111-111111111111", "https://example.test", "https://example.test", ServerProfileId("22222222-2222-4222-8222-222222222222"), "33333333-3333-4333-8333-333333333333", 1, "a".repeat(64), null, null, null, null, null)
+    private fun checkpoint() = AdmissionCheckpoint(
+        "77777777-7777-4777-8777-777777777777",
+        "a".repeat(64),
+        ServerProfileId("22222222-2222-4222-8222-222222222222"),
+        "33333333-3333-4333-8333-333333333333",
+        1,
+        "a".repeat(64),
+        "b".repeat(64),
+        "88888888-8888-4888-8888-888888888888",
+        "https://example.test",
+        "https://stream.example.test",
+    )
     private object FakeKeys : M5DeviceKeyStore {
         private val key = java.security.KeyPairGenerator.getInstance("EC").apply { initialize(java.security.spec.ECGenParameterSpec("secp256r1")) }.generateKeyPair()
         var lastAlias = ""; override fun ensure(alias: String) { lastAlias = alias }; override fun delete(alias: String) = Unit
@@ -120,6 +152,7 @@ class AdmissionRuntimeTest {
         override fun signP1363(alias: String, domainSeparator: String, payloadSha256: ByteArray): ByteArray { lastAlias = alias; return ByteArray(64) }
     }
     private class FakePort : AdmissionPort {
+        var requestCalls = 0
         var exchangeCalls = 0
         var lastExchangeRefreshToken: ByteArray? = null
         var lastRecoveryWire: String? = null
@@ -127,8 +160,16 @@ class AdmissionRuntimeTest {
         var pollFailure: String? = null
         var exchangeGate: CompletableDeferred<Unit>? = null
         var exchangeFailure: String? = null
-        override suspend fun request(request: AdmissionRequest) = PairingNetworkResult.Success(AdmissionCreated("review", "poll-secret".encodeToByteArray(), "000000000001"))
-        override suspend fun recover(request: AdmissionRequest): PairingNetworkResult<AdmissionRecovery> { lastRecoveryWire = request.wireJson; return PairingNetworkResult.Success(AdmissionRecovery("review2", "new-poll-secret".encodeToByteArray(), "000000000002")) }
+        var recoveryFailure: String? = null
+        override suspend fun request(request: AdmissionRequest): PairingNetworkResult<AdmissionCreated> {
+            requestCalls++
+            return PairingNetworkResult.Success(AdmissionCreated("review", "poll-secret".encodeToByteArray(), "000000000001"))
+        }
+        override suspend fun recover(request: AdmissionRequest): PairingNetworkResult<AdmissionRecovery> {
+            lastRecoveryWire = request.wireJson
+            return recoveryFailure?.let { PairingNetworkResult.Failure(it) }
+                ?: PairingNetworkResult.Success(AdmissionRecovery("review2", "new-poll-secret".encodeToByteArray(), "000000000002"))
+        }
         override suspend fun poll(request: AdmissionRequest, pollBearer: ByteArray): PairingNetworkResult<AdmissionPoll> { pollGate?.await(); return pollFailure?.let { PairingNetworkResult.Failure(it) } ?: PairingNetworkResult.Success(AdmissionPoll.Approved(AdmissionAccount(UserId("44444444-4444-4444-8444-444444444444"), "Account"))) }
         override suspend fun exchange(command: AdmissionExchangeCommand): PairingNetworkResult<EnrollmentSession> { exchangeCalls++; lastExchangeRefreshToken = command.nextRefreshToken.copyOf(); exchangeGate?.await(); return exchangeFailure?.let { PairingNetworkResult.Failure(it) } ?: PairingNetworkResult.Success(EnrollmentSession(app.autplay.domain.DeviceId("55555555-5555-4555-8555-555555555555"), "66666666-6666-4666-8666-666666666666", "66666666-6666-4666-8666-666666666666", 0, ByteArray(32), command.nextRefreshToken.copyOf())) }
         override suspend fun trustedReenrollmentChallenge(request: AdmissionRequest) = PairingNetworkResult.Success(TrustedReenrollmentChallenge("77777777-7777-4777-8777-777777777777", "abcdefghijklmnopqrstuv".encodeToByteArray()))

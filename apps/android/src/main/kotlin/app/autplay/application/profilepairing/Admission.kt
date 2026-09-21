@@ -275,7 +275,25 @@ class AdmissionRuntime(
         }
     }
     fun cancel() = scope.launch { terminal(AdmissionState.Cancelled) }
-    fun retry(snapshot: PairingFlowSnapshot) { recoveryCheckpoint?.let(::recover) ?: request(snapshot) }
+    fun retry(snapshot: PairingFlowSnapshot) = scope.launch {
+        val checkpoint = recoveryCheckpoint
+        if (checkpoint == null) {
+            request(snapshot).join()
+            return@launch
+        }
+        recover(checkpoint).join()
+        if (
+            stateFlow.value == AdmissionState.Unavailable &&
+            activeGenerationId == checkpoint.generationId
+        ) {
+            activeGenerationId = null
+            recoveryCheckpoint = null
+            pollBearer?.fill(0)
+            pollBearer = null
+            persistCheckpoint(null)
+            request(snapshot).join()
+        }
+    }
     fun reenrollTrusted(snapshot: PairingFlowSnapshot) {
         val user = snapshot.expectedUserId ?: return
         val commit = snapshot.bindingCommitId ?: return

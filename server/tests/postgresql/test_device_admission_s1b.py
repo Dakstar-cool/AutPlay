@@ -399,6 +399,43 @@ def test_actual_http_and_web_routers_complete_recovery_review_and_exchange(
     assert exchanged.json()["binding_commit_id"] == exchange["binding_commit_id"]
 
 
+def test_fresh_submit_retires_an_expired_pending_request_for_the_same_key(
+    admission_runtime: _Runtime, database_connection: Connection[Any]
+) -> None:
+    first_request, key, _ = _admission_request(
+        admission_runtime,
+        source="198.51.100.1",
+        nonce_marker=1,
+    )
+    first, _ = admission_runtime.service.submit_device_admission(
+        first_request,
+        source="198.51.100.1",
+    )
+    admission_runtime.clock.advance(timedelta(minutes=16))
+
+    replacement_request, _, _ = _admission_request(
+        admission_runtime,
+        key=key,
+        source="198.51.100.1",
+        nonce_marker=2,
+    )
+    replacement, replayed = admission_runtime.service.submit_device_admission(
+        replacement_request,
+        source="198.51.100.1",
+    )
+
+    assert not replayed
+    assert replacement["request_id"] != first["request_id"]
+    assert database_connection.execute(
+        "SELECT state FROM account.device_admission WHERE request_id=%s",
+        (UUID(str(first_request["request_id"])),),
+    ).fetchone() == ("EXPIRED",)
+    assert database_connection.execute(
+        "SELECT state FROM account.device_admission WHERE request_id=%s",
+        (UUID(str(replacement_request["request_id"])),),
+    ).fetchone() == ("PENDING",)
+
+
 def test_concurrent_duplicate_submit_and_exact_approval_replay_are_serialized(
     admission_runtime: _Runtime, database_connection: Connection[Any]
 ) -> None:

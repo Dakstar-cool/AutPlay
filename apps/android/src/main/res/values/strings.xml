@@ -402,6 +402,10 @@
     <string name="profile_revoke_device">Remove this device</string>
     <string name="profile_disconnect">Disconnect server from this phone</string>
     <string name="profile_personal_server">Personal server</string>
+    <string name="admission_copy_review_locator">Copy review locator</string>
+    <string name="admission_copy_comparison_code">Copy comparison code</string>
+    <string name="admission_review_locator_clipboard_label">AutPlay review locator</string>
+    <string name="admission_comparison_code_clipboard_label">AutPlay comparison code</string>
     <string name="profile_connection_local">Not connected — local mode continues</string>
     <string name="profile_server_origin">Server address</string>
     <string name="profile_server_origin_hint">Use the private address supplied by your server administrator.</string>

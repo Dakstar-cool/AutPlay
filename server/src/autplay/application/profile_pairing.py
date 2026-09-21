@@ -760,12 +760,15 @@ class ProfilePairingService:
                 .where(
                     DeviceAdmissionRow.device_key_thumbprint_sha256 == thumb,
                     DeviceAdmissionRow.state == "PENDING",
-                    DeviceAdmissionRow.expires_at > now,
                 )
                 .with_for_update()
             )
             if pending is not None:
-                raise ProfilePairingError("admission_request_unavailable")
+                if pending.expires_at > now:
+                    raise ProfilePairingError("admission_request_unavailable")
+                pending.state, pending.decided_at = "EXPIRED", now
+                # Release the partial unique key before inserting the replacement request.
+                s.flush()
             self._admission_submit_rate_gate(s, thumb, source, now)
             row = DeviceAdmissionRow(
                 request_id=request_id,

@@ -416,6 +416,10 @@
     <string name="profile_revoke_device">Удалить это устройство</string>
     <string name="profile_disconnect">Отключить сервер от телефона</string>
     <string name="profile_personal_server">Личный сервер</string>
+    <string name="admission_copy_review_locator">Копировать локатор</string>
+    <string name="admission_copy_comparison_code">Копировать код</string>
+    <string name="admission_review_locator_clipboard_label">Локатор запроса AutPlay</string>
+    <string name="admission_comparison_code_clipboard_label">Код сравнения AutPlay</string>
     <string name="profile_connection_local">Не подключено — локальный режим продолжает работать</string>
     <string name="profile_server_origin">Адрес сервера</string>
     <string name="profile_server_origin_hint">Используйте приватный адрес, полученный от администратора сервера.</string>

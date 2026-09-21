@@ -1,5 +1,6 @@
 package app.autplay.ui.profilepairing
 
+import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -67,6 +68,45 @@ class ProfilePairingScreenTest {
         compose.onNodeWithText("Approved for Owner (66666666-6666-4666-8666-666666666666). Confirm this account before connecting.").assertIsDisplayed()
         compose.onNodeWithText("Confirm account").performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, confirmations.get()) }
+    }
+
+    @Test
+    fun admissionReviewLocatorAndComparisonCodeCanBeCopiedExactly() {
+        render(
+            ProfilePairingUiState(
+                pairing = connectedState(),
+                admission = AdmissionUiState(
+                    AdmissionState.AwaitingComparison(
+                        approvedCheckpoint(),
+                        "ara6hVVJoUHZe6rx3sGJ8",
+                        "876961153582",
+                    ),
+                ),
+            ),
+        )
+        val clipboard = compose.activity.getSystemService(ClipboardManager::class.java)
+
+        compose.onNodeWithText(context.getString(R.string.admission_copy_review_locator))
+            .performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals("ara6hVVJoUHZe6rx3sGJ8", clipboard.primaryClip?.getItemAt(0)?.text)
+            assertEquals(
+                true,
+                clipboard.primaryClipDescription?.extras
+                    ?.getBoolean("android.content.extra.IS_SENSITIVE"),
+            )
+        }
+
+        compose.onNodeWithText(context.getString(R.string.admission_copy_comparison_code))
+            .performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals("8769-6115-3582", clipboard.primaryClip?.getItemAt(0)?.text)
+            assertEquals(
+                true,
+                clipboard.primaryClipDescription?.extras
+                    ?.getBoolean("android.content.extra.IS_SENSITIVE"),
+            )
+        }
     }
 
     @Test
