@@ -93,3 +93,15 @@ def test_processing_pause_covers_every_background_track_processor() -> None:
         (*rollout.START_ORDER, *rollout.AUXILIARY_RESTART)
     ) >= rollout.PROCESSING_CONTAINERS
     assert not rollout.PROCESSING_CONTAINERS & set(rollout.HEALTH_REQUIRED)
+
+
+def test_paused_rollout_has_no_music_proxy_precondition() -> None:
+    rollout = _load_rollout()
+
+    assert rollout.expected_running_containers(leave_processing_stopped=True) == {
+        "open-webui"
+    }
+    assert rollout.expected_running_containers(leave_processing_stopped=False) == {
+        "autplay-music-proxy",
+        "open-webui",
+    }

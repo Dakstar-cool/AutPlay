@@ -255,6 +255,12 @@ def wait_healthy(name: str, attempts: int = 90) -> None:
     raise RuntimeError(f"container_health_timeout:{name}")
 
 
+def expected_running_containers(*, leave_processing_stopped: bool) -> set[str]:
+    if leave_processing_stopped:
+        return {"open-webui"}
+    return {"autplay-music-proxy", "open-webui"}
+
+
 def prepare_private_storage() -> None:
     key_program = """
 import os
@@ -377,7 +383,10 @@ def main(*, leave_processing_stopped: bool = False) -> None:
     if old_actual != OLD_IMAGE_SHA256:
         raise RuntimeError("rollback_image_digest_changed")
     running = set(docker("ps", "--format", "{{.Names}}").splitlines())
-    if running != {"autplay-music-proxy", "open-webui"}:
+    expected_running = expected_running_containers(
+        leave_processing_stopped=leave_processing_stopped
+    )
+    if running != expected_running:
         raise RuntimeError("unexpected_running_container_set")
     originals = {
         name: json.loads(docker("inspect", name))[0] for name in SERVER_CONTAINERS
