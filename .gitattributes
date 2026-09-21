@@ -8,6 +8,7 @@ gradlew.bat text eol=crlf
 *.kts text eol=lf
 *.md text eol=lf
 *.json text eol=lf
+*.js text eol=lf
 *.css text eol=lf
 *.toml text eol=lf
 *.yaml text eol=lf

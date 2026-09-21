@@ -28,6 +28,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY server/src ./src
 RUN uv sync --frozen --no-dev --no-editable
+RUN .venv/bin/python -c "from autplay.web.renderer import STATIC_ASSET_DIGESTS, read_static_asset; [read_static_asset(name) for name in STATIC_ASSET_DIGESTS]"
 
 COPY server/alembic.ini ./alembic.ini
 COPY server/migrations ./migrations
