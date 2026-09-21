@@ -63,6 +63,13 @@ raises the Web alert at the configured threshold and terminates the stream befor
 On any failure it attempts to restore the exact prior runtime; `--leave-stopped` is reserved for an
 immediately following isolated restore/deployment window.
 
+Every run creates a new timestamped generation with exclusive-create semantics. The agent refuses
+to start when either its `.incomplete` directory or final directory already exists and never
+truncates a prior generation. An interrupted streamed dump or tar is deliberately not resumable:
+restore tooling ignores the `.incomplete` directory, and an operator must review and explicitly
+remove that exact directory before reclaiming its space. Completed generations are never pruned by
+the agent.
+
 The matching Compose overlay and commands are documented in
 [`deploy/compose/README.md`](../../deploy/compose/README.md#optional-admin-backup-control).
 The opaque registry never stores a Windows drive letter or NAS path; that mapping remains in the

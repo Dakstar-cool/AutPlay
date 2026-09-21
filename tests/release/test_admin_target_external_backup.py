@@ -77,6 +77,56 @@ def test_backup_id_is_strict() -> None:
     assert tool.BACKUP_ID.fullmatch(r"..\production") is None
 
 
+def test_existing_incomplete_generation_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup_id = "admin-target-20260920T180629Z"
+    incomplete = tmp_path / f".{backup_id}.incomplete"
+    incomplete.mkdir()
+    marker = incomplete / "preserve.bin"
+    marker.write_bytes(b"existing partial generation")
+    baseline = tool._default_baseline()
+    remote = tool.RemotePreflightRecord(
+        1,
+        "2026-09-20T18:06:29Z",
+        "operator@example",
+        baseline.migration_head,
+        baseline.live_image_sha256,
+        baseline.container_set_sha256,
+        baseline.candidate_archive_sha256,
+        baseline.candidate_image_sha256,
+        False,
+        {},
+        "PASS",
+    )
+    volume = tool.ExternalVolumeRecord(
+        "E", 1, "USB", "NTFS", False, False, 2 * 1024**4, 2 * 1024**4
+    )
+    record = tool.ExternalPreflightRecord(
+        1,
+        "2026-09-20T18:06:29Z",
+        str(tmp_path),
+        volume,
+        1024**3,
+        remote,
+        "PASS",
+    )
+    monkeypatch.setattr(tool, "preflight", lambda *args, **kwargs: record)
+
+    with pytest.raises(tool.ExternalBackupError, match="backup_target_already_exists"):
+        tool.execute_backup(
+            tmp_path,
+            "operator@example",
+            backup_id,
+            1024**3,
+            128 * 1024**3,
+            90,
+            leave_stopped=False,
+        )
+
+    assert marker.read_bytes() == b"existing partial generation"
+
+
 def test_hash_manifest_is_stable_and_read_back(tmp_path: Path) -> None:
     (tmp_path / "b.bin").write_bytes(b"b")
     (tmp_path / "a.bin").write_bytes(b"a")
