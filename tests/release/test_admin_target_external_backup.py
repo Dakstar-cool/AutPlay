@@ -222,7 +222,7 @@ def test_remote_control_helper_image_requires_root(tmp_path: Path) -> None:
 def test_run_requested_noops_when_admin_status_is_not_requested(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(tool.RemoteControlReporter, "request_is_pending", lambda self: False)
+    monkeypatch.setattr(tool.RemoteControlReporter, "resolve_run", lambda self, now: None)
 
     assert (
         tool.main(
@@ -239,7 +239,76 @@ def test_run_requested_noops_when_admin_status_is_not_requested(
         == 0
     )
 
-    assert '"status": "NOOP"' in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert '"status": "NOOP"' in output
+    assert '"reason": "no_due_backup"' in output
+
+
+def test_automatic_schedule_claims_one_weekly_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter = tool.RemoteControlReporter(
+        "operator@example",
+        "/srv/autplay/operator/backup-control",
+        "windows-usb-e",
+        "admin-target-20260920T180629Z",
+    )
+    documents: dict[str, dict[str, object] | None] = {
+        "status.json": {"state": "COMPLETED", "target_id": "windows-usb-e"},
+        "policy.json": {
+            "target_id": "windows-usb-e",
+            "max_backup_bytes": 140 * 1024**3,
+            "warning_percent": 90,
+            "schedule_mode": "automatic",
+            "schedule_weekday": 7,
+            "schedule_hour": 3,
+        },
+        "automatic-slot.json": None,
+    }
+    writes: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        reporter, "_read_optional_document", lambda name: documents.get(name)
+    )
+    monkeypatch.setattr(
+        reporter, "_write_document", lambda name, payload: writes.append((name, payload))
+    )
+
+    run = reporter.resolve_run(tool.datetime(2026, 9, 20, 3, 15, tzinfo=tool.UTC))
+
+    assert run == tool.AgentRunPolicy(140 * 1024**3, 90, "automatic", "2026-09-20T03")
+    assert writes[0][0] == "automatic-slot.json"
+    assert writes[0][1]["schedule_slot"] == "2026-09-20T03"
+
+
+def test_automatic_schedule_does_not_repeat_claimed_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter = tool.RemoteControlReporter(
+        "operator@example",
+        "/srv/autplay/operator/backup-control",
+        "windows-usb-e",
+        "admin-target-20260920T180629Z",
+    )
+    documents: dict[str, dict[str, object] | None] = {
+        "status.json": {"state": "COMPLETED", "target_id": "windows-usb-e"},
+        "policy.json": {
+            "target_id": "windows-usb-e",
+            "max_backup_bytes": 140 * 1024**3,
+            "warning_percent": 90,
+            "schedule_mode": "automatic",
+            "schedule_weekday": 7,
+            "schedule_hour": 3,
+        },
+        "automatic-slot.json": {
+            "target_id": "windows-usb-e",
+            "schedule_slot": "2026-09-20T03",
+        },
+    }
+    monkeypatch.setattr(
+        reporter, "_read_optional_document", lambda name: documents.get(name)
+    )
+
+    assert reporter.resolve_run(tool.datetime(2026, 9, 20, 3, 59, tzinfo=tool.UTC)) is None
 
 
 def test_remote_control_helper_reads_owner_only_spool(

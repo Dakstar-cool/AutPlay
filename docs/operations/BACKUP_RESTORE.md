@@ -76,14 +76,18 @@ The opaque registry never stores a Windows drive letter or NAS path; that mappin
 agent invocation on the machine that actually owns the storage.
 
 For the target workstation, `scripts/run_admin_backup_agent.ps1` is the non-interactive entry
-point intended for a once-per-minute per-user Scheduled Task. It performs no backup unless the
-owner-only Admin page has published a fresh `REQUESTED` status. A completed, failed or already
-running request is a no-op, so scheduler retries cannot duplicate a generation. The selected
-target is an opaque registry ID in Admin Web; the agent keeps the actual Windows drive mapping and
-continues to enforce USB/NTFS/non-system-volume checks locally. On the target deployment the agent
-reads and updates the `0600` spool documents through a short-lived, networkless helper container
-running with the Admin UID and only the spool bind-mounted. This keeps progress reporting alive
-while Admin is quiesced without weakening host file permissions.
+point intended for a once-per-minute per-user Scheduled Task. Manual backup requests from the
+owner-only Admin page are accepted in both run modes and may be submitted at any time. In automatic
+mode the agent additionally starts at most once per week, on the selected ISO weekday and during
+the selected hour in the storage agent's local time. The first scheduler tick in that hour claims
+the dated hour slot before starting; later minute ticks cannot create a duplicate generation. A
+failed automatic attempt keeps its slot claimed, so it is retried only through an explicit manual
+request rather than by a minute-by-minute retry storm. A completed or already running request is
+also a no-op. The selected target is an opaque registry ID in Admin Web; the agent keeps the actual
+Windows drive mapping and continues to enforce USB/NTFS/non-system-volume checks locally. On the
+target deployment the agent reads and updates the `0600` spool documents through a short-lived,
+networkless helper container running with the Admin UID and only the spool bind-mounted. This keeps
+progress reporting alive while Admin is quiesced without weakening host file permissions.
 The scheduled launcher also requires `admin-backup-baseline.json` on the external disk. That strict,
 non-secret record pins the deployed migration, live image/container-set digests, retained source
 archive, helper image and rollback image; routine backups therefore fail closed after an unreviewed

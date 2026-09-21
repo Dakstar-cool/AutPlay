@@ -68,6 +68,7 @@ def create_backup_control_router(
             "backup_target_invalid",
             "backup_size_invalid",
             "backup_warning_invalid",
+            "backup_schedule_invalid",
             "backup_policy_stale",
             "backup_policy_missing",
             "backup_already_active",
@@ -182,10 +183,24 @@ def create_backup_control_router(
                         "target_id",
                         "max_backup_gib",
                         "warning_percent",
+                        "schedule_mode",
+                        "schedule_weekday",
+                        "schedule_hour",
                     }
                 ),
             )
             authenticated, _ = authorize(request, form)
+            schedule_mode = form["schedule_mode"]
+            schedule_weekday = (
+                _integer(form["schedule_weekday"], 1, 7)
+                if schedule_mode == "automatic"
+                else None
+            )
+            schedule_hour = (
+                _integer(form["schedule_hour"], 0, 23)
+                if schedule_mode == "automatic"
+                else None
+            )
             await run_in_threadpool(
                 backups.configure,
                 authenticated.actor,
@@ -193,6 +208,9 @@ def create_backup_control_router(
                 max_backup_bytes=_integer(form["max_backup_gib"], 1, 1_048_576) * 1024**3,
                 warning_percent=_integer(form["warning_percent"], 50, 99),
                 expected_revision=_integer(form["expected_revision"], 0, 2**31 - 1),
+                schedule_mode=schedule_mode,
+                schedule_weekday=schedule_weekday,
+                schedule_hour=schedule_hour,
             )
         except (KeyError, ValueError, WebAdminError) as error:
             return problem(request, error)

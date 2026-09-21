@@ -10,6 +10,7 @@ from autplay.application.backup_control import (
     BackupControlService,
     BackupSnapshot,
     BackupStatus,
+    BackupTarget,
     parse_backup_targets,
 )
 from autplay.domain.auth import AccountRole
@@ -22,7 +23,7 @@ def _actor(role: AccountRole = AccountRole.OWNER) -> WebActor:
     return WebActor(uuid4(), uuid4(), uuid4(), role, 1)
 
 
-def _targets() -> tuple:
+def _targets() -> tuple[BackupTarget, ...]:
     return parse_backup_targets(
         json.dumps(
             [
@@ -73,6 +74,61 @@ def test_owner_configures_policy_and_requests_agent_without_storage_authority(
     assert request["max_backup_bytes"] == 140 * 1024**3
     assert status.state == "REQUESTED"
     assert status.message_code == "backup_waiting_for_agent"
+    assert policy.schedule_mode == "manual"
+    assert policy.schedule_weekday is None and policy.schedule_hour is None
+
+
+def test_owner_configures_weekly_automatic_schedule(tmp_path: Path) -> None:
+    service = BackupControlService(tmp_path / "control", _targets())
+
+    policy = service.configure(
+        _actor(),
+        target_id="workstation-usb-e",
+        max_backup_bytes=140 * 1024**3,
+        warning_percent=90,
+        expected_revision=0,
+        schedule_mode="automatic",
+        schedule_weekday=7,
+        schedule_hour=3,
+    )
+
+    assert (policy.schedule_mode, policy.schedule_weekday, policy.schedule_hour) == (
+        "automatic",
+        7,
+        3,
+    )
+    persisted = json.loads((service.root / "policy.json").read_text(encoding="utf-8"))
+    assert persisted["schedule_mode"] == "automatic"
+    assert persisted["schedule_weekday"] == 7
+    assert persisted["schedule_hour"] == 3
+
+
+@pytest.mark.parametrize(
+    ("mode", "weekday", "hour"),
+    [
+        ("automatic", None, 3),
+        ("automatic", 8, 3),
+        ("automatic", 1, 24),
+        ("manual", 1, 3),
+        ("sometimes", None, None),
+    ],
+)
+def test_invalid_schedule_fails_closed(
+    tmp_path: Path, mode: str, weekday: int | None, hour: int | None
+) -> None:
+    service = BackupControlService(tmp_path / "control", _targets())
+
+    with pytest.raises(WebAdminError, match="backup_schedule_invalid"):
+        service.configure(
+            _actor(),
+            target_id="workstation-usb-e",
+            max_backup_bytes=140 * 1024**3,
+            warning_percent=90,
+            expected_revision=0,
+            schedule_mode=mode,
+            schedule_weekday=weekday,
+            schedule_hour=hour,
+        )
 
 
 def test_non_owner_and_stale_revision_fail_closed(tmp_path: Path) -> None:

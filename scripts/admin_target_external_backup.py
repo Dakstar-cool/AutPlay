@@ -66,6 +66,14 @@ class ExternalVolumeRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentRunPolicy:
+    max_backup_bytes: int
+    warning_percent: int
+    trigger: str
+    schedule_slot: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class RemotePreflightRecord:
     schema_version: int
     checked_at: str
@@ -175,6 +183,8 @@ class RemoteControlReporter:
         self.target_id = target_id
         self.backup_id = backup_id
         self.helper_image = helper_image
+        self.trigger = "manual"
+        self.schedule_slot: str | None = None
 
     def _read_text(self, path: str) -> str:
         arguments: tuple[str, ...] = ("cat", path)
@@ -198,84 +208,36 @@ class RemoteControlReporter:
             )
         return _remote_output(self.ssh_target, shlex.join(arguments))
 
-    def requested_policy(self) -> tuple[int, int]:
-        request_path = str(PurePosixPath(self.root) / "request.json")
+    def _read_optional_document(self, name: str) -> dict[str, object] | None:
+        if re.fullmatch(r"[a-z][a-z0-9-]*\.json", name) is None:
+            raise ExternalBackupError("backup_control_document_invalid")
+        path = str(PurePosixPath(self.root) / name)
         try:
-            value = json.loads(self._read_text(request_path))
-            if not isinstance(value, dict) or value.get("target_id") != self.target_id:
-                raise ValueError("target mismatch")
-            maximum = value["max_backup_bytes"]
-            warning = value["warning_percent"]
-            if (
-                not isinstance(maximum, int)
-                or isinstance(maximum, bool)
-                or not isinstance(warning, int)
-                or isinstance(warning, bool)
-            ):
-                raise ValueError("invalid policy values")
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise ExternalBackupError("backup_request_invalid") from error
-        return maximum, warning
-
-    def request_is_pending(self) -> bool:
-        status_path = str(PurePosixPath(self.root) / "status.json")
-        try:
-            value = json.loads(self._read_text(status_path))
+            value = json.loads(self._read_text(path))
         except subprocess.CalledProcessError as error:
             if "No such file or directory" in (error.stderr or ""):
-                return False
-            raise ExternalBackupError("backup_status_unavailable") from error
+                return None
+            raise ExternalBackupError("backup_control_unavailable") from error
         except (TypeError, ValueError, json.JSONDecodeError) as error:
-            raise ExternalBackupError("backup_status_invalid") from error
+            raise ExternalBackupError("backup_control_unavailable") from error
         if not isinstance(value, dict):
-            raise ExternalBackupError("backup_status_invalid")
-        state = value.get("state")
-        target_id = value.get("target_id")
-        if state == "REQUESTED":
-            if target_id != self.target_id:
-                raise ExternalBackupError("backup_status_target_mismatch")
-            return True
-        if state not in {
-            "IDLE",
-            "RUNNING",
-            "COMPLETED",
-            "FAILED",
-            "LIMIT_EXCEEDED",
-        }:
-            raise ExternalBackupError("backup_status_invalid")
-        return False
+            raise ExternalBackupError("backup_control_unavailable")
+        return value
 
-    def update(
-        self,
-        state: str,
-        *,
-        bytes_written: int,
-        available_bytes: int,
-        max_backup_bytes: int,
-        warning_percent: int,
-        message_code: str | None,
-    ) -> None:
-        payload = {
-            "schema_version": 1,
-            "state": state,
-            "target_id": self.target_id,
-            "backup_id": self.backup_id,
-            "bytes_written": bytes_written,
-            "available_bytes": max(0, available_bytes),
-            "max_backup_bytes": max_backup_bytes,
-            "warning_percent": warning_percent,
-            "message_code": message_code,
-            "updated_at": _utc_now(),
-        }
+    def _write_document(self, name: str, payload: dict[str, object]) -> None:
+        if re.fullmatch(r"[a-z][a-z0-9-]*\.json", name) is None:
+            raise ExternalBackupError("backup_control_document_invalid")
         encoded = base64.b64encode(
             (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
         ).decode("ascii")
         root = shlex.quote(self.root)
-        status = shlex.quote(str(PurePosixPath(self.root) / "status.json"))
-        temporary = shlex.quote(str(PurePosixPath(self.root) / f".status.{self.backup_id}.tmp"))
+        destination = shlex.quote(str(PurePosixPath(self.root) / name))
+        temporary = shlex.quote(
+            str(PurePosixPath(self.root) / f".{name}.{self.backup_id}.tmp")
+        )
         write_script = (
             f"umask 077; mkdir -p {root}; printf %s {shlex.quote(encoded)} "
-            f"| base64 -d > {temporary}; mv -f {temporary} {status}"
+            f"| base64 -d > {temporary}; mv -f {temporary} {destination}"
         )
         command = write_script
         if self.helper_image is not None:
@@ -300,6 +262,134 @@ class RemoteControlReporter:
                 )
             )
         _remote_run(self.ssh_target, command)
+
+    def requested_policy(self) -> tuple[int, int]:
+        request_path = str(PurePosixPath(self.root) / "request.json")
+        try:
+            value = json.loads(self._read_text(request_path))
+            if not isinstance(value, dict) or value.get("target_id") != self.target_id:
+                raise ValueError("target mismatch")
+            maximum = value["max_backup_bytes"]
+            warning = value["warning_percent"]
+            if (
+                not isinstance(maximum, int)
+                or isinstance(maximum, bool)
+                or not isinstance(warning, int)
+                or isinstance(warning, bool)
+            ):
+                raise ValueError("invalid policy values")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ExternalBackupError("backup_request_invalid") from error
+        return maximum, warning
+
+    def request_is_pending(self) -> bool:
+        value = self._read_optional_document("status.json")
+        if value is None:
+            return False
+        state = value.get("state")
+        target_id = value.get("target_id")
+        if state == "REQUESTED":
+            if target_id != self.target_id:
+                raise ExternalBackupError("backup_status_target_mismatch")
+            return True
+        if state not in {
+            "IDLE",
+            "RUNNING",
+            "COMPLETED",
+            "FAILED",
+            "LIMIT_EXCEEDED",
+        }:
+            raise ExternalBackupError("backup_status_invalid")
+        return False
+
+    def resolve_run(self, now: datetime) -> AgentRunPolicy | None:
+        if self.request_is_pending():
+            requested_maximum, requested_warning = self.requested_policy()
+            self.trigger, self.schedule_slot = "manual", None
+            return AgentRunPolicy(
+                requested_maximum,
+                requested_warning,
+                self.trigger,
+                self.schedule_slot,
+            )
+        policy = self._read_optional_document("policy.json")
+        if policy is None or policy.get("schedule_mode") != "automatic":
+            return None
+        try:
+            if policy.get("target_id") != self.target_id:
+                raise ValueError("target mismatch")
+            maximum = policy["max_backup_bytes"]
+            warning = policy["warning_percent"]
+            weekday = policy["schedule_weekday"]
+            hour = policy["schedule_hour"]
+            if (
+                not isinstance(maximum, int)
+                or isinstance(maximum, bool)
+                or not 1024**3 <= maximum <= 1024**5
+                or not isinstance(warning, int)
+                or isinstance(warning, bool)
+                or not 50 <= warning <= 99
+                or not isinstance(weekday, int)
+                or isinstance(weekday, bool)
+                or not 1 <= weekday <= 7
+                or not isinstance(hour, int)
+                or isinstance(hour, bool)
+                or not 0 <= hour <= 23
+            ):
+                raise ValueError("invalid automatic policy")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ExternalBackupError("backup_schedule_invalid") from error
+        if now.isoweekday() != weekday or now.hour != hour:
+            return None
+        slot = f"{now.date().isoformat()}T{hour:02d}"
+        previous = self._read_optional_document("automatic-slot.json")
+        if previous is not None and (
+            previous.get("target_id") == self.target_id
+            and previous.get("schedule_slot") == slot
+        ):
+            return None
+        self._write_document(
+            "automatic-slot.json",
+            {
+                "schema_version": 1,
+                "target_id": self.target_id,
+                "schedule_slot": slot,
+                "claimed_at": _utc_now(),
+            },
+        )
+        self.trigger, self.schedule_slot = "automatic", slot
+        return AgentRunPolicy(
+            maximum,
+            warning,
+            self.trigger,
+            self.schedule_slot,
+        )
+
+    def update(
+        self,
+        state: str,
+        *,
+        bytes_written: int,
+        available_bytes: int,
+        max_backup_bytes: int,
+        warning_percent: int,
+        message_code: str | None,
+    ) -> None:
+        payload = {
+            "schema_version": 1,
+            "state": state,
+            "target_id": self.target_id,
+            "backup_id": self.backup_id,
+            "bytes_written": bytes_written,
+            "available_bytes": max(0, available_bytes),
+            "max_backup_bytes": max_backup_bytes,
+            "warning_percent": warning_percent,
+            "message_code": message_code,
+            "trigger": self.trigger,
+            "schedule_slot": self.schedule_slot,
+            "updated_at": _utc_now(),
+        }
+        self._write_document("status.json", payload)
 
 
 def _utc_now() -> str:
@@ -1190,15 +1280,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         if options.remote_control_root is not None
         else None
     )
+    agent_policy: AgentRunPolicy | None = None
     if options.run_requested:
         assert reporter is not None
-        if not reporter.request_is_pending():
-            print(json.dumps({"status": "NOOP", "reason": "no_requested_backup"}))
+        agent_policy = reporter.resolve_run(datetime.now().astimezone())
+        if agent_policy is None:
+            print(json.dumps({"status": "NOOP", "reason": "no_due_backup"}))
             return 0
     max_backup_bytes = options.max_backup_bytes
     warning_percent = options.warning_percent
     if reporter is not None:
-        requested_maximum, requested_warning = reporter.requested_policy()
+        if agent_policy is None:
+            requested_maximum, requested_warning = reporter.requested_policy()
+        else:
+            requested_maximum = agent_policy.max_backup_bytes
+            requested_warning = agent_policy.warning_percent
         if max_backup_bytes is not None and max_backup_bytes != requested_maximum:
             raise ExternalBackupError("max_backup_bytes_policy_mismatch")
         if warning_percent is not None and warning_percent != requested_warning:

@@ -1,5 +1,19 @@
 "use strict";
 
+function syncBackupScheduleControls(root) {
+  const mode = root.querySelector("#backup-schedule-mode");
+  const automatic = root.querySelector("[data-backup-automatic-schedule]");
+  if (!(mode instanceof HTMLSelectElement) || !(automatic instanceof HTMLElement)) return;
+  automatic.hidden = mode.value !== "automatic";
+}
+
+syncBackupScheduleControls(document);
+document.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLSelectElement && event.target.id === "backup-schedule-mode") {
+    syncBackupScheduleControls(document);
+  }
+});
+
 // CORS-mode fetch supplies the exact Origin even under Referrer-Policy: no-referrer.
 // Delegate on document so server-rendered POST results keep working without inline scripts.
 document.addEventListener("submit", async (event) => {
@@ -38,6 +52,7 @@ document.addEventListener("submit", async (event) => {
     if (!response.headers.get("content-type")?.startsWith("text/html")) throw new Error("ADMIN_ACTION_FAILED");
     const result = new DOMParser().parseFromString(await response.text(), "text/html");
     document.replaceChild(document.importNode(result.documentElement, true), document.documentElement);
+    syncBackupScheduleControls(document);
     document.getElementById("main")?.focus();
   } catch {
     status.textContent = document.body.dataset.actionError;

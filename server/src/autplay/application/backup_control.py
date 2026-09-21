@@ -19,6 +19,7 @@ _MAXIMUM_MAX_BYTES = 1024**5
 _STATUS_STATES = frozenset(
     {"IDLE", "REQUESTED", "RUNNING", "COMPLETED", "FAILED", "LIMIT_EXCEEDED"}
 )
+_SCHEDULE_MODES = frozenset({"manual", "automatic"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,9 @@ class BackupPolicy:
     target_id: str
     max_backup_bytes: int
     warning_percent: int
+    schedule_mode: str
+    schedule_weekday: int | None
+    schedule_hour: int | None
     revision: int
     updated_at: str
 
@@ -126,6 +130,9 @@ class BackupControlService:
         max_backup_bytes: int,
         warning_percent: int,
         expected_revision: int,
+        schedule_mode: str = "manual",
+        schedule_weekday: int | None = None,
+        schedule_hour: int | None = None,
     ) -> BackupPolicy:
         self._owner(actor)
         if target_id not in self._target_ids:
@@ -134,6 +141,18 @@ class BackupControlService:
             raise WebAdminError("backup_size_invalid")
         if not 50 <= warning_percent <= 99:
             raise WebAdminError("backup_warning_invalid")
+        if schedule_mode not in _SCHEDULE_MODES:
+            raise WebAdminError("backup_schedule_invalid")
+        if schedule_mode == "manual":
+            if schedule_weekday is not None or schedule_hour is not None:
+                raise WebAdminError("backup_schedule_invalid")
+        elif (
+            schedule_weekday is None
+            or not 1 <= schedule_weekday <= 7
+            or schedule_hour is None
+            or not 0 <= schedule_hour <= 23
+        ):
+            raise WebAdminError("backup_schedule_invalid")
         current = self._read_policy()
         revision = current.revision if current is not None else 0
         if expected_revision != revision:
@@ -142,6 +161,9 @@ class BackupControlService:
             target_id,
             max_backup_bytes,
             warning_percent,
+            schedule_mode,
+            schedule_weekday,
+            schedule_hour,
             revision + 1,
             _utc_now(),
         )
@@ -200,6 +222,17 @@ class BackupControlService:
                 target_id=str(value["target_id"]),
                 max_backup_bytes=_json_integer(value["max_backup_bytes"]),
                 warning_percent=_json_integer(value["warning_percent"]),
+                schedule_mode=str(value.get("schedule_mode", "manual")),
+                schedule_weekday=(
+                    _json_integer(value["schedule_weekday"])
+                    if value.get("schedule_weekday") is not None
+                    else None
+                ),
+                schedule_hour=(
+                    _json_integer(value["schedule_hour"])
+                    if value.get("schedule_hour") is not None
+                    else None
+                ),
                 revision=_json_integer(value["revision"]),
                 updated_at=str(value["updated_at"]),
             )
@@ -209,6 +242,20 @@ class BackupControlService:
             policy.target_id not in self._target_ids
             or not _MINIMUM_MAX_BYTES <= policy.max_backup_bytes <= _MAXIMUM_MAX_BYTES
             or not 50 <= policy.warning_percent <= 99
+            or policy.schedule_mode not in _SCHEDULE_MODES
+            or (
+                policy.schedule_mode == "manual"
+                and (policy.schedule_weekday is not None or policy.schedule_hour is not None)
+            )
+            or (
+                policy.schedule_mode == "automatic"
+                and (
+                    policy.schedule_weekday is None
+                    or not 1 <= policy.schedule_weekday <= 7
+                    or policy.schedule_hour is None
+                    or not 0 <= policy.schedule_hour <= 23
+                )
+            )
             or policy.revision < 1
         ):
             raise WebAdminError("backup_control_unavailable")

@@ -30,6 +30,20 @@
     <input id="backup-max" name="max_backup_gib" type="number" min="1" max="1048576" step="1" inputmode="numeric" required value="{{ (policy.max_backup_bytes // 1073741824) if policy else 128 }}">
     <label for="backup-warning">{{ t("backup_warning_percent") }}</label>
     <input id="backup-warning" name="warning_percent" type="number" min="50" max="99" step="1" inputmode="numeric" required value="{{ policy.warning_percent if policy else 90 }}">
+    <label for="backup-schedule-mode">{{ t("backup_schedule_mode") }}</label>
+    <select id="backup-schedule-mode" name="schedule_mode" aria-controls="backup-automatic-schedule" required>
+      <option value="manual"{% if not policy or policy.schedule_mode == 'manual' %} selected{% endif %}>{{ t("backup_schedule_manual") }}</option>
+      <option value="automatic"{% if policy and policy.schedule_mode == 'automatic' %} selected{% endif %}>{{ t("backup_schedule_automatic") }}</option>
+    </select>
+    <div id="backup-automatic-schedule" data-backup-automatic-schedule>
+      <label for="backup-schedule-weekday">{{ t("backup_schedule_weekday") }}</label>
+      <select id="backup-schedule-weekday" name="schedule_weekday" required>
+        {% for day in range(1, 8) %}<option value="{{ day }}"{% if (policy and policy.schedule_weekday == day) or (not policy and day == 7) %} selected{% endif %}>{{ t("backup_weekday_" ~ day) }}</option>{% endfor %}
+      </select>
+      <label for="backup-schedule-hour">{{ t("backup_schedule_hour") }}</label>
+      <input id="backup-schedule-hour" name="schedule_hour" type="number" min="0" max="23" step="1" inputmode="numeric" required value="{{ policy.schedule_hour if policy and policy.schedule_hour is not none else 3 }}">
+    </div>
+    <p>{{ t("backup_schedule_notice") }}</p>
     <p>{{ t("backup_hard_limit_notice") }}</p>
     <button type="submit">{{ t("backup_save_policy") }}</button>
   </form>

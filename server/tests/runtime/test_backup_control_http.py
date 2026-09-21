@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 from autplay.application.backup_control import BackupControlService, parse_backup_targets
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import AuthenticatedWebSession, WebActor, WebAdminError
+from autplay.entrypoints.admin_web_http import WebAdminHttp
 from autplay.entrypoints.backup_control_http import create_backup_control_router
 from autplay.web.renderer import AdminTemplateRenderer
 
@@ -49,7 +51,7 @@ def _client(tmp_path: Path) -> tuple[TestClient, BackupControlService]:
     app = FastAPI()
     app.include_router(
         create_backup_control_router(
-            web=_Web(),
+            web=cast(WebAdminHttp, _Web()),
             backups=service,
             renderer=AdminTemplateRenderer(),
             origin="https://admin.test",
@@ -84,6 +86,9 @@ def test_owner_selects_target_and_requests_bounded_external_agent(tmp_path: Path
         "target_id": "workstation-usb-e",
         "max_backup_gib": "140",
         "warning_percent": "90",
+        "schedule_mode": "automatic",
+        "schedule_weekday": "7",
+        "schedule_hour": "3",
     }
     saved = client.post(
         "/admin/recovery/policy?lang=ru",
@@ -106,6 +111,10 @@ def test_owner_selects_target_and_requests_bounded_external_agent(tmp_path: Path
     assert document["max_backup_bytes"] == 140 * 1024**3
     assert document["warning_percent"] == 90
     assert "path" not in document
+    stored_policy = json.loads((service.root / "policy.json").read_text(encoding="utf-8"))
+    assert stored_policy["schedule_mode"] == "automatic"
+    assert stored_policy["schedule_weekday"] == 7
+    assert stored_policy["schedule_hour"] == 3
 
 
 def test_origin_and_csrf_fail_without_mutating_policy(tmp_path: Path) -> None:
@@ -115,6 +124,9 @@ def test_origin_and_csrf_fail_without_mutating_policy(tmp_path: Path) -> None:
         "target_id": "workstation-usb-e",
         "max_backup_gib": "140",
         "warning_percent": "90",
+        "schedule_mode": "manual",
+        "schedule_weekday": "7",
+        "schedule_hour": "3",
     }
 
     response = client.post("/admin/recovery/policy", data=form)
