@@ -113,7 +113,7 @@ def test_search_keeps_only_artist_authorized_downloads() -> None:
     ]
 
 
-def test_search_rejects_downloadable_track_without_valid_license() -> None:
+def test_search_skips_downloadable_track_without_valid_license() -> None:
     transport = FakeSearchTransport(
         _response(
             _track(
@@ -126,16 +126,14 @@ def test_search_rejects_downloadable_track_without_valid_license() -> None:
         )
     )
 
-    with pytest.raises(jamendo_download.JamendoToolError, match="license_url_invalid"):
-        jamendo_download.search_tracks("Allowed Song", transport=transport)
+    assert jamendo_download.search_tracks("Allowed Song", transport=transport) == ()
 
 
-def test_search_rejects_download_url_outside_exact_storage_host_pattern() -> None:
+def test_search_skips_download_url_outside_exact_storage_host_pattern() -> None:
     raw_track = _track(track_id="10", title="Allowed Song", artist="Open Artist", allowed=True)
     raw_track["audiodownload"] = "https://attacker.example/download/track/10/mp32/"
 
-    with pytest.raises(jamendo_download.JamendoToolError, match="download_url_invalid"):
-        jamendo_download.parse_search_response(_response(raw_track), limit=1)
+    assert jamendo_download.parse_search_response(_response(raw_track), limit=1) == ()
 
 
 @pytest.mark.parametrize(
