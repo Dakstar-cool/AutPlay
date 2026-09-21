@@ -40,5 +40,8 @@ jobs:
       - name: Install pinned Playwright Chromium
         run: uv run --project server --frozen playwright install --with-deps chromium
 
+      - name: Install pinned ffmpeg and ffprobe
+        run: bash scripts/install-ci-ffmpeg.sh
+
       - name: Run canonical server gate
         run: bash scripts/check.sh --server-only

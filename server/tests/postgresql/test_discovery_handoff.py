@@ -391,8 +391,13 @@ def test_actual_ingest_ready_receipt_replays_after_source_expiry_without_second_
         assert attempt.state == "COMPLETED" and upload.state == (
             "REUSED" if reused else "COMMITTED"
         )
-        present(session.get(SourceAuthorizationRow, attempt.source_authorization_id)).expires_at = (
-            present(session.scalar(select(func.clock_timestamp()))) - timedelta(seconds=1)
+        authorization = present(
+            session.get(SourceAuthorizationRow, attempt.source_authorization_id)
+        )
+        database_now = present(session.scalar(select(func.clock_timestamp())))
+        assert authorization.granted_at < database_now
+        authorization.expires_at = (
+            authorization.granted_at + (database_now - authorization.granted_at) / 2
         )
         present(session.get(UserAccountRow, prepared.target.user_id)).authority_generation += 1
         assert session.scalars(select(ResourceAdmissionRow.resource_type)).all() == [

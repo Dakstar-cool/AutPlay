@@ -46,6 +46,7 @@ from autplay.domain.resource_execution import ExecutionState, ExitKind, ProcessE
 from autplay.entrypoints import worker_cpu
 from autplay.entrypoints.ingest_composition import IngestWorkerRuntime
 from autplay.runtime.settings import WorkerSettings
+from process_tree_support import process_tree_factory
 from pydantic import SecretStr
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
@@ -301,6 +302,7 @@ def test_downgrade_cannot_discard_reviewed_budget(
 def test_actual_cpu_worker_once_uses_contained_work_and_cleanup(
     ingest: IngestFixture, tmp_path: Path, database_url: str
 ) -> None:
+    process_tree_factory()
     source = io.BytesIO()
     with wave.open(source, "wb") as audio:
         audio.setnchannels(1)
@@ -398,6 +400,7 @@ def test_poisoned_cleanup_does_not_prevent_job_poll(
     database_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    process_tree_factory()
     _, claim = finalized(ingest)
     # Lose the published bytes: cleanup must leave its canonical intent pending.
     digest = claim.expected.sha256.hex
@@ -436,6 +439,7 @@ def test_actual_once_signal_interrupts_owned_runtime(
     database_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    process_tree_factory()
     stopped = Event()
     original = IngestWorkerRuntime.request_stop
     original_shutdown = IngestWorkerRuntime.shutdown

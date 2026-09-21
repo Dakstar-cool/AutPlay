@@ -454,6 +454,7 @@ def test_downgrade_refuses_metadata_history(
 def test_actual_worker_once_reads_canonical_audio_inside_tree(
     ingest: IngestFixture, tmp_path: Path, database_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    process_tree_factory()
     source = io.BytesIO()
     with wave.open(source, "wb") as audio:
         audio.setnchannels(1)
