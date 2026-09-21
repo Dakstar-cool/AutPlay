@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="metadata_heading">Сведения о треке</string>
+    <string name="metadata_title_field">Название</string>
+    <string name="metadata_artist">Исполнитель</string>
+    <string name="metadata_album_artist">Исполнитель альбома</string>
+    <string name="metadata_release_date">Дата выпуска издания</string>
+    <string name="metadata_first_release">Первый выпуск</string>
+    <string name="metadata_recording_date">Дата записи</string>
+    <string name="metadata_label">Лейбл</string>
+    <string name="metadata_track_number">Номер трека</string>
+    <string name="metadata_disc_number">Номер диска</string>
+    <string name="metadata_local">Прочитано из аудиофайла</string>
+    <string name="metadata_ready">Сведения обновлены</string>
+    <string name="metadata_review">Выберите подходящую запись и издание</string>
+    <string name="metadata_not_found">Надёжное совпадение в каталоге не найдено. Сведения из файла сохранены.</string>
+    <string name="metadata_pending">Обновляется в фоне</string>
+    <string name="metadata_failed">Не удалось обновить. Прежние сведения сохранены.</string>
+    <string name="metadata_missing">Дополнительные сведения ещё не загружены</string>
+    <string name="metadata_manual">Вручную</string>
+    <string name="metadata_from_file">Из файла</string>
+    <string name="metadata_command_failed">Не удалось применить изменение. Обновите сведения и повторите.</string>
+    <string name="metadata_refresh">Обновить</string>
+    <string name="metadata_edit">Изменить сведения</string>
+    <string name="metadata_choose">Выбрать это издание</string>
+    <string name="metadata_edit_hint">Изменённые поля сохранятся при обновлении. Даты: ГГГГ, ГГГГ-ММ или ГГГГ-ММ-ДД.</string>
+    <string name="metadata_backfill">Загрузить сведения и обложки музыки</string>
+</resources>

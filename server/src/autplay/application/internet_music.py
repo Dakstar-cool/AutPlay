@@ -30,9 +30,7 @@ from autplay.adapters.postgresql.models.internet_music import (
     InternetAcquisitionRow,
     InternetSearchRow,
 )
-from autplay.adapters.postgresql.resource_authority import ResourceAuthorityGate
-from autplay.adapters.postgresql.resource_limits import lock_resource_admission
-from autplay.application.job_worker import JobExecutionContext, JobLeaseLost, JobResourceWait
+from autplay.application.job_worker import JobExecutionContext, JobLeaseLost
 from autplay.application.music_library import MusicError, MusicLibraryService
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.domain.auth import AccountRole, Principal
@@ -43,7 +41,6 @@ from autplay.domain.jobs import (
     RetryableJobError,
     TerminalJobError,
 )
-from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.ports.jobs import EnqueueJob
 
 INTERNET_ACQUIRE_JOB = JobKey("music.internet.acquire", 1)
@@ -116,18 +113,6 @@ class InternetMusicService:
 
     def select(self, principal: Principal, search_id: UUID, candidate_id: str) -> dict[str, Any]:
         with self.sessions.begin() as session:
-            lock_resource_admission(session)
-            now = session.scalar(select(func.clock_timestamp()))
-            if not isinstance(now, datetime):
-                raise MusicError(
-                    "music_acquisition_unavailable", "The download is unavailable.", 503
-                )
-            try:
-                authority = ResourceAuthorityGate(
-                    session, automatic_acquisition_enabled=False
-                ).authenticate(principal, now, lock_rows=False)
-            except ResourceAdmissionError as error:
-                raise MusicError("auth_invalid", "Authentication is unavailable.", 401) from error
             _acquire_sync_owner_publish_lock(session, principal.user_id)
             search = session.get(InternetSearchRow, search_id)
             if search is None or search.user_id != principal.user_id:
@@ -200,9 +185,6 @@ class InternetMusicService:
                 acquisition_id=identity,
                 user_id=principal.user_id,
                 device_id=principal.device_id,
-                authority_generation=authority.authority_generation,
-                source_session_family_id=authority.session_family_id,
-                source_session_mode=authority.session_mode,
                 search_id=search_id,
                 candidate_id=candidate_id,
                 selected_snapshot=candidate,
@@ -412,7 +394,7 @@ class InternetMusicHandler:
                     raise ValueError("music_upload_failed")
                 time.sleep(2)
             raise RetryableJobError("music_ingest_pending")
-        except JobLeaseLost, JobCancellationRequested, JobResourceWait:
+        except JobLeaseLost, JobCancellationRequested:
             raise
         except MusicError as error:
             if error.status_code in {403, 404}:

@@ -127,6 +127,7 @@ public data class HomeScreenUiState(
     public val offlineReady: List<HomeTrackUiItem> = emptyList(),
     public val problems: List<HomeProblemUiItem> = emptyList(),
     public val recommendationError: Boolean = false,
+    public val likedTrackIds: Set<String> = emptySet(),
 )
 
 public data class SearchScreenUiState(
@@ -188,6 +189,9 @@ public fun HomeProductScreen(
     onOpenPlayer: () -> Unit = {},
     onTogglePlayPause: () -> Unit = {},
     onLikeHeroTrack: (String) -> Unit = {},
+    onPreviousTrack: () -> Unit = {},
+    onNextTrack: () -> Unit = {},
+    swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
 ) {
     val heroState = buildHomePlaybackHeroUiState(
         homeState = state,
@@ -196,16 +200,7 @@ public fun HomeProductScreen(
         currentTrackLiked = currentTrackLiked,
     )
     val listState = rememberLazyListState()
-    val showStickyPlayback by remember(listState, heroState.hasActivePlayback) {
-        derivedStateOf {
-            val layout = listState.layoutInfo
-            val hero = layout.visibleItemsInfo.firstOrNull { it.key == "home:playback-hero" }
-            heroState.hasActivePlayback &&
-                layout.totalItemsCount > 0 &&
-                (hero == null || hero.offset + hero.size <= layout.viewportStartOffset)
-        }
-    }
-    Box(Modifier.fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth().padding(contentPadding)) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxWidth().testTag("home-product-list"),
@@ -213,7 +208,7 @@ public fun HomeProductScreen(
                 start = 20.dp,
                 top = 0.dp,
                 end = 20.dp,
-                bottom = contentPadding.calculateBottomPadding() + 28.dp,
+                bottom = 28.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
@@ -231,7 +226,9 @@ public fun HomeProductScreen(
                     onLike = onLikeHeroTrack,
                     onOpenListenTogether = onOpenListenTogether,
                     modifier = Modifier.requiredWidth(maxWidth + 40.dp),
-                    topChromePadding = contentPadding.calculateTopPadding(),
+                    swipeTargets = swipeTargets,
+                    onPrevious = onPreviousTrack,
+                    onNext = onNextTrack,
                 )
             }
         }
@@ -291,7 +288,7 @@ public fun HomeProductScreen(
             item(key = "home:continue-card:${item.trackId}") {
                 AutPlayCard(onClick = { onPlayTrack(item.trackId) }) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TrackRow(item.title, item.artist ?: stringResource(R.string.library_unknown_artist), item.positionText)
+                        TrackRow(item.title, item.artist ?: stringResource(R.string.library_unknown_artist), item.positionText, item.trackId)
                         Text(stringResource(R.string.home_continue_action), color = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -315,7 +312,7 @@ public fun HomeProductScreen(
                     onClick = { onPlayTrack(track.id) },
                     modifier = Modifier.testTag("home-recent"),
                 ) {
-                    TrackRow(track.title, track.artist ?: stringResource(R.string.library_unknown_artist), null)
+                    TrackRow(track.title, track.artist ?: stringResource(R.string.library_unknown_artist), null, track.id)
                 }
             }
         }
@@ -347,7 +344,7 @@ public fun HomeProductScreen(
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(item.section, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                            TrackRow(item.title, item.artist, null)
+                            TrackRow(item.title, item.artist, null, item.id)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     enabled = item.feedbackEnabled,
@@ -388,7 +385,7 @@ public fun HomeProductScreen(
         } else {
             items(state.offlineReady, key = { "home-offline:${it.id}" }) { track ->
                 AutPlayCard(onClick = { onPlayTrack(track.id) }) {
-                    TrackRow(track.title, track.artist ?: stringResource(R.string.library_unknown_artist), null)
+                    TrackRow(track.title, track.artist ?: stringResource(R.string.library_unknown_artist), null, track.id)
                 }
             }
             item(key = "home:offline-open") {
@@ -411,16 +408,6 @@ public fun HomeProductScreen(
             }
             }
         }
-        if (showStickyPlayback) {
-            HomePlaybackStickyControl(
-                state = heroState,
-                onOpenPlayer = onOpenPlayer,
-                onTogglePlayPause = onTogglePlayPause,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = contentPadding.calculateTopPadding() + 8.dp, start = 16.dp, end = 16.dp),
-            )
-        }
     }
 }
 
@@ -438,6 +425,8 @@ public fun SearchProductScreen(
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
 ) {
+    var internetRequest by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    var internetQuery by rememberSaveable { mutableStateOf("") }
     val listContextKey = "search:${state.query.trim().replace(Regex("\\s+"), " ")}:${state.vaultSelected}"
     val listKeys = searchListKeys(state)
     val listState = rememberStableAnchorListState(
@@ -488,7 +477,7 @@ public fun SearchProductScreen(
         }
         item(key = "search:submit") {
             Button(
-                onClick = onSearch,
+                onClick = { internetQuery = state.query; internetRequest++; onSearch() },
                 enabled = state.query.isNotBlank(),
                 modifier = Modifier
                     .heightIn(min = 48.dp)
@@ -496,6 +485,9 @@ public fun SearchProductScreen(
             ) {
                 Text(stringResource(R.string.search_action))
             }
+        }
+        if (internetRequest > 0 && internetQuery == state.query) {
+            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest) }
         }
         if (state.loading) {
             item(key = "search:loading") {
@@ -531,7 +523,7 @@ public fun SearchProductScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    AutPlayArtwork(track.title)
+                    AutPlayArtwork(track.title, trackId = track.id)
                     Column(Modifier.weight(1f)) {
                         Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
@@ -579,7 +571,7 @@ public fun SearchProductScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        AutPlayArtwork(track.title ?: stringResource(R.string.track_untitled))
+                        AutPlayArtwork(track.title ?: stringResource(R.string.track_untitled), trackId = track.id)
                         Column(Modifier.weight(1f)) {
                             Text(
                                 track.title ?: stringResource(R.string.search_vault_metadata_unavailable),
@@ -1109,7 +1101,7 @@ private fun LibraryTrackCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                AutPlayArtwork(track.title)
+                AutPlayArtwork(track.title, trackId = track.id)
                 Column(Modifier.weight(1f)) {
                     Text(
                         track.title,
@@ -1154,7 +1146,6 @@ private fun LibraryTrackCard(
                     }
                     OutlinedButton(
                         onClick = { onLike(track.id) },
-                        enabled = !track.loved,
                         modifier = Modifier.heightIn(min = 48.dp),
                     ) {
                         Text(stringResource(if (track.loved) R.string.action_liked else R.string.action_like))
@@ -1199,13 +1190,13 @@ private fun libraryFilterLabel(filter: LibraryFilter): String = stringResource(
 )
 
 @Composable
-private fun TrackRow(title: String, artist: String, detail: String?) {
+private fun TrackRow(title: String, artist: String, detail: String?, trackId: String? = null) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        AutPlayArtwork(title)
+        AutPlayArtwork(title, trackId = trackId)
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(artist, color = AutPlayTokens.colors.mutedText, maxLines = 1, overflow = TextOverflow.Ellipsis)

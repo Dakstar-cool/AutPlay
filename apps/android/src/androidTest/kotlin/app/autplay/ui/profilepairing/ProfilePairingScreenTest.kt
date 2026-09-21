@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -167,7 +168,7 @@ class ProfilePairingScreenTest {
             ProfilePairingActions(applyLocalDataSelection = applied::set),
         )
 
-        compose.onNodeWithText("PLAY · 10 · ${context.getString(R.string.profile_local_data_not_selected)}").performClick()
+        compose.onNodeWithTag("profile-local-change-change-1").performClick()
         compose.onNodeWithText(context.getString(R.string.profile_apply_selected_changes)).performClick()
         compose.runOnIdle { assert(applied.get() == null) }
         compose.onNodeWithText(context.getString(R.string.profile_apply)).performClick()
@@ -182,7 +183,7 @@ class ProfilePairingScreenTest {
             ProfilePairingActions(applyLocalDataSelection = { calls.incrementAndGet() }),
         )
 
-        compose.onNodeWithText("PLAY · 10 · ${context.getString(R.string.profile_local_data_not_selected)}").performClick()
+        compose.onNodeWithTag("profile-local-change-change-1").performClick()
         compose.onNodeWithText(context.getString(R.string.profile_apply_selected_changes)).performClick()
         compose.onNodeWithText(context.getString(R.string.profile_apply)).performClick()
         compose.runOnIdle { assert(calls.get() == 1) }

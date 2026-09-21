@@ -114,12 +114,11 @@ internal fun buildCoreCommandActions(
             scope.launch {
                 try {
                     runCatching {
-                        sliceRepository.setPreference(
+                        sliceRepository.setPlaybackPreference(
                             activeBinding,
                             LocalId(item.localUserTrackRefId),
                             LocalId.random(),
                             preference,
-                            false,
                             recommendationRepository.attributionJson(
                                 LocalId(presentationId),
                                 impression.impressionEventId,
@@ -317,12 +316,13 @@ internal fun buildCoreCommandActions(
             if (actionGate.begin(actionKey)) scope.launch {
                 try {
                     val result = runCatching {
-                        sliceRepository.setPreference(
-                            binding(),
+                        val activeBinding = binding()
+                        val detail = checkNotNull(coreProductRepository.trackDetail(trackRefId, activeBinding?.serverProfileId?.value))
+                        sliceRepository.setPlaybackPreference(
+                            activeBinding,
                             LocalId(trackRefId),
                             LocalId.random(),
-                            "LIKED",
-                            false,
+                            if (detail.preference.preference == "LIKED") "NEUTRAL" else "LIKED",
                             null,
                             System.currentTimeMillis(),
                         )

@@ -1,6 +1,6 @@
 # ADR-052: Owner track metadata enrichment
 
-Status: accepted for implementation, 2026-09-16.
+Status: implemented and verified for the private deployment, 2026-09-16.
 
 Track description is separate from canonical recording identity. Embedded tags,
 MusicBrainz and Cover Art Archive enrich an owner-reachable UserTrackRef overlay;

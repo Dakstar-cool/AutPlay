@@ -114,8 +114,12 @@ class CatalogArtistSyncPublisher:
     ) -> int:
         _acquire_sync_owner_publish_lock(session, owner_user_id)
         resolved_refs = list(
-            session.scalars(
-                select(UserTrackRefRow)
+            session.execute(
+                select(UserTrackRefRow, TrackMetadataRow)
+                .outerjoin(
+                    TrackMetadataRow,
+                    TrackMetadataRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+                )
                 .where(
                     UserTrackRefRow.user_id == owner_user_id,
                     UserTrackRefRow.deleted_at.is_(None),
@@ -125,24 +129,8 @@ class CatalogArtistSyncPublisher:
                 .order_by(UserTrackRefRow.user_track_ref_id)
             )
         )
-        descriptive_rows = {
-            row.user_track_ref_id: row
-            for row in session.scalars(
-                select(TrackMetadataRow)
-                .join(
-                    UserTrackRefRow,
-                    UserTrackRefRow.user_track_ref_id == TrackMetadataRow.user_track_ref_id,
-                )
-                .where(
-                    UserTrackRefRow.user_id == owner_user_id,
-                    UserTrackRefRow.deleted_at.is_(None),
-                    UserTrackRefRow.recording_id.is_not(None),
-                    true() if ref_ids is None else UserTrackRefRow.user_track_ref_id.in_(ref_ids),
-                )
-            )
-        }
         candidates: list[dict[str, Any]] = []
-        for ref in resolved_refs:
+        for ref, descriptive in resolved_refs:
             payload: dict[str, Any] = {
                 "recording_id": str(ref.recording_id),
                 "title": ref.raw_title,
@@ -151,7 +139,6 @@ class CatalogArtistSyncPublisher:
                 "duration_ms": ref.raw_duration_ms,
                 "resolution_status": ref.resolution_status,
             }
-            descriptive = descriptive_rows.get(ref.user_track_ref_id)
             if descriptive is not None:
                 payload["metadata_v1"] = metadata_view(descriptive)
             payload_digest = hashlib.sha256(_canonical_payload_bytes(payload)).hexdigest()
@@ -177,7 +164,7 @@ class CatalogArtistSyncPublisher:
         recording_scope = (
             None
             if ref_ids is None
-            else tuple(ref.recording_id for ref in resolved_refs if ref.recording_id is not None)
+            else tuple(ref.recording_id for ref, _ in resolved_refs if ref.recording_id is not None)
         )
         # Release proofs describe the owner's complete reachable release closure. Keep
         # full publication for recordings attached to releases; fresh standalone imports

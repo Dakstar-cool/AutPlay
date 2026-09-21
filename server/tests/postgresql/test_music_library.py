@@ -1,18 +1,12 @@
 """Real database proof for owner identity preservation and immutable Internet choices."""
 
-import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.internet_music import InternetMusicProvider
-from autplay.adapters.postgresql.models import (
-    LibraryEntryRow,
-    RecordingRow,
-    UserSessionRow,
-    UserTrackRefRow,
-)
+from autplay.adapters.postgresql.models import LibraryEntryRow, RecordingRow, UserTrackRefRow
 from autplay.adapters.postgresql.models.internet_music import (
     InternetAcquisitionRow,
     InternetSearchRow,
@@ -27,7 +21,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 
 def owner(sessions: sessionmaker[Session]) -> Principal:
-    session_id = uuid4()
     with sessions.begin() as session:
         user = session.scalar(
             text(
@@ -42,29 +35,13 @@ def owner(sessions: sessionmaker[Session]) -> Principal:
             ),
             {"user": user},
         )
-        assert isinstance(user, UUID)
-        assert isinstance(device, UUID)
-        session.add(
-            UserSessionRow(
-                session_id=session_id,
-                user_id=user,
-                device_id=device,
-                refresh_token_hash=hashlib.sha256(session_id.bytes).digest(),
-                issued_at=datetime.now(UTC),
-                expires_at=datetime.now(UTC) + timedelta(days=90),
-                session_mode="V2",
-                family_id=session_id,
-                generation=0,
-            )
-        )
-    return Principal(user, device, session_id, AccountRole.USER)
+    return Principal(user, device, uuid4(), AccountRole.USER)
 
 
 class Provider(InternetMusicProvider):
     calls = 0
 
     def search(self, query: str) -> list[dict[str, Any]]:
-        del query
         self.calls += 1
         return [
             {
@@ -105,10 +82,10 @@ def test_prepare_preserves_ref_and_library_and_replays(database_url: str) -> Non
     recording = service.prepare(principal, ref_id)
     assert service.prepare(principal, ref_id) == recording
     with sessions() as session:
-        ref_row = session.get(UserTrackRefRow, ref_id)
-        entry_row = session.get(LibraryEntryRow, entry_id)
-        assert ref_row is not None and ref_row.recording_id == recording
-        assert entry_row is not None and entry_row.availability_status == "LOCAL"
+        stored_ref = session.get(UserTrackRefRow, ref_id)
+        assert stored_ref is not None and stored_ref.recording_id == recording
+        stored_entry = session.get(LibraryEntryRow, entry_id)
+        assert stored_entry is not None and stored_entry.availability_status == "LOCAL"
         assert session.scalar(select(func.count()).select_from(RecordingRow)) == 1
         assert session.scalar(select(func.count()).select_from(UserTrackRefRow)) == 1
     with pytest.raises(ApiError) as denied:
@@ -190,7 +167,7 @@ def test_worker_fence_and_revocation_prevent_side_effect(database_url: str) -> N
         lease_interval=timedelta(seconds=60),
     )
     handler = InternetMusicHandler(service)
-    calls: list[str] = []
+    calls = []
     identity = UUID(selected["acquisition_id"])
     handler._guarded(identity, context, lambda: calls.append("allowed"))
     with sessions.begin() as session:

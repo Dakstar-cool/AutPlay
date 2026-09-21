@@ -52,6 +52,7 @@ import app.autplay.work.DeferredWorkSubject
 import app.autplay.work.RemoteImportWorkScheduler
 import app.autplay.work.VaultUploadWorkScheduler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.UUID
 import app.autplay.ui.discoveryCandidateOperationKey
@@ -72,6 +73,7 @@ internal fun buildNowPlayingRouteActions(
     binding: () -> ClientEventBinding?,
     reportError: (String) -> Unit,
     queueActions: QueueEditorUiActions,
+    downloadTrack: (String) -> Unit = {},
 ): NowPlayingRouteActions = NowPlayingRouteActions(
     togglePlayPause = playbackActions::toggleDirectPlayPause,
     toggleShuffle = playbackActions::toggleDirectShuffle,
@@ -134,6 +136,7 @@ internal fun buildNowPlayingRouteActions(
     },
     observingChanged = { playerAdapter.setSurfaceObserving("full", it) },
     queue = queueActions,
+    download = { currentTrackRefId()?.let(downloadTrack) },
 )
 
 private fun recordPlaybackPreference(
@@ -552,7 +555,14 @@ internal fun buildLegacySecondaryRouteActions(
     retrySync = {
         binding()?.let { activeBinding ->
             scope.launch {
-                syncScheduler.enqueue(syncWorkRequest(activeBinding))
+                try {
+                    // A manual retry must replace a worker waiting in exponential backoff.
+                    syncScheduler.reconcile(syncWorkRequest(activeBinding))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    reportError("SYNC_RETRY_UNAVAILABLE")
+                }
             }
         }
     },

@@ -12,6 +12,14 @@ music=$(realpath -m -- "$3")
 shift 3
 : "${ACQUISITION_IMAGE:?Set the tested image ID or tag}"
 : "${ACQUISITION_SECCOMP:?Set the Chromium seccomp profile path}"
+cpus=${ACQUISITION_CPUS:-6}
+workers=${ACQUISITION_WORKERS:-2}
+index_recheck=${ACQUISITION_INDEX_RECHECK_SECONDS:-86400}
+if [[ ! "$cpus" =~ ^([1-9]|[1-5][0-9]|6[0-4])$ || ! "$workers" =~ ^[1-4]$ ||
+      ! "$index_recheck" =~ ^[0-9]{1,5}$ ]] || (( 10#$index_recheck > 86400 )); then
+    printf 'Invalid acquisition CPU, worker or index setting\n' >&2
+    exit 2
+fi
 for path in "$playlist" "$queue" "$music" "$ACQUISITION_SECCOMP"; do
     if [[ "$path" == *','* || "$path" == *$'\n'* ]]; then
         printf 'Unsupported mount path\n' >&2
@@ -24,7 +32,16 @@ mkdir -p -- "$queue" "$music"
 mounts=(--mount "type=bind,src=$playlist,dst=/input/playlist.txt,readonly"
         --mount "type=bind,src=$queue,dst=/queue"
         --mount "type=bind,src=$music,dst=/music")
-options=(--output-dir /music --queue-dir /queue --normalize-numbered --workers 2)
+options=(--output-dir /music --queue-dir /queue --normalize-numbered --workers "$workers"
+         --index-recheck-seconds "$index_recheck")
+if [[ -n "${ACQUISITION_EXPAND_SOURCE:-}" ]]; then
+    source_queue=$(realpath -e -- "$ACQUISITION_EXPAND_SOURCE")
+    [[ "$source_queue" != *','* && "$source_queue" != *$'\n'* ]]
+    [[ "$source_queue" != "$queue" ]]
+    test -f "$source_queue/queue.json"
+    mounts+=(--mount "type=bind,src=$source_queue,dst=/source-queue,readonly")
+    options+=(--expand-missing-from /source-queue --candidate-limit "${ACQUISITION_CANDIDATE_LIMIT:-3}")
+fi
 container_options=()
 if [[ -n "${ACQUISITION_CONTAINER_NAME:-}" ]]; then
     container_options+=(--name "$ACQUISITION_CONTAINER_NAME")
@@ -114,6 +131,6 @@ exec docker run --rm --init \
     --user "${ACQUISITION_UID:-$(id -u)}:${ACQUISITION_GID:-$(id -g)}" \
     --read-only --tmpfs /tmp:size=1g,mode=1777 --cap-drop ALL --cap-add SYS_CHROOT \
     --security-opt no-new-privileges:true --security-opt "seccomp=$ACQUISITION_SECCOMP" \
-    --pids-limit 256 --memory 2g --cpus 2 --env HOME=/tmp \
+    --pids-limit 256 --memory 2g --cpus "$cpus" --env HOME=/tmp \
     "${container_options[@]}" "${mounts[@]}" \
     "$ACQUISITION_IMAGE" /input/playlist.txt "${options[@]}" "$@"

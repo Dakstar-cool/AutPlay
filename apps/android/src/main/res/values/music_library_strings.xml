@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="music_download_track">Download track</string>
+    <string name="music_download_body">Save from Vault to listen without an internet connection.</string>
+    <string name="music_saved_offline">Available offline</string>
+    <string name="music_downloading">Downloading…</string>
+    <string name="music_phone_title">Music on this phone</string>
+    <string name="music_scan_phone">Find music on phone</string>
+    <string name="music_scan_body">Select audio to copy into Music/AutPlay. Original files are kept.</string>
+    <string name="music_upload_title">Send tracks to Vault</string>
+    <string name="music_upload_body">Choose local tracks to keep on your personal server.</string>
+    <string name="music_permission_required">Allow access to audio files to scan your phone.</string>
+    <string name="music_scan_loading">Finding audio files…</string>
+    <string name="music_scan_empty">No audio files found on this phone.</string>
+    <string name="music_scan_failed">Could not read the phone music library. Try again.</string>
+    <string name="music_select_all">Select all</string>
+    <string name="music_clear_selection">Clear selection</string>
+    <string name="music_import_selected">Copy selected (%1$d)</string>
+    <string name="music_upload_selected">Send to Vault (%1$d)</string>
+    <string name="music_transfer_progress">Completed: %1$d · In progress: %2$d · Failed: %3$d</string>
+    <string name="music_close">Close</string>
+    <string name="music_retry">Try again</string>
+    <string name="music_need_server">Connect your personal server to use Vault.</string>
+    <string name="music_internet_title">On the internet</string>
+    <string name="music_add_vault">Add to Vault</string>
+    <string name="music_add_download">Add to Vault and download</string>
+    <string name="music_internet_empty">No matching tracks were found.</string>
+    <string name="music_internet_error">Internet music search is temporarily unavailable.</string>
+    <string name="music_internet_added">Added to Vault</string>
+    <string name="music_internet_adding">Adding to Vault…</string>
+</resources>

@@ -55,6 +55,23 @@ class PlaybackPersistenceRepositoryTest {
         }
     }
 
+    @Test fun delayedSessionStartCannotMutateAReplacementQueue() = runBlocking {
+        val repository = PlaybackPersistenceRepository(database)
+        database.libraryDao().upsertTrackRef(track(id(90), uuid(91)))
+        repository.activateQueue(id(92), listOf(NewPlaybackQueueEntry(id(93), id(90), "ORGANIC", "LOCAL_THEN_VAULT")),
+            "USER", null, null, "GENERAL", 1)
+        repository.activateQueue(id(94), listOf(NewPlaybackQueueEntry(id(95), id(90), "ORGANIC", "LOCAL_THEN_VAULT")),
+            "USER", null, null, "GENERAL", 2)
+        val replacement = database.queueDao().activeSnapshotOnce()
+        assertNull(repository.startSessionIfActive(id(92), id(93), 700, 3, null))
+        assertEquals(replacement, database.queueDao().activeSnapshotOnce())
+        assertNull(repository.startSessionIfActive(id(94), id(93), 700, 4, null))
+        assertEquals(replacement, database.queueDao().activeSnapshotOnce())
+        val current = repository.startSessionIfActive(id(94), id(95), 0, 5, null)
+        assertNotNull(current)
+        assertEquals(current!!.listeningEventId.value, database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
+    }
+
     @Test fun shutdownCheckpointCannotResurrectFinalizedOrReplaceNewSession() = runBlocking {
         val repository = PlaybackPersistenceRepository(database)
         database.libraryDao().upsertTrackRef(track(id(80), uuid(81)))

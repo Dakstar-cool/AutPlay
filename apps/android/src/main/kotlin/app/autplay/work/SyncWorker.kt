@@ -27,7 +27,9 @@ class SyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWork
         val cursor = AutPlayRuntime.database(applicationContext).syncDao().cursor(request.serverProfileId.value) ?: return Result.success()
         val binding = ClientEventBinding(user, device, request.serverProfileId, LocalId(cursor.journalEpoch))
         return try {
-            if (AutPlayRuntime.syncCoordinator(applicationContext, binding).run(binding)) Result.success() else Result.retry()
+            if (AutPlayRuntime.syncCoordinator(applicationContext, binding).run(binding)) {
+                Result.success()
+            } else Result.retry()
         } catch (error: Exception) {
             when (syncWorkerErrorDisposition(error)) {
                 SyncWorkerErrorDisposition.CANCEL -> throw error

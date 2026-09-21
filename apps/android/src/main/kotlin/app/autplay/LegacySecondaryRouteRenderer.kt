@@ -111,7 +111,9 @@ internal fun LegacySecondaryRouteRenderer(
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(text = stringResource(state.destination.labelRes), style = MaterialTheme.typography.headlineSmall)
+        if (state.destination !in listOf(UiDestination.Profile, UiDestination.Settings, UiDestination.PrivacyAndData)) {
+            Text(text = stringResource(state.destination.labelRes), style = MaterialTheme.typography.headlineSmall)
+        }
         when (state.view) {
             "Playlists" -> {
                 Text(stringResource(R.string.playlists_count, state.playlists.size))
@@ -184,15 +186,7 @@ internal fun LegacySecondaryRouteRenderer(
                 state = state.serverUiState,
                 actions = actions.serverFeatures,
             )
-            "Profile" -> {
-                ProfileFrontendScreen(
-                    state = state.profilePairing,
-                    actions = actions.profilePairing,
-                )
-                OwnerProfileStatisticsCard(state.ownerStatistics, Modifier.padding(top = 12.dp))
-                if (state.socialAvailable) SocialPanel(state.social, actions.social)
-                else Text(stringResource(R.string.sync_requires_server))
-            }
+            "Profile" -> UserProfileScreen(state, actions)
             "Settings" -> SettingsFrontendScreen(
                 settings = state.settings,
                 onUpdate = actions.updateSettings,
@@ -209,7 +203,6 @@ internal fun LegacySecondaryRouteRenderer(
             )
             else -> Text(stringResource(R.string.state_unavailable_body))
         }
-        state.stableError?.let { Text(stringResource(R.string.action_failed_friendly)) }
     }
 }
 

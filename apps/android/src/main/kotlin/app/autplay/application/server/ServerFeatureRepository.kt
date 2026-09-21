@@ -193,6 +193,64 @@ class ServerFeatureRepository(
         )
     }
 
+    suspend fun prepareMusicUpload(refId: String): String {
+        requireUuidLike(refId)
+        return authorized(emptyPost("/music/user-tracks/$refId/prepare-upload")).jsonObject.requiredString("recording_id", UUID_TEXT_LENGTH)
+    }
+
+    suspend fun trackMetadata(refId: String): JsonObject {
+        requireUuidLike(refId)
+        return authorized(Request.Builder().url("$apiBaseUrl/music/user-tracks/$refId/metadata").get().build()).jsonObject
+    }
+
+    suspend fun metadataCommand(refId: String, body: JsonObject): JsonObject {
+        requireUuidLike(refId)
+        return musicPost("/music/user-tracks/$refId/metadata", body)
+    }
+
+    suspend fun metadataBackfill(): Int = musicPost("/music/metadata/backfill", JsonObject(emptyMap())).requiredInt("queued")
+
+    suspend fun metadataArtwork(refId: String, sha: String): ByteArray {
+        requireUuidLike(refId)
+        require(SHA256_REGEX.matches(sha))
+        return checkNotNull(authorizedRaw(Request.Builder().url("$apiBaseUrl/music/user-tracks/$refId/artwork/$sha").get().build(),
+            expectBody = true, binary = true).bytes)
+    }
+
+    suspend fun publishMusicUpload(refId: String, uploadId: String): String {
+        requireUuidLike(refId)
+        requireUuidLike(uploadId)
+        return musicPost("/music/user-tracks/$refId/publish-upload", buildJsonObject { put("upload_id", uploadId) })
+            .requiredString("audio_variant_id", UUID_TEXT_LENGTH)
+    }
+
+    suspend fun searchInternetMusic(query: String, operationId: String): InternetMusicSearch {
+        val root = musicPost("/music/internet/search", buildJsonObject { put("query", query); put("operation_id", operationId) })
+        check(root.requiredString("contract_version", 40) == "internet-music-v1")
+        return InternetMusicSearch(root.requiredString("search_id", UUID_TEXT_LENGTH), root.requiredArray("candidates", 5).map {
+            InternetMusicCandidate(it.requiredString("candidate_id", 40), it.requiredString("title", 500),
+                it.requiredString("artist", 500), it.requiredString("provider", 40), it.requiredLong("duration_ms"))
+        })
+    }
+
+    suspend fun selectInternetMusic(searchId: String, candidateId: String): InternetMusicAcquisition = decodeMusicAcquisition(
+        musicPost("/music/internet/acquisitions", buildJsonObject { put("search_id", searchId); put("candidate_id", candidateId) }),
+    )
+
+    suspend fun internetMusicStatus(id: String): InternetMusicAcquisition {
+        requireUuidLike(id)
+        return decodeMusicAcquisition(authorized(Request.Builder().url("$apiBaseUrl/music/internet/acquisitions/$id").get().build()).jsonObject)
+    }
+
+    private fun decodeMusicAcquisition(root: JsonObject): InternetMusicAcquisition {
+        check(root.requiredString("contract_version", 40) == "internet-music-v1")
+        return InternetMusicAcquisition(root.requiredString("acquisition_id", UUID_TEXT_LENGTH), root.requiredString("state", 40),
+            root.optionalString("user_track_ref_id", UUID_TEXT_LENGTH), root.optionalString("audio_variant_id", UUID_TEXT_LENGTH))
+    }
+
+    private suspend fun musicPost(path: String, body: JsonObject): JsonObject = authorized(Request.Builder()
+        .url(apiBaseUrl + path).post(body.toString().toRequestBody(JSON_MEDIA_TYPE)).build()).jsonObject
+
     suspend fun librarySnapshot(limit: Int = 50): RemoteLibrarySnapshot {
         require(limit in 1..100)
         val entries = page("/library/entries", limit).map { value ->
@@ -692,18 +750,18 @@ class ServerFeatureRepository(
         authorizedRaw(request, expectBody).body?.let(Json::parseToJsonElement)
             ?: JsonObject(emptyMap())
 
-    private suspend fun authorizedRaw(request: Request, expectBody: Boolean): HttpResult =
+    private suspend fun authorizedRaw(request: Request, expectBody: Boolean, binary: Boolean = false): HttpResult =
         withContext(Dispatchers.IO) {
             beforeRequest()
             var access = sessionCredentials.access(profileId)
             try {
-                var result = executeOnce(request, access, expectBody)
+                var result = executeOnce(request, access, expectBody, binary)
                 if (result.status == 401) {
                     val rejectedGeneration = access.generation
                     access.close()
                     beforeRequest()
                     access = sessionCredentials.refreshAfterRejection(profileId, rejectedGeneration)
-                    result = executeOnce(request, access, expectBody)
+                    result = executeOnce(request, access, expectBody, binary)
                 }
                 if (result.status == 401 || result.status == 403) throw SessionRequiredException()
                 if (result.status !in 200..299) error("SERVER_HTTP_${result.status}")
@@ -713,7 +771,7 @@ class ServerFeatureRepository(
             }
         }
 
-    private suspend fun executeOnce(request: Request, access: SessionAccess, expectBody: Boolean): HttpResult {
+    private suspend fun executeOnce(request: Request, access: SessionAccess, expectBody: Boolean, binary: Boolean = false): HttpResult {
         beforeRequest()
         val authorized = request.newBuilder()
             .header("Authorization", "Bearer ${access.token.toString(StandardCharsets.UTF_8)}")
@@ -722,8 +780,9 @@ class ServerFeatureRepository(
         return client.newCall(authorized).readCancellable { response ->
             HttpResult(
                 response.code,
-                if (expectBody) response.body.readBoundedUtf8(MAX_RESPONSE_BYTES) else null,
+                if (expectBody && !binary) response.body.readBoundedUtf8(MAX_RESPONSE_BYTES) else null,
                 response.headers.toMap(),
+                if (expectBody && binary) response.body.readBoundedBytes(MAX_RESPONSE_BYTES) else null,
             )
         }
     }
@@ -783,6 +842,10 @@ class ServerFeatureRepository(
             ?: error("SERVER_RESPONSE_INVALID")
 
     private fun okhttp3.ResponseBody.readBoundedUtf8(maxBytes: Int): String {
+        return readBoundedBytes(maxBytes).toString(StandardCharsets.UTF_8)
+    }
+
+    private fun okhttp3.ResponseBody.readBoundedBytes(maxBytes: Int): ByteArray {
         val length = contentLength()
         if (length > maxBytes) error("SERVER_RESPONSE_TOO_LARGE")
         val output = ByteArrayOutputStream(minOf(maxBytes, if (length > 0) length.toInt() else 8_192))
@@ -797,7 +860,7 @@ class ServerFeatureRepository(
                 output.write(buffer, 0, count)
             }
         }
-        return output.toByteArray().toString(StandardCharsets.UTF_8)
+        return output.toByteArray()
     }
 
     private fun requireUuidLike(value: String) {
@@ -809,7 +872,7 @@ class ServerFeatureRepository(
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
-    private data class HttpResult(val status: Int, val body: String?, val headers: Map<String, String>)
+    private data class HttpResult(val status: Int, val body: String?, val headers: Map<String, String>, val bytes: ByteArray? = null)
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json".toMediaType()

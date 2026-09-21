@@ -115,7 +115,7 @@ fun ServerFeaturesScreen(
         }
     }
 
-    Section(stringResource(R.string.server_library_section)) {
+    if (LocalDeveloperMode.current) Section(stringResource(R.string.server_library_section)) {
         val snapshot = state.library
         Text(
             snapshot?.let {
@@ -144,7 +144,7 @@ fun ServerFeaturesScreen(
                 state.searchResults.forEach { row ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(stringResource(R.string.server_search_row, row.source, row.availabilityStatus))
-                        Text(
+                        if (LocalDeveloperMode.current) Text(
                             stringResource(R.string.server_result_identity, row.libraryEntryId.take(8)),
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -213,7 +213,7 @@ fun ServerFeaturesScreen(
         }
     }
 
-    Section(stringResource(R.string.server_recommendations_section)) {
+    if (LocalDeveloperMode.current) Section(stringResource(R.string.server_recommendations_section)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = isBound && state.busyAction == null, onClick = { actions.recommendations(false) }) {
                 Text(stringResource(R.string.server_recommendations_load))
@@ -224,14 +224,14 @@ fun ServerFeaturesScreen(
         }
         state.recommendation?.let { result ->
             Text(stringResource(R.string.server_recommendations_count, result.items.size))
-            Text(stringResource(R.string.server_recommendations_authority, result.replay, result.requestId.take(8)))
+            if (LocalDeveloperMode.current) Text(stringResource(R.string.server_recommendations_authority, result.replay, result.requestId.take(8)))
             if (result.items.isEmpty()) Text(stringResource(R.string.server_recommendations_empty))
             if (state.recommendationError) {
                 Text(stringResource(R.string.server_recommendations_error), color = MaterialTheme.colorScheme.error)
             }
             result.items.forEach { item ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Text(stringResource(R.string.server_recommendation_row, item.section, item.reasonCode))
+                    if (LocalDeveloperMode.current) Text(stringResource(R.string.server_recommendation_row, item.section, item.reasonCode))
                     Text(stringResource(R.string.server_result_unavailable), style = MaterialTheme.typography.bodySmall)
                 }
             }

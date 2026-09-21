@@ -39,6 +39,7 @@ class LocalImportReviewRepositoryTest {
         assertEquals("Duplicate", firstEntries[0].rawTitle)
         assertEquals("Duplicate", firstEntries[1].rawTitle)
         assertEquals(2, database.libraryDao().trackRefCount())
+        assertEquals(2, app.autplay.application.search.LocalTrackSearchRepository(database).search("Duplicate", command.serverProfileId).size)
 
         repository.controlJob(job.importJobId, CHANGE_PAUSE, ImportJobControlAction.PAUSE, 2)
         database.close()

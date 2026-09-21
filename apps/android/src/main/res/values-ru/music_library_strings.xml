@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="music_download_track">Скачать трек</string>
+    <string name="music_download_body">Сохранить из Vault для прослушивания без интернета.</string>
+    <string name="music_saved_offline">Доступен без интернета</string>
+    <string name="music_downloading">Скачивается…</string>
+    <string name="music_phone_title">Музыка на телефоне</string>
+    <string name="music_scan_phone">Найти музыку на телефоне</string>
+    <string name="music_scan_body">Выберите аудиофайлы для копирования в Music/AutPlay. Исходные файлы сохранятся.</string>
+    <string name="music_upload_title">Передать треки в Vault</string>
+    <string name="music_upload_body">Выберите локальные треки для хранения на личном сервере.</string>
+    <string name="music_permission_required">Разрешите доступ к аудиофайлам для поиска музыки на телефоне.</string>
+    <string name="music_scan_loading">Поиск аудиофайлов…</string>
+    <string name="music_scan_empty">Аудиофайлы на телефоне не найдены.</string>
+    <string name="music_scan_failed">Не удалось прочитать музыку на телефоне. Попробуйте ещё раз.</string>
+    <string name="music_select_all">Выбрать все</string>
+    <string name="music_clear_selection">Снять выбор</string>
+    <string name="music_import_selected">Скопировать выбранные (%1$d)</string>
+    <string name="music_upload_selected">Передать в Vault (%1$d)</string>
+    <string name="music_transfer_progress">Готово: %1$d · В процессе: %2$d · Ошибок: %3$d</string>
+    <string name="music_close">Закрыть</string>
+    <string name="music_retry">Повторить</string>
+    <string name="music_need_server">Подключите личный сервер для работы с Vault.</string>
+    <string name="music_internet_title">В интернете</string>
+    <string name="music_add_vault">Добавить в Vault</string>
+    <string name="music_add_download">В Vault и на телефон</string>
+    <string name="music_internet_empty">Подходящие треки не найдены.</string>
+    <string name="music_internet_error">Поиск музыки в интернете временно недоступен.</string>
+    <string name="music_internet_added">Добавлен в Vault</string>
+    <string name="music_internet_adding">Добавляется в Vault…</string>
+</resources>

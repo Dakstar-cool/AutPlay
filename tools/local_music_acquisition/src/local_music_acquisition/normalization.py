@@ -38,6 +38,42 @@ def normalize_artist(value: str) -> str:
     return re.sub(r"\s+(?:vs\.?|versus)\s+", ", ", normalize_text(value), flags=re.I)
 
 
+_CYRILLIC = re.compile(r"[\u0400-\u04ff]")
+_LATIN = re.compile(r"[A-Za-z]")
+_TO_CYRILLIC = str.maketrans(
+    "ABCEHKMOPTXYaceopxy",
+    "\u0410\u0412\u0421\u0415\u041d\u041a\u041c\u041e\u0420\u0422\u0425\u0423"
+    "\u0430\u0441\u0435\u043e\u0440\u0445\u0443",
+)
+
+
+def normalize_query(value: str) -> str:
+    """Repair contextual OCR confusables for search only, never persisted identity."""
+    value = normalize_text(value)
+    cyrillic_context = len(_CYRILLIC.findall(value)) > len(_LATIN.findall(value))
+
+    def repair(match: re.Match[str]) -> str:
+        word = match.group()
+        mixed = bool(_CYRILLIC.search(word) and _LATIN.search(word))
+        if mixed or (cyrillic_context and len(word) <= 3):
+            converted = word.translate(_TO_CYRILLIC)
+            if not _LATIN.search(converted):
+                return converted
+        return word
+
+    return re.sub(r"[^\W\d_]+", repair, value).strip(" ,;")
+
+
+def search_variants(item: PlaylistItem) -> tuple[PlaylistItem, ...]:
+    """Bound discovery to two queries; incomplete suffixes are only search hints."""
+    first = replace(item, artist=normalize_query(item.artist), title=normalize_query(item.title))
+    artist = first.artist.split(",", 1)[0].strip()
+    title = re.sub(r"\s*[\[(][^\])]*$", "", first.title).strip()
+    title = re.sub(r"[\u2026\u2039\u203a]+$", "", title).strip()
+    second = replace(first, artist=artist, title=title)
+    return (first,) if second == first or not title else (first, second)
+
+
 def _identity(artist: str, title: str) -> tuple[str, str]:
     return normalize_artist(artist).casefold(), normalize_text(title).casefold()
 

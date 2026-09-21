@@ -21,7 +21,6 @@ class Http(PublicMetadataHttp):
         self.urls: list[str] = []
 
     def json(self, url: str, *, post: bytes | None = None) -> dict[str, Any]:
-        del post
         self.urls.append(url)
         return self.document
 
@@ -170,6 +169,7 @@ def test_release_requires_recording_membership() -> None:
 
 def test_http_retry_after_and_response_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx2
+    from autplay.adapters.public_track_metadata import PublicMetadataHttp
 
     monkeypatch.setattr("socket.getaddrinfo", lambda *a, **kw: [(2, 1, 6, "", ("8.8.8.8", 443))])
     http = PublicMetadataHttp()

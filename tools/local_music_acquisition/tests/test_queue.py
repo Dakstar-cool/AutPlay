@@ -4,6 +4,8 @@ import hashlib
 import io
 import json
 import shutil
+import threading
+import time
 import wave
 from pathlib import Path
 
@@ -151,6 +153,36 @@ def test_no_match_is_not_retried_without_explicit_request(tmp_path: Path, audio:
     assert queue.run_queue(root, providers=(provider,))["downloaded"] == 1
 
 
+def test_persistent_miss_cache_skips_only_previous_miss_on_retry(
+    tmp_path: Path, audio: bytes
+) -> None:
+    root, _ = setup_queue(tmp_path)
+    missing = Provider(audio, action="miss")
+    missing.name = "missing"
+    recovering = Provider(audio, action="fail")
+    settings = {"miss_cache_ttl_seconds": 3600, "miss_cache_namespace": "a" * 64}
+    assert queue.run_queue(root, providers=(missing, recovering), **settings)["retry"] == 1
+    state_path = next((root / "jobs").glob("*.json"))
+    state = read_json(state_path)
+    state["next_retry"] = 0
+    write_json(state_path, state)
+    recovering.action = "ok"
+    assert queue.run_queue(root, providers=(missing, recovering), **settings)["downloaded"] == 1
+    assert missing.calls == 1
+    assert recovering.calls == 2
+    assert read_json(root / "runtime.json")["miss_cache"]["hits"] == 1
+
+
+def test_explicit_retry_invalidates_cached_miss(tmp_path: Path, audio: bytes) -> None:
+    root, _ = setup_queue(tmp_path)
+    provider = Provider(audio, action="miss")
+    settings = {"miss_cache_ttl_seconds": 3600, "miss_cache_namespace": "a" * 64}
+    assert queue.run_queue(root, providers=(provider,), **settings)["not_found"] == 1
+    queue.retry_unsuccessful(root, include_not_found=True)
+    provider.action = "ok"
+    assert queue.run_queue(root, providers=(provider,), **settings)["downloaded"] == 1
+
+
 def test_pause_resume_and_read_only_status(tmp_path: Path, audio: bytes, capsys) -> None:
     root, _output = setup_queue(tmp_path)
     provider = Provider(audio)
@@ -248,6 +280,19 @@ def test_failed_provider_bytes_stay_outside_published_music(tmp_path: Path, audi
     assert len(list(output.glob(".acquire/*/*/quarantine/*/bad/*.wav"))) == 1
 
 
+def test_needs_review_requires_full_verification_even_with_valid_cache(tmp_path, audio):
+    root, _output = setup_queue(tmp_path)
+    provider = Provider(audio)
+    queue.run_queue(root, providers=(provider,))
+    path = next((root / "jobs").glob("*.json"))
+    state = read_json(path)
+    state["state"] = "needs_review"
+    write_json(path, state)
+    assert queue.run_queue(root, providers=(provider,))["downloaded"] == 1
+    assert read_json(root / "runtime.json")["index"]["sha256_verified"] == 1
+    assert read_json(root / "runtime.json")["index"]["cache_hits"] == 0
+
+
 def test_large_cp1251_playlist_round_trips_without_unreadable_manifest(tmp_path: Path) -> None:
     playlist = tmp_path / "playlist.txt"
     text = "".join(f"{'\u0410' * 3980}\t{'\u0411' * 3980}{number}\n" for number in range(240))
@@ -270,3 +315,129 @@ def test_directory_creation_flushes_parent_before_receipt(tmp_path: Path, monkey
     assert tmp_path / "new" in calls
     assert calls.index(tmp_path) < calls.index(tmp_path / "new")
     assert calls[-1] == leaf
+
+
+@pytest.mark.parametrize("other_action", ["miss", "fail", "ok"])
+@pytest.mark.parametrize("blocked_first", [False, True])
+def test_deferred_fallback_preserves_real_outcome(tmp_path, audio, other_action, blocked_first):
+    from local_music_acquisition.models import PlaylistItem
+
+    blocked = Provider(audio)
+    blocked.name = "blocked"
+    other = Provider(audio, action=other_action)
+    providers = (blocked, other) if blocked_first else (other, blocked)
+    session = DownloadSession(providers, frozenset())
+    lane = next(lane for lane in session.lanes if lane.provider.name == "blocked")
+    lane.circuit_open, lane.opened_at = True, time.monotonic()
+    outcome = session.download(PlaylistItem(1, "Artist", "Track"), tmp_path)
+    assert blocked.calls == 0
+    if other_action == "ok":
+        assert outcome.status == "downloaded" and not outcome.deferred
+    elif other_action == "fail":
+        assert outcome.error_code == "fixture.timeout" and not outcome.deferred
+    else:
+        assert outcome.status == "failed" and outcome.deferred
+        assert outcome.error_code == "blocked.circuit_open"
+
+
+def test_parallel_waiters_do_not_spend_budget_when_circuit_opens(tmp_path, audio, monkeypatch):
+    from local_music_acquisition import orchestrator
+
+    root, output = setup_queue(tmp_path, "".join(f"Artist - Track {i}\n" for i in range(4)))
+    provider = Provider(audio, action="fail")
+    barrier = threading.Barrier(4)
+    invoke = orchestrator._ProviderLane.invoke
+
+    def simultaneous(lane, item, directory):
+        barrier.wait(timeout=5)
+        return invoke(lane, item, directory)
+
+    monkeypatch.setattr(orchestrator._ProviderLane, "invoke", simultaneous)
+    summary = queue.run_queue(root, providers=(provider,), max_workers=4, max_attempts=1)
+    assert provider.calls == 2
+    assert summary["failed"] == 2 and summary["retry"] == 2
+    states = [read_json(path) for path in (root / "jobs").glob("*.json")]
+    assert all(state["attempts"] == 1 for state in states)
+    deferred = [state for state in states if state["state"] == "retry"]
+    assert all(state["attempt_budget_reset"] == 1 for state in deferred)
+    assert all(state["next_retry"] > time.time() for state in deferred)
+    metrics = read_json(root / "runtime.json")
+    assert metrics["providers"]["fixture"]["requests"] == 2
+    assert metrics["providers"]["fixture"]["deferred"] == 2
+    assert "Artist" not in json.dumps(metrics) and str(tmp_path) not in json.dumps(metrics)
+    monkeypatch.setattr(orchestrator._ProviderLane, "invoke", invoke)
+    for path in (root / "jobs").glob("*.json"):
+        state = read_json(path)
+        if state["state"] == "retry":
+            state["next_retry"] = 0
+            write_json(path, state)
+    assert queue.run_queue(root, providers=(provider,), max_attempts=1)["failed"] == 4
+    assert provider.calls == 4
+    assert len(list(output.glob(".acquire/*/*/2"))) == 2
+    queue.retry_unsuccessful(root)
+    provider.action = "ok"
+    assert queue.run_queue(root, providers=(provider,), max_attempts=1)["downloaded"] == 4
+
+
+def test_new_queue_reuses_index_and_verify_command_preserves_pause(tmp_path, audio, capsys):
+    root, output = setup_queue(tmp_path)
+    provider = Provider(audio)
+    queue.run_queue(root, providers=(provider,))
+    second = tmp_path / "second-queue"
+    queue.enqueue(tmp_path / "playlist.txt", second, output)
+    assert queue.run_queue(second, providers=(provider,))["downloaded"] == 1
+    assert provider.calls == 1
+    assert read_json(second / "runtime.json")["index"]["cache_hits"] == 1
+    write_json(second / "pause", {"paused": True})
+    assert queue_main(["verify", "--queue-dir", str(second)]) == 0
+    report = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert report["paused"] and report["index"]["sha256_verified"] == 1
+    assert report["index"]["cache_hits"] == 0
+    assert provider.calls == 1
+
+
+def test_paused_queue_cli_exits_successfully_without_requests(tmp_path, audio, monkeypatch):
+    from local_music_acquisition import cli
+
+    root, output = setup_queue(tmp_path)
+    provider = Provider(audio)
+    monkeypatch.setattr(cli, "YtDlpProvider", lambda **kwargs: provider)
+    write_json(root / "pause", {"paused": True})
+    result = cli.main(
+        [
+            str(tmp_path / "playlist.txt"),
+            "--output-dir",
+            str(output),
+            "--queue-dir",
+            str(root),
+            "--disable-jamendo",
+            "--disable-hitmo",
+        ]
+    )
+    assert result == 0 and provider.calls == 0
+
+
+def test_file_disappearing_during_index_check_does_not_abort_other_jobs(
+    tmp_path, audio, monkeypatch
+):
+    from local_music_acquisition import download_index
+
+    root, output = setup_queue(tmp_path, "Artist - One\nArtist - Two\n")
+    provider = Provider(audio)
+    queue.run_queue(root, providers=(provider,))
+    original = download_index.verify_receipt
+    removed = []
+
+    def remove_after_hash(directory, key):
+        receipt = original(directory, key)
+        if not removed:
+            path = directory / receipt["provider"] / receipt["filename"]
+            removed.append(path)
+            path.unlink()
+        return receipt
+
+    monkeypatch.setattr(download_index, "verify_receipt", remove_after_hash)
+    summary = queue.run_queue(root, providers=(provider,), index_recheck_seconds=0)
+    assert summary["downloaded"] == 1 and summary["needs_review"] == 1
+    assert provider.calls == 2
+    assert len(list(output.glob("tracks/*/*/*.wav"))) == 1

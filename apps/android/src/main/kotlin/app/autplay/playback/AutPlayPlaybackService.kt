@@ -1,5 +1,7 @@
 package app.autplay.playback
 
+import app.autplay.application.library.decoded
+
 import android.content.Intent
 import androidx.core.net.toUri
 import android.os.Bundle
@@ -30,6 +32,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -61,6 +66,7 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var lastPlayerMetrics: PlayerMetricsSnapshot? = null
     private var pendingTransitionMetrics: PlayerMetricsSnapshot? = null
     private val audioContourSink = PlaybackAudioContourSink()
+    private val metadataTrack = MutableStateFlow<String?>(null)
 
     override fun onCreate() {
         super.onCreate()
@@ -99,6 +105,32 @@ class AutPlayPlaybackService : MediaSessionService() {
             .setCallback(AutPlaySessionCallback(packageName))
             .build()
         scope.launch { restoreQueue(autoplay = false) }
+        scope.launch {
+            metadataTrack.collectLatest { id ->
+                if (id == null) return@collectLatest
+                val ref = withContext(Dispatchers.IO) { database.libraryDao().trackRef(id) } ?: return@collectLatest
+                combine(database.trackMetadataDao().observe(ref.serverProfileId, id),
+                    database.trackMetadataDao().observeArtwork(ref.serverProfileId, id)) { metadata, art -> metadata to art }
+                    .collectLatest { (metadata, art) ->
+                        val description = metadata?.decoded()
+                        val bytes = withContext(Dispatchers.IO) { readArtwork(art?.filePath) }
+                        stateMutex.withLock {
+                            val item = player.currentMediaItem ?: return@withLock
+                            if (item.mediaMetadata.extras?.getString("local_user_track_ref_id") != id) return@withLock
+                            val updated = item.mediaMetadata.buildUpon()
+                                .setTitle(mediaText(description, "title", ref.rawTitle))
+                                .setArtist(mediaText(description, "artist", ref.rawArtist))
+                                .setAlbumTitle(mediaText(description, "album", ref.rawAlbum))
+                                .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER).build()
+                            if (updated != item.mediaMetadata) {
+                                // Preserve the URI, position and listening session: only description changes.
+                                player.replaceMediaItem(player.currentMediaItemIndex, item.buildUpon().setMediaMetadata(updated).build())
+                                publishRuntimeState(title = updated.title?.toString())
+                            }
+                        }
+                    }
+            }
+        }
         scope.launch {
             while (isActive) {
                 delay(AUDIO_CONTOUR_PUBLISH_MS)
@@ -384,6 +416,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     currentPositionMs?.let { player.seekTo(index, it) }
                     resolvedQueueEntryIds += entry.queueEntryId
                     if (index == player.currentMediaItemIndex) {
+                        metadataTrack.value = entry.localUserTrackRefId
                         publishRuntimeState(
                             source = resolution.source,
                             unavailableReason = resolution.unavailableReason,
@@ -421,7 +454,13 @@ class AutPlayPlaybackService : MediaSessionService() {
     private suspend fun resolveQueueItem(queue: RestoredPlaybackQueue, index: Int): QueueItemResolution =
         withContext(Dispatchers.IO) {
             val entry = queue.entries[index]
-            val track = AutPlayRuntime.database(applicationContext).libraryDao().trackRef(entry.localUserTrackRefId)
+            val metadataDatabase = AutPlayRuntime.database(applicationContext)
+            val originalTrack = metadataDatabase.libraryDao().trackRef(entry.localUserTrackRefId)
+            val description = originalTrack?.let { metadataDatabase.trackMetadataDao().get(it.serverProfileId, it.localUserTrackRefId)?.decoded() }
+            val track = if (description == null) originalTrack else originalTrack.copy(
+                rawTitle = mediaText(description, "title", originalTrack.rawTitle), rawArtist = mediaText(description, "artist", originalTrack.rawArtist), rawAlbum = mediaText(description, "album", originalTrack.rawAlbum))
+            val artwork = if (track != null && description?.artworkSha256 != null) metadataDatabase.trackMetadataDao().artwork(track.serverProfileId, description.artworkSha256) else null
+            val artworkBytes = readArtwork(artwork?.filePath)
             when (val resolved = sourceResolver.resolve(LocalId(entry.localUserTrackRefId), System.currentTimeMillis())) {
                 is AndroidSourceResolution.Unavailable -> {
                     val reason = resolved.reason.name
@@ -440,6 +479,8 @@ class AutPlayPlaybackService : MediaSessionService() {
                             MediaMetadata.Builder()
                                 .setTitle(track?.rawTitle ?: "Unavailable title")
                                 .setArtist(track?.rawArtist)
+                                .setAlbumTitle(track?.rawAlbum)
+                                .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                                 .setExtras(Bundle().apply {
                                     putString("queue_snapshot_id", queue.snapshot.queueSnapshotId)
                                     putString("local_user_track_ref_id", entry.localUserTrackRefId)
@@ -454,6 +495,19 @@ class AutPlayPlaybackService : MediaSessionService() {
                 )
             }
         }
+
+    private fun mediaText(description: app.autplay.application.library.TrackMetadata?, field: String, fallback: String?): String? =
+        // Media3 fills nulls from embedded tags; an explicit user clear must override them.
+        if (description?.fields?.get(field) == kotlinx.serialization.json.JsonNull) ""
+        else if (description == null) fallback else description.text(field, fallback)
+
+    private fun readArtwork(path: String?): ByteArray? = runCatching {
+        path?.let {
+            val file = java.io.File(it)
+            val root = java.io.File(filesDir, "metadata-art").canonicalPath + java.io.File.separator
+            file.takeIf { it.canonicalPath.startsWith(root) && it.isFile && it.length() in 1..2_097_152 }?.readBytes()
+        }
+    }.getOrNull()
 
     private data class QueueItemResolution(
         val item: MediaItem,
@@ -511,8 +565,10 @@ class AutPlayPlaybackService : MediaSessionService() {
 
     private suspend fun ensureSession(): LogicalListeningCheckpoint? {
         logicalSession?.let { return it }
+        val queue = restored ?: return null
         val mediaId = player.currentMediaItem?.mediaId ?: return null
-        return persistence.startSession(
+        return persistence.startSessionIfActive(
+            LocalId(queue.snapshot.queueSnapshotId),
             LocalId(mediaId),
             player.currentPosition.coerceAtLeast(0),
             System.currentTimeMillis(),
@@ -800,8 +856,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             scope.launch {
                 stateMutex.withLock {
                     if (isPlaying) {
-                        ensureSession()
-                        if (observedPlaybackStartedAtMs == null) {
+                        if (ensureSession() != null && observedPlaybackStartedAtMs == null) {
                             observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
                         }
                     } else {
@@ -813,6 +868,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            metadataTrack.value = mediaItem?.mediaMetadata?.extras?.getString("local_user_track_ref_id")
             scope.launch {
                 stateMutex.withLock {
                     val current = logicalSession
@@ -836,8 +892,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     )
                     scheduleResolveIndex(queue, player.nextMediaItemIndex, queueGeneration)
                     if (player.isPlaying) {
-                        ensureSession()
-                        observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
+                        if (ensureSession() != null) observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
                     } else if (!isSameRestore && mediaItem != null) {
                         persistence.selectIdleEntry(
                             snapshotId = LocalId(queue.snapshot.queueSnapshotId),

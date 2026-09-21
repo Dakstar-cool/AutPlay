@@ -27,6 +27,7 @@ class SettingsTransferCodecTest {
             accentPalette = "BLUE",
             syncOnMeteredNetwork = true,
             wavePrefetchMode = "NEXT_3",
+            developerMode = true,
         )
 
         val encoded = SettingsTransferCodec.encode(portable)
@@ -37,6 +38,8 @@ class SettingsTransferCodecTest {
         assertEquals("BLUE", restored.accentPalette)
         assertEquals(true, restored.syncOnMeteredNetwork)
         assertEquals("NEXT_3", restored.wavePrefetchMode)
+        assertEquals(false, restored.developerMode)
+        assertNull(encoded.decodeToString().takeIf { "developer" in it })
         assertEquals(current.activeServerProfileId, restored.activeServerProfileId)
         assertEquals(current.serverBaseUrl, restored.serverBaseUrl)
         assertEquals(current.streamBaseUrl, restored.streamBaseUrl)

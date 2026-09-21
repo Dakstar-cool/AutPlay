@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Protocol
 
 from autplay.domain.track_metadata import MetadataCandidate, MetadataFields, MetadataQuery
-from autplay.domain.vault import ChromaprintEvidence
 
 
 class MetadataProviderError(RuntimeError):
@@ -23,14 +22,6 @@ class EmbeddedMetadata:
 
 class EmbeddedMetadataReader(Protocol):
     def read(self, path: Path) -> EmbeddedMetadata: ...
-
-
-class MetadataByteWork(Protocol):
-    """All audio, artwork decoding and fingerprints stay in the owned process tree."""
-
-    def read_audio(self) -> EmbeddedMetadata: ...
-    def fingerprint(self) -> ChromaprintEvidence: ...
-    def normalize_artwork(self, payload: bytes) -> bytes: ...
 
 
 class PublicMetadataProvider(Protocol):

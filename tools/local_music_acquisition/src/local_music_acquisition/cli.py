@@ -98,6 +98,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--queue-dir", type=Path, help="Use a durable per-track server queue.")
     parser.add_argument("--queue-max-attempts", type=_bounded_integer(1, 10), default=3)
     parser.add_argument("--queue-retry-seconds", type=_bounded_integer(1, 3600), default=60)
+    parser.add_argument("--index-recheck-seconds", type=_bounded_integer(0, 86400), default=86400)
+    parser.add_argument("--yt-dlp-concurrency", type=_bounded_integer(1, 2), default=1)
+    parser.add_argument("--soundcloud-concurrency", type=_bounded_integer(1, 2), default=1)
+    parser.add_argument("--miss-cache-ttl-seconds", type=_bounded_integer(0, 86400), default=0)
+    parser.add_argument(
+        "--expand-missing-from",
+        type=Path,
+        help="Read unsuccessful parents and acquire related identities in a separate queue.",
+    )
+    parser.add_argument("--candidate-limit", type=_bounded_integer(1, 3), default=3)
+    parser.add_argument("--expansion-parent-limit", type=_bounded_integer(1, 10000), default=10000)
+    parser.add_argument("--expansion-parent-key", action="append", default=[])
     parser.add_argument(
         "--check-runtime",
         action="store_true",
@@ -120,6 +132,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
     cleanup_failed = False
     try:
         options = _parser().parse_args(arguments)
+        if options.queue_dir is None and (
+            options.miss_cache_ttl_seconds
+            or options.yt_dlp_concurrency != 1
+            or options.soundcloud_concurrency != 1
+        ):
+            raise PlaylistDownloadError("performance_options_require_queue")
         catalog = options.normalization_catalog
         if catalog is None and (options.output_dir / "normalization-catalog.json").is_file():
             catalog = options.output_dir / "normalization-catalog.json"
@@ -221,8 +239,59 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 resources.callback(signal.signal, signum, previous)
         if xray is not None:
             resources.callback(xray.close)
-        if options.queue_dir is not None:
+        if options.expand_missing_from is not None:
+            from .expansion import run_expansion
+
+            if options.queue_dir is None:
+                raise PlaylistDownloadError("expansion_queue_required")
+            summary = run_expansion(
+                options.expand_missing_from,
+                options.queue_dir,
+                options.output_dir,
+                providers=tuple(providers),
+                rights_confirmed=frozenset(rights),
+                stop=stop,
+                candidate_limit=options.candidate_limit,
+                parent_limit=options.expansion_parent_limit,
+                parent_keys=tuple(options.expansion_parent_key),
+                normalization_catalog=catalog,
+                workers=options.workers,
+                max_bytes=options.max_mib * 1024 * 1024,
+                index_recheck_seconds=options.index_recheck_seconds,
+                retry_seconds=options.queue_retry_seconds,
+            )
+        elif options.queue_dir is not None:
+            from .provider_cache import cache_namespace
             from .queue import enqueue, run_queue
+
+            namespace = None
+            if options.miss_cache_ttl_seconds:
+                inputs = [
+                    path
+                    for path in (
+                        source_path,
+                        catalog,
+                        options.jamendo_client_id_file,
+                        options.soundcloud_client_id_file,
+                        options.yandex_token_file,
+                        options.xray_config if xray is not None else None,
+                    )
+                    if path is not None
+                ]
+                namespace = cache_namespace(
+                    {
+                        "providers": [provider.name for provider in providers],
+                        "jamendo_limit": options.jamendo_limit,
+                        "yandex_quality": options.yandex_quality,
+                        "max_mib": options.max_mib,
+                        "proxy": [
+                            provider.name
+                            for provider in providers
+                            if getattr(provider, "requires_proxy", False)
+                        ],
+                    },
+                    inputs,
+                )
 
             enqueue(
                 options.input,
@@ -240,6 +309,13 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 retry_seconds=options.queue_retry_seconds,
                 max_bytes=options.max_mib * 1024 * 1024,
                 stop=stop,
+                index_recheck_seconds=options.index_recheck_seconds,
+                provider_concurrency={
+                    provider.name: getattr(options, f"{provider.name}_concurrency", 1)
+                    for provider in providers
+                },
+                miss_cache_ttl_seconds=options.miss_cache_ttl_seconds,
+                miss_cache_namespace=namespace,
             )
         else:
             summary = download_playlist(
@@ -267,7 +343,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
     if cleanup_failed:
         return 2
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    if options.expand_missing_from is not None:
+        return 0 if summary["paused"] or summary["remaining_parents"] == 0 else 75
     if options.queue_dir is not None:
+        if summary.get("paused", False):
+            return 0
         if summary["state"] != "finished":
             return 75
         return (

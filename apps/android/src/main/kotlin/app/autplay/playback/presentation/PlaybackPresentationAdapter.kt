@@ -169,6 +169,7 @@ class PlaybackPresentationAdapter(
             mediaId = mediaId,
             title = current?.mediaMetadata?.title?.toString(),
             artist = current?.mediaMetadata?.artist?.toString(),
+            localTrackRefId = current?.mediaMetadata?.extras?.getString("local_user_track_ref_id"),
             positionMs = current?.currentPosition?.coerceAtLeast(0) ?: 0,
             bufferedPositionMs = current?.bufferedPosition?.coerceAtLeast(0) ?: 0,
             durationMs = duration,
@@ -190,6 +191,8 @@ class PlaybackPresentationAdapter(
             },
             context = context,
             controls = gate,
+            previousMediaId = current?.let { adjacentMediaId(it, context, forward = false) },
+            nextMediaId = current?.let { adjacentMediaId(it, context, forward = true) },
             seekEnabled = seekEnabled,
             shuffleEnabled = current?.let {
                 gateFor(it, context, Player.COMMAND_SET_SHUFFLE_MODE) is PlaybackControlGate.Allowed
@@ -207,6 +210,19 @@ class PlaybackPresentationAdapter(
         gesture = TimelineSeekGesture.reconcile(gesture, next)
         _state.value = next.copy(seekPreviewPositionMs = (gesture as? TimelineSeekGesture.Dragging)?.targetMs)
         updateTicker()
+    }
+
+    private fun adjacentMediaId(
+        controller: MediaController,
+        context: ActiveQueueContext,
+        forward: Boolean,
+    ): String? {
+        if (!controller.isCommandAvailable(Player.COMMAND_GET_TIMELINE)) return null
+        val command = if (forward) Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM else Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+        if (gateFor(controller, context, command) !is PlaybackControlGate.Allowed) return null
+        val index = if (forward) controller.nextMediaItemIndex else controller.previousMediaItemIndex
+        if (index !in 0 until controller.mediaItemCount) return null
+        return controller.getMediaItemAt(index).mediaId.takeIf(String::isNotBlank)
     }
 
     private fun gateFor(
@@ -266,6 +282,8 @@ class PlaybackPresentationAdapter(
             shuffleEnabled = false,
             repeatEnabled = false,
             seekPreviewPositionMs = null,
+            previousMediaId = null,
+            nextMediaId = null,
         )
     }
 

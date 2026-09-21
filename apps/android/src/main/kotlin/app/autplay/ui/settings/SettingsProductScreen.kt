@@ -86,6 +86,7 @@ internal fun SettingsProductScreen(
         }
 
         SettingsSection(icon = AutPlayIcon.Library, titleRes = R.string.settings_library_access) {
+            PhoneMusicTools(settings)
             Text(
                 stringResource(
                     if (settings.libraryRootTreeUri == null) R.string.settings_folder_not_selected
@@ -119,6 +120,12 @@ internal fun SettingsProductScreen(
                 onClick = { onNavigate(UiDestination.Profile) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.settings_open_personal_server)) }
+            OutlinedButton(onClick = { onNavigate(UiDestination.ServerFeatures) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.nav_server_features))
+            }
+            OutlinedButton(onClick = { onNavigate(UiDestination.SyncStatus) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.nav_sync_status))
+            }
             SettingsSwitchRow(
                 label = stringResource(R.string.settings_metered_sync),
                 checked = settings.syncOnMeteredNetwork,
@@ -129,6 +136,9 @@ internal fun SettingsProductScreen(
         }
 
         SettingsSection(icon = AutPlayIcon.Wave, titleRes = R.string.nav_wave_rooms) {
+            OutlinedButton(onClick = { onNavigate(UiDestination.WaveRooms) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.nav_wave_rooms))
+            }
             ChoiceColumn {
                 listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
                     FilterChip(
@@ -212,8 +222,8 @@ internal fun SettingsProductScreen(
             }
         }
 
-        SettingsSection(icon = AutPlayIcon.Playlist, titleRes = R.string.settings_more) {
-            UiDestination.secondaryNavigation.forEach { target ->
+        SettingsSection(icon = AutPlayIcon.Playlist, titleRes = R.string.settings_music_navigation) {
+            listOf(UiDestination.Playlists, UiDestination.Downloads, UiDestination.History, UiDestination.ImportReview).forEach { target ->
                 Surface(
                     onClick = { onNavigate(target) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
@@ -231,6 +241,23 @@ internal fun SettingsProductScreen(
                 }
             }
         }
+        SettingsSection(icon = AutPlayIcon.Settings, titleRes = R.string.settings_about) {
+            Text(stringResource(R.string.settings_app_version, app.autplay.BuildConfig.VERSION_NAME))
+            SettingsSwitchRow(
+                label = stringResource(R.string.settings_developer_mode),
+                checked = settings.developerMode,
+                onCheckedChange = { enabled -> onUpdate { it.copy(developerMode = enabled) } },
+            )
+            Text(stringResource(R.string.settings_developer_description), color = AutPlayTokens.colors.mutedText)
+            if (settings.developerMode) {
+                Text(stringResource(R.string.settings_developer_enabled), color = MaterialTheme.colorScheme.primary)
+                Text("${app.autplay.BuildConfig.APPLICATION_ID} · ${app.autplay.BuildConfig.VERSION_CODE}")
+                OutlinedButton(onClick = { onNavigate(UiDestination.ServerFeatures) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.settings_diagnostics))
+                }
+            }
+        }
+
     }
 }
 
@@ -240,29 +267,21 @@ private fun SettingsSection(
     @StringRes titleRes: Int,
     content: @Composable () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = AutPlayTokens.colors.glassSurface,
-        border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
-        tonalElevation = 1.dp,
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                AutPlayPlatformIcon(
-                    icon = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(stringResource(titleRes), style = MaterialTheme.typography.titleLarge)
-            }
-            content()
-        }
-    }
+    app.autplay.ui.PreferenceSection(
+        title = stringResource(titleRes),
+        icon = icon,
+        summary = stringResource(when (titleRes) {
+            R.string.settings_appearance -> R.string.settings_appearance_summary
+            R.string.settings_library_access -> R.string.settings_library_summary
+            R.string.settings_network -> R.string.settings_connection_summary
+            R.string.nav_wave_rooms -> R.string.settings_wave_summary
+            R.string.settings_statistics_privacy -> R.string.settings_privacy_summary
+            R.string.settings_transfer -> R.string.settings_transfer_summary
+            R.string.settings_music_navigation -> R.string.settings_music_summary
+            else -> R.string.settings_about_summary
+        }),
+        content = content,
+    )
 }
 
 @Composable

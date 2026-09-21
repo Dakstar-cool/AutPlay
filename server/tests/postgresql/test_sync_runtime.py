@@ -177,8 +177,9 @@ def test_projected_track_ids_replay_and_remain_owner_scoped(database_url: str) -
         with Session(engine) as session:
             row = session.get(ListeningEventRow, UUID(str(listening["event_id"])))
             assert row is not None and row.user_track_ref_id == ref_id
-            preference_row = session.get(UserTrackPreferenceRow, ref_id)
-            assert preference_row is not None and preference_row.preference == "LIKED"
+            stored_preference = session.get(UserTrackPreferenceRow, ref_id)
+            assert stored_preference is not None and stored_preference.preference == "LIKED"
+        assert isinstance(listening["payload"], dict)
         for sequence, invalid in enumerate((foreign_id, uuid4()), start=3):
             denied = _event(
                 owner,
@@ -186,10 +187,10 @@ def test_projected_track_ids_replay_and_remain_owner_scoped(database_url: str) -
                 sequence,
                 "LISTENING_EVENT_RECORDED",
                 "LISTENING_EVENT",
-                dict(
-                    cast(dict[str, object], listening["payload"]),
-                    server_user_track_ref_id=str(invalid),
-                ),
+                {
+                    **listening["payload"],
+                    "server_user_track_ref_id": str(invalid),
+                },
             )
             response = service.push(owner, {**body, "events": [denied]}, uuid4())
             assert response["acks"][0]["outcome"] == "REJECTED"

@@ -1,0 +1,4 @@
+Debug APK + AndroidTest APK + JVM tests + Lint
+--max-workers=1; strict dependency verification; Kotlin incremental disabled; unchanged toolchain and 2GiB heap
+versionCode=7 versionName=0.3.4-m52
+BUILD SUCCESSFUL in 7m 24s

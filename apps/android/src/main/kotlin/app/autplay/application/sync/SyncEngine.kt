@@ -1,6 +1,8 @@
 package app.autplay.application.sync
 
 import androidx.room3.withWriteTransaction
+import app.autplay.application.search.refreshTrackSearch
+import app.autplay.application.library.projectMetadata
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.AppliedServerEventEntity
 import app.autplay.data.local.entity.ArtistCreditProjectionEntity
@@ -25,7 +27,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -71,6 +75,7 @@ class SyncCoordinator(
     private val transport: SyncTransport,
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val token: () -> String = { UUID.randomUUID().toString() },
+    private val afterSync: (ClientEventBinding) -> Unit = {},
 ) {
     suspend fun run(binding: ClientEventBinding): Boolean {
         val cursor = requireCursor(binding)
@@ -100,9 +105,9 @@ class SyncCoordinator(
                 return false
             }
             compact(binding)
-            val pending = database.journalDao()
-                .nextPending(cursor.journalLineageId, Long.MAX_VALUE, 1)
-                .isNotEmpty()
+            // A replaced worker may still be releasing its lease. Keep a durable retry
+            // until both pending intents and in-flight leases have drained.
+            val pending = database.journalDao().observePendingCount(cursor.journalLineageId).first() > 0
             if (pending) {
                 database.syncDao().upsertRuntimeStatus(
                     SyncRuntimeStatusEntity(
@@ -115,6 +120,7 @@ class SyncCoordinator(
                 return false
             }
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), nowMs()))
+            afterSync(binding)
             return true
         } catch (error: CancellationException) {
             throw error
@@ -557,10 +563,10 @@ class SyncCoordinator(
     }
 
     private fun payloadId(event: RemoteEvent, key: String): String? = runCatching {
-        Json.parseToJsonElement(event.payloadJson).jsonObject[key]?.jsonPrimitive?.content
+        Json.parseToJsonElement(event.payloadJson).jsonObject[key]?.jsonPrimitive?.takeIf { it.isString }?.contentOrNull
     }.getOrNull()
     private fun payloadString(payload: String, key: String): String? = runCatching {
-        Json.parseToJsonElement(payload).jsonObject[key]?.jsonPrimitive?.content
+        Json.parseToJsonElement(payload).jsonObject[key]?.jsonPrimitive?.takeIf { it.isString }?.contentOrNull
     }.getOrNull()
     private fun conflictId(profile: String, eventId: String): String = UUID.nameUUIDFromBytes("$profile:$eventId".toByteArray()).toString()
     private fun remoteLocalId(profile: String, serverId: String): String = UUID.nameUUIDFromBytes("$profile:$serverId".toByteArray()).toString()
@@ -582,23 +588,33 @@ class SyncCoordinator(
         }
     }
     private suspend fun applyPayloadProjection(type: String, local: String, payload: String): Boolean {
+        val root = runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: return false
         when (type) {
             "USER_TRACK_REF" -> {
                 val row = database.libraryDao().trackRef(local) ?: return false
-                val root = runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: return false
+                if (root.containsKey("metadata_v1")) {
+                    val metadata = root["metadata_v1"] as? kotlinx.serialization.json.JsonObject ?: return false
+                    if (!database.projectMetadata(row.serverProfileId, local, metadata)) return false
+                }
                 val recordingId = if (root.containsKey("recording_id")) {
                     val raw = runCatching { root["recording_id"]?.jsonPrimitive?.contentOrNull }.getOrNull()
                     raw?.let(::canonicalUuid) ?: if (raw == null) null else return false
                 } else row.serverRecordingId
                 database.libraryDao().upsertTrackRef(row.copy(
                     serverRecordingId = recordingId,
-                    resolutionStatus = payloadString(payload, "resolution_status") ?: row.resolutionStatus,
-                    rawTitle = payloadString(payload, "title") ?: row.rawTitle,
-                    rawArtist = payloadString(payload, "artist") ?: row.rawArtist,
-                    rawAlbum = payloadString(payload, "album") ?: row.rawAlbum,
+                    resolutionStatus = root.projectRequiredText("resolution_status", row.resolutionStatus),
+                    rawTitle = root.projectNullableText("title", row.rawTitle),
+                    rawArtist = root.projectNullableText("artist", row.rawArtist),
+                    rawAlbum = root.projectNullableText("album", row.rawAlbum),
+                ))
+                database.refreshTrackSearch(local)
+            }
+            "PLAYLIST" -> database.playlistDao().playlist(local)?.let { row ->
+                database.playlistDao().upsertPlaylist(row.copy(
+                    name = root.projectRequiredText("name", row.name),
+                    description = root.projectNullableText("description", row.description),
                 ))
             }
-            "PLAYLIST" -> database.playlistDao().playlist(local)?.let { row -> database.playlistDao().upsertPlaylist(row.copy(name = payloadString(payload, "name") ?: row.name, description = payloadString(payload, "description") ?: row.description)) }
             "PLAYLIST_ENTRY" -> database.playlistDao().entry(local)?.let { row -> payloadString(payload, "position_key")?.let { database.playlistDao().upsertEntry(row.copy(positionKey = it, activePositionKey = it)) } }
         }
         return true
@@ -689,17 +705,18 @@ object SyncAttemptPolicy {
 }
 
 class SyncStatusRepository(private val database: AutPlayDatabase) {
-    fun observe(binding: ClientEventBinding): Flow<SyncStatus> = flow {
-        val cursor = database.syncDao().cursor(binding.serverProfileId.value)
-        if (cursor == null) {
-            emit(SyncStatus(0, 0, 0, null, "NOT_BOUND"))
-            return@flow
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun observe(binding: ClientEventBinding): Flow<SyncStatus> =
+        database.syncDao().observeCursor(binding.serverProfileId.value).flatMapLatest { cursor ->
+            if (cursor == null) flowOf(SyncStatus(0, 0, 0, null, "NOT_BOUND"))
+            else combine(
+                database.journalDao().observePendingCount(cursor.journalLineageId),
+                database.journalDao().observeDeadLetterCount(cursor.journalLineageId),
+                database.syncDao().observeOpenConflictCount(binding.serverProfileId.value),
+                database.syncDao().observeRuntimeStatus(binding.serverProfileId.value),
+            ) { pending, dead, conflicts, runtime ->
+                SyncStatus(pending, dead, conflicts, runtime?.lastSuccessAtMs ?: cursor.lastSyncAtMs,
+                    cursor.bootstrapState, runtime?.lastErrorCode)
+            }
         }
-        val runtime = database.syncDao().runtimeStatus(binding.serverProfileId.value)
-        combine(
-            database.journalDao().observePendingCount(cursor.journalLineageId),
-            database.journalDao().observeDeadLetterCount(cursor.journalLineageId),
-            database.syncDao().observeOpenConflictCount(binding.serverProfileId.value),
-        ) { pending, dead, conflicts -> SyncStatus(pending, dead, conflicts, runtime?.lastSuccessAtMs ?: cursor.lastSyncAtMs, cursor.bootstrapState, runtime?.lastErrorCode) }.collect { emit(it) }
-    }
 }

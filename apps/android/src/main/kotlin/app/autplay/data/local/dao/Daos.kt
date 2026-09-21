@@ -607,10 +607,12 @@ interface SyncDao {
     @Upsert suspend fun upsertCursor(cursor: SyncCursorEntity)
     @Upsert suspend fun upsertRuntimeStatus(status: SyncRuntimeStatusEntity)
     @Query("SELECT * FROM sync_runtime_status WHERE server_profile_id = :profileId") suspend fun runtimeStatus(profileId: String): SyncRuntimeStatusEntity?
+    @Query("SELECT * FROM sync_runtime_status WHERE server_profile_id = :profileId") fun observeRuntimeStatus(profileId: String): Flow<SyncRuntimeStatusEntity?>
     @Upsert suspend fun upsertBootstrapState(state: SyncBootstrapStateEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertInteractionFact(fact: RecommendationInteractionFactEntity): Long
     @Query("SELECT * FROM sync_bootstrap_state WHERE server_profile_id = :profileId") suspend fun bootstrapState(profileId: String): SyncBootstrapStateEntity?
     @Query("SELECT * FROM sync_cursor WHERE server_profile_id = :profileId") suspend fun cursor(profileId: String): SyncCursorEntity?
+    @Query("SELECT * FROM sync_cursor WHERE server_profile_id = :profileId") fun observeCursor(profileId: String): Flow<SyncCursorEntity?>
     @Query("UPDATE sync_cursor SET last_acked_device_sequence = :sequence, updated_at_ms = :nowMs WHERE server_profile_id = :profileId AND last_acked_device_sequence < :sequence AND NOT EXISTS (SELECT 1 FROM offline_journal_event WHERE journal_lineage_id = :lineageId AND device_sequence <= :sequence AND state NOT IN ('ACKED', 'DEAD_LETTER', 'CONFLICT'))") suspend fun advanceAck(profileId: String, lineageId: String, sequence: Long, nowMs: Long): Int
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun markApplied(event: AppliedServerEventEntity): Long
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun defer(event: DeferredServerEventEntity): Long
@@ -857,12 +859,13 @@ interface RecommendationPackDao {
 
 @Dao
 interface SearchDao {
+    @Query("SELECT * FROM track_search_content WHERE local_user_track_ref_id = :trackRefId LIMIT 1") suspend fun contentForTrack(trackRefId: String): TrackSearchContentEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertContent(row: TrackSearchContentEntity): Long
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertContents(rows: List<TrackSearchContentEntity>): List<Long>
     @Update suspend fun updateContent(row: TrackSearchContentEntity): Int
     @Delete suspend fun deleteContent(row: TrackSearchContentEntity): Int
     @Query("SELECT c.local_user_track_ref_id FROM track_search_fts f JOIN track_search_content c ON c.rowid = f.rowid WHERE track_search_fts MATCH :query ORDER BY bm25(track_search_fts), c.rowid ASC LIMIT :limit") suspend fun search(query: String, limit: Int): List<String>
-    @Query("SELECT c.local_user_track_ref_id FROM track_search_fts f JOIN track_search_content c ON c.rowid = f.rowid JOIN user_track_ref u ON u.local_user_track_ref_id = c.local_user_track_ref_id WHERE track_search_fts MATCH :query AND u.server_profile_id = :profileId ORDER BY bm25(track_search_fts), c.rowid ASC LIMIT :limit") suspend fun searchForProfile(query: String, profileId: String, limit: Int): List<String>
-    @Query("SELECT c.local_user_track_ref_id FROM track_search_fts f JOIN track_search_content c ON c.rowid = f.rowid JOIN user_track_ref u ON u.local_user_track_ref_id = c.local_user_track_ref_id WHERE track_search_fts MATCH :query AND u.server_profile_id = 'legacy-unscoped' ORDER BY bm25(track_search_fts), c.rowid ASC LIMIT :limit") suspend fun searchLegacy(query: String, limit: Int): List<String>
+    @Query("SELECT c.local_user_track_ref_id FROM track_search_fts f JOIN track_search_content c ON c.rowid = f.rowid JOIN user_track_ref u ON u.local_user_track_ref_id = c.local_user_track_ref_id WHERE track_search_fts MATCH :query AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId ORDER BY bm25(track_search_fts), c.rowid ASC LIMIT :limit") suspend fun searchForProfile(query: String, profileId: String, limit: Int): List<String>
+    @Query("SELECT c.local_user_track_ref_id FROM track_search_fts f JOIN track_search_content c ON c.rowid = f.rowid JOIN user_track_ref u ON u.local_user_track_ref_id = c.local_user_track_ref_id WHERE track_search_fts MATCH :query AND u.deleted_at_ms IS NULL AND u.server_profile_id = 'legacy-unscoped' ORDER BY bm25(track_search_fts), c.rowid ASC LIMIT :limit") suspend fun searchLegacy(query: String, limit: Int): List<String>
     @Query("DELETE FROM track_search_content") suspend fun clearContent(): Int
 }

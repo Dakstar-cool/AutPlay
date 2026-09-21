@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="metadata_heading">Track information</string>
+    <string name="metadata_title_field">Title</string>
+    <string name="metadata_artist">Artist</string>
+    <string name="metadata_album_artist">Album artist</string>
+    <string name="metadata_release_date">Edition release date</string>
+    <string name="metadata_first_release">First release</string>
+    <string name="metadata_recording_date">Recording date</string>
+    <string name="metadata_label">Label</string>
+    <string name="metadata_track_number">Track number</string>
+    <string name="metadata_disc_number">Disc number</string>
+    <string name="metadata_local">Read from the audio file</string>
+    <string name="metadata_ready">Information updated</string>
+    <string name="metadata_review">Choose the matching recording and edition</string>
+    <string name="metadata_not_found">No reliable catalog match. File information is preserved.</string>
+    <string name="metadata_pending">Updating in the background</string>
+    <string name="metadata_failed">Update failed. Existing information is preserved.</string>
+    <string name="metadata_missing">Additional information has not been loaded yet</string>
+    <string name="metadata_manual">Your edit</string>
+    <string name="metadata_from_file">Audio file</string>
+    <string name="metadata_command_failed">Could not apply the change. Refresh information and try again.</string>
+    <string name="metadata_refresh">Refresh</string>
+    <string name="metadata_edit">Edit information</string>
+    <string name="metadata_choose">Use this edition</string>
+    <string name="metadata_edit_hint">Edited fields will be preserved during refresh. Dates: YYYY, YYYY-MM or YYYY-MM-DD.</string>
+    <string name="metadata_backfill">Load music information and covers</string>
+</resources>

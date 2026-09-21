@@ -31,6 +31,26 @@ class PlaybackPlayerSurfacesTest {
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun fullPlayerUsesActualNeighboursEvenAtLinearQueueBoundary() {
+        val state = androidx.compose.runtime.mutableStateOf(ordinaryState().copy(previousMediaId = "last", nextMediaId = "first"))
+        var previousCalls = 0
+        var nextCalls = 0
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(state.value, {}, {}, {}, {}, {}, {}, {}, {}, true, {},
+                onPrevious = { previousCalls++ }, onNext = { nextCalls++ },
+                queueState = app.autplay.ui.queue.QueueEditorUiState(canPrevious = false, canNext = false))
+        } }
+        val previous = composeRule.onNodeWithContentDescription(context.getString(R.string.action_previous))
+        val next = composeRule.onNodeWithContentDescription(context.getString(R.string.action_next))
+        previous.performScrollTo().assertIsEnabled().performClick()
+        next.assertIsEnabled().performClick()
+        assertEquals(1, previousCalls)
+        assertEquals(1, nextCalls)
+        composeRule.runOnIdle { state.value = state.value.copy(previousMediaId = null, nextMediaId = null) }
+        previous.assertIsNotEnabled()
+        next.assertIsNotEnabled()
+    }
+
     @Test
     fun ordinaryMiniPlayerShowsMetadataAndEnabledTransport() {
         composeRule.setContent {

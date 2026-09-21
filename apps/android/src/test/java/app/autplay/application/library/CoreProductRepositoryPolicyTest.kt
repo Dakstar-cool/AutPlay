@@ -6,6 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreProductRepositoryPolicyTest {
+    @Test fun `MediaStore does not require a persistable SAF grant but respects actual revocation`() {
+        val media = CoreAudioCapabilityState("AVAILABLE", false, requiresPersistedUriPermission = false)
+        assertEquals(CoreTrackAvailability.PLAYABLE_LOCAL, CoreProductDetailPolicy.availability(listOf(media)))
+        assertTrue(CoreProductDetailPolicy.capabilities(input(audioStates = listOf(media))).contains(CoreTrackDetailCapability.PLAY))
+        assertEquals(CoreTrackAvailability.PERMISSION_REVOKED,
+            CoreProductDetailPolicy.availability(listOf(media.copy(status = "PERMISSION_REVOKED"))))
+        assertEquals(CoreTrackAvailability.PERMISSION_REVOKED,
+            CoreProductDetailPolicy.availability(listOf(CoreAudioCapabilityState("AVAILABLE", false))))
+    }
     @Test
     fun `available persisted content can play and revoked content cannot`() {
         assertEquals(CoreTrackAvailability.PLAYABLE_LOCAL, CoreProductDetailPolicy.availability(listOf(audio("AVAILABLE", true))))
@@ -48,7 +57,7 @@ class CoreProductRepositoryPolicyTest {
     @Test
     fun `resolved server playback candidate can play without a local source`() {
         assertEquals(
-            CoreTrackAvailability.PLAYABLE_SERVER,
+            CoreTrackAvailability.SERVER_CANDIDATE,
             CoreProductDetailPolicy.availability(emptyList(), hasServerPlaybackCandidate = true),
         )
         assertTrue(

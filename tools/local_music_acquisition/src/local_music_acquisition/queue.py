@@ -8,15 +8,19 @@ import shutil
 import threading
 import time
 import unicodedata
+from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .download_index import DownloadIndex
 from .models import AcquiredArtifact, PlaylistItem, ProviderFailure
 from .normalization import normalize_items
 from .orchestrator import DownloadSession, PlaylistDownloadError
 from .playlist import MAX_IMPORT_BYTES, normalize_numbered_collection, parse_playlist
+from .provider_cache import CachedProvider, ProviderMissCache
 from .providers.base import AcquisitionProvider
 from .queue_store import (
     audio_receipt,
@@ -152,6 +156,7 @@ class _VerifiedProvider:
         self.name = provider.name
         self.requires_rights_confirmation = provider.requires_rights_confirmation
         self.requires_proxy = getattr(provider, "requires_proxy", False)
+        self.max_parallelism = getattr(provider, "max_parallelism", 1)
         self.max_bytes = max_bytes
 
     def acquire(self, item: PlaylistItem, output_directory: Path) -> AcquiredArtifact:
@@ -207,12 +212,13 @@ def _staging_root(root: Path, output: Path, key: str) -> Path:
     return output / ".acquire" / namespace / key
 
 
-def _reconcile(root: Path, output: Path, key: str) -> dict[str, Any]:
+def _reconcile(root: Path, output: Path, key: str, index: DownloadIndex) -> dict[str, Any]:
     state = _state(root, key)
+    before = state.copy()
     destination = output / "tracks" / key
     try:
         if destination.exists():
-            verify_receipt(destination, key)
+            index.verify(key, force=state["state"] == "needs_review")
             state.update(state="downloaded", error_code=None)
         else:
             prepared = sorted(_staging_root(root, output, key).glob("*/receipt.json"))
@@ -221,6 +227,7 @@ def _reconcile(root: Path, output: Path, key: str) -> dict[str, Any]:
                 prepared = sorted((output / ".acquire" / key).glob("*/receipt.json"))
             if prepared:
                 _publish(prepared[0].parent, destination, key)
+                index.verify(key)
                 state.update(state="downloaded", error_code=None)
             elif state["state"] == "downloaded":
                 raise PlaylistDownloadError("queue_artifact_missing")
@@ -228,7 +235,8 @@ def _reconcile(root: Path, output: Path, key: str) -> dict[str, Any]:
                 state.update(state="retry", next_retry=0, error_code="worker_interrupted")
     except PlaylistDownloadError as error:
         state.update(state="needs_review", error_code=str(error))
-    write_json(root / "jobs" / f"{key}.json", state)
+    if state != before:
+        write_json(root / "jobs" / f"{key}.json", state)
     return state
 
 
@@ -241,6 +249,7 @@ def _process(
     max_attempts: int,
     retry_seconds: int,
     max_bytes: int,
+    index: DownloadIndex,
 ) -> None:
     key = _key(item)
     state = _state(root, key)
@@ -264,9 +273,18 @@ def _process(
     state.update(error_code=outcome.error_code, provider=outcome.provider, updated_unix=time.time())
     if outcome.status == "downloaded":
         _publish(stage, output / "tracks" / key, key)
+        index.verify(key)
         state.update(state="downloaded")
     elif outcome.status == "not_found":
         state.update(state="not_found")
+    elif outcome.deferred:
+        # attempts is also the staging sequence. Credit only an explicitly deferred
+        # result, never a last error string that could hide a real earlier failure.
+        state.update(
+            state="retry",
+            attempt_budget_reset=state.get("attempt_budget_reset", 0) + 1,
+            next_retry=time.time() + retry_seconds,
+        )
     elif used_attempts + 1 < max_attempts:
         state.update(
             state="retry",
@@ -287,24 +305,48 @@ def run_queue(
     retry_seconds: int = 60,
     max_bytes: int = 200 * 1024 * 1024,
     stop: threading.Event | None = None,
+    index_recheck_seconds: int = 86400,
+    provider_concurrency: Mapping[str, int] | None = None,
+    miss_cache_ttl_seconds: int = 0,
+    miss_cache_namespace: str | None = None,
 ) -> dict[str, Any]:
     if not 1 <= max_workers <= 4 or not 1 <= max_attempts <= 10 or not 1 <= retry_seconds <= 3600:
         raise PlaylistDownloadError("queue_policy_invalid")
     if not 1024 <= max_bytes <= 1024 * 1024 * 1024:
         raise PlaylistDownloadError("queue_max_bytes_invalid")
+    if not 0 <= miss_cache_ttl_seconds <= 86400:
+        raise PlaylistDownloadError("miss_cache_ttl_invalid")
+    cache = (
+        ProviderMissCache(
+            root / "provider-misses", miss_cache_namespace or "", miss_cache_ttl_seconds
+        )
+        if miss_cache_ttl_seconds
+        else None
+    )
+    verified: tuple[AcquisitionProvider, ...] = tuple(
+        _VerifiedProvider(provider, max_bytes) for provider in providers
+    )
+    if cache is not None:
+        verified = tuple(CachedProvider(provider, cache) for provider in verified)
     session = DownloadSession(
-        tuple(_VerifiedProvider(provider, max_bytes) for provider in providers),
+        verified,
         rights_confirmed,
         cooldown_seconds=retry_seconds,
+        provider_concurrency=provider_concurrency,
     )
     root = _directory(root)
     document = _load(root)
     output = _directory(Path(document["output"]))
     stop = stop or threading.Event()
-    with exclusive_lock(root / "queue.lock"), exclusive_lock(output / ".acquisition.lock"):
+    started = time.monotonic()
+    with (
+        exclusive_lock(root / "queue.lock"),
+        exclusive_lock(output / ".acquisition.lock"),
+        closing(DownloadIndex(output, recheck_seconds=index_recheck_seconds)) as index,
+    ):
         ready: list[PlaylistItem] = []
         for key, item in document["jobs"].items():
-            state = _reconcile(root, output, key)
+            state = _reconcile(root, output, key, index)
             if state["state"] == "pending" or (
                 state["state"] == "retry" and state.get("next_retry", 0) <= time.time()
             ):
@@ -334,12 +376,27 @@ def run_queue(
                             max_attempts=max_attempts,
                             retry_seconds=retry_seconds,
                             max_bytes=max_bytes,
+                            index=index,
                         )
                     )
                 if active:
                     done, active = wait(active, return_when=FIRST_COMPLETED)
                     for future in done:
                         future.result()
+        write_json(
+            root / "runtime.json",
+            {
+                "schema_version": 1,
+                "finished_unix": time.time(),
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+                "workers": max_workers,
+                "providers": session.metrics(),
+                "index": index.summary(),
+                "miss_cache": cache.summary()
+                if cache is not None
+                else {"hits": 0, "stored": 0, "invalid": 0},
+            },
+        )
     return queue_status(root)
 
 
@@ -354,5 +411,25 @@ def retry_unsuccessful(root: Path, *, include_not_found: bool = False) -> dict[s
                 # Never reuse attempt directories or reset their monotonic sequence number.
                 state.update(state="pending", attempts=state["attempts"], next_retry=0)
                 state["attempt_budget_reset"] = state["attempts"]
+                # An explicit operator retry must re-check previously missed sources.
+                cache_root = root / "provider-misses"
+                if cache_root.exists():
+                    _directory(cache_root)
+                    (cache_root / f"{key}.json").unlink(missing_ok=True)
                 write_json(root / "jobs" / f"{key}.json", state)
     return queue_status(root)
+
+
+def verify_downloads(root: Path) -> dict[str, Any]:
+    """Force byte verification and refresh this queue's index without network calls."""
+    root = _directory(root)
+    document = _load(root)
+    output = _directory(Path(document["output"]))
+    with (
+        exclusive_lock(root / "queue.lock"),
+        exclusive_lock(output / ".acquisition.lock"),
+        closing(DownloadIndex(output, recheck_seconds=0)) as index,
+    ):
+        for key in document["jobs"]:
+            _reconcile(root, output, key, index)
+        return {**queue_status(root), "index": index.summary()}

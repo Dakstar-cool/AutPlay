@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -443,7 +444,8 @@ private fun PublicAccountRegistrationPanel(
                 is PublicAccountRegistrationState.Blocked,
                 -> {
                     if (state is PublicAccountRegistrationState.Blocked) {
-                        Text("Registration stopped: ${state.code}", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.profile_registration_failed), color = MaterialTheme.colorScheme.error)
+                        if (app.autplay.ui.LocalDeveloperMode.current) Text(state.code.toString())
                     }
                     Text("Scan the invitation QR or open an .autplayinvite file. The secret is kept only for this registration.")
                     OutlinedTextField(
@@ -484,13 +486,13 @@ private fun PublicAccountRegistrationPanel(
                 }
                 is PublicAccountRegistrationState.AwaitingConfirmation -> {
                     Text("Create account “${state.invitation.accountDisplayName}” and bind this phone as its first device?")
-                    Text("PA2 has no recovery or additional-device flow. Keep this device and its app data safe.")
+                    Text(stringResource(R.string.profile_first_device_note))
                     Button(onClick = onConfirmRegistration) { Text("Create account and connect") }
                     OutlinedButton(onClick = onCancel) { Text("Cancel") }
                 }
                 PublicAccountRegistrationState.Redeeming -> {
                     Text(stringResource(R.string.profile_connection_exchanging), style = MaterialTheme.typography.titleMedium)
-                    Text("Keep AutPlay open while the first account, device, and session are committed.")
+                    Text(stringResource(R.string.profile_connecting_note))
                 }
                 PublicAccountRegistrationState.Connected -> Text(stringResource(R.string.recovery_account_created))
             }
@@ -515,8 +517,11 @@ private fun OwnerProvisioningPanel(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Invite friends", style = MaterialTheme.typography.titleMedium)
-            Text("Each invitation creates one USER account and binds only its first Android device.")
-            state.errorCode?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Text(stringResource(R.string.profile_invite_friend_note))
+            state.errorCode?.let {
+                Text(stringResource(R.string.action_failed_friendly), color = MaterialTheme.colorScheme.error)
+                if (app.autplay.ui.LocalDeveloperMode.current) Text(it)
+            }
             OutlinedTextField(
                 value = displayName,
                 onValueChange = { displayName = it.take(120) },
@@ -542,7 +547,7 @@ private fun OwnerProvisioningPanel(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("${invitation.displayName} · ${invitation.state}", modifier = Modifier.weight(1f))
+                    Text("${invitation.displayName} · ${accountStatusLabel(invitation.state)}", modifier = Modifier.weight(1f))
                     if (invitation.state == "ACTIVE") {
                         OutlinedButton(
                             enabled = !state.busy,
@@ -557,7 +562,7 @@ private fun OwnerProvisioningPanel(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("${account.displayName} · ${account.status}", modifier = Modifier.weight(1f))
+                    Text("${account.displayName} · ${accountStatusLabel(account.status)}", modifier = Modifier.weight(1f))
                     if (account.status == "ACTIVE") {
                         OutlinedButton(
                             enabled = !state.busy,
@@ -717,14 +722,22 @@ private fun LocalDataReviewDialog(
                 review.items.forEach { item ->
                     val selected = item.localChangeId in selectedIds
                     OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("profile-local-change-${item.localChangeId}"),
                         enabled = !applying,
                         onClick = {
                             selectedIds = if (selected) selectedIds - item.localChangeId else selectedIds + item.localChangeId
                         },
                     ) {
                         val stateLabel = if (selected) R.string.profile_local_data_selected else R.string.profile_local_data_not_selected
-                        Text("${item.eventType} · ${item.occurredAtMs} · ${stringResource(stateLabel)}")
+                        val label = stringResource(when (item.eventType) {
+                            "USER_TRACK_PREFERENCE_SET" -> R.string.profile_change_preference
+                            "LISTENING_EVENT_RECORDED" -> R.string.nav_history
+                            "PLAYLIST_CREATED", "PLAYLIST_METADATA_PATCHED", "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED" -> R.string.nav_playlists
+                            else -> R.string.profile_change_library
+                        })
+                        val date = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.occurredAtMs))
+                        Text("$label · $date · ${stringResource(stateLabel)}")
+                        if (app.autplay.ui.LocalDeveloperMode.current) Text(item.eventType)
                     }
                 }
             }
@@ -944,3 +957,15 @@ private fun ProfileRemoteAction.confirmBodyRes(): Int = when (this) {
     ProfileRemoteAction.REVOKE_CURRENT_DEVICE -> R.string.profile_confirm_revoke_body
     ProfileRemoteAction.DISCONNECT_LOCAL -> R.string.profile_confirm_disconnect_body
 }
+
+@Composable
+private fun accountStatusLabel(value: String): String = if (app.autplay.ui.LocalDeveloperMode.current) value else stringResource(
+    when (value) {
+        "ACTIVE" -> R.string.profile_status_active
+        "EXPIRED" -> R.string.profile_status_expired
+        "CANCELLED" -> R.string.profile_status_cancelled
+        "REDEEMED", "CONSUMED" -> R.string.profile_status_used
+        "DISABLED" -> R.string.profile_status_disabled
+        else -> R.string.profile_status_unavailable
+    },
+)

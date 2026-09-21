@@ -18,7 +18,7 @@ import app.autplay.data.local.entity.PlaylistEntity
 import app.autplay.data.local.entity.PlaylistEntryEntity
 import app.autplay.data.local.entity.UserTrackPreferenceEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
-import app.autplay.data.local.entity.TrackSearchContentEntity
+import app.autplay.application.search.refreshTrackSearch
 import app.autplay.data.local.entity.SyncCursorEntity
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
@@ -91,10 +91,18 @@ class LibraryVerticalSliceRepository(
             database.libraryDao().upsertEntry(existing.copy(removedAtMs = null, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
-    suspend fun setPreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean, attributionJson: String?, now: Long): SliceMutationResult {
+    suspend fun setPreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean, attributionJson: String?, now: Long): SliceMutationResult =
+        changePreference(binding, trackRefId, changeId, preference, excluded, attributionJson, now)
+
+    private suspend fun changePreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean?, attributionJson: String?, now: Long): SliceMutationResult {
         require(preference in setOf("NEUTRAL", "LIKED", "DISLIKED"))
         val attribution = attributionJson?.let(::validateAttribution)
-        val payload = "{\"attribution\":${attribution ?: "null"},\"excluded_from_taste\":$excluded,\"local_user_track_ref_id\":${q(trackRefId.value)},\"preference\":${q(preference)}}"
+        var resolvedExcluded = false
+        // Read the preserved flag in the same write transaction as the row and Journal event.
+        val payload: suspend () -> String = {
+            resolvedExcluded = excluded ?: (database.libraryDao().preference(trackRefId.value)?.excludedFromTaste ?: false)
+            "{\"attribution\":${attribution ?: "null"},\"excluded_from_taste\":$resolvedExcluded,\"local_user_track_ref_id\":${q(trackRefId.value)},\"preference\":${q(preference)}}"
+        }
         return mutate(binding, changeId, "USER_TRACK_PREFERENCE_SET", "USER_TRACK_PREFERENCE", trackRefId, now, payload) { sequence, bound ->
             val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
             ensureOwned(binding, track.serverProfileId)
@@ -103,7 +111,7 @@ class LibraryVerticalSliceRepository(
                     trackRefId.value,
                     preference,
                     null,
-                    excluded,
+                    resolvedExcluded,
                     sync(bound),
                     sequence,
                     now,
@@ -121,12 +129,12 @@ class LibraryVerticalSliceRepository(
         preference: String,
         attributionJson: String?,
         now: Long,
-    ): SliceMutationResult = setPreference(
+    ): SliceMutationResult = changePreference(
         binding = binding,
         trackRefId = trackRefId,
         changeId = changeId,
         preference = preference,
-        excluded = database.libraryDao().preference(trackRefId.value)?.excludedFromTaste ?: false,
+        excluded = null,
         attributionJson = attributionJson,
         now = now,
     )
@@ -300,14 +308,18 @@ class LibraryVerticalSliceRepository(
                 ),
             )
             database.localAudioDao().upsertState(LocalAudioStateEntity(audioStateId.value, trackRefId.value, null, null, inspection.uri, persistedPermission, null, null, null, null, null, null, null, null, null, null, status, "USER_IMPORT", inspection.byteSize, null, now, now, now))
-            database.searchDao().insertContent(TrackSearchContentEntity(localUserTrackRefId = trackRefId.value, title = title, artist = artist, album = null, aliases = null, transliterations = null))
+            database.refreshTrackSearch(trackRefId.value)
         }
     }
 
     private suspend fun mutate(binding: ClientEventBinding?, changeId: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, now: Long, rawPayload: String, aggregate: suspend (Long, Boolean) -> Unit): SliceMutationResult {
+        return mutate(binding, changeId, eventType, aggregateType, aggregateId, now, { rawPayload }, aggregate)
+    }
+
+    private suspend fun mutate(binding: ClientEventBinding?, changeId: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, now: Long, rawPayload: suspend () -> String, aggregate: suspend (Long, Boolean) -> Unit): SliceMutationResult {
         require(now >= 0)
-        val payload = P07PayloadCodec.canonicalize(rawPayload)
         val result = database.withWriteTransaction {
+            val payload = P07PayloadCodec.canonicalize(rawPayload())
             val lineage = binding?.let { resolveLineage(it, now) }
             val sequence = lineage?.let { database.journalDao().allocateSequence(it.lineageId) } ?: 0L
             // Capture the observed remote version before the local row becomes DIRTY. Existing

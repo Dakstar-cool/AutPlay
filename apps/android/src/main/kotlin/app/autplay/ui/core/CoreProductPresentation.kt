@@ -61,8 +61,8 @@ private fun resolveTrackAvailability(
     serverPlaybackCandidate: Boolean,
 ): TrackAvailability = when {
     downloaded || serverPlaybackCandidate || libraryAvailability == "LOCAL" ||
-        audioStates.any { it.status == "AVAILABLE" && it.persistedUriPermission } -> TrackAvailability.Available
-    audioStates.any { it.status == "PERMISSION_REVOKED" || !it.persistedUriPermission } ->
+        audioStates.any { it.status == "AVAILABLE" && it.hasReadAccess } -> TrackAvailability.Available
+    audioStates.any { it.status == "PERMISSION_REVOKED" || !it.hasReadAccess } ->
         TrackAvailability.PermissionRevoked
     audioStates.isNotEmpty() -> TrackAvailability.Missing
     else -> TrackAvailability.MetadataOnly
@@ -105,6 +105,7 @@ internal fun buildHomeScreenUiState(
         .toSet()
     return HomeScreenUiState(
     localMode = localMode,
+    likedTrackIds = libraryTracks.filter { it.loved }.map { it.stableId }.toSet(),
     recommendationLoading = recommendationLoading,
     offlineFallback = offlineFallback,
     releases = releases.map { HomeReleaseUiItem(it.stableId, it.title, it.artistName, null) },

@@ -1,0 +1,16 @@
+{
+  "credentials_persisted": false,
+  "device_serial": "emulator-5580",
+  "durable_counts": {
+    "devices": 2,
+    "revoked_sessions": 1,
+    "security_audit_events": 3
+  },
+  "duration_seconds": 22.501,
+  "finished_at": "2026-09-16T05:31:16.902206+00:00",
+  "one_shot_handoff": "loopback-only, consumed once, no invitation or bearer in Gradle arguments",
+  "schema_version": 1,
+  "started_at": "2026-09-16T05:30:54.401296+00:00",
+  "status": "PASS",
+  "transport": "Android OkHttp pairing/sync -> FastAPI -> PostgreSQL 18.4/pgvector"
+}

@@ -37,7 +37,7 @@
     <string name="home_my_wave">My Wave</string>
     <string name="home_hero_personal_flow">Your personal flow</string>
     <string name="home_hero_open_player">Open the full player</string>
-    <string name="home_hero_playing">Playing · the ring moves with playback</string>
+    <string name="home_hero_playing">Now playing</string>
     <string name="home_hero_ready">Ready to play</string>
     <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
     <string name="home_hero_empty">Choose a local track to start your flow</string>
@@ -163,7 +163,7 @@
     <string name="detail_duration">Duration</string>
     <string name="detail_availability">Availability</string>
     <string name="detail_availability_local">Playable on this device</string>
-    <string name="detail_availability_server">Playable from your server</string>
+    <string name="detail_availability_server">Linked to your server. Audio availability will be checked when you play.</string>
     <string name="detail_availability_permission">Folder access must be restored</string>
     <string name="detail_availability_unavailable">Local source unavailable</string>
     <string name="detail_availability_metadata">Metadata only</string>
@@ -228,6 +228,7 @@
     <string name="queue_play_next">Play next</string>
     <string name="queue_add_to_end">Add to queue</string>
     <string name="action_failed_friendly">The action could not be completed. Try again.</string>
+    <string name="action_dismiss_error">Dismiss</string>
     <string name="action_in_progress">Working…</string>
     <string name="action_refresh">Refresh</string>
     <string name="action_cancel">Cancel</string>
@@ -489,7 +490,7 @@
     <string name="settings_folder_selected">Music folder selected</string>
     <string name="settings_choose_folder">Choose music folder</string>
     <string name="settings_scan_folder">Scan folder again</string>
-    <string name="settings_folder_privacy">AutPlay can read only the folder you choose. You can remove access at any time.</string>
+    <string name="settings_folder_privacy">This folder is used for library updates. Searching the phone requests separate access to audio files. You can revoke permissions in Android settings.</string>
     <string name="settings_network">Personal server and shared listening</string>
     <string name="settings_personal_server_body">Connect and manage your personal server from one trusted connection flow.</string>
     <string name="settings_open_personal_server">Open personal server</string>
@@ -502,7 +503,6 @@
     <string name="settings_export">Save settings to a file</string>
     <string name="settings_import">Load settings from a file</string>
     <string name="settings_export_privacy">Passwords, private addresses and device connections are not included.</string>
-    <string name="settings_more">More features</string>
     <string name="player_sleep_timer">Sleep timer</string>
     <plurals name="player_sleep_timer_active">
         <item quantity="one">Turns off in about %1$d minute</item>

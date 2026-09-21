@@ -11,7 +11,7 @@ import app.autplay.data.local.entity.LibraryEntryEntity
 import app.autplay.data.local.entity.LocalMutationOutboxEntity
 import app.autplay.data.local.entity.OfflineJournalEventEntity
 import app.autplay.data.local.entity.SyncCursorEntity
-import app.autplay.data.local.entity.TrackSearchContentEntity
+import app.autplay.application.search.refreshTrackSearch
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
@@ -379,16 +379,7 @@ class LocalLibraryCommandRepository(
                 serverProfileId = profileId,
             ),
         )
-        database.searchDao().insertContent(
-            TrackSearchContentEntity(
-                localUserTrackRefId = command.trackRefId.value,
-                title = command.title,
-                artist = command.artist,
-                album = null,
-                aliases = null,
-                transliterations = null,
-            ),
-        )
+        database.refreshTrackSearch(command.trackRefId.value)
     }
 
     private fun journalEvent(

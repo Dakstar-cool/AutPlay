@@ -12,8 +12,6 @@ import app.autplay.data.local.entity.PlaylistEntity
 import app.autplay.data.local.entity.TrackSearchContentEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.security.CredentialStore
-import app.autplay.data.security.SessionCredentialEnvelope
-import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.application.library.AddLocalTrackCommand
 import app.autplay.application.library.AddLocalTrackResult
@@ -40,7 +38,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -57,6 +54,37 @@ class SyncCoordinatorAcceptanceTest {
     private val otherProfile = ServerProfileId("22222222-2222-4222-8222-222222222222")
     private val binding = ClientEventBinding(UserId("33333333-3333-4333-8333-333333333333"), DeviceId("44444444-4444-4444-8444-444444444444"), profile, LocalId("55555555-5555-4555-8555-555555555555"))
     @After fun close() = db.close()
+
+    @Test fun openStatusUpdatesForBindingBootstrapFailureAndSuccess() = runBlocking {
+        val updates = kotlinx.coroutines.channels.Channel<SyncStatus>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val collector = launch { SyncStatusRepository(db).observe(binding).collect { updates.send(it) } }
+        suspend fun nextMatching(predicate: (SyncStatus) -> Boolean): SyncStatus = kotlinx.coroutines.withTimeout(5_000) {
+            suspend fun next(): SyncStatus = updates.receive().also {
+                assertFalse(it.lastErrorCode == "OTHER_PROFILE_ERROR" || it.lastSuccessAtMs == 999L)
+            }
+            var status = next()
+            while (!predicate(status)) status = next()
+            status
+        }
+        try {
+            nextMatching { it.bootstrapState == "NOT_BOUND" }
+            seed(profile, "cursor-a")
+            nextMatching { it.bootstrapState == "READY" }
+            val cursor = requireNotNull(db.syncDao().cursor(profile.value))
+            db.syncDao().upsertCursor(cursor.copy(bootstrapState = "RESET_REQUIRED"))
+            nextMatching { it.bootstrapState == "RESET_REQUIRED" }
+            db.syncDao().upsertRuntimeStatus(app.autplay.data.local.entity.SyncRuntimeStatusEntity(
+                profile.value, "NETWORK_UNAVAILABLE", 10, null))
+            nextMatching { it.lastErrorCode == "NETWORK_UNAVAILABLE" }
+            db.syncDao().upsertRuntimeStatus(app.autplay.data.local.entity.SyncRuntimeStatusEntity(
+                otherProfile.value, "OTHER_PROFILE_ERROR", 20, 999))
+            db.syncDao().upsertRuntimeStatus(app.autplay.data.local.entity.SyncRuntimeStatusEntity(
+                profile.value, null, 30, 30))
+            val success = nextMatching { it.lastSuccessAtMs == 30L }
+            assertEquals(null, success.lastErrorCode)
+            assertEquals(0, success.pending)
+        } finally { collector.cancelAndJoin(); updates.close() }
+    }
 
     @Test fun bindRecoversOnlyResetDeadLettersWithoutChangingIdentity() = runBlocking {
         seed(profile, "cursor-a")
@@ -167,6 +195,30 @@ class SyncCoordinatorAcceptanceTest {
             assertEquals("ACKED", persisted.state)
             org.junit.Assert.assertArrayEquals(original.requestHash, persisted.requestHash)
         }
+    }
+
+    @Test fun replacementCannotFinishWhilePreviousWorkerStillOwnsALease() = runBlocking {
+        seed(profile, "cursor-a")
+        val event = pending(1).copy(aggregateType = "LISTENING_EVENT", eventType = "LISTENING_EVENT_RECORDED",
+            state = "SENDING", attemptCount = 1, leaseToken = "previous-worker", leaseExpiresAtMs = 10_000)
+        db.journalDao().insert(event)
+        val transport = FakeTransport(acks = listOf(SyncAck(event.eventId, "APPLIED",
+            aggregateType = event.aggregateType, aggregateLocalId = event.aggregateLocalId,
+            aggregateServerId = event.eventId, serverRowVersion = 1)))
+        val coordinator = SyncCoordinator(db, transport, nowMs = { 1_000 })
+        assertFalse(coordinator.run(binding))
+        val sending = requireNotNull(db.journalDao().event(event.eventId))
+        assertEquals("SENDING", sending.state)
+        assertEquals(1, sending.attemptCount)
+        assertEquals("previous-worker", sending.leaseToken)
+        assertEquals(0, transport.sent.size)
+        assertEquals("PUSH_DRAIN_PENDING", db.syncDao().runtimeStatus(profile.value)?.lastErrorCode)
+        db.journalDao().releaseCancelledLease(event.journalLineageId, "previous-worker")
+        assertEquals(true, coordinator.run(binding))
+        val acknowledged = requireNotNull(db.journalDao().event(event.eventId))
+        assertEquals("ACKED", acknowledged.state)
+        org.junit.Assert.assertArrayEquals(event.requestHash, acknowledged.requestHash)
+        assertEquals(listOf(event.eventId), transport.sent.map { it.eventId })
     }
 
     @Test fun cancelledPushReleasesLeaseWithoutSpendingRetryBudgetOrChangingIdentity() = runBlocking {
@@ -461,32 +513,19 @@ class SyncCoordinatorAcceptanceTest {
         context.deleteDatabase(firstDatabaseName)
         context.deleteDatabase(secondDatabaseName)
         val arguments = InstrumentationRegistry.getArguments()
-        val handoff = arguments.getString("p14E2eBaseUrl")?.let { fetchP14Handoff(it) }
-        val realBaseUrl = handoff?.getString("base_url") ?: arguments.getString("p14BaseUrl")
+        val realBaseUrl = arguments.getString("p14BaseUrl")
         val firstProfile = ServerProfileId("10000000-0000-4000-8000-000000000001")
         val secondProfile = ServerProfileId("10000000-0000-4000-8000-000000000002")
-        val user = UserId(
-            handoff?.getString("user_id")
-                ?: arguments.getString("p14UserId")
-                ?: "10000000-0000-4000-8000-000000000003",
-        )
+        val user = UserId(arguments.getString("p14UserId") ?: "10000000-0000-4000-8000-000000000003")
         val firstBinding = ClientEventBinding(
             user,
-            DeviceId(
-                handoff?.getString("first_device_id")
-                    ?: arguments.getString("p14FirstDeviceId")
-                    ?: "10000000-0000-4000-8000-000000000004",
-            ),
+            DeviceId(arguments.getString("p14FirstDeviceId") ?: "10000000-0000-4000-8000-000000000004"),
             firstProfile,
             LocalId("10000000-0000-4000-8000-000000000005"),
         )
         val secondBinding = ClientEventBinding(
             user,
-            DeviceId(
-                handoff?.getString("second_device_id")
-                    ?: arguments.getString("p14SecondDeviceId")
-                    ?: "10000000-0000-4000-8000-000000000006",
-            ),
+            DeviceId(arguments.getString("p14SecondDeviceId") ?: "10000000-0000-4000-8000-000000000006"),
             secondProfile,
             LocalId("10000000-0000-4000-8000-000000000007"),
         )
@@ -494,18 +533,16 @@ class SyncCoordinatorAcceptanceTest {
             val relay = CrashAfterCommitRelay()
             SyncScenario(relay, relay, { relay.serverAggregateId }, { relay.acceptedEventCount })
         } else {
-            val firstToken = handoff?.getString("first_token")
-                ?: requireNotNull(arguments.getString("p14FirstToken"))
-            val secondToken = handoff?.getString("second_token")
-                ?: requireNotNull(arguments.getString("p14SecondToken"))
+            val firstToken = requireNotNull(arguments.getString("p14FirstToken"))
+            val secondToken = requireNotNull(arguments.getString("p14SecondToken"))
             bindDevice(realBaseUrl, firstToken, firstBinding)
             bindDevice(realBaseUrl, secondToken, secondBinding)
             val first = AckLosingTransport(
-                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(firstProfile, firstToken)),
+                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(firstToken)),
             )
             SyncScenario(
                 first,
-                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(secondProfile, secondToken)),
+                OkHttpSyncTransport(realBaseUrl, StaticCredentialStore(secondToken)),
                 { requireNotNull(first.serverAggregateId) },
                 { null },
             )
@@ -582,6 +619,84 @@ class SyncCoordinatorAcceptanceTest {
         }
     }
 
+    @Test fun syncedMetadataMaintainsSearchAndDistinguishesNullFromMissing() = runBlocking {
+        seed(profile, "before")
+        val serverId = "aaaaaaaa-0000-4000-8000-000000000001"
+        var sequence = 0L
+        suspend fun apply(payload: String, type: String = "USER_TRACK_REF_PATCHED", operation: String = "UPSERT") {
+            sequence++
+            val event = RemoteEvent(UUID.randomUUID().toString(), sequence, type, 1, payload, "USER_TRACK_REF", serverId, sequence, operation)
+            assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("cursor-$sequence", false, listOf(event)))).run(binding))
+        }
+        apply("""{"title":"Before","artist":"Artist","album":"Album"}""")
+        val search = LocalTrackSearchRepository(db)
+        val track = db.libraryDao().trackRefByServerId(profile.value, serverId)!!
+        assertEquals(listOf(track.localUserTrackRefId), search.search("Before", profile.value).map { it.localUserTrackRefId })
+        assertEquals(0, search.search("Before", otherProfile.value).size)
+        val content = db.searchDao().contentForTrack(track.localUserTrackRefId)!!
+        db.searchDao().updateContent(content.copy(aliases = "Nickname", transliterations = "Alias"))
+        apply("""{"title":"After","album":null}""")
+        val updated = db.libraryDao().trackRef(track.localUserTrackRefId)!!
+        assertEquals("Artist", updated.rawArtist)
+        assertEquals(null, updated.rawAlbum)
+        assertEquals(0, search.search("Before", profile.value).size)
+        assertEquals(1, search.search("After", profile.value).size)
+        assertEquals(1, search.search("Nickname", profile.value).size)
+        assertEquals(content.rowId, db.searchDao().contentForTrack(track.localUserTrackRefId)?.rowId)
+        apply("""{"title":null,"artist":null,"album":"null"}""")
+        val cleared = db.libraryDao().trackRef(track.localUserTrackRefId)!!
+        assertEquals(null, cleared.rawTitle)
+        assertEquals(null, cleared.rawArtist)
+        assertEquals("null", cleared.rawAlbum)
+        apply("{}", "AGGREGATE_DELETED", "DELETE")
+        assertEquals(0, search.search("Nickname", profile.value).size)
+    }
+
+    @Test fun authoritativeBootstrapRepairsOldNullTextAndPreservesLiteralText() = runBlocking {
+        seed(profile, "before")
+        val serverId = "aaaaaaaa-0000-4000-8000-000000000003"
+        val original = RemoteEvent(UUID.randomUUID().toString(), 1, "USER_TRACK_REF_PATCHED", 1,
+            """{"title":"Title","artist":"Artist","album":"null"}""", "USER_TRACK_REF", serverId, 1)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("old", false, listOf(original)))).run(binding))
+        db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(bootstrapState = "RESET_REQUIRED"))
+        val snapshotEvent = original.copy(eventId = UUID.randomUUID().toString(), sequence = 0,
+            payloadJson = """{"title":"Title","artist":"null","album":null}""")
+        val page = BootstrapPage(UUID.randomUUID().toString(), null, "repaired", false, listOf(snapshotEvent))
+        assertEquals(true, SyncCoordinator(db, FakeTransport(bootstrapPages = listOf(page))).run(binding))
+        val repaired = db.libraryDao().trackRefByServerId(profile.value, serverId)!!
+        assertEquals(null, repaired.rawAlbum)
+        assertEquals("null", repaired.rawArtist)
+        assertEquals(1L, repaired.serverRowVersion)
+        assertEquals(null, db.searchDao().contentForTrack(repaired.localUserTrackRefId)?.album)
+    }
+
+    @Test fun playlistDescriptionCanBeClearedWithoutClearingMissingFields() = runBlocking {
+        seed(profile, "before")
+        val id = "aaaaaaaa-0000-4000-8000-000000000004"
+        val original = RemoteEvent(UUID.randomUUID().toString(), 1, "PLAYLIST_CREATED", 1,
+            """{"name":"Playlist","description":"Details"}""", "PLAYLIST", id, 1)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("one", false, listOf(original)))).run(binding))
+        val patch = original.copy(eventId = UUID.randomUUID().toString(), sequence = 2, eventType = "PLAYLIST_METADATA_PATCHED",
+            payloadJson = """{"description":null}""", serverRowVersion = 2)
+        assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("two", false, listOf(patch)))).run(binding))
+        val playlist = db.playlistDao().playlistByServerId(profile.value, id)!!
+        assertEquals("Playlist", playlist.name)
+        assertEquals(null, playlist.description)
+    }
+
+    @Test fun invalidTextRollsBackTheWholePageIncludingSearchAndCursor() = runBlocking {
+        seed(profile, "before")
+        val serverId = "aaaaaaaa-0000-4000-8000-000000000002"
+        val first = RemoteEvent(UUID.randomUUID().toString(), 1, "USER_TRACK_REF_PATCHED", 1,
+            """{"title":"Rollback","artist":"Artist"}""", "USER_TRACK_REF", serverId, 1)
+        val second = first.copy(eventId = UUID.randomUUID().toString(), sequence = 2, serverRowVersion = 2,
+            payloadJson = """{"album":["invalid"]}""")
+        runCatching { SyncCoordinator(db, FakeTransport(pull = PullPage("bad", false, listOf(first, second)))).run(binding) }
+        assertEquals("before", db.syncDao().cursor(profile.value)?.opaqueCursor)
+        assertEquals(null, db.libraryDao().trackRefByServerId(profile.value, serverId))
+        assertEquals(0, LocalTrackSearchRepository(db).search("Rollback", profile.value).size)
+    }
+
     private suspend fun seed(id: ServerProfileId, cursor: String) {
         val lineage = JournalLineageEntity("77777777-7777-4777-8777-777777777777", binding.userId.value, binding.deviceId.value, binding.journalEpoch!!.value, 1, 1)
         if (db.journalDao().lineageById(lineage.lineageId) == null) db.journalDao().insertLineage(lineage)
@@ -639,17 +754,6 @@ class SyncCoordinatorAcceptanceTest {
         }
     }
 
-    private suspend fun fetchP14Handoff(baseUrl: String): JSONObject = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url(baseUrl.trimEnd('/') + "/p14-e2e/one-shot-handoff")
-            .get()
-            .build()
-        OkHttpClient().newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "P14_E2E_HANDOFF_HTTP_${response.code}" }
-            JSONObject(requireNotNull(response.body).string())
-        }
-    }
-
     private data class SyncScenario(
         val firstTransport: SyncTransport,
         val secondTransport: SyncTransport,
@@ -657,15 +761,9 @@ class SyncCoordinatorAcceptanceTest {
         val acceptedEventCount: () -> Int?,
     )
 
-    private class StaticCredentialStore(
-        private val expectedProfile: ServerProfileId,
-        token: String,
-    ) : CredentialStore {
-        private val tokenBytes = SessionCredentialEnvelopeCodec.encode(
-            SessionCredentialEnvelope(token, refreshToken = null, generation = 0),
-        )
-        override suspend fun read(profileId: ServerProfileId): ByteArray? =
-            if (profileId == expectedProfile) tokenBytes.copyOf() else null
+    private class StaticCredentialStore(token: String) : CredentialStore {
+        private val tokenBytes = token.toByteArray()
+        override suspend fun read(profileId: ServerProfileId): ByteArray = tokenBytes.copyOf()
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
         override suspend fun clear(profileId: ServerProfileId) = Unit
     }

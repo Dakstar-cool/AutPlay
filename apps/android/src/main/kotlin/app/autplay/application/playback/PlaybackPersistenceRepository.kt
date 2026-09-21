@@ -135,10 +135,31 @@ class PlaybackPersistenceRepository(
         positionMs: Long,
         nowMs: Long,
         ownerBinding: PlaybackSessionOwnerBinding?,
-    ): LogicalListeningCheckpoint {
+    ): LogicalListeningCheckpoint = checkNotNull(startSessionTransaction(null, entryId, positionMs, nowMs, ownerBinding))
+
+    /** A delayed player callback must never start a listen in a replacement queue. */
+    suspend fun startSessionIfActive(
+        expectedSnapshotId: LocalId,
+        entryId: LocalId,
+        positionMs: Long,
+        nowMs: Long,
+        ownerBinding: PlaybackSessionOwnerBinding?,
+    ): LogicalListeningCheckpoint? = startSessionTransaction(expectedSnapshotId, entryId, positionMs, nowMs, ownerBinding)
+
+    private suspend fun startSessionTransaction(
+        expectedSnapshotId: LocalId?,
+        entryId: LocalId,
+        positionMs: Long,
+        nowMs: Long,
+        ownerBinding: PlaybackSessionOwnerBinding?,
+    ): LogicalListeningCheckpoint? {
         return database.withWriteTransaction {
-            val snapshot = requireNotNull(database.queueDao().activeSnapshotOnce()) { "ACTIVE_QUEUE_NOT_FOUND" }
-            val entry = requireNotNull(database.queueDao().entry(entryId.value)) { "QUEUE_ENTRY_NOT_FOUND" }
+            val active = database.queueDao().activeSnapshotOnce()
+            if (expectedSnapshotId != null && active?.queueSnapshotId != expectedSnapshotId.value) return@withWriteTransaction null
+            val snapshot = requireNotNull(active) { "ACTIVE_QUEUE_NOT_FOUND" }
+            val candidate = database.queueDao().entry(entryId.value)
+            if (expectedSnapshotId != null && candidate?.queueSnapshotId != snapshot.queueSnapshotId) return@withWriteTransaction null
+            val entry = requireNotNull(candidate) { "QUEUE_ENTRY_NOT_FOUND" }
             require(entry.queueSnapshotId == snapshot.queueSnapshotId)
             require(database.queueDao().beginActiveListenTasteExclusion(snapshot.queueSnapshotId, nowMs) == 1)
             val checkpoint = LogicalListeningSession.start(

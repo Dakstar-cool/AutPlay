@@ -2,13 +2,10 @@ package app.autplay.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -22,8 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -32,7 +27,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -51,6 +45,7 @@ public data class HomePlaybackHeroUiState(
     public val hasActivePlayback: Boolean,
     public val liked: Boolean,
     public val playPauseEnabled: Boolean = true,
+    public val playbackKey: String? = trackId,
 )
 
 public fun buildHomePlaybackHeroUiState(
@@ -68,6 +63,7 @@ public fun buildHomePlaybackHeroUiState(
             hasActivePlayback = true,
             liked = currentTrackLiked,
             playPauseEnabled = playerState.controls is PlaybackControlGate.Allowed,
+            playbackKey = playerState.mediaId,
         )
     }
     val fallback = homeState.continueListening?.let {
@@ -80,7 +76,7 @@ public fun buildHomePlaybackHeroUiState(
         artist = fallback?.artist,
         isPlaying = false,
         hasActivePlayback = false,
-        liked = false,
+        liked = fallback?.id in homeState.likedTrackIds,
         playPauseEnabled = fallback != null,
     )
 }
@@ -96,14 +92,18 @@ public fun HomePlaybackHero(
     onOpenListenTogether: () -> Unit,
     modifier: Modifier = Modifier,
     topChromePadding: Dp = 0.dp,
+    swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
+    onPrevious: () -> Unit = {},
+    onNext: () -> Unit = {},
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
     val palette = remember(title) { playbackVisualPalette(title) }
-    val openPlayerLabel = stringResource(R.string.home_hero_open_player)
     val togetherLabel = stringResource(R.string.nav_wave_rooms)
     val hasPlaybackTarget = state.hasActivePlayback || state.trackId != null
-    val canTogglePlayback = hasPlaybackTarget && (!state.hasActivePlayback || state.playPauseEnabled)
+    val motion = rememberHomeCarouselMotion(state.playbackKey)
+    val playbackAllowed = hasPlaybackTarget && (!state.hasActivePlayback || state.playPauseEnabled)
+    val canTogglePlayback = playbackAllowed && !motion.busy
     val playLabel = stringResource(if (state.isPlaying) R.string.action_pause else R.string.action_play)
     val openTarget = {
         if (state.hasActivePlayback) onOpenPlayer() else state.trackId?.let(onPlayTrack)
@@ -122,22 +122,17 @@ public fun HomePlaybackHero(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             HomeHeroHeader(localMode, togetherLabel, onOpenListenTogether)
-            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val artworkSize = (maxWidth * 0.84f).coerceIn(160.dp, 320.dp)
-                Box(
-                    Modifier.size(artworkSize)
-                        .shadow(20.dp, MaterialTheme.shapes.small)
-                        .clip(MaterialTheme.shapes.small)
-                        .clickable(enabled = hasPlaybackTarget, role = Role.Button, onClick = openTarget)
-                        .semantics {
-                            role = Role.Button
-                            contentDescription = openPlayerLabel
-                            if (!hasPlaybackTarget) disabled()
-                        },
-                ) {
-                    AutPlayArtwork(title = title, size = artworkSize)
-                }
-            }
+            HomeArtworkCarousel(
+                trackId = state.trackId,
+                title = title,
+                targets = swipeTargets,
+                motion = motion,
+                enabled = playbackAllowed && state.trackId != null,
+                canOpen = hasPlaybackTarget,
+                onOpen = openTarget,
+                onPrevious = onPrevious,
+                onNext = onNext,
+            )
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -182,7 +177,7 @@ public fun HomePlaybackHero(
                 HeroIconButton(
                     icon = AutPlayIcon.Favorite,
                     label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
-                    enabled = state.trackId != null && !state.liked,
+                    enabled = state.trackId != null && !motion.busy,
                     selected = state.liked,
                     onClick = { state.trackId?.let(onLike) },
                 )
@@ -244,61 +239,6 @@ private fun HomeHeroHeader(localMode: Boolean, togetherLabel: String, onOpen: ()
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 heading(Modifier.weight(1f))
                 action()
-            }
-        }
-    }
-}
-
-/** Keeps the active transport reachable after the large Home hero has scrolled away. */
-@Composable
-internal fun HomePlaybackStickyControl(
-    state: HomePlaybackHeroUiState,
-    onOpenPlayer: () -> Unit,
-    onTogglePlayPause: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (!state.hasActivePlayback) return
-    val title = state.title ?: stringResource(R.string.player_nothing_playing)
-    val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
-    val openPlayerLabel = stringResource(R.string.home_hero_open_player)
-    val lightSurface = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val stickyContentColor = if (lightSurface) MaterialTheme.colorScheme.onSurface else Color.White
-    Surface(
-        modifier = modifier.fillMaxWidth().testTag("home-sticky-playback"),
-        shape = CircleShape,
-        color = if (lightSurface) AutPlayTokens.colors.raisedSurface else Color(0xEB16171B),
-        contentColor = stickyContentColor,
-        border = BorderStroke(
-            1.dp,
-            if (lightSurface) AutPlayTokens.colors.border else Color.White.copy(alpha = 0.14f),
-        ),
-        shadowElevation = 10.dp,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            HeroIconButton(
-                icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
-                label = stringResource(if (state.isPlaying) R.string.action_pause else R.string.action_play),
-                enabled = state.playPauseEnabled,
-                onClick = onTogglePlayPause,
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(role = Role.Button, onClick = onOpenPlayer)
-                    .semantics { contentDescription = openPlayerLabel },
-            ) {
-                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    artist,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (lightSurface) AutPlayTokens.colors.mutedText else Color.White.copy(alpha = 0.70f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
     }

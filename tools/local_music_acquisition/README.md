@@ -86,7 +86,36 @@ CLI-запусками. Можно указать другой каталог ф
 Все участники сохраняются; слова внутри названия песни не меняются. Правила применяются
 к любому плейлисту, а исправления конкретных записей остаются во внешнем каталоге данных.
 
-## Проверенные ссылки
+## Related recordings after an unsuccessful search
+
+`--expand-missing-from SOURCE_QUEUE --queue-dir NEW_EXPANSION_DIRECTORY` enables
+bounded expansion of existing `not_found` and `failed` jobs. The original queue is read-only.
+Contextual Cyrillic/Latin OCR repair and a second query without incomplete trailing credits
+improve discovery. They do not rewrite recording identity or truncate titles stored in Vault.
+
+Discovery compares artist and composition independently. An exact candidate takes priority;
+otherwise `--candidate-limit 1..3` selects up to three related, distinct recording identities.
+Live, remix, acoustic and other versions retain their actual titles and credits. Matching
+and audio verification during acquisition remain exact for each selected candidate.
+Albums and durations from the unsuccessful request are not assigned to a new candidate.
+
+Each parent has a private frozen plan and resumable child queue. Related results are deduplicated
+against existing receipts and saved plans, including after restart. The source queue keeps its
+original outcome; `ready_distinct_candidates` reports the separate expansion result. Private
+plans record the parent, actual candidate, score, provider outcomes and child receipt key.
+Network failures use three bounded discovery attempts with exponential backoff, not a false
+empty result. A changed policy, source manifest or normalization catalog requires a new root.
+
+`--expansion-parent-key KEY` (repeatable) selects a canary; `--expansion-parent-limit N` bounds
+work in one pass. A remaining retry returns exit 75. A `pause` file in the expansion root stops
+new parents. Existing verified audio is reused in the common output root, which also lets the
+Vault bridge discover each newly completed receipt immediately.
+
+For Docker, set `ACQUISITION_EXPAND_SOURCE` to the original host queue directory. The launcher
+mounts it read-only and keeps the new queue writable. Do not run two acquisition processes
+against the same output simultaneously; the shared acquisition lock enforces this boundary.
+
+## Reviewed source links
 
 `--source-catalog PATH` подключает локальный JSON-каталог ссылок. По умолчанию используется
 `source-catalog.json` в папке результатов, если он существует. Пример для любого плейлиста:
@@ -231,6 +260,26 @@ SHA-256 отпечатки загруженных байтов, но не абс
 отпечаток нужен только для privacy-redacted correlation и не является доказательством целостности
 или ключом дедупликации. Код `0` означает полную загрузку, `1` — завершённый прогон с
 пропусками/ошибками, `2` — ошибку входных данных или конфигурации.
+
+## Настройка производительности очереди
+
+Для запуска с `--queue-dir` доступны `--yt-dlp-concurrency 1|2`,
+`--soundcloud-concurrency 1|2` и `--miss-cache-ttl-seconds 0..86400`.
+По умолчанию каждый источник выполняет один запрос, кэш выключен. Эти параметры
+не меняют общий предел `--workers` (до 4) и не применяются к обычному запуску без очереди.
+Hitmo остаётся последовательным; параллельность 2 поддерживают только изолированные
+процессы YouTube и SoundCloud. При восстановлении после сбоя выполняется одна проба.
+
+Кэш в `queue/provider-misses` сохраняет только `exact_match_not_found` на заданный срок.
+Сетевые ошибки, отсутствие доступного оригинала и ошибки проверки аудио не кэшируются.
+Изменение кода, каталогов, настроек источников или файлов учётных данных отменяет старые
+записи. `queue retry` очищает кэш для повторяемых задач. Повреждённая или недоступная
+запись приводит к обычному поиску. Метрики находятся в `runtime.json`: `miss_cache`,
+а для каждого источника — `cached_misses` и `parallelism`.
+
+Увеличение параллельности следует сравнивать на одинаковых выборках и при одинаковых
+лимитах контейнера. Сравнивайте число завершённых поисков, успешные загрузки и ошибки;
+кэш особенно полезен при повторе задачи после сбоя другого источника.
 
 ## Отдельный Hitmo-контур
 

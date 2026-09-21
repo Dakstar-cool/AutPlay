@@ -9,13 +9,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .orchestrator import PlaylistDownloadError
-from .queue import enqueue, queue_status, retry_unsuccessful
+from .queue import enqueue, queue_status, retry_unsuccessful, verify_downloads
 from .queue_store import sync_directory, write_json
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Inspect and control the file-only server queue.")
-    parser.add_argument("action", choices=("init", "status", "pause", "resume", "retry"))
+    parser.add_argument("action", choices=("init", "status", "pause", "resume", "retry", "verify"))
     parser.add_argument("--queue-dir", type=Path, required=True)
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output-dir", type=Path)
@@ -39,6 +39,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     else None
                 ),
             )
+        elif options.action == "verify":
+            summary = verify_downloads(options.queue_dir)
         else:
             summary = queue_status(options.queue_dir)
             if options.action == "pause":

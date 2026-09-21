@@ -1,0 +1,78 @@
+{
+  "audit_date": "2026-09-16",
+  "timezone": "Europe/Moscow",
+  "result": "AUDIT_COMPLETE_WITH_OPEN_DEFECTS",
+  "base_commit": "bd371e1bd0e89e907b08ce809b64b8edc169391b",
+  "branch": "codex/m52-ui",
+  "uncommitted_source_snapshot": true,
+  "apk_sha256": {
+    "apps/android/build/outputs/apk/debug/android-debug.apk": "950c503fc97c2453d062d56909995a156b451f44c001cb019f2e40c09a5d2529",
+    "apps/android/build/outputs/apk/release/android-release-unsigned.apk": "4e0b267fa33ff83342914a13f88db2d0023a51361431e6fa83cb5b6fca4af6b0",
+    "apps/android/build/outputs/apk/trustedLan/android-trustedLan.apk": "fc78a9ddb6c67896b8239878716754d86be88615ef12b702f004561b628371af",
+    "apps/android/build/outputs/apk/androidTest/debug/android-debug-androidTest.apk": "1a1108559d37c84d40e3262453509e8e85db5560bb3bbea608b8352c0ea2c868"
+  },
+  "android_jvm": {
+    "result": "PASS",
+    "gradle_execution": "UP-TO-DATE, unchanged production sources",
+    "tests": 290,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "android_full_initial": {
+    "registered": 224,
+    "reported_pass": 220,
+    "failure": 1,
+    "assumption_skip": 3,
+    "unexercised_opt_in_provisioning_case_reported_as_pass": 1
+  },
+  "android_retest": {
+    "class": "app.autplay.OfflineLibraryScreenTest",
+    "passed": 4,
+    "failed": 0,
+    "change": "Expand Music settings section before navigating to import review"
+  },
+  "special_android_stages": {
+    "process_death": "PASS, 2 stages",
+    "pairing_revoke_e2e": "PASS",
+    "sync_e2e": "PASS"
+  },
+  "builds": {
+    "debug": "PASS",
+    "trustedLan": "PASS",
+    "release": "PASS"
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 0,
+    "hints": 1
+  },
+  "root_python": {
+    "passed": 171,
+    "failed": 0
+  },
+  "server_cpu": {
+    "passed": 919,
+    "failed": 0,
+    "skipped": 1,
+    "skip_reason": "Windows symlink privilege unavailable",
+    "dependency_versions": "Python 3.14.7, PostgreSQL 18.4, pgvector 0.8.6"
+  },
+  "format_lint_typecheck": "PASS, root and server canonical check",
+  "physical_device": "Samsung SM-M526B, Android 13 / API 33, installed 0.3.3-m52 versionCode 6",
+  "emulator": "Disposable API 26, emulator-5580",
+  "open_defects": {
+    "P1": 1,
+    "P2": 6,
+    "P3": 1
+  },
+  "production_code_changed_in_this_audit": false,
+  "device_data": "Preserved; all original row keys, preference values, all 26 DataStore preferences and APK hash match",
+  "limitations": [
+    "Production M52 server unavailable; real audio/network path not certified",
+    "No multi-physical-device Wave timing or headset/vehicle controls test",
+    "LocalServerProvisioning opt-in scenario not exercised",
+    "GPU/training/external acquisition experiments not rerun",
+    "Windows symlink refusal test skipped"
+  ]
+}

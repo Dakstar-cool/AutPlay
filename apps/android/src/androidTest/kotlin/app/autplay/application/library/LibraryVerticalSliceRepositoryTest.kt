@@ -43,6 +43,26 @@ class LibraryVerticalSliceRepositoryTest {
     @Before fun setUp() { context.deleteDatabase(name); database = AutPlayDatabase.open(context, name) }
     @After fun tearDown() { database.close(); context.deleteDatabase(name) }
 
+    @Test fun playbackFeedbackPreservesExclusionInBothRowAndImmutableIntent() = runBlocking {
+        val ids = ids(810)
+        LocalLibraryCommandRepository(database).add(AddLocalTrackCommand(null, ids.track, ids.entry, ids.change, "Taste", "Artist", 1))
+        val repository = LibraryVerticalSliceRepository(database)
+        repository.setPreference(null, ids.track, id(814), "NEUTRAL", true, null, 2)
+        listOf("LIKED", "DISLIKED", "NEUTRAL").forEachIndexed { index, preference ->
+            val change = id(815 + index)
+            repository.setPlaybackPreference(null, ids.track, change, preference, null, 3L + index)
+            assertEquals(preference, database.libraryDao().preference(ids.track.value)?.preference)
+            assertEquals(true, database.libraryDao().preference(ids.track.value)?.excludedFromTaste)
+            assertTrue(database.journalDao().outbox(change.value)!!.payloadJson.contains("\"excluded_from_taste\":true"))
+        }
+        val before = database.libraryDao().preference(ids.track.value)
+        val count = database.journalDao().outboxCount()
+        val failing = LibraryVerticalSliceRepository(database, SliceFailureInjector { error("injected") })
+        assertTrue(runCatching { failing.setPlaybackPreference(null, ids.track, id(818), "LIKED", null, 9) }.isFailure)
+        assertEquals(before, database.libraryDao().preference(ids.track.value))
+        assertEquals(count, database.journalDao().outboxCount())
+    }
+
     @Test fun standaloneMutationRollsBackAggregateAndOutboxOnInjectedFailure() = runBlocking {
         val ids = ids(1)
         LocalLibraryCommandRepository(database).add(AddLocalTrackCommand(null, ids.track, ids.entry, ids.change, "Title", "Artist", 1))
