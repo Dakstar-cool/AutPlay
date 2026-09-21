@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from autplay.domain.enrichment import AcceleratorSelection
 
 from .settings import GpuWorkerSettings
-from .sona_artifacts import SonaArtifactStore, VerifiedSonaArtifact
+from .sona_artifacts import SonaArtifactStore, SonaPublicationAuthority, VerifiedSonaArtifact
 from .sona_runtime import SonaOnnxCudaRuntime
 
 
@@ -24,18 +24,25 @@ class ComposedSonaWorker:
 
 
 def compose_sona_shadow_worker(
-    gpu: GpuWorkerSettings, selection: AcceleratorSelection
+    gpu: GpuWorkerSettings,
+    selection: AcceleratorSelection,
+    *,
+    publication_authority: SonaPublicationAuthority | None = None,
 ) -> ComposedSonaWorker:
     """Verify exact graph provenance before CUDA session construction."""
 
     if not gpu.sona_configured:
         raise SonaWorkerCompositionError("gpu_sona_model_not_configured")
+    if publication_authority is None:
+        raise SonaWorkerCompositionError("gpu_sona_publication_authority_not_configured")
     artifact_sha256 = gpu.sona_artifact_sha256
     model_manifest_sha256 = gpu.sona_model_manifest_sha256
     tokenizer_sha256 = gpu.sona_tokenizer_sha256
     if artifact_sha256 is None or model_manifest_sha256 is None or tokenizer_sha256 is None:
         raise SonaWorkerCompositionError("gpu_sona_identity_incomplete")
-    artifact = SonaArtifactStore(gpu.model_cache_root).resolve(
+    artifact = SonaArtifactStore(
+        gpu.model_cache_root, publication_authority=publication_authority
+    ).resolve(
         artifact_sha256=artifact_sha256,
         model_manifest_sha256=model_manifest_sha256,
         tokenizer_sha256=tokenizer_sha256,

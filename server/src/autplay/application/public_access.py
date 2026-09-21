@@ -26,6 +26,11 @@ from autplay.adapters.postgresql.models.public_access import (
     AccountProvisioningRateWindowRow,
     AccountRegistrationReceiptRow,
 )
+from autplay.adapters.postgresql.resource_limits import (
+    lock_resource_admission,
+    require_device_capacity,
+    terminate_resource_authority,
+)
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.profile_pairing import (
@@ -35,6 +40,7 @@ from autplay.domain.profile_pairing import (
     public_key_thumbprint,
     verify_p1363,
 )
+from autplay.domain.resource_admission import ResourceAdmissionError
 
 _DOMAIN: Final = "AutPlay account registration v1\n"
 _NO_TOKEN: Final = "public_access_unavailable"
@@ -327,9 +333,17 @@ class PublicAccessService:
             raise PublicAccessError() from None
         registration_id = UUID(str(body["registration_id"]))
         with self.sessions.begin() as session:
+            server = self._server(session)
+            lock_resource_admission(session)
+            discovered = session.get(AccountRegistrationReceiptRow, registration_id)
+            if discovered is not None:
+                session.get(UserAccountRow, discovered.user_id, with_for_update=True)
             _lock_uuid(session, b"REGISTRATION", registration_id)
             receipt = session.get(
-                AccountRegistrationReceiptRow, registration_id, with_for_update=True
+                AccountRegistrationReceiptRow,
+                registration_id,
+                with_for_update=True,
+                populate_existing=True,
             )
             if receipt is not None:
                 if (
@@ -338,7 +352,7 @@ class PublicAccessService:
                     or receipt.device_key_thumbprint_sha256 != thumb
                 ):
                     raise PublicAccessError("registration_conflict")
-                return self._registration_response(session, receipt, replayed=True), True
+                return self._registration_response(session, receipt, server, replayed=True), True
             invitation = session.get(AccountInvitationRow, invitation_id, with_for_update=True)
             if (
                 invitation is None
@@ -348,7 +362,6 @@ class PublicAccessService:
                 or invitation.expires_at <= now
             ):
                 raise PublicAccessError()
-            server = self._server(session)
             if not _matches_server(body, server, invitation.display_name):
                 raise PublicAccessError()
             account_count = session.scalar(
@@ -372,6 +385,10 @@ class PublicAccessService:
             # while the complete registration still commits atomically below.
             session.add(account)
             session.flush()
+            try:
+                require_device_capacity(session, user_id)
+            except ResourceAdmissionError as error:
+                raise PublicAccessError(error.code) from error
             device = DeviceRow(
                 device_id=device_id,
                 user_id=user_id,
@@ -435,7 +452,7 @@ class PublicAccessService:
                 registration_id,
             )
             session.flush()
-            return self._registration_response(session, receipt, replayed=False), False
+            return self._registration_response(session, receipt, server, replayed=False), False
 
     def cleanup(self, limit: int = 500) -> int:
         return cleanup_expired_public_access(self.sessions, limit=limit)
@@ -449,7 +466,11 @@ class PublicAccessService:
             canonical_sha256(body),
         )
         with self.sessions.begin() as session:
-            self._require_bootstrap_owner(session, actor)
+            self._require_bootstrap_owner(
+                session,
+                actor,
+                target_user_id=target_id if action != "CANCEL" else None,
+            )
             _lock_uuid(session, b"OWNER_OPERATION", operation_id)
             receipt = session.get(
                 AccountProvisioningOperationReceiptRow, operation_id, with_for_update=True
@@ -478,11 +499,12 @@ class PublicAccessService:
                 account = session.get(UserAccountRow, target_id, with_for_update=True)
                 if link is None or account is None or link.issued_by_user_id != actor.user_id:
                     raise PublicAccessError("not_found")
-                if account.status == "ACTIVE":
+                if account.status in {"ACTIVE", "DELETION_PENDING"}:
                     account.status, account.updated_at = "DISABLED", now
                     session.query(UserSessionRow).filter(
                         UserSessionRow.user_id == target_id, UserSessionRow.revoked_at.is_(None)
                     ).update({UserSessionRow.revoked_at: now}, synchronize_session=False)
+                    terminate_resource_authority(session, target_id, now)
                     outcome = "APPLIED"
                 else:
                     outcome = "ALREADY_TERMINAL"
@@ -523,15 +545,51 @@ class PublicAccessService:
             )
             return result
 
-    def _require_bootstrap_owner(self, session: Session, actor: Principal) -> None:
+    def _require_bootstrap_owner(
+        self,
+        session: Session,
+        actor: Principal,
+        *,
+        target_user_id: UUID | None = None,
+    ) -> None:
         if actor.role is not AccountRole.OWNER:
             raise PublicAccessError("unauthorized")
-        owners = session.scalars(
+        self._server(session)
+        lock_resource_admission(session)
+        identifiers = {actor.user_id}
+        if target_user_id is not None:
+            identifiers.add(target_user_id)
+        session.scalars(
             select(UserAccountRow)
-            .where(UserAccountRow.role == "OWNER", UserAccountRow.status == "ACTIVE")
+            .where(UserAccountRow.user_id.in_(identifiers))
+            .order_by(UserAccountRow.user_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        owners = session.scalars(
+            select(UserAccountRow).where(
+                UserAccountRow.role == "OWNER",
+                UserAccountRow.status == "ACTIVE",
+                UserAccountRow.deleted_at.is_(None),
+            )
         ).all()
         if len(owners) != 1 or owners[0].user_id != actor.user_id:
+            raise PublicAccessError("unauthorized")
+        device = session.get(DeviceRow, actor.device_id, with_for_update=True)
+        credential = session.get(UserSessionRow, actor.session_id, with_for_update=True)
+        # HTTP authentication ended before this transaction acquired the authority locks.
+        now = session.scalar(select(func.clock_timestamp()))
+        if (
+            not isinstance(now, datetime)
+            or device is None
+            or device.user_id != actor.user_id
+            or device.revoked_at is not None
+            or credential is None
+            or credential.user_id != actor.user_id
+            or credential.device_id != actor.device_id
+            or credential.revoked_at is not None
+            or credential.expires_at <= now
+        ):
             raise PublicAccessError("unauthorized")
 
     def _exact_operation(
@@ -632,19 +690,27 @@ class PublicAccessService:
             raise PublicAccessError("registration_rate_limited")
 
     def _registration_response(
-        self, session: Session, receipt: AccountRegistrationReceiptRow, *, replayed: bool
+        self,
+        session: Session,
+        receipt: AccountRegistrationReceiptRow,
+        server: ServerInstanceRow,
+        *,
+        replayed: bool,
     ) -> dict[str, object]:
         # Lock and reload mutable authority before minting any first/replayed bearer. This
         # serializes account disable and session/device revocation against token issuance.
         account = session.get(UserAccountRow, receipt.user_id, with_for_update=True)
         device = session.get(DeviceRow, receipt.device_id, with_for_update=True)
         user_session = session.get(UserSessionRow, receipt.session_id, with_for_update=True)
-        server = self._server(session)
         if (
             account is None
             or device is None
             or user_session is None
             or account.status != "ACTIVE"
+            or account.deleted_at is not None
+            or device.user_id != account.user_id
+            or user_session.user_id != account.user_id
+            or user_session.device_id != device.device_id
             or device.revoked_at is not None
             or user_session.revoked_at is not None
             or user_session.expires_at <= _now()

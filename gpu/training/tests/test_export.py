@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort  # type: ignore[import-untyped]
+import pytest
 import torch
 from autplay.domain.sona import SONA_MAX_CANDIDATES, SONA_MAX_HISTORY_EVENTS
 from autplay_sona_training.export import export_sona_onnx
@@ -52,6 +53,17 @@ def test_exported_graph_has_exact_runtime_contract_and_matches_eager_matrix(
                 atol=1e-5,
                 err_msg=case_name,
             )
+
+    checkpoint_bytes = 4_096
+    rejected = tmp_path / "rejected" / "candidate.onnx"
+    with pytest.raises(ValueError, match="admitted byte bound"):
+        export_sona_onnx(
+            model,
+            rejected,
+            maximum_total_bytes=checkpoint_bytes + 1,
+            base_output_bytes=checkpoint_bytes,
+        )
+    assert not rejected.parent.exists()
 
 
 def _matrix_feed(

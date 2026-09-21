@@ -41,6 +41,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -85,6 +86,10 @@ class SyncWorkerLifecycleTest {
 
     @Test fun policyReconciliationCancelsActiveLeaseAndWaitsForRealUnmeteredNetwork() = runBlocking {
         val fixture = Fixture()
+        assumeTrue(
+            "Changing the system Wi-Fi transport requires a disposable emulator",
+            fixture.isDisposableEmulator(),
+        )
         try {
             fixture.start()
             fixture.holdPush = true
@@ -182,6 +187,18 @@ class SyncWorkerLifecycleTest {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     assertEquals("Bearer ${"a".repeat(64)}", request.getHeader("Authorization"))
+                    if (request.requestUrl?.encodedPath?.endsWith("/devices/bind") == true) {
+                        val received = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+                        assertEquals("1", received.getValue("protocol_version").jsonPrimitive.content)
+                        assertEquals(binding.userId.value, received.getValue("user_id").jsonPrimitive.content)
+                        assertEquals(binding.deviceId.value, received.getValue("device_id").jsonPrimitive.content)
+                        assertEquals(profile.value, received.getValue("server_profile_id").jsonPrimitive.content)
+                        assertEquals(
+                            binding.journalEpoch?.value,
+                            received.getValue("journal_epoch").jsonPrimitive.content,
+                        )
+                        return json(received.toString())
+                    }
                     if (request.requestUrl?.encodedPath?.endsWith("/sync/push") == true) {
                         val events = Json.parseToJsonElement(request.body.readUtf8()).jsonObject.getValue("events").jsonArray
                         val acks = events.map { it.jsonObject }.map { event ->
@@ -195,6 +212,7 @@ class SyncWorkerLifecycleTest {
                         if (disconnect) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
                         return json("""{"acks":[${acks.joinToString(",") }]}""")
                     }
+                    assertTrue(request.requestUrl?.encodedPath?.endsWith("/sync/pull") == true)
                     pullEntered.countDown()
                     if (disconnectPull) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
                     if (holdPull) { holdPull = false; check(release.await(40, TimeUnit.SECONDS)) }
@@ -223,8 +241,9 @@ class SyncWorkerLifecycleTest {
             while (!condition()) delay(50)
         }
         fun work(): List<WorkInfo> = workManager.getWorkInfosForUniqueWork(workName).get(2, TimeUnit.SECONDS)
+        fun isDisposableEmulator(): Boolean = shell("getprop ro.kernel.qemu").trim() == "1"
         fun wifi(enabled: Boolean) {
-            check(shell("getprop ro.kernel.qemu").trim() == "1") { "DISPOSABLE_EMULATOR_REQUIRED" }
+            check(isDisposableEmulator()) { "DISPOSABLE_EMULATOR_REQUIRED" }
             wifiChanged = true
             shell("su 0 svc wifi ${if (enabled) "enable" else "disable"}")
         }

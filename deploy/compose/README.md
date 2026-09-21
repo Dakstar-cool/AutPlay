@@ -69,8 +69,33 @@ AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=<different source-HMAC secret f
 AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE=<different local Admin source secret file>
 AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE=<different local Admin CSRF secret file>
 AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE=<persistent P-256 identity PEM>
+AUTPLAY_RUNTIME_PRIVACY_LEDGER_KEY_FILE=<persistent deletion-ledger encryption key file>
+AUTPLAY_RUNTIME_TRAINING_CONSENT_LEDGER_KEY_FILE=<persistent consent-ledger encryption key file>
+AUTPLAY_PRIVACY_LEDGER_KEY_ID=<stable deletion-ledger key identifier>
+AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID=<stable consent-ledger key identifier>
 AUTPLAY_ACME_EMAIL=<operator certificate-expiry contact>
 ```
+
+The two ledger keys and their identifiers belong to persistent production state. Back them up with
+the corresponding named volumes and never rotate or replace them as part of an ordinary image
+upgrade. On the first start, migrate PostgreSQL and initialize each empty independent ledger before
+starting either API. Both initializers are idempotent for the exact existing key and fail closed for
+an incompatible ledger:
+
+```text
+docker compose <the five -f arguments below> --profile runtime up -d --wait postgres
+docker compose <the five -f arguments below> --profile runtime run --rm migrate
+docker compose <the five -f arguments below> --profile runtime run --rm --no-deps privacy-ledger-init
+docker compose <the five -f arguments below> --profile runtime run --rm --no-deps training-consent-ledger-init
+```
+
+The CPU worker also fails closed until the target server has reviewed resource-report v1 and joint
+internal-I/O report v3 budgets. Start `mobile-api` and `admin-init` first to persist or verify the
+server identity, collect and review the target measurements, and apply them with
+`autplay-admin resource-budget-initialize` and `autplay-admin internal-io-budget-apply`. Do not use
+synthetic test values in a persistent deployment. The report format and command inputs are defined
+in [`docs/design/AutPlay_Resource_Measurement_Report_v1.md`](../../docs/design/AutPlay_Resource_Measurement_Report_v1.md).
+Only after both commands succeed should the complete runtime be started.
 
 Render and validate before any host mutation:
 
@@ -141,6 +166,43 @@ it only in the masked form. The browser session is an HttpOnly loopback developm
 administrator session. The administrative API publication is always literal `127.0.0.1`; the
 separate mobile API contains no administrative Web routes. Cleartext admin Web remains forbidden
 outside literal loopback.
+
+### Optional Admin backup control
+
+`compose.backup-control.yaml` adds the owner-only `/admin/recovery` control page without granting
+the API process access to Docker, SSH, raw disks or arbitrary filesystem paths. The operator
+registers one to 32 opaque target IDs and labels; the browser can select only those IDs, set the
+hard per-generation byte cap and choose a 50–99% warning threshold. The API writes bounded
+`policy.json`, `request.json` and agent-owned `status.json` documents through a private spool.
+
+Prepare a host directory writable by the non-root API UID and the separately authorized agent,
+then add the overlay after `compose.admin-local.yaml` (or the equivalent private-HTTPS Admin
+overlay):
+
+```text
+AUTPLAY_RUNTIME_BACKUP_CONTROL_ROOT=/srv/autplay/operator/backup-control
+AUTPLAY_ADMIN_BACKUP_TARGETS_JSON=[{"id":"workstation-usb-e","label":"External USB E","kind":"external-agent"}]
+docker compose <normal -f arguments> -f deploy/compose/compose.backup-control.yaml config --quiet
+```
+
+Target registry entries deliberately contain no path. `kind` is either `external-agent` or
+`mounted`; the approved agent maps the opaque ID to a local USB/NAS destination. Requesting a
+backup from Web creates no subprocess. Run the agent separately with its explicit destination,
+target ID and shared remote spool. It claims the policy limit, streams directly to the destination,
+updates Admin Web every 256 MiB, emits an assertive alert at the configured threshold and stops
+before crossing the hard cap:
+
+```powershell
+server\.venv\Scripts\python.exe scripts\admin_target_external_backup.py `
+  --destination-root E:\AutPlayBackups `
+  --target-id workstation-usb-e `
+  --remote-control-root /srv/autplay/operator/backup-control `
+  --execute
+```
+
+For a one-off run before the Web control spool exists, omit the two control arguments and supply
+`--max-backup-bytes` plus optional `--warning-percent` explicitly. The agent refuses `--execute`
+without a hard maximum.
 
 P12 adds `ml-gpu` under the opt-in `gpu` profile. It is built from `gpu/Dockerfile`, publishes no
 port, has no API/CPU dependency edge, reads Vault and pre-provisioned private model-cache bytes

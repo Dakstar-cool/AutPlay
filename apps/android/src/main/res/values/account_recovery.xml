@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recovery_title">Account recovery</string>
+    <string name="recovery_new_account_incomplete">Account setup is incomplete. Create and save your recovery TXT to finish. Your local music remains available.</string>
+    <string name="recovery_account_created">Account created. Finish setting up recovery in your profile.</string>
+    <string name="recovery_working">Connecting…</string>
+    <string name="recovery_save_required">Save the recovery TXT somewhere safe. You will need it if you lose access to your devices.</string>
+    <string name="recovery_existing_code">A recovery code is configured on another device. Keep that file, or replace the code here.</string>
+    <string name="recovery_setup_required">Protect this account: create and save a recovery code.</string>
+    <string name="recovery_export">Save recovery TXT</string>
+    <string name="recovery_rotate">Replace recovery code</string>
+    <string name="recovery_create">Create recovery code</string>
+    <string name="recovery_setup">Set up recovery</string>
+    <string name="recovery_unavailable">Recovery is unavailable. Check the server, account and code, then try again.</string>
+    <string name="recovery_retry">Retry saved operation</string>
+    <string name="recovery_description">Use your saved TXT or recovery code to regain access to your account.</string>
+    <string name="recovery_import">Open recovery TXT</string>
+    <string name="recovery_manual">Enter code manually</string>
+    <string name="recovery_server">Server address</string>
+    <string name="recovery_account_id">Account ID from the TXT</string>
+    <string name="recovery_code">Recovery code</string>
+    <string name="recovery_inspect_server">Check server</string>
+    <string name="recovery_confirm_server">Confirm this server and account before sending your recovery code.</string>
+    <string name="recovery_trust">Confirm server</string>
+    <string name="recovery_cancel">Cancel</string>
+    <string name="recovery_confirm_account">Recover account “%1$s”?</string>
+    <string name="recovery_revoke_warning">All previous devices, browser sessions, passkeys and invitations will lose access. Your account data will remain.</string>
+    <string name="recovery_commit">Recover this account</string>
+    <string name="recovery_pending">The result is not yet confirmed. Your new code and sign-in details are saved on this phone. Retry this operation; do not clear app data.</string>
+    <string name="recovery_connected">Account recovered. Save the new recovery TXT; the old code no longer works.</string>
+    <string name="recovery_saved">Recovery TXT saved.</string>
+    <string name="recovery_file_failed">The file could not be read or saved. Your recovery details remain on this phone.</string>
+    <string name="recovery_rotation_warning">The previous code will stop working. Save the new TXT after replacing it.</string>
+</resources>

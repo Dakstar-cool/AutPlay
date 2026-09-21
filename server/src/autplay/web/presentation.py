@@ -28,6 +28,11 @@ class NavigationItem:
     href: str
     label: str
     current: bool
+    children: tuple[NavigationItem, ...] = ()
+
+    @property
+    def aria_current(self) -> str:
+        return "location" if any(child.current for child in self.children) else "page"
 
 
 _NAVIGATION: Final = (
@@ -37,6 +42,8 @@ _NAVIGATION: Final = (
     ("/admin/invitations", "nav_invitations", "invitations"),
     ("/admin/connection-requests", "nav_connection_requests", "connection-requests"),
     ("/admin/trusted-devices", "nav_trusted_devices", "trusted-devices"),
+    ("/admin/passkeys", "nav_passkeys", "passkeys"),
+    ("/admin/quotas", "nav_quotas", "quotas"),
     ("/admin/vault", "nav_vault", "vault"),
     ("/admin/jobs", "nav_jobs", "jobs"),
     ("/admin/review", "nav_review", "review"),
@@ -51,19 +58,63 @@ _NAVIGATION: Final = (
     ),
 )
 
+_SECTIONS: Final = (
+    ("dashboard", "nav_dashboard", ()),
+    (
+        "accounts",
+        "nav_accounts",
+        (
+            "devices",
+            "connection-requests",
+            "trusted-devices",
+            "sessions",
+            "invitations",
+            "passkeys",
+        ),
+    ),
+    ("music", "nav_music", ("jobs", "review", "discovery", "discovery-automation")),
+    ("server", "nav_server", ("quotas", "vault", "diagnostics", "recovery", "audit")),
+)
+
 
 def navigation(
     surface: str,
     *,
     discovery_enabled: bool = False,
     discovery_automation_enabled: bool = False,
+    passkeys_enabled: bool = False,
+    quotas_enabled: bool = False,
 ) -> tuple[NavigationItem, ...]:
-    return tuple(
-        NavigationItem(href, label, current=surface == candidate)
+    """Group existing, permission-checked surfaces without introducing new authority."""
+    links = {
+        candidate: NavigationItem(href, label, current=surface == candidate)
         for href, label, candidate in _NAVIGATION
         if (discovery_enabled or candidate != "discovery")
         and (discovery_automation_enabled or candidate != "discovery-automation")
+        and (passkeys_enabled or candidate != "passkeys")
+        and (quotas_enabled or candidate != "quotas")
+    }
+    return tuple(
+        NavigationItem(
+            "/admin/" if section == "dashboard" else f"/admin/{section}",
+            label,
+            current=surface == section or surface in surfaces,
+            children=tuple(links[child] for child in surfaces if child in links),
+        )
+        for section, label, surfaces in _SECTIONS
     )
+
+
+def section_context(surface: str, items: tuple[NavigationItem, ...]) -> dict[str, object]:
+    """Build a hub from enabled links, never from unscoped account or device queries."""
+    section = next((item for item in items if item.href == f"/admin/{surface}"), None)
+    if section is None:
+        raise ValueError("unknown admin section")
+    return {
+        "section_title_key": section.label,
+        "section_intro_key": f"{surface}_section_intro",
+        "section_links": section.children,
+    }
 
 
 def dashboard_context(

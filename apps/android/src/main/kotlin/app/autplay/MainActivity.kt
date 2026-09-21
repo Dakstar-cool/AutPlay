@@ -2204,6 +2204,7 @@ internal fun SettingsFrontendScreen(
     statisticsSettingsErrorCode: String?,
     onStatisticsVisibilityChange: (Boolean) -> Unit,
     onNavigate: (UiDestination) -> Unit,
+    trainingConsent: TrainingConsentUi = TrainingConsentUi(),
 ) {
     SettingsProductScreen(
         settings = settings,
@@ -2217,6 +2218,7 @@ internal fun SettingsFrontendScreen(
         statisticsSettingsErrorCode = statisticsSettingsErrorCode,
         onStatisticsVisibilityChange = onStatisticsVisibilityChange,
         onNavigate = onNavigate,
+        trainingConsent = trainingConsent,
     )
 }
 

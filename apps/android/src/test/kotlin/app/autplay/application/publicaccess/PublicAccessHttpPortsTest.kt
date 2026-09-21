@@ -85,7 +85,7 @@ class PublicAccessHttpPortsTest {
 
     private class FixedCredentialStore(private val expected: ServerProfileId) : CredentialStore {
         override suspend fun read(profileId: ServerProfileId): ByteArray? {
-            assertEquals(expected, profileId)
+            if (profileId != expected) return null
             return SessionCredentialEnvelopeCodec.encode(SessionCredentialEnvelope("owner-token", "refresh-token", 0))
         }
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit

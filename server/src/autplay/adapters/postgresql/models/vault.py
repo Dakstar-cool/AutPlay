@@ -568,6 +568,9 @@ class UploadSessionRow(Base):
     source_acquisition_attempt_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), nullable=True
     )
+    source_internet_acquisition_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
     target_recording_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(Text(), nullable=False)
     request_hash: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
@@ -618,6 +621,13 @@ class UploadSessionRow(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["source_internet_acquisition_id"],
+            ["discovery.internet_acquisition.acquisition_id"],
+            name="upload_session_source_internet_acquisition_id_fkey",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
             ["device_id"],
             ["account.device.device_id"],
             name="upload_session_device_id_fkey",
@@ -660,9 +670,21 @@ class UploadSessionRow(Base):
             "source_acquisition_attempt_id",
             name="uq_upload_session_source_acquisition_attempt",
         ),
+        UniqueConstraint(
+            "source_internet_acquisition_id",
+            name="uq_upload_session_source_internet_acquisition",
+        ),
         CheckConstraint(
-            "(actor_kind = 'DEVICE' AND device_id IS NOT NULL AND source_candidate_id IS NULL AND source_acquisition_attempt_id IS NULL) OR "
-            "(actor_kind = 'PROVIDER' AND device_id IS NULL AND source_candidate_id IS NOT NULL AND source_acquisition_attempt_id IS NOT NULL)",
+            "(actor_kind='DEVICE' AND device_id IS NOT NULL "
+            "AND source_candidate_id IS NULL AND source_acquisition_attempt_id IS NULL "
+            "AND source_internet_acquisition_id IS NULL) OR "
+            "(actor_kind='PROVIDER' AND device_id IS NULL "
+            "AND source_candidate_id IS NOT NULL AND source_acquisition_attempt_id IS NOT NULL "
+            "AND source_internet_acquisition_id IS NULL) OR "
+            "(actor_kind='INTERNET' AND device_id IS NULL "
+            "AND source_candidate_id IS NULL AND source_acquisition_attempt_id IS NULL "
+            "AND source_internet_acquisition_id IS NOT NULL AND declared_sha256 IS NOT NULL "
+            "AND job_id IS NOT NULL AND state<>'OPEN')",
             name="ck_upload_session_actor",
         ),
         CheckConstraint(

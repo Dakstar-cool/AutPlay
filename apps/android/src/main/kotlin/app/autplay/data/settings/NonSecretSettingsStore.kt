@@ -74,6 +74,8 @@ data class NonSecretSettings(
     val m5CancelledPairingGenerationId: String? = null,
     /** Redacted S1B recovery facts only; poll and review bearers are forbidden here. */
     val m5AdmissionCheckpoint: String? = null,
+    /** PA2 setup requires a verified explicit document save; existing accounts have no marker. */
+    val accountRecoverySetup: AccountRecoverySetupCheckpoint? = null,
 )
 
 /** Sensitive non-secret local evidence for a single M5 binding; it is never an authority token. */
@@ -210,6 +212,16 @@ class DataStoreNonSecretSettingsStore(
             ?: preferences.remove(M5_CANCELLED_GENERATION)
         settings.m5AdmissionCheckpoint?.let { preferences[M5_ADMISSION_CHECKPOINT] = it }
             ?: preferences.remove(M5_ADMISSION_CHECKPOINT)
+        settings.accountRecoverySetup?.let { recovery ->
+            preferences[RECOVERY_SETUP_SERVER_ID] = recovery.serverInstanceId
+            preferences[RECOVERY_SETUP_ACCOUNT_ID] = recovery.accountId
+            preferences[RECOVERY_SETUP_BINDING_COMMIT_ID] = recovery.bindingCommitId
+            recovery.savedCodeGeneration?.let { preferences[RECOVERY_SETUP_SAVED_GENERATION] = it.toString() }
+                ?: preferences.remove(RECOVERY_SETUP_SAVED_GENERATION)
+            recovery.savedDocumentSha256?.let { preferences[RECOVERY_SETUP_SAVED_DOCUMENT_SHA256] = it }
+                ?: preferences.remove(RECOVERY_SETUP_SAVED_DOCUMENT_SHA256)
+            Unit
+        } ?: RECOVERY_SETUP_KEYS.forEach(preferences::remove)
     }
 
     private fun toSettings(preferences: Preferences): NonSecretSettings {
@@ -235,6 +247,7 @@ class DataStoreNonSecretSettingsStore(
         m5PendingExchangeCheckpoint = preferences[M5_PENDING_EXCHANGE],
         m5CancelledPairingGenerationId = preferences[M5_CANCELLED_GENERATION],
         m5AdmissionCheckpoint = preferences[M5_ADMISSION_CHECKPOINT],
+        accountRecoverySetup = accountRecoverySetup(preferences),
         )
     }
 
@@ -247,6 +260,19 @@ class DataStoreNonSecretSettingsStore(
             preferences[M5_IDENTITY_EPOCH]!!.toLong(), preferences[M5_IDENTITY_THUMBPRINT]!!,
             preferences[M5_DEVICE_KEY_ALIAS]!!, preferences[M5_SESSION_ID]!!,
             preferences[M5_SESSION_FAMILY_ID]!!, preferences[M5_SESSION_GENERATION]!!.toLong(),
+        )
+    }
+
+    private fun accountRecoverySetup(preferences: Preferences): AccountRecoverySetupCheckpoint? {
+        if (RECOVERY_SETUP_KEYS.all { preferences[it] == null }) return null
+        val required = listOf(RECOVERY_SETUP_SERVER_ID, RECOVERY_SETUP_ACCOUNT_ID, RECOVERY_SETUP_BINDING_COMMIT_ID)
+        require(required.all { preferences[it] != null }) { "Account recovery setup checkpoint is incomplete." }
+        return AccountRecoverySetupCheckpoint(
+            preferences[RECOVERY_SETUP_SERVER_ID]!!,
+            preferences[RECOVERY_SETUP_ACCOUNT_ID]!!,
+            preferences[RECOVERY_SETUP_BINDING_COMMIT_ID]!!,
+            preferences[RECOVERY_SETUP_SAVED_GENERATION]?.toLong(),
+            preferences[RECOVERY_SETUP_SAVED_DOCUMENT_SHA256],
         )
     }
 
@@ -343,6 +369,12 @@ class DataStoreNonSecretSettingsStore(
         val M5_PENDING_EXCHANGE = stringPreferencesKey("m5_pending_exchange_checkpoint")
         val M5_CANCELLED_GENERATION = stringPreferencesKey("m5_cancelled_pairing_generation_id")
         val M5_ADMISSION_CHECKPOINT = stringPreferencesKey("m5_admission_checkpoint_redacted")
+        val RECOVERY_SETUP_SERVER_ID = stringPreferencesKey("account_recovery_setup_server_id")
+        val RECOVERY_SETUP_ACCOUNT_ID = stringPreferencesKey("account_recovery_setup_account_id")
+        val RECOVERY_SETUP_BINDING_COMMIT_ID = stringPreferencesKey("account_recovery_setup_binding_commit_id")
+        val RECOVERY_SETUP_SAVED_GENERATION = stringPreferencesKey("account_recovery_setup_saved_generation")
+        val RECOVERY_SETUP_SAVED_DOCUMENT_SHA256 = stringPreferencesKey("account_recovery_setup_saved_document_sha256")
+        val RECOVERY_SETUP_KEYS = listOf(RECOVERY_SETUP_SERVER_ID, RECOVERY_SETUP_ACCOUNT_ID, RECOVERY_SETUP_BINDING_COMMIT_ID, RECOVERY_SETUP_SAVED_GENERATION, RECOVERY_SETUP_SAVED_DOCUMENT_SHA256)
         val M5_KEYS = listOf(M5_BINDING_COMMIT_ID, M5_SERVER_INSTANCE_ID, M5_IDENTITY_EPOCH, M5_IDENTITY_THUMBPRINT, M5_DEVICE_KEY_ALIAS, M5_SESSION_ID, M5_SESSION_FAMILY_ID, M5_SESSION_GENERATION)
         val M5_TRUST_KEYS = listOf(M5_IDENTITY_SPKI, M5_SERVER_LABEL_HINT, M5_CAPABILITY_PAYLOAD, M5_CAPABILITY_HASH, M5_CAPABILITY_REVISION)
     }

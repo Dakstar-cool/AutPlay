@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from importlib.resources import files
 
 from autplay.web.renderer import (
+    STATIC_ASSET_DIGESTS,
     AdminTemplateRenderer,
     format_bytes,
     format_count,
@@ -91,3 +93,12 @@ def test_catalogs_have_exact_key_parity_and_static_asset_is_integrity_checked() 
     payload, digest = read_static_asset("admin-v1.css")
     assert b"prefers-reduced-motion" in payload
     assert digest == "b3c13018b1db8ec4c083b6f708ce473b1bf18aec620f73df81f7cbfc27d6b9ec"
+
+
+def test_every_declared_static_asset_digest_matches_packaged_bytes() -> None:
+    static_root = files("autplay.web").joinpath("static")
+
+    for name, expected in STATIC_ASSET_DIGESTS.items():
+        payload = static_root.joinpath(name).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == expected
+        assert read_static_asset(name) == (payload, expected)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
@@ -27,11 +28,15 @@ from autplay.domain.sona_approval import (
     load_sona_dataset_approval,
     load_sona_source_approval,
 )
+from autplay.domain.training_work import TrainingInputProvenance
 
+from .authority import SonaSharedTrainingAuthority, SonaTrainingInputBinding
 from .dataset import (
     SONA_SOURCE_KIND_OWNER_APPROVED,
+    SonaDatasetHeader,
     SonaTensorDataset,
     load_sona_dataset,
+    load_sona_dataset_header,
 )
 from .quality_trust import load_deployment_sona_reviewer_trust_anchor
 from .source_manifest import SONA_CATALOG_MANIFEST_KIND, SONA_SOURCE_MANIFEST_KIND
@@ -130,8 +135,13 @@ def load_quality_approved_sona_dataset_bundle(
     source_approval_path: Path,
     dataset_approval_path: Path,
     at_ms: int,
+    shared_training_authority: SonaSharedTrainingAuthority | None = None,
 ) -> SonaQualityDatasetBundle:
-    """Fail closed unless the complete approved bundle is present and internally exact."""
+    """Verify historical approval; optionally gate payload reads with current authority.
+
+    Historical verification alone does not authorize new shared-training work. Use
+    ``load_current_sona_training_bundle`` for a training entry point.
+    """
 
     reviewer_trust = load_deployment_sona_reviewer_trust_anchor()
     source_approval = load_sona_source_approval(
@@ -160,6 +170,29 @@ def load_quality_approved_sona_dataset_bundle(
         source_approval=source_approval,
         at_ms=at_ms,
     )
+    headers = (
+        load_sona_dataset_header(train_directory),
+        load_sona_dataset_header(validation_directory),
+        load_sona_dataset_header(test_directory),
+    )
+    check_current = (
+        _authorize_quality_headers(
+            headers, source_approval, dataset_approval, shared_training_authority
+        )
+        if shared_training_authority is not None
+        else None
+    )
+
+    def load_split(directory: Path, expected: SonaDatasetHeader) -> SonaTensorDataset:
+        def before_payload(header: SonaDatasetHeader) -> Callable[[], None] | None:
+            if header != expected:
+                raise ValueError("Sona quality bundle changed after current authorization")
+            return check_current
+
+        return load_sona_dataset(directory, before_payload=before_payload)
+
+    if check_current is not None:
+        check_current()
     teacher_calibration = load_sona_teacher_calibration_set(teacher_calibration_path)
     teacher_manifest, teacher_manifest_sha256 = _load_manifest(teacher_manifest_path)
     _verify_teacher_manifest(
@@ -170,15 +203,17 @@ def load_quality_approved_sona_dataset_bundle(
     )
 
     datasets = (
-        load_sona_dataset(train_directory),
-        load_sona_dataset(validation_directory),
-        load_sona_dataset(test_directory),
+        load_split(train_directory, headers[0]),
+        load_split(validation_directory, headers[1]),
+        load_split(test_directory, headers[2]),
     )
     _verify_exact_directory(
         tokenizer_directory,
         frozenset({"manifest.json", "centroids.npy", "mapping.json"}),
         "tokenizer",
     )
+    if check_current is not None:
+        check_current()
     tokenizer = load_sona_tokenizer(tokenizer_directory)
     _verify_teacher_calibration_dataset(
         datasets[1],
@@ -226,6 +261,8 @@ def load_quality_approved_sona_dataset_bundle(
         raise ValueError("Sona quality bundle leakage audit mismatch")
 
     approval_hash = dataset_approval.approval_sha256
+    if check_current is not None:
+        check_current()
     return SonaQualityDatasetBundle(
         train=replace(datasets[0], quality_eligible=True, quality_approval_sha256=approval_hash),
         validation=replace(
@@ -256,8 +293,82 @@ def load_quality_approved_sona_dataset_bundle(
     )
 
 
+def load_current_sona_training_bundle(
+    inputs: SonaQualityBundleVerificationInputs,
+    *,
+    at_ms: int,
+    shared_training_authority: SonaSharedTrainingAuthority,
+) -> SonaQualityDatasetBundle:
+    """Bind every approved contributor to live consent before training payload reads.
+
+    This control-plane gate still requires retained measured execution and trusted
+    immutable storage in the worker composition.
+    """
+
+    if shared_training_authority is None:
+        raise ValueError("Current shared-training authority is required for owner-derived inputs")
+    return load_quality_approved_sona_dataset_bundle(
+        train_directory=inputs.train_directory,
+        validation_directory=inputs.validation_directory,
+        test_directory=inputs.test_directory,
+        tokenizer_directory=inputs.tokenizer_directory,
+        source_manifest_path=inputs.source_manifest_path,
+        catalog_manifest_path=inputs.catalog_manifest_path,
+        source_rekey_plan_path=inputs.source_rekey_plan_path,
+        source_provenance_acceptance_path=inputs.source_provenance_acceptance_path,
+        teacher_calibration_path=inputs.teacher_calibration_path,
+        teacher_manifest_path=inputs.teacher_manifest_path,
+        source_approval_path=inputs.source_approval_path,
+        dataset_approval_path=inputs.dataset_approval_path,
+        at_ms=at_ms,
+        shared_training_authority=shared_training_authority,
+    )
+
+
+def _authorize_quality_headers(
+    headers: tuple[SonaDatasetHeader, SonaDatasetHeader, SonaDatasetHeader],
+    source: VerifiedSonaSourceApproval,
+    approval: VerifiedSonaDatasetApproval,
+    authority: SonaSharedTrainingAuthority,
+) -> Callable[[], None]:
+    expected = (
+        approval.train_manifest_sha256,
+        approval.validation_manifest_sha256,
+        approval.test_manifest_sha256,
+    )
+    if any(
+        header.source_kind != SONA_SOURCE_KIND_OWNER_APPROVED
+        or header.manifest_sha256 != digest
+        or header.source_manifest_sha256 != source.source_manifest_sha256
+        or header.owner_lineage_key_id != source.owner_lineage_key_id
+        for header, digest in zip(headers, expected, strict=True)
+    ):
+        raise ValueError("Sona quality training headers do not match their approved source")
+    tokens = tuple(sorted({token for header in headers for token in header.owner_lineage_tokens}))
+    if (
+        len(tokens) != source.owner_count
+        or compute_sona_owner_lineage_manifest_sha256(headers)
+        != approval.owner_lineage_manifest_sha256
+    ):
+        raise ValueError("Sona quality training header lineage does not match its approval")
+    provenance = authority.authorize(
+        SonaTrainingInputBinding(
+            source.source_manifest_sha256,
+            approval.dataset_bundle_sha256,
+            source.owner_lineage_key_id,
+            tokens,
+        )
+    )
+    if not isinstance(provenance, TrainingInputProvenance):
+        raise ValueError("Current shared-training input provenance is invalid")
+    return authority.check_running
+
+
 def reverify_quality_approved_sona_dataset_bundle(
-    bundle: SonaQualityDatasetBundle, *, at_ms: int
+    bundle: SonaQualityDatasetBundle,
+    *,
+    at_ms: int,
+    shared_training_authority: SonaSharedTrainingAuthority | None = None,
 ) -> SonaQualityDatasetBundle:
     """Reload every file and signature, then require the same approved bundle identity."""
 
@@ -276,6 +387,7 @@ def reverify_quality_approved_sona_dataset_bundle(
         source_approval_path=inputs.source_approval_path,
         dataset_approval_path=inputs.dataset_approval_path,
         at_ms=at_ms,
+        shared_training_authority=shared_training_authority,
     )
     original_identity = (
         bundle.source_approval.approval_sha256,
@@ -305,7 +417,11 @@ def reverify_quality_approved_sona_dataset_bundle(
 
 
 def compute_sona_owner_lineage_manifest_sha256(
-    datasets: tuple[SonaTensorDataset, SonaTensorDataset, SonaTensorDataset],
+    datasets: tuple[
+        SonaTensorDataset | SonaDatasetHeader,
+        SonaTensorDataset | SonaDatasetHeader,
+        SonaTensorDataset | SonaDatasetHeader,
+    ],
 ) -> str:
     """Hash the exact owner pseudonym union and lineage-key identity."""
 
@@ -675,8 +791,10 @@ __all__ = (
     "SONA_SOURCE_MANIFEST_KIND",
     "SONA_TEACHER_CALIBRATION_POLICY",
     "SONA_TEACHER_MANIFEST_KIND",
+    "SonaQualityBundleVerificationInputs",
     "SonaQualityDatasetBundle",
     "compute_sona_leakage_audit_sha256",
     "compute_sona_owner_lineage_manifest_sha256",
+    "load_current_sona_training_bundle",
     "load_quality_approved_sona_dataset_bundle",
 )

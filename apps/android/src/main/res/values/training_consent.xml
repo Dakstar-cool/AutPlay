@@ -1,0 +1,16 @@
+<resources>
+    <string name="training_consent_title">Shared model training</string>
+    <string name="training_consent_explanation">Allow your listening interactions and recommendation choices to contribute to shared recommendation model training. Participation is off until you allow it. Your personal statistics and recommendations remain available if you refuse or withdraw.</string>
+    <string name="training_consent_weights">Withdrawing stops new use and removes related training examples and unfinished work. Already trained shared models continue to work until their normal replacement; withdrawal does not remove past contributions from their weights.</string>
+    <string name="training_consent_allow">Allow</string>
+    <string name="training_consent_refuse">Refuse</string>
+    <string name="training_consent_withdraw">Withdraw consent</string>
+    <string name="training_consent_unknown">Participation is off. No decision saved yet.</string>
+    <string name="training_consent_private">Participation is off. Your decision is saved for this account.</string>
+    <string name="training_consent_granted">Participation is allowed for this account.</string>
+    <string name="training_consent_pending">The server outcome is unknown. Retry the same decision or withdraw consent. This change is not confirmed yet.</string>
+    <string name="training_consent_loading">Checking the account’s decision…</string>
+    <string name="training_consent_unavailable">Connect to a server that supports shared-training consent to check your account’s decision.</string>
+    <string name="training_consent_refresh">Refresh / retry</string>
+    <string name="training_consent_error">The decision could not be confirmed. Check the connection and refresh.</string>
+</resources>

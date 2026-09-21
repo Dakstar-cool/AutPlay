@@ -479,6 +479,9 @@ def test_actual_renderer_renders_dashboard_table_and_status() -> None:
     client.cookies.set("__Host-autplay_admin", "session")
     for path, text in (
         ("/admin/", "Test server"),
+        ("/admin/accounts", "Connect devices"),
+        ("/admin/music", "Follow imports"),
+        ("/admin/server", "Check storage"),
         ("/admin/devices", "Phone"),
         ("/admin/jobs?live=1", "33%"),
         ("/admin/vault", "This information is unavailable"),
@@ -488,6 +491,14 @@ def test_actual_renderer_renders_dashboard_table_and_status() -> None:
     jobs = client.get("/admin/jobs?live=1")
     assert '<meta http-equiv="refresh"' in jobs.text
     assert "discovery.acquire" in jobs.text
+
+
+@pytest.mark.parametrize("section", ["accounts", "music", "server"])
+def test_section_hubs_require_current_browser_authority(section: str) -> None:
+    client, _ = _client(AdminTemplateRenderer())
+    response = client.get(f"/admin/{section}", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/login"
 
 
 def test_dashboard_navigation_discovers_enabled_automation() -> None:

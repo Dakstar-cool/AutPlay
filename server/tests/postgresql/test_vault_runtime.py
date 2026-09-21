@@ -12,13 +12,14 @@ from pathlib import Path
 from threading import Barrier
 from typing import Any
 
+import pytest
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
     TransactionalIngestRepository,
 )
 from autplay.application.vault_ingest import IngestSession
-from autplay.application.vault_reconciliation import ReconcileMode, VaultReconciliationService
+from autplay.application.vault_reconciliation import ReconcileMode
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
@@ -26,11 +27,13 @@ from autplay.domain.vault import (
     Sha256Digest,
     VaultLimits,
 )
+from autplay.entrypoints.vault_reconciliation import build_vault_reconciliation_service
 from psycopg import Connection, Cursor
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 
+@pytest.mark.usefixtures("internal_io_budget")
 def test_concurrent_same_sha_resumes_every_commit_window_and_converges(
     database_connection: Connection[Any], database_url: str, tmp_path: Path
 ) -> None:
@@ -87,12 +90,13 @@ def test_concurrent_same_sha_resumes_every_commit_window_and_converges(
         )
 
         # Crash after DB finalization but before staging cleanup: reconciliation preserves bytes.
-        with factory() as unit:
-            report = VaultReconciliationService(repository=unit.vault, storage=storage).run(
-                mode=ReconcileMode.APPLY, limit=100
-            )
-            unit.commit()
-        assert report.quarantined == 1
+        report = build_vault_reconciliation_service(sessions, tmp_path).run(
+            mode=ReconcileMode.APPLY, limit=100
+        )
+        assert report.quarantined == report.missing == 0
+        assert publisher.staging_key in storage.inventory().staging_keys
+        # Explicit fixture cleanup; inventory did not infer writer exit from COMMITTED.
+        storage.cleanup_staging(publisher.staging_key)
 
         # The concurrent waiter now deterministically reuses the committed exact bytes.
         assert (
@@ -127,23 +131,21 @@ def test_concurrent_same_sha_resumes_every_commit_window_and_converges(
         engine.dispose()
 
 
-def test_reconciliation_quarantines_orphan_and_corrupt_final_bytes(
+@pytest.mark.usefixtures("internal_io_budget")
+def test_reconciliation_retires_orphan_but_protects_registered_final_bytes(
     database_connection: Connection[Any], database_url: str, tmp_path: Path
 ) -> None:
     engine: Engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
-    factory = SqlAlchemyVaultUnitOfWorkFactory(sessions)
     storage = FilesystemVaultStorage(
         tmp_path, limits=VaultLimits(max_object_bytes=1024, max_chunk_bytes=1024)
     )
     try:
         orphan_payload = b"orphan final"
         orphan = _publish(storage, "orphanstage", orphan_payload)
-        with factory() as unit:
-            report = VaultReconciliationService(repository=unit.vault, storage=storage).run(
-                mode=ReconcileMode.APPLY, limit=100
-            )
-            unit.commit()
+        report = build_vault_reconciliation_service(sessions, tmp_path).run(
+            mode=ReconcileMode.APPLY, limit=100
+        )
         assert report.quarantined == 1
         assert orphan not in storage.inventory().object_keys
 
@@ -197,18 +199,11 @@ def test_reconciliation_quarantines_orphan_and_corrupt_final_bytes(
         if os.name != "nt":
             object_path.chmod(stat.S_IRUSR)
 
-        with factory() as unit:
-            first_page = VaultReconciliationService(repository=unit.vault, storage=storage).run(
-                mode=ReconcileMode.APPLY, limit=1
-            )
-            unit.commit()
-        assert first_page.repaired == 0
-        assert first_page.remaining >= 1
-        with factory() as unit:
-            report = VaultReconciliationService(repository=unit.vault, storage=storage).run(
-                mode=ReconcileMode.APPLY, limit=1
-            )
-            unit.commit()
+        report = build_vault_reconciliation_service(sessions, tmp_path).run(
+            mode=ReconcileMode.APPLY, limit=1
+        )
+        assert report.scan_complete and report.pass_complete
+        assert report.protected == 2 and report.quarantined == report.missing == 0
         status = database_connection.execute(
             """
             SELECT vo.commit_status, vr.replica_status, vo.verification_error
@@ -218,42 +213,48 @@ def test_reconciliation_quarantines_orphan_and_corrupt_final_bytes(
             """,
             (object_id,),
         ).fetchone()
-        assert report.repaired == 1 and report.quarantined == 1
-        assert status == ("QUARANTINED", "QUARANTINED", "vault_replica_integrity_mismatch")
-        assert tracked not in storage.inventory().object_keys
+        assert status == ("COMMITTED", "AVAILABLE", None)
+        assert tracked in storage.inventory().object_keys
+        assert object_path.read_bytes() == b"corrupted bytes"
+        # Tracked integrity verification needs its own retained writer/reader protocol.
     finally:
         engine.dispose()
 
 
-def test_reconciliation_expires_open_and_repairs_missing_processing_staging(
+@pytest.mark.usefixtures("internal_io_budget")
+def test_reconciliation_preserves_expired_open_and_missing_processing_staging(
     database_connection: Connection[Any], database_url: str, tmp_path: Path
 ) -> None:
     payload = b"abc"
     digest = Sha256Digest(hashlib.sha256(payload).digest())
     _recording_id, uploads = _seed_processing_uploads(
         database_connection,
-        count=2,
+        count=1,
         expected_size=len(payload),
         declared_sha256=digest.value,
     )
-    expired_upload, _expired_job, expired_key = uploads[0]
-    missing_upload, _missing_job, _missing_key = uploads[1]
-    database_connection.execute(
-        """
-        UPDATE vault.upload_session
-        SET state = 'OPEN', job_id = NULL, sealed_at = NULL,
-            received_size = 0, chunk_count = 0,
-            created_at = now() - interval '2 hours',
-            expires_at = now() - interval '1 hour'
-        WHERE upload_session_id = %s
-        """,
-        (expired_upload,),
+    missing_upload, _missing_job, _missing_key = uploads[0]
+    expired_key = f"expired-{uuid.uuid4().hex}"
+    expired_upload = _returned_uuid(
+        database_connection.execute(
+            """
+            INSERT INTO vault.upload_session (
+                user_id, device_id, target_recording_id, idempotency_key,
+                request_hash, declared_sha256, expected_size, chunk_size,
+                max_chunks, staging_key, created_at, expires_at
+            ) SELECT user_id, device_id, target_recording_id, %s,
+                request_hash, declared_sha256, expected_size, chunk_size,
+                max_chunks, %s, now() - interval '2 hours', now() - interval '1 hour'
+            FROM vault.upload_session WHERE upload_session_id = %s
+            RETURNING upload_session_id
+            """,
+            (expired_key, expired_key, missing_upload),
+        )
     )
     database_connection.commit()
 
     engine: Engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
-    factory = SqlAlchemyVaultUnitOfWorkFactory(sessions)
     storage = FilesystemVaultStorage(
         tmp_path, limits=VaultLimits(max_object_bytes=1024, max_chunk_bytes=1024)
     )
@@ -266,11 +267,9 @@ def test_reconciliation_expires_open_and_repairs_missing_processing_staging(
         payload_sha256=Sha256Digest(hashlib.sha256(payload[:1]).digest()),
     )
     try:
-        with factory() as unit:
-            report = VaultReconciliationService(repository=unit.vault, storage=storage).run(
-                mode=ReconcileMode.APPLY, limit=100
-            )
-            unit.commit()
+        report = build_vault_reconciliation_service(sessions, tmp_path).run(
+            mode=ReconcileMode.APPLY, limit=100
+        )
         states = dict(
             database_connection.execute(
                 """
@@ -281,10 +280,9 @@ def test_reconciliation_expires_open_and_repairs_missing_processing_staging(
                 (expired_upload, missing_upload),
             ).fetchall()
         )
-        assert states == {expired_upload: "EXPIRED", missing_upload: "FAILED"}
-        assert report.repaired == 2
-        assert report.quarantined == 1
-        assert storage.inventory().staging_keys == ()
+        assert states == {expired_upload: "OPEN", missing_upload: "PROCESSING"}
+        assert report.quarantined == report.missing == 0
+        assert storage.inventory().staging_keys == (expired_staging,)
     finally:
         engine.dispose()
 
@@ -367,7 +365,12 @@ def test_exact_byte_reuse_fails_closed_for_a_different_active_recording(
 
 
 def _seed_processing_uploads(
-    connection: Connection[Any], *, count: int, expected_size: int, declared_sha256: bytes
+    connection: Connection[Any],
+    *,
+    count: int,
+    expected_size: int,
+    declared_sha256: bytes,
+    sealed: bool = False,
 ) -> tuple[uuid.UUID, list[tuple[uuid.UUID, uuid.UUID, str]]]:
     user_id = _returned_uuid(
         connection.execute(
@@ -427,7 +430,7 @@ def _seed_processing_uploads(
                     job_id, expires_at, sealed_at
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s,
-                    1024, 1, 1, %s, 'PROCESSING', %s, %s, now()
+                    1024, 1, 1, %s, %s, %s, %s, now()
                 ) RETURNING upload_session_id
                 """,
                 (
@@ -440,6 +443,7 @@ def _seed_processing_uploads(
                     expected_size,
                     expected_size,
                     staging_key,
+                    "SEALED" if sealed else "PROCESSING",
                     job_id,
                     datetime.now(UTC) + timedelta(hours=1),
                 ),

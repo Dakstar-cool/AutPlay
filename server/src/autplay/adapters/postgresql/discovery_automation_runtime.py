@@ -25,8 +25,10 @@ from autplay.application.discovery_automation import (
 )
 from autplay.domain.discovery import DiscoveryCandidate, ProviderTrackPage
 from autplay.domain.jobs import JobKey, JsonValue, LeaseFence
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.ports.jobs import EnqueueJob
 
+from .acquisition_authority import acquisition_generation
 from .discovery_runtime import (
     JAMENDO_PROVIDER_ID,
     BulkDiscoveryError,
@@ -51,6 +53,7 @@ from .models import (
     SourceProviderRow,
     UserTrackRefRow,
 )
+from .resource_limits import lock_resource_admission
 
 DISCOVERY_SCAN_JOB = JobKey("discovery.scan", 1)
 DISCOVERY_ACQUIRE_JOB = JobKey("discovery.acquire", 1)
@@ -67,6 +70,7 @@ class PostgresDiscoveryAutomationRepository:
     def set_policy(
         self, *, owner_user_id: UUID, command: PolicyMutation, request_sha256: bytes, now: datetime
     ) -> PolicyMutationResult:
+        lock_resource_admission(self._session)
         self._lock_operation(owner_user_id, command.operation_id)
         lock_scope = b"a1c-policy-operation-v1" + owner_user_id.bytes
         lock_key = int.from_bytes(hashlib.sha256(lock_scope).digest()[:8], "big", signed=True)
@@ -273,6 +277,7 @@ class PostgresDiscoveryAutomationRepository:
         request_sha256: bytes,
         now: datetime,
     ) -> CandidateActionResult:
+        lock_resource_admission(self._session)
         if action not in {"SELECT", "RETRY", "IGNORE"}:
             raise DiscoveryAutomationError("candidate_action_invalid")
         self._lock_operation(owner_user_id, operation_id)
@@ -344,6 +349,7 @@ class PostgresDiscoveryAutomationRepository:
         return result
 
     def dispatch_due(self, *, now: datetime, limit: int) -> int:
+        lock_resource_admission(self._session)
         self._reconcile_terminal_jobs(now)
         policies = tuple(
             self._session.scalars(
@@ -462,6 +468,7 @@ class PostgresDiscoveryAutomationRepository:
         page: ProviderTrackPage,
         now: datetime,
     ) -> ScanTarget | None:
+        lock_resource_admission(self._session)
         self._require_fence(fence, owner_user_id)
         run = self._locked_run(run_id, owner_user_id)
         if (
@@ -911,6 +918,10 @@ class PostgresDiscoveryAutomationRepository:
     ) -> bool:
         if candidate.disposition != "SELECTABLE" or candidate.acquisition_state != "NOT_REQUESTED":
             return False
+        try:
+            generation = acquisition_generation(self._session, policy.user_id)
+        except ResourceAdmissionError as error:
+            raise DiscoveryAutomationError("source_authorization_unavailable") from error
         auth = self._session.scalar(
             select(SourceAuthorizationRow)
             .where(
@@ -959,6 +970,7 @@ class PostgresDiscoveryAutomationRepository:
             self._session.add(auth)
             self._session.flush([auth])
         attempt = AcquisitionAttemptRow(
+            authority_generation=generation,
             candidate_id=candidate.candidate_id,
             origin="AUTOMATIC",
             policy_id=policy.policy_id,

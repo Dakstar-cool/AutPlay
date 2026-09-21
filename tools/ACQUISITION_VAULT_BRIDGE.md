@@ -18,13 +18,19 @@ Repeat `--root` for additional explicitly selected roots. Each completed item mu
 Receipts must contain the full SHA-256, exact byte length, positive duration and declared metadata.
 The first run explicitly provisions one deterministic owner device; revoking that device stops
 publication. Use a process supervisor with restart-on-failure and preserve the checkpoint volume.
+The provisioned device is represented by the narrow `LOCAL_BRIDGE` authority introduced in
+`0060_local_bridge_authority`. It creates no `account.user_session`, cannot authorize playback or
+download, and is accepted only for an owned `UPLOAD_INTENT`. Every chunk consumes the measured
+transfer budget, runs in the retained Vault child, commits only after current account/device/grant
+revalidation, and releases its permit after exact child-exit acknowledgement.
 
 The process:
 
 1. Checks receipt containment, file stability and full content hash.
 2. Imports exact metadata and creates a distinct recording through the existing explicit review
    command. Similar titles/artists never silently merge recordings.
-3. Uploads with stable replay keys; the CPU workers perform normal media validation and ingestion.
+3. Uploads with stable replay keys through the ordinary quota, retained-process and commit-guard
+   path; the CPU workers then perform normal media validation and ingestion.
 4. Selects the upload's verified audio variant only when no canonical choice exists.
 5. Confirms owner-scoped playback resolution, then publishes `VAULT` availability and catalog sync
    events in the same library transaction.
@@ -49,5 +55,7 @@ WorkManager constraints. Actual time from file completion to playback also inclu
 verification; the app does not advertise a file as ready before that verification succeeds.
 
 Validation covers real PostgreSQL/filesystem publication, replay after each command, immutable-byte
-tampering, malformed receipt isolation, and fresh-arrival priority during backfill. Use the normal
-disposable PostgreSQL fixture for `server/tests/postgresql/test_acquisition_bridge.py`.
+tampering, malformed receipt isolation, fresh-arrival priority during backfill, zero fabricated
+user sessions, `LOCAL_BRIDGE`-only admissions, exact permit/execution cleanup and device revocation.
+Use the normal disposable PostgreSQL fixture for
+`server/tests/postgresql/test_acquisition_bridge.py`.

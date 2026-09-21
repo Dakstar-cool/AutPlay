@@ -1,5 +1,7 @@
 package app.autplay.data.security
 
+import app.autplay.application.accountrecovery.accountDeletionVetoes
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Base64
@@ -64,6 +66,11 @@ data class SessionCredentialEnvelope(
     val publicAccessPendingRegistrationId: String? = null,
     val publicAccessPendingCanonicalRequest: String? = null,
     val publicAccessPendingSuccessorRefreshToken: String? = null,
+    /** Independent encrypted rendezvous journal; stored only in a reserved pairing slot. */
+    val selfDevicePairingRole: String? = null,
+    val selfDevicePairingPending: String? = null,
+    val accountRecoveryRole: String? = null,
+    val accountRecoveryPending: String? = null,
 ) {
     init {
         require(accessToken.isNotBlank() && accessToken.length <= MAX_TOKEN_CHARS)
@@ -89,6 +96,22 @@ data class SessionCredentialEnvelope(
         publicAccessPendingRegistrationId?.let { require(java.util.UUID.fromString(it).toString() == it) }
         require(publicAccessPendingCanonicalRequest == null || publicAccessPendingCanonicalRequest.length in 2..32_768) { "Public access pending request is bounded." }
         require(publicAccessPendingSuccessorRefreshToken == null || publicAccessPendingSuccessorRefreshToken.length in 43..128) { "Public access pending successor is bounded." }
+        require((selfDevicePairingRole == null) == (selfDevicePairingPending == null))
+        require((accountRecoveryRole == null) == (accountRecoveryPending == null))
+        if (accountRecoveryRole != null) {
+            require(accountRecoveryRole in setOf("SOURCE", "RECIPIENT", "DELETION_SOURCE", "DELETION_RECIPIENT", "TRAINING_CONSENT"))
+            require(accountRecoveryPending!!.length in 2..65_536)
+            require(refreshPending && refreshToken == null && generation == 0L)
+            require(m5.all { it == null } && publicAccess.all { it == null })
+            require(selfDevicePairingRole == null && m5PendingRotationId == null && m5PendingExchangeId == null && m5PendingMaterializationRequest == null)
+        }
+        if (selfDevicePairingRole != null) {
+            require(selfDevicePairingRole in setOf("SOURCE", "RECIPIENT"))
+            require(selfDevicePairingPending!!.length in 2..65_536)
+            require(refreshPending && refreshToken == null && generation == 0L)
+            require(m5.all { it == null } && publicAccess.all { it == null })
+            require(m5PendingRotationId == null && m5PendingExchangeId == null && m5PendingMaterializationRequest == null)
+        }
     }
 
     private companion object {
@@ -124,6 +147,10 @@ object SessionCredentialEnvelopeCodec {
             publicAccessPendingRegistrationId = value["public_access_pending_registration_id"]?.jsonPrimitive?.content,
             publicAccessPendingCanonicalRequest = value["public_access_pending_canonical_request"]?.jsonPrimitive?.content,
             publicAccessPendingSuccessorRefreshToken = value["public_access_pending_successor_refresh_token"]?.jsonPrimitive?.content,
+            selfDevicePairingRole = value["self_device_pairing_role"]?.jsonPrimitive?.content,
+            selfDevicePairingPending = value["self_device_pairing_pending"]?.jsonPrimitive?.content,
+            accountRecoveryRole = value["account_recovery_role"]?.jsonPrimitive?.content,
+            accountRecoveryPending = value["account_recovery_pending"]?.jsonPrimitive?.content,
         )
     }
 
@@ -146,6 +173,10 @@ object SessionCredentialEnvelopeCodec {
         value.publicAccessPendingRegistrationId?.let { put("public_access_pending_registration_id", it) }
         value.publicAccessPendingCanonicalRequest?.let { put("public_access_pending_canonical_request", it) }
         value.publicAccessPendingSuccessorRefreshToken?.let { put("public_access_pending_successor_refresh_token", it) }
+        value.selfDevicePairingRole?.let { put("self_device_pairing_role", it) }
+        value.selfDevicePairingPending?.let { put("self_device_pairing_pending", it) }
+        value.accountRecoveryRole?.let { put("account_recovery_role", it) }
+        value.accountRecoveryPending?.let { put("account_recovery_pending", it) }
     }.toString().toByteArray(StandardCharsets.UTF_8)
 
     private fun JsonObject.requiredString(name: String): String =
@@ -156,7 +187,9 @@ object SessionCredentialEnvelopeCodec {
 suspend fun CredentialStore.readAccessToken(profileId: ServerProfileId): ByteArray? {
     val material = read(profileId) ?: return null
     return try {
-        SessionCredentialEnvelopeCodec.decode(material).accessToken.toByteArray(StandardCharsets.UTF_8)
+        val envelope = SessionCredentialEnvelopeCodec.decode(material)
+        if (accountDeletionVetoes(profileId, envelope.bindingCommitId)) null
+        else envelope.accessToken.toByteArray(StandardCharsets.UTF_8)
     } finally {
         material.fill(0)
     }

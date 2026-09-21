@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import INTERVAL, JSONB, TIMESTAMP
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
+from autplay.adapters.postgresql.resource_limits import lock_resource_admission
 from autplay.domain.jobs import (
     MAX_WORKER_ID_LENGTH,
     CancelRequestResult,
@@ -27,6 +28,7 @@ from autplay.domain.jobs import (
     JsonValue,
     LeaseFence,
     LeaseTransition,
+    ResourceWaitTransition,
     RetryPolicy,
     validate_job_document,
 )
@@ -135,6 +137,8 @@ _SET_JOB_STATE = text(
     """
     UPDATE jobs.job
     SET state = :state,
+        resource_waiting = false,
+        resource_wake_until = NULL,
         scheduled_at = CASE
             WHEN :state = 'RETRY_WAIT' THEN now() + :retry_delay
             ELSE scheduled_at
@@ -183,6 +187,8 @@ _CANCEL_PENDING_JOB = text(
     """
     UPDATE jobs.job
     SET state = 'CANCELLED',
+        resource_waiting = false,
+        resource_wake_until = NULL,
         cancel_requested_at = COALESCE(cancel_requested_at, now()),
         completed_at = now(),
         error_code = NULL,
@@ -367,7 +373,8 @@ class PostgresJobRepository:
                 error=None,
             )
             return LeaseTransition.CANCELLED
-        if fence.attempt_no >= policy.max_attempts:
+        retry_attempt = self._retry_attempt_no(fence)
+        if retry_attempt >= policy.max_attempts:
             exhausted = JobError(
                 "job.retry_exhausted",
                 {"last_error_code": error.code, "retry_exhausted": True},
@@ -386,11 +393,104 @@ class PostgresJobRepository:
                 state=JobState.RETRY_WAIT,
                 error=error,
                 retry_delay=max(
-                    policy.delay_for(fence.job_id, fence.attempt_no),
+                    policy.delay_for(fence.job_id, retry_attempt),
                     timedelta(seconds=_retry_after_seconds(error)),
                 ),
             )
         return LeaseTransition.APPLIED
+
+    def defer_for_resource(
+        self, fence: LeaseFence, operation_id: UUID, delay: timedelta
+    ) -> ResourceWaitTransition:
+        """Yield only a matching WAITING admission; a concurrent grant keeps the CPU claim."""
+        if not timedelta(seconds=1) <= delay <= timedelta(seconds=30):
+            raise ValueError("resource wait delay must be between one and 30 seconds")
+        lock_resource_admission(self._session)
+        job = (
+            self._session.execute(
+                text("""
+SELECT user_id, job_type, cancel_requested_at, lease_deadline FROM jobs.job
+WHERE job_id=:job_id AND state='RUNNING' AND lease_owner=:worker_id
+  AND attempt_count=:attempt_no
+FOR UPDATE
+            """),
+                _fence_params(fence),
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if job is None:
+            return ResourceWaitTransition.LOST_LEASE
+        now = self._session.scalar(text("SELECT clock_timestamp()"))
+        if not isinstance(now, datetime) or _mapping_datetime(job, "lease_deadline") <= now:
+            return ResourceWaitTransition.LOST_LEASE
+        if job["cancel_requested_at"] is not None:
+            self._finish(
+                fence,
+                outcome=JobAttemptOutcome.CANCELLED,
+                state=JobState.CANCELLED,
+                error=None,
+            )
+            return ResourceWaitTransition.CANCELLED
+        operation = (
+            self._session.execute(
+                text("""
+SELECT state, lease_until, claim_until, claimed_at FROM account.resource_admission
+WHERE operation_id=:operation_id AND user_id=:user_id AND job_id=:job_id
+  AND job_worker_id=:worker_id AND job_attempt=:attempt_no AND kind='TRANSFER'
+  AND ((resource_type='INTERNET_ACQUISITION' AND :job_type='music.internet.acquire')
+       OR (resource_type='DISCOVERY_ACQUISITION' AND :job_type='discovery.acquire'))
+FOR UPDATE
+            """),
+                {
+                    **_fence_params(fence),
+                    "operation_id": operation_id,
+                    "user_id": job["user_id"],
+                    "job_type": job["job_type"],
+                },
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if operation is None or operation["state"] not in {"ACTIVE", "WAITING", "EXPIRED"}:
+            raise JobPersistenceInvariantError("resource wait has no matching admission")
+        if operation["state"] == "EXPIRED":
+            return ResourceWaitTransition.RECHECK
+        if operation["state"] == "ACTIVE":
+            checked_at = self._session.scalar(text("SELECT clock_timestamp()"))
+            live = (
+                isinstance(checked_at, datetime)
+                and _mapping_datetime(operation, "lease_until") > checked_at
+                and (
+                    operation["claimed_at"] is not None
+                    or _mapping_datetime(operation, "claim_until") > checked_at
+                )
+            )
+            return ResourceWaitTransition.GRANTED if live else ResourceWaitTransition.RECHECK
+        self._finish(
+            fence,
+            outcome=JobAttemptOutcome.RESOURCE_WAIT,
+            state=JobState.RETRY_WAIT,
+            error=None,
+            retry_delay=delay,
+        )
+        self._session.execute(
+            text("""
+UPDATE jobs.job SET resource_wait_count=resource_wait_count+1, resource_waiting=true
+WHERE job_id=:job_id
+            """),
+            {"job_id": fence.job_id},
+        )
+        return ResourceWaitTransition.DEFERRED
+
+    def _retry_attempt_no(self, fence: LeaseFence) -> int:
+        waits = self._session.scalar(
+            text("SELECT resource_wait_count FROM jobs.job WHERE job_id=:job_id"),
+            {"job_id": fence.job_id},
+        )
+        if type(waits) is not int or not 0 <= waits < fence.attempt_no:
+            raise JobPersistenceInvariantError("invalid resource wait count")
+        return fence.attempt_no - waits
 
     def fail_terminal(self, fence: LeaseFence, error: JobError) -> LeaseTransition:
         """Close an attempt as terminal unless cancellation is already pending."""
@@ -480,6 +580,7 @@ class PostgresJobRepository:
         for row in rows:
             job_id = _mapping_uuid(row, "job_id")
             attempt_no = _mapping_int(row, "attempt_count")
+            retry_attempt = attempt_no - _mapping_int(row, "resource_wait_count")
             worker_id = _mapping_str(row, "lease_owner")
             fence = LeaseFence(job_id, worker_id, attempt_no)
             cancel_requested = row["cancel_requested_at"] is not None
@@ -493,7 +594,7 @@ class PostgresJobRepository:
                 error: JobError | None = None
             else:
                 state = (
-                    JobState.FAILED if attempt_no >= policy.max_attempts else JobState.RETRY_WAIT
+                    JobState.FAILED if retry_attempt >= policy.max_attempts else JobState.RETRY_WAIT
                 )
                 closed = self._try_close_attempt(
                     fence,
@@ -516,7 +617,7 @@ class PostgresJobRepository:
                 state=state,
                 error=error,
                 retry_delay=(
-                    policy.delay_for(job_id, attempt_no)
+                    policy.delay_for(job_id, retry_attempt)
                     if state is JobState.RETRY_WAIT
                     else timedelta(0)
                 ),
@@ -598,7 +699,7 @@ class PostgresJobRepository:
 def _claim_sql(supported_predicate: str) -> str:
     return f"""
     WITH candidate AS MATERIALIZED (
-        SELECT j.job_id
+        SELECT j.job_id, j.resource_waiting, (j.resource_wake_until IS NOT NULL) AS resource_ready
         FROM jobs.job AS j
         WHERE j.state IN ('QUEUED', 'RETRY_WAIT')
           AND j.scheduled_at <= now()
@@ -618,13 +719,17 @@ def _claim_sql(supported_predicate: str) -> str:
                      AND prerequisite.state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED'))
                 )
           )
-        ORDER BY j.priority ASC, j.scheduled_at ASC, j.created_at ASC, j.job_id ASC
+        ORDER BY (j.resource_wake_until IS NOT NULL) DESC, j.resource_waiting ASC,
+                 j.priority ASC, j.scheduled_at ASC,
+                 j.created_at ASC, j.job_id ASC
         FOR UPDATE OF j SKIP LOCKED
         LIMIT :limit
     ),
     claimed AS (
         UPDATE jobs.job AS j
         SET state = 'RUNNING',
+            resource_waiting = false,
+            resource_wake_until = NULL,
             lease_owner = :worker_id,
             lease_deadline = now() + :lease_interval,
             heartbeat_at = now(),
@@ -638,7 +743,9 @@ def _claim_sql(supported_predicate: str) -> str:
         RETURNING j.job_id, j.job_type, j.schema_version, j.user_id, j.priority,
                   j.payload, j.checkpoint, j.attempt_count, j.lease_owner,
                   j.lease_deadline, j.cancel_requested_at, j.scheduled_at,
-                  j.created_at
+                  j.created_at, j.resource_wait_count,
+                  candidate.resource_waiting AS was_resource_waiting,
+                  candidate.resource_ready AS was_resource_ready
     ),
     attempts AS (
         INSERT INTO jobs.job_attempt (job_id, attempt_no, worker_id, started_at)
@@ -651,14 +758,15 @@ def _claim_sql(supported_predicate: str) -> str:
     JOIN attempts
       ON attempts.job_id = claimed.job_id
      AND attempts.attempt_no = claimed.attempt_count
-    ORDER BY claimed.priority ASC, claimed.scheduled_at ASC,
+    ORDER BY claimed.was_resource_ready DESC, claimed.was_resource_waiting ASC,
+             claimed.priority ASC, claimed.scheduled_at ASC,
              claimed.created_at ASC, claimed.job_id ASC
     """
 
 
 def _lock_expired_sql(supported_predicate: str) -> str:
     return f"""
-    SELECT job_id, attempt_count, lease_owner, cancel_requested_at
+    SELECT job_id, attempt_count, lease_owner, cancel_requested_at, resource_wait_count
     FROM jobs.job
     WHERE state = 'RUNNING'
       AND lease_deadline <= now()
@@ -691,6 +799,7 @@ def _lease_from_row(row: RowMapping) -> JobLease:
         checkpoint=checkpoint,
         lease_deadline=_mapping_datetime(row, "lease_deadline"),
         cancel_requested_at=_mapping_optional_datetime(row, "cancel_requested_at"),
+        resource_wait_count=_mapping_int(row, "resource_wait_count"),
     )
 
 

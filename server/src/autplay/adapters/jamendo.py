@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from datetime import date
+from email.message import Message
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -233,6 +237,7 @@ class JamendoProvider:
         destination: Path,
         *,
         max_bytes: int,
+        preserve_partial: bool = False,
     ) -> int:
         if not candidate.acquisition_allowed or candidate.download_url is None:
             raise DiscoveryError("discovery_not_eligible")
@@ -246,33 +251,42 @@ class JamendoProvider:
             },
             method="GET",
         )
+        created = False
         try:
             self._wait_for_request_slot()
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
+                if response.status != 200:
+                    raise DiscoveryError("discovery_acquisition_failed")
                 content_type = response.headers.get_content_type().casefold()
-                content_length = response.headers.get("Content-Length")
-                if content_length is not None and int(content_length) > max_bytes:
-                    raise DiscoveryError("discovery_response_too_large")
+                declared = _declared_length(response.headers, max_bytes)
                 byte_count = 0
                 with destination.open("xb") as output:
-                    while chunk := response.read(min(1024 * 1024, max_bytes + 1 - byte_count)):
+                    created = True
+                    while chunk := response.read(min(32 * 1024, max_bytes + 1 - byte_count)):
                         byte_count += len(chunk)
                         if byte_count > max_bytes:
                             raise DiscoveryError("discovery_response_too_large")
                         output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if declared is not None and byte_count != declared:
+                    raise DiscoveryError("discovery_acquisition_failed")
+                if (
+                    byte_count < 1_024
+                    or content_type not in _AUDIO_TYPES
+                    or not _looks_like_mp3(destination)
+                ):
+                    raise DiscoveryError("discovery_content_invalid")
         except DiscoveryError:
-            destination.unlink(missing_ok=True)
+            if created and not preserve_partial:
+                with suppress(OSError):
+                    destination.unlink(missing_ok=True)
             raise
-        except HTTPError, URLError, OSError, ValueError:
-            destination.unlink(missing_ok=True)
+        except HTTPError, URLError, OSError, ValueError, HTTPException:
+            if created and not preserve_partial:
+                with suppress(OSError):
+                    destination.unlink(missing_ok=True)
             raise DiscoveryError("discovery_acquisition_failed") from None
-        if (
-            byte_count < 1_024
-            or content_type not in _AUDIO_TYPES
-            or not _looks_like_mp3(destination)
-        ):
-            destination.unlink(missing_ok=True)
-            raise DiscoveryError("discovery_content_invalid")
         return byte_count
 
     def _request_json(self, url: str, parameters: Mapping[str, str]) -> bytes:
@@ -288,13 +302,15 @@ class JamendoProvider:
         try:
             self._wait_for_request_slot()
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
-                content_length = response.headers.get("Content-Length")
-                if content_length is not None and int(content_length) > MAX_RESPONSE_BYTES:
-                    raise DiscoveryError("discovery_response_too_large")
+                if response.status != 200:
+                    raise DiscoveryError("discovery_adapter_unavailable")
+                declared = _declared_length(response.headers, MAX_RESPONSE_BYTES)
                 payload = bytes(response.read(MAX_RESPONSE_BYTES + 1))
+                if declared is not None and len(payload) != declared:
+                    raise DiscoveryError("discovery_adapter_unavailable")
         except DiscoveryError:
             raise
-        except HTTPError, URLError, OSError, ValueError:
+        except HTTPError, URLError, OSError, ValueError, HTTPException:
             raise DiscoveryError("discovery_adapter_unavailable") from None
         if len(payload) > MAX_RESPONSE_BYTES:
             raise DiscoveryError("discovery_response_too_large")
@@ -309,6 +325,24 @@ class JamendoProvider:
             if delay > 0:
                 self._sleeper(delay)
             self._last_request = self._monotonic_clock()
+
+
+def _declared_length(headers: Message, maximum: int) -> int | None:
+    lengths = headers.get_all("Content-Length", [])
+    transfers = headers.get_all("Transfer-Encoding", [])
+    if len(lengths) > 1 or len(transfers) > 1 or (lengths and transfers):
+        raise DiscoveryError("discovery_provider_response_invalid")
+    if transfers and transfers[0].strip().casefold() != "chunked":
+        raise DiscoveryError("discovery_provider_response_invalid")
+    if not lengths:
+        return None
+    raw = lengths[0].strip()
+    if re.fullmatch(r"[0-9]{1,20}", raw) is None:
+        raise DiscoveryError("discovery_provider_response_invalid")
+    length = int(raw)
+    if length > maximum:
+        raise DiscoveryError("discovery_response_too_large")
+    return length
 
 
 def _parse_candidates(payload: bytes, *, limit: int) -> tuple[DiscoveryCandidate, ...]:

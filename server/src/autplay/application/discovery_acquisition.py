@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -15,10 +16,22 @@ from autplay.adapters.postgresql.discovery_runtime import (
     BulkDiscoveryError,
     PostgresBulkDiscoveryRepository,
 )
+from autplay.application.controlled_discovery import (
+    DiscoveryAcquisitionRepository,
+    DiscoveryExecutor,
+    DiscoveryHandoffReceipt,
+)
 from autplay.application.job_worker import JobExecutionContext
 from autplay.application.manual_discovery import ManualDiscoveryService
+from autplay.application.resource_admission import ResourceAdmissionService
 from autplay.domain.discovery import AcquisitionAuthorizationReceipt, DiscoveryError
 from autplay.domain.jobs import JobLease, RetryableJobError, TerminalJobError
+from autplay.domain.resource_admission import (
+    AcquisitionClaim,
+    ActivationFence,
+    AdmissionState,
+    ResourceAdmissionError,
+)
 from autplay.domain.vault import (
     ImmutableObjectConflictError,
     OpaqueStorageKey,
@@ -35,9 +48,12 @@ _TERMINAL_DISCOVERY_ERRORS = frozenset(
         "automation_not_active",
         "candidate_not_selectable",
         "discovery_content_invalid",
+        "discovery_handoff_conflict",
         "discovery_not_eligible",
         "discovery_operation_conflict",
         "discovery_provider_response_invalid",
+        "discovery_response_too_large",
+        "discovery_staging_unavailable",
         "discovery_target_not_found",
         "identity_review_required",
         "policy_revision_stale",
@@ -88,6 +104,64 @@ class ManualDiscoveryBoundaryAuthorizer:
             boundary=boundary,
             checked_at=datetime.now(UTC),
         )
+
+
+class ControlledDiscoveryAcquisitionHandler:
+    """Retain one TRANSFER through bounded provider work and durable metadata handoff."""
+
+    def __init__(
+        self,
+        repository: DiscoveryAcquisitionRepository,
+        admissions: ResourceAdmissionService,
+        executor: DiscoveryExecutor,
+    ) -> None:
+        self._repository, self._admissions, self._executor = repository, admissions, executor
+
+    def __call__(self, context: JobExecutionContext, lease: JobLease) -> None:
+        try:
+            self._run(context, lease)
+        except SQLAlchemyError as error:
+            raise RetryableJobError("database_unavailable") from error
+
+    def _run(self, context: JobExecutionContext, lease: JobLease) -> None:
+        candidate_id = _candidate_id(lease)
+        owner = lease.user_id
+        if owner is None or context.fence != lease.fence:
+            raise TerminalJobError("discovery.invalid_job_payload")
+        try:
+            context.raise_if_cancelled()
+            target = self._repository.prepare(candidate_id, owner, lease.fence)
+            if isinstance(target, DiscoveryHandoffReceipt):
+                return
+            claim = AcquisitionClaim(
+                lease.fence, "DISCOVERY_ACQUISITION", target.acquisition_attempt_id
+            )
+            active: ActivationFence | None = None
+            for _ in range(8):
+                context.raise_if_cancelled()
+                status = self._admissions.acquire_worker(claim)
+                if status.operation.state == AdmissionState.ACTIVE:
+                    active = status.operation.fence
+                    break
+                context.defer_for_resource(claim.request.operation_id)
+            if active is None:
+                raise RetryableJobError("resource_service_unavailable")
+            result = self._executor.execute(claim, active, target)
+            context.raise_if_cancelled()
+            self._repository.handoff(
+                claim, target, result.execution_id, result.verified, result.evidence
+            )
+            with suppress(ResourceAdmissionError):
+                self._admissions.release(claim, active)
+        except (BulkDiscoveryError, DiscoveryError) as error:
+            terminal = error.code in _TERMINAL_DISCOVERY_ERRORS
+            self._repository.fail(candidate_id, owner, lease.fence, error.code, terminal=terminal)
+            if terminal:
+                raise TerminalJobError(error.code) from None
+            raise RetryableJobError(error.code) from None
+        except ResourceAdmissionError as error:
+            self._repository.fail(candidate_id, owner, lease.fence, error.code, terminal=False)
+            raise RetryableJobError(error.code) from None
 
 
 class DiscoveryAcquisitionHandler:
@@ -221,7 +295,7 @@ class DiscoveryAcquisitionHandler:
                 )
                 session.commit()
         except BulkDiscoveryError as error:
-            if error.code != "lease_fence_lost":
+            if error.code not in {"lease_fence_lost", "source_authorization_unavailable"}:
                 raise
 
 
@@ -274,6 +348,7 @@ def _candidate_id(lease: JobLease) -> UUID:
 
 
 __all__ = (
+    "ControlledDiscoveryAcquisitionHandler",
     "DiscoveryAcquisitionHandler",
     "ManualDiscoveryBoundaryAuthorizer",
     "StandardAnalysisHandler",

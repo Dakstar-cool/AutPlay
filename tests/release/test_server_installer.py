@@ -174,9 +174,18 @@ def test_release_overlay_covers_every_admin_local_server_process() -> None:
     overlay = (REPOSITORY_ROOT / "deploy" / "compose" / "compose.release.yaml").read_text(
         encoding="utf-8"
     )
-    for service in ("migrate", "api", "worker-cpu", "stream", "mobile-api", "admin-init"):
+    for service in (
+        "migrate",
+        "privacy-ledger-init",
+        "training-consent-ledger-init",
+        "api",
+        "worker-cpu",
+        "stream",
+        "mobile-api",
+        "admin-init",
+    ):
         assert f"  {service}:" in overlay
-    assert overlay.count('    image: "${AUTPLAY_SERVER_IMAGE:') == 6
+    assert overlay.count('    image: "${AUTPLAY_SERVER_IMAGE:') == 8
 
 
 def test_release_packager_emits_both_apks_and_the_server_installer() -> None:

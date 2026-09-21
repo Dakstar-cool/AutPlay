@@ -33,6 +33,7 @@ from autplay.domain.jobs import (
     RetryPolicy,
 )
 from autplay.ports.jobs import EnqueueJob, JobIdempotencyConflict
+from process_tree_support import process_tree_factory
 from psycopg import Connection
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -41,9 +42,11 @@ TEST_KEY = JobKey("p03.test", 1)
 LEASE = timedelta(minutes=5)
 
 
+@pytest.mark.usefixtures("internal_io_budget")
 def test_worker_cli_readiness_and_once_use_the_migrated_database(
     database_url: str, tmp_path: Path
 ) -> None:
+    process_tree_factory()
     environment = {
         key: value for key, value in os.environ.items() if not key.startswith("AUTPLAY_")
     }
@@ -54,6 +57,8 @@ def test_worker_cli_readiness_and_once_use_the_migrated_database(
             "AUTPLAY_VAULT_ROOT": str(tmp_path / "vault"),
         }
     )
+    if os.name != "nt":
+        environment["AUTPLAY_WORKER_CGROUP_ROOT"] = os.environ["AUTPLAY_TEST_CGROUP_ROOT"]
     readiness = subprocess.run(
         [sys.executable, "-m", "autplay.entrypoints.worker_cpu", "--check-readiness"],
         check=False,

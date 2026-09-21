@@ -6,16 +6,23 @@ import hashlib
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, Response
 
 from autplay.domain.auth import OwnedObjectNotFoundError, Principal
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.vault import ChunkIntegrityError, UploadLimitError, UploadOffsetError
+from autplay.entrypoints.resource_admission_http import resource_admission_error
+from autplay.entrypoints.resource_io_http import require_resource_io_headers
 from autplay.runtime.http import ApiError
+from autplay.runtime.resource_io_scope import resource_io_scope
+from autplay.runtime.vault_io import VaultIoCoordinator, VaultIoSession
 
 _MAX_OBJECT_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_CHUNK_BYTES = 1024 * 1024
@@ -38,6 +45,22 @@ class UploadView:
     offset: int
     expected_size: int
     state: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdmittedChunk:
+    principal: Principal
+    upload_id: UUID
+    offset: int
+    chunk_index: int
+    payload: bytes
+    payload_sha256: str
+
+
+@runtime_checkable
+class AdmittedUploadService(Protocol):
+    def append_admitted(self, command: AdmittedChunk, io: VaultIoSession) -> int:
+        """Own the whole upload UoW in the coordinator worker and commit with its guard."""
 
 
 class UploadService(Protocol):
@@ -74,10 +97,16 @@ class UploadService(Protocol):
 
 
 def create_vault_router(
-    service: UploadService, *, authenticated: Callable[[Request], None]
+    service: UploadService,
+    *,
+    authenticated: Callable[[Request], None],
+    coordinator: VaultIoCoordinator | None = None,
+    admitted: AdmittedUploadService | None = None,
 ) -> APIRouter:
     """Build bounded, no-store upload routes around one application service."""
 
+    if (coordinator is None) != (admitted is None):
+        raise ValueError("admitted uploads require both a coordinator and a transaction adapter")
     router = APIRouter(prefix="/vault", dependencies=[Depends(authenticated)])
 
     @router.post("/uploads", response_model=None)
@@ -127,23 +156,53 @@ def create_vault_router(
         chunk_hash = _single_header(request, "x-chunk-sha256", max_length=64)
         if _SHA256.fullmatch(chunk_hash) is None:
             raise _chunk_error()
-        payload = await request.body()
-        if len(payload) != content_length:
-            raise _chunk_error()
-        if hashlib.sha256(payload).hexdigest() != chunk_hash:
-            raise _chunk_error()
+        io: VaultIoSession | None = None
         try:
-            next_offset = service.append(
-                _principal(request),
-                upload_id,
-                offset=offset,
-                chunk_index=chunk_index,
-                payload=payload,
-                payload_sha256=chunk_hash,
+            if coordinator is None and isinstance(service, AdmittedUploadService):
+                raise ResourceAdmissionError("capability_missing")
+            if coordinator is not None:
+                resource = require_resource_io_headers(
+                    request, allowed=frozenset({"UPLOAD_INTENT"})
+                )
+                io = await coordinator.open(
+                    _principal(request),
+                    resource.fence,
+                    resource_type=resource.resource_type,
+                    target_id=upload_id,
+                    on_bind=resource_io_scope(request.scope).bind,
+                )
+                payload = await io.deadline.run(request.body)
+            else:
+                payload = await request.body()
+            if len(payload) != content_length or hashlib.sha256(payload).hexdigest() != chunk_hash:
+                raise _chunk_error()
+            if io is not None and admitted is not None:
+                command = AdmittedChunk(
+                    _principal(request), upload_id, offset, chunk_index, payload, chunk_hash
+                )
+                next_offset = await io.perform(lambda: admitted.append_admitted(command, io))
+            else:
+                next_offset = await run_in_threadpool(
+                    service.append,
+                    _principal(request),
+                    upload_id,
+                    offset=offset,
+                    chunk_index=chunk_index,
+                    payload=payload,
+                    payload_sha256=chunk_hash,
+                )
+            response = Response(
+                status_code=204, headers={**_no_store(), "Upload-Offset": str(next_offset)}
             )
-        except Exception as error:
-            _raise_upload_error(error)
-        return Response(status_code=204, headers={**_no_store(), "Upload-Offset": str(next_offset)})
+            return response
+        except BaseException as error:
+            if io is not None:
+                if isinstance(error, Exception):
+                    io.deadline.freeze_error()
+                io.finish()
+            if isinstance(error, Exception):
+                _raise_upload_error(error)
+            raise
 
     @router.post("/uploads/{upload_id}/complete", status_code=202, response_model=None)
     def complete_upload(upload_id: UUID, request: Request) -> JSONResponse:
@@ -220,6 +279,10 @@ def _require_content_type(request: Request, expected: str) -> None:
 
 
 def _raise_upload_error(error: Exception) -> None:
+    if isinstance(error, ResourceAdmissionError):
+        raise resource_admission_error(error.code) from None
+    if isinstance(error, SQLAlchemyError):
+        raise resource_admission_error("resource_service_unavailable") from None
     if (
         isinstance(error, UploadOffsetError)
         or getattr(error, "code", None) == "upload_offset_mismatch"

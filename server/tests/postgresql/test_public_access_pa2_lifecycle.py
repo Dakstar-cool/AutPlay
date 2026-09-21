@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Barrier, Lock
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.postgresql.models import (
+    DeviceRow,
     FriendshipRow,
     PresenceSettingsRow,
     UserSessionRow,
@@ -21,6 +22,70 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .test_public_access_pa2 import _owner_and_server, _request, _service
+
+
+@pytest.mark.parametrize("gate", ["device", "session", "expired"])
+def test_cached_owner_principal_cannot_mutate_or_replay_after_revocation(
+    database_url: str,
+    database_connection: Connection[object],
+    gate: Literal["device", "session", "expired"],
+) -> None:
+    service, engine = _service(database_url)
+    try:
+        owner, _ = _owner_and_server(database_connection)
+        create = {
+            "contract_version": "v1",
+            "schema_version": 1,
+            "operation_id": str(uuid4()),
+            "account_display_name": "Friend",
+            "expires_in_seconds": 600,
+        }
+        invitation, _ = service.create_invitation(owner, create)
+        response, _ = service.redeem(
+            _request(invitation, ec.generate_private_key(ec.SECP256R1())), "owner-revoke"
+        )
+        with Session(engine) as session, session.begin():
+            if gate == "device":
+                device = session.get(DeviceRow, owner.device_id)
+                assert device is not None
+                device.revoked_at = datetime.now(UTC)
+            else:
+                row = session.get(UserSessionRow, owner.session_id)
+                assert row is not None
+                if gate == "session":
+                    row.revoked_at = datetime.now(UTC)
+                else:
+                    row.issued_at = datetime.now(UTC) - timedelta(days=1)
+                    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        command = {
+            "contract_version": "v1",
+            "schema_version": 1,
+            "operation_id": str(uuid4()),
+            "reason_code": "ACCESS_ENDED",
+        }
+        actions = (
+            lambda: service.create_invitation(owner, create),
+            lambda: service.create_invitation(owner, {**create, "operation_id": str(uuid4())}),
+            lambda: service.cancel_invitation(
+                owner, UUID(str(invitation["invitation_id"])), command
+            ),
+            lambda: service.disable_account(owner, UUID(str(response["user_id"])), command),
+            lambda: service.list_invitations(owner, 10),
+            lambda: service.list_accounts(owner, 10),
+        )
+        for action in actions:
+            with pytest.raises(PublicAccessError, match="unauthorized"):
+                action()
+        with Session(engine) as session:
+            assert (
+                session.execute(
+                    text("SELECT status FROM account.user_account WHERE user_id=:id"),
+                    {"id": UUID(str(response["user_id"]))},
+                ).scalar_one()
+                == "ACTIVE"
+            )
+    finally:
+        engine.dispose()
 
 
 def test_account_cap_race_admits_only_one_last_slot(
@@ -154,7 +219,11 @@ def test_disable_revokes_session_and_exact_replay_returns_same_result(
         with Session(engine) as session:
             assert (
                 session.execute(
-                    text("SELECT count(*) FROM account.user_session WHERE revoked_at IS NULL")
+                    text(
+                        "SELECT count(*) FROM account.user_session "
+                        "WHERE revoked_at IS NULL AND user_id != :owner"
+                    ),
+                    {"owner": owner.user_id},
                 ).scalar_one()
                 == 0
             )

@@ -1,0 +1,16 @@
+<resources>
+    <string name="training_consent_title">Обучение общей модели</string>
+    <string name="training_consent_explanation">Разрешить использовать ваши действия при прослушивании и выбор рекомендаций для обучения общей модели рекомендаций. До разрешения участие выключено. Личная статистика и рекомендации доступны и при отказе или отзыве.</string>
+    <string name="training_consent_weights">Отзыв прекращает новое использование и удаляет связанные учебные примеры и незавершённые задания. Уже обученные общие модели продолжают работать до обычной замены; отзыв не удаляет прежний вклад из их весов.</string>
+    <string name="training_consent_allow">Разрешить</string>
+    <string name="training_consent_refuse">Отказаться</string>
+    <string name="training_consent_withdraw">Отозвать согласие</string>
+    <string name="training_consent_unknown">Участие выключено. Решение ещё не сохранено.</string>
+    <string name="training_consent_private">Участие выключено. Решение сохранено для этого аккаунта.</string>
+    <string name="training_consent_granted">Участие разрешено для этого аккаунта.</string>
+    <string name="training_consent_pending">Результат на сервере неизвестен. Повторите то же решение или отзовите согласие. Изменение ещё не подтверждено.</string>
+    <string name="training_consent_loading">Проверка решения аккаунта…</string>
+    <string name="training_consent_unavailable">Подключитесь к серверу с поддержкой согласия на общее обучение, чтобы проверить решение аккаунта.</string>
+    <string name="training_consent_refresh">Обновить / повторить</string>
+    <string name="training_consent_error">Не удалось подтвердить решение. Проверьте соединение и обновите.</string>
+</resources>

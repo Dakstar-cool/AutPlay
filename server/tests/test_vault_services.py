@@ -14,7 +14,6 @@ from autplay.application.vault_streaming import parse_single_range
 from autplay.application.vault_uploads import (
     UploadInfo,
     UploadRepository,
-    VaultCapacityError,
     VaultPrincipal,
     VaultUploadService,
 )
@@ -79,7 +78,7 @@ def test_vault_ingest_registration_is_exactly_version_one() -> None:
     assert handlers == {JobKey("vault.ingest", 1): handler}
 
 
-def test_low_disk_blocks_complete_and_worker_before_enqueue_or_claim() -> None:
+def test_complete_is_metadata_only_and_low_disk_blocks_worker_before_claim() -> None:
     upload_id = uuid4()
     principal = VaultPrincipal(uuid4(), uuid4())
     repository = _UploadRepository(
@@ -95,12 +94,9 @@ def test_low_disk_blocks_complete_and_worker_before_enqueue_or_claim() -> None:
     storage = _CapacityStorage(9)
     service = VaultUploadService(
         repository=cast(UploadRepository, repository),
-        storage=cast(VaultStorage, storage),
-        minimum_free_bytes=10,
     )
-    with pytest.raises(VaultCapacityError):
-        service.complete(principal, upload_id)
-    assert not repository.sealed
+    assert service.complete(principal, upload_id) == repository.info
+    assert repository.sealed
 
     handler = VaultIngestHandler(
         repository=cast(object, repository),  # type: ignore[arg-type]
@@ -221,8 +217,16 @@ class _Vault:
     def __init__(self, session: IngestSession) -> None:
         self._session = session
 
-    def start_ingest(self, upload_session_id: object, job_id: object) -> IngestSession:
-        del upload_session_id, job_id
+    def start_ingest(
+        self,
+        upload_session_id: object,
+        job_id: object,
+        *,
+        fence: object | None = None,
+        execution: object | None = None,
+    ) -> IngestSession:
+        del upload_session_id, job_id, fence
+        assert execution == self._session.execution
         return self._session
 
     def prepare_commit(
@@ -329,8 +333,10 @@ class _MissingRepository:
         self.session = session
         self.quarantine_code: str | None = None
 
-    def start_ingest(self, upload_session_id: object, job_id: object) -> IngestSession:
-        del upload_session_id, job_id
+    def start_ingest(
+        self, upload_session_id: object, job_id: object, *, fence: object | None = None
+    ) -> IngestSession:
+        del upload_session_id, job_id, fence
         return self.session
 
     def quarantine(self, session: IngestSession, code: str) -> None:
@@ -353,8 +359,10 @@ class _BoundaryRepository:
         self.finalize_count = 0
         self.quarantine_code: str | None = None
 
-    def start_ingest(self, upload_session_id: object, job_id: object) -> IngestSession:
-        del upload_session_id, job_id
+    def start_ingest(
+        self, upload_session_id: object, job_id: object, *, fence: object | None = None
+    ) -> IngestSession:
+        del upload_session_id, job_id, fence
         return self.session
 
     def prepare_commit(self, *_: object) -> str:

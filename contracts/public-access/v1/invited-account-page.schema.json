@@ -18,7 +18,7 @@
           "provisioning_invitation_id": {"type": "string", "format": "uuid"},
           "display_name": {"type": "string", "minLength": 1, "maxLength": 120},
           "role": {"const": "USER"},
-          "status": {"enum": ["ACTIVE", "DISABLED"]},
+          "status": {"enum": ["ACTIVE", "DISABLED", "DELETION_PENDING"]},
           "created_at": {"type": "string", "format": "date-time"},
           "disabled_at": {"type": ["string", "null"], "format": "date-time"}
         },

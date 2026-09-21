@@ -1,0 +1,82 @@
+{
+  "acquire-playback-request": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "operation_id": "10000000-0000-4000-8000-000000000001",
+    "resource_id": "10000000-0000-4000-8000-000000000002",
+    "kind": "PLAYBACK",
+    "resource_type": "PLAY_INSTANCE"
+  },
+  "acquire-transfer-request": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "operation_id": "10000000-0000-4000-8000-000000000001",
+    "resource_id": "10000000-0000-4000-8000-000000000002",
+    "kind": "TRANSFER",
+    "resource_type": "DOWNLOAD_INTENT",
+    "target_id": "10000000-0000-4000-8000-000000000004"
+  },
+  "renew-request": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "activation_id": "10000000-0000-4000-8000-000000000003",
+    "generation": 1
+  },
+  "release-request": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "activation_id": "10000000-0000-4000-8000-000000000003",
+    "generation": 1,
+    "reason": "COMPLETE"
+  },
+  "cancel-waiting-request": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "operation_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "reason": "CANCEL"
+  },
+  "attachments-request": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "activation_id": "10000000-0000-4000-8000-000000000003",
+    "generation": 1,
+    "expected_attachment_revision": 0,
+    "current_recording_id": "10000000-0000-4000-8000-000000000005",
+    "next_recording_id": null
+  },
+  "status-response": {
+    "contract_version": "v1",
+    "schema_version": 1,
+    "operation_id": "10000000-0000-4000-8000-000000000001",
+    "kind": "PLAYBACK",
+    "resource_type": "PLAY_INSTANCE",
+    "resource_id": "10000000-0000-4000-8000-000000000002",
+    "target_id": null,
+    "operation_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "state": "ACTIVE",
+    "activation_id": "10000000-0000-4000-8000-000000000003",
+    "generation": 1,
+    "waiting_until": "2026-09-16T12:00:45Z",
+    "claim_until": "2026-09-16T12:00:15Z",
+    "lease_until": "2026-09-16T12:00:30Z",
+    "attachment_revision": 0,
+    "current_recording_id": null,
+    "next_recording_id": null,
+    "account_limit": 2,
+    "device_limit": 1,
+    "server_limit": 8,
+    "account_usage": 1,
+    "device_usage": 1,
+    "server_usage": 1,
+    "waiting_reason": null,
+    "retry_after_seconds": 0
+  },
+  "error": {
+    "error": {
+      "code": "resource_budget_unconfigured",
+      "message": "Resource admission is unavailable.",
+      "retryable": true,
+      "request_id": "10000000-0000-4000-8000-000000000006"
+    }
+  }
+}

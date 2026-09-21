@@ -31,10 +31,12 @@ from autplay.runtime.web_security import (
     source_rate_key,
 )
 from autplay.web.presentation import (
+    NavigationItem,
     dashboard_context,
     jobs_context,
     navigation,
     page_context,
+    section_context,
     status_context,
 )
 from autplay.web.renderer import read_static_asset, resolve_locale
@@ -186,17 +188,19 @@ def create_admin_web_router(
     discovery_enabled: bool = False,
     discovery_automation_enabled: bool = False,
     device_admission: DeviceAdmissionWebHttp | None = None,
+    passkeys_enabled: bool = False,
 ) -> APIRouter:
     if len(source_secret) < 32:
         raise ValueError("admin Web source secret must be at least 32 bytes")
     cookies = WebCookieProfile.for_origin(origin)
     router = APIRouter(prefix="/admin")
 
-    def admin_navigation(surface: str) -> tuple[object, ...]:
+    def admin_navigation(surface: str) -> tuple[NavigationItem, ...]:
         return navigation(
             surface,
             discovery_enabled=discovery_enabled,
             discovery_automation_enabled=discovery_automation_enabled,
+            passkeys_enabled=passkeys_enabled,
         )
 
     def render(template: str, request: Request | None = None, **context: object) -> str:
@@ -211,6 +215,7 @@ def create_admin_web_router(
             "navigation": (),
             "flash": None,
             "development_mode": not cookies.secure,
+            "passkeys_enabled": passkeys_enabled,
             "language_url": f"{path}?lang={'ru' if locale == 'en' else 'en'}",
             **context,
         }
@@ -236,7 +241,24 @@ def create_admin_web_router(
 
     @router.get("/static/admin-v1.css")
     def static_css() -> Response:
-        asset_bytes, asset_digest = read_static_asset("admin-v1.css")
+        return stylesheet("admin-v1.css")
+
+    @router.get("/static/admin-v2.css")
+    def static_css_v2() -> Response:
+        return stylesheet("admin-v2.css")
+
+    @router.get("/static/admin-forms-v1.js")
+    def static_forms() -> Response:
+        payload, digest = read_static_asset("admin-forms-v1.js")
+        value = apply_admin_security_headers(
+            PlainTextResponse(payload, media_type="text/javascript")
+        )
+        value.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        value.headers["ETag"] = f'"sha256-{digest}"'
+        return value
+
+    def stylesheet(name: str) -> Response:
+        asset_bytes, asset_digest = read_static_asset(name)
         value = apply_admin_security_headers(PlainTextResponse(asset_bytes, media_type="text/css"))
         value.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         value.headers["ETag"] = f'"sha256-{asset_digest}"'
@@ -257,6 +279,7 @@ def create_admin_web_router(
         value = response(
             render(
                 "login.html",
+                request,
                 preauth_nonce=challenge.nonce.decode(),
                 challenge_id=str(challenge.challenge_id),
                 operation_id=str(challenge.login_operation_id),
@@ -742,7 +765,10 @@ def create_admin_web_router(
             request.query_params.get("lang"), request.headers.get("accept-language")
         )
         try:
-            if surface in {"vault", "recovery"}:
+            if surface in {"accounts", "music", "server"}:
+                context = section_context(surface, admin_navigation(surface))
+                template = "section.html"
+            elif surface in {"vault", "recovery"}:
                 context = status_context(views.status(actor, surface), surface, locale=locale)
                 template = "status.html"
             else:

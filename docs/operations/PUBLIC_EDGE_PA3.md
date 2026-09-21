@@ -55,6 +55,8 @@ The production overlay requires separate files for:
 - access-token signing HMAC and the distinct public-access source HMAC;
 - the distinct loopback Admin source and CSRF HMAC values;
 - the persistent P-256 server identity private key.
+- the independent deletion-ledger and training-consent-ledger encryption keys, each with a stable
+  non-secret key identifier.
 
 It also requires an operator ACME contact in `AUTPLAY_ACME_EMAIL`. The Android APK keystore is not
 a server secret and must never be copied to this host.
@@ -71,6 +73,10 @@ export AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE='/srv/autplay/secrets/pr
 export AUTPLAY_RUNTIME_ADMIN_SOURCE_SECRET_FILE='/srv/autplay/secrets/production/admin-source-hmac'
 export AUTPLAY_RUNTIME_ADMIN_CSRF_SECRET_FILE='/srv/autplay/secrets/production/admin-csrf-hmac'
 export AUTPLAY_RUNTIME_PROFILE_IDENTITY_KEY_FILE='/srv/autplay/secrets/production/server-identity.pem'
+export AUTPLAY_RUNTIME_PRIVACY_LEDGER_KEY_FILE='/srv/autplay/secrets/production/deletion-ledger-key'
+export AUTPLAY_RUNTIME_TRAINING_CONSENT_LEDGER_KEY_FILE='/srv/autplay/secrets/production/training-consent-ledger-key'
+export AUTPLAY_PRIVACY_LEDGER_KEY_ID='deletion-ledger-v1'
+export AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID='training-consent-ledger-v1'
 export AUTPLAY_ACME_EMAIL='<operator contact>'
 
 docker compose -p autplay-production \
@@ -100,6 +106,53 @@ docker run --rm --network none --read-only \
   caddy:2.11.4-alpine@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a \
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
+
+## First-start state gates
+
+Before the complete runtime can become healthy, create the database schema and both independent
+ledgers with the exact reviewed Compose model. These operations do not expose the public edge:
+
+```bash
+docker compose -p autplay-production \
+  -f compose.yaml -f compose.runtime.yaml -f compose.admin-local.yaml \
+  -f compose.public-edge.yaml -f compose.release.yaml \
+  --profile runtime up -d --wait postgres
+docker compose -p autplay-production \
+  -f compose.yaml -f compose.runtime.yaml -f compose.admin-local.yaml \
+  -f compose.public-edge.yaml -f compose.release.yaml \
+  --profile runtime run --rm migrate
+docker compose -p autplay-production \
+  -f compose.yaml -f compose.runtime.yaml -f compose.admin-local.yaml \
+  -f compose.public-edge.yaml -f compose.release.yaml \
+  --profile runtime run --rm --no-deps privacy-ledger-init
+docker compose -p autplay-production \
+  -f compose.yaml -f compose.runtime.yaml -f compose.admin-local.yaml \
+  -f compose.public-edge.yaml -f compose.release.yaml \
+  --profile runtime run --rm --no-deps training-consent-ledger-init
+docker compose -p autplay-production \
+  -f compose.yaml -f compose.runtime.yaml -f compose.admin-local.yaml \
+  -f compose.public-edge.yaml -f compose.release.yaml \
+  --profile runtime up -d --wait mobile-api admin-init
+```
+
+The discovery call made by `admin-init` persists or verifies the identity derived from the P-256
+key. The worker intentionally remains unavailable while either measured policy is unconfigured.
+Collect the worst permitted joint workload on this exact server, review resource-report v1 and
+joint internal-I/O report v3, then run the two local operator commands using read-only report-file
+mounts. Use `autplay-admin --help` for the complete arguments and follow
+[`AutPlay_Resource_Measurement_Report_v1.md`](../design/AutPlay_Resource_Measurement_Report_v1.md).
+Record the exact report hashes, environment hash, operation UUIDs, policy revisions and returned
+receipts. Synthetic fixture limits are invalid deployment evidence.
+
+The worker's PID 1 briefly mounts a private cgroup2 hierarchy using only the Compose-declared
+bootstrap capabilities, delegates one subtree to UID/GID 999, and then drops supplementary groups,
+GID, UID and every effective capability before executing worker code. Docker's generated
+`docker-default` AppArmor profile blocks the required cgroup2 mount on Ubuntu even with the narrow
+capability set, so this one service uses `apparmor=unconfined`. Seccomp, read-only rootfs,
+`no-new-privileges`, the private cgroup namespace and all other container limits remain active.
+Readiness verifies the final non-root identity, zero effective capabilities and private cgroup
+boundary. Keep `cgroup: private`, both security options, the explicit capability list and the
+worker command together when reviewing or packaging the Compose files.
 
 ## Network and certificate activation gate
 

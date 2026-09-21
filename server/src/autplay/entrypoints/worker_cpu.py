@@ -3,41 +3,35 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import signal
 import sys
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from time import monotonic
+from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.jamendo import JamendoProvider
-from autplay.adapters.media.tools import (
-    ChromaprintTool,
-    FfmpegDecodeValidator,
-    FfprobeInspector,
-    ValidatedMediaInspector,
-)
+from autplay.adapters.postgresql.controlled_discovery import PostgresControlledDiscoveryRepository
 from autplay.adapters.postgresql.discovery_automation_runtime import (
     SqlAlchemyDiscoveryAutomationRepository,
 )
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
-from autplay.adapters.postgresql.vault_uow import (
-    SqlAlchemyVaultUnitOfWorkFactory,
-    TransactionalIngestRepository,
-)
 from autplay.adapters.postgresql.web_admin import SqlAlchemyWebAdminRepository
 from autplay.adapters.system import Uuid7Generator
+from autplay.application.account_recovery import cleanup_expired_recovery_operations
 from autplay.application.bulk_discovery import BulkDiscoveryService
 from autplay.application.discovery_acquisition import (
-    DiscoveryAcquisitionHandler,
+    ControlledDiscoveryAcquisitionHandler,
     ManualDiscoveryBoundaryAuthorizer,
     StandardAnalysisHandler,
 )
@@ -60,16 +54,55 @@ from autplay.application.profile_pairing import (
 )
 from autplay.application.public_access import cleanup_expired_public_access
 from autplay.application.social import SocialService
-from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
+from autplay.domain.privacy_deletion import DeletionEvidenceError
+from autplay.domain.resource_admission import ResourceAdmissionError
+from autplay.domain.training_consent import TrainingConsentEvidenceError
 from autplay.domain.vault import VaultLimits
+from autplay.entrypoints.ingest_composition import IngestWorkerRuntime
+from autplay.entrypoints.resource_composition import ResourceIoRuntime
 from autplay.ports.ids import IdGenerator
 from autplay.ports.transactions import JobUnitOfWorkFactory
+from autplay.runtime.discovery_io import DiscoveryIoExecutor
 from autplay.runtime.logging import configure_json_logging
 from autplay.runtime.settings import SettingsLoadError, load_worker_settings
 
 SERVICE_NAME = "autplay-worker-cpu"
 _LOGGER = logging.getLogger("autplay.worker_cpu")
+
+
+@contextmanager
+def worker_stop_scope(
+    stop: threading.Event,
+    on_stop: Callable[[], None],
+    *,
+    join_timeout: Callable[[], float] = lambda: 1,
+) -> Iterator[None]:
+    """Observe signals while the main thread is inside any retained byte operation."""
+    previous: dict[signal.Signals, signal._HANDLER] = {}
+
+    def request_stop(signum: int, frame: object) -> None:
+        del signum, frame
+        stop.set()
+
+    def observe() -> None:
+        stop.wait()
+        on_stop()
+
+    observer = threading.Thread(target=observe, name="cpu-worker-stop", daemon=True)
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_stop)
+    try:
+        observer.start()
+        yield
+    finally:
+        stop.set()
+        if observer.ident is not None:
+            observer.join(timeout=min(1, join_timeout()))
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def build_cpu_worker(
@@ -91,7 +124,7 @@ def build_cpu_worker(
     )
 
 
-def vault_ingest_handlers(handler: VaultIngestHandler) -> Mapping[JobKey, JobHandler]:
+def vault_ingest_handlers(handler: JobHandler) -> Mapping[JobKey, JobHandler]:
     """Return the single P06 CPU-only worker registration at priority three.
 
     Priority is persisted when the upload completion enqueues ``vault.ingest``;
@@ -107,7 +140,7 @@ def import_handlers(handler: ImportJobHandler) -> Mapping[JobKey, JobHandler]:
     return {JobKey("library.import", 1): handler}
 
 
-def discovery_handlers(handler: DiscoveryAcquisitionHandler) -> Mapping[JobKey, JobHandler]:
+def discovery_handlers(handler: JobHandler) -> Mapping[JobKey, JobHandler]:
     """Return the disabled-by-default manual A1B acquisition registration."""
 
     return {JobKey("discovery.acquire", 1): handler}
@@ -133,6 +166,8 @@ def run_cpu_worker(
     web_admin_cleanup: Callable[[], int] | None = None,
     discovery_cleanup: Callable[[], int] | None = None,
     discovery_dispatch: Callable[[], int] | None = None,
+    ingest_cleanup: Callable[[], int] | None = None,
+    account_purge: Callable[[], int] | None = None,
     cleanup_interval: timedelta = timedelta(minutes=5),
     discovery_dispatch_interval: timedelta = timedelta(minutes=5),
 ) -> None:
@@ -159,6 +194,11 @@ def run_cpu_worker(
         while not process_stop.is_set():
             current = monotonic()
             if current >= next_cleanup_at:
+                if account_purge is not None:
+                    try:
+                        account_purge()
+                    except DeletionEvidenceError, SQLAlchemyError:
+                        _LOGGER.error("account_purge_unavailable")
                 if profile_receipt_cleanup is not None:
                     try:
                         profile_receipt_cleanup()
@@ -182,6 +222,8 @@ def run_cpu_worker(
                     except SQLAlchemyError:
                         _LOGGER.exception("discovery_dispatch_failed")
                 next_discovery_dispatch_at = current + discovery_dispatch_interval.total_seconds()
+            if ingest_cleanup is not None:
+                ingest_cleanup()
             tick = worker.run_once()
             if tick.outcome.value == "IDLE":
                 process_stop.wait(worker.idle_poll_interval.total_seconds())
@@ -224,7 +266,20 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
     configure_json_logging(service=SERVICE_NAME, level=runtime_settings.log_level)
     engine = create_runtime_engine(runtime_settings)
+    ingest_runtime: IngestWorkerRuntime | None = None
+    provider_runtime: ResourceIoRuntime | None = None
+    process_stop = threading.Event()
+    result = 0
+    pending: tuple[UUID, ...] = ()
+    stop_scope = ExitStack()
     try:
+        from autplay.entrypoints.privacy_deletion import (
+            build_privacy_deletion_service,
+            enforce_privacy_restore_guard,
+        )
+
+        enforce_privacy_restore_guard(runtime_settings, engine)
+        privacy_deletion = build_privacy_deletion_service(runtime_settings, engine)
         readiness = PostgreSQLReadinessProbe(engine).check()
         if not readiness.ready:
             sys.stderr.write(
@@ -245,19 +300,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
             max_chunk_bytes=runtime_settings.vault_max_chunk_bytes,
             io_block_bytes=runtime_settings.vault_stream_block_bytes,
         )
-        vault_storage = FilesystemVaultStorage(runtime_settings.vault_root, limits=vault_limits)
-        inspector = ValidatedMediaInspector(
-            FfmpegDecodeValidator(
-                "ffmpeg",
-                timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
-                max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
-            ),
-            FfprobeInspector(
-                "ffprobe",
-                timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
-                max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
-            ),
-        )
         discovery: ManualDiscoveryService | None = None
         release_provider: JamendoProvider | None = None
         if runtime_settings.jamendo_enabled:
@@ -277,16 +319,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     runtime_settings.jamendo_minimum_request_interval_seconds
                 ),
             )
-        ingest = VaultIngestHandler(
-            repository=TransactionalIngestRepository(SqlAlchemyVaultUnitOfWorkFactory(sessions)),
-            storage=vault_storage,
-            media=inspector,
-            fingerprints=ChromaprintTool(
-                "fpcalc",
-                algorithm_version="1.6.1",
-                timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
-                max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
-            ),
+        ingest_runtime = IngestWorkerRuntime(
+            runtime_settings,
+            sessions,
+            on_drained=engine.dispose,
+            stop_requested=process_stop.is_set,
             source_authorizer=(
                 ManualDiscoveryBoundaryAuthorizer(
                     discovery,
@@ -296,20 +333,32 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 if discovery is not None
                 else None
             ),
-            minimum_free_bytes=runtime_settings.vault_low_disk_bytes,
         )
-        handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest))
+        handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest_runtime.handler))
         handlers.update(import_handlers(ImportJobHandler(sessions)))
         handlers.update(standard_analysis_handlers(StandardAnalysisHandler(sessions)))
         if discovery is not None:
+            client_id = runtime_settings.jamendo_client_id
+            assert client_id is not None
+            provider_runtime = ResourceIoRuntime(runtime_settings, maximum=1)
+            provider_runtime.start()
             handlers.update(
                 discovery_handlers(
-                    DiscoveryAcquisitionHandler(
-                        sessions,
-                        discovery=discovery,
-                        storage=vault_storage,
-                        limits=vault_limits,
-                        automatic_enabled=lambda: runtime_settings.discovery_automation_enabled,
+                    ControlledDiscoveryAcquisitionHandler(
+                        PostgresControlledDiscoveryRepository(
+                            sessions,
+                            limits=vault_limits,
+                            automatic_enabled=lambda: runtime_settings.discovery_automation_enabled,
+                        ),
+                        provider_runtime.service,
+                        DiscoveryIoExecutor(
+                            provider_runtime.coordinator,
+                            root=runtime_settings.vault_root,
+                            limits=vault_limits,
+                            tree_factory=ingest_runtime.tree_factory,
+                            client_id=client_id.get_secret_value(),
+                            max_download_bytes=runtime_settings.jamendo_max_download_bytes,
+                        ),
                     )
                 )
             )
@@ -348,6 +397,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             def cleanup() -> int:
                 return (
                     cleanup_expired_pairing_receipts(sessions, limit=10_000)
+                    + cleanup_expired_recovery_operations(sessions, limit=10_000)
                     + cleanup_expired_device_admissions(sessions, limit=10_000)
                     + cleanup_expired_public_access(sessions, limit=10_000)
                 )
@@ -375,19 +425,47 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     return 0
                 return automation.dispatch_due(now=datetime.now(UTC), limit=20)
 
-            if namespace.once:
+            def stop_bytes() -> None:
+                assert ingest_runtime is not None
+                ingest_runtime.request_stop()
+                if provider_runtime is not None:
+                    provider_runtime.coordinator.request_stop()
+
+            stop_scope.enter_context(
+                worker_stop_scope(
+                    process_stop,
+                    stop_bytes,
+                    join_timeout=lambda: max(0, deadline - monotonic()),
+                )
+            )
+            if namespace.once and not process_stop.is_set():
                 cleanup()
                 web_cleanup()
                 discovery_cleanup()
                 discovery_dispatch()
-                worker.run_once()
+                ingest_runtime.drain_cleanup()
+                if not process_stop.is_set():
+                    worker.run_once()
+                if not process_stop.is_set():
+                    ingest_runtime.drain_cleanup()
+                if (
+                    not process_stop.is_set()
+                    and privacy_deletion is not None
+                    and runtime_settings.account_purge_enabled
+                ):
+                    privacy_deletion.run_due()
             else:
                 run_cpu_worker(
                     worker,
+                    process_stop,
                     profile_receipt_cleanup=cleanup,
                     web_admin_cleanup=web_cleanup,
                     discovery_cleanup=discovery_cleanup,
                     discovery_dispatch=discovery_dispatch,
+                    ingest_cleanup=ingest_runtime.drain_cleanup,
+                    account_purge=privacy_deletion.run_due
+                    if privacy_deletion is not None and runtime_settings.account_purge_enabled
+                    else None,
                     cleanup_interval=timedelta(
                         seconds=runtime_settings.profile_receipt_cleanup_interval_seconds
                     ),
@@ -398,17 +476,45 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 exc_info=(type(error), error, error.__traceback__),
                 extra={"error_code": "database_unavailable"},
             )
-            return 3
+            result = 3
         except Exception as error:
             _LOGGER.error(
                 "worker_runtime_failure",
                 exc_info=(type(error), error, error.__traceback__),
                 extra={"error_code": "worker_runtime_failure"},
             )
-            return 1
+            result = 1
+    except (DeletionEvidenceError, TrainingConsentEvidenceError) as privacy_error:
+        sys.stderr.write(
+            json.dumps(
+                {"event": str(privacy_error), "service": SERVICE_NAME},
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        result = 3
+    except ResourceAdmissionError as error:
+        sys.stderr.write(
+            json.dumps({"event": error.code, "service": SERVICE_NAME}, separators=(",", ":")) + "\n"
+        )
+        result = 3
     finally:
-        engine.dispose()
-    return 0
+        deadline = monotonic() + 5
+        process_stop.set()
+        try:
+            if provider_runtime is not None:
+                pending += asyncio.run(
+                    provider_runtime.shutdown(timeout=max(0, deadline - monotonic()))
+                )
+            if ingest_runtime is not None:
+                pending += ingest_runtime.shutdown(timeout=max(0, deadline - monotonic()))
+            else:
+                engine.dispose()
+        finally:
+            stop_scope.close()
+        if pending:
+            _LOGGER.error("worker_processes_unconfirmed", extra={"pending_count": len(pending)})
+    return 4 if pending else result
 
 
 if __name__ == "__main__":

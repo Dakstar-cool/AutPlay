@@ -1,5 +1,7 @@
 package app.autplay.data.security
 
+import app.autplay.application.accountrecovery.accountDeletionVetoes
+
 import app.autplay.domain.ServerProfileId
 import app.autplay.data.network.withAutPlayRedirectPolicy
 import app.autplay.data.network.readCancellable
@@ -163,7 +165,9 @@ class RefreshingSessionCredentials(
     private suspend fun readEnvelope(profileId: ServerProfileId): SessionCredentialEnvelope? {
         val material = credentials.read(profileId) ?: return null
         return try {
-            SessionCredentialEnvelopeCodec.decode(material)
+            val envelope = SessionCredentialEnvelopeCodec.decode(material)
+            if (credentials.accountDeletionVetoes(profileId, envelope.bindingCommitId)) throw SessionRequiredException()
+            envelope
         } finally {
             material.fill(0)
         }

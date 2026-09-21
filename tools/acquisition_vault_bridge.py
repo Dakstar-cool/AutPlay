@@ -8,6 +8,7 @@ their identifiers. Run one instance with a read-only music mount and the normal 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import math
@@ -139,7 +140,9 @@ class Backend:
 
     def __init__(self, owner: UUID, *, provision: bool = False) -> None:
         from autplay.application.imports import ImportService
+        from autplay.domain.resource_admission import LocalBridgeClaim
         from autplay.entrypoints.composition import build_vault_http_service
+        from autplay.entrypoints.resource_composition import ResourceIoRuntime
         from autplay.runtime.settings import load_api_settings
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
@@ -157,6 +160,15 @@ class Backend:
         self.imports = ImportService(self.sessions)
         self.vault = build_vault_http_service(settings, self.engine)
         self.principal = self.authorize(provision=provision)
+        self.bridge = LocalBridgeClaim(self.owner, self.device)
+        self.resource = ResourceIoRuntime(settings, maximum=16)
+        self.resource.start()
+
+    def close(self) -> None:
+        pending = asyncio.run(self.resource.shutdown())
+        if pending:
+            raise ReceiptError("resource_execution_unconfirmed")
+        self.engine.dispose()
 
     def authorize(self, *, provision: bool = False) -> Any:
         from autplay.adapters.postgresql.models import AuditEventRow, DeviceRow, UserAccountRow
@@ -272,13 +284,13 @@ class Backend:
                     payload = handle.read(1024 * 1024)
                     if not payload:
                         break
-                    offset = self.vault.append(
-                        self.principal,
-                        upload_id,
-                        offset=offset,
-                        chunk_index=offset // (1024 * 1024),
-                        payload=payload,
-                        payload_sha256=hashlib.sha256(payload).hexdigest(),
+                    offset = asyncio.run(
+                        self._append_chunk(
+                            upload_id,
+                            offset=offset,
+                            chunk_index=offset // (1024 * 1024),
+                            payload=payload,
+                        )
                     )
             if offset == receipt.byte_size:
                 self.vault.complete(self.principal, upload_id)
@@ -368,6 +380,59 @@ class Backend:
             "variant_id": str(variant),
             "published_at": time.time(),
         }
+
+    async def _append_chunk(
+        self,
+        upload_id: UUID,
+        *,
+        offset: int,
+        chunk_index: int,
+        payload: bytes,
+    ) -> int:
+        from autplay.domain.resource_admission import (
+            AdmissionState,
+            ResourceAdmissionError,
+            ResourceKind,
+            ResourceRequest,
+        )
+        from autplay.entrypoints.vault_http import AdmittedChunk
+
+        operation_id = uuid5(
+            NAMESPACE_URL,
+            f"autplay:acquisition-bridge-upload:v1:{upload_id}:{chunk_index}",
+        )
+        request = ResourceRequest(
+            operation_id,
+            ResourceKind.TRANSFER,
+            "UPLOAD_INTENT",
+            upload_id,
+            upload_id,
+        )
+        status = self.resource.service.acquire_bridge(self.bridge, request)
+        if status.operation.state != AdmissionState.ACTIVE or status.operation.fence is None:
+            raise ResourceAdmissionError("resource_execution_busy")
+        fence = status.operation.fence
+        io = await self.resource.coordinator.open_bridge(
+            self.bridge,
+            fence,
+            target_id=upload_id,
+        )
+        try:
+            digest = hashlib.sha256(payload).hexdigest()
+            command = AdmittedChunk(
+                self.principal,
+                upload_id,
+                offset,
+                chunk_index,
+                payload,
+                digest,
+            )
+            return await io.perform(lambda: self.vault.append_admitted(command, io))
+        finally:
+            try:
+                await io.close()
+            finally:
+                self.resource.service.release(self.bridge, fence)
 
 
 def select_work(receipts: dict[str, Receipt], checkpoints: dict[str, Any], limit: int) -> list[str]:
@@ -539,6 +604,7 @@ def main() -> int:
         elif not stopping:
             time.sleep(0.25)
     executor.shutdown(wait=True)
+    backend.close()
     return 0
 
 

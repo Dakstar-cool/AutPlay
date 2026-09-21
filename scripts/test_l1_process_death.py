@@ -1,4 +1,4 @@
-"""Run the two real process-death stages on a disposable Android emulator."""
+"""Run two real process-death stages on an emulator or an isolated physical QA app."""
 
 from __future__ import annotations
 
@@ -12,6 +12,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_CLASS = "app.autplay.playback.PlaybackServiceProcessStageTest"
+PRODUCTION_APPLICATION_ID = "app.autplay"
+QA_APPLICATION_ID = "app.autplay.qa"
+
+
+def _serial_sha256(serial: str) -> str:
+    return hashlib.sha256(serial.encode("utf-8")).hexdigest()
+
+
+def _require_safe_target(*, is_emulator: bool, qa_side_by_side: bool) -> None:
+    if not is_emulator and not qa_side_by_side:
+        raise RuntimeError("Physical devices require the isolated --qa-side-by-side package")
+
+
+def _find_aapt(android_sdk: Path) -> Path:
+    executable = "aapt.exe" if os.name == "nt" else "aapt"
+    candidates = sorted((android_sdk / "build-tools").glob(f"*/{executable}"))
+    if not candidates:
+        raise RuntimeError("Android aapt is unavailable")
+    return candidates[-1]
+
+
+def _assert_apk_package(aapt: Path, apk: Path, expected: str) -> None:
+    result = subprocess.run(
+        [str(aapt), "dump", "badging", str(apk)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    if f"package: name='{expected}' " not in first_line:
+        raise RuntimeError(f"APK identity mismatch for required package {expected}")
 
 
 def main() -> None:
@@ -23,7 +55,9 @@ def main() -> None:
     sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     if not sdk:
         parser.error("ANDROID_HOME or ANDROID_SDK_ROOT is required")
-    adb = str(Path(sdk) / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb"))
+    android_sdk = Path(sdk)
+    adb = str(android_sdk / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb"))
+    aapt = _find_aapt(android_sdk)
 
     def command(*parts: str, timeout: int = 30, check: bool = True) -> str:
         result = subprocess.run(
@@ -37,21 +71,35 @@ def main() -> None:
         )
         return result.stdout + result.stderr
 
-    if command("shell", "getprop", "ro.kernel.qemu").strip() != "1":
-        parser.error("This fixture resets its test database and requires a disposable emulator")
+    is_emulator = command("shell", "getprop", "ro.kernel.qemu").strip() == "1"
+    try:
+        _require_safe_target(is_emulator=is_emulator, qa_side_by_side=args.qa_side_by_side)
+    except RuntimeError as error:
+        parser.error(str(error))
     args.output.mkdir(parents=True, exist_ok=True)
-    package = "app.autplay.qa" if args.qa_side_by_side else "app.autplay"
+    package = QA_APPLICATION_ID if args.qa_side_by_side else PRODUCTION_APPLICATION_ID
     runner = f"{package}.test/androidx.test.runner.AndroidJUnitRunner"
     stages = [
         "stage1_seedServiceAndWaitForPeriodicCheckpoint",
         "stage2_verifyServiceRestoresPersistedQueueAfterFreshConnection",
     ]
-    receipt: dict[str, object] = {"serial": args.serial, "stages": [], "status": "RUNNING"}
+    receipt: dict[str, object] = {
+        "schema_version": 1,
+        "device_serial_sha256": _serial_sha256(args.serial),
+        "execution_target": "emulator" if is_emulator else "physical_qa_side_by_side",
+        "application_id": package,
+        "stages": [],
+        "status": "RUNNING",
+    }
     try:
         artifacts = [
             ROOT / "apps/android/build/outputs/apk/debug/android-debug.apk",
             ROOT / "apps/android/build/outputs/apk/androidTest/debug/android-debug-androidTest.apk",
         ]
+        expected_packages = [package, f"{package}.test"]
+        for apk, expected_package in zip(artifacts, expected_packages, strict=True):
+            _assert_apk_package(aapt, apk, expected_package)
+        receipt["package_identities_verified"] = True
         receipt["apk_sha256"] = {
             apk.name: hashlib.sha256(apk.read_bytes()).hexdigest() for apk in artifacts
         }

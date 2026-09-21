@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
 from autplay.domain.auth import AccountRole, OwnedObjectNotFoundError, Principal
 from autplay.domain.vault import UploadOffsetError
 from autplay.entrypoints.api import create_app
-from autplay.entrypoints.vault_http import UploadView
+from autplay.entrypoints.vault_http import AdmittedChunk, UploadView
 from autplay.runtime.settings import ApiSettings
+from autplay.runtime.vault_io import VaultIoSession
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
@@ -83,6 +85,36 @@ def _client(uploads: Uploads) -> TestClient:
 
 def _headers() -> dict[str, str]:
     return {"Authorization": "Bearer good"}
+
+
+def test_admitted_adapter_without_coordinator_rejects_before_receiving_body() -> None:
+    class AdmittedUploads(Uploads):
+        def append_admitted(self, command: AdmittedChunk, io: VaultIoSession) -> int:
+            raise AssertionError("missing coordinator reached admitted write")
+
+    view = UploadView(uuid4(), 0, 3, "OPEN")
+    received: list[bool] = []
+
+    def body() -> Iterator[bytes]:
+        received.append(True)
+        yield b"abc"
+
+    with _client(AdmittedUploads(view)) as client:
+        response = client.patch(
+            f"/api/v1/vault/uploads/{view.upload_id}",
+            headers={
+                **_headers(),
+                "Content-Type": "application/offset+octet-stream",
+                "Content-Length": "3",
+                "Upload-Offset": "0",
+                "Upload-Chunk-Index": "0",
+                "X-Chunk-Sha256": CHUNK_SHA256,
+            },
+            content=body(),
+        )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "capability_missing"
+    assert not received
 
 
 def test_create_new_replay_and_conflict_envelopes_are_no_store() -> None:

@@ -12,7 +12,7 @@
     {"path": "contracts/public-access/v1/account-registration-request.schema.json", "sha256": "0741d6c3c7e01f42aee26966b04485ff748f3b5547497937a38a5c251bc1d022"},
     {"path": "contracts/public-access/v1/account-registration-response.schema.json", "sha256": "c0a5e37cc77ca800e55002a3ee21d33cd9ebbcfd5c4a7d62449889a4057ac5cf"},
     {"path": "contracts/public-access/v1/error.schema.json", "sha256": "b1bf0573306369aaa3a95ea831822c9decca77e6d9f7e6f1b38d931b18c7ffbc"},
-    {"path": "contracts/public-access/v1/invited-account-page.schema.json", "sha256": "3cee07fee12a891712e29c7e928d2cc2718747abb38e01d064237312b2b0a70b"},
+    {"path": "contracts/public-access/v1/invited-account-page.schema.json", "sha256": "b430ad7cc29ab4caa830e66c7fe0aedd9bc50d7975ad8a76804f7d6420b4c7f6"},
     {"path": "tests/fixtures/public-access/v1/hash-vectors.json", "sha256": "2d99d98cf3ffef2e9fe6da5352eabfd7d95dd3472ae8275c5b826c2f1e3a6753"},
     {"path": "tests/fixtures/public-access/v1/invalid-cases.json", "sha256": "cf628c7e733d77b2768374a895f4049ba1b33f5b9e845128adf52328119bdb34"},
     {"path": "tests/fixtures/public-access/v1/scenario-vectors.json", "sha256": "25869a2c9641e80faf8ecc250f82c7004977cdd58b7bd19cce171508a764cdae"},

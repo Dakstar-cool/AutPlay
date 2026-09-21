@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="empty" aria-labelledby="quota-error-title">
+  <h1 id="quota-error-title">{{ t("nav_quotas") }}</h1>
+  <p role="alert">{{ t(error_key) }}</p>
+  <a class="button" href="/admin/quotas?lang={{ locale }}">{{ t("quota_back") }}</a>
+</section>
+{% endblock %}

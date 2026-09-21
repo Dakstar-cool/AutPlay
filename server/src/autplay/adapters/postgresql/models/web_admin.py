@@ -73,7 +73,11 @@ class WebSessionRow(Base):
     idle_expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True))
     absolute_expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    passkey_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("account.web_passkey.passkey_id", ondelete="RESTRICT")
+    )
     __table_args__ = (
+        Index("ix_web_session_passkey", "passkey_id"),
         Index(
             "ix_web_session_user_active",
             "user_id",

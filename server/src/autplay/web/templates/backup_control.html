@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block head %}{% if not unavailable and snapshot.status.state in ('REQUESTED', 'RUNNING') %}<meta http-equiv="refresh" content="10;url=/admin/recovery?lang={{ locale }}">{% endif %}{% endblock %}
+{% block content %}
+<header class="page-heading"><div><h1>{{ t("backup_title") }}</h1><p class="page-summary">{{ t("backup_intro") }}</p></div>{% if not unavailable %}<span class="pill pill-{{ 'warn' if snapshot.alert else ('good' if snapshot.status.state == 'COMPLETED' else 'neutral') }}">{{ t("backup_state_" ~ snapshot.status.state|lower) }}</span>{% endif %}</header>
+{% if unavailable %}
+<section class="empty" aria-labelledby="backup-unavailable"><h2 id="backup-unavailable">{{ t("unavailable_title") }}</h2><p>{{ t(error_key) }}</p></section>
+{% else %}
+{% if snapshot.alert %}<p class="notice" role="alert" aria-live="assertive">{{ t("backup_limit_alert") }}</p>{% endif %}
+{% if flash %}<p class="notice" role="status" aria-live="polite">{{ t(flash) }}</p>{% endif %}
+<section aria-labelledby="backup-status-title">
+  <h2 id="backup-status-title">{{ t("backup_status") }}</h2>
+  <dl class="facts">
+    <div><dt>{{ t("backup_state") }}</dt><dd>{{ t("backup_state_" ~ snapshot.status.state|lower) }}</dd></div>
+    <div><dt>{{ t("backup_written") }}</dt><dd>{{ format_bytes(snapshot.status.bytes_written) }}</dd></div>
+    <div><dt>{{ t("backup_available") }}</dt><dd>{{ format_bytes(snapshot.status.available_bytes) }}</dd></div>
+    <div><dt>{{ t("backup_updated") }}</dt><dd>{{ snapshot.status.updated_at }}</dd></div>
+  </dl>
+  {% if snapshot.status.max_backup_bytes %}<p>{{ t("backup_usage") }}: {{ format_bytes(snapshot.status.bytes_written) }} / {{ format_bytes(snapshot.status.max_backup_bytes) }}.</p>{% endif %}
+</section>
+<section class="section-card" aria-labelledby="backup-policy-title">
+  <h2 id="backup-policy-title">{{ t("backup_policy") }}</h2>
+  <p>{{ t("backup_policy_intro") }}</p>
+  <form method="post" action="/admin/recovery/policy?lang={{ locale }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ policy_operation_id }}">
+    <input type="hidden" name="expected_revision" value="{{ policy.revision if policy else 0 }}">
+    <label for="backup-target">{{ t("backup_target") }}</label>
+    <select id="backup-target" name="target_id" required>{% for target in snapshot.targets %}<option value="{{ target.target_id }}"{% if policy and policy.target_id == target.target_id %} selected{% endif %}>{{ target.label }} · {{ t("backup_kind_" ~ target.kind|replace('-', '_')) }}</option>{% endfor %}</select>
+    <label for="backup-max">{{ t("backup_max_gib") }}</label>
+    <input id="backup-max" name="max_backup_gib" type="number" min="1" max="1048576" step="1" inputmode="numeric" required value="{{ (policy.max_backup_bytes // 1073741824) if policy else 128 }}">
+    <label for="backup-warning">{{ t("backup_warning_percent") }}</label>
+    <input id="backup-warning" name="warning_percent" type="number" min="50" max="99" step="1" inputmode="numeric" required value="{{ policy.warning_percent if policy else 90 }}">
+    <label for="backup-schedule-mode">{{ t("backup_schedule_mode") }}</label>
+    <select id="backup-schedule-mode" name="schedule_mode" aria-controls="backup-automatic-schedule" required>
+      <option value="manual"{% if not policy or policy.schedule_mode == 'manual' %} selected{% endif %}>{{ t("backup_schedule_manual") }}</option>
+      <option value="automatic"{% if policy and policy.schedule_mode == 'automatic' %} selected{% endif %}>{{ t("backup_schedule_automatic") }}</option>
+    </select>
+    <div id="backup-automatic-schedule" data-backup-automatic-schedule>
+      <label for="backup-schedule-weekday">{{ t("backup_schedule_weekday") }}</label>
+      <select id="backup-schedule-weekday" name="schedule_weekday" required>
+        {% for day in range(1, 8) %}<option value="{{ day }}"{% if (policy and policy.schedule_weekday == day) or (not policy and day == 7) %} selected{% endif %}>{{ t("backup_weekday_" ~ day) }}</option>{% endfor %}
+      </select>
+      <label for="backup-schedule-hour">{{ t("backup_schedule_hour") }}</label>
+      <input id="backup-schedule-hour" name="schedule_hour" type="number" min="0" max="23" step="1" inputmode="numeric" required value="{{ policy.schedule_hour if policy and policy.schedule_hour is not none else 3 }}">
+    </div>
+    <p>{{ t("backup_schedule_notice") }}</p>
+    <p>{{ t("backup_hard_limit_notice") }}</p>
+    <button type="submit">{{ t("backup_save_policy") }}</button>
+  </form>
+</section>
+<section class="section-card" aria-labelledby="backup-run-title">
+  <h2 id="backup-run-title">{{ t("backup_run") }}</h2>
+  <p>{{ t("backup_agent_notice") }}</p>
+  <form method="post" action="/admin/recovery/request?lang={{ locale }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="operation_id" value="{{ request_operation_id }}">
+    <input type="hidden" name="expected_revision" value="{{ policy.revision if policy else 0 }}">
+    <button type="submit"{% if not policy or snapshot.status.state in ('REQUESTED', 'RUNNING') %} disabled{% endif %}>{{ t("backup_request") }}</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

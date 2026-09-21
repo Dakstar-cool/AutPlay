@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import and_, exists, func, or_, select, text
+from sqlalchemy import exists, func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.discovery_runtime import (
     BulkDiscoveryError,
     PostgresBulkDiscoveryRepository,
     refresh_bulk_operations,
+)
+from autplay.adapters.postgresql.ingest_execution_guard import require_ingest_execution
+from autplay.adapters.postgresql.internet_ingest_authority import (
+    lock_internet_ingest_scope,
+    require_internet_ingest_authority,
 )
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.models.audit import AuditEventRow
@@ -21,6 +29,7 @@ from autplay.adapters.postgresql.models.discovery import (
     DiscoveryCandidateRow,
 )
 from autplay.adapters.postgresql.models.identity import RecordingRedirectRow
+from autplay.adapters.postgresql.models.internet_music import InternetAcquisitionRow
 from autplay.adapters.postgresql.models.jobs import JobRow
 from autplay.adapters.postgresql.models.library import LibraryEntryRow, UserTrackRefRow
 from autplay.adapters.postgresql.models.sync import SyncEventRow
@@ -34,9 +43,19 @@ from autplay.adapters.postgresql.models.vault import (
     VaultObjectRow,
     VaultReplicaRow,
 )
+from autplay.adapters.postgresql.orphan_object_retirement import (
+    lock_cas_digest,
+    require_cas_unclaimed,
+)
+from autplay.adapters.postgresql.resource_limits import lock_resource_admission
+from autplay.adapters.postgresql.resource_upload_guard import (
+    require_upload_writer,
+)
+from autplay.adapters.postgresql.upload_cleanup import queue_upload_cleanup
+from autplay.application.job_worker import JobLeaseLost
+from autplay.application.music_library import MusicLibraryService
 from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.application.vault_ingest import IngestSession
-from autplay.application.vault_reconciliation import ReconcileReport
 from autplay.application.vault_streaming import AuthorizedStream
 from autplay.application.vault_uploads import (
     CreateUploadCommand,
@@ -47,29 +66,31 @@ from autplay.application.vault_uploads import (
     VaultNotFoundError,
     VaultPrincipal,
 )
-from autplay.domain.discovery import AcquisitionAuthorizationReceipt
-from autplay.domain.jobs import JobKey
+from autplay.domain.discovery import AcquisitionAuthorizationReceipt, DiscoveryError
+from autplay.domain.ingest_execution import IngestExecutionStatus
+from autplay.domain.jobs import JobKey, LeaseFence, RetryableJobError
+from autplay.domain.resource_admission import ResourceAdmissionError
+from autplay.domain.resource_execution import ExecutionStatus
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
     ChunkWriteResult,
     OpaqueStorageKey,
     Sha256Digest,
-    StorageOperationError,
-    StorageSafetyError,
-    VaultInventory,
     VaultLimits,
     VerifiedStagedFile,
 )
 from autplay.ports.jobs import EnqueueJob
-from autplay.ports.vault import VaultStorage
 
 
 class PostgresVaultRuntime(UploadRepository):
     """Short-transaction upload state operations backed by PostgreSQL rows."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self, session: Session, *, upload_execution: ExecutionStatus | None = None
+    ) -> None:
         self._session = session
+        self._upload_execution = upload_execution
 
     def authorize_target(self, principal: VaultPrincipal, recording_id: UUID) -> bool:
         statement = (
@@ -110,6 +131,8 @@ class PostgresVaultRuntime(UploadRepository):
             .with_for_update()
         ).scalar_one_or_none()
         if existing is not None:
+            if existing.actor_kind != "DEVICE" or existing.device_id != principal.device_id:
+                raise VaultNotFoundError()
             if existing.request_hash != command.request_hash:
                 raise UploadConflictError()
             return _info(existing), False
@@ -143,9 +166,9 @@ class PostgresVaultRuntime(UploadRepository):
     def staging_key_for_owned(
         self, principal: VaultPrincipal, upload_session_id: UUID
     ) -> OpaqueStorageKey:
-        return OpaqueStorageKey(
-            self._owned_row(principal, upload_session_id, lock=True).staging_key
-        )
+        row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id, expected=self._upload_execution)
+        return OpaqueStorageKey(row.staging_key)
 
     def record_chunk(
         self,
@@ -158,6 +181,7 @@ class PostgresVaultRuntime(UploadRepository):
         sha256: Sha256Digest,
     ) -> ChunkWriteResult:
         row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id, expected=self._upload_execution)
         if row.state != "OPEN" or row.expires_at <= datetime.now(UTC):
             raise UploadStateError()
         existing = self._session.execute(
@@ -198,6 +222,7 @@ class PostgresVaultRuntime(UploadRepository):
 
     def seal_and_enqueue(self, principal: VaultPrincipal, upload_session_id: UUID) -> UploadInfo:
         row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id)
         if row.state in {"SEALED", "PROCESSING", "COMMIT_PREPARED", "COMMITTED", "REUSED"}:
             return _info(row)
         if row.state != "OPEN" or row.received_size != row.expected_size:
@@ -225,22 +250,28 @@ class PostgresVaultRuntime(UploadRepository):
 
         row = self._owned_row(principal, upload_session_id, lock=True)
         if row.state == "OPEN":
+            require_upload_writer(self._session, upload_session_id)
             row.state = "EXPIRED"
             row.error_code = "upload_session_expired"
             row.completed_at = datetime.now(UTC)
             self._audit(row, "vault.upload_expired")
             self._session.flush()
+        if row.state == "EXPIRED":
+            queue_upload_cleanup(self._session, row)
         return _info(row), OpaqueStorageKey(row.staging_key)
 
     def cancel(self, principal: VaultPrincipal, upload_session_id: UUID) -> None:
         row = self._owned_row(principal, upload_session_id, lock=True)
+        require_upload_writer(self._session, upload_session_id)
         if row.state in {"OPEN", "SEALED"}:
             row.state = "CANCELLED"
             row.error_code = "upload_cancelled"
             row.completed_at = datetime.now(UTC)
             self._session.flush()
+            queue_upload_cleanup(self._session, row)
             return
         if row.state == "CANCELLED":
+            queue_upload_cleanup(self._session, row)
             return
         raise UploadStateError()
 
@@ -253,7 +284,7 @@ class PostgresVaultRuntime(UploadRepository):
             UploadSessionRow.device_id == principal.device_id,
         )
         if lock:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update().execution_options(populate_existing=True)
         row = self._session.execute(statement).scalar_one_or_none()
         if row is None:
             raise VaultNotFoundError()
@@ -262,22 +293,118 @@ class PostgresVaultRuntime(UploadRepository):
     def acquire_sha_lock(self, digest: Sha256Digest) -> None:
         """Serialize one exact-byte CAS decision without exposing the digest."""
 
-        lock_key = int.from_bytes(digest.value[:8], "big", signed=True)
-        self._session.execute(
-            text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key}
+        lock_cas_digest(self._session, digest)
+        require_cas_unclaimed(self._session, digest)
+
+    def _require_ingest_fence(self, fence: LeaseFence | None, upload_id: UUID) -> None:
+        """Validate the exact ingest claim after its job lock, before upload/CAS locks."""
+        if fence is None:
+            return
+        job = self._session.scalar(
+            select(JobRow)
+            .where(JobRow.job_id == fence.job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        now = self._session.scalar(select(func.clock_timestamp()))
+        owner = self._session.scalar(
+            select(UploadSessionRow.user_id).where(UploadSessionRow.upload_session_id == upload_id)
+        )
+        if (
+            job is None
+            or not isinstance(now, datetime)
+            or owner is None
+            or job.job_type != "vault.ingest"
+            or job.schema_version != 1
+            or job.user_id != owner
+            or not isinstance(job.payload, dict)
+            or job.payload.get("upload_session_id") != str(upload_id)
+            or job.state != "RUNNING"
+            or job.lease_owner != fence.worker_id
+            or job.attempt_count != fence.attempt_no
+            or job.cancel_requested_at is not None
+            or job.lease_deadline is None
+            or job.lease_deadline <= now
+        ):
+            raise JobLeaseLost
 
-    def start_ingest(self, upload_session_id: UUID, job_id: UUID) -> IngestSession | None:
+    @contextmanager
+    def _ingest_transaction(
+        self,
+        fence: LeaseFence | None,
+        upload_id: UUID,
+        execution: IngestExecutionStatus | None = None,
+    ) -> Iterator[None]:
+        lock_resource_admission(self._session)
+        self._require_ingest_fence(fence, upload_id)
+        lock_internet_ingest_scope(self._session, upload_id)
+        if execution is not None and execution.ticket.fence != fence:
+            raise ResourceAdmissionError("ingest_execution_stale")
+        require_ingest_execution(self._session, upload_id, execution)
+        terminal_before = self._session.scalar(
+            select(UploadSessionRow.state).where(UploadSessionRow.upload_session_id == upload_id)
+        ) in {"COMMITTED", "REUSED"}
+        yield
+        # Upload/CAS locks and writes can outlast the lease while the job lock is held.
+        # Flush first, then reject the entire caller-owned transaction on expiry.
+        self._session.flush()
+        upload = self._session.get(UploadSessionRow, upload_id, populate_existing=True)
+        if (
+            not terminal_before
+            and upload is not None
+            and upload.source_internet_acquisition_id is not None
+            and upload.state in {"COMMIT_PREPARED", "COMMITTED", "REUSED"}
+        ):
+            require_internet_ingest_authority(self._session, upload)
+        self._require_ingest_fence(fence, upload_id)
+        require_ingest_execution(self._session, upload_id, execution)
+
+    def start_ingest(
+        self,
+        upload_session_id: UUID,
+        job_id: UUID,
+        *,
+        fence: LeaseFence | None = None,
+        execution: IngestExecutionStatus | None = None,
+    ) -> IngestSession | None:
         """Claim a sealed upload; terminal/replayed sessions require no work."""
+        if fence is not None and fence.job_id != job_id:
+            raise JobLeaseLost
+        with self._ingest_transaction(fence, upload_session_id, execution):
+            return self._start_ingest(upload_session_id, job_id, fence=fence, execution=execution)
 
+    def _start_ingest(
+        self,
+        upload_session_id: UUID,
+        job_id: UUID,
+        *,
+        fence: LeaseFence | None,
+        execution: IngestExecutionStatus | None = None,
+    ) -> IngestSession | None:
         row = self._session.execute(
             select(UploadSessionRow)
             .where(UploadSessionRow.upload_session_id == upload_session_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         ).scalar_one_or_none()
         if row is None or row.job_id != job_id:
             return None
+        require_upload_writer(self._session, upload_session_id, ingest=execution)
         if row.state in {"COMMITTED", "REUSED", "QUARANTINED", "FAILED", "CANCELLED"}:
+            return None
+        if row.actor_kind != "DEVICE" and not self._source_commit_authorized(row):
+            self.quarantine(
+                IngestSession(
+                    upload_session_id=row.upload_session_id,
+                    target_recording_id=row.target_recording_id,
+                    staging_key=OpaqueStorageKey(row.staging_key),
+                    expected_size=row.expected_size,
+                    declared_sha256=row.declared_sha256,
+                    lease_fence=fence,
+                    execution=execution,
+                ),
+                "source_authorization_unavailable",
+            )
             return None
         if row.state == "SEALED":
             row.state = "PROCESSING"
@@ -304,6 +431,8 @@ class PostgresVaultRuntime(UploadRepository):
             source_provider_track_id=source_provider_track_id,
             source_owner_user_id=row.user_id if row.source_candidate_id is not None else None,
             source_acquisition_attempt_id=row.source_acquisition_attempt_id,
+            lease_fence=fence,
+            execution=execution,
         )
 
     def prepare_commit(
@@ -314,24 +443,38 @@ class PostgresVaultRuntime(UploadRepository):
         evidence: ChromaprintEvidence,
     ) -> str:
         """Record a pre-publish intent after the SHA advisory fence is acquired."""
-
         del evidence
+        with self._ingest_transaction(
+            ingest.lease_fence, ingest.upload_session_id, ingest.execution
+        ):
+            return self._prepare_commit(ingest, verified, metadata)
+
+    def _prepare_commit(
+        self,
+        ingest: IngestSession,
+        verified: VerifiedStagedFile,
+        metadata: AudioTechnicalMetadata,
+    ) -> str:
         self.acquire_sha_lock(verified.sha256)
         session = self._session.execute(
             select(UploadSessionRow)
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
-        if session.source_candidate_id is not None and not self._discovery_commit_authorized(
-            session
-        ):
-            session.state = "QUARANTINED"
-            session.error_code = "source_authorization_unavailable"
-            session.completed_at = datetime.now(UTC)
-            self._fail_discovery_candidate(session, session.error_code)
-            self._audit(session, "vault.ingest_quarantined")
-            self._session.flush()
-            return "CONFLICT"
+        require_upload_writer(self._session, ingest.upload_session_id, ingest=ingest.execution)
+        if session.state in {"COMMITTED", "REUSED"}:
+            return (
+                "REUSED"
+                if (
+                    session.computed_sha256 == verified.sha256.value
+                    and session.expected_size == verified.byte_size
+                    and session.target_recording_id == ingest.target_recording_id
+                )
+                else "CONFLICT"
+            )
+        if session.actor_kind != "DEVICE" and not self._source_commit_authorized(session):
+            self._quarantine_finalize_conflict(session, code="source_authorization_unavailable")
+            return "SOURCE_UNAVAILABLE"
         existing = self._session.execute(
             select(VaultObjectRow)
             .where(VaultObjectRow.sha256 == verified.sha256.value)
@@ -418,31 +561,95 @@ class PostgresVaultRuntime(UploadRepository):
         authorization_receipt: AcquisitionAuthorizationReceipt | None = None,
     ) -> bool:
         """Make the prepared CAS metadata streamable only after a file publish."""
+        try:
+            with self._ingest_transaction(
+                ingest.lease_fence, ingest.upload_session_id, ingest.execution
+            ):
+                return self._finalize_published(
+                    ingest,
+                    storage_key,
+                    metadata,
+                    evidence,
+                    reused=reused,
+                    authorization_receipt=authorization_receipt,
+                )
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) == "55P03":
+                raise RetryableJobError("vault.canonical_busy") from error
+            raise
 
+    def _finalize_published(
+        self,
+        ingest: IngestSession,
+        storage_key: OpaqueStorageKey,
+        metadata: AudioTechnicalMetadata,
+        evidence: ChromaprintEvidence,
+        *,
+        reused: bool,
+        authorization_receipt: AcquisitionAuthorizationReceipt | None,
+    ) -> bool:
         session = self._session.execute(
             select(UploadSessionRow)
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
+        require_upload_writer(self._session, ingest.upload_session_id, ingest=ingest.execution)
         if session.state in {"COMMITTED", "REUSED"}:
             return True
         if session.vault_object_id is None or session.computed_sha256 is None:
             raise UploadStateError()
-        if session.source_candidate_id is not None and not self._discovery_commit_authorized(
+        if session.actor_kind != "DEVICE" and not self._source_commit_authorized(
             session,
             authorization_receipt=authorization_receipt,
             receipt_required=True,
         ):
             self._quarantine_finalize_conflict(session, code="source_authorization_unavailable")
             return False
-        obj = self._session.get(VaultObjectRow, session.vault_object_id)
+        if session.source_internet_acquisition_id is not None:
+            # Never wait for a second CAS set while reconciliation may hold a batch.
+            self._lock_publication_object(session.vault_object_id)
+            self._lock_publication_canonical(session.target_recording_id)
+        obj = self._session.get(VaultObjectRow, session.vault_object_id, populate_existing=True)
         if obj is None:
+            raise UploadStateError()
+        replica = self._session.scalar(
+            select(VaultReplicaRow)
+            .where(
+                VaultReplicaRow.vault_object_id == obj.vault_object_id,
+                VaultReplicaRow.storage_backend == "LOCAL_FILESYSTEM",
+                VaultReplicaRow.storage_key == storage_key.value,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if session.source_internet_acquisition_id is not None and (
+            replica is None
+            or obj.sha256 != session.computed_sha256
+            or obj.byte_size != session.expected_size
+            or storage_key.value != obj.sha256.hex()
+            or (
+                reused
+                and (
+                    obj.commit_status != "COMMITTED"
+                    or replica.replica_status != "AVAILABLE"
+                    or replica.verified_at is None
+                )
+            )
+            or (
+                not reused
+                and (obj.commit_status != "STAGING" or replica.replica_status != "COPYING")
+            )
+        ):
+            # Reconciliation may have moved or invalidated bytes after file publication.
+            # A finalize retry must never undo that independently committed decision.
+            self._quarantine_finalize_conflict(session)
+            return False
+        if replica is None:
             raise UploadStateError()
         existing_variants = (
             self._session.execute(
                 select(AudioVariantRow)
                 .where(AudioVariantRow.vault_object_id == obj.vault_object_id)
-                .with_for_update()
+                .with_for_update(nowait=session.source_internet_acquisition_id is not None)
             )
             .scalars()
             .all()
@@ -481,13 +688,6 @@ class PostgresVaultRuntime(UploadRepository):
             )
         obj.commit_status = "COMMITTED"
         obj.committed_at = datetime.now(UTC)
-        replica = self._session.execute(
-            select(VaultReplicaRow).where(
-                VaultReplicaRow.vault_object_id == obj.vault_object_id,
-                VaultReplicaRow.storage_backend == "LOCAL_FILESYSTEM",
-                VaultReplicaRow.storage_key == storage_key.value,
-            )
-        ).scalar_one()
         replica.replica_status = "AVAILABLE"
         replica.verified_at = datetime.now(UTC)
         session.audio_variant_id = variant.audio_variant_id
@@ -495,27 +695,51 @@ class PostgresVaultRuntime(UploadRepository):
         session.completed_at = datetime.now(UTC)
         if session.source_candidate_id is not None:
             self._finalize_discovery_candidate(session, variant)
+        elif session.source_internet_acquisition_id is not None:
+            source = require_internet_ingest_authority(self._session, session)
+            if source.user_track_ref_id is None:
+                raise DiscoveryError("source_authorization_unavailable")
+            canonical = MusicLibraryService.publish_in_transaction(
+                self._session,
+                session.user_id,
+                source.user_track_ref_id,
+                session.upload_session_id,
+                resolve_variant=self._resolve_publication_variant,
+            )
+            source.state, source.audio_variant_id, source.error_code = "READY", canonical, None
+            source.updated_at = datetime.now(UTC)
         self._audit(session, "vault.ingest_reused" if reused else "vault.ingest_committed")
         self._session.flush()
         return True
 
     def quarantine(self, ingest: IngestSession, code: str) -> None:
+        with self._ingest_transaction(
+            ingest.lease_fence, ingest.upload_session_id, ingest.execution
+        ):
+            self._quarantine(ingest, code)
+
+    def _quarantine(self, ingest: IngestSession, code: str) -> None:
         row = self._session.execute(
             select(UploadSessionRow)
             .where(UploadSessionRow.upload_session_id == ingest.upload_session_id)
             .with_for_update()
         ).scalar_one()
+        require_upload_writer(self._session, ingest.upload_session_id, ingest=ingest.execution)
         if row.state not in {"COMMITTED", "REUSED", "CANCELLED"}:
             self._detach_uncommitted_object(row)
             row.state = "QUARANTINED"
             row.error_code = code[:100]
             row.completed_at = datetime.now(UTC)
-            if row.source_candidate_id is not None:
-                self._fail_discovery_candidate(row, row.error_code)
+            self._fail_source_acquisition(row, row.error_code)
             self._audit(row, "vault.ingest_quarantined")
             self._session.flush()
 
     def resolve_stream(self, principal: VaultPrincipal, audio_variant_id: UUID) -> AuthorizedStream:
+        return self._resolve_owner_stream(principal.user_id, audio_variant_id)
+
+    def _resolve_owner_stream(
+        self, owner_user_id: UUID, audio_variant_id: UUID
+    ) -> AuthorizedStream:
         """Authorize by owner projection before returning a filesystem replica."""
 
         statement = (
@@ -548,10 +772,10 @@ class PostgresVaultRuntime(UploadRepository):
                 VaultReplicaRow.storage_backend == "LOCAL_FILESYSTEM",
                 VaultReplicaRow.replica_status == "AVAILABLE",
                 VaultReplicaRow.verified_at.is_not(None),
-                UserTrackRefRow.user_id == principal.user_id,
+                UserTrackRefRow.user_id == owner_user_id,
                 UserTrackRefRow.resolution_status == "RESOLVED",
                 UserTrackRefRow.deleted_at.is_(None),
-                LibraryEntryRow.user_id == principal.user_id,
+                LibraryEntryRow.user_id == owner_user_id,
                 LibraryEntryRow.removed_at.is_(None),
             )
             .limit(1)
@@ -564,6 +788,9 @@ class PostgresVaultRuntime(UploadRepository):
         )
 
     def resolve_playback_variant(self, principal: VaultPrincipal, user_track_ref_id: UUID) -> UUID:
+        return self.resolve_owner_playback_variant(principal.user_id, user_track_ref_id)
+
+    def resolve_owner_playback_variant(self, owner_user_id: UUID, user_track_ref_id: UUID) -> UUID:
         """Return the canonical servable Variant for one owned active library Track."""
 
         audio_variant_id = self._session.scalar(
@@ -578,10 +805,10 @@ class PostgresVaultRuntime(UploadRepository):
             )
             .where(
                 UserTrackRefRow.user_track_ref_id == user_track_ref_id,
-                UserTrackRefRow.user_id == principal.user_id,
+                UserTrackRefRow.user_id == owner_user_id,
                 UserTrackRefRow.resolution_status == "RESOLVED",
                 UserTrackRefRow.deleted_at.is_(None),
-                LibraryEntryRow.user_id == principal.user_id,
+                LibraryEntryRow.user_id == owner_user_id,
                 LibraryEntryRow.removed_at.is_(None),
             )
             .limit(1)
@@ -590,8 +817,57 @@ class PostgresVaultRuntime(UploadRepository):
             raise VaultNotFoundError()
         # Reuse the exact stream authorization predicate so discovery never advertises
         # a corrupt, unverified, redirected, deleted, or otherwise unservable Variant.
-        self.resolve_stream(principal, audio_variant_id)
+        self._resolve_owner_stream(owner_user_id, audio_variant_id)
         return audio_variant_id
+
+    def _lock_publication_object(self, object_id: UUID) -> None:
+        self._session.execute(
+            select(VaultObjectRow.vault_object_id)
+            .where(VaultObjectRow.vault_object_id == object_id)
+            .with_for_update(nowait=True)
+        )
+        self._session.execute(
+            select(VaultReplicaRow.vault_replica_id)
+            .where(VaultReplicaRow.vault_object_id == object_id)
+            .order_by(VaultReplicaRow.vault_replica_id)
+            .with_for_update(nowait=True)
+        )
+
+    def _lock_publication_canonical(self, recording_id: UUID) -> None:
+        variant_id = self._session.scalar(
+            select(RecordingCanonicalVariantRow.audio_variant_id)
+            .where(RecordingCanonicalVariantRow.recording_id == recording_id)
+            .with_for_update(nowait=True)
+        )
+        if variant_id is None:
+            return
+        object_id = self._session.scalar(
+            select(AudioVariantRow.vault_object_id)
+            .where(
+                AudioVariantRow.audio_variant_id == variant_id,
+                AudioVariantRow.recording_id == recording_id,
+            )
+            .with_for_update(nowait=True)
+        )
+        if object_id is None:
+            raise RetryableJobError("vault.canonical_unavailable")
+        self._lock_publication_object(object_id)
+
+    def _resolve_publication_variant(self, owner_user_id: UUID, ref_id: UUID) -> UUID:
+        recording = self._session.scalar(
+            select(UserTrackRefRow.recording_id).where(
+                UserTrackRefRow.user_track_ref_id == ref_id,
+                UserTrackRefRow.user_id == owner_user_id,
+            )
+        )
+        if recording is None:
+            raise RetryableJobError("vault.canonical_unavailable")
+        self._lock_publication_canonical(recording)
+        try:
+            # Separate statement snapshot after the nonblocking locks; locks survive commit.
+            return self.resolve_owner_playback_variant(owner_user_id, ref_id)
+        except VaultNotFoundError as error:
+            raise RetryableJobError("vault.canonical_unavailable") from error
 
     def _recording_is_active(self, recording_id: UUID) -> bool:
         return (
@@ -641,10 +917,28 @@ class PostgresVaultRuntime(UploadRepository):
         session.state = "QUARANTINED"
         session.error_code = code
         session.completed_at = datetime.now(UTC)
-        if session.source_candidate_id is not None:
-            self._fail_discovery_candidate(session, code)
+        self._fail_source_acquisition(session, code)
         self._audit(session, "vault.ingest_quarantined")
         self._session.flush()
+
+    def _source_commit_authorized(
+        self,
+        upload: UploadSessionRow,
+        *,
+        authorization_receipt: AcquisitionAuthorizationReceipt | None = None,
+        receipt_required: bool = False,
+    ) -> bool:
+        if upload.source_internet_acquisition_id is not None:
+            try:
+                require_internet_ingest_authority(self._session, upload)
+            except DiscoveryError:
+                return False
+            return True
+        return self._discovery_commit_authorized(
+            upload,
+            authorization_receipt=authorization_receipt,
+            receipt_required=receipt_required,
+        )
 
     def _discovery_commit_authorized(
         self,
@@ -795,6 +1089,22 @@ class PostgresVaultRuntime(UploadRepository):
         )
         refresh_bulk_operations(self._session, candidate.candidate_id, now)
 
+    def _fail_source_acquisition(self, upload: UploadSessionRow, code: str) -> None:
+        if upload.source_internet_acquisition_id is not None:
+            source = self._session.get(
+                InternetAcquisitionRow, upload.source_internet_acquisition_id
+            )
+            if (
+                source is not None
+                and source.user_id == upload.user_id
+                and source.upload_id == upload.upload_session_id
+                and source.state != "READY"
+            ):
+                source.state, source.error_code = "FAILED", code
+                source.updated_at = datetime.now(UTC)
+        elif upload.source_candidate_id is not None:
+            self._fail_discovery_candidate(upload, code)
+
     def _fail_discovery_candidate(self, upload: UploadSessionRow, code: str) -> None:
         candidate = self._session.scalar(
             select(DiscoveryCandidateRow)
@@ -829,215 +1139,6 @@ class PostgresVaultRuntime(UploadRepository):
         attempt.updated_at = now
         attempt.row_version += 1
         refresh_bulk_operations(self._session, candidate.candidate_id, now)
-
-    def reconcile_inventory(
-        self,
-        inventory: VaultInventory,
-        storage: VaultStorage,
-        *,
-        apply: bool,
-        limit: int,
-    ) -> ReconcileReport:
-        """Mark absent/corrupt replicas unservable and quarantine orphan final CAS files."""
-
-        known_keys = set(
-            self._session.execute(
-                select(VaultReplicaRow.storage_key).where(
-                    VaultReplicaRow.storage_backend == "LOCAL_FILESYSTEM"
-                )
-            ).scalars()
-        )
-        final_keys = {key.value for key in inventory.object_keys}
-        inspected = repaired = quarantined = 0
-        orphan_candidates = sorted(final_keys - known_keys)
-        orphan_keys = orphan_candidates[:limit]
-        for raw_key in orphan_keys:
-            inspected += 1
-            if apply:
-                storage.quarantine_object(
-                    OpaqueStorageKey(raw_key), OpaqueStorageKey(f"orphan-{raw_key}")
-                )
-                quarantined += 1
-        remaining_capacity = limit - inspected
-        terminal = {"COMMITTED", "REUSED", "QUARANTINED", "FAILED", "CANCELLED", "EXPIRED"}
-        staging_values = [key.value for key in inventory.staging_keys]
-        actionable_staging: list[
-            tuple[OpaqueStorageKey, UploadSessionRow | None, str | None, bool, bool]
-        ] = []
-        if remaining_capacity and staging_values:
-            staging_rows = self._session.execute(
-                select(UploadSessionRow, JobRow.state)
-                .outerjoin(JobRow, JobRow.job_id == UploadSessionRow.job_id)
-                .where(UploadSessionRow.staging_key.in_(staging_values))
-                .with_for_update(of=UploadSessionRow)
-            ).all()
-            by_staging_key = {row.staging_key: (row, job_state) for row, job_state in staging_rows}
-            for key in inventory.staging_keys:
-                tracked = by_staging_key.get(key.value)
-                session = None if tracked is None else tracked[0]
-                job_state = None if tracked is None else tracked[1]
-                expired = (
-                    session is not None
-                    and session.state == "OPEN"
-                    and session.expires_at <= datetime.now(UTC)
-                )
-                stranded = (
-                    session is not None
-                    and session.state not in terminal
-                    and job_state in {"FAILED", "CANCELLED", "COMPLETED"}
-                )
-                if session is None or session.state in terminal or stranded or expired:
-                    actionable_staging.append((key, session, job_state, expired, stranded))
-            for key, session, job_state, expired, stranded in actionable_staging[
-                :remaining_capacity
-            ]:
-                inspected += 1
-                if apply:
-                    if session is not None and expired:
-                        session.state = "EXPIRED"
-                        session.error_code = "upload_session_expired"
-                        session.completed_at = datetime.now(UTC)
-                        repaired += 1
-                    elif session is not None and stranded:
-                        self._detach_uncommitted_object(session)
-                        session.state = "CANCELLED" if job_state == "CANCELLED" else "FAILED"
-                        session.error_code = "vault_ingest_job_terminal"
-                        session.completed_at = datetime.now(UTC)
-                        repaired += 1
-                    storage.quarantine(key, OpaqueStorageKey(f"staging-{key.value}"))
-                    quarantined += 1
-                    if session is not None:
-                        self._audit(session, "vault.staging_quarantined")
-        remaining_capacity = limit - inspected
-        missing_total = missing_processed = 0
-        if remaining_capacity:
-            base_missing = UploadSessionRow.state.not_in(terminal)
-            missing_condition = (
-                and_(base_missing, UploadSessionRow.staging_key.not_in(staging_values))
-                if staging_values
-                else and_(base_missing)
-            )
-            missing_total = self._session.execute(
-                select(func.count()).select_from(UploadSessionRow).where(missing_condition)
-            ).scalar_one()
-            missing_rows = (
-                self._session.execute(
-                    select(UploadSessionRow)
-                    .outerjoin(JobRow, JobRow.job_id == UploadSessionRow.job_id)
-                    .where(missing_condition)
-                    .order_by(UploadSessionRow.created_at, UploadSessionRow.upload_session_id)
-                    .with_for_update(of=UploadSessionRow)
-                    .limit(remaining_capacity)
-                )
-                .scalars()
-                .all()
-            )
-            missing_processed = len(missing_rows)
-            for session in missing_rows:
-                inspected += 1
-                if not apply:
-                    continue
-                self._detach_uncommitted_object(session)
-                if session.state == "OPEN" and session.expires_at <= datetime.now(UTC):
-                    session.state = "EXPIRED"
-                    session.error_code = "upload_session_expired"
-                elif session.job_id is None:
-                    session.state = "CANCELLED"
-                    session.error_code = "vault_staging_missing"
-                else:
-                    session.state = "FAILED"
-                    session.error_code = "vault_staging_missing"
-                session.completed_at = datetime.now(UTC)
-                self._audit(session, "vault.staging_missing")
-                repaired += 1
-        remaining_capacity = limit - inspected
-        replica_total = replica_processed = 0
-        if remaining_capacity:
-            base_actionable = VaultReplicaRow.replica_status == "AVAILABLE"
-            replica_actionable = (
-                or_(base_actionable, VaultReplicaRow.storage_key.in_(final_keys))
-                if final_keys
-                else or_(base_actionable)
-            )
-            replica_condition = (
-                VaultReplicaRow.storage_backend == "LOCAL_FILESYSTEM"
-            ) & replica_actionable
-            replica_total = self._session.execute(
-                select(func.count()).select_from(VaultReplicaRow).where(replica_condition)
-            ).scalar_one()
-            rows = self._session.execute(
-                select(VaultReplicaRow, VaultObjectRow)
-                .join(
-                    VaultObjectRow,
-                    VaultObjectRow.vault_object_id == VaultReplicaRow.vault_object_id,
-                )
-                .where(replica_condition)
-                .order_by(
-                    VaultReplicaRow.verified_at.asc().nulls_first(),
-                    VaultReplicaRow.vault_replica_id,
-                )
-                .with_for_update()
-                .limit(remaining_capacity)
-            ).all()
-            replica_processed = len(rows)
-            for replica, obj in rows:
-                inspected += 1
-                if replica.storage_key not in final_keys:
-                    if apply and replica.replica_status == "AVAILABLE":
-                        replica.replica_status = "MISSING"
-                        obj.verification_error = "vault_replica_missing"
-                        repaired += 1
-                    continue
-                if replica.replica_status == "QUARANTINED":
-                    if apply:
-                        storage.quarantine_object(
-                            OpaqueStorageKey(replica.storage_key),
-                            OpaqueStorageKey(f"object-{replica.storage_key}"),
-                        )
-                        quarantined += 1
-                    continue
-                try:
-                    observed = storage.verify_object(OpaqueStorageKey(replica.storage_key))
-                except StorageOperationError, StorageSafetyError:
-                    if apply:
-                        replica.replica_status = "CORRUPT"
-                        replica.verified_at = datetime.now(UTC)
-                        obj.verification_error = "vault_replica_corrupt"
-                        repaired += 1
-                    continue
-                if not apply:
-                    continue
-                if observed.sha256.value != obj.sha256 or observed.byte_size != obj.byte_size:
-                    replica.replica_status = "QUARANTINED"
-                    obj.commit_status = "QUARANTINED"
-                    obj.verification_error = "vault_replica_integrity_mismatch"
-                    storage.quarantine_object(
-                        OpaqueStorageKey(replica.storage_key),
-                        OpaqueStorageKey(f"corrupt-{replica.storage_key}"),
-                    )
-                    repaired += 1
-                    quarantined += 1
-                    continue
-                if replica.replica_status in {"MISSING", "CORRUPT"}:
-                    replica.replica_status = "AVAILABLE"
-                    repaired += 1
-                replica.verified_at = datetime.now(UTC)
-                obj.verification_error = None
-        if apply:
-            self._session.flush()
-        return ReconcileReport(
-            inspected,
-            repaired,
-            quarantined,
-            len(orphan_candidates)
-            - len(orphan_keys)
-            + len(actionable_staging)
-            - min(len(actionable_staging), max(0, limit - len(orphan_keys)))
-            + missing_total
-            - missing_processed
-            + replica_total
-            - replica_processed,
-        )
 
     def _audit(self, session: UploadSessionRow, action: str) -> None:
         """Append a redacted operational event; payload/paths/digests stay out."""

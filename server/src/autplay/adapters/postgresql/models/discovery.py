@@ -530,6 +530,7 @@ class AcquisitionAttemptRow(Base):
     acquisition_attempt_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), nullable=False, server_default=text("uuidv7()")
     )
+    authority_generation: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
     candidate_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     origin: Mapped[str] = mapped_column(Text(), nullable=False)
     policy_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
@@ -581,6 +582,10 @@ class AcquisitionAttemptRow(Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint("origin IN ('MANUAL', 'AUTOMATIC')", name="ck_acquisition_attempt_origin"),
+        CheckConstraint(
+            "authority_generation IS NULL OR authority_generation >= 1",
+            name="ck_acquisition_attempt_authority",
+        ),
         CheckConstraint(
             "(origin = 'MANUAL' AND policy_id IS NULL AND policy_revision IS NULL) OR (origin = 'AUTOMATIC' AND policy_id IS NOT NULL AND policy_revision >= 1)",
             name="ck_acquisition_attempt_policy_lineage",

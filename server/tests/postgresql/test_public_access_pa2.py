@@ -64,8 +64,20 @@ def _owner_and_server(connection: Connection[Any]) -> tuple[Principal, UUID]:
         VALUES (%s,1,%s,%s,'test','https://api.test.invalid','https://stream.test.invalid',1,now(),now())""",
         (server_id, server_spki, public_key_thumbprint(server_spki)),
     )
+    device_id, session_id = uuid4(), uuid4()
+    connection.execute(
+        "INSERT INTO account.device (device_id,user_id,device_name,platform,app_version) "
+        "VALUES (%s,%s,'Owner phone','ANDROID','pa2-test')",
+        (device_id, owner[0]),
+    )
+    connection.execute(
+        "INSERT INTO account.user_session "
+        "(session_id,user_id,device_id,refresh_token_hash,issued_at,expires_at) "
+        "VALUES (%s,%s,%s,%s,now(),now()+interval '90 days')",
+        (session_id, owner[0], device_id, hashlib.sha256(session_id.bytes).digest()),
+    )
     connection.commit()
-    return Principal(UUID(str(owner[0])), uuid4(), uuid4(), AccountRole.OWNER), server_id
+    return Principal(UUID(str(owner[0])), device_id, session_id, AccountRole.OWNER), server_id
 
 
 def _request(invitation: dict[str, object], key: ec.EllipticCurvePrivateKey) -> dict[str, object]:
@@ -282,7 +294,13 @@ def test_concurrent_double_redemption_creates_one_binding_and_no_trust(
                 ).scalar_one()
                 == 1
             )
-            assert session.execute(text("SELECT count(*) FROM account.device")).scalar_one() == 1
+            assert (
+                session.execute(
+                    text("SELECT count(*) FROM account.device WHERE user_id != :owner"),
+                    {"owner": owner.user_id},
+                ).scalar_one()
+                == 1
+            )
             assert (
                 session.execute(
                     text(

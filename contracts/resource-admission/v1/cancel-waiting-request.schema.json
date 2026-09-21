@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/resource-admission/v1/cancel-waiting-request.schema.json",
+  "title": "cancel-waiting-request",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "x-autplay-integer-token-only": true,
+      "const": 1
+    },
+    "operation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reason": {
+      "const": "CANCEL"
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "operation_sha256",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "ADAPTER_TESTED_ROLLOUT_PENDING"
+}

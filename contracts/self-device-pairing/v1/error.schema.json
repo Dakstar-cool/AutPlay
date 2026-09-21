@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/self-device-pairing/v1/error.schema.json",
+  "title": "error",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "error_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "safe_message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "retryable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_version",
+    "error_code",
+    "safe_message",
+    "request_id",
+    "retryable"
+  ],
+  "additionalProperties": false,
+  "x-autplay-implementation-status": "IN_PROGRESS_DISABLED"
+}

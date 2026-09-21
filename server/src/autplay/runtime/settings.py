@@ -28,6 +28,12 @@ _ENV_PREFIX: Final = "AUTPLAY_"
 _MAX_CONFIG_BYTES: Final = 1_048_576
 _MAX_SECRET_BYTES: Final = 65_536
 _COMMON_ENV_FIELDS: Final = {
+    "training_consent_ledger_path": "TRAINING_CONSENT_LEDGER_PATH",
+    "training_consent_ledger_key": "TRAINING_CONSENT_LEDGER_KEY",
+    "training_consent_ledger_key_id": "TRAINING_CONSENT_LEDGER_KEY_ID",
+    "privacy_ledger_path": "PRIVACY_LEDGER_PATH",
+    "privacy_ledger_key": "PRIVACY_LEDGER_KEY",
+    "privacy_ledger_key_id": "PRIVACY_LEDGER_KEY_ID",
     "database_url": "DATABASE_URL",
     "database_connect_timeout_seconds": "DATABASE_CONNECT_TIMEOUT_SECONDS",
     "database_statement_timeout_ms": "DATABASE_STATEMENT_TIMEOUT_MS",
@@ -61,9 +67,16 @@ _API_ENV_FIELDS: Final = {
     "profile_api_origin": "PROFILE_API_ORIGIN",
     "profile_stream_origin": "PROFILE_STREAM_ORIGIN",
     "admin_web_enabled": "ADMIN_WEB_ENABLED",
+    "admin_passkeys_enabled": "ADMIN_PASSKEYS_ENABLED",
+    "self_device_pairing_enabled": "SELF_DEVICE_PAIRING_ENABLED",
+    "account_recovery_enabled": "ACCOUNT_RECOVERY_ENABLED",
+    "account_deletion_enabled": "ACCOUNT_DELETION_ENABLED",
+    "shared_training_consent_enabled": "SHARED_TRAINING_CONSENT_ENABLED",
     "admin_web_origin": "ADMIN_WEB_ORIGIN",
     "admin_web_source_hmac_secret": "ADMIN_WEB_SOURCE_HMAC_SECRET",
     "admin_web_csrf_hmac_secret": "ADMIN_WEB_CSRF_HMAC_SECRET",
+    "admin_backup_targets_json": "ADMIN_BACKUP_TARGETS_JSON",
+    "admin_backup_control_root": "ADMIN_BACKUP_CONTROL_ROOT",
     "jamendo_enabled": "JAMENDO_ENABLED",
     "discovery_automation_enabled": "DISCOVERY_AUTOMATION_ENABLED",
     "jamendo_client_id": "JAMENDO_CLIENT_ID",
@@ -80,6 +93,10 @@ _STREAM_ENV_FIELDS: Final = {
     "auth_audience": "AUTH_AUDIENCE",
 }
 _WORKER_ENV_FIELDS: Final = {
+    "account_purge_enabled": "ACCOUNT_PURGE_ENABLED",
+    "acoustid_client_key": "ACOUSTID_CLIENT_KEY",
+    "metadata_proxy": "METADATA_PROXY",
+    "worker_cgroup_root": "WORKER_CGROUP_ROOT",
     "worker_id": "WORKER_ID",
     "poll_interval_seconds": "WORKER_POLL_INTERVAL_SECONDS",
     "lease_seconds": "WORKER_LEASE_SECONDS",
@@ -98,6 +115,8 @@ _WORKER_ENV_FIELDS: Final = {
 }
 _SECRET_FIELDS: Final = frozenset(
     {
+        "training_consent_ledger_key",
+        "privacy_ledger_key",
         "database_url",
         "auth_signing_secret",
         "public_access_source_hmac_secret",
@@ -106,6 +125,7 @@ _SECRET_FIELDS: Final = frozenset(
         "admin_web_csrf_hmac_secret",
         "jamendo_client_id",
         "acoustid_client_key",
+        "metadata_proxy",
     }
 )
 _FILE_ONLY_SECRET_FIELDS: Final = frozenset({"jamendo_client_id", "acoustid_client_key"})
@@ -141,6 +161,12 @@ class _ExplicitSettings(BaseSettings):
     )
 
     profile: RuntimeProfile = RuntimeProfile.DEVELOPMENT
+    training_consent_ledger_path: Path | None = None
+    training_consent_ledger_key: SecretStr | None = Field(default=None, repr=False)
+    training_consent_ledger_key_id: str | None = None
+    privacy_ledger_path: Path | None = None
+    privacy_ledger_key: SecretStr | None = Field(default=None, repr=False)
+    privacy_ledger_key_id: str | None = None
     database_url: SecretStr = Field(repr=False)
     database_connect_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30.0)
     database_statement_timeout_ms: int = Field(default=5_000, ge=100, le=120_000)
@@ -205,6 +231,66 @@ class _ExplicitSettings(BaseSettings):
             raise ValueError("vault chunk limit cannot exceed object limit")
         return self
 
+    @model_validator(mode="after")
+    def _validate_privacy_ledger(self) -> Self:
+        if self.profile is RuntimeProfile.PRODUCTION and self.privacy_ledger_path is None:
+            raise ValueError("production processes require independent deletion evidence")
+        supplied = (
+            self.privacy_ledger_path is not None,
+            self.privacy_ledger_key is not None,
+            self.privacy_ledger_key_id is not None,
+        )
+        if any(supplied) and not all(supplied):
+            raise ValueError("independent deletion ledger requires path, key and key identifier")
+        if self.privacy_ledger_path is not None:
+            if (
+                not self.privacy_ledger_path.is_absolute()
+                or self.privacy_ledger_path.resolve().is_relative_to(self.vault_root.resolve())
+            ):
+                raise ValueError("deletion ledger must be an absolute path outside the Vault")
+            if (
+                self.privacy_ledger_key is None
+                or len(self.privacy_ledger_key.get_secret_value().encode()) < 32
+            ):
+                raise ValueError("deletion ledger key is too short")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.privacy_ledger_key_id or ""):
+                raise ValueError("deletion ledger key identifier is invalid")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_training_consent_ledger(self) -> Self:
+        if self.profile is RuntimeProfile.PRODUCTION and self.training_consent_ledger_path is None:
+            raise ValueError("production processes require independent training consent evidence")
+        supplied = (
+            self.training_consent_ledger_path is not None,
+            self.training_consent_ledger_key is not None,
+            self.training_consent_ledger_key_id is not None,
+        )
+        if any(supplied) and not all(supplied):
+            raise ValueError("independent training consent requires path, key and key identifier")
+        path = self.training_consent_ledger_path
+        if path is not None:
+            if not path.is_absolute() or path.resolve().is_relative_to(self.vault_root.resolve()):
+                raise ValueError(
+                    "training consent ledger must be an absolute path outside the Vault"
+                )
+            if (
+                self.privacy_ledger_path is not None
+                and path.resolve() == self.privacy_ledger_path.resolve()
+            ):
+                raise ValueError("training consent and deletion require separate ledger files")
+            key = self.training_consent_ledger_key
+            if key is None or len(key.get_secret_value().encode()) < 32:
+                raise ValueError("training consent ledger key is too short")
+            if (
+                self.privacy_ledger_key is not None
+                and key.get_secret_value() == self.privacy_ledger_key.get_secret_value()
+            ):
+                raise ValueError("training consent and deletion require separate keys")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.training_consent_ledger_key_id or ""):
+                raise ValueError("training consent ledger key identifier is invalid")
+        return self
+
 
 class ApiSettings(_ExplicitSettings):
     """Validated settings available only to the HTTP API process."""
@@ -234,6 +320,11 @@ class ApiSettings(_ExplicitSettings):
         default="https://autplay.invalid", min_length=1, max_length=2048
     )
     admin_web_enabled: bool = False
+    admin_passkeys_enabled: bool = False
+    self_device_pairing_enabled: bool = False
+    account_recovery_enabled: bool = False
+    account_deletion_enabled: bool = False
+    shared_training_consent_enabled: bool = False
     admin_web_origin: str | None = Field(default=None, min_length=1, max_length=2048)
     admin_web_source_hmac_secret: SecretStr | None = Field(
         default=None, repr=False, min_length=32, max_length=4_096
@@ -241,6 +332,8 @@ class ApiSettings(_ExplicitSettings):
     admin_web_csrf_hmac_secret: SecretStr | None = Field(
         default=None, repr=False, min_length=32, max_length=4_096
     )
+    admin_backup_targets_json: str | None = Field(default=None, min_length=2, max_length=32_768)
+    admin_backup_control_root: Path | None = None
     jamendo_enabled: bool = False
     discovery_automation_enabled: bool = False
     jamendo_client_id: SecretStr | None = Field(
@@ -284,6 +377,22 @@ class ApiSettings(_ExplicitSettings):
 
     @model_validator(mode="after")
     def _validate_auth_contract(self) -> Self:
+        if self.shared_training_consent_enabled and self.training_consent_ledger_path is None:
+            raise ValueError("shared training requires independent consent evidence")
+        if self.account_deletion_enabled and not self.account_recovery_enabled:
+            raise ValueError("account deletion requires enabled account recovery")
+        if self.account_deletion_enabled and self.privacy_ledger_path is None:
+            raise ValueError("account deletion requires independent deletion evidence")
+        if self.account_recovery_enabled and self.profile_identity_private_key_pem is None:
+            raise ValueError("account recovery requires a persistent profile identity")
+        if self.self_device_pairing_enabled and self.profile_identity_private_key_pem is None:
+            raise ValueError("self-device pairing requires a persistent profile identity")
+        if self.admin_passkeys_enabled and (
+            not self.admin_web_enabled
+            or self.admin_web_origin is None
+            or not self.admin_web_origin.startswith("https://")
+        ):
+            raise ValueError("passkeys require enabled Admin Web with a canonical HTTPS origin")
         public_source_secret = self.public_access_source_hmac_secret.get_secret_value()
         reserved_secrets = [self.auth_signing_secret.get_secret_value()]
         reserved_secrets.extend(
@@ -315,6 +424,22 @@ class ApiSettings(_ExplicitSettings):
             ):
                 raise ValueError("admin Web source and CSRF HMAC secrets must differ")
             _validate_admin_web_origin(self.admin_web_origin, profile=self.profile)
+        backup_values = (
+            self.admin_backup_targets_json is not None,
+            self.admin_backup_control_root is not None,
+        )
+        if any(backup_values) and not all(backup_values):
+            raise ValueError("Admin backup control requires targets and a control root")
+        if all(backup_values):
+            if not self.admin_web_enabled:
+                raise ValueError("Admin backup control requires enabled Admin Web")
+            assert self.admin_backup_control_root is not None
+            if not self.admin_backup_control_root.is_absolute():
+                raise ValueError("Admin backup control root must be absolute")
+            from autplay.application.backup_control import parse_backup_targets
+
+            assert self.admin_backup_targets_json is not None
+            parse_backup_targets(self.admin_backup_targets_json)
         if self.jamendo_enabled:
             if not self.admin_web_enabled:
                 raise ValueError("Jamendo manual discovery requires admin Web")
@@ -339,7 +464,20 @@ class ApiSettings(_ExplicitSettings):
 class WorkerSettings(_ExplicitSettings):
     """Validated settings available only to the CPU worker process."""
 
+    account_purge_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _validate_account_purge(self) -> Self:
+        if self.account_purge_enabled and self.privacy_ledger_path is None:
+            raise ValueError("account purge requires independent deletion evidence")
+        return self
+
+    acoustid_client_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    metadata_proxy: SecretStr | None = Field(default=None, repr=False)
     worker_id: str | None = Field(default=None, min_length=1, max_length=300)
+    worker_cgroup_root: Path | None = None
+    vault_tool_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
+    vault_tool_max_output_bytes: int = Field(default=262_144, ge=1_024, le=262_144)
     poll_interval_seconds: float = Field(default=1.0, ge=0.05, le=60.0)
     lease_seconds: int = Field(default=120, ge=10, le=3_600)
     heartbeat_seconds: int = Field(default=30, ge=1, le=1_800)
@@ -361,6 +499,10 @@ class WorkerSettings(_ExplicitSettings):
 
     @model_validator(mode="after")
     def _validate_worker_timing(self) -> Self:
+        if self.worker_cgroup_root is not None and (
+            not self.worker_cgroup_root.is_absolute() or ".." in self.worker_cgroup_root.parts
+        ):
+            raise ValueError("worker cgroup root must be an absolute delegated directory")
         if self.heartbeat_seconds * 2 >= self.lease_seconds:
             raise ValueError("worker heartbeat must be less than half the lease")
         if self.retry_max_seconds < self.retry_base_seconds:

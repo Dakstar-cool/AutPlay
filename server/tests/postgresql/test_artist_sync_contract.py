@@ -36,9 +36,13 @@ from .identity_factory import (
 
 class _FailingPublisher(CatalogArtistSyncPublisher):
     def publish(
-        self, session: object, owner_user_id: UUID, *, ref_ids: tuple[UUID, ...] | None = None
+        self,
+        session: Session,
+        owner_user_id: UUID,
+        *,
+        ref_ids: tuple[UUID, ...] | None = None,
     ) -> int:
-        del session, owner_user_id
+        del session, owner_user_id, ref_ids
         raise RuntimeError("injected publisher failure")
 
 

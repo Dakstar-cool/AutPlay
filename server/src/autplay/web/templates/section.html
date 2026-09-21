@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-heading">
+  <div><h1>{{ t(section_title_key) }}</h1><p class="page-summary">{{ t(section_intro_key) }}</p></div>
+</header>
+<div class="section-grid section-destinations">
+  {% for item in section_links %}
+  <a class="section-card section-destination" href="{{ item.href }}?lang={{ locale }}">
+    <h2>{{ t(item.label) }}</h2><span aria-hidden="true">→</span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

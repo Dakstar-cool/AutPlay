@@ -25,6 +25,8 @@ REQUEST_ID_HEADER: Final = "X-Request-ID"
 # P09 sync push is a separately validated protocol body with an 8 MiB contract cap.
 MAX_REQUEST_BODY_BYTES: Final = 8_388_608
 MAX_REQUEST_BODY_FRAMES: Final = 1_024
+_UPLOAD_CHUNK_BYTES: Final = 1_048_576
+_RESOURCE_REQUEST_BYTES: Final = 4_096
 _REQUEST_ID_HEADER_BYTES: Final = b"x-request-id"
 _CONTENT_LENGTH_HEADER_BYTES: Final = b"content-length"
 _HTTP_METHODS: Final = frozenset(
@@ -114,28 +116,48 @@ class RequestRuntimeMiddleware:
 
         try:
             try:
-                if _declared_body_too_large(scope):
+                upload_body, resource_body = _special_body_routes(scope)
+                maximum = (
+                    _UPLOAD_CHUNK_BYTES
+                    if upload_body
+                    else _RESOURCE_REQUEST_BYTES
+                    if resource_body
+                    else MAX_REQUEST_BODY_BYTES
+                )
+                if _declared_body_too_large(scope, maximum):
                     raise _RequestBodyTooLarge
-                buffered_messages = await _read_bounded_request(receive)
-                next_message = 0
+                bounded_receive = _BoundedReceive(receive, maximum)
+                if upload_body:
+                    # The route must authenticate and acquire its permit before its
+                    # first receive. Buffering here would already consume the bytes.
+                    await self._app(scope, bounded_receive, send_with_request_id)
+                else:
+                    buffered_messages = await _read_bounded_request(bounded_receive)
+                    next_message = 0
 
-                async def receive_buffered() -> Message:
-                    nonlocal next_message
-                    if next_message < len(buffered_messages):
-                        message = buffered_messages[next_message]
-                        next_message += 1
-                        return message
-                    return await receive()
+                    async def receive_buffered() -> Message:
+                        nonlocal next_message
+                        if next_message < len(buffered_messages):
+                            message = buffered_messages[next_message]
+                            next_message += 1
+                            return message
+                        return await bounded_receive()
 
-                await self._app(scope, receive_buffered, send_with_request_id)
+                    await self._app(scope, receive_buffered, send_with_request_id)
             except _RequestBodyTooLarge:
                 if response_started:
                     raise
                 response = error_response(
                     request_id=request_id,
-                    code="request_body_too_large",
-                    message="The request body is too large.",
-                    status_code=413,
+                    code=(
+                        "upload_limit_exceeded"
+                        if upload_body
+                        else "resource_request_invalid"
+                        if resource_body
+                        else "request_body_too_large"
+                    ),
+                    message="The request body exceeds a limit.",
+                    status_code=422 if upload_body else 400 if resource_body else 413,
                     retryable=False,
                     headers={"Cache-Control": "no-store"},
                 )
@@ -235,7 +257,25 @@ def _incoming_request_id(scope: Scope) -> str | None:
         return None
 
 
-def _declared_body_too_large(scope: Scope) -> bool:
+def _special_body_routes(scope: Scope) -> tuple[bool, bool]:
+    path = str(scope.get("path", ""))
+    root = str(scope.get("root_path", ""))
+    if root and path.startswith(root + "/"):
+        path = path[len(root) :]
+    # Include the slash redirect without weakening the cap on the actual route.
+    path = path.rstrip("/")
+    upload_prefix = "/api/v1/vault/uploads/"
+    upload_body = (
+        scope.get("method") == "PATCH"
+        and path.startswith(upload_prefix)
+        and "/" not in path[len(upload_prefix) :]
+        and bool(path[len(upload_prefix) :])
+    )
+    resource_prefix = "/api/v1/account/resource-admissions"
+    return upload_body, path == resource_prefix or path.startswith(resource_prefix + "/")
+
+
+def _declared_body_too_large(scope: Scope, maximum: int) -> bool:
     values = [
         value
         for name, value in scope.get("headers", [])
@@ -249,12 +289,32 @@ def _declared_body_too_large(scope: Scope) -> bool:
         declared = int(values[0].decode("ascii"))
     except UnicodeDecodeError, ValueError:
         return True
-    return declared < 0 or declared > MAX_REQUEST_BODY_BYTES
+    return declared < 0 or declared > maximum
+
+
+class _BoundedReceive:
+    """Count wire frames and bytes before returning each frame to the consumer."""
+
+    def __init__(self, receive: Receive, maximum: int) -> None:
+        self._receive = receive
+        self._maximum = maximum
+        self._size = 0
+        self._frames = 0
+
+    async def __call__(self) -> Message:
+        message = await self._receive()
+        if message["type"] == "http.request":
+            self._frames += 1
+            self._size += len(message.get("body", b""))
+            if self._frames > MAX_REQUEST_BODY_FRAMES or self._size > self._maximum:
+                raise _RequestBodyTooLarge
+        elif message["type"] != "http.disconnect":
+            raise RuntimeError("unexpected ASGI request message")
+        return message
 
 
 async def _read_bounded_request(receive: Receive) -> list[Message]:
     body = bytearray()
-    frame_count = 0
     while True:
         message = await receive()
         if message["type"] == "http.disconnect":
@@ -266,10 +326,7 @@ async def _read_bounded_request(receive: Receive) -> list[Message]:
             ]
         if message["type"] != "http.request":
             raise RuntimeError("unexpected ASGI request message")
-        frame_count += 1
         chunk = message.get("body", b"")
-        if frame_count > MAX_REQUEST_BODY_FRAMES or len(body) + len(chunk) > MAX_REQUEST_BODY_BYTES:
-            raise _RequestBodyTooLarge
         body.extend(chunk)
         if not message.get("more_body", False):
             return [{"type": "http.request", "body": bytes(body), "more_body": False}]

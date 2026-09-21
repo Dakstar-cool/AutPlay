@@ -42,6 +42,12 @@ class StorageOperationError(VaultError):
     code = "vault_storage_unavailable"
 
 
+class VaultCapacityError(VaultError):
+    """The configured free-space reserve would be violated by an upload."""
+
+    code = "vault_capacity_low"
+
+
 class StagedFileNotFoundError(VaultError):
     code = "staged_file_not_found"
 
@@ -207,6 +213,7 @@ __all__ = (
     "StorageSafetyError",
     "UploadLimitError",
     "UploadOffsetError",
+    "VaultCapacityError",
     "VaultError",
     "VaultInventory",
     "VaultLimits",

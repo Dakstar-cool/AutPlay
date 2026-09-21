@@ -36,7 +36,13 @@ FROM ghcr.io/astral-sh/uv:0.12.3-python3.14-trixie-slim@sha256:93035a1ae478ef905
 
 RUN groupadd --system autplay \
     && useradd --system --gid autplay --home-dir /nonexistent --shell /usr/sbin/nologin autplay \
-    && install -d -o autplay -g autplay -m 0700 /var/lib/autplay/vault
+    && install -d -o autplay -g autplay -m 0700 \
+        /var/lib/autplay/vault \
+        /var/lib/autplay/vault/staging \
+        /var/lib/autplay/vault/objects \
+        /var/lib/autplay/vault/quarantine \
+        /var/lib/autplay/privacy-ledger \
+        /var/lib/autplay/training-consent-ledger
 
 COPY --from=builder --chown=autplay:autplay /opt/autplay /opt/autplay
 COPY --from=media-tools --chown=root:root /opt/chromaprint/fpcalc /usr/local/bin/fpcalc

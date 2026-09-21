@@ -40,6 +40,35 @@ class SubprocessExecutableRunner:
         self, arguments: Sequence[str], *, timeout_seconds: float, max_output_bytes: int
     ) -> ProcessResult:
         """Run one bounded process and discard untrusted diagnostic detail on failure."""
+        return self._run(
+            arguments, timeout_seconds=timeout_seconds, max_output_bytes=max_output_bytes
+        )
+
+    def run_input(
+        self,
+        arguments: Sequence[str],
+        payload: bytes,
+        *,
+        timeout_seconds: float,
+        max_output_bytes: int,
+    ) -> ProcessResult:
+        if not 1 <= len(payload) <= 4 * 1024 * 1024:
+            raise ValueError("invalid executable input limit")
+        return self._run(
+            arguments,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
+            payload=payload,
+        )
+
+    def _run(
+        self,
+        arguments: Sequence[str],
+        *,
+        timeout_seconds: float,
+        max_output_bytes: int,
+        payload: bytes | None = None,
+    ) -> ProcessResult:
 
         if not arguments or timeout_seconds <= 0 or max_output_bytes < 1:
             raise ValueError("invalid executable runner limits")
@@ -47,7 +76,7 @@ class SubprocessExecutableRunner:
             process = subprocess.Popen(
                 list(arguments),
                 shell=False,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL if payload is None else subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=_minimal_environment(),
@@ -91,6 +120,24 @@ class SubprocessExecutableRunner:
         )
         for reader in readers:
             reader.start()
+        input_error = threading.Event()
+
+        def write_input() -> None:
+            assert process.stdin is not None and payload is not None
+            try:
+                with process.stdin:
+                    view = memoryview(payload)
+                    while view:
+                        written = process.stdin.write(view[:65536])
+                        if written is None or written <= 0:
+                            raise OSError("short tool input")
+                        view = view[written:]
+            except OSError:
+                input_error.set()
+
+        writer = None if payload is None else threading.Thread(target=write_input, daemon=True)
+        if writer is not None:
+            writer.start()
         deadline = monotonic() + timeout_seconds
         timed_out = False
         while process.poll() is None:
@@ -108,13 +155,19 @@ class SubprocessExecutableRunner:
                 continue
         for reader in readers:
             reader.join(timeout=2.0)
-        if any(reader.is_alive() for reader in readers):
+        if writer is not None:
+            writer.join(timeout=2.0)
+        if any(reader.is_alive() for reader in readers) or (
+            writer is not None and writer.is_alive()
+        ):
             _terminate_process(process)
             raise MediaValidationError()
         if timed_out:
             raise MediaToolTimeoutError()
         if output_exceeded.is_set():
             raise MediaToolOutputError()
+        if input_error.is_set() and process.returncode == 0:
+            raise MediaValidationError()
         return ProcessResult(
             returncode=process.returncode,
             stdout=bytes(stdout),

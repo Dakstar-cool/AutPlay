@@ -690,9 +690,10 @@ class MatchPolicyActivationRow(Base):
         nullable=False,
         server_default=text("'ADMIN'"),
     )
-    actor_user_id: Mapped[UUID] = mapped_column(
+    actor_erased_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    actor_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        nullable=False,
+        nullable=True,
     )
     reason: Mapped[str] = mapped_column(
         Text(),
@@ -705,6 +706,10 @@ class MatchPolicyActivationRow(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "(actor_user_id IS NOT NULL AND actor_erased_at IS NULL) OR (actor_user_id IS NULL AND actor_erased_at IS NOT NULL)",
+            name="match_policy_actor_erasure_check",
+        ),
         PrimaryKeyConstraint("activation_id", name="match_policy_activation_pkey"),
         CheckConstraint(
             "sequence_no >= 1",
@@ -996,6 +1001,7 @@ class MatchDecisionRow(Base):
         Text(),
         nullable=False,
     )
+    actor_erased_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     actor_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         nullable=True,
@@ -1140,7 +1146,9 @@ class MatchDecisionRow(Base):
             ["supersedes_decision_id"],
             ["identity.match_decision.decision_id"],
             name="match_decision_supersedes_decision_id_fkey",
-            ondelete="RESTRICT",
+            deferrable=True,
+            initially="IMMEDIATE",
+            ondelete="NO ACTION",
         ),
         UniqueConstraint(
             "idempotency_scope", "idempotency_key", name="uq_match_decision_idempotency"
@@ -1179,7 +1187,7 @@ class MatchDecisionRow(Base):
             name="ck_match_decision_json",
         ),
         CheckConstraint(
-            "actor_type IN ('SYSTEM', 'USER', 'ADMIN') AND ((actor_type = 'SYSTEM' AND actor_user_id IS NULL) OR (actor_type IN ('USER', 'ADMIN') AND actor_user_id IS NOT NULL))",
+            "actor_type IN ('SYSTEM', 'USER', 'ADMIN') AND ((actor_type = 'SYSTEM' AND actor_user_id IS NULL AND actor_erased_at IS NULL) OR (actor_type IN ('USER', 'ADMIN') AND ((actor_user_id IS NOT NULL AND actor_erased_at IS NULL) OR (actor_user_id IS NULL AND actor_erased_at IS NOT NULL))))",
             name="ck_match_decision_actor",
         ),
         CheckConstraint(
@@ -1202,7 +1210,9 @@ class MatchDecisionRow(Base):
                 "identity.match_candidate_evidence.recording_id",
             ],
             name="fk_match_decision_reviewed_evidence",
-            ondelete="RESTRICT",
+            deferrable=True,
+            initially="IMMEDIATE",
+            ondelete="NO ACTION",
             use_alter=True,
         ),
         {"schema": "identity"},

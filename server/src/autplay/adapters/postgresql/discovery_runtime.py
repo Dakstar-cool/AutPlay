@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import math
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -23,6 +24,7 @@ from autplay.application.identity_evidence import (
 from autplay.domain.discovery import (
     BulkArtistResolution,
     DiscoveryCandidate,
+    DiscoveryEvidence,
     ProviderArtistTracks,
 )
 from autplay.domain.import_identity import (
@@ -33,9 +35,11 @@ from autplay.domain.import_identity import (
     normalize_text,
 )
 from autplay.domain.jobs import JobKey, JsonValue, LeaseFence
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.vault import OpaqueStorageKey, VaultLimits, VerifiedStagedFile
 from autplay.ports.jobs import EnqueueJob
 
+from .acquisition_authority import acquisition_generation
 from .identity_decisions import CreateRecordingReviewCommand, execute_create_recording_review
 from .import_runtime import PostgresImportRepository
 from .jobs_runtime import PostgresJobRepository
@@ -66,6 +70,7 @@ from .models import (
     VaultObjectRow,
     VaultReplicaRow,
 )
+from .resource_limits import lock_resource_admission
 
 JAMENDO_PROVIDER_ID = UUID("426dc183-ab26-5a6e-9350-3f8bb57cd575")
 DISCOVERY_ACQUIRE_JOB = JobKey("discovery.acquire", 1)
@@ -136,6 +141,7 @@ class PostgresBulkDiscoveryRepository:
     ) -> DiscoveryCandidateRow:
         """Select or retry one reviewed candidate under fresh manual authority."""
 
+        lock_resource_admission(self._session)
         if action not in {"SELECT", "RETRY"}:
             raise ValueError("manual candidate action is invalid")
         self._require_provider()
@@ -375,6 +381,7 @@ class PostgresBulkDiscoveryRepository:
     ) -> BulkStartResult:
         """Bind a second explicit action and enqueue each currently selectable candidate."""
 
+        lock_resource_admission(self._session)
         self._require_provider()
         operation = self._session.scalar(
             select(BulkOperationRow)
@@ -484,6 +491,7 @@ class PostgresBulkDiscoveryRepository:
     ) -> BulkStartResult:
         """Persist one explicit search result and enqueue Vault-first acquisition."""
 
+        lock_resource_admission(self._session)
         self._require_provider()
         canonical_artist_id = self._eligible_artist_id(owner_user_id, evidence.artist)
         if not evidence.acquisition_allowed:
@@ -767,6 +775,7 @@ class PostgresBulkDiscoveryRepository:
         automatic_enabled: bool = False,
     ) -> AcquisitionTarget | None:
         """Fence and enter one candidate's external-I/O state."""
+        lock_resource_admission(self._session)
 
         self._require_fence(
             fence, owner_user_id, expected_key=DISCOVERY_ACQUIRE_JOB, candidate_id=candidate_id
@@ -778,6 +787,7 @@ class PostgresBulkDiscoveryRepository:
                 DiscoveryCandidateRow.user_id == owner_user_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if candidate is None or candidate.job_id != fence.job_id:
             raise BulkDiscoveryError("discovery_target_not_found")
@@ -808,6 +818,7 @@ class PostgresBulkDiscoveryRepository:
         candidate.row_version += 1
         refresh_bulk_operations(self._session, candidate.candidate_id, candidate.updated_at)
         self._session.flush()
+        self._require_current_attempt(candidate, fence=fence)
         return AcquisitionTarget(
             candidate.candidate_id,
             attempt.acquisition_attempt_id,
@@ -826,6 +837,7 @@ class PostgresBulkDiscoveryRepository:
         automatic_enabled: bool,
     ) -> None:
         """Revalidate exact attempt and operator authority immediately before provider I/O."""
+        lock_resource_admission(self._session)
 
         self._require_fence(
             fence, owner_user_id, expected_key=DISCOVERY_ACQUIRE_JOB, candidate_id=candidate_id
@@ -837,6 +849,7 @@ class PostgresBulkDiscoveryRepository:
                 DiscoveryCandidateRow.user_id == owner_user_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if candidate is None or candidate.current_acquisition_attempt_id != acquisition_attempt_id:
             raise BulkDiscoveryError("source_authorization_unavailable")
@@ -844,6 +857,29 @@ class PostgresBulkDiscoveryRepository:
         self._require_operator_gate(attempt, automatic_enabled=automatic_enabled)
         self._require_provider()
         self._require_candidate_artist(candidate)
+
+    def require_persistent_acquisition_authority(
+        self,
+        *,
+        candidate_id: UUID,
+        owner_user_id: UUID,
+        acquisition_attempt_id: UUID,
+        authority_now: Callable[[], datetime],
+    ) -> None:
+        """Check durable intent without transient operator/provider execution gates."""
+        lock_resource_admission(self._session)
+        candidate = self._session.scalar(
+            select(DiscoveryCandidateRow)
+            .where(
+                DiscoveryCandidateRow.candidate_id == candidate_id,
+                DiscoveryCandidateRow.user_id == owner_user_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if candidate is None or candidate.current_acquisition_attempt_id != acquisition_attempt_id:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        self._require_current_attempt(candidate, authority_now=authority_now)
 
     def require_ingest_boundary(
         self,
@@ -854,6 +890,7 @@ class PostgresBulkDiscoveryRepository:
         automatic_enabled: bool,
     ) -> None:
         """Revalidate exact lineage and operator gate at a Vault publication boundary."""
+        lock_resource_admission(self._session)
 
         candidate = self._session.scalar(
             select(DiscoveryCandidateRow)
@@ -862,6 +899,7 @@ class PostgresBulkDiscoveryRepository:
                 DiscoveryCandidateRow.user_id == owner_user_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if candidate is None or candidate.current_acquisition_attempt_id != acquisition_attempt_id:
             raise BulkDiscoveryError("source_authorization_unavailable")
@@ -882,6 +920,11 @@ class PostgresBulkDiscoveryRepository:
         limits: VaultLimits,
     ) -> AcquisitionPrepared:
         """Recheck evidence, explicitly create identity, and enqueue canonical Vault ingest."""
+        # This legacy seam cannot atomically bind the new durable provider receipt.
+        # Controlled provider handoff must use its own exact receipt transition.
+        if staging_key.value.startswith("provider-"):
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        lock_resource_admission(self._session)
 
         self._require_fence(
             fence, owner_user_id, expected_key=DISCOVERY_ACQUIRE_JOB, candidate_id=candidate_id
@@ -894,6 +937,7 @@ class PostgresBulkDiscoveryRepository:
                 DiscoveryCandidateRow.user_id == owner_user_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if (
             candidate is None
@@ -919,6 +963,23 @@ class PostgresBulkDiscoveryRepository:
                 existing_upload.job_id,
                 existing_upload.target_recording_id,
             )
+        result = self._create_ingest_locked(
+            candidate, attempt, evidence, staging_key, verified, limits
+        )
+        self._require_current_attempt(candidate, fence=fence)
+        return result
+
+    def _create_ingest_locked(
+        self,
+        candidate: DiscoveryCandidateRow,
+        attempt: AcquisitionAttemptRow,
+        evidence: DiscoveryEvidence,
+        staging_key: OpaqueStorageKey,
+        verified: VerifiedStagedFile,
+        limits: VaultLimits,
+    ) -> AcquisitionPrepared:
+        """Materialize within an already locked/authorized caller-owned transaction."""
+        owner_user_id = candidate.user_id
         recording, user_ref, library_entry, external_reference = self._materialize_identity(
             candidate, evidence
         )
@@ -936,7 +997,7 @@ class PostgresBulkDiscoveryRepository:
                 idempotency_key=str(upload_id),
             )
         )
-        now = datetime.now(UTC)
+        now = self._authority_now()
         request_hash = hashlib.sha256(
             b"\0".join(
                 (
@@ -998,6 +1059,7 @@ class PostgresBulkDiscoveryRepository:
         terminal: bool,
     ) -> None:
         """Persist only a bounded error code while retaining retryable job authority."""
+        lock_resource_admission(self._session)
 
         self._require_fence(
             fence, owner_user_id, expected_key=DISCOVERY_ACQUIRE_JOB, candidate_id=candidate_id
@@ -1009,6 +1071,7 @@ class PostgresBulkDiscoveryRepository:
                 DiscoveryCandidateRow.user_id == owner_user_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if candidate is None or candidate.job_id != fence.job_id:
             raise BulkDiscoveryError("discovery_target_not_found")
@@ -1024,6 +1087,19 @@ class PostgresBulkDiscoveryRepository:
         attempt.row_version += 1
         refresh_bulk_operations(self._session, candidate.candidate_id, candidate.updated_at)
         self._session.flush()
+        # Bulk row locks can wait past expiry. Mutable authority is still locked;
+        # recheck time without rejecting this transaction's new FAILED state.
+        self._require_fence(
+            fence, owner_user_id, expected_key=DISCOVERY_ACQUIRE_JOB, candidate_id=candidate_id
+        )
+        expires_at = self._session.scalar(
+            select(SourceAuthorizationRow.expires_at).where(
+                SourceAuthorizationRow.authorization_id == attempt.source_authorization_id,
+                SourceAuthorizationRow.revision == attempt.source_authorization_revision,
+            )
+        )
+        if expires_at is None or expires_at <= self._authority_now():
+            raise BulkDiscoveryError("source_authorization_unavailable")
 
     def require_commit_authorization(
         self,
@@ -1034,6 +1110,7 @@ class PostgresBulkDiscoveryRepository:
         acquisition_attempt_id: UUID,
     ) -> DiscoveryCandidateRow:
         """Fence durable owner, source, and artist authority at a Vault boundary."""
+        lock_resource_admission(self._session)
 
         self._require_provider()
         candidate = self._session.scalar(
@@ -1047,6 +1124,7 @@ class PostgresBulkDiscoveryRepository:
                 DiscoveryCandidateRow.acquisition_state.in_({"INGESTING", "MATERIALIZING"}),
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if candidate is None:
             raise BulkDiscoveryError("source_authorization_unavailable")
@@ -1056,6 +1134,7 @@ class PostgresBulkDiscoveryRepository:
 
     def claim_analysis(self, *, candidate_id: UUID, owner_user_id: UUID, fence: LeaseFence) -> bool:
         """Fence the standard CPU analysis fact for one already-ready candidate."""
+        lock_resource_admission(self._session)
 
         self._require_fence(
             fence, owner_user_id, expected_key=STANDARD_ANALYSIS_JOB, candidate_id=candidate_id
@@ -1084,6 +1163,7 @@ class PostgresBulkDiscoveryRepository:
         self, *, candidate_id: UUID, owner_user_id: UUID, fence: LeaseFence
     ) -> bool:
         """Record that canonical ingest produced validated technical/fingerprint evidence."""
+        lock_resource_admission(self._session)
 
         self._require_fence(
             fence, owner_user_id, expected_key=STANDARD_ANALYSIS_JOB, candidate_id=candidate_id
@@ -1137,8 +1217,24 @@ class PostgresBulkDiscoveryRepository:
         return True
 
     def _materialize_identity(
-        self, candidate: DiscoveryCandidateRow, evidence: DiscoveryCandidate
+        self, candidate: DiscoveryCandidateRow, evidence: DiscoveryEvidence
     ) -> tuple[RecordingRow, UserTrackRefRow, LibraryEntryRow, ExternalReferenceRow]:
+        # Identity writers lock Recording before references. Observe the mapping,
+        # take that row lock, then lock/recheck the reference before reusing it.
+        observed_recording = self._session.scalar(
+            select(ExternalReferenceRow.recording_id).where(
+                ExternalReferenceRow.provider_id == JAMENDO_PROVIDER_ID,
+                ExternalReferenceRow.external_entity_type == "TRACK",
+                ExternalReferenceRow.external_id == evidence.provider_track_id,
+                ExternalReferenceRow.market_scope == "GLOBAL",
+            )
+        )
+        if observed_recording is not None:
+            self._session.execute(
+                select(RecordingRow.recording_id)
+                .where(RecordingRow.recording_id == observed_recording)
+                .with_for_update()
+            )
         track_reference = self._session.scalar(
             select(ExternalReferenceRow)
             .where(
@@ -1148,19 +1244,30 @@ class PostgresBulkDiscoveryRepository:
                 ExternalReferenceRow.market_scope == "GLOBAL",
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        if (
+            track_reference.recording_id if track_reference is not None else None
+        ) != observed_recording:
+            raise BulkDiscoveryError("identity_review_required")
         if track_reference is not None and track_reference.recording_id is not None:
             user_ref = self._session.scalar(
-                select(UserTrackRefRow).where(
+                select(UserTrackRefRow)
+                .where(
                     UserTrackRefRow.user_id == candidate.user_id,
                     UserTrackRefRow.recording_id == track_reference.recording_id,
                     UserTrackRefRow.resolution_status == "RESOLVED",
                     UserTrackRefRow.deleted_at.is_(None),
                 )
+                .order_by(UserTrackRefRow.user_track_ref_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if user_ref is None:
                 raise BulkDiscoveryError("identity_review_required")
-            recording = self._session.get(RecordingRow, track_reference.recording_id)
+            recording = self._session.get(
+                RecordingRow, track_reference.recording_id, populate_existing=True
+            )
             if recording is None or recording.deleted_at is not None:
                 raise BulkDiscoveryError("identity_review_required")
             library_entry = self._active_or_new_library_entry(candidate.user_id, user_ref)
@@ -1285,11 +1392,15 @@ class PostgresBulkDiscoveryRepository:
         self, owner_user_id: UUID, user_ref: UserTrackRefRow
     ) -> LibraryEntryRow:
         existing = self._session.scalar(
-            select(LibraryEntryRow).where(
+            select(LibraryEntryRow)
+            .where(
                 LibraryEntryRow.user_id == owner_user_id,
                 LibraryEntryRow.user_track_ref_id == user_ref.user_track_ref_id,
                 LibraryEntryRow.removed_at.is_(None),
             )
+            .order_by(LibraryEntryRow.library_entry_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if existing is not None:
             return existing
@@ -1313,6 +1424,10 @@ class PostgresBulkDiscoveryRepository:
     ) -> AcquisitionAttemptRow:
         """Create a fresh manual lineage without reviving a terminal automatic attempt."""
 
+        try:
+            generation = acquisition_generation(self._session, candidate.user_id)
+        except ResourceAdmissionError as error:
+            raise BulkDiscoveryError("source_authorization_unavailable") from error
         active_attempt = self._session.scalar(
             select(AcquisitionAttemptRow)
             .where(
@@ -1333,6 +1448,7 @@ class PostgresBulkDiscoveryRepository:
         if attempt is None:
             attempt = AcquisitionAttemptRow(
                 acquisition_attempt_id=attempt_id,
+                authority_generation=generation,
                 candidate_id=candidate.candidate_id,
                 origin="MANUAL",
                 source_authorization_id=authorization.authorization_id,
@@ -1379,6 +1495,12 @@ class PostgresBulkDiscoveryRepository:
         self._session.flush([attempt, candidate])
         return attempt
 
+    def _authority_now(self) -> datetime:
+        now = self._session.scalar(select(func.clock_timestamp()))
+        if not isinstance(now, datetime):
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        return now
+
     def _require_fence(
         self,
         fence: LeaseFence,
@@ -1389,13 +1511,11 @@ class PostgresBulkDiscoveryRepository:
     ) -> None:
         row = self._session.scalar(
             select(JobRow)
-            .where(
-                JobRow.job_id == fence.job_id,
-                JobRow.lease_deadline.is_not(None),
-                JobRow.lease_deadline > func.now(),
-            )
+            .where(JobRow.job_id == fence.job_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        now = self._authority_now()
         if (
             row is None
             or row.user_id != owner_user_id
@@ -1405,6 +1525,9 @@ class PostgresBulkDiscoveryRepository:
             or row.job_type != expected_key.job_type
             or row.schema_version != expected_key.schema_version
             or row.payload != {"candidate_id": str(candidate_id)}
+            or row.cancel_requested_at is not None
+            or row.lease_deadline is None
+            or row.lease_deadline <= now
         ):
             raise BulkDiscoveryError("lease_fence_lost")
 
@@ -1604,6 +1727,7 @@ class PostgresBulkDiscoveryRepository:
         candidate: DiscoveryCandidateRow,
         *,
         fence: LeaseFence | None = None,
+        authority_now: Callable[[], datetime] | None = None,
     ) -> AcquisitionAttemptRow:
         attempt_id = candidate.current_acquisition_attempt_id
         if attempt_id is None:
@@ -1615,6 +1739,7 @@ class PostgresBulkDiscoveryRepository:
                 AcquisitionAttemptRow.candidate_id == candidate.candidate_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if (
             attempt is None
@@ -1625,6 +1750,12 @@ class PostgresBulkDiscoveryRepository:
             or candidate.source_authorization_revision != attempt.source_authorization_revision
         ):
             raise BulkDiscoveryError("source_authorization_unavailable")
+        try:
+            generation = acquisition_generation(self._session, candidate.user_id)
+        except ResourceAdmissionError as error:
+            raise BulkDiscoveryError("source_authorization_unavailable") from error
+        if attempt.authority_generation != generation:
+            raise BulkDiscoveryError("source_authorization_unavailable")
         authorization = self._session.scalar(
             select(SourceAuthorizationRow)
             .where(
@@ -1632,6 +1763,7 @@ class PostgresBulkDiscoveryRepository:
                 SourceAuthorizationRow.revision == attempt.source_authorization_revision,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if (
             authorization is None
@@ -1643,7 +1775,6 @@ class PostgresBulkDiscoveryRepository:
             or authorization.market_scope != "GLOBAL"
             or authorization.rights_capability != "AUTHORIZED_DOWNLOAD"
             or authorization.revoked_at is not None
-            or authorization.expires_at <= datetime.now(UTC)
         ):
             raise BulkDiscoveryError("source_authorization_unavailable")
         if attempt.origin == "MANUAL":
@@ -1662,6 +1793,7 @@ class PostgresBulkDiscoveryRepository:
                     ArtistPolicyRow.user_id == candidate.user_id,
                 )
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if (
                 policy is None
@@ -1677,6 +1809,18 @@ class PostgresBulkDiscoveryRepository:
                 raise BulkDiscoveryError("policy_revision_stale")
         else:
             raise BulkDiscoveryError("source_authorization_unavailable")
+        # Policy locks can wait after the source authorization lock. Check both
+        # source and worker expiry only after every lineage lock has been acquired.
+        now = (authority_now or self._authority_now)()
+        if authorization.expires_at <= now:
+            raise BulkDiscoveryError("source_authorization_unavailable")
+        if fence is not None:
+            self._require_fence(
+                fence,
+                candidate.user_id,
+                expected_key=DISCOVERY_ACQUIRE_JOB,
+                candidate_id=candidate.candidate_id,
+            )
         return attempt
 
     @staticmethod
@@ -1708,7 +1852,7 @@ class PostgresBulkDiscoveryRepository:
 
 def _discovery_predecessor(
     candidate: DiscoveryCandidateRow,
-    evidence: DiscoveryCandidate,
+    evidence: DiscoveryEvidence,
     user_ref: UserTrackRefRow,
 ) -> MatchDecisionRow:
     snapshot_values: dict[str, JsonValue] = {

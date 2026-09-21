@@ -312,6 +312,7 @@ def test_lossless_decision_and_candidate_round_trip_with_multiple_origins_and_fe
         "explanation_schema_version": "1",
         "actor_type": "ADMIN",
         "actor_user_id": world.admin_user_id,
+        "actor_erased_at": None,
         "idempotency_scope": "p02-identity",
         "idempotency_key": "p02-lossless-roundtrip",
         "request_sha256": request_sha256,

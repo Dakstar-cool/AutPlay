@@ -2,7 +2,7 @@ package app.autplay.application.profilepairing
 
 import java.util.concurrent.atomic.AtomicReference
 
-enum class FirstBindCeremonyOwner { M5, PUBLIC_ACCESS }
+enum class FirstBindCeremonyOwner { M5, PUBLIC_ACCESS, SELF_DEVICE_PAIRING, ACCOUNT_RECOVERY, ACCOUNT_DELETE_CANCEL }
 
 /** Process-local reservation spanning the complete first-bind ceremony, including user decisions. */
 class FirstBindCeremonyGate {

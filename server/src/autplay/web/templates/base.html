@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>{{ page_title }} · {{ t("app_name") }}</title>
-  <link rel="stylesheet" href="/admin/static/admin-v1.css">
+  <link rel="stylesheet" href="/admin/static/admin-v2.css?v=3">
+  <script src="/admin/static/admin-forms-v1.js?v=2" defer></script>
   {% block head %}{% endblock %}
 </head>
-<body>
+<body data-action-error="{{ t('passkey_action_error') }}">
   <a class="skip-link" href="#main">{{ t("skip_to_content") }}</a>
   {% if development_mode %}<p class="development-warning" role="status">{{ t("development_warning") }}</p>{% endif %}
   <header class="site-header">
@@ -20,7 +21,7 @@
     <aside class="sidebar">
       <nav class="primary-nav primary-nav-desktop" aria-label="{{ t('navigation') }}">
         {% for item in navigation %}
-        <a href="{{ item.href }}?lang={{ locale }}"{% if item.current %} aria-current="page"{% endif %}>{{ t(item.label) }}</a>
+        <a href="{{ item.href }}?lang={{ locale }}"{% if item.current %} aria-current="{{ item.aria_current }}"{% endif %}>{{ t(item.label) }}</a>
         {% endfor %}
       </nav>
     </aside>
@@ -31,12 +32,21 @@
         <summary><span>{{ t("navigation") }}</span>{% for item in navigation %}{% if item.current %}<strong>{{ t(item.label) }}</strong>{% endif %}{% endfor %}</summary>
         <nav class="primary-nav primary-nav-mobile" aria-label="{{ t('navigation') }}">
           {% for item in navigation %}
-          <a href="{{ item.href }}?lang={{ locale }}"{% if item.current %} aria-current="page"{% endif %}>{{ t(item.label) }}</a>
+          <a href="{{ item.href }}?lang={{ locale }}"{% if item.current %} aria-current="{{ item.aria_current }}"{% endif %}>{{ t(item.label) }}</a>
           {% endfor %}
         </nav>
       </details>
       {% endif %}
       <main id="main" tabindex="-1">
+        {% if authenticated %}
+        {% for section in navigation %}{% if section.current and section.children %}
+        <nav class="section-nav" aria-label="{{ t(section.label) }}">
+          {% for item in section.children %}
+          <a href="{{ item.href }}?lang={{ locale }}"{% if item.current %} aria-current="page"{% endif %}>{{ t(item.label) }}</a>
+          {% endfor %}
+        </nav>
+        {% endif %}{% endfor %}
+        {% endif %}
         {% if flash %}<p class="notice" role="status" aria-live="polite">{{ flash }}</p>{% endif %}
         {% block content %}{% endblock %}
       </main>

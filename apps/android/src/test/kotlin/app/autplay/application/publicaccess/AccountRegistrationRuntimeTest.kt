@@ -1,6 +1,7 @@
 package app.autplay.application.publicaccess
 
 import app.autplay.data.security.CredentialStore
+import app.autplay.data.security.CredentialJournalSlots
 import app.autplay.data.security.SessionCredentialEnvelopeCodec
 import app.autplay.application.profilepairing.PairingFlowSnapshot
 import app.autplay.application.profilepairing.FirstBindCeremonyGate
@@ -14,6 +15,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AccountRegistrationRuntimeTest {
+    @Test fun everyReservedJournalRejectsRegistrationAndResumeBeforeCredentialAccess() = runBlocking {
+        val store = object : CredentialStore {
+            override suspend fun read(profileId: ServerProfileId): ByteArray? = error("must not read journal")
+            override suspend fun write(profileId: ServerProfileId, material: ByteArray) = error("must not overwrite journal")
+            override suspend fun clear(profileId: ServerProfileId) = error("must not erase journal")
+        }
+        for (slot in CredentialJournalSlots.all) {
+            val gate = FirstBindCeremonyGate()
+            val runtime = AccountRegistrationRuntime(store,
+                AccountRegistrationPort { error("must not call server") },
+                AccountRegistrationBindingCommitter { _, _, _, _ -> error("must not bind") },
+                ActiveProfileGate { error("must reject identity first") },
+                object : AccountRegistrationDiscoveryGate {
+                    override suspend fun verify(invitation: AccountInvitation) = error("must not discover")
+                    override fun takeVerifiedContext() = null
+                }, gate)
+            val invitation = AccountInvitationParser.parseQr(document().replace("10000000-0000-4000-8000-000000000002", slot.value))
+            val signed = AccountRegistrationProof.create(invitation, "Pixel", "0.3.0", FakeKeys())
+            assertEquals(false, runtime.pendingMatches(slot, invitation))
+            assertTrue(runtime.resumePending(slot, FakeKeys()).isFailure)
+            assertEquals("RESERVED_CREDENTIAL_PROFILE", runtime.redeem(signed).exceptionOrNull()?.message)
+            assertTrue(gate.reserve(FirstBindCeremonyOwner.M5))
+        }
+    }
+
     @Test fun m5ReservationWinsBeforePublicRedeemWithoutCallingServer() = runBlocking {
         val store = RecordingStore()
         val firstBindGate = FirstBindCeremonyGate()

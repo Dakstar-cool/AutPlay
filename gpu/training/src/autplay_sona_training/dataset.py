@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from hashlib import sha256
 from hmac import new as new_hmac
@@ -87,6 +88,28 @@ _DATASET_MANIFEST_KEYS_V2 = frozenset(
 type Float32Array = npt.NDArray[np.float32]
 type Int64Array = npt.NDArray[np.int64]
 type BytesArray = npt.NDArray[np.bytes_]
+
+
+@dataclass(frozen=True, slots=True)
+class SonaDatasetHeader:
+    """Bounded manifest facts available before any owner-derived tensor is read."""
+
+    manifest_sha256: str
+    source_kind: str
+    source_manifest_sha256: str
+    owner_lineage_key_id: str
+    owner_lineage_tokens: tuple[str, ...]
+    tokenizer_active_codes_per_level: int
+
+
+@dataclass(frozen=True, slots=True)
+class _SonaDatasetMetadata:
+    document: dict[str, JsonValue]
+    header: SonaDatasetHeader
+    schema_version: int
+    tensor_fields: tuple[str, ...]
+    example_count: int
+    snapshot_sha256: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,8 +327,7 @@ def _materialize_sona_dataset(
     )
 
 
-def load_sona_dataset(directory: Path) -> SonaTensorDataset:
-    """Load and fully verify one immutable Sona tensor dataset."""
+def _load_dataset_metadata(directory: Path) -> _SonaDatasetMetadata:
 
     manifest_path = directory / "manifest.json"
     if manifest_path.stat().st_size > SONA_MAX_DATASET_MANIFEST_BYTES:
@@ -343,6 +365,34 @@ def load_sona_dataset(directory: Path) -> SonaTensorDataset:
     example_count = _expect_int(document.get("example_count"), "example_count")
     if not 1 <= example_count <= SONA_MAX_DATASET_EXAMPLES:
         raise ValueError("Sona dataset example count is outside the accepted bound")
+    header = _dataset_header(document, manifest_sha256, schema_version)
+    snapshot_sha256 = sha256(rfc8785.dumps(envelope)).digest()
+    return _SonaDatasetMetadata(
+        document, header, schema_version, tensor_fields, example_count, snapshot_sha256
+    )
+
+
+def load_sona_dataset_header(directory: Path) -> SonaDatasetHeader:
+    """Verify bounded manifest facts without opening tensor payloads."""
+    return _load_dataset_metadata(directory).header
+
+
+def load_sona_dataset(
+    directory: Path,
+    *,
+    before_payload: Callable[[SonaDatasetHeader], Callable[[], None] | None] | None = None,
+) -> SonaTensorDataset:
+    """Verify tensors, with an optional current-authority gate before payload reads.
+
+    This reader issues no byte/process permit. Controlled callers retain their own
+    admission and containment; a historical verification alone cannot train.
+    """
+    metadata = _load_dataset_metadata(directory)
+    document, header = metadata.document, metadata.header
+    schema_version, tensor_fields = metadata.schema_version, metadata.tensor_fields
+    example_count, snapshot_sha256 = metadata.example_count, metadata.snapshot_sha256
+    manifest_path, manifest_sha256 = directory / "manifest.json", header.manifest_sha256
+    check_current = before_payload(header) if before_payload is not None else None
     tensor_entries = _expect_list(document.get("tensors"), "tensors")
     arrays: dict[str, npt.NDArray[np.generic]] = {}
     expected_shapes = _expected_tensor_shapes(example_count)
@@ -364,6 +414,9 @@ def load_sona_dataset(directory: Path) -> SonaTensorDataset:
         canonical_dtype = _expected_dtype(name)
         if expected_shape != expected_shapes[name] or expected_dtype != canonical_dtype.str:
             raise ValueError("Sona dataset tensor declaration is outside canonical bounds")
+        if check_current is not None:
+            check_current()
+        _require_manifest_snapshot(manifest_path, snapshot_sha256)
         tensor_payload = read_canonical_npy(
             tensor_path,
             expected_shape=expected_shape,
@@ -476,7 +529,54 @@ def load_sona_dataset(directory: Path) -> SonaTensorDataset:
     )
     if sha256(dataset.example_sha256.tobytes()).hexdigest() != ordered_examples_sha256:
         raise ValueError("Sona dataset ordered example hash mismatch")
+    _require_manifest_snapshot(manifest_path, snapshot_sha256)
     return dataset
+
+
+def _dataset_header(
+    document: dict[str, JsonValue], manifest_sha256: str, schema_version: int
+) -> SonaDatasetHeader:
+    legacy = schema_version == 2
+    source_kind = (
+        SONA_SOURCE_KIND_SYNTHETIC
+        if legacy
+        else _expect_string(document.get("source_kind"), "source_kind")
+    )
+    if source_kind not in {SONA_SOURCE_KIND_SYNTHETIC, SONA_SOURCE_KIND_OWNER_APPROVED}:
+        raise ValueError("Unknown Sona training source authority")
+    source_sha256 = (
+        sha256(f"legacy-v2:{manifest_sha256}".encode()).hexdigest()
+        if legacy
+        else _expect_string(document.get("source_manifest_sha256"), "source_manifest_sha256")
+    )
+    key_id = (
+        "legacy-v2"
+        if legacy
+        else _expect_string(document.get("owner_lineage_key_id"), "owner_lineage_key_id")
+    )
+    tokens = tuple(
+        _expect_string(value, "owner lineage token")
+        for value in _expect_list(document.get("owner_lineage_tokens"), "owner_lineage_tokens")
+    )
+    _validate_sha256(source_sha256, "source_manifest_sha256")
+    _validate_label(key_id, "owner_lineage_key_id")
+    if not 1 <= len(tokens) <= SONA_MAX_DATASET_EXAMPLES or tuple(sorted(set(tokens))) != tokens:
+        raise ValueError("Sona dataset owner lineage is invalid")
+    for token in tokens:
+        _validate_sha256(token, "owner lineage token")
+    active_codes = _expect_int(
+        document.get("tokenizer_active_codes_per_level"), "tokenizer_active_codes_per_level"
+    )
+    if not 1 <= active_codes <= SONA_MAX_ACTIVE_TOKENIZER_CODES:
+        raise ValueError("Sona tokenizer active-code count is outside the accepted bound")
+    return SonaDatasetHeader(
+        manifest_sha256, source_kind, source_sha256, key_id, tokens, active_codes
+    )
+
+
+def _require_manifest_snapshot(path: Path, expected_sha256: bytes) -> None:
+    if sha256(rfc8785.dumps(_load_json_object(path))).digest() != expected_sha256:
+        raise ValueError("Sona dataset manifest changed during authorized loading")
 
 
 def _tensorize_examples(examples: tuple[SonaTrainingExample, ...]) -> SonaTensorDataset:
@@ -823,8 +923,23 @@ def _expected_dtype(name: str) -> np.dtype[np.generic]:
 
 
 def _load_json_object(path: Path) -> dict[str, JsonValue]:
-    parsed = cast(JsonValue, json.loads(path.read_bytes()))
+    if path.is_symlink():
+        raise ValueError("Sona dataset manifest path is unsafe")
+    with path.open("rb") as stream:
+        payload = stream.read(SONA_MAX_DATASET_MANIFEST_BYTES + 1)
+    if not 1 <= len(payload) <= SONA_MAX_DATASET_MANIFEST_BYTES:
+        raise ValueError("Sona dataset manifest exceeds the accepted bound")
+    parsed = cast(JsonValue, json.loads(payload, object_pairs_hook=_unique_json_object))
     return _expect_object(parsed, str(path))
+
+
+def _unique_json_object(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
+    result: dict[str, JsonValue] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Sona dataset manifest contains duplicate keys")
+        result[key] = value
+    return result
 
 
 def _expect_object(value: JsonValue | None, field: str) -> dict[str, JsonValue]:
@@ -884,8 +999,10 @@ __all__ = (
     "SONA_MAX_DATASET_EXAMPLES",
     "SONA_SOURCE_KIND_OWNER_APPROVED",
     "SONA_SOURCE_KIND_SYNTHETIC",
+    "SonaDatasetHeader",
     "SonaTensorDataset",
     "load_sona_dataset",
+    "load_sona_dataset_header",
     "materialize_quality_candidate_sona_dataset",
     "materialize_sona_dataset",
 )

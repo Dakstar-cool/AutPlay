@@ -9,6 +9,7 @@ from datetime import timedelta
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Protocol
+from uuid import UUID
 
 from autplay.domain.jobs import (
     JobCancellationRequested,
@@ -18,6 +19,7 @@ from autplay.domain.jobs import (
     JsonValue,
     LeaseFence,
     LeaseTransition,
+    ResourceWaitTransition,
     RetryableJobError,
     RetryPolicy,
     TerminalJobError,
@@ -41,6 +43,14 @@ class JobLeaseLost(RuntimeError):
         super().__init__("job.lease_lost")
 
 
+class JobResourceWait(RuntimeError):
+    """A committed defer has already released this job's CPU claim."""
+
+    def __init__(self, *, cancelled: bool = False) -> None:
+        super().__init__("job.resource_wait")
+        self.cancelled = cancelled
+
+
 class WorkerOutcome(StrEnum):
     """Observable result of one bounded worker iteration."""
 
@@ -50,6 +60,7 @@ class WorkerOutcome(StrEnum):
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
     LEASE_LOST = "LEASE_LOST"
+    RESOURCE_WAIT = "RESOURCE_WAIT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +184,21 @@ class JobExecutionContext:
         if self._cancel_requested.is_set():
             raise JobCancellationRequested
 
+    def defer_for_resource(
+        self, operation_id: UUID, *, delay: timedelta = timedelta(seconds=2)
+    ) -> None:
+        """Return for a concurrent grant, otherwise yield only after the defer commits."""
+        self.raise_if_cancelled()
+        with self._uow_factory() as unit:
+            transition = unit.jobs.defer_for_resource(self._fence, operation_id, delay)
+            unit.commit()
+        if transition in {ResourceWaitTransition.GRANTED, ResourceWaitTransition.RECHECK}:
+            return
+        if transition is ResourceWaitTransition.LOST_LEASE:
+            self._lease_lost.set()
+            raise JobLeaseLost
+        raise JobResourceWait(cancelled=transition is ResourceWaitTransition.CANCELLED)
+
 
 class JobWorker:
     """Single-concurrency CPU worker with a separate lease heartbeat."""
@@ -251,6 +277,10 @@ class JobWorker:
                 context.raise_if_cancelled()
             if monitor.failure is not None:
                 return WorkerOutcome.LEASE_LOST
+        except JobResourceWait as result:
+            # A racing heartbeat may observe the deliberately released claim.
+            # The atomic defer already committed; never finish this attempt twice.
+            return WorkerOutcome.CANCELLED if result.cancelled else WorkerOutcome.RESOURCE_WAIT
         except JobCancellationRequested:
             transition = self._acknowledge_cancel(lease.fence)
             return _outcome_for_transition(transition, applied=WorkerOutcome.CANCELLED)
@@ -262,7 +292,7 @@ class JobWorker:
                 transition,
                 applied=(
                     WorkerOutcome.FAILED
-                    if lease.fence.attempt_no >= self._settings.retry_policy.max_attempts
+                    if lease.retry_attempt_no >= self._settings.retry_policy.max_attempts
                     else WorkerOutcome.RETRY_SCHEDULED
                 ),
             )
@@ -364,6 +394,7 @@ __all__ = (
     "JobHandler",
     "JobHandlerRegistry",
     "JobLeaseLost",
+    "JobResourceWait",
     "JobWorker",
     "JobWorkerSettings",
     "WorkerOutcome",

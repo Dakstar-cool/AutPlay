@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKeyConstraint,
     Index,
@@ -88,6 +89,13 @@ class JobRow(Base):
         nullable=False,
         server_default=text("0"),
     )
+    resource_wait_count: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("0")
+    )
+    resource_waiting: Mapped[bool] = mapped_column(
+        Boolean(), nullable=False, server_default=text("false")
+    )
+    resource_wake_until: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     scheduled_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -172,6 +180,18 @@ class JobRow(Base):
         CheckConstraint(
             "attempt_count >= 0",
             name="job_attempt_count_check",
+        ),
+        CheckConstraint(
+            "resource_wait_count >= 0 AND resource_wait_count <= attempt_count",
+            name="job_resource_wait_count_check",
+        ),
+        CheckConstraint(
+            "NOT resource_waiting OR state = 'RETRY_WAIT'",
+            name="job_resource_waiting_check",
+        ),
+        CheckConstraint(
+            "resource_wake_until IS NULL OR resource_waiting",
+            name="job_resource_wake_check",
         ),
         CheckConstraint(
             "row_version >= 1",
@@ -259,7 +279,7 @@ class JobAttemptRow(Base):
         ),
         UniqueConstraint("job_id", "attempt_no", name="uq_job_attempt_number"),
         CheckConstraint(
-            "outcome IS NULL OR outcome IN ('SUCCESS', 'RETRYABLE_ERROR', 'TERMINAL_ERROR', 'LEASE_EXPIRED', 'CANCELLED')",
+            "outcome IS NULL OR outcome IN ('SUCCESS', 'RETRYABLE_ERROR', 'TERMINAL_ERROR', 'LEASE_EXPIRED', 'CANCELLED', 'RESOURCE_WAIT')",
             name="ck_job_attempt_outcome",
         ),
         CheckConstraint(

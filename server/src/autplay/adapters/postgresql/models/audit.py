@@ -44,6 +44,7 @@ class CatalogChangeSetRow(Base):
         Text(),
         nullable=False,
     )
+    actor_erased_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     actor_user_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         nullable=True,
@@ -92,7 +93,7 @@ class CatalogChangeSetRow(Base):
             name="ck_catalog_change_set_actor",
         ),
         CheckConstraint(
-            "(actor_type = 'SYSTEM') OR (actor_type IN ('USER', 'ADMIN') AND actor_user_id IS NOT NULL)",
+            "(actor_type = 'SYSTEM' AND actor_erased_at IS NULL) OR (actor_type IN ('USER','ADMIN') AND ((actor_user_id IS NOT NULL AND actor_erased_at IS NULL) OR (actor_user_id IS NULL AND actor_erased_at IS NOT NULL)))",
             name="ck_catalog_change_set_actor_user",
         ),
         CheckConstraint(

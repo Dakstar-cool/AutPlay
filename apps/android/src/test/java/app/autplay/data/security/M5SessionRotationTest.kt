@@ -182,7 +182,7 @@ class M5SessionRotationTest {
 
     private class MutableStore(initial: ByteArray) : CredentialStore {
         private var material: ByteArray? = initial.copyOf()
-        override suspend fun read(profileId: ServerProfileId) = synchronized(this) { material?.copyOf() }
+        override suspend fun read(profileId: ServerProfileId) = synchronized(this) { if (profileId.isReservedCredentialProfile()) null else material?.copyOf() }
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = synchronized(this) {
             this.material?.fill(0)
             this.material = material.copyOf()

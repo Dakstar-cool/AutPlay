@@ -8,7 +8,8 @@ from uuid import UUID
 
 from autplay.application.job_worker import JobExecutionContext
 from autplay.domain.discovery import AcquisitionAuthorizationReceipt, DiscoveryError
-from autplay.domain.jobs import JobLease, RetryableJobError, TerminalJobError
+from autplay.domain.ingest_execution import IngestExecutionStatus
+from autplay.domain.jobs import JobLease, LeaseFence, RetryableJobError, TerminalJobError
 from autplay.domain.vault import (
     AudioTechnicalMetadata,
     ChromaprintEvidence,
@@ -21,7 +22,7 @@ from autplay.domain.vault import (
     VerifiedStagedFile,
 )
 from autplay.ports.discovery import AcquisitionBoundaryAuthorizer
-from autplay.ports.vault import FingerprintGenerator, MediaInspector, VaultStorage
+from autplay.ports.vault import FingerprintGenerator, IngestStorage, MediaInspector
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,12 +38,16 @@ class IngestSession:
     source_provider_track_id: str | None = None
     source_owner_user_id: UUID | None = None
     source_acquisition_attempt_id: UUID | None = None
+    lease_fence: LeaseFence | None = None
+    execution: IngestExecutionStatus | None = None
 
 
 class IngestRepository(Protocol):
     """Persistence transitions whose database implementation is lease fenced."""
 
-    def start_ingest(self, upload_session_id: UUID, job_id: UUID) -> IngestSession | None: ...
+    def start_ingest(
+        self, upload_session_id: UUID, job_id: UUID, *, fence: LeaseFence
+    ) -> IngestSession | None: ...
     def prepare_commit(
         self,
         session: IngestSession,
@@ -70,7 +75,7 @@ class VaultIngestHandler:
         self,
         *,
         repository: IngestRepository,
-        storage: VaultStorage,
+        storage: IngestStorage,
         media: MediaInspector,
         fingerprints: FingerprintGenerator,
         source_authorizer: AcquisitionBoundaryAuthorizer | None = None,
@@ -100,7 +105,7 @@ class VaultIngestHandler:
             raise RetryableJobError(error.code) from error
         except StorageSafetyError as error:
             raise TerminalJobError(error.code) from error
-        session = self._repository.start_ingest(upload_id, lease.fence.job_id)
+        session = self._repository.start_ingest(upload_id, lease.fence.job_id, fence=lease.fence)
         if session is None:
             return
         try:
@@ -119,6 +124,8 @@ class VaultIngestHandler:
             context.checkpoint({"stage": "DB_PREPARED"})
             if action == "WAIT":
                 raise RetryableJobError("vault.sha_commit_pending")
+            if action == "SOURCE_UNAVAILABLE":
+                raise TerminalJobError("source_authorization_unavailable")
             if action not in {"PUBLISH", "REUSED"}:
                 self._repository.quarantine(session, "vault.integrity_conflict")
                 raise TerminalJobError("vault.integrity_conflict")
@@ -151,7 +158,12 @@ class VaultIngestHandler:
             if not finalized:
                 raise TerminalJobError("vault.integrity_conflict")
             context.checkpoint({"stage": "DB_FINALIZED"})
-            self._cleanup_after_finalization(context, session.staging_key)
+            if session.execution is None:
+                self._cleanup_after_finalization(context, session.staging_key)
+            else:
+                # Registered finalization atomically creates its canonical cleanup
+                # intent. WORK must exit before any separate cleanup can begin.
+                context.checkpoint({"stage": "CLEANUP_DEFERRED"})
         except MediaValidationError as error:
             self._repository.quarantine(session, error.code)
             raise TerminalJobError(error.code) from error

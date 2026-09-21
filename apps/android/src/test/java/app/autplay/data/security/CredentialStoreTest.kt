@@ -89,7 +89,7 @@ class CredentialStoreTest {
     }
 
     private class InMemoryStore(private val material: ByteArray) : CredentialStore {
-        override suspend fun read(profileId: ServerProfileId): ByteArray = material
+        override suspend fun read(profileId: ServerProfileId): ByteArray? = if (profileId.isReservedCredentialProfile()) null else material
         override suspend fun write(profileId: ServerProfileId, material: ByteArray) = Unit
         override suspend fun clear(profileId: ServerProfileId) = Unit
     }

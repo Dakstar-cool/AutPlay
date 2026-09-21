@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="deletion_title">Удаление аккаунта</string>
+    <string name="deletion_check">Проверить возможность удаления</string>
+    <string name="deletion_initializing">Сервер готовится к удалению аккаунтов. Попробуйте позже.</string>
+    <string name="deletion_request">Запросить удаление аккаунта</string>
+    <string name="deletion_warning">Все устройства, сессии браузера, ключи доступа и приглашения потеряют доступ. В течение 30 дней удаление можно отменить с текущим TXT или кодом восстановления. Затем данные аккаунта на сервере удаляются безвозвратно. Локальная музыка останется на телефоне.</string>
+    <string name="deletion_confirm_id">Введите ID аккаунта для подтверждения</string>
+    <string name="deletion_last_owner">Последнего активного владельца удалить нельзя. Сначала добавьте другого активного владельца.</string>
+    <string name="deletion_recorded">Удаление запрошено. Этот телефон отключён от аккаунта.</string>
+    <string name="deletion_historical">Состояние этого запроса на сервере уже изменилось.</string>
+    <string name="deletion_not_accepted">Сервер подтвердил, что этот точный запрос удаления не был принят и больше не может быть принят. Телефон остаётся отключённым. Можно снова подключить аккаунт.</string>
+    <string name="deletion_deadline">Крайний срок отмены (UTC): %1$s</string>
+    <string name="deletion_unknown">Результат неизвестен. Телефон отключён, точный запрос сохранён. Повторите его перед подключением аккаунта. Не очищайте данные приложения.</string>
+    <string name="deletion_unavailable">Удаление недоступно. Проверьте сервер и код восстановления.</string>
+    <string name="deletion_cancel_title">Отмена удаления аккаунта</string>
+    <string name="deletion_cancel_description">Используйте текущий TXT или код восстановления до истечения 30 дней, чтобы отменить удаление и подключить этот телефон.</string>
+    <string name="deletion_confirm_cancel">Отменить удаление аккаунта «%1$s»?</string>
+    <string name="deletion_cancel_warning">Данные аккаунта сохранятся. Телефон получит новую сессию и код восстановления. Прежние устройства и доступ через браузер останутся отозванными.</string>
+    <string name="deletion_cancel_commit">Отменить удаление и подключиться</string>
+    <string name="deletion_cancelled">Удаление отменено. Сохраните новый TXT восстановления: прежний код больше не работает.</string>
+</resources>

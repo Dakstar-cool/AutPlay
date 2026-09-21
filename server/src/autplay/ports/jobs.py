@@ -19,6 +19,7 @@ from autplay.domain.jobs import (
     JsonValue,
     LeaseFence,
     LeaseTransition,
+    ResourceWaitTransition,
     RetryPolicy,
 )
 
@@ -99,6 +100,13 @@ class JobRepository(Protocol):
 
     def complete(self, fence: LeaseFence) -> LeaseTransition:
         """Finish the current lease successfully or honor pending cancellation."""
+
+        ...
+
+    def defer_for_resource(
+        self, fence: LeaseFence, operation_id: UUID, delay: timedelta
+    ) -> ResourceWaitTransition:
+        """Atomically recheck the admission and release CPU without consuming a retry."""
 
         ...
 

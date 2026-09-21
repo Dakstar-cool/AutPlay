@@ -10,6 +10,15 @@ x-autplay-production-database-environment: &autplay-production-database-environm
   AUTPLAY_VAULT_TOOL_TIMEOUT_SECONDS: "120"
   AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "1048576"
 
+x-autplay-production-runtime-environment: &autplay-production-runtime-environment
+  <<: *autplay-production-database-environment
+  AUTPLAY_PRIVACY_LEDGER_PATH: /var/lib/autplay/privacy-ledger/deletion.sqlite3
+  AUTPLAY_PRIVACY_LEDGER_KEY_FILE: /run/secrets/autplay-privacy-ledger-key
+  AUTPLAY_PRIVACY_LEDGER_KEY_ID: "${AUTPLAY_PRIVACY_LEDGER_KEY_ID:?set AUTPLAY_PRIVACY_LEDGER_KEY_ID to the retained deletion-ledger key revision}"
+  AUTPLAY_TRAINING_CONSENT_LEDGER_PATH: /var/lib/autplay/training-consent-ledger/consent.sqlite3
+  AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_FILE: /run/secrets/autplay-training-consent-ledger-key
+  AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID: "${AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID:?set AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID to the retained consent-ledger key revision}"
+
 services:
   postgres:
     environment: !override
@@ -28,9 +37,39 @@ services:
       - source: autplay-database-url
         target: autplay-database-url
 
+  privacy-ledger-init:
+    environment: !override
+      <<: *autplay-production-runtime-environment
+      AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "262144"
+    secrets: !override
+      - source: autplay-database-url
+        target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger
+
+  training-consent-ledger-init:
+    environment: !override
+      <<: *autplay-production-runtime-environment
+      AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "262144"
+    secrets: !override
+      - source: autplay-database-url
+        target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger
+
   api:
     environment: !override
-      <<: *autplay-production-database-environment
+      <<: *autplay-production-runtime-environment
       AUTPLAY_API_HOST: 0.0.0.0
       AUTPLAY_API_PORT: "8787"
       AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
@@ -45,10 +84,18 @@ services:
         target: autplay-public-access-source-hmac
       - source: autplay-database-url
         target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger
 
   worker-cpu:
     environment: !override
-      <<: *autplay-production-database-environment
+      <<: *autplay-production-runtime-environment
+      AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "262144"
       AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
       AUTPLAY_WORKER_LEASE_SECONDS: "120"
       AUTPLAY_WORKER_MAX_ATTEMPTS: "5"
@@ -56,10 +103,17 @@ services:
     secrets: !override
       - source: autplay-database-url
         target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger
 
   mobile-api:
     environment: !override
-      <<: *autplay-production-database-environment
+      <<: *autplay-production-runtime-environment
       AUTPLAY_API_HOST: 0.0.0.0
       AUTPLAY_API_PORT: "8787"
       AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
@@ -69,6 +123,10 @@ services:
       AUTPLAY_PROFILE_API_ORIGIN: https://api.autplay.win
       AUTPLAY_PROFILE_STREAM_ORIGIN: https://stream.autplay.win
       AUTPLAY_PUBLIC_ACCESS_TRUSTED_PROXY_IP: 172.30.77.2
+      AUTPLAY_SELF_DEVICE_PAIRING_ENABLED: "true"
+      AUTPLAY_ACCOUNT_RECOVERY_ENABLED: "true"
+      AUTPLAY_ACCOUNT_DELETION_ENABLED: "true"
+      AUTPLAY_SHARED_TRAINING_CONSENT_ENABLED: "true"
     secrets: !override
       - source: autplay-auth-signing-secret
         target: autplay-auth-signing-secret
@@ -78,6 +136,13 @@ services:
         target: autplay-profile-identity-key
       - source: autplay-database-url
         target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger
     ports: !reset []
     networks:
       default: null
@@ -86,7 +151,7 @@ services:
 
   stream:
     environment: !override
-      <<: *autplay-production-database-environment
+      <<: *autplay-production-runtime-environment
       AUTPLAY_STREAM_HOST: 0.0.0.0
       AUTPLAY_STREAM_PORT: "8788"
       AUTPLAY_AUTH_SIGNING_SECRET_FILE: /run/secrets/autplay-auth-signing-secret
@@ -95,6 +160,13 @@ services:
         target: autplay-auth-signing-secret
       - source: autplay-database-url
         target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger:ro
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger:ro
     ports: !reset []
     networks:
       default: null
@@ -161,9 +233,19 @@ volumes:
   caddy-data:
     labels:
       app.autplay.purpose: persistent-public-tls
+  privacy-ledger-data:
+    labels:
+      app.autplay.purpose: persistent-production-deletion-ledger
+  training-consent-ledger-data:
+    labels:
+      app.autplay.purpose: persistent-production-training-consent-ledger
 
 secrets:
   autplay-postgres-password:
     file: "${AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE:?set AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE to a private local file}"
   autplay-database-url:
     file: "${AUTPLAY_RUNTIME_DATABASE_URL_FILE:?set AUTPLAY_RUNTIME_DATABASE_URL_FILE to a private local file}"
+  autplay-privacy-ledger-key:
+    file: "${AUTPLAY_RUNTIME_PRIVACY_LEDGER_KEY_FILE:?set AUTPLAY_RUNTIME_PRIVACY_LEDGER_KEY_FILE to an independently retained private key file}"
+  autplay-training-consent-ledger-key:
+    file: "${AUTPLAY_RUNTIME_TRAINING_CONSENT_LEDGER_KEY_FILE:?set AUTPLAY_RUNTIME_TRAINING_CONSENT_LEDGER_KEY_FILE to a different independently retained private key file}"

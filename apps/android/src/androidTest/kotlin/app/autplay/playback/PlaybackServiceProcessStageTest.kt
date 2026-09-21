@@ -27,7 +27,7 @@ import org.junit.runners.MethodSorters
 import org.junit.runner.RunWith
 
 /**
- * Run stage1, force-stop app.autplay with adb, then run stage2 for the true process-death gate.
+ * Run stage1, force-stop the target app with adb, then run stage2 for the true process-death gate.
  * The wrapper-only argument keeps these externally orchestrated stages out of the normal suite.
  */
 @UnstableApi

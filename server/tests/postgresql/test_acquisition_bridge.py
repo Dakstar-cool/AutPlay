@@ -13,8 +13,20 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
-from autplay.adapters.postgresql.models import LibraryEntryRow, SyncEventRow, UserAccountRow
+from autplay.adapters.postgresql.models import (
+    DeviceRow,
+    LibraryEntryRow,
+    SyncEventRow,
+    UserAccountRow,
+    UserSessionRow,
+)
+from autplay.adapters.postgresql.models.resource_admission import (
+    ResourceAdmissionRow,
+    ResourceIoExecutionRow,
+    ResourceIoPermitRow,
+)
 from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
     TransactionalIngestRepository,
@@ -35,6 +47,7 @@ sys.modules[_SPEC.name] = bridge
 _SPEC.loader.exec_module(bridge)
 
 
+@pytest.mark.usefixtures("internal_io_budget")
 def test_receipt_replay_publishes_one_playable_entry(
     database_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -84,7 +97,7 @@ def test_receipt_replay_publishes_one_playable_entry(
         repository=TransactionalIngestRepository(
             SqlAlchemyVaultUnitOfWorkFactory(backend.sessions)
         ),
-        storage=backend.vault._storage,
+        storage=FilesystemVaultStorage(tmp_path / "vault"),
         media=Media(),
         fingerprints=Fingerprints(),
     )
@@ -98,7 +111,10 @@ def test_receipt_replay_publishes_one_playable_entry(
             }
         ),
     )
-    checkpoint: dict[str, Any] = {"state": "DISCOVERED", "signature": list(receipt.signature)}
+    checkpoint: dict[str, Any] = {
+        "state": "DISCOVERED",
+        "signature": list(receipt.signature),
+    }
     try:
         for _ in range(20):
             previous = dict(checkpoint)
@@ -114,6 +130,14 @@ def test_receipt_replay_publishes_one_playable_entry(
         assert checkpoint["state"] == "PUBLISHED"
         with backend.sessions() as session:
             assert session.scalar(select(func.count()).select_from(LibraryEntryRow)) == 1
+            assert session.scalar(select(func.count()).select_from(UserSessionRow)) == 0
+            admissions = session.scalars(select(ResourceAdmissionRow)).all()
+            assert admissions
+            assert {row.authority_kind for row in admissions} == {"LOCAL_BRIDGE"}
+            assert {row.resource_type for row in admissions} == {"UPLOAD_INTENT"}
+            assert {row.state for row in admissions} == {"RELEASED"}
+            assert session.scalar(select(func.count()).select_from(ResourceIoPermitRow)) == 0
+            assert session.scalar(select(func.count()).select_from(ResourceIoExecutionRow)) == 0
             published = session.scalars(
                 select(SyncEventRow).where(SyncEventRow.event_type == "LIBRARY_ENTRY_UPSERTED")
             ).all()
@@ -124,8 +148,14 @@ def test_receipt_replay_publishes_one_playable_entry(
         (audio_dir / "sample.flac").write_bytes(b"x" * len(payload))
         with pytest.raises(bridge.ReceiptError, match="integrity_mismatch"):
             bridge.verify_audio(receipt)
+        with backend.sessions.begin() as session:
+            device = session.get(DeviceRow, backend.device)
+            assert device is not None
+            device.revoked_at = session.scalar(select(func.clock_timestamp()))
+        with pytest.raises(bridge.ReceiptError, match="bridge_device_not_active"):
+            backend.authorize()
     finally:
-        backend.engine.dispose()
+        backend.close()
         engine.dispose()
 
 
@@ -142,8 +172,8 @@ def test_new_completion_preempts_full_backfill(tmp_path: Path) -> None:
 
 
 def test_ready_publication_does_not_wait_for_unrelated_upload() -> None:
-    slow_upload: Future[dict[str, str]] = Future()
-    ready_publication: Future[dict[str, str]] = Future()
+    slow_upload: Future[dict[str, Any]] = Future()
+    ready_publication: Future[dict[str, Any]] = Future()
     ready_publication.set_result({"state": "PUBLISHED"})
     in_flight = {"slow": slow_upload, "ready": ready_publication}
     assert bridge.completed_work(in_flight) == {"ready": {"state": "PUBLISHED"}}

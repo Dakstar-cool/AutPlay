@@ -74,7 +74,10 @@ def create_auth_router(service: AuthService) -> APIRouter:
     @router.post("/auth/logout-all", status_code=204, dependencies=authenticated)
     def logout_all(request: Request) -> Response:
         principal = _principal(request)
-        service.logout_all(principal, request_id=_request_id(request))
+        try:
+            service.logout_all(principal, request_id=_request_id(request))
+        except InvalidAccessTokenError as error:
+            raise _access_error() from error
         return Response(status_code=204, headers=_NO_STORE_HEADERS)
 
     @router.post(
@@ -93,6 +96,8 @@ def create_auth_router(service: AuthService) -> APIRouter:
                 device_id,
                 request_id=_request_id(request),
             )
+        except InvalidAccessTokenError as error:
+            raise _access_error() from error
         except OwnedObjectNotFoundError as error:
             raise ApiError(
                 code="not_found",

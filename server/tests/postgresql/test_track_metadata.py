@@ -1,7 +1,7 @@
 """Real PostgreSQL proof: identity, owner access, revision replay, fencing and history."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,7 +18,8 @@ from autplay.application.sync import _bootstrap_projections
 from autplay.application.track_metadata import METADATA_JOB, TrackMetadataService
 from autplay.domain.auth import Principal
 from autplay.domain.track_metadata import FieldEvidence
-from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -54,20 +55,47 @@ def setup(
 
 def test_owner_revision_replay_immutable_history_and_identity(database_url: str) -> None:
     engine, sessions, principal, ref_id, service = setup(database_url)
-    command: dict[str, Any] = dict(
-        operation_id=uuid4(),
+    operation_id = uuid4()
+    fields: dict[str, Any] = {"album": "Chosen", "release_date": "1998"}
+    result = service.command(
+        principal,
+        ref_id,
+        operation_id=operation_id,
         expected_revision=0,
         action="EDIT",
-        fields={"album": "Chosen", "release_date": "1998"},
+        fields=fields,
     )
-    result = service.command(principal, ref_id, **command)
-    assert result["fields"] == command["fields"]
+    assert result["fields"] == fields
     assert result["provenance"]["album"]["locked"] is True
-    assert service.command(principal, ref_id, **command) == result
+    assert (
+        service.command(
+            principal,
+            ref_id,
+            operation_id=operation_id,
+            expected_revision=0,
+            action="EDIT",
+            fields=fields,
+        )
+        == result
+    )
     with pytest.raises(MusicError, match="metadata_operation_conflict"):
-        service.command(principal, ref_id, **{**command, "fields": {"album": "Different"}})
+        service.command(
+            principal,
+            ref_id,
+            operation_id=operation_id,
+            expected_revision=0,
+            action="EDIT",
+            fields={"album": "Different"},
+        )
     with pytest.raises(MusicError, match="metadata_revision_conflict"):
-        service.command(principal, ref_id, **{**command, "operation_id": uuid4()})
+        service.command(
+            principal,
+            ref_id,
+            operation_id=uuid4(),
+            expected_revision=0,
+            action="EDIT",
+            fields=fields,
+        )
     with pytest.raises(MusicError) as foreign:
         service.get(owner(sessions), ref_id)
     assert foreign.value.status_code == 404
@@ -78,9 +106,9 @@ def test_owner_revision_replay_immutable_history_and_identity(database_url: str)
         assert len(list(session.scalars(select(TrackMetadataRevisionRow)))) == 1
         event = session.scalar(select(SyncEventRow))
         assert event is not None
-        assert isinstance(event.payload, dict)
+        event_payload = cast(dict[str, Any], event.payload)
         assert (
-            event.event_type == "USER_TRACK_REF_PATCHED" and event.payload["metadata_v1"] == result
+            event.event_type == "USER_TRACK_REF_PATCHED" and event_payload["metadata_v1"] == result
         )
         boot = _bootstrap_projections(session, principal.user_id)
         assert (
@@ -161,7 +189,9 @@ def test_downgrade_preserves_nonempty_metadata(
     engine.dispose()
 
 
-def test_chosen_edition_replaces_automatic_fields_and_cover_atomically(database_url: str) -> None:
+def test_chosen_edition_replaces_automatic_fields_and_cover_atomically(
+    database_url: str,
+) -> None:
     engine, sessions, principal, ref_id, service = setup(database_url)
     service.enqueue_missing()
     with sessions.begin() as session:

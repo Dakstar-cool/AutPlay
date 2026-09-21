@@ -46,6 +46,62 @@ the intended external USB device. The passphrase remains outside the archive and
    successful backup.
 7. Resume writes only after the generation is complete or explicitly marked failed.
 
+## Admin Web policy and storage agent
+
+The owner-only `/admin/recovery` page is an optional control plane, not a privileged backup
+process. It lists only operator-registered opaque destination IDs, so browser input cannot select
+an arbitrary host path. A policy binds the selected target, a hard maximum generation size and a
+50–99% warning threshold. A backup request is written atomically to an owner-controlled spool;
+the Web process never receives Docker, SSH, raw-disk or destination credentials.
+
+Run `scripts/admin_target_external_backup.py` as the independently authorized Windows storage
+agent for a workstation USB disk. It verifies that the destination is a non-system USB NTFS
+volume, checks the exact server/candidate baseline, quiesces stateful production containers,
+streams PostgreSQL, volumes, configuration/secrets and the rollback image directly over OpenSSH,
+and publishes only after SHA-256 readback. It reports progress to the Admin spool every 256 MiB,
+raises the Web alert at the configured threshold and terminates the stream before the hard maximum.
+On any failure it attempts to restore the exact prior runtime; `--leave-stopped` is reserved for an
+immediately following isolated restore/deployment window.
+
+Every run creates a new timestamped generation with exclusive-create semantics. The agent refuses
+to start when either its `.incomplete` directory or final directory already exists and never
+truncates a prior generation. An interrupted streamed dump or tar is deliberately not resumable:
+restore tooling ignores the `.incomplete` directory, and an operator must review and explicitly
+remove that exact directory before reclaiming its space. Completed generations are never pruned by
+the agent.
+
+The matching Compose overlay and commands are documented in
+[`deploy/compose/README.md`](../../deploy/compose/README.md#optional-admin-backup-control).
+The opaque registry never stores a Windows drive letter or NAS path; that mapping remains in the
+agent invocation on the machine that actually owns the storage.
+
+For the target workstation, `scripts/run_admin_backup_agent.ps1` is the non-interactive entry
+point intended for a once-per-minute per-user Scheduled Task. Manual backup requests from the
+owner-only Admin page are accepted in both run modes and may be submitted at any time. In automatic
+mode the agent additionally starts at most once per week, on the selected ISO weekday and during
+the selected hour in the storage agent's local time. The first scheduler tick in that hour claims
+the dated hour slot before starting; later minute ticks cannot create a duplicate generation. A
+failed automatic attempt keeps its slot claimed, so it is retried only through an explicit manual
+request rather than by a minute-by-minute retry storm. A completed or already running request is
+also a no-op. The selected target is an opaque registry ID in Admin Web; the agent keeps the actual
+Windows drive mapping and continues to enforce USB/NTFS/non-system-volume checks locally. On the
+target deployment the agent reads and updates the `0600` spool documents through a short-lived,
+networkless helper container running with the Admin UID and only the spool bind-mounted. This keeps
+progress reporting alive while Admin is quiesced without weakening host file permissions.
+The scheduled launcher also requires `admin-backup-baseline.json` on the external disk. That strict,
+non-secret record pins the deployed migration, live image/container-set digests, retained source
+archive, helper image and rollback image; routine backups therefore fail closed after an unreviewed
+deployment instead of silently backing up a changed target.
+
+After placing the reviewed baseline on the chosen disk, run
+`scripts/install_admin_backup_agent.ps1`. With no `-DriveLetter`, it selects the only eligible
+non-system USB/NTFS disk or displays the eligible disks and asks for a choice. The installer maps
+that drive to an opaque Admin target ID, registers a once-per-minute per-user Scheduled Task and
+uses `IgnoreNew`, so a long backup cannot be started a second time by the scheduler. Use
+`-DriveLetter E -TargetId windows-usb-e` for a non-interactive installation, or `-Uninstall` to
+remove the task. The Admin page chooses among the registered target IDs and remains unable to
+supply an arbitrary Windows path.
+
 ## Isolated restore
 
 1. Provision a clean PostgreSQL 18.4/pgvector 0.8.6 instance with no production routing.

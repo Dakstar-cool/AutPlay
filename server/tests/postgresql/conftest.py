@@ -176,6 +176,22 @@ class DatabaseHarness:
             command.downgrade(self.alembic_config(database_name), revision)
 
 
+def prepare_adjacent_downgrade(
+    database_harness: DatabaseHarness, database_name: str, revision: str
+) -> None:
+    """Remove synthetic capacity, then isolate one historical downgrade gate."""
+    with database_harness.connect(database_name) as connection:
+        connection.execute(
+            """UPDATE account.internal_io_policy SET revision=revision+1,
+            active_limit=NULL, measured_ceiling=NULL, server_instance_id=NULL,
+            identity_epoch=NULL, environment_sha256=NULL, workload_sha256=NULL,
+            report_sha256=NULL, playback_ceiling=NULL, transfer_ceiling=NULL,
+            initialized_at=NULL, updated_at=now() WHERE singleton_id=1"""
+        )
+        connection.commit()
+    database_harness.downgrade(database_name, revision)
+
+
 @pytest.fixture(scope="session")
 def database_harness() -> Iterator[DatabaseHarness]:
     """Expose the guarded database harness after validating the supplied DSN."""
@@ -237,6 +253,39 @@ def database_name(
 def database_url(database_harness: DatabaseHarness, database_name: str) -> str:
     """Return the isolated test database URL."""
     return database_harness.database_url(database_name)
+
+
+@pytest.fixture
+def internal_io_budget(database_harness: DatabaseHarness, database_name: str) -> None:
+    """Explicit synthetic capacity for ownership tests; never deployment evidence."""
+    server_id = uuid.uuid4()
+    with database_harness.connect(database_name) as connection:
+        connection.execute(
+            """
+            INSERT INTO account.server_instance(server_instance_id, identity_epoch,
+              identity_public_key_spki, identity_thumbprint_sha256, label_hint, api_origin,
+              stream_origin, capability_revision, created_at, updated_at)
+            VALUES (%s,1,%s,%s,'Synthetic internal I/O','https://api.invalid',
+              'https://stream.invalid',1,now(),now())
+        """,
+            (server_id, b"s" * 65, b"t" * 32),
+        )
+        connection.execute("""
+            UPDATE account.resource_quota_policy SET global_playbacks=16, global_transfers=16,
+              playback_ceiling=16, transfer_ceiling=16, budget_evidence='synthetic-not-deployment'
+            WHERE global_playbacks IS NULL
+        """)
+        connection.execute(
+            """
+            UPDATE account.internal_io_policy SET active_limit=100, measured_ceiling=100,
+              server_instance_id=%s, identity_epoch=1, environment_sha256=repeat('a',64),
+              workload_sha256=repeat('b',64), report_sha256=repeat('c',64),
+              playback_ceiling=1000000, transfer_ceiling=1000000,
+              initialized_at=now(), updated_at=now(), revision=2 WHERE singleton_id=1
+        """,
+            (server_id,),
+        )
+        connection.commit()
 
 
 @pytest.fixture
