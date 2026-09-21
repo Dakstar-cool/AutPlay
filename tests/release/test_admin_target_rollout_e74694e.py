@@ -78,3 +78,18 @@ def test_private_storage_uses_utf8_safe_independent_keys(monkeypatch) -> None:
     compile(input_programs[0], "ledger-key-program", "exec")
     assert "secrets.token_urlsafe(48).encode('ascii')" in input_programs[0]
     assert "os.urandom" not in input_programs[0]
+
+
+def test_processing_pause_covers_every_background_track_processor() -> None:
+    rollout = _load_rollout()
+
+    assert {
+        "autplay-production-worker-cpu-1",
+        "autplay-music-worker",
+        "autplay-metadata-worker",
+        "autplay-acquisition-vault-bridge",
+    } == rollout.PROCESSING_CONTAINERS
+    assert set(
+        (*rollout.START_ORDER, *rollout.AUXILIARY_RESTART)
+    ) >= rollout.PROCESSING_CONTAINERS
+    assert not rollout.PROCESSING_CONTAINERS & set(rollout.HEALTH_REQUIRED)

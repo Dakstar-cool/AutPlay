@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import http.client
 import json
@@ -47,6 +48,14 @@ START_ORDER = (
     "autplay-production-worker-cpu-1",
     "autplay-music-worker",
     "autplay-metadata-worker",
+)
+PROCESSING_CONTAINERS = frozenset(
+    {
+        "autplay-production-worker-cpu-1",
+        "autplay-music-worker",
+        "autplay-metadata-worker",
+        "autplay-acquisition-vault-bridge",
+    }
 )
 AUXILIARY_RESTART = (
     "autplay-acquisition-vault-bridge",
@@ -346,7 +355,7 @@ def initialize_private_ledgers(operator: dict[str, Any]) -> None:
             raise RuntimeError(f"ledger_initialization_failed:{name}")
 
 
-def main() -> None:
+def main(*, leave_processing_stopped: bool = False) -> None:
     os.umask(0o077)
     for key in (SECRETS / "deletion-ledger-key", SECRETS / "training-consent-ledger-key"):
         if Path(key).exists():
@@ -435,9 +444,19 @@ def main() -> None:
             raise RuntimeError(f"rollback_container_already_exists:{before}")
         docker("rename", name, before)
         docker("rename", name + STAGED_SUFFIX, name)
-    for name in START_ORDER:
+    start_order = tuple(
+        name
+        for name in START_ORDER
+        if not leave_processing_stopped or name not in PROCESSING_CONTAINERS
+    )
+    auxiliary_restart = tuple(
+        name
+        for name in AUXILIARY_RESTART
+        if not leave_processing_stopped or name not in PROCESSING_CONTAINERS
+    )
+    for name in start_order:
         docker("start", name)
-    for name in AUXILIARY_RESTART:
+    for name in auxiliary_restart:
         docker("start", name)
     for name in HEALTH_REQUIRED:
         wait_healthy(name)
@@ -447,6 +466,7 @@ def main() -> None:
             "phase": "started",
             "image_sha256": actual_image,
             "migration_head": current,
+            "processing_stopped": leave_processing_stopped,
         },
     )
     print(
@@ -456,6 +476,7 @@ def main() -> None:
                 "migration_head": current,
                 "image_sha256": actual_image,
                 "health_required": list(HEALTH_REQUIRED),
+                "processing_stopped": leave_processing_stopped,
             },
             sort_keys=True,
         ),
@@ -464,4 +485,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--leave-processing-stopped", action="store_true")
+    arguments = parser.parse_args()
+    main(leave_processing_stopped=arguments.leave_processing_stopped)
