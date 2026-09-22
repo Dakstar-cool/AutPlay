@@ -41,6 +41,8 @@ $unsignedSource = Join-Path $repoRoot "apps\android\build\outputs\apk\release\an
 $trustedLanSource = Join-Path $repoRoot "apps\android\build\outputs\apk\trustedLan\android-trustedLan.apk"
 $gradle = Join-Path $repoRoot "gradlew.bat"
 $checkScript = Join-Path $repoRoot "scripts\check.ps1"
+$releaseAuditScript = Join-Path $repoRoot "scripts\release_audit_gate.py"
+$p14ReleaseAuditScript = Join-Path $repoRoot "scripts\p14_release_audit.py"
 $composeBase = Join-Path $repoRoot "deploy\compose\compose.yaml"
 $composeRuntime = Join-Path $repoRoot "deploy\compose\compose.runtime.yaml"
 $composeRelease = Join-Path $repoRoot "deploy\compose\compose.release.yaml"
@@ -63,6 +65,8 @@ foreach ($requiredPath in @(
     $gzip,
     $gradle,
     $checkScript,
+    $releaseAuditScript,
+    $p14ReleaseAuditScript,
     $composeBase,
     $composeRuntime,
     $composeRelease,
@@ -115,7 +119,6 @@ try {
     }
 
     New-Item -ItemType Directory -Path $outputRoot | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $outputRoot "sbom") | Out-Null
 
     $env:JAVA_HOME = $JavaHome
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $checkScript
@@ -517,27 +520,50 @@ try {
         Remove-Item Env:AUTPLAY_MOBILE_STREAM_PORT -ErrorAction SilentlyContinue
     }
 
-    & uv export --frozen --format cyclonedx1.5 `
-        --output-file (Join-Path $outputRoot "sbom\python-root.cdx.json") | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Root SBOM export failed"
-    }
-    & uv export --project server --frozen --format cyclonedx1.5 `
-        --output-file (Join-Path $outputRoot "sbom\python-server.cdx.json") | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Server SBOM export failed"
-    }
-    & uv export --project gpu --frozen --format cyclonedx1.5 `
-        --output-file (Join-Path $outputRoot "sbom\python-gpu.cdx.json") | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "GPU SBOM export failed"
-    }
     $dependencyReport = Join-Path $outputRoot "ANDROID_RELEASE_DEPENDENCIES.txt"
     & $gradle --no-daemon --console=plain --max-workers=1 `
-        :apps:android:dependencies --configuration releaseRuntimeClasspath |
+        --dependency-verification=strict :apps:android:dependencies `
+        --configuration releaseRuntimeClasspath |
         Out-File -LiteralPath $dependencyReport -Encoding utf8
     if ($LASTEXITCODE -ne 0) {
         throw "Android release dependency report failed"
+    }
+    $releaseAuditRoot = Join-Path $outputRoot "release-audit"
+    $releaseAuditArtifacts = @(
+        "android_unsigned=$unsignedAsset",
+        "android_development_signed=$signedAsset",
+        "android_trusted_lan=$trustedLanAsset",
+        "android_development_certificate=$certificateAsset",
+        "server_archive=$serverArchive",
+        "server_installer=$installerAsset"
+    )
+    $releaseAuditGenerateArguments = @(
+        "run", "--frozen", "python", "-m", "scripts.release_audit_gate", "generate",
+        "--output-directory", $releaseAuditRoot,
+        "--android-dependency-report", $dependencyReport,
+        "--source-commit", $sourceCommit,
+        "--distribution-class", "DEVELOPMENT_RELEASE",
+        "--valid-for-hours", "24"
+    )
+    foreach ($artifact in $releaseAuditArtifacts) {
+        $releaseAuditGenerateArguments += @("--artifact", $artifact)
+    }
+    & uv @releaseAuditGenerateArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Fresh release audit evidence generation failed"
+    }
+    $releaseAuditVerifyArguments = @(
+        "run", "--frozen", "python", "-m", "scripts.release_audit_gate", "verify",
+        "--evidence-directory", $releaseAuditRoot,
+        "--source-commit", $sourceCommit,
+        "--max-age-hours", "24"
+    )
+    foreach ($artifact in $releaseAuditArtifacts) {
+        $releaseAuditVerifyArguments += @("--artifact", $artifact)
+    }
+    & uv @releaseAuditVerifyArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release audit evidence validation failed"
     }
     Copy-Item -LiteralPath $releaseNotes `
         -Destination (Join-Path $outputRoot "RELEASE_NOTES.md")
@@ -595,6 +621,13 @@ try {
             canonical_host_gate = "PASS"
             android_signature = "PASS"
             artifact_hash_manifest = "SHA256SUMS"
+            release_audit = [ordered]@{
+                status = "PASS"
+                source_commit = $sourceCommit
+                max_age_hours = 24
+                path = "release-audit/release-audit.json"
+                index = Get-ArtifactRecord (Join-Path $releaseAuditRoot "release-audit.json")
+            }
         }
     }
     $manifestJson = $manifest | ConvertTo-Json -Depth 10

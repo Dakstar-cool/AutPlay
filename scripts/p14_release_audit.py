@@ -52,6 +52,7 @@ SECRET_PATTERNS = {
 }
 DISPOSABLE_PASSWORD_PATTERN = re.compile(r"\bautplay_dev_only\b")
 DISPOSABLE_PASSWORD_ALLOWLIST = {
+    ".github/workflows/ci-training.yml",
     "deploy/compose/compose.yaml",
     "deploy/compose/compose.runtime.yaml",
     "deploy/compose/compose.admin-local.yaml",
@@ -736,6 +737,68 @@ def _artifact_inventory(paths: list[Path]) -> list[dict[str, Any]]:
                 }
             )
     return artifacts
+
+
+def generate_release_supply_chain_evidence(
+    output_directory: Path,
+    android_dependency_report: Path,
+) -> dict[str, dict[str, Path]]:
+    """Generate the reusable, credential-free subset of the P14 release audit."""
+    output_directory.mkdir(parents=True, exist_ok=True)
+    sbom_directory = output_directory / "sbom"
+    vulnerability_directory = output_directory / "vulnerability"
+    license_directory = output_directory / "license"
+    secret_directory = output_directory / "secret"
+    for directory in (
+        sbom_directory,
+        vulnerability_directory,
+        license_directory,
+        secret_directory,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    sbom_paths = {
+        "root": sbom_directory / "python-root.cdx.json",
+        "server": sbom_directory / "python-server.cdx.json",
+        "gpu": sbom_directory / "python-gpu.cdx.json",
+        "training": sbom_directory / "python-sona-training.cdx.json",
+        "acquisition": sbom_directory / "python-acquisition.cdx.json",
+    }
+    for project, path in (
+        (None, sbom_paths["root"]),
+        ("server", sbom_paths["server"]),
+        ("gpu", sbom_paths["gpu"]),
+        ("gpu/training", sbom_paths["training"]),
+        ("tools/local_music_acquisition", sbom_paths["acquisition"]),
+    ):
+        _export_sbom(project, path)
+
+    vulnerability_paths = {
+        "root": vulnerability_directory / "uv-audit-root.json",
+        "server": vulnerability_directory / "uv-audit-server.json",
+        "gpu": vulnerability_directory / "uv-audit-gpu.json",
+        "training": vulnerability_directory / "uv-audit-sona-training.json",
+        "acquisition": vulnerability_directory / "uv-audit-acquisition.json",
+    }
+    for project, path in (
+        (None, vulnerability_paths["root"]),
+        ("server", vulnerability_paths["server"]),
+        ("gpu", vulnerability_paths["gpu"]),
+        ("gpu/training", vulnerability_paths["training"]),
+        ("tools/local_music_acquisition", vulnerability_paths["acquisition"]),
+    ):
+        _audit(project, path)
+
+    license_path = license_directory / "license-inventory.json"
+    _license_inventory(android_dependency_report, license_path)
+    secret_path = secret_directory / "secret-scan.json"
+    _write_json(secret_path, _secret_scan())
+    return {
+        "sbom": sbom_paths,
+        "vulnerability": vulnerability_paths,
+        "license": {"dependency_licenses": license_path},
+        "secret_scan": {"repository_secret_scan": secret_path},
+    }
 
 
 def run(

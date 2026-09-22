@@ -323,6 +323,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-releas
 
 Результаты ниже относятся к сохранённым запускам и указанным в отчётах исходникам/APK.
 Они не означают, что каждый пакет из раздела скачивания содержит последние исправления.
+Единый актуальный порядок доведения проекта до production находится в
+[production readiness plan](docs/operations/PRODUCTION_READINESS_PLAN.md); датированные handoff и
+старый P00-P14 build-pack используются только как историческое доказательство.
 
 | Область | Зафиксированный результат |
 | --- | --- |
@@ -331,7 +334,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-releas
 | Android после аудита | **238 passed** в полном прогоне API 26; три условно пропущенных сценария выполнены отдельно. Lint, восстановление процесса и подключение профиля прошли. [Отчёт](docs/release/AUDIT_FIXES_2026-09-16.md) |
 | Загрузчик, 16 сентября | **308 тестов** в полном Linux-прогоне перед публикацией. Контрольная партия: 18 новых записей из 6 проблемных запросов, проверены SHA-256 и публикация в Vault. Результат не является оценкой всей библиотеки. [Проверки](docs/release/COMPLETED_WORK_2026-09-16.md) · [Контрольная партия](docs/release/ACQUISITION_EXPANSION_2026-09-16.md) |
 | Face / рекомендации, 11 сентября | Две CPU-модели на реальном аудио, 54 сценария базового рекомендателя и **90 целевых тестов**. [Отчёт](docs/release/PLAYLIST_FACE_ML_2026-09-11.md) |
-| Аккаунты и Admin, 19–21 сентября | Четыре Admin-раздела, passkey, QR self-pairing, TXT-восстановление, отменяемое удаление, consent и квоты реализованы и прошли Android/server/browser проверки. Целевое production-развёртывание всё ещё отделено. [Единый статус](docs/release/ADMIN_UNIFIED_GOAL_2026_09_19.md) |
+| Аккаунты и Admin, 19–21 сентября | Четыре Admin-раздела, passkey, QR self-pairing, TXT-восстановление, отменяемое удаление, consent и квоты реализованы и прошли Android/server/browser проверки. Целевое production-развёртывание всё ещё отделено. [Исторический acceptance snapshot](docs/release/ADMIN_UNIFIED_GOAL_2026_09_19.md) |
 | Релиз v0.4.0, 22 сентября | Полный canonical gate, подпись APK development-ключом, перезагрузка Docker archive и disposable Compose smoke выполняются упаковщиком и закрепляются в manifest/SHA256SUMS. [Release notes](docs/release/RELEASE_NOTES_0.4.0.md) |
 
 [Состав опубликованных изменений и повторные проверки](docs/release/COMPLETED_WORK_2026-09-16.md).
@@ -341,23 +344,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-releas
 [порядок настройки и ограничения восстановления](docs/release/ADMIN_ACCOUNT_DELETION_2026_09_18.md#operator-configuration-not-enabled-here).
 Отсутствующий или повреждённый журнал блокирует запуск; автоматически он не создаётся.
 
-Следующие границы остаются открытыми:
-
-- **Адаптивные рекомендации Sona-Lite.** Код обучения и теневой оценки реализован,
-  но R1B заблокирован отсутствием достаточных связанных данных для финальной оценки.
-  R1C не активирован; сервер продолжает выдавать базовые детерминированные рекомендации.
-- **Анализ музыки для Face.** Нет активированной модели, непрерывного production timeline
-  и подтверждённого качества интерпретации. Наличие схем и эксперимента этого не заменяет.
-- **Публичный сервер.** Подготовлен Caddy edge, но активация и внешние TLS/scan/renewal/rollback,
-  проверки на реальном телефоне и Range ещё требуются. Подробности:
-  [публичный edge](docs/operations/PUBLIC_EDGE_PA3.md).
-- **Выпуск и оборудование.** `v0.4.0` остаётся development-выпуском: APK подписаны сохранённым
-  development key, магазин приложений и production rollout не настроены. Физические A55-проверки
-  функций аккаунта не заменяют проверку конкретной production-сети и production-подписи.
-
-[Текущие и будущие рекомендации](docs/design/AutPlay_Recommendation_System_Current_and_Future_v1.md) ·
-[Границы развёртывания](docs/operations/DEPLOYMENT.md) ·
-[Резервное копирование и восстановление](docs/operations/BACKUP_RESTORE.md)
+Открытые границы сгруппированы в плане: production-подпись и точный A55 release, Admin Gates A-D,
+ресурсные бюджеты worker, Face Timeline/quality, PA3 TLS/mobile/rollback, R1B/R1C и отдельный
+продуктовый backlog. Краткие эксплуатационные источники:
+[развёртывание](docs/operations/DEPLOYMENT.md) ·
+[публичный edge](docs/operations/PUBLIC_EDGE_PA3.md) ·
+[резервное копирование](docs/operations/BACKUP_RESTORE.md).
 
 ## Карта репозитория
 

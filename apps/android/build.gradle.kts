@@ -15,6 +15,7 @@ interface InjectedBuildFeatures {
 }
 
 val qaSideBySide = providers.gradleProperty("autplay.qaSideBySide").orNull == "true"
+val productionRelease = providers.gradleProperty("autplay.productionRelease").orNull == "true"
 val releaseVersionCodeOverride = providers.gradleProperty("autplay.versionCode").orNull?.toInt()
 val releaseVersionNameOverride = providers.gradleProperty("autplay.versionName").orNull
 val releaseKeystorePath = providers.environmentVariable("AUTPLAY_ANDROID_KEYSTORE_PATH").orNull
@@ -36,6 +37,18 @@ if (!releaseSigningEnabled && releaseSigningInputs.any { !it.isNullOrBlank() }) 
 if (releaseSigningEnabled && buildFeatures.configurationCache.active.get()) {
     throw GradleException("Production signing requires --no-configuration-cache")
 }
+if (productionRelease && qaSideBySide) {
+    throw GradleException("Production release cannot use the QA side-by-side application ID")
+}
+if (
+    productionRelease &&
+    (releaseVersionCodeOverride == null || releaseVersionNameOverride.isNullOrBlank())
+) {
+    throw GradleException("Production release requires explicit versionCode and versionName")
+}
+if (productionRelease && !releaseSigningEnabled) {
+    throw GradleException("Production release requires production signing inputs")
+}
 
 android {
     namespace = "app.autplay"
@@ -50,8 +63,8 @@ android {
         applicationId = if (qaSideBySide) "app.autplay.qa" else "app.autplay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.4.0"
+        versionCode = 13
+        versionName = "1.0.0"
         releaseVersionCodeOverride?.let { versionCode = it }
         releaseVersionNameOverride?.let { versionName = it }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

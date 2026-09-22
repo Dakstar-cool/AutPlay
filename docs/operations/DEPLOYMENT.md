@@ -3,17 +3,20 @@
 ## Current state
 
 AutPlay has reproducible local runtime Compose files, GitHub Actions for CI plus restricted
-release-candidate bundles, and a locally qualified PA3 production-edge candidate. The candidate is
-blocked from live deployment by off-host restore and Android signing/update gates. The normal
-runtime and trusted-LAN files remain development evidence and must not be exposed to the public
-Internet or pointed at personal/production data. See `PUBLIC_EDGE_PA3.md` for the exact candidate
-and stop boundary.
+release-candidate bundles, and a locally qualified PA3 production-edge candidate. Historical
+off-host restore and Android signer-custody/update gates have evidence, but the current `v0.4.0`
+distribution is still development-signed and not production-deployed. Live production remains
+blocked on the exact-release Android/A55 gate, Admin/account target Gates A-D, reviewed real worker
+budgets, and PA3 certificate/external-scan/renewal/rollback/real-mobile evidence. The normal runtime
+and trusted-LAN files remain development evidence and must not be exposed to the public Internet or
+pointed at personal/production data. See `PRODUCTION_READINESS_PLAN.md` for the active sequence and
+`PUBLIC_EDGE_PA3.md` for the exact edge procedure.
 
 No checked-in workflow currently deploys, pushes an OCI image, creates a GitHub Release, signs an
 APK with a production key or runs a migration against a persistent target. This is an intentional
 fail-closed boundary, not a missing success claim.
 
-## Decisions required before a live production deployment
+## Decisions to confirm for the exact live production deployment
 
 The operator must explicitly choose and record all of the following:
 
@@ -30,8 +33,8 @@ The operator must explicitly choose and record all of the following:
 7. Android distribution channel, application ID/version policy and production signing custody.
 8. Rollout health gate, rollback procedure and operator responsible for approval.
 
-These items are deliberately deferred by `DECISION_REGISTER.md` and cannot be guessed by a
-provider-neutral repository change.
+Some choices have historical PA3 evidence, but every item must be rebound to the exact release and
+target configuration. Missing choices cannot be guessed by a provider-neutral repository change.
 
 ## Required production gate
 

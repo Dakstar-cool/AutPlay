@@ -3,6 +3,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPOSITORY_ROOT / "scripts" / "build-pa3-signed-release.ps1"
+ANDROID_BUILD_PATH = REPOSITORY_ROOT / "apps" / "android" / "build.gradle.kts"
 EVIDENCE_INDEX_PATH = REPOSITORY_ROOT / "docs" / "release" / "PA3_ANDROID_SIGNING_EVIDENCE.json"
 
 
@@ -27,30 +28,85 @@ def test_pass_receipt_is_atomic_and_follows_verified_cleanup() -> None:
     script = _script()
 
     cleanup = script.index("$cleanupVerified = $true")
-    receipt = script.index("$receiptPath = Join-Path $evidenceDirectory")
-    atomic_write = script.index("Write-Utf8FileAtomically `\n    -LiteralPath $receiptPath")
+    manifest = script.index(
+        '$manifestPath = Join-Path $evidenceStagingDirectory "android-production-manifest.json"'
+    )
+    receipt = script.index("$receiptPath = Join-Path $evidenceStagingDirectory")
+    atomic_write = script.index("Write-Utf8FileAtomically `\n        -LiteralPath $receiptPath")
+    publish = script.index("[IO.Directory]::Move($evidenceStagingDirectory, $evidenceDirectory)")
     success = script.index('Write-Output "SIGNED_RELEASE_BUILD_PASS"')
 
-    assert cleanup < receipt < atomic_write < success
+    assert cleanup < manifest < receipt < atomic_write < publish < success
     assert 'plaintext_keystore_cleanup = "PASS"' in script
     assert "[IO.File]::Move($temporaryPath, $fullPath)" in script
+    assert "EVIDENCE_STAGING_CLEANUP_PATH_INVALID" in script
 
 
-def test_dirty_source_provenance_covers_untracked_content_and_build_drift() -> None:
+def test_production_source_must_be_clean_stable_and_tagged_at_exact_head() -> None:
     script = _script()
 
-    pre_build = script.index(
-        "$sourceProvenance = Get-StableSourceProvenance -Git $git -RepoRoot $repoRoot"
-    )
+    pre_build = script.index("$sourceProvenance = Assert-ProductionSourceIdentity `")
     build = script.index("Invoke-GradleRelease $gradle")
-    post_build = script.index("$postBuildSourceProvenance = Get-StableSourceProvenance")
+    post_build = script.index("$postBuildSourceProvenance = Assert-ProductionSourceIdentity `")
 
     assert '"ls-files", "--others", "--exclude-standard", "-z"' in script
     assert "sha256 = Get-Sha256Hex $fullPath" in script
     assert pre_build < build < post_build
+    assert "PRODUCTION_SOURCE_WORKTREE_DIRTY" in script
+    assert '"rev-parse", "--verify", "$tagRef^{commit}"' in script
+    assert "PRODUCTION_RELEASE_TAG_HEAD_MISMATCH" in script
     assert "SOURCE_PROVENANCE_DRIFT_DETECTED" in script
     assert "source_untracked_manifest = $sourceProvenance.UntrackedManifest" in script
     assert 'source_stability = "PRE_AND_POST_BUILD_MATCH"' in script
+
+
+def test_production_build_requires_explicit_identity_and_emits_one_verified_apk() -> None:
+    script = _script()
+
+    for declaration in (
+        "[int]$VersionCode",
+        "[string]$VersionName",
+        "[string]$ReleaseTag",
+        "[string]$SourceCommit",
+    ):
+        assert declaration in script
+
+    assert "PRODUCTION_RELEASE_IDENTITY_REQUIRED" in script
+    assert '"-Pautplay.productionRelease=true"' in script
+    assert '":apps:android:clean"' in script
+    assert '":apps:android:assembleRelease"' in script
+    assert "$releaseApks.Count -ne 1" in script
+    assert "APK_SIGNER_SET_INVALID" in script
+    assert "APK_SIGNER_FINGERPRINT_MISMATCH" in script
+    assert "APK_PACKAGE_IDENTITY_MISMATCH" in script
+    assert "0.3.0-pa3.1" not in script
+    assert "0.3.0-pa3.2" not in script
+
+
+def test_manifest_binds_apk_source_certificate_and_latest_tracked_room_schema() -> None:
+    script = _script()
+
+    assert 'release_kind = "ANDROID_PRODUCTION_APK"' in script
+    assert "release_tag = $ReleaseTag" in script
+    assert "source_commit = $sourceProvenance.Commit" in script
+    assert "signer_certificate_sha256 = $expectedFingerprint" in script
+    assert "apk = $artifactRecord" in script
+    assert '"ls-files", "--error-unmatch", "--", $relativePath' in script
+    assert "identity_hash = $roomSchema.IdentityHash" in script
+    assert "sha256 = $roomSchema.Sha256" in script
+    assert "ROOM_SCHEMA_DRIFT_DETECTED" in script
+    assert 'secrets = "NOT_RECORDED"' in script
+
+
+def test_android_gradle_production_flag_fails_closed() -> None:
+    build = ANDROID_BUILD_PATH.read_text(encoding="utf-8")
+
+    assert "versionCode = 13" in build
+    assert 'versionName = "1.0.0"' in build
+    assert 'gradleProperty("autplay.productionRelease")' in build
+    assert "productionRelease && qaSideBySide" in build
+    assert "Production release requires explicit versionCode and versionName" in build
+    assert "productionRelease && !releaseSigningEnabled" in build
 
 
 def test_signing_evidence_index_scopes_update_proof_to_exact_apk_hashes() -> None:

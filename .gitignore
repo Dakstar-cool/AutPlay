@@ -62,6 +62,7 @@ tmp/
 /.agents/
 /.codex/agents/
 /.codex/config.toml
+/.codex-state/
 /docs/build-pack/
 /docs/implementation/
 /docs/design/AutPlay_Codex_Goal_Schema_Foundation_v1.md
