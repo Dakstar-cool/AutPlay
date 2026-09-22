@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: ./server-control.sh <start|stop|status|logs|bootstrap-owner|invite-browser|fingerprint> [arguments]" >&2
+  echo "usage: ./server-control.sh <start|start-core|stop|status|logs|bootstrap-owner|invite-browser|fingerprint> [arguments]" >&2
   echo "  bootstrap-owner <display-name> [device-name]" >&2
   echo "  invite-browser <owner-uuid>" >&2
 }
@@ -51,9 +51,11 @@ compose=(docker compose --project-name "$project_name" --env-file "$env_file"
   --file "$bundle_root/compose.admin-local.yaml"
   --file "$bundle_root/compose.release.yaml"
   --profile runtime)
+core_services=(postgres vault-init migrate api stream mobile-api admin-init music-po-token)
 
 case "$action" in
   start) "${compose[@]}" up --no-build --wait ;;
+  start-core) "${compose[@]}" up --no-build --wait "${core_services[@]}" ;;
   stop) "${compose[@]}" down --remove-orphans ;;
   status) "${compose[@]}" ps ;;
   logs) "${compose[@]}" logs --no-color --tail 200 ;;

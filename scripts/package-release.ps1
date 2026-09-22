@@ -434,11 +434,30 @@ try {
         $env:AUTPLAY_MOBILE_API_PORT = [string]$runtimeMobileApiPort
         $env:AUTPLAY_MOBILE_STREAM_PORT = [string]$runtimeMobileStreamPort
 
-        & docker @runtimeComposeArguments up --no-build --wait
+        $runtimeSmokeServices = @(
+            "postgres",
+            "vault-init",
+            "migrate",
+            "api",
+            "stream",
+            "mobile-api",
+            "admin-init",
+            "music-po-token"
+        )
+        & docker @runtimeComposeArguments up --no-build --wait @runtimeSmokeServices
         if ($LASTEXITCODE -ne 0) {
             & docker @runtimeComposeArguments logs --no-color --tail 200 `
-                migrate api worker-cpu stream mobile-api admin-init
+                vault-init migrate api stream mobile-api admin-init music-po-token
             throw "Reloaded release image Compose runtime gate failed"
+        }
+        $workerReady = (& docker @runtimeComposeArguments run --rm --no-deps `
+            worker-cpu python -m autplay.entrypoints.worker_cgroup_bootstrap `
+            --check-readiness | Out-String).Trim()
+        if (
+            $LASTEXITCODE -ne 0 -or
+            $workerReady -ne '{"status":"ready","service":"autplay-worker-cpu"}'
+        ) {
+            throw "Reloaded release image CPU worker readiness gate failed"
         }
         $apiReady = Invoke-WebRequest `
             -UseBasicParsing `

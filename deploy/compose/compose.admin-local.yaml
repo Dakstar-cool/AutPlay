@@ -73,6 +73,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
     ports:
       - name: mobile-api-lan
         target: 8787

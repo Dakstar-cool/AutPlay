@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("start", "stop", "status", "logs", "bootstrap-owner", "invite-browser", "fingerprint")]
+    [ValidateSet("start", "start-core", "stop", "status", "logs", "bootstrap-owner", "invite-browser", "fingerprint")]
     [string]$Action,
     [string]$StateDirectory = (Join-Path $env:LOCALAPPDATA "AutPlayServer"),
     [string]$DisplayName,
@@ -56,9 +56,20 @@ foreach ($file in @("compose.yaml", "compose.runtime.yaml", "compose.admin-local
     $compose += @("--file", (Join-Path $bundleRoot $file))
 }
 $compose += @("--profile", "runtime")
+$coreServices = @(
+    "postgres",
+    "vault-init",
+    "migrate",
+    "api",
+    "stream",
+    "mobile-api",
+    "admin-init",
+    "music-po-token"
+)
 
 switch ($Action) {
     "start" { & docker @compose up --no-build --wait }
+    "start-core" { & docker @compose up --no-build --wait @coreServices }
     "stop" { & docker @compose down --remove-orphans }
     "status" { & docker @compose ps }
     "logs" { & docker @compose logs --no-color --tail 200 }

@@ -255,13 +255,23 @@ foreach ($file in $composeFiles) {
     $composeArguments += @("--file", $path)
 }
 $composeArguments += @("--profile", "runtime")
+$coreServices = @(
+    "postgres",
+    "vault-init",
+    "migrate",
+    "api",
+    "stream",
+    "mobile-api",
+    "admin-init",
+    "music-po-token"
+)
 
 & docker @composeArguments config --quiet
 if ($LASTEXITCODE -ne 0) {
     throw "COMPOSE_CONFIG_INVALID"
 }
 if (-not $NoStart) {
-    & docker @composeArguments up --no-build --wait
+    & docker @composeArguments up --no-build --wait @coreServices
     if ($LASTEXITCODE -ne 0) {
         throw "SERVER_HEALTH_FAILED"
     }
@@ -269,4 +279,5 @@ if (-not $NoStart) {
 
 Write-Output "AutPlay server installer PASS"
 Write-Output "Admin Web is available only on loopback port 8787. Mobile ports: 18787/18788."
+Write-Output "CPU worker remains stopped until reviewed resource and internal-I/O budgets are applied."
 Write-Output "Next: run server-control fingerprint and follow INSTALL_AND_PAIR.md."

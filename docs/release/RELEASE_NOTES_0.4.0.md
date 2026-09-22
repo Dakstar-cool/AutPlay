@@ -69,8 +69,9 @@ The release packager runs `scripts/check.ps1`, which covers locked Python projec
 strict mypy, contract/release tests, the server suite against disposable PostgreSQL 18.4 with
 pgvector 0.8.6, Android lint/unit/debug/trusted-LAN/release-R8, GPU static tests and Sona-training
 tests. It then verifies both APK manifests and signer continuity, reloads the generated Docker
-archive, checks API/worker/stream/media configuration and starts the packaged server in a disposable
-Compose topology before generating the manifest and checksums.
+archive, checks API/worker/stream/media configuration, starts the packaged core services in a
+disposable Compose topology and verifies CPU-worker readiness without inventing operator resource
+measurements before generating the manifest and checksums.
 
 Current implementation evidence and the still-separate target acceptance gates are indexed in
 [`ADMIN_UNIFIED_GOAL_2026_09_19.md`](ADMIN_UNIFIED_GOAL_2026_09_19.md). The release bundle's
@@ -82,6 +83,9 @@ files.
 - Android requires API 26 or newer. The two APK variants use separate application IDs and databases.
 - The server installer is CPU-only `linux/amd64` and is intended for a single operator on a trusted
   personal network. ARM64 is not included.
+- The installer starts the core server without the CPU worker. Full worker activation remains
+  fail-closed until the operator applies reviewed resource-report v1 and internal-I/O report v3
+  budgets; synthetic test measurements are never installed automatically.
 - Stable production signing, store policy, public domain/TLS activation, registry distribution,
   production secret delivery and rollout/rollback remain separate operator decisions.
 - Sona-Lite shadow/training code is present, but the adaptive model is not active for recommendations;

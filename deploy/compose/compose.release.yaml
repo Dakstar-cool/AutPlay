@@ -3,6 +3,10 @@ services:
     image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
     build: !reset null
 
+  vault-init:
+    image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
+    build: !reset null
+
   privacy-ledger-init:
     image: "${AUTPLAY_SERVER_IMAGE:?set AUTPLAY_SERVER_IMAGE to the loaded release image tag}"
     build: !reset null

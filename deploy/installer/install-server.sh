@@ -170,11 +170,13 @@ compose=(docker compose --project-name "$project_name" --env-file "$env_file"
   --file "$bundle_root/compose.admin-local.yaml"
   --file "$bundle_root/compose.release.yaml"
   --profile runtime)
+core_services=(postgres vault-init migrate api stream mobile-api admin-init music-po-token)
 "${compose[@]}" config --quiet
 if [[ "$start_server" -eq 1 ]]; then
-  "${compose[@]}" up --no-build --wait
+  "${compose[@]}" up --no-build --wait "${core_services[@]}"
 fi
 
 echo "AutPlay server installer PASS"
 echo "Admin Web is available only on loopback port 8787. Mobile ports: 18787/18788."
+echo "CPU worker remains stopped until reviewed resource and internal-I/O budgets are applied."
 echo "Next: run server-control fingerprint and follow INSTALL_AND_PAIR.md."

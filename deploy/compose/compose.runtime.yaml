@@ -37,6 +37,21 @@ services:
     mem_limit: 512m
     cpus: 1.0
 
+  vault-init:
+    <<: *autplay-runtime
+    command:
+      - python
+      - -c
+      - >-
+        from pathlib import Path;
+        from autplay.adapters.filesystem.vault import FilesystemVaultStorage;
+        FilesystemVaultStorage(Path('/var/lib/autplay/vault'))
+    volumes:
+      - vault-data:/var/lib/autplay/vault
+    restart: "no"
+    mem_limit: 128m
+    cpus: 0.25
+
   privacy-ledger-init:
     <<: *autplay-runtime
     profiles: [ledger-bootstrap]
@@ -78,6 +93,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
     ports:
       - name: api-local
         target: 8787
@@ -118,11 +135,14 @@ services:
       AUTPLAY_WORKER_MAX_ATTEMPTS: "5"
       AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
       AUTPLAY_MUSIC_PO_TOKEN_URL: http://music-po-token:4416
+      AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "262144"
     depends_on:
       migrate:
         condition: service_completed_successfully
       music-po-token:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
     volumes:
       - vault-data:/var/lib/autplay/vault
     healthcheck:
@@ -182,6 +202,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
     ports:
       - name: stream-local
         target: 8788
@@ -238,6 +260,8 @@ services:
       AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      vault-init:
         condition: service_completed_successfully
     volumes:
       - vault-data:/var/lib/autplay/vault:ro

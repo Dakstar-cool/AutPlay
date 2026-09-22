@@ -53,6 +53,7 @@ def test_admin_local_overlay_forces_the_api_to_literal_loopback(tmp_path: Path) 
     api = config["services"]["api"]
     mobile_api = config["services"]["mobile-api"]
     stream = config["services"]["stream"]
+    vault_init = config["services"]["vault-init"]
 
     assert [port["host_ip"] for port in api["ports"]] == ["127.0.0.1"]
     assert [(port["host_ip"], int(port["published"])) for port in mobile_api["ports"]] == [
@@ -78,6 +79,25 @@ def test_admin_local_overlay_forces_the_api_to_literal_loopback(tmp_path: Path) 
     }
     assert config["services"]["admin-init"]["depends_on"]["mobile-api"]["condition"] == (
         "service_healthy"
+    )
+    assert vault_init["restart"] == "no"
+    assert vault_init["command"][:2] == ["python", "-c"]
+    assert "FilesystemVaultStorage" in vault_init["command"][2]
+    assert vault_init["volumes"] == [
+        {
+            "type": "volume",
+            "source": "vault-data",
+            "target": "/var/lib/autplay/vault",
+            "volume": {},
+        }
+    ]
+    for service_name in ("api", "mobile-api", "stream", "worker-cpu"):
+        assert config["services"][service_name]["depends_on"]["vault-init"]["condition"] == (
+            "service_completed_successfully"
+        )
+    assert (
+        config["services"]["worker-cpu"]["environment"]["AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES"]
+        == "262144"
     )
     assert "ports" not in config["services"]["admin-init"]
 

@@ -153,6 +153,15 @@ def test_installer_is_private_lan_only_and_preserves_state_on_stop() -> None:
     assert "Test-PrivateDirectoryAcl" in powershell
     assert "AUTPLAY_SERVER_STATE_V1" in powershell
     assert "STATE_DIRECTORY_NOT_PRIVATE" in shell
+    assert '"start-core"' in control_powershell
+    assert "start-core)" in control_shell
+    assert '"vault-init"' in powershell
+    assert (
+        "core_services=(postgres vault-init migrate api stream "
+        "mobile-api admin-init music-po-token)" in shell
+    )
+    assert "CPU worker remains stopped" in powershell
+    assert "CPU worker remains stopped" in shell
 
 
 def test_release_overlay_is_last_in_installer_compose_order() -> None:
@@ -176,6 +185,7 @@ def test_release_overlay_covers_every_admin_local_server_process() -> None:
     )
     for service in (
         "migrate",
+        "vault-init",
         "privacy-ledger-init",
         "training-consent-ledger-init",
         "api",
@@ -185,7 +195,7 @@ def test_release_overlay_covers_every_admin_local_server_process() -> None:
         "admin-init",
     ):
         assert f"  {service}:" in overlay
-    assert overlay.count('    image: "${AUTPLAY_SERVER_IMAGE:') == 8
+    assert overlay.count('    image: "${AUTPLAY_SERVER_IMAGE:') == 9
 
 
 def test_release_packager_emits_both_apks_and_the_server_installer() -> None:
@@ -214,6 +224,10 @@ def test_release_packager_emits_both_apks_and_the_server_installer() -> None:
     assert "Caddyfile.public-edge" in packager
     assert "RELEASE_NOTES_$releaseVersion.md" in packager
     assert "version_code = $androidVersionCode" in packager
+    assert '"vault-init"' in packager
+    assert "worker_cgroup_bootstrap" in packager
+    assert "--check-readiness" in packager
+    assert "CPU worker readiness gate failed" in packager
     assert "BuildConfig.VERSION_NAME" in (
         REPOSITORY_ROOT
         / "apps"

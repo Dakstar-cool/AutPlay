@@ -96,7 +96,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-server.ps1 `
 
 Установщик проверяет SHA-256 вложенного Docker image, загружает его, один раз создаёт секреты и
 постоянный P-256 identity key в `%LOCALAPPDATA%\AutPlayServer`, проверяет Compose и ждёт healthy
-состояния. Повторный запуск сохраняет существующие секреты и identity.
+состояния основного контура. Повторный запуск сохраняет существующие секреты и identity. CPU-worker
+остаётся остановленным, пока оператор не применит два отчёта измерения ресурсов; телефон, Web Admin,
+Vault, sync и stream для первичной настройки доступны без него.
 
 Разрешите входящие TCP `18787` и `18788` только для профиля Private и `LocalSubnet`. Выполните в
 PowerShell от администратора:
@@ -208,6 +210,7 @@ Windows:
 .\server-control.ps1 -Action status
 .\server-control.ps1 -Action logs
 .\server-control.ps1 -Action stop
+.\server-control.ps1 -Action start-core
 .\server-control.ps1 -Action start
 ```
 
@@ -217,8 +220,16 @@ Linux:
 ./server-control.sh status
 ./server-control.sh logs
 ./server-control.sh stop
+./server-control.sh start-core
 ./server-control.sh start
 ```
+
+`start-core` поднимает основной контур без CPU-worker и подходит для первичной настройки. Полный
+`start` используйте после применения проверенных resource-report v1 и internal-I/O report v3.
+CPU-worker намеренно остаётся fail-closed без этих бюджетов; синтетические значения из тестов нельзя
+переносить в постоянный сервер. Формат отчётов и точные аргументы `autplay-admin
+resource-budget-initialize` / `internal-io-budget-apply` описаны в
+[AutPlay Resource Measurement Report](../design/AutPlay_Resource_Measurement_Report_v1.md).
 
 Обычный `stop` сохраняет PostgreSQL и Vault named volumes. Никогда не добавляйте `--volumes`, если
 данные нужны: эта опция удалит их. Текущий development installer не является системой резервного

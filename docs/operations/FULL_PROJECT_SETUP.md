@@ -196,14 +196,16 @@ bash scripts/check.sh --server-only
 $env:AUTPLAY_RUNTIME_AUTH_SECRET_FILE = 'D:\AutPlaySecrets\auth.txt'
 $env:AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE = 'D:\AutPlaySecrets\source-hmac.txt'
 docker compose -f deploy/compose/compose.yaml `
-  -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait
+  -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait `
+  postgres vault-init migrate api stream music-po-token
 ```
 
 ```bash
 export AUTPLAY_RUNTIME_AUTH_SECRET_FILE=/srv/autplay-secrets/auth
 export AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=/srv/autplay-secrets/source-hmac
 docker compose -f deploy/compose/compose.yaml \
-  -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait
+  -f deploy/compose/compose.runtime.yaml --profile runtime up --build --wait \
+  postgres vault-init migrate api stream music-po-token
 ```
 
 Порты по умолчанию привязаны к loopback. Этот Compose использует disposable development volume;
@@ -215,7 +217,11 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 
 Для постоянного личного сервера используйте installer из Release. Он проверяет image/revision,
 создаёт постоянные secrets и P-256 identity вне bundle и применяет release overlay в правильном
-порядке.
+порядке. Installer сначала запускает основной контур без CPU-worker. Worker включается полным
+`server-control start` только после применения проверенных resource-report v1 и internal-I/O
+report v3; без них он намеренно fail-closed. Не используйте синтетические test fixtures на
+постоянном сервере. Схема отчётов и аргументы команд описаны в
+[AutPlay Resource Measurement Report](../design/AutPlay_Resource_Measurement_Report_v1.md).
 
 ## 8. Web Admin и аккаунты
 
@@ -223,6 +229,7 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 
 ```powershell
 .\server-control.ps1 -Action status
+.\server-control.ps1 -Action start-core
 .\server-control.ps1 -Action fingerprint
 .\server-control.ps1 -Action bootstrap-owner -DisplayName "Owner"
 .\server-control.ps1 -Action invite-browser -UserId <owner UUID>
@@ -231,6 +238,7 @@ docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.
 
 ```bash
 ./server-control.sh status
+./server-control.sh start-core
 ./server-control.sh fingerprint
 ./server-control.sh bootstrap-owner "Owner"
 ./server-control.sh invite-browser <owner UUID>
