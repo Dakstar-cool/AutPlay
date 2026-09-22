@@ -35,6 +35,14 @@ class _Service:
     def capabilities(self, _: Principal) -> dict[str, object]:
         return _example("capabilities.schema.json")
 
+    def developer_mode_state(self, principal: Principal) -> dict[str, object]:
+        return {
+            "contract_version": "v1",
+            "schema_version": 1,
+            "device_id": str(principal.device_id),
+            "enabled": False,
+        }
+
     def issue_invitation(self, *_: object) -> dict[str, object]:
         return _example("enrollment-invitation.schema.json")
 
@@ -161,6 +169,21 @@ def test_every_runtime_success_response_matches_its_openapi_schema_and_is_no_sto
         _validate(schema, response.json())
         assert response.headers["cache-control"] == "no-store"
         assert response.headers["pragma"] == "no-cache"
+
+
+def test_developer_mode_is_read_only_and_bound_to_authenticated_device(
+    client: TestClient,
+) -> None:
+    response = client.get("/profile/developer-mode")
+    assert response.status_code == 200
+    assert response.json() == {
+        "contract_version": "v1",
+        "schema_version": 1,
+        "device_id": "33333333-3333-4333-8333-333333333333",
+        "enabled": False,
+    }
+    assert response.headers["cache-control"] == "no-store"
+    assert client.post("/profile/developer-mode", json={"enabled": True}).status_code == 405
 
 
 def test_pairing_errors_and_request_validation_are_non_cacheable(client: TestClient) -> None:

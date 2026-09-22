@@ -97,6 +97,16 @@ def create_profile_pairing_router(
             raise _error("capability_missing", 503)
         return JSONResponse(service.capabilities(_principal(request)), headers=_NO_STORE)
 
+    @router.get("/profile/developer-mode", dependencies=[Depends(authenticated)])
+    def developer_mode(request: Request) -> JSONResponse:
+        if service is None:
+            raise _error("capability_missing", 503)
+        try:
+            result = service.developer_mode_state(_principal(request))
+        except ProfilePairingError as error:
+            raise _profile_error(error) from error
+        return JSONResponse(result, headers=_NO_STORE)
+
     @router.post(
         "/pairing/enrollment/invitations", status_code=201, dependencies=[Depends(authenticated)]
     )

@@ -10,7 +10,7 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
-/** One bounded file per durable work item; no change to the original audio. */
+/** One bounded source reference per durable work item; no copy or change to the original audio. */
 class PhoneMusicWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val settings = applicationNonSecretSettingsStore(applicationContext).settings.first()
@@ -25,7 +25,7 @@ class PhoneMusicWorker(context: Context, parameters: WorkerParameters) : Corouti
             val track = PhoneMusicTrack(inputData.getString("uri") ?: return Result.failure(),
                 inputData.getString("title").orEmpty(), inputData.getString("artist").orEmpty(),
                 inputData.getLong("size", 0), inputData.getString("mime") ?: "audio/mpeg")
-            val id = PhoneMusicRepository(applicationContext).copyIntoLibrary(track, binding)
+            val id = PhoneMusicRepository(applicationContext).linkIntoLibrary(track, binding)
             if (inputData.getBoolean("upload", false) && binding != null) {
                 PhoneVaultUploadWork.enqueue(applicationContext, id, profile)
             }

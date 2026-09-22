@@ -303,6 +303,11 @@ class ServerFeatureRepository(
             }
     }
 
+    /** Reads the Web-admin decision for the authenticated device; the app cannot mutate it. */
+    suspend fun developerModeEnabled(): Boolean = authorized(
+        Request.Builder().url("$apiBaseUrl/profile/developer-mode").get().build(),
+    ).jsonObject.requiredBoolean("enabled")
+
     /** Resolves only an owner-authorized stable Variant ID; URLs and credentials stay runtime-only. */
     suspend fun playbackVariantId(serverUserTrackRefId: String): String? {
         requireUuidLike(serverUserTrackRefId)
@@ -727,7 +732,10 @@ class ServerFeatureRepository(
                 .build(),
             expectBody = false,
         )
-        return result.headers["Upload-Offset"]?.toLongOrNull()
+        return result.headers.entries
+            .firstOrNull { (name, _) -> name.equals("Upload-Offset", ignoreCase = true) }
+            ?.value
+            ?.toLongOrNull()
             ?: error("VAULT_UPLOAD_OFFSET_MISSING")
     }
 

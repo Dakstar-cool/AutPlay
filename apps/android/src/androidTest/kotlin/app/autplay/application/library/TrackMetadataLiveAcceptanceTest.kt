@@ -50,7 +50,7 @@ class TrackMetadataLiveAcceptanceTest {
         val sourceTrack = repository.scan().first { it.uri == source.toString() }
         val inspector = app.autplay.application.importing.ContentUriInspector(resolver)
         val digest = inspector.inspectWithDigest(source.toString()).contentSha256
-        val audioId = repository.copyIntoLibrary(sourceTrack, owner)
+        val audioId = repository.linkIntoLibrary(sourceTrack, owner)
         val database = AutPlayRuntime.database(context)
         val audio = checkNotNull(database.localAudioDao().state(audioId))
         // Existing copies may have been imported before metadata support.

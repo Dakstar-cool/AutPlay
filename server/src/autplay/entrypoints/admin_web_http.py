@@ -145,6 +145,8 @@ class TrustedDeviceWebItem:
     platform: str
     trust_state: str
     active_session_count: int
+    device_id: UUID | None = None
+    developer_mode_enabled: bool = False
 
 
 class DeviceAdmissionWebHttp(Protocol):
@@ -172,6 +174,15 @@ class DeviceAdmissionWebHttp(Protocol):
         actor: WebActor,
         key_reference: UUID,
         action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None: ...
+
+    def manage_device_developer_mode(
+        self,
+        actor: WebActor,
+        device_id: UUID,
+        enabled: bool,
         operation_id: UUID,
         request_sha256: bytes,
     ) -> None: ...
@@ -699,6 +710,11 @@ def create_admin_web_router(
                     }
                     for item in items
                 },
+                developer_operations={
+                    str(item.device_id): {action: str(uuid4()) for action in ("enable", "disable")}
+                    for item in items
+                    if item.device_id is not None
+                },
             )
         )
         if authenticated.rotated_bearer is not None:
@@ -743,6 +759,42 @@ def create_admin_web_router(
             )
             device_admission.manage_trusted_device(
                 authenticated.actor, key_reference, actions[action], operation_id, request_hash
+            )
+        except ValueError, WebAdminError:
+            return error("trusted_device_unavailable", 403)
+        return apply_admin_security_headers(
+            RedirectResponse("/admin/trusted-devices", status_code=303)
+        )
+
+    @router.post("/trusted-devices/device/{device_id}/developer-mode/{action}")
+    async def trusted_device_developer_mode(
+        device_id: UUID, action: str, request: Request
+    ) -> Response:
+        if device_admission is None or action not in {"enable", "disable"}:
+            return admission_unavailable()
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id"}),
+            )
+            operation_id = UUID(form["operation_id"])
+            request_hash = canonical_form_request_hash("POST", request.url.path, form)
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor,
+                decode_request_integrity_token(form["csrf_token"]),
+                operation_id,
+            )
+            device_admission.manage_device_developer_mode(
+                authenticated.actor,
+                device_id,
+                action == "enable",
+                operation_id,
+                request_hash,
             )
         except ValueError, WebAdminError:
             return error("trusted_device_unavailable", 403)

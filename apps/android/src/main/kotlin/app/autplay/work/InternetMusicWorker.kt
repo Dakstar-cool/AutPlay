@@ -6,6 +6,7 @@ import androidx.work.*
 import app.autplay.AutPlayRuntime
 import app.autplay.application.download.DownloadIntentRepository
 import app.autplay.application.sync.ClientEventBinding
+import app.autplay.application.sync.SyncBindingInitializer
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
 import app.autplay.download.DownloadStorageClass
@@ -33,8 +34,19 @@ class InternetMusicWorker(context: Context, parameters: WorkerParameters) : Coro
             when (status.state) {
                 "FAILED" -> Result.failure()
                 "READY" -> {
-                    AutPlayRuntime.syncCoordinator(applicationContext, binding).run(binding)
-                    val track = database.libraryDao().trackRefByServerId(profile.value, checkNotNull(status.refId)) ?: return retryOrFail()
+                    val coordinator = AutPlayRuntime.syncCoordinator(applicationContext, binding)
+                    coordinator.run(binding)
+                    val serverRef = checkNotNull(status.refId)
+                    var track = database.libraryDao().trackRefByServerId(profile.value, serverRef)
+                    if (
+                        track == null &&
+                        database.syncDao().cursor(profile.value)?.bootstrapState == "READY"
+                    ) {
+                        SyncBindingInitializer(database).requestFullSnapshot(binding)
+                        coordinator.run(binding)
+                        track = database.libraryDao().trackRefByServerId(profile.value, serverRef)
+                    }
+                    track ?: return retryOrFail()
                     if (inputData.getBoolean("download", false)) DownloadIntentRepository(applicationContext, database).requestVaultDownload(
                         LocalId(track.localUserTrackRefId), profile, checkNotNull(status.variantId), DownloadStorageClass.USER_DOWNLOAD, System.currentTimeMillis(),
                     )

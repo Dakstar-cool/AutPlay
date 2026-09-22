@@ -56,8 +56,8 @@ The candidate bundle is delivery evidence, not a production release. It is inten
 and private to the workflow run. Production signing, GitHub Release/registry publication and live
 deployment require the explicit decisions and approval in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-The private repository's manually approved development distributions are assembled by
-`scripts/package-release.ps1` from an immutable local tag. The `v0.3.0` path produces a hardened
+The repository's explicitly approved development distributions are assembled by
+`scripts/package-release.ps1` from an immutable local tag. The `v0.4.0` path produces a hardened
 APK, a separately identified trusted-LAN APK, and a CPU-only `linux/amd64` server-installer ZIP.
 The script runs the canonical gates, verifies both APK manifests and the retained development
 signer, exports the public certificate, creates and reloads the Docker image archive, runs the

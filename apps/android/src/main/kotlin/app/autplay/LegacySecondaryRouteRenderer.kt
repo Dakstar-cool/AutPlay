@@ -93,6 +93,7 @@ internal data class LegacySecondaryRouteActions(
     val rescanLibraryRoot: () -> Unit,
     val exportSettings: () -> Unit,
     val importSettings: () -> Unit,
+    val refreshDeveloperMode: () -> Unit,
     val social: SocialActions,
     val navigate: (UiDestination) -> Unit,
 )
@@ -199,6 +200,7 @@ internal fun LegacySecondaryRouteRenderer(
                 statisticsSettingsErrorCode = state.social.statisticsSettingsErrorCode,
                 onStatisticsVisibilityChange = actions.social.setProfileStatisticsVisibility,
                 trainingConsent = state.trainingConsent,
+                onRefreshDeveloperMode = actions.refreshDeveloperMode,
                 onNavigate = actions.navigate,
             )
             else -> Text(stringResource(R.string.state_unavailable_body))

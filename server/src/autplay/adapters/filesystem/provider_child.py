@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 from autplay.adapters.child_process import provider_child_launch
 from autplay.domain.vault import VaultError, VaultLimits, VerifiedStagedFile
 
+from .provider_media import MEDIA_ERROR_EXIT_CODES
 from .provider_staging import FilesystemProviderStorage
 from .vault_child import (
     MAX_COMMAND_BYTES,
@@ -153,7 +154,18 @@ def download_youtube(candidate: str, workspace: Path, maximum: int) -> Path:
             output.flush()
             os.fsync(output.fileno())
         # The child's independent command watchdog also bounds a stuck wait/pipe.
-        if process.wait() != 0 or written == 0:
+        exit_code = process.wait()
+        if exit_code != 0:
+            code = next(
+                (
+                    name
+                    for name, classified_exit in MEDIA_ERROR_EXIT_CODES.items()
+                    if classified_exit == exit_code
+                ),
+                "provider_download_failed",
+            )
+            raise ProviderChildError(code)
+        if written == 0:
             raise ProviderChildError()
         return source
     finally:

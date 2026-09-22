@@ -150,6 +150,12 @@ def test_public_edge_is_the_only_non_loopback_listener(tmp_path: Path) -> None:
         "autplay-training-consent-ledger-key",
     }
     worker = services["worker-cpu"]  # type: ignore[index]
+    token_provider = services["music-po-token"]  # type: ignore[index]
+    assert "ports" not in token_provider
+    assert token_provider["networks"] == {"music-provider": None}
+    assert config["networks"]["music-provider"]["internal"] is True  # type: ignore[index]
+    assert worker["environment"]["AUTPLAY_MUSIC_PO_TOKEN_URL"] == ("http://music-po-token:4416")
+    assert worker["depends_on"]["music-po-token"]["condition"] == "service_healthy"
     assert worker["command"] == [
         "python",
         "-m",

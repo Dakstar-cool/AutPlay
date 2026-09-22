@@ -49,7 +49,7 @@ class PhoneMusicLiveAcceptanceTest {
         return ClientEventBinding(checkNotNull(settings.activeUserId), checkNotNull(settings.deviceId), profile, LocalId(cursor.journalEpoch))
     }
 
-    @Test fun copyPreservesSourceAndRepeatedImportRestoresOneEntry() = runBlocking {
+    @Test fun linkPreservesSourceWithoutCopyAndRepeatedImportRestoresOneEntry() = runBlocking {
         val owner = binding()
         val resolver = context.contentResolver
         val source = preferences.getString("source", null)?.let(Uri::parse) ?: run {
@@ -72,21 +72,19 @@ class PhoneMusicLiveAcceptanceTest {
         val track = scanner.scan().first { it.uri == source.toString() }
         val sourceDigest = ContentUriInspector(resolver).inspectWithDigest(source.toString()).contentSha256
         val database = AutPlayRuntime.database(context)
-        val id = scanner.copyIntoLibrary(track, owner)
+        val id = scanner.linkIntoLibrary(track, owner)
         preferences.edit().putString("audio", id).commit()
-        val copied = checkNotNull(database.localAudioDao().state(id))
-        assertNotEquals(source.toString(), copied.contentUri)
-        assertEquals(sourceDigest, ContentUriInspector(resolver).inspectWithDigest(copied.contentUri).contentSha256)
-        resolver.query(Uri.parse(copied.contentUri), arrayOf(MediaStore.Audio.Media.RELATIVE_PATH, MediaStore.Audio.Media.IS_PENDING), null, null, null)!!.use {
-            assertTrue(it.moveToFirst()); assertEquals("Music/AutPlay/", it.getString(0)); assertEquals(0, it.getInt(1))
-        }
+        val linked = checkNotNull(database.localAudioDao().state(id))
+        assertEquals(source.toString(), linked.contentUri)
+        assertFalse(linked.persistedUriPermission)
+        assertEquals(sourceDigest, ContentUriInspector(resolver).inspectWithDigest(linked.contentUri).contentSha256)
         val count = database.libraryDao().trackRefCount()
-        assertEquals(id, scanner.copyIntoLibrary(track, owner))
+        assertEquals(id, scanner.linkIntoLibrary(track, owner))
         assertEquals(count, database.libraryDao().trackRefCount())
-        val entry = checkNotNull(database.libraryDao().entryForTrack(copied.localUserTrackRefId))
+        val entry = checkNotNull(database.libraryDao().entryForTrack(linked.localUserTrackRefId))
         val library = LibraryVerticalSliceRepository(database, syncScheduler = AutPlayRuntime.syncScheduler(context))
         library.removeLibrary(owner, LocalId(entry.localLibraryEntryId), LocalId.random(), System.currentTimeMillis())
-        assertEquals(id, scanner.copyIntoLibrary(track, owner))
+        assertEquals(id, scanner.linkIntoLibrary(track, owner))
         assertNull(database.libraryDao().entry(entry.localLibraryEntryId)!!.removedAtMs)
         assertEquals(sourceDigest, ContentUriInspector(resolver).inspectWithDigest(source.toString()).contentSha256)
     }

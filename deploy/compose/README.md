@@ -26,15 +26,15 @@ and project-scoped. The override uses Compose `!reset` and therefore requires Do
 or newer:
 
 ```text
-docker load --input autplay-server-v0.3.0.docker.tar.gz
-AUTPLAY_SERVER_IMAGE=autplay-server:v0.3.0
+docker load --input autplay-server-v0.4.0.docker.tar.gz
+AUTPLAY_SERVER_IMAGE=autplay-server:v0.4.0
 AUTPLAY_RUNTIME_AUTH_SECRET_FILE=<local secret file outside the repository>
 AUTPLAY_RUNTIME_PUBLIC_ACCESS_SOURCE_SECRET_FILE=<different local source-HMAC secret file>
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime up --no-build --wait
 docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.runtime.yaml -f deploy/compose/compose.release.yaml --profile runtime down --volumes
 ```
 
-For the `v0.3.0` trusted-LAN development release, prefer the packaged server installer instead of
+For the `v0.4.0` trusted-LAN development release, prefer the packaged server installer instead of
 assembling this command by hand. It verifies the image archive, platform, revision and exact image
 tag, creates persistent secrets and the P-256 identity outside the extracted bundle, and always
 applies `compose.release.yaml` last. See

@@ -72,6 +72,7 @@ _API_ENV_FIELDS: Final = {
     "account_recovery_enabled": "ACCOUNT_RECOVERY_ENABLED",
     "account_deletion_enabled": "ACCOUNT_DELETION_ENABLED",
     "shared_training_consent_enabled": "SHARED_TRAINING_CONSENT_ENABLED",
+    "direct_vault_upload_enabled": "DIRECT_VAULT_UPLOAD_ENABLED",
     "admin_web_origin": "ADMIN_WEB_ORIGIN",
     "admin_web_source_hmac_secret": "ADMIN_WEB_SOURCE_HMAC_SECRET",
     "admin_web_csrf_hmac_secret": "ADMIN_WEB_CSRF_HMAC_SECRET",
@@ -94,6 +95,7 @@ _STREAM_ENV_FIELDS: Final = {
 }
 _WORKER_ENV_FIELDS: Final = {
     "account_purge_enabled": "ACCOUNT_PURGE_ENABLED",
+    "direct_vault_ingest_enabled": "DIRECT_VAULT_INGEST_ENABLED",
     "acoustid_client_key": "ACOUSTID_CLIENT_KEY",
     "metadata_proxy": "METADATA_PROXY",
     "worker_cgroup_root": "WORKER_CGROUP_ROOT",
@@ -325,6 +327,10 @@ class ApiSettings(_ExplicitSettings):
     account_recovery_enabled: bool = False
     account_deletion_enabled: bool = False
     shared_training_consent_enabled: bool = False
+    # Transitional compatibility path for deployments whose reviewed resource
+    # budget has not been initialized yet. It restores the pre-admission Vault
+    # writer only when an operator opts in explicitly.
+    direct_vault_upload_enabled: bool = False
     admin_web_origin: str | None = Field(default=None, min_length=1, max_length=2048)
     admin_web_source_hmac_secret: SecretStr | None = Field(
         default=None, repr=False, min_length=32, max_length=4_096
@@ -465,6 +471,9 @@ class WorkerSettings(_ExplicitSettings):
     """Validated settings available only to the CPU worker process."""
 
     account_purge_enabled: bool = False
+    # Transitional compatibility path matching the API's direct-upload gate.
+    # It is deliberately worker-only and defaults to the admitted ingest path.
+    direct_vault_ingest_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_account_purge(self) -> Self:
@@ -499,6 +508,8 @@ class WorkerSettings(_ExplicitSettings):
 
     @model_validator(mode="after")
     def _validate_worker_timing(self) -> Self:
+        if self.direct_vault_ingest_enabled and self.jamendo_enabled:
+            raise ValueError("direct Vault ingest cannot run provider acquisition")
         if self.worker_cgroup_root is not None and (
             not self.worker_cgroup_root.is_absolute() or ".." in self.worker_cgroup_root.parts
         ):

@@ -38,7 +38,7 @@
   <g id="copy" font-family="Inter, Segoe UI, Arial, sans-serif">
     <g transform="translate(76 70)">
       <rect width="158" height="34" rx="17" fill="#ff5b35"/>
-      <text x="79" y="23" fill="#0b0b10" font-size="14" font-weight="800" text-anchor="middle" letter-spacing="1.8">AUTPLAY 0.3</text>
+      <text x="79" y="23" fill="#0b0b10" font-size="14" font-weight="800" text-anchor="middle" letter-spacing="1.8">AUTPLAY 0.4</text>
     </g>
     <text x="76" y="194" fill="#f7f3ed" font-size="76" font-weight="780" letter-spacing="-3.4">Слушать сразу.</text>
     <text x="76" y="270" fill="#f7f3ed" font-size="76" font-weight="780" letter-spacing="-3.4">Синхронизировать потом.</text>

@@ -95,11 +95,13 @@ services:
   worker-cpu:
     environment: !override
       <<: *autplay-production-runtime-environment
+      AUTPLAY_DIRECT_VAULT_INGEST_ENABLED: "true"
       AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "262144"
       AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
       AUTPLAY_WORKER_LEASE_SECONDS: "120"
       AUTPLAY_WORKER_MAX_ATTEMPTS: "5"
       AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
+      AUTPLAY_MUSIC_PO_TOKEN_URL: http://music-po-token:4416
     secrets: !override
       - source: autplay-database-url
         target: autplay-database-url
@@ -127,6 +129,7 @@ services:
       AUTPLAY_ACCOUNT_RECOVERY_ENABLED: "true"
       AUTPLAY_ACCOUNT_DELETION_ENABLED: "true"
       AUTPLAY_SHARED_TRAINING_CONSENT_ENABLED: "true"
+      AUTPLAY_DIRECT_VAULT_UPLOAD_ENABLED: "true"
     secrets: !override
       - source: autplay-auth-signing-secret
         target: autplay-auth-signing-secret

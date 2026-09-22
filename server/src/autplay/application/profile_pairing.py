@@ -1434,6 +1434,7 @@ class ProfilePairingService:
                     .where(
                         DeviceRow.user_id == principal.user_id,
                         DeviceRow.public_key_thumbprint_sha256 == row.device_key_thumbprint_sha256,
+                        DeviceRow.revoked_at.is_(None),
                     )
                     .order_by(DeviceRow.created_at.desc(), DeviceRow.device_id)
                     .limit(1)
@@ -1470,9 +1471,118 @@ class ProfilePairingService:
                         "removed_at": None if row.removed_at is None else iso8601(row.removed_at),
                         "revision": row.revision,
                         "active_session_count": int(active_sessions or 0),
+                        "device_id": None if known_device is None else str(known_device.device_id),
+                        "developer_mode_enabled": False
+                        if known_device is None
+                        else self._developer_mode_enabled(s, known_device.device_id),
                     }
                 )
             return {"trusted_keys": items}
+
+    def developer_mode_state(self, principal: Principal) -> dict[str, object]:
+        """Return the latest Web-admin decision for this exact active Android device."""
+        with self._sessions() as s:
+            self._require_application_actor(s, principal)
+            device = s.scalar(
+                select(DeviceRow).where(
+                    DeviceRow.device_id == principal.device_id,
+                    DeviceRow.user_id == principal.user_id,
+                    DeviceRow.revoked_at.is_(None),
+                )
+            )
+            if device is None:
+                raise ProfilePairingError("device_revoked")
+            return {
+                "contract_version": "v1",
+                "schema_version": 1,
+                "device_id": str(device.device_id),
+                "enabled": self._developer_mode_enabled(s, device.device_id),
+            }
+
+    def manage_device_developer_mode(
+        self,
+        *,
+        principal: WebActor,
+        device_id: UUID,
+        enabled: bool,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> dict[str, object]:
+        """Persist one replay-safe Web-admin decision in the existing append-only audit log."""
+        action = "profile.developer_mode_enabled" if enabled else "profile.developer_mode_disabled"
+        now = _now()
+        with self._sessions.begin() as s:
+            account, now = self._lock_admin_actor(
+                s, principal, web_session_id=principal.web_session_id
+            )
+            _transaction_lock(s, b"web-operation", operation_id.bytes)
+            if account.status != "ACTIVE" or account.deleted_at is not None:
+                raise ProfilePairingError("auth_attention_required")
+            target_hash = hashlib.sha256(b"developer-mode\x00" + device_id.bytes).digest()
+            if self._web_operation_replay(
+                s,
+                principal,
+                principal.web_session_id,
+                operation_id,
+                action,
+                device_id,
+                target_hash,
+                request_sha256,
+                now,
+            ):
+                return {"operation_id": str(operation_id), "enabled": enabled, "replayed": True}
+            device = s.scalar(
+                select(DeviceRow)
+                .where(
+                    DeviceRow.device_id == device_id,
+                    DeviceRow.user_id == principal.user_id,
+                    DeviceRow.revoked_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if device is None:
+                raise ProfilePairingError("device_revoked")
+            self._audit(
+                s,
+                now,
+                principal,
+                action,
+                "DEVICE",
+                device_id,
+                request_id=operation_id,
+            )
+            self._record_web_operation(
+                s,
+                principal,
+                principal.web_session_id,
+                operation_id,
+                action,
+                device_id,
+                target_hash,
+                request_sha256,
+                now,
+            )
+            return {
+                "operation_id": str(operation_id),
+                "enabled": enabled,
+                "terminal_at": iso8601(now),
+            }
+
+    @staticmethod
+    def _developer_mode_enabled(s: Session, device_id: UUID) -> bool:
+        latest = s.scalar(
+            select(AuditEventRow)
+            .where(
+                AuditEventRow.target_type == "DEVICE",
+                AuditEventRow.target_id == device_id,
+                AuditEventRow.action.in_(
+                    ("profile.developer_mode_enabled", "profile.developer_mode_disabled")
+                ),
+            )
+            .order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.audit_event_id.desc())
+            .limit(1)
+        )
+        return latest is not None and latest.action == "profile.developer_mode_enabled"
 
     def issue_trusted_reenrollment_challenge(
         self,

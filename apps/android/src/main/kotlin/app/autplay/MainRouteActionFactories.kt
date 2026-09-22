@@ -528,6 +528,7 @@ internal fun buildLegacySecondaryRouteActions(
     chooseLibraryRoot: () -> Unit,
     exportSettings: () -> Unit,
     importSettings: () -> Unit,
+    refreshDeveloperMode: () -> Unit,
     social: SocialActions,
     manualPlaylists: ManualPlaylistActions,
     openPlaylist: (String) -> Unit,
@@ -732,6 +733,7 @@ internal fun buildLegacySecondaryRouteActions(
     },
     exportSettings = exportSettings,
     importSettings = importSettings,
+    refreshDeveloperMode = refreshDeveloperMode,
     social = social,
     navigate = navigate,
 )

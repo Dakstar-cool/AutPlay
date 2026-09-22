@@ -55,6 +55,10 @@ class InternetAcquisitionRepository(Protocol):
         """Persist one verified, exited provider result and its ingest job atomically."""
         ...
 
+    def record_error(self, claim: AcquisitionClaim, error_code: str, *, terminal: bool) -> None:
+        """Project a classified provider failure onto the selected acquisition."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderFileReceipt:
@@ -86,8 +90,29 @@ class ControlledInternetAcquisitionHandler:
             self._run(context, lease)
         except SQLAlchemyError as error:
             raise RetryableJobError("database_unavailable") from error
+        except TerminalJobError as error:
+            self._record_error(lease, error.error.code, terminal=True)
+            raise
+        except RetryableJobError as error:
+            self._record_error(lease, error.error.code, terminal=False)
+            raise
         except ResourceAdmissionError as error:
+            self._record_error(lease, error.code, terminal=False)
             raise RetryableJobError(error.code) from error
+
+    def _record_error(self, lease: JobLease, code: str, *, terminal: bool) -> None:
+        raw = lease.payload.get("acquisition_id")
+        if not isinstance(raw, str):
+            return
+        try:
+            identity = UUID(raw)
+        except ValueError:
+            return
+        self._repository.record_error(
+            AcquisitionClaim(lease.fence, "INTERNET_ACQUISITION", identity),
+            code,
+            terminal=terminal,
+        )
 
     def _run(self, context: JobExecutionContext, lease: JobLease) -> None:
         raw = lease.payload.get("acquisition_id")

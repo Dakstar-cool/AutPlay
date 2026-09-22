@@ -1,6 +1,6 @@
-# Установка AutPlay v0.3.0 и подключение личного сервера
+# Установка AutPlay v0.4.0 и подключение личного сервера
 
-Это руководство относится к development pre-release `v0.3.0`. Android полностью работает без
+Это руководство относится к development pre-release `v0.4.0`. Android полностью работает без
 сервера. Поставляемый установщик сервера предназначен для одного оператора, CPU `linux/amd64` и
 доверенной домашней сети. Он не настраивает публичный домен, TLS, резервное копирование или
 production-хранилище и не должен быть доступен из Интернета.
@@ -9,11 +9,11 @@ production-хранилище и не должен быть доступен и�
 
 На странице GitHub Release нужны:
 
-- `autplay-0.3.0-dev-signed.apk` — hardened APK для локального режима или сервера с отдельно
+- `autplay-0.4.0-dev-signed.apk` — hardened APK для локального режима или сервера с отдельно
   настроенным HTTPS;
-- `autplay-0.3.0-trusted-lan.apk` — отдельный debuggable APK для связи с поставляемым HTTP-сервером
+- `autplay-0.4.0-trusted-lan.apk` — отдельный debuggable APK для связи с поставляемым HTTP-сервером
   в доверенной RFC1918-сети;
-- `autplay-server-v0.3.0-installer.zip` — CPU image, Compose-конфигурация и установщики Windows/Linux;
+- `autplay-server-v0.4.0-installer.zip` — CPU image, Compose-конфигурация и установщики Windows/Linux;
 - `SHA256SUMS` — контрольные суммы всех опубликованных файлов.
 
 Оба APK используют сохранённый development signer, а не production/app-store key. Не публикуйте
@@ -24,12 +24,12 @@ production-хранилище и не должен быть доступен и�
 Проверьте SHA-256 до установки:
 
 ```powershell
-Get-FileHash .\autplay-0.3.0-trusted-lan.apk -Algorithm SHA256
-Get-FileHash .\autplay-server-v0.3.0-installer.zip -Algorithm SHA256
+Get-FileHash .\autplay-0.4.0-trusted-lan.apk -Algorithm SHA256
+Get-FileHash .\autplay-server-v0.4.0-installer.zip -Algorithm SHA256
 ```
 
 ```bash
-sha256sum autplay-0.3.0-trusted-lan.apk autplay-server-v0.3.0-installer.zip
+sha256sum autplay-0.4.0-trusted-lan.apk autplay-server-v0.4.0-installer.zip
 ```
 
 Сравните значения с `SHA256SUMS`. При несовпадении ничего не запускайте.
@@ -38,14 +38,14 @@ sha256sum autplay-0.3.0-trusted-lan.apk autplay-server-v0.3.0-installer.zip
 
 1. На телефоне разрешите установку неизвестных приложений только для браузера или файлового
    менеджера, которым открываете APK.
-2. Откройте `autplay-0.3.0-dev-signed.apk` и подтвердите установку.
+2. Откройте `autplay-0.4.0-dev-signed.apk` и подтвердите установку.
 3. Запустите AutPlay. Для локальной музыки учётная запись и сервер не нужны.
 4. Откройте медиатеку/импорт, выберите каталог через системный Android file picker и разрешите
    доступ только к нужной папке.
 5. После установки выключите разрешение «Установка неизвестных приложений» у браузера или
    файлового менеджера.
 
-Для связи с сервером из раздела 3 установите `autplay-0.3.0-trusted-lan.apk`. Он имеет отдельные
+Для связи с сервером из раздела 3 установите `autplay-0.4.0-trusted-lan.apk`. Он имеет отдельные
 application id `app.autplay.lan` и имя `AutPlay LAN`, поэтому может стоять рядом с hardened AutPlay
 и не получает доступ к его локальной базе. Данные между двумя вариантами автоматически не
 переносятся. При сообщении о несовместимой подписи не удаляйте существующее приложение, если
@@ -57,9 +57,11 @@ application id `app.autplay.lan` и имя `AutPlay LAN`, поэтому мож�
 `linux/amd64`; ARM64 в этом выпуске не поставляется. На Windows запустите Docker Desktop в режиме
 Linux containers. Убедитесь, что команды выполняются без ошибки:
 
-Installer содержит образ AutPlay, но не дублирует digest-pinned образ PostgreSQL/pgvector. При
-первом запуске Docker потребуется доступ к registry для его загрузки, если этот образ ещё не
-находится в локальном cache. После загрузки дальнейший trusted-LAN запуск не требует Internet.
+Installer содержит образ AutPlay, но не дублирует digest-pinned образы PostgreSQL/pgvector и
+изолированного PO-token provider для включаемой пользователем загрузки музыки. При первом запуске
+Docker потребуется доступ к registry для их загрузки, если образов ещё нет в локальном cache.
+После загрузки локальная библиотека, Vault и синхронизация работают без внешнего Интернета;
+поиск и получение музыки из внешнего источника, разумеется, требуют сети.
 
 ```text
 docker version
@@ -83,7 +85,7 @@ ip -4 address
 
 ## 4. Установка сервера на Windows
 
-1. Распакуйте `autplay-server-v0.3.0-installer.zip` в постоянную папку.
+1. Распакуйте `autplay-server-v0.4.0-installer.zip` в постоянную папку.
 2. Откройте обычный PowerShell в этой папке. Администраторские права установщику не нужны.
 3. Подставьте найденный IP:
 
@@ -178,7 +180,7 @@ Linux:
 
 ## 9. Связывание Android и сервера
 
-1. Установите `autplay-0.3.0-trusted-lan.apk`; включите Wi-Fi той же доверенной сети.
+1. Установите `autplay-0.4.0-trusted-lan.apk`; включите Wi-Fi той же доверенной сети.
 2. В AutPlay откройте `Профиль` → `Личный сервер`.
 3. Введите `http://192.168.1.25:18787`, нажмите проверку сервера и внимательно проверьте
    показанные имя и origin. Сравните весь identity fingerprint с локальным значением из раздела 6;

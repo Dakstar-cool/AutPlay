@@ -17,7 +17,14 @@ from typing import Any
 
 import pytest
 from autplay.adapters.child_process import provider_child_launch
-from autplay.adapters.filesystem.provider_media import options, stream_format, validated_ffmpeg
+from autplay.adapters.filesystem.provider_media import (
+    ProviderMediaError,
+    classify_download_error,
+    options,
+    po_token_url,
+    stream_format,
+    validated_ffmpeg,
+)
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_child import decode_document
 from autplay.adapters.filesystem.vault_process import RetainedVaultProcess
@@ -53,6 +60,50 @@ def _pinned_windows_media_tools() -> tuple[str, str]:
     if version.returncode != 0 or not version.stdout.startswith("ffprobe version 8.1.2"):
         pytest.skip("pinned ffprobe 8.1.2 is unavailable; the Linux proof image covers it")
     return ffmpeg, ffprobe
+
+
+def test_private_po_token_provider_configures_mweb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTPLAY_MUSIC_PO_TOKEN_URL", "http://music-po-token:4416/")
+
+    assert po_token_url(required=True) == "http://music-po-token:4416"
+    assert options(require_token_provider=True)["extractor_args"] == {
+        "youtube": {"player_client": ["mweb"]},
+        "youtubepot-bgutilhttp": {"base_url": ["http://music-po-token:4416"]},
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://music-po-token:4416",
+        "http://example.com:4416",
+        "http://user:secret@music-po-token:4416",
+        "http://music-po-token:4416/token?unsafe=1",
+    ],
+)
+def test_po_token_provider_refuses_non_private_or_credentialed_urls(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("AUTPLAY_MUSIC_PO_TOKEN_URL", value)
+
+    with pytest.raises(ProviderMediaError, match="provider_token_configuration_invalid"):
+        po_token_url(required=True)
+
+
+@pytest.mark.parametrize(
+    "message,code",
+    [
+        ("Sign in to confirm you're not a bot", "provider_challenge_unresolved"),
+        ("Unable to fetch PO token: connection refused", "provider_token_unavailable"),
+        ("Video unavailable", "provider_source_unavailable"),
+        ("No video formats found", "provider_format_unsupported"),
+        ("Unexpected extractor failure", "provider_download_failed"),
+    ],
+)
+def test_provider_errors_are_classified(message: str, code: str) -> None:
+    assert classify_download_error(RuntimeError(message)) == code
 
 
 @pytest.mark.parametrize("fault", ["missing", "protocol", "aes", "codec"])

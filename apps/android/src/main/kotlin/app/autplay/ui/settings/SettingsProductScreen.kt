@@ -47,6 +47,7 @@ internal fun SettingsProductScreen(
     statisticsSettings: ProfileStatisticsSettingsState = ProfileStatisticsSettingsState.Unavailable,
     statisticsSettingsErrorCode: String? = null,
     onStatisticsVisibilityChange: (Boolean) -> Unit = {},
+    onRefreshDeveloperMode: () -> Unit = {},
     onNavigate: (UiDestination) -> Unit,
     trainingConsent: app.autplay.TrainingConsentUi = app.autplay.TrainingConsentUi(),
 ) {
@@ -243,18 +244,19 @@ internal fun SettingsProductScreen(
         }
         SettingsSection(icon = AutPlayIcon.Settings, titleRes = R.string.settings_about) {
             Text(stringResource(R.string.settings_app_version, app.autplay.BuildConfig.VERSION_NAME))
-            SettingsSwitchRow(
-                label = stringResource(R.string.settings_developer_mode),
-                checked = settings.developerMode,
-                onCheckedChange = { enabled -> onUpdate { it.copy(developerMode = enabled) } },
-            )
+            Text(stringResource(R.string.settings_developer_mode), style = MaterialTheme.typography.titleSmall)
             Text(stringResource(R.string.settings_developer_description), color = AutPlayTokens.colors.mutedText)
+            OutlinedButton(onClick = onRefreshDeveloperMode, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.settings_developer_refresh))
+            }
             if (settings.developerMode) {
                 Text(stringResource(R.string.settings_developer_enabled), color = MaterialTheme.colorScheme.primary)
                 Text("${app.autplay.BuildConfig.APPLICATION_ID} · ${app.autplay.BuildConfig.VERSION_CODE}")
                 OutlinedButton(onClick = { onNavigate(UiDestination.ServerFeatures) }, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.settings_diagnostics))
                 }
+            } else {
+                Text(stringResource(R.string.settings_developer_disabled), color = AutPlayTokens.colors.mutedText)
             }
         }
 

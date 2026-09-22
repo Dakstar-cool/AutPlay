@@ -169,10 +169,12 @@ def test_fixed_youtube_command_and_environment_do_not_inherit_application_secret
     monkeypatch.setenv("AUTPLAY_DATABASE_URL", "synthetic-private-database")
     monkeypatch.setenv("PYTHONPATH", "synthetic-untrusted-modules")
     monkeypatch.setenv("AUTPLAY_MUSIC_PROXY", "http://synthetic-proxy.invalid:8080")
+    monkeypatch.setenv("AUTPLAY_MUSIC_PO_TOKEN_URL", "http://music-po-token:4416")
     arguments, environment = provider_child_launch()
     assert arguments[-1] == "autplay.adapters.filesystem.provider_child"
     assert "AUTPLAY_DATABASE_URL" not in environment and "PYTHONPATH" not in environment
     assert environment["AUTPLAY_MUSIC_PROXY"] == "http://synthetic-proxy.invalid:8080"
+    assert environment["AUTPLAY_MUSIC_PO_TOKEN_URL"] == "http://music-po-token:4416"
     arguments = youtube_arguments("abcdefghijk")
     assert arguments[-2:] == ["autplay.adapters.filesystem.provider_media", "abcdefghijk"]
     with pytest.raises(ChildProtocolError):

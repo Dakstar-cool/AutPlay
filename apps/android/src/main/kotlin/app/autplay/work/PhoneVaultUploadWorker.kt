@@ -5,6 +5,7 @@ import androidx.work.*
 import app.autplay.AutPlayRuntime
 import app.autplay.application.server.ServerFeatureStateRepository
 import app.autplay.application.sync.ClientEventBinding
+import app.autplay.application.sync.SyncBindingInitializer
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
 import java.time.Duration
@@ -18,10 +19,11 @@ class PhoneVaultUploadWorker(context: Context, parameters: WorkerParameters) : C
         if (inputData.getString("profile") != profile.value) return Result.failure()
         val user = settings.activeUserId ?: return Result.failure()
         val device = settings.deviceId ?: return Result.failure()
-        val database = AutPlayRuntime.database(applicationContext)
-        val cursor = database.syncDao().cursor(profile.value) ?: return Result.retry()
-        val binding = ClientEventBinding(user, device, profile, LocalId(cursor.journalEpoch))
         return try {
+            val database = AutPlayRuntime.database(applicationContext)
+            val initial = ClientEventBinding(user, device, profile)
+            val cursor = SyncBindingInitializer(database).ensure(initial)
+            val binding = initial.copy(journalEpoch = LocalId(cursor.journalEpoch))
             val local = database.localAudioDao().state(inputData.getString("audio_id") ?: return Result.failure()) ?: return Result.failure()
             var track = database.libraryDao().trackRef(local.localUserTrackRefId) ?: return Result.failure()
             if (track.serverUserTrackRefId == null) {

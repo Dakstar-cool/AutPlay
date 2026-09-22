@@ -99,6 +99,8 @@ def test_job_download_handoff_and_retry_keep_one_operation(
                         if failure == "http"
                         else "resource_execution_busy"
                     )
+                    source = present(session.get(InternetAcquisitionRow, acquisition_id))
+                    assert source.error_code == job.error_code
                     job.scheduled_at = datetime.now(UTC) - timedelta(seconds=1)
                     operation = present(session.scalar(select(ResourceAdmissionRow)))
                     assert operation.state != "RELEASED"
@@ -120,6 +122,7 @@ def test_job_download_handoff_and_retry_keep_one_operation(
             assert provider.requested.is_set()
         with admission.sessions() as session:
             source = present(session.get(InternetAcquisitionRow, acquisition_id))
+            assert source.error_code is None
             upload = present(session.get(UploadSessionRow, source.upload_id))
             assert upload.expected_size == len(payload)
             receipts = session.scalars(select(ProviderStagingRow)).all()

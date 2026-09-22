@@ -58,9 +58,19 @@ class Repository:
 
     def renew(self, ticket: IngestExecutionTicket, child: ProcessIdentity) -> IngestExecutionStatus:
         self.renewals += 1
-        if self.fault == "renew_blocked":
+        if self.fault in {"renew_blocked", "short_grant"}:
             self.entered.set()
             assert self.release.wait(10)
+        if self.fault == "short_grant":
+            now = datetime.now(UTC)
+            self.current = IngestExecutionStatus(
+                ticket,
+                ExecutionState.RUNNING,
+                child,
+                now + timedelta(seconds=0.1),
+                now,
+            )
+            return self.current
         return self.start(ticket, child)
 
     def status(self, ticket: IngestExecutionTicket) -> IngestExecutionStatus | None:
@@ -171,7 +181,10 @@ def test_watchdog_stops_blocked_pipe_and_detached_tree_independently_of_db(
     tmp_path: Path, fault: str
 ) -> None:
     setup_storage(tmp_path)
-    repository = Repository(seconds=1 if fault == "renew_blocked" else 0.4, fault=fault)
+    # A real isolated CPython descendant must exist before the expiry proof is meaningful.
+    # For short_grant, hold the first renewal until that evidence exists, then return a
+    # 100 ms grant so expiry tests the watchdog rather than process-startup timing.
+    repository = Repository(seconds=1 if fault == "renew_blocked" else 5, fault=fault)
     coordinator = IngestProcessCoordinator(
         repository,
         IngestChildSettings(tmp_path),
@@ -184,11 +197,12 @@ def test_watchdog_stops_blocked_pipe_and_detached_tree_independently_of_db(
         future = pool.submit(coordinator.run, first, lambda work: work.storage.verify_staging(KEY))
         try:
             wait_marker(tmp_path / "ingest-descendant")
-            if fault == "renew_blocked":
-                assert repository.entered.wait(3)
+            assert repository.entered.wait(3)
+            if fault == "short_grant":
+                repository.release.set()
             with pytest.raises((ResourceAdmissionError, ValueError)):
-                future.result(timeout=4)
-            assert monotonic() - started < 4
+                future.result(timeout=8)
+            assert monotonic() - started < 8
             if fault == "renew_blocked":
                 assert coordinator.pending() == (first.execution_id,)
                 assert not repository.proofs

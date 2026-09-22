@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_process_upload import ProcessVaultChunkWriter
 from autplay.adapters.jamendo import JamendoProvider
 from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
@@ -61,7 +62,13 @@ from autplay.application.web_passkeys import WebPasskeyService
 from autplay.domain.auth import Principal
 from autplay.domain.profile_pairing import load_private_key
 from autplay.domain.resource_admission import LocalBridgeClaim, ResourceAdmissionError
-from autplay.domain.vault import OpaqueStorageKey, Sha256Digest, VaultLimits
+from autplay.domain.vault import (
+    ChunkWriteResult,
+    OpaqueStorageKey,
+    Sha256Digest,
+    VaultCapacityError,
+    VaultLimits,
+)
 from autplay.entrypoints.stream_http import AuthorizedStream
 from autplay.entrypoints.vault_http import AdmittedChunk, UploadView
 from autplay.runtime.settings import ApiSettings, StreamSettings
@@ -267,7 +274,7 @@ def build_admin_command_service(engine: Engine) -> AdminCommandService:
     )
 
 
-class _VaultHttpService:
+class _AdmittedVaultHttpService:
     """Short-transaction HTTP adapter around the P06 application use case."""
 
     def __init__(self, settings: ApiSettings, engine: Engine) -> None:
@@ -400,10 +407,183 @@ class _VaultHttpService:
             unit.commit()
 
 
-def build_vault_http_service(settings: ApiSettings, engine: Engine) -> _VaultHttpService:
+class _DirectVaultChunkWriter:
+    """Reconcile direct staging bytes for an explicitly opted-in personal server."""
+
+    def __init__(self, storage: FilesystemVaultStorage, *, minimum_free_bytes: int) -> None:
+        self._storage = storage
+        self._minimum_free_bytes = minimum_free_bytes
+
+    def append_reconciled_chunk(
+        self,
+        key: OpaqueStorageKey,
+        *,
+        committed_size: int,
+        expected_size: int,
+        offset: int,
+        payload: bytes,
+        payload_sha256: Sha256Digest,
+    ) -> ChunkWriteResult:
+        remaining = expected_size - committed_size
+        if self._storage.available_bytes() - remaining < self._minimum_free_bytes:
+            raise VaultCapacityError()
+        self._storage.prepare_upload_staging(key, committed_size)
+        return self._storage.write_chunk(
+            key, offset=offset, payload=payload, payload_sha256=payload_sha256
+        )
+
+
+class _DirectVaultHttpService:
+    """Explicit pre-admission compatibility writer for an unmeasured personal server."""
+
+    def __init__(self, settings: ApiSettings, engine: Engine) -> None:
+        self._uows = SqlAlchemyVaultUnitOfWorkFactory(
+            sessionmaker(engine, class_=Session, expire_on_commit=False)
+        )
+        self._limits = _vault_limits(settings)
+        self._storage = FilesystemVaultStorage(settings.vault_root, limits=self._limits)
+        self._writer = _DirectVaultChunkWriter(
+            self._storage, minimum_free_bytes=settings.vault_low_disk_bytes
+        )
+        self._minimum_free_bytes = settings.vault_low_disk_bytes
+        self._clock = SystemClock()
+        self._ids = Uuid7Generator()
+        self._ttl = timedelta(seconds=settings.vault_session_ttl_seconds)
+
+    def create(
+        self,
+        principal: Principal,
+        *,
+        recording_id: UUID,
+        expected_size: int,
+        declared_sha256: str | None,
+        idempotency_key: str,
+    ) -> tuple[UploadView, bool]:
+        digest = None if declared_sha256 is None else Sha256Digest(bytes.fromhex(declared_sha256))
+        command = CreateUploadCommand(recording_id, expected_size, idempotency_key, digest)
+        if self._storage.available_bytes() - expected_size < self._minimum_free_bytes:
+            raise VaultCapacityError()
+        with self._uows() as unit:
+            service = VaultUploadService(
+                repository=unit.vault,
+                limits=self._limits,
+                ttl=self._ttl,
+            )
+            info, created = service.create(
+                _vault_principal(principal),
+                command,
+                now=self._clock.now(),
+                staging_key=OpaqueStorageKey(self._ids.new().hex),
+            )
+            unit.commit()
+        return _upload_view(info), created
+
+    def resolve_playback_variant(self, principal: Principal, user_track_ref_id: UUID) -> UUID:
+        with self._uows() as unit:
+            audio_variant_id = unit.vault.resolve_playback_variant(
+                _vault_principal(principal), user_track_ref_id
+            )
+            unit.commit()
+        return audio_variant_id
+
+    def status(self, principal: Principal, upload_id: UUID) -> UploadView:
+        with self._uows() as unit:
+            service = VaultUploadService(repository=unit.vault)
+            expired = service.expire_if_due(
+                _vault_principal(principal), upload_id, now=self._clock.now()
+            )
+            info = (
+                expired[0]
+                if expired is not None
+                else service.status(_vault_principal(principal), upload_id)
+            )
+            unit.commit()
+        if expired is not None:
+            self._quarantine_expired(upload_id, expired[1])
+        return _upload_view(info)
+
+    def append(
+        self,
+        principal: Principal,
+        upload_id: UUID,
+        *,
+        offset: int,
+        chunk_index: int,
+        payload: bytes,
+        payload_sha256: str,
+    ) -> int:
+        with self._uows() as unit:
+            service = VaultUploadService(
+                repository=unit.vault,
+                limits=self._limits,
+                ttl=self._ttl,
+                chunk_writer=self._writer,
+            )
+            expired = service.expire_if_due(
+                _vault_principal(principal), upload_id, now=self._clock.now()
+            )
+            if expired is None:
+                result = service.append(
+                    _vault_principal(principal),
+                    upload_id,
+                    offset=offset,
+                    chunk_index=chunk_index,
+                    payload=payload,
+                    payload_sha256=Sha256Digest(bytes.fromhex(payload_sha256)),
+                )
+            unit.commit()
+        if expired is not None:
+            self._quarantine_expired(upload_id, expired[1])
+            raise UploadStateError()
+        return result.next_offset
+
+    def complete(self, principal: Principal, upload_id: UUID) -> UploadView:
+        if self._storage.available_bytes() < self._minimum_free_bytes:
+            raise VaultCapacityError()
+        with self._uows() as unit:
+            service = VaultUploadService(
+                repository=unit.vault,
+                limits=self._limits,
+                ttl=self._ttl,
+            )
+            expired = service.expire_if_due(
+                _vault_principal(principal), upload_id, now=self._clock.now()
+            )
+            if expired is None:
+                info = service.complete(_vault_principal(principal), upload_id)
+            unit.commit()
+        if expired is not None:
+            self._quarantine_expired(upload_id, expired[1])
+            raise UploadStateError()
+        return _upload_view(info)
+
+    def cancel(self, principal: Principal, upload_id: UUID) -> None:
+        with self._uows() as unit:
+            staging_key = unit.vault.staging_key_for_owned(_vault_principal(principal), upload_id)
+            VaultUploadService(repository=unit.vault).cancel(_vault_principal(principal), upload_id)
+            unit.commit()
+        try:
+            self._storage.quarantine(staging_key, OpaqueStorageKey(f"cancelled-{upload_id.hex}"))
+        except Exception as error:
+            if getattr(error, "code", None) != "staged_file_not_found":
+                raise
+
+    def _quarantine_expired(self, upload_id: UUID, staging_key: OpaqueStorageKey) -> None:
+        try:
+            self._storage.quarantine(staging_key, OpaqueStorageKey(f"expired-{upload_id.hex}"))
+        except Exception as error:
+            if getattr(error, "code", None) != "staged_file_not_found":
+                raise
+
+
+def build_vault_http_service(
+    settings: ApiSettings, engine: Engine
+) -> _AdmittedVaultHttpService | _DirectVaultHttpService:
     """Assemble the API upload adapter without connecting to PostgreSQL eagerly."""
 
-    return _VaultHttpService(settings, engine)
+    if settings.direct_vault_upload_enabled:
+        return _DirectVaultHttpService(settings, engine)
+    return _AdmittedVaultHttpService(settings, engine)
 
 
 def build_library_service(engine: Engine) -> LibraryService:

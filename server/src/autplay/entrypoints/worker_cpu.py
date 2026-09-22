@@ -18,7 +18,14 @@ from uuid import UUID
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.jamendo import JamendoProvider
+from autplay.adapters.media.tools import (
+    ChromaprintTool,
+    FfmpegDecodeValidator,
+    FfprobeInspector,
+    ValidatedMediaInspector,
+)
 from autplay.adapters.postgresql.controlled_discovery import PostgresControlledDiscoveryRepository
 from autplay.adapters.postgresql.discovery_automation_runtime import (
     SqlAlchemyDiscoveryAutomationRepository,
@@ -26,6 +33,10 @@ from autplay.adapters.postgresql.discovery_automation_runtime import (
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
+from autplay.adapters.postgresql.vault_uow import (
+    SqlAlchemyVaultUnitOfWorkFactory,
+    TransactionalIngestRepository,
+)
 from autplay.adapters.postgresql.web_admin import SqlAlchemyWebAdminRepository
 from autplay.adapters.system import Uuid7Generator
 from autplay.application.account_recovery import cleanup_expired_recovery_operations
@@ -54,6 +65,7 @@ from autplay.application.profile_pairing import (
 )
 from autplay.application.public_access import cleanup_expired_public_access
 from autplay.application.social import SocialService
+from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
 from autplay.domain.privacy_deletion import DeletionEvidenceError
 from autplay.domain.resource_admission import ResourceAdmissionError
@@ -319,25 +331,61 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     runtime_settings.jamendo_minimum_request_interval_seconds
                 ),
             )
-        ingest_runtime = IngestWorkerRuntime(
-            runtime_settings,
-            sessions,
-            on_drained=engine.dispose,
-            stop_requested=process_stop.is_set,
-            source_authorizer=(
-                ManualDiscoveryBoundaryAuthorizer(
-                    discovery,
-                    sessions,
-                    automatic_enabled=lambda: runtime_settings.discovery_automation_enabled,
-                )
-                if discovery is not None
-                else None
-            ),
+        source_authorizer = (
+            ManualDiscoveryBoundaryAuthorizer(
+                discovery,
+                sessions,
+                automatic_enabled=lambda: runtime_settings.discovery_automation_enabled,
+            )
+            if discovery is not None
+            else None
         )
-        handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest_runtime.handler))
+        if runtime_settings.direct_vault_ingest_enabled:
+            storage = FilesystemVaultStorage.open_existing(
+                runtime_settings.vault_root,
+                limits=vault_limits,
+            )
+            inspector = ValidatedMediaInspector(
+                FfmpegDecodeValidator(
+                    "ffmpeg",
+                    timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
+                    max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
+                ),
+                FfprobeInspector(
+                    "ffprobe",
+                    timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
+                    max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
+                ),
+            )
+            ingest_handler: JobHandler = VaultIngestHandler(
+                repository=TransactionalIngestRepository(
+                    SqlAlchemyVaultUnitOfWorkFactory(sessions)
+                ),
+                storage=storage,
+                media=inspector,
+                fingerprints=ChromaprintTool(
+                    "fpcalc",
+                    algorithm_version="1.6.1",
+                    timeout_seconds=runtime_settings.vault_tool_timeout_seconds,
+                    max_output_bytes=runtime_settings.vault_tool_max_output_bytes,
+                ),
+                source_authorizer=source_authorizer,
+                minimum_free_bytes=runtime_settings.vault_low_disk_bytes,
+            )
+        else:
+            ingest_runtime = IngestWorkerRuntime(
+                runtime_settings,
+                sessions,
+                on_drained=engine.dispose,
+                stop_requested=process_stop.is_set,
+                source_authorizer=source_authorizer,
+            )
+            ingest_handler = ingest_runtime.handler
+        handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest_handler))
         handlers.update(import_handlers(ImportJobHandler(sessions)))
         handlers.update(standard_analysis_handlers(StandardAnalysisHandler(sessions)))
         if discovery is not None:
+            assert ingest_runtime is not None
             client_id = runtime_settings.jamendo_client_id
             assert client_id is not None
             provider_runtime = ResourceIoRuntime(runtime_settings, maximum=1)
@@ -426,8 +474,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 return automation.dispatch_due(now=datetime.now(UTC), limit=20)
 
             def stop_bytes() -> None:
-                assert ingest_runtime is not None
-                ingest_runtime.request_stop()
+                if ingest_runtime is not None:
+                    ingest_runtime.request_stop()
                 if provider_runtime is not None:
                     provider_runtime.coordinator.request_stop()
 
@@ -443,10 +491,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 web_cleanup()
                 discovery_cleanup()
                 discovery_dispatch()
-                ingest_runtime.drain_cleanup()
+                if ingest_runtime is not None:
+                    ingest_runtime.drain_cleanup()
                 if not process_stop.is_set():
                     worker.run_once()
-                if not process_stop.is_set():
+                if not process_stop.is_set() and ingest_runtime is not None:
                     ingest_runtime.drain_cleanup()
                 if (
                     not process_stop.is_set()
@@ -462,7 +511,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     web_admin_cleanup=web_cleanup,
                     discovery_cleanup=discovery_cleanup,
                     discovery_dispatch=discovery_dispatch,
-                    ingest_cleanup=ingest_runtime.drain_cleanup,
+                    ingest_cleanup=(
+                        ingest_runtime.drain_cleanup if ingest_runtime is not None else None
+                    ),
                     account_purge=privacy_deletion.run_due
                     if privacy_deletion is not None and runtime_settings.account_purge_enabled
                     else None,

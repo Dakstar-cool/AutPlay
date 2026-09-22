@@ -6,7 +6,7 @@
     <string name="music_downloading">Скачивается…</string>
     <string name="music_phone_title">Музыка на телефоне</string>
     <string name="music_scan_phone">Найти музыку на телефоне</string>
-    <string name="music_scan_body">Выберите аудиофайлы для копирования в Music/AutPlay. Исходные файлы сохранятся.</string>
+    <string name="music_scan_body">Выберите аудиофайлы для добавления ссылкой — без копирования и перемещения. Доступ сохранится, пока доступен исходный файл.</string>
     <string name="music_upload_title">Передать треки в Vault</string>
     <string name="music_upload_body">Выберите локальные треки для хранения на личном сервере.</string>
     <string name="music_permission_required">Разрешите доступ к аудиофайлам для поиска музыки на телефоне.</string>

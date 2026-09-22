@@ -13,18 +13,102 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from autplay.adapters.media.tools import SubprocessExecutableRunner
 from autplay.domain.vault import VaultError
 
+MEDIA_ERROR_EXIT_CODES = {
+    "provider_token_configuration_invalid": 20,
+    "provider_token_unavailable": 21,
+    "provider_challenge_unresolved": 22,
+    "provider_source_unavailable": 23,
+    "provider_format_unsupported": 24,
+    "provider_runtime_unsupported": 25,
+    "provider_download_failed": 26,
+}
 
-def options() -> dict[str, Any]:
-    # Use the pinned parser to keep CLI defaults without loading operator config,
-    # plugins, remote components, credentials, or provider-supplied commands.
+
+class ProviderMediaError(ValueError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def po_token_url(*, required: bool = False) -> str | None:
+    raw = os.environ.get("AUTPLAY_MUSIC_PO_TOKEN_URL", "")
+    if not raw:
+        if required:
+            raise ProviderMediaError("provider_token_configuration_invalid")
+        return None
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as error:
+        raise ProviderMediaError("provider_token_configuration_invalid") from error
+    if (
+        parsed.scheme != "http"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.hostname not in {"music-po-token", "127.0.0.1", "::1", "localhost"}
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or port is None
+        or not 1 <= port <= 65535
+    ):
+        raise ProviderMediaError("provider_token_configuration_invalid")
+    return raw.rstrip("/")
+
+
+def classify_download_error(error: BaseException) -> str:
+    message = str(error).lower().replace("\u2019", "'")
+    if any(
+        marker in message
+        for marker in (
+            "connection refused",
+            "connection reset",
+            "network is unreachable",
+            "timed out",
+            "temporary failure in name resolution",
+            "failed to resolve",
+            "unable to fetch",
+        )
+    ):
+        return "provider_token_unavailable"
+    if any(
+        marker in message
+        for marker in (
+            "sign in to confirm you're not a bot",
+            "http error 403",
+            "po token",
+        )
+    ):
+        return "provider_challenge_unresolved"
+    if any(
+        marker in message
+        for marker in (
+            "video unavailable",
+            "private video",
+            "has been removed",
+            "not available in your country",
+        )
+    ):
+        return "provider_source_unavailable"
+    if any(
+        marker in message
+        for marker in ("requested format is not available", "no video formats found")
+    ):
+        return "provider_format_unsupported"
+    return "provider_download_failed"
+
+
+def options(*, require_token_provider: bool = False) -> dict[str, Any]:
+    # Use the pinned parser and its one pinned PO-token plugin without loading
+    # operator config, remote components, credentials, or provider commands.
     parsed = importlib.import_module("yt_dlp").parse_options(
         [
             "--ignore-config",
-            "--no-plugin-dirs",
             "--no-remote-components",
             "--no-cache-dir",
             "--no-playlist",
@@ -53,9 +137,17 @@ def options() -> dict[str, Any]:
         ]
     )
     params = dict(parsed.ydl_opts)
+    # Surface extractor failures to the classifier instead of returning None.
+    params["ignoreerrors"] = False
     # yt-dlp otherwise falls back to process or Windows proxy discovery. The
     # provider child receives only this explicitly configured proxy variable.
     params["proxy"] = os.environ.get("AUTPLAY_MUSIC_PROXY", "")
+    token_url = po_token_url(required=require_token_provider)
+    if token_url is not None:
+        params["extractor_args"] = {
+            "youtube": {"player_client": ["mweb"]},
+            "youtubepot-bgutilhttp": {"base_url": [token_url]},
+        }
     return params
 
 
@@ -68,12 +160,12 @@ def stream_format(ydl: Any, info: dict[str, Any]) -> None:
         or info.get("is_live")
         or info.get("impersonate")
     ):
-        raise ValueError("provider_format_unsupported")
+        raise ProviderMediaError("provider_format_unsupported")
     codec = str(info.get("acodec", "")).split(".")[0]
     container = {"aac": "adts", "mp4a": "adts", "opus": "ogg"}.get(codec)
     info = dict(info, to_stdout=True)
     if container is None:
-        raise ValueError("provider_format_unsupported")
+        raise ProviderMediaError("provider_format_unsupported")
     # Avoid extractor-defined FFmpeg arguments. Only headers and URLs are data;
     # codec/container/output choices belong to this fixed helper.
     info.pop("downloader_options", None)
@@ -84,7 +176,7 @@ def stream_format(ydl: Any, info: dict[str, Any]) -> None:
         # framing and writes only stdout; it never uses fragment files. Disable
         # in-stream retries because a server ignoring Range could duplicate bytes.
         if any(str(name).lower() == "range" for name in info.get("http_headers", {})):
-            raise ValueError("provider_format_unsupported")
+            raise ProviderMediaError("provider_format_unsupported")
         params.update(
             retries=0,
             continuedl=False,
@@ -96,10 +188,10 @@ def stream_format(ydl: Any, info: dict[str, Any]) -> None:
         )
         http = importlib.import_module("yt_dlp.downloader.http").HttpFD
         if not http(ydl, params).download("-", info)[0]:
-            raise ValueError("provider_download_failed")
+            raise ProviderMediaError("provider_download_failed")
         return
     if not ffmpeg.can_download(info):
-        raise ValueError("provider_format_unsupported")
+        raise ProviderMediaError("provider_format_unsupported")
     params["ffmpeg_location"] = validated_ffmpeg()
     params["external_downloader_args"] = {
         "ffmpeg_i": [
@@ -116,14 +208,14 @@ def stream_format(ydl: Any, info: dict[str, Any]) -> None:
     # this exact class instead, and never call YoutubeDL.dl/process_info here.
     result = ffmpeg(ydl, params).download("-", info)
     if not result[0]:
-        raise ValueError("provider_download_failed")
+        raise ProviderMediaError("provider_download_failed")
 
 
 def validated_ffmpeg() -> str:
     """Use the same resolved, supported binary for preflight and media execution."""
     executable = shutil.which("ffmpeg")
     if executable is None:
-        raise ValueError("provider_runtime_unsupported")
+        raise ProviderMediaError("provider_runtime_unsupported")
     executable = str(Path(executable).resolve(strict=True))
     try:
         result = SubprocessExecutableRunner().run(
@@ -132,12 +224,12 @@ def validated_ffmpeg() -> str:
             max_output_bytes=16384,
         )
     except VaultError as error:
-        raise ValueError("provider_runtime_unsupported") from error
+        raise ProviderMediaError("provider_runtime_unsupported") from error
     if (
         result.returncode != 0
         or re.match(rb"ffmpeg version 8\.1\.2(?:[- ]|\r?\n)", result.stdout) is None
     ):
-        raise ValueError("provider_runtime_unsupported")
+        raise ProviderMediaError("provider_runtime_unsupported")
     return executable
 
 
@@ -146,7 +238,7 @@ def main() -> int:
         return 2
     ytdlp = importlib.import_module("yt_dlp")
     try:
-        with ytdlp.YoutubeDL(options()) as ydl:
+        with ytdlp.YoutubeDL(options(require_token_provider=True)) as ydl:
             info = ydl.extract_info(
                 "https://www.youtube.com/watch?v=" + sys.argv[1], download=False
             )
@@ -157,8 +249,12 @@ def main() -> int:
                 return 2
             stream_format(ydl, selected[0])
         return 0
-    except ValueError, OSError, ytdlp.utils.DownloadError:
-        return 2
+    except ProviderMediaError as error:
+        return MEDIA_ERROR_EXIT_CODES[error.code]
+    except ytdlp.utils.DownloadError as error:
+        return MEDIA_ERROR_EXIT_CODES[classify_download_error(error)]
+    except ValueError, OSError:
+        return MEDIA_ERROR_EXIT_CODES["provider_download_failed"]
 
 
 if __name__ == "__main__":

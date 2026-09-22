@@ -117,9 +117,12 @@ services:
       AUTPLAY_WORKER_LEASE_SECONDS: "120"
       AUTPLAY_WORKER_MAX_ATTEMPTS: "5"
       AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
+      AUTPLAY_MUSIC_PO_TOKEN_URL: http://music-po-token:4416
     depends_on:
       migrate:
         condition: service_completed_successfully
+      music-po-token:
+        condition: service_healthy
     volumes:
       - vault-data:/var/lib/autplay/vault
     healthcheck:
@@ -132,6 +135,38 @@ services:
     restart: unless-stopped
     mem_limit: 768m
     cpus: 1.0
+    networks:
+      default: null
+      music-provider: null
+
+  music-po-token:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.0@sha256:ed86b6fdd5e430ddd7c8ce1adb55e1ab54db7c7dbc1bcbf3a82454a85b971164
+    profiles: [runtime]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    networks:
+      music-provider: null
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:4416/ping').then(r => {
+          if (!r.ok) process.exit(1)}).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
 
   stream:
     <<: *autplay-runtime
@@ -231,3 +266,7 @@ volumes:
   model-cache:
     labels:
       app.autplay.purpose: private-derived-model-cache
+
+networks:
+  music-provider:
+    internal: true

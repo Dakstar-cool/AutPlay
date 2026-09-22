@@ -22,8 +22,10 @@
     <string name="settings_about_summary">Version and developer mode</string>
     <string name="settings_app_version">AutPlay %1$s</string>
     <string name="settings_developer_mode">Developer mode</string>
-    <string name="settings_developer_description">Show technical details and diagnostic tools on this device.</string>
-    <string name="settings_developer_enabled">Technical details are visible</string>
+    <string name="settings_developer_description">Permission is controlled for this exact device from Admin Web → Trusted devices.</string>
+    <string name="settings_developer_refresh">Check Admin Web permission</string>
+    <string name="settings_developer_enabled">Allowed by Admin Web. Technical details are visible.</string>
+    <string name="settings_developer_disabled">Not allowed by Admin Web.</string>
     <string name="settings_diagnostics">Server diagnostics</string>
     <string name="profile_registration_failed">Could not finish connecting. Check the invitation or try again.</string>
     <string name="profile_first_device_note">Account recovery and adding another device are not available yet. Keep this phone and its app data safe.</string>

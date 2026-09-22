@@ -250,7 +250,11 @@ class PostgresInternetAcquisitionRepository:
                 source.candidate_id,
             )
             self._target(session, source, target)
-            source.state, source.updated_at = "DOWNLOADING", self._now(session)
+            source.state, source.error_code, source.updated_at = (
+                "DOWNLOADING",
+                None,
+                self._now(session),
+            )
             session.flush()
             self._authorize(session, source)
             return target
@@ -424,7 +428,12 @@ class PostgresInternetAcquisitionRepository:
             )
             session.add(upload)
             session.flush()
-            source.upload_id, source.state, source.updated_at = upload_id, "PROCESSING", now
+            source.upload_id, source.state, source.error_code, source.updated_at = (
+                upload_id,
+                "PROCESSING",
+                None,
+                now,
+            )
             staging.upload_session_id, staging.state, staging.handed_off_at = (
                 upload_id,
                 "HANDED_OFF",
@@ -439,3 +448,10 @@ class PostgresInternetAcquisitionRepository:
             if result is None:
                 raise TerminalJobError("music_handoff_conflict")
             return result
+
+    def record_error(self, claim: AcquisitionClaim, error_code: str, *, terminal: bool) -> None:
+        with self._transaction(claim) as (session, source):
+            source.error_code = error_code[:100]
+            if terminal:
+                source.state = "FAILED"
+            source.updated_at = self._now(session)

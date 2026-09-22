@@ -188,6 +188,7 @@ source = { directory = "../server" }
 dependencies = [
     { name = "alembic" },
     { name = "argon2-cffi" },
+    { name = "bgutil-ytdlp-pot-provider" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx2", extra = ["socks"] },
@@ -211,6 +212,7 @@ dependencies = [
 requires-dist = [
     { name = "alembic", specifier = "==1.19.1" },
     { name = "argon2-cffi", specifier = "==25.1.0" },
+    { name = "bgutil-ytdlp-pot-provider", specifier = "==2.0.0" },
     { name = "cryptography", specifier = "==50.0.0" },
     { name = "fastapi", specifier = "==0.141.1" },
     { name = "httpx2", extras = ["socks"], specifier = "==2.12.0" },
@@ -237,6 +239,15 @@ dev = [
     { name = "playwright", specifier = "==1.62.0" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff", specifier = "==0.16.2" },
+]
+
+[[package]]
+name = "bgutil-ytdlp-pot-provider"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/f2/785a5d6a0d69508756a3bf53af430660a47a4143abdd40543089b03108de/bgutil_ytdlp_pot_provider-2.0.0.tar.gz", hash = "sha256:dac2d1aeeac63218efe879e538e978d2efc088ed887124095e6fd6a09c3077df", size = 11688, upload-time = "2026-09-08T00:11:47.482Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/38/fd54194c03f6636488343d4c49e96ce2fe8ecd228c0cf7ce4d024ab7d52b/bgutil_ytdlp_pot_provider-2.0.0-py3-none-any.whl", hash = "sha256:22884c399802771ddfd9275bb05b178d67c89db67a1d5d1e17ed7f681956628e", size = 12358, upload-time = "2026-09-08T00:11:46.305Z" },
 ]
 
 [[package]]

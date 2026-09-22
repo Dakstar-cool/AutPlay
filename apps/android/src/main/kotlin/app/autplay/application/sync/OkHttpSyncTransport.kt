@@ -9,6 +9,7 @@ import app.autplay.data.network.withAutPlayRedirectPolicy
 import app.autplay.data.network.readCancellable
 import app.autplay.data.security.SessionRequiredException
 import java.nio.charset.StandardCharsets
+import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -35,8 +36,13 @@ class OkHttpSyncTransport(
     client: OkHttpClient = OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(30)).build(),
     private val m5Rotation: M5SessionRotationClient? = null,
     private val beforeRequest: suspend () -> Unit = {},
+    bootstrapTimeout: Duration = Duration.ofMinutes(3),
 ) : SyncTransport {
     private val client = client.withAutPlayRedirectPolicy()
+    private val bootstrapClient = this.client.newBuilder()
+        .readTimeout(bootstrapTimeout)
+        .callTimeout(bootstrapTimeout)
+        .build()
     private val sessionCredentials = RefreshingSessionCredentials(baseUrl, credentials, client, m5Rotation = m5Rotation, beforeRequest = beforeRequest)
 
     override suspend fun bind(binding: ClientEventBinding) {
@@ -93,7 +99,12 @@ class OkHttpSyncTransport(
     override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage {
         require(pendingCount in 0..100_000)
         val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\"]}"
-        val root = execute(binding.serverProfileId, "/sync/bootstrap", payload).jsonObject
+        val root = execute(
+            binding.serverProfileId,
+            "/sync/bootstrap",
+            payload,
+            requestClient = bootstrapClient,
+        ).jsonObject
         val snapshot = root["snapshot_id"]!!.jsonPrimitive.content
         val aggregates = root["aggregates"]?.jsonArray.orEmpty().map { item -> item.jsonObject.let { value ->
             val type = value["aggregate_type"]!!.jsonPrimitive.content
@@ -111,18 +122,23 @@ class OkHttpSyncTransport(
         return BootstrapPage(snapshot, root["next_page_token"]?.jsonPrimitive?.contentOrNull, root["snapshot_cursor"]?.jsonPrimitive?.contentOrNull, root["has_more"]!!.jsonPrimitive.boolean, items)
     }
 
-    private suspend fun execute(profileId: ServerProfileId, path: String, body: String?) = withContext(Dispatchers.IO) {
+    private suspend fun execute(
+        profileId: ServerProfileId,
+        path: String,
+        body: String?,
+        requestClient: OkHttpClient = client,
+    ) = withContext(Dispatchers.IO) {
         val url = if (path.startsWith("http")) path else baseUrl.trimEnd('/') + path
         beforeRequest()
         var access = sessionCredentials.access(profileId)
         try {
-            var result = executeOnce(url, body, access)
+            var result = executeOnce(requestClient, url, body, access)
             if (result.first == 401) {
                 val rejectedGeneration = access.generation
                 access.close()
                 beforeRequest()
                 access = sessionCredentials.refreshAfterRejection(profileId, rejectedGeneration)
-                result = executeOnce(url, body, access)
+                result = executeOnce(requestClient, url, body, access)
             }
             val (status, text) = result
             if (status == 401 || status == 403) throw SessionRequiredException()
@@ -134,13 +150,18 @@ class OkHttpSyncTransport(
         }
     }
 
-    private suspend fun executeOnce(url: String, body: String?, access: SessionAccess): Pair<Int, String> {
+    private suspend fun executeOnce(
+        requestClient: OkHttpClient,
+        url: String,
+        body: String?,
+        access: SessionAccess,
+    ): Pair<Int, String> {
         beforeRequest()
         val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer ${access.token.toString(StandardCharsets.UTF_8)}")
         if (body != null) builder.post(body.toRequestBody("application/json".toMediaType())) else builder.get()
-        return client.newCall(builder.build()).readCancellable { response ->
+        return requestClient.newCall(builder.build()).readCancellable { response ->
             val source = response.body.source()
             check(!source.request(MAX_RESPONSE_BYTES + 1)) { "SYNC_RESPONSE_TOO_LARGE" }
             response.code to source.readUtf8()

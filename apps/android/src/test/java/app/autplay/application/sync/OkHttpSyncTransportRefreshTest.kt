@@ -7,7 +7,10 @@ import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
+import java.time.Duration
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
@@ -88,6 +91,38 @@ class OkHttpSyncTransportRefreshTest {
             assertEquals(rejected.path, retried.path)
         } finally {
             server.shutdown()
+        }
+    }
+
+    @Test fun bootstrapUsesItsBoundedLongRunningTimeout() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse()
+                    .setBodyDelay(200, TimeUnit.MILLISECONDS)
+                    .setBody(
+                        """{"snapshot_id":"60000000-0000-4000-8000-000000000001","next_page_token":null,"snapshot_cursor":"cursor","has_more":false,"aggregates":[],"tombstones":[],"redirects":[]}""",
+                    ),
+            )
+            server.start()
+            val credentials = MutableCredentialStore(
+                SessionCredentialEnvelopeCodec.encode(
+                    SessionCredentialEnvelope("valid-access", "valid-refresh", 0),
+                ),
+            )
+            val shortClient = OkHttpClient.Builder()
+                .readTimeout(Duration.ofMillis(50))
+                .callTimeout(Duration.ofMillis(50))
+                .build()
+
+            val page = OkHttpSyncTransport(
+                server.url("/api/v1").toString(),
+                credentials,
+                client = shortClient,
+                bootstrapTimeout = Duration.ofSeconds(2),
+            ).bootstrap(BINDING, null, null, 0)
+
+            assertEquals("60000000-0000-4000-8000-000000000001", page.snapshotId)
+            assertEquals("/api/v1/sync/bootstrap", server.takeRequest().path)
         }
     }
 

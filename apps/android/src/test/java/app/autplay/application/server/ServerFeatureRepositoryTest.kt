@@ -50,7 +50,9 @@ class ServerFeatureRepositoryTest {
         server.enqueue(MockResponse().setBody("""{"import_job_id":"$IMPORT","delivery_job_id":"$DELIVERY","replayed":false}"""))
         server.enqueue(MockResponse().setBody(importReportJson()))
         server.enqueue(MockResponse().setResponseCode(201).setBody("""{"upload_id":"$UPLOAD","offset":0,"expected_size":3,"state":"OPEN"}"""))
-        server.enqueue(MockResponse().setResponseCode(204).setHeader("Upload-Offset", "3"))
+        // HTTP/2 requires lower-case field names. Header lookup must therefore not
+        // depend on the casing preserved by an HTTP/1.1 test server.
+        server.enqueue(MockResponse().setResponseCode(204).setHeader("upload-offset", "3"))
         server.enqueue(MockResponse().setResponseCode(202).setBody("""{"upload_id":"$UPLOAD","offset":3,"expected_size":3,"state":"PROCESSING"}"""))
         server.enqueue(MockResponse().setBody(recommendationJson()))
         server.enqueue(MockResponse().setResponseCode(204))

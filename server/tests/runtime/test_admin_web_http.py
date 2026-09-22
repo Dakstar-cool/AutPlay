@@ -234,6 +234,7 @@ class _Admission:
     def __init__(self) -> None:
         self.request_id = uuid4()
         self.key_reference = uuid4()
+        self.device_id = uuid4()
         self.calls: list[tuple[object, ...]] = []
 
     def resolve_review_locator(
@@ -269,7 +270,11 @@ class _Admission:
 
     def trusted_devices(self, actor: WebActor) -> tuple[TrustedDeviceWebItem, ...]:
         assert actor
-        return (TrustedDeviceWebItem(self.key_reference, "Phone", "ANDROID", "TRUSTED", 1),)
+        return (
+            TrustedDeviceWebItem(
+                self.key_reference, "Phone", "ANDROID", "TRUSTED", 1, self.device_id, False
+            ),
+        )
 
     def manage_trusted_device(
         self,
@@ -281,6 +286,17 @@ class _Admission:
     ) -> None:
         assert actor and key_reference == self.key_reference and len(request_sha256) == 32
         self.calls.append((action, actor.user_id, operation_id))
+
+    def manage_device_developer_mode(
+        self,
+        actor: WebActor,
+        device_id: UUID,
+        enabled: bool,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None:
+        assert actor and device_id == self.device_id and len(request_sha256) == 32
+        self.calls.append(("DEVELOPER_MODE", enabled, actor.user_id, operation_id))
 
 
 def _client(
@@ -360,6 +376,28 @@ def test_trusted_device_actions_are_exact_and_consequence_specific() -> None:
         follow_redirects=False,
     )
     assert response.status_code == 303 and admission.calls[-1][0] == "REVOKE_AND_REMOVE"
+
+
+def test_developer_mode_requires_exact_admin_web_device_action() -> None:
+    admission = _Admission()
+    client, _ = _client(AdminTemplateRenderer(), admission)
+    client.cookies.set("__Host-autplay_admin", "session")
+    page = client.get("/admin/trusted-devices")
+    assert page.status_code == 200 and "Allow on this device" in page.text
+    form = _form(page.text)
+    denied = client.post(
+        f"/admin/trusted-devices/device/{admission.device_id}/developer-mode/enable",
+        data=form,
+    )
+    assert denied.status_code == 403
+    approved = client.post(
+        f"/admin/trusted-devices/device/{admission.device_id}/developer-mode/enable",
+        data=form,
+        headers={"Origin": "https://admin.test"},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 303
+    assert admission.calls[-1][0:2] == ("DEVELOPER_MODE", True)
 
 
 def test_login_and_security_headers() -> None:

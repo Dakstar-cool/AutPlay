@@ -22,8 +22,10 @@
     <string name="settings_about_summary">Версия и режим разработчика</string>
     <string name="settings_app_version">AutPlay %1$s</string>
     <string name="settings_developer_mode">Режим разработчика</string>
-    <string name="settings_developer_description">Показывать технические сведения и инструменты диагностики на этом устройстве.</string>
-    <string name="settings_developer_enabled">Технические сведения включены</string>
+    <string name="settings_developer_description">Разрешение для этого устройства выдаётся в админ-вебе → «Доверенные устройства».</string>
+    <string name="settings_developer_refresh">Проверить разрешение в админ-вебе</string>
+    <string name="settings_developer_enabled">Разрешено в админ-вебе. Технические сведения доступны.</string>
+    <string name="settings_developer_disabled">Не разрешено в админ-вебе.</string>
     <string name="settings_diagnostics">Диагностика сервера</string>
     <string name="profile_registration_failed">Не удалось завершить подключение. Проверьте приглашение или попробуйте ещё раз.</string>
     <string name="profile_first_device_note">Восстановление аккаунта и добавление другого устройства пока недоступны. Сохраните этот телефон и данные приложения.</string>

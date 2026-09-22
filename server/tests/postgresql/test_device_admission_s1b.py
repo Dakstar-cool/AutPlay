@@ -14,13 +14,6 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from psycopg import Connection
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.profile_pairing import (
@@ -46,6 +39,12 @@ from autplay.entrypoints.device_admission_http import (
 from autplay.entrypoints.device_admission_web import DeviceAdmissionWebAdapter
 from autplay.runtime.http import install_error_handlers
 from autplay.web.renderer import AdminTemplateRenderer
+from cryptography.hazmat.primitives.asymmetric import ec
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from psycopg import Connection
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 REQUEST_DOMAIN = "autplay:s1b:admission-request:v1\n"
 POLL_DOMAIN = "autplay:s1b:admission-poll:v1\n"

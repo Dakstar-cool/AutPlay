@@ -17,7 +17,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from autplay.adapters.internet_music import InternetMusicProvider
+from autplay.adapters.internet_music import InternetMusicProvider, InternetMusicProviderError
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.library_runtime import LibraryRepository
 from autplay.adapters.postgresql.models import (
@@ -339,6 +339,7 @@ class InternetMusicHandler:
                 row.user_track_ref_id = ref.user_track_ref_id
             ref_id, candidate_id, upload_id = row.user_track_ref_id, row.candidate_id, row.upload_id
             row.state = "DOWNLOADING" if upload_id is None else "PROCESSING"
+            row.error_code = None
         recording_id = self._guarded(
             identity, context, lambda: self.service.library.prepare(principal, ref_id)
         )
@@ -414,14 +415,37 @@ class InternetMusicHandler:
             raise RetryableJobError("music_ingest_pending")
         except JobLeaseLost, JobCancellationRequested, JobResourceWait:
             raise
+        except InternetMusicProviderError as error:
+            self._record_failure(identity, context, error.code, terminal=not error.retryable)
+            if error.retryable:
+                raise RetryableJobError(error.code) from error
+            raise TerminalJobError(error.code) from error
         except MusicError as error:
-            if error.status_code in {403, 404}:
+            terminal = error.status_code in {403, 404}
+            self._record_failure(identity, context, error.code, terminal=terminal)
+            if terminal:
                 raise TerminalJobError(error.code) from error
             raise RetryableJobError(error.code) from error
-        except RetryableJobError:
+        except RetryableJobError as error:
+            self._record_failure(identity, context, error.error.code, terminal=False)
             raise
         except Exception as error:
+            self._record_failure(identity, context, "music_acquisition_unavailable", terminal=False)
             raise RetryableJobError("music_acquisition_unavailable") from error
+
+    def _record_failure(
+        self,
+        identity: UUID,
+        context: JobExecutionContext,
+        code: str,
+        *,
+        terminal: bool,
+    ) -> None:
+        with self.service.sessions.begin() as session:
+            row = self._locked(session, identity, context)
+            row.error_code = code[:100]
+            if terminal:
+                row.state = "FAILED"
 
     def _guarded[R](
         self,

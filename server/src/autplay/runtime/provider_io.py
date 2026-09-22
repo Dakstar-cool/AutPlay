@@ -11,6 +11,7 @@ from autplay.adapters.child_process import provider_child_launch
 from autplay.adapters.filesystem.vault_child import ChildProtocolError, decode_document
 from autplay.adapters.filesystem.vault_process import ChildLaunch, ProcessTreeFactory
 from autplay.application.internet_acquisition import ProviderFileReceipt
+from autplay.domain.jobs import TerminalJobError
 from autplay.domain.resource_admission import (
     AcquisitionClaim,
     ActivationFence,
@@ -19,6 +20,18 @@ from autplay.domain.resource_admission import (
 from autplay.domain.vault import Sha256Digest, VaultLimits, VerifiedStagedFile
 
 from .vault_io import VaultIoCoordinator, VaultIoSession
+
+_RETRYABLE_PROVIDER_ERRORS = {
+    "provider_challenge_unresolved",
+    "provider_download_failed",
+    "provider_token_unavailable",
+}
+_TERMINAL_PROVIDER_ERRORS = {
+    "provider_format_unsupported",
+    "provider_runtime_unsupported",
+    "provider_source_unavailable",
+    "provider_token_configuration_invalid",
+}
 
 
 async def execute_provider[T](
@@ -96,6 +109,13 @@ class ProviderIoExecutor:
         )
         tag, payload = io.child.read_result()
         document = decode_document(payload)
+        if tag == b"E" and set(document) == {"code"}:
+            code = document["code"]
+            if isinstance(code, str) and code in _TERMINAL_PROVIDER_ERRORS:
+                raise TerminalJobError(code)
+            if isinstance(code, str) and code in _RETRYABLE_PROVIDER_ERRORS:
+                raise ResourceAdmissionError(code)
+            raise ResourceAdmissionError("resource_provider_failed")
         if tag != b"R" or set(document) != {"byte_size", "sha256"}:
             raise ResourceAdmissionError("resource_provider_failed")
         size, digest = document["byte_size"], document["sha256"]

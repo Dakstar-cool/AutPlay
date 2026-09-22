@@ -87,6 +87,8 @@ class DeviceAdmissionWebAdapter:
                 str(row["platform"]),
                 "REMOVED" if row["removed_at"] else "ACTIVE",
                 int(row["active_session_count"]),
+                UUID(str(row["device_id"])) if row.get("device_id") is not None else None,
+                bool(row.get("developer_mode_enabled", False)),
             )
             for row in rows
         )
@@ -104,6 +106,24 @@ class DeviceAdmissionWebAdapter:
                 principal=actor,
                 key_reference=key_reference,
                 action=action,
+                operation_id=operation_id,
+                request_sha256=request_sha256,
+            )
+        )
+
+    def manage_device_developer_mode(
+        self,
+        actor: WebActor,
+        device_id: UUID,
+        enabled: bool,
+        operation_id: UUID,
+        request_sha256: bytes,
+    ) -> None:
+        self._call(
+            lambda: self._service.manage_device_developer_mode(
+                principal=actor,
+                device_id=device_id,
+                enabled=enabled,
                 operation_id=operation_id,
                 request_sha256=request_sha256,
             )

@@ -55,6 +55,7 @@ _MAX_PAYLOAD_BYTES: Final = 262_144
 _MAX_BATCH: Final = 100
 _MAX_PULL: Final = 500
 _EVENT_INSERT_BATCH: Final = 500
+_BOOTSTRAP_INSERT_BATCH: Final = 1_000
 _OWNER_RECORDING_PAGE_SIZE: Final = 100
 CATALOG_ARTIST_ID_V1: Final = "CATALOG_ARTIST_ID_V1"
 _CATALOG_AGGREGATES: Final = frozenset(
@@ -1065,15 +1066,26 @@ class SyncService:
                     principal.user_id,
                     include_catalog_artist=_catalog_enabled(body),
                 )
-                for ordinal, item in enumerate(projections, start=1):
-                    session.add(
-                        BootstrapSnapshotItemRow(
-                            snapshot_id=snapshot.snapshot_id,
-                            ordinal=ordinal,
-                            aggregate_type=item[0],
-                            aggregate_id=item[1],
-                            server_row_version=item[2],
-                            payload=item[3],
+                snapshot_rows = [
+                    {
+                        "snapshot_id": snapshot.snapshot_id,
+                        "ordinal": ordinal,
+                        "aggregate_type": item[0],
+                        "aggregate_id": item[1],
+                        "server_row_version": item[2],
+                        "payload": item[3],
+                    }
+                    for ordinal, item in enumerate(projections, start=1)
+                ]
+                # A large owner library can contain tens of thousands of rows.  ORM
+                # unit-of-work inserts turn the first bootstrap into thousands of
+                # round trips, long enough for a mobile client to abandon the call.
+                # Keep each SQL statement bounded while materializing the same
+                # immutable snapshot in bulk inside this transaction.
+                for start in range(0, len(snapshot_rows), _BOOTSTRAP_INSERT_BATCH):
+                    session.execute(
+                        pg_insert(BootstrapSnapshotItemRow).values(
+                            snapshot_rows[start : start + _BOOTSTRAP_INSERT_BATCH]
                         )
                     )
             else:

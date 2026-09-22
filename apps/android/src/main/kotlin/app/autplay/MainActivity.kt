@@ -61,6 +61,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.offline.DownloadService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -138,6 +139,7 @@ import app.autplay.data.settings.NonSecretSettingsStore
 import app.autplay.data.settings.CURRENT_ONBOARDING_REVISION
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
+import app.autplay.download.AutPlayDownloadService
 import app.autplay.playback.PlaybackSessionOwner
 import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackRuntimeState
@@ -245,6 +247,14 @@ class MainActivity : ComponentActivity() {
         )
         val playbackOwner = ServicePlaybackSessionOwner(applicationContext)
         val downloadRepository = DownloadIntentRepository(applicationContext, database)
+        // Media3 owns transfer execution, while Room keeps durable user intent.  Restart
+        // the service from a foreground app launch so an update/process death cannot
+        // strand REQUESTED rows before they reach Media3's download index.
+        DownloadService.sendResumeDownloads(
+            applicationContext,
+            AutPlayDownloadService::class.java,
+            false,
+        )
         val syncStatusRepository = SyncStatusRepository(database)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
@@ -669,6 +679,34 @@ private fun OfflineLibraryScreen(
     val activeProfileId = binding?.serverProfileId?.value
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val trainingConsent = rememberTrainingConsentUi(settings, pairingRuntimeState.pairing)
+    var verifiedDeveloperMode by remember(
+        binding?.serverProfileId,
+        binding?.userId,
+        binding?.deviceId,
+        settings.m5Binding?.bindingCommitId,
+    ) { mutableStateOf(false) }
+    suspend fun refreshDeveloperModeApproval() {
+        val active = binding
+        verifiedDeveloperMode = false
+        val enabled = if (active == null) false else runCatching {
+            AutPlayRuntime.serverFeatures(context, active).developerModeEnabled()
+        }.getOrDefault(false)
+        verifiedDeveloperMode = enabled
+        settingsStore.mutate { current ->
+            if (current.activeServerProfileId == active?.serverProfileId &&
+                current.activeUserId == active?.userId && current.deviceId == active?.deviceId
+            ) current.copy(developerMode = enabled) else current.copy(developerMode = false)
+        }
+    }
+    LaunchedEffect(
+        binding?.serverProfileId,
+        binding?.userId,
+        binding?.deviceId,
+        settings.m5Binding?.bindingCommitId,
+    ) {
+        refreshDeveloperModeApproval()
+    }
     val ownerProvisioningCoordinator = remember(
         activeProfileId,
         settings.serverBaseUrl,
@@ -1616,7 +1654,9 @@ private fun OfflineLibraryScreen(
             )
         },
         selectedTrackUploadEligible = selectedUploadCandidate != null,
-        settings = settings,
+        // Never expose a stale local developer-mode value while server approval is loading.
+        settings = settings.copy(developerMode = verifiedDeveloperMode),
+        trainingConsent = trainingConsent,
         profilePairing = ProfilePairingUiState(
             pairing = pairingRuntimeState.pairing,
             publicAccountRegistration = publicRegistrationState.takeIf { binding == null },
@@ -1711,6 +1751,7 @@ private fun OfflineLibraryScreen(
         chooseLibraryRoot = { activityLaunchers.chooseLibraryRoot.launch(null) },
         exportSettings = { activityLaunchers.exportSettings.launch("autplay-settings.json") },
         importSettings = { activityLaunchers.importSettings.launch(arrayOf("application/json", "text/json")) },
+        refreshDeveloperMode = { scope.launch { refreshDeveloperModeApproval() } },
         social = socialActions,
         manualPlaylists = manualPlaylistActions,
         openPlaylist = { openCoreDetail(DetailTarget(DetailKind.Playlist, it)) },
@@ -2204,6 +2245,7 @@ internal fun SettingsFrontendScreen(
     statisticsSettings: app.autplay.application.social.ProfileStatisticsSettingsState,
     statisticsSettingsErrorCode: String?,
     onStatisticsVisibilityChange: (Boolean) -> Unit,
+    onRefreshDeveloperMode: () -> Unit,
     onNavigate: (UiDestination) -> Unit,
     trainingConsent: TrainingConsentUi = TrainingConsentUi(),
 ) {
@@ -2218,6 +2260,7 @@ internal fun SettingsFrontendScreen(
         statisticsSettings = statisticsSettings,
         statisticsSettingsErrorCode = statisticsSettingsErrorCode,
         onStatisticsVisibilityChange = onStatisticsVisibilityChange,
+        onRefreshDeveloperMode = onRefreshDeveloperMode,
         onNavigate = onNavigate,
         trainingConsent = trainingConsent,
     )

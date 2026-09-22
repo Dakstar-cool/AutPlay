@@ -44,6 +44,8 @@ def provider_child_launch() -> tuple[list[str], dict[str, str]]:
     environment["PATH"] = os.environ.get("PATH", "")
     if proxy := os.environ.get("AUTPLAY_MUSIC_PROXY"):
         environment["AUTPLAY_MUSIC_PROXY"] = proxy
+    if po_token_url := os.environ.get("AUTPLAY_MUSIC_PO_TOKEN_URL"):
+        environment["AUTPLAY_MUSIC_PO_TOKEN_URL"] = po_token_url
     return arguments, environment
 
 

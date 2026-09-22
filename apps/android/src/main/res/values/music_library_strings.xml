@@ -6,7 +6,7 @@
     <string name="music_downloading">Downloading…</string>
     <string name="music_phone_title">Music on this phone</string>
     <string name="music_scan_phone">Find music on phone</string>
-    <string name="music_scan_body">Select audio to copy into Music/AutPlay. Original files are kept.</string>
+    <string name="music_scan_body">Select audio to link in AutPlay without copying or moving it. Access remains tied to the source file.</string>
     <string name="music_upload_title">Send tracks to Vault</string>
     <string name="music_upload_body">Choose local tracks to keep on your personal server.</string>
     <string name="music_permission_required">Allow access to audio files to scan your phone.</string>

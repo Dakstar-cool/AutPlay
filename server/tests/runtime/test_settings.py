@@ -64,6 +64,26 @@ def test_missing_required_settings_raise_one_sanitized_error() -> None:
     assert str(exc_info.value) == "runtime_configuration_invalid"
 
 
+def test_direct_vault_compatibility_modes_are_explicit_and_component_scoped() -> None:
+    api = load_api_settings(
+        overrides={
+            "database_url": DATABASE_URL,
+            "auth_signing_secret": AUTH_SECRET,
+            "public_access_source_hmac_secret": PUBLIC_SOURCE_SECRET,
+        },
+        environ={"AUTPLAY_DIRECT_VAULT_UPLOAD_ENABLED": "true"},
+    )
+    worker = load_worker_settings(
+        overrides={"database_url": DATABASE_URL},
+        environ={"AUTPLAY_DIRECT_VAULT_INGEST_ENABLED": "true"},
+    )
+
+    assert api.direct_vault_upload_enabled is True
+    assert worker.direct_vault_ingest_enabled is True
+    assert "direct_vault_ingest_enabled" not in ApiSettings.model_fields
+    assert "direct_vault_upload_enabled" not in WorkerSettings.model_fields
+
+
 def test_explicit_precedence_and_secret_files(tmp_path: Path) -> None:
     database_secret = tmp_path / "database.secret"
     auth_secret = tmp_path / "auth.secret"
@@ -266,6 +286,20 @@ def test_production_shared_training_accepts_independent_consent_evidence(
     )
 
     assert settings.shared_training_consent_enabled
+
+
+def test_direct_vault_upload_requires_explicit_environment_opt_in() -> None:
+    overrides = {
+        "database_url": DATABASE_URL,
+        "auth_signing_secret": AUTH_SECRET,
+        "public_access_source_hmac_secret": PUBLIC_SOURCE_SECRET,
+    }
+
+    assert not load_api_settings(overrides=overrides, environ={}).direct_vault_upload_enabled
+    assert load_api_settings(
+        overrides=overrides,
+        environ={"AUTPLAY_DIRECT_VAULT_UPLOAD_ENABLED": "true"},
+    ).direct_vault_upload_enabled
 
 
 @pytest.mark.parametrize(

@@ -10,11 +10,29 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from autplay.adapters.filesystem.provider_media import (
+    ProviderMediaError,
+    classify_download_error,
+    po_token_url,
+)
+
+
+class InternetMusicProviderError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        self.retryable = code not in {
+            "provider_format_unsupported",
+            "provider_runtime_unsupported",
+            "provider_source_unavailable",
+            "provider_token_configuration_invalid",
+        }
+        super().__init__(code)
+
 
 class InternetMusicProvider:
     """Provider ranking is preserved; search never downloads media."""
 
-    def _command(self) -> list[str]:
+    def _command(self, *, require_token_provider: bool = False) -> list[str]:
         command = [
             sys.executable,
             "-m",
@@ -36,7 +54,23 @@ class InternetMusicProvider:
         proxy = os.environ.get("AUTPLAY_MUSIC_PROXY")
         if proxy:
             command += ["--proxy", proxy]
+        try:
+            token_url = po_token_url(required=require_token_provider)
+        except ProviderMediaError as error:
+            raise InternetMusicProviderError(error.code) from error
+        if token_url is not None:
+            command += [
+                "--extractor-args",
+                f"youtube:player_client=mweb;youtubepot-bgutilhttp:base_url={token_url}",
+            ]
         return command
+
+    @staticmethod
+    def _require_success(result: subprocess.CompletedProcess[bytes]) -> None:
+        if result.returncode == 0:
+            return
+        detail = result.stderr[:65536].decode("utf-8", errors="replace")
+        raise InternetMusicProviderError(classify_download_error(RuntimeError(detail)))
 
     def search(self, query: str) -> list[dict[str, Any]]:
         result = subprocess.run(
@@ -50,8 +84,9 @@ class InternetMusicProvider:
             ],
             capture_output=True,
             timeout=35,
-            check=True,
+            check=False,
         )
+        self._require_success(result)
         if len(result.stdout) > 1024 * 1024:
             raise ValueError("music_search_response_too_large")
         document = json.loads(result.stdout)
@@ -86,7 +121,7 @@ class InternetMusicProvider:
             raise ValueError("music_candidate_invalid")
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         command = [
-            *self._command(),
+            *self._command(require_token_provider=True),
             "--format",
             "bestaudio/best",
             "--max-filesize",
@@ -100,7 +135,8 @@ class InternetMusicProvider:
             "--",
             "https://www.youtube.com/watch?v=" + candidate_id,
         ]
-        completed = subprocess.run(command, capture_output=True, timeout=240, check=True)
+        completed = subprocess.run(command, capture_output=True, timeout=240, check=False)
+        self._require_success(completed)
         if len(completed.stdout) > 16384:
             raise ValueError("music_download_response_invalid")
         path = Path(completed.stdout.decode().strip().splitlines()[-1]).resolve()
