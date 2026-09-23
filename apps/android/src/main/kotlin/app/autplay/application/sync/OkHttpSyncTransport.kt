@@ -142,7 +142,14 @@ class OkHttpSyncTransport(
             }
             val (status, text) = result
             if (status == 401 || status == 403) throw SessionRequiredException()
-            if (status == 410 || (status == 409 && runCatching { Json.parseToJsonElement(text).jsonObject["code"]?.jsonPrimitive?.content }.getOrNull() in setOf("CURSOR_INVALID", "DEVICE_RESET_REQUIRED"))) throw InvalidCursorException()
+            val errorCode = if (status in 400..499) runCatching {
+                val root = Json.parseToJsonElement(text).jsonObject
+                (root["error"]?.jsonObject ?: root)["code"]?.jsonPrimitive?.content
+            }.getOrNull() else null
+            if (status == 410 || (status == 409 && errorCode in setOf("CURSOR_INVALID", "DEVICE_RESET_REQUIRED"))) throw InvalidCursorException()
+            if (status == 422 && path == "/sync/bootstrap" && errorCode == "bootstrap_snapshot_invalid") {
+                throw InvalidBootstrapSnapshotException()
+            }
             if (status !in 200..299) throw IllegalStateException("SYNC_HTTP_$status")
             Json.parseToJsonElement(text)
         } finally {

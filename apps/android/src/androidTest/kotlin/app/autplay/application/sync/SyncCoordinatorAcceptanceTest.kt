@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.JournalLineageEntity
 import app.autplay.data.local.entity.SyncCursorEntity
+import app.autplay.data.local.entity.SyncBootstrapStateEntity
 import app.autplay.data.local.entity.OfflineJournalEventEntity
 import app.autplay.data.local.entity.PlaylistEntity
 import app.autplay.data.local.entity.TrackSearchContentEntity
@@ -294,6 +295,51 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals("final-cursor", db.syncDao().cursor(profile.value)?.opaqueCursor)
         assertEquals("PENDING", db.journalDao().event(pending.eventId)?.state)
         assertFalse(db.syncDao().isServerEventKnown(profile.value, server))
+    }
+
+    @Test fun expiredBootstrapSnapshotRestartsWithoutLosingLocalJournal() = runBlocking {
+        seed(profile, "old-cursor")
+        val pending = pending(1)
+        db.journalDao().insert(pending)
+        val stale = "efefefef-efef-4fef-8fef-efefefefefef"
+        db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(
+            bootstrapSnapshotId = stale, bootstrapState = "BOOTSTRAPPING",
+        ))
+        db.syncDao().upsertBootstrapState(SyncBootstrapStateEntity(
+            profile.value, stale, "stale-page", null, "BOOTSTRAPPING", 1,
+        ))
+        val fresh = "abababab-abab-4bab-8bab-abababababab"
+        val transport = FakeTransport(
+            bootstrapPages = listOf(BootstrapPage(fresh, null, "fresh-cursor", false, emptyList())),
+            throwInvalidBootstrapOnce = true,
+        )
+        val coordinator = SyncCoordinator(db, transport)
+
+        assertEquals(SyncRunOutcome.RETRY, coordinator.runForWorker(binding))
+        assertEquals("old-cursor", db.syncDao().cursor(profile.value)?.opaqueCursor)
+        assertEquals(null, db.syncDao().bootstrapState(profile.value)?.snapshotId)
+        assertEquals("PENDING", db.journalDao().event(pending.eventId)?.state)
+
+        assertEquals(SyncRunOutcome.RETRY, coordinator.runForWorker(binding))
+        assertEquals(listOf(stale to "stale-page", null to null), transport.bootstrapRequests)
+        assertEquals("fresh-cursor", db.syncDao().cursor(profile.value)?.opaqueCursor)
+        assertEquals("PENDING", db.journalDao().event(pending.eventId)?.state)
+    }
+
+    @Test fun healthyLargeBootstrapContinuesWithoutFailureBackoff() = runBlocking {
+        seed(profile, "old-cursor")
+        db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(bootstrapState = "NOT_STARTED"))
+        val snapshot = "abababab-abab-4bab-8bab-abababababab"
+        val pages = (1..10).map { index ->
+            BootstrapPage(snapshot, "page-$index", null, true, emptyList())
+        } + BootstrapPage(snapshot, null, "complete-cursor", false, emptyList())
+        val coordinator = SyncCoordinator(db, FakeTransport(bootstrapPages = pages))
+
+        assertEquals(SyncRunOutcome.CONTINUE, coordinator.runForWorker(binding))
+        assertEquals("BOOTSTRAPPING", db.syncDao().cursor(profile.value)?.bootstrapState)
+        assertEquals(null, db.syncDao().runtimeStatus(profile.value)?.lastErrorCode)
+        assertEquals(SyncRunOutcome.COMPLETE, coordinator.runForWorker(binding))
+        assertEquals("complete-cursor", db.syncDao().cursor(profile.value)?.opaqueCursor)
     }
 
     @Test fun sameServerAggregateIdMaterializesSeparatelyPerProfile() = runBlocking {
@@ -877,6 +923,7 @@ class SyncCoordinatorAcceptanceTest {
         private val acks: List<SyncAck> = emptyList(),
         private val bootstrapPages: List<BootstrapPage> = emptyList(),
         private val throwSessionRequired: Boolean = false,
+        private val throwInvalidBootstrapOnce: Boolean = false,
     ) : SyncTransport {
         override suspend fun bind(binding: ClientEventBinding) = Unit
         val sent = mutableListOf<app.autplay.data.local.entity.OfflineJournalEventEntity>()
@@ -889,6 +936,15 @@ class SyncCoordinatorAcceptanceTest {
         }
         override suspend fun pull(binding: ClientEventBinding, cursor: String?): PullPage { if (throwInvalidCursor) throw InvalidCursorException(); return pull }
         private var bootstrapIndex = 0
-        override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage = bootstrapPages.getOrElse(bootstrapIndex++) { BootstrapPage("88888888-8888-4888-8888-888888888888", null, "next", false, emptyList()) }
+        val bootstrapRequests = mutableListOf<Pair<String?, String?>>()
+        private var invalidBootstrapThrown = false
+        override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage {
+            bootstrapRequests += snapshotId to pageToken
+            if (throwInvalidBootstrapOnce && !invalidBootstrapThrown) {
+                invalidBootstrapThrown = true
+                throw InvalidBootstrapSnapshotException()
+            }
+            return bootstrapPages.getOrElse(bootstrapIndex++) { BootstrapPage("88888888-8888-4888-8888-888888888888", null, "next", false, emptyList()) }
+        }
     }
 }

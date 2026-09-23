@@ -56,6 +56,8 @@ data class RemoteEvent(val eventId: String, val sequence: Long, val eventType: S
 data class PullPage(val nextCursor: String, val hasMore: Boolean, val events: List<RemoteEvent>)
 data class BootstrapPage(val snapshotId: String, val nextPageToken: String?, val snapshotCursor: String?, val hasMore: Boolean, val events: List<RemoteEvent>)
 
+enum class SyncRunOutcome { COMPLETE, CONTINUE, RETRY }
+
 /** The port makes process-death and timeout behavior testable without a real network. */
 interface SyncTransport {
     suspend fun bind(binding: ClientEventBinding)
@@ -65,6 +67,7 @@ interface SyncTransport {
 }
 /** A 410/invalid opaque cursor asks for a snapshot; journal rows are intentionally untouched. */
 class InvalidCursorException : IllegalStateException("CURSOR_INVALID")
+class InvalidBootstrapSnapshotException : IllegalStateException("BOOTSTRAP_SNAPSHOT_INVALID")
 
 /**
  * P09 local coordinator. Leasing and every cursor advance are Room transactions; network calls are
@@ -77,7 +80,9 @@ class SyncCoordinator(
     private val token: () -> String = { UUID.randomUUID().toString() },
     private val afterSync: (ClientEventBinding) -> Unit = {},
 ) {
-    suspend fun run(binding: ClientEventBinding): Boolean {
+    suspend fun run(binding: ClientEventBinding): Boolean = runForWorker(binding) == SyncRunOutcome.COMPLETE
+
+    suspend fun runForWorker(binding: ClientEventBinding): SyncRunOutcome {
         val cursor = requireCursor(binding)
         database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), null))
         try {
@@ -96,13 +101,14 @@ class SyncCoordinator(
             do {
                 val refreshed = requireCursor(binding)
                 val outcome = if (refreshed.bootstrapState != "READY") bootstrap(binding, refreshed) else pull(binding, refreshed)
-                if (!outcome.completed) return false
+                if (!outcome.completed) return SyncRunOutcome.RETRY
                 hasMore = outcome.hasMore
                 pages++
             } while (hasMore && pages < MAX_DRAIN_PAGES)
             if (hasMore) {
-                database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, "PULL_CAP_REACHED", nowMs(), null))
-                return false
+                // A healthy bounded page drain must not enter WorkManager's exponential retry.
+                database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), null))
+                return SyncRunOutcome.CONTINUE
             }
             compact(binding)
             // A replaced worker may still be releasing its lease. Keep a durable retry
@@ -117,11 +123,11 @@ class SyncCoordinator(
                         null,
                     ),
                 )
-                return false
+                return SyncRunOutcome.RETRY
             }
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), nowMs()))
             afterSync(binding)
-            return true
+            return SyncRunOutcome.COMPLETE
         } catch (error: CancellationException) {
             throw error
         } catch (error: IllegalStateException) {
@@ -228,7 +234,22 @@ class SyncCoordinator(
     private suspend fun bootstrap(binding: ClientEventBinding, cursor: SyncCursorEntity): DrainOutcome {
         val pending = database.journalDao().nextPending(cursor.journalLineageId, Long.MAX_VALUE, PUSH_BATCH_LIMIT).size
         val bootstrap = database.syncDao().bootstrapState(binding.serverProfileId.value)
-        val page = transport.bootstrap(binding, bootstrap?.snapshotId, bootstrap?.pageToken, pending)
+        val page = try {
+            transport.bootstrap(binding, bootstrap?.snapshotId, bootstrap?.pageToken, pending)
+        } catch (error: InvalidBootstrapSnapshotException) {
+            // The server expires materialized snapshots. Keep already applied projections and
+            // local Journal facts, but restart this incomplete snapshot from a fresh first page.
+            if (bootstrap?.snapshotId == null) throw error
+            database.withWriteTransaction {
+                database.syncDao().upsertBootstrapState(SyncBootstrapStateEntity(
+                    binding.serverProfileId.value, null, null, null, "RESET_REQUIRED", nowMs(),
+                ))
+                database.syncDao().upsertCursor(cursor.copy(
+                    bootstrapSnapshotId = null, bootstrapState = "RESET_REQUIRED", updatedAtMs = nowMs(),
+                ))
+            }
+            return DrainOutcome(false, false)
+        }
         if (page.events.any { !isProjectionSupported(it) }) {
             database.withWriteTransaction {
                 page.events.filterNot(::isProjectionSupported).forEach { event -> database.syncDao().defer(DeferredServerEventEntity(binding.serverProfileId.value, event.eventId, event.sequence, event.eventType, event.schemaVersion, event.payloadJson, nowMs(), "UPGRADE_REQUIRED")) }
