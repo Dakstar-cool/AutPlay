@@ -1,6 +1,7 @@
 package app.autplay.work
 
 import app.autplay.application.library.ArtworkBatchResult
+import app.autplay.application.library.ArtworkShard
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -22,5 +23,16 @@ class TrackMetadataArtworkPaginationTest {
         assertEquals(ArtworkNextStep.CONTINUE, artworkNextStep(ArtworkBatchResult(100, 80)))
         assertEquals(ArtworkNextStep.UNAVAILABLE, artworkNextStep(ArtworkBatchResult(100, 100)))
         assertEquals(ArtworkNextStep.CONTINUE, artworkNextStep(ArtworkBatchResult(60, 0)))
+    }
+
+    @Test fun shardsCoverEveryHexPrefixExactlyOnce() {
+        for (prefix in "0123456789abcdef") {
+            assertEquals(1, ArtworkShard.entries.count {
+                prefix.toString() >= it.lowerSha && prefix.toString() < it.upperSha
+            })
+        }
+        assertEquals(4, ArtworkShard.entries.size)
+        assertEquals(null, ArtworkShard.fromIndex(-1))
+        assertEquals(null, ArtworkShard.fromIndex(4))
     }
 }

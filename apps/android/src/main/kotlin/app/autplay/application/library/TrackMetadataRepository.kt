@@ -31,11 +31,11 @@ class TrackMetadataRepository(private val context: Context) {
         }
     }
 
-    suspend fun fetchArtwork(profile: String, api: ServerFeatureRepository, offset: Int = 0): ArtworkBatchResult = withContext(Dispatchers.IO) {
+    suspend fun fetchArtwork(profile: String, api: ServerFeatureRepository, shard: ArtworkShard, offset: Int = 0): ArtworkBatchResult = withContext(Dispatchers.IO) {
         require(offset >= 0)
         val dao = database.trackMetadataDao()
-        val before = dao.missingArtworkCount(profile)
-        val batch = dao.missingArtwork(profile, 40, offset)
+        val before = dao.missingArtworkCount(profile, shard.lowerSha, shard.upperSha)
+        val batch = dao.missingArtwork(profile, shard.lowerSha, shard.upperSha, 40, offset)
         for (metadata in batch) {
             val ref = database.libraryDao().trackRef(metadata.localUserTrackRefId) ?: continue
             if (ref.serverProfileId != profile || ref.deletedAtMs != null) continue
@@ -54,7 +54,7 @@ class TrackMetadataRepository(private val context: Context) {
             check(digest(bytes) == sha) { "METADATA_ARTWORK_INTEGRITY" }
             storeArtwork(profile, bytes, sha)
         }
-        val remaining = dao.missingArtworkCount(profile)
+        val remaining = dao.missingArtworkCount(profile, shard.lowerSha, shard.upperSha)
         // A stored cover or a refreshed 404 may remove several references at once.
         // Restart at the head after progress; otherwise skip this unavailable page.
         ArtworkBatchResult(remaining, when {
@@ -131,3 +131,12 @@ class TrackMetadataRepository(private val context: Context) {
 }
 
 data class ArtworkBatchResult(val remaining: Int, val nextOffset: Int)
+
+/** SHA-256 prefixes partition references without moving rows between concurrent workers. */
+enum class ArtworkShard(val lowerSha: String, val upperSha: String) {
+    FIRST("0", "4"), SECOND("4", "8"), THIRD("8", "c"), FOURTH("c", "g");
+
+    companion object {
+        fun fromIndex(index: Int): ArtworkShard? = entries.getOrNull(index)
+    }
+}
