@@ -3,6 +3,7 @@ package app.autplay.work
 import android.content.Context
 import androidx.work.*
 import app.autplay.AutPlayRuntime
+import app.autplay.application.library.ArtworkBatchResult
 import app.autplay.application.library.TrackMetadataRepository
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.settings.applicationNonSecretSettingsStore
@@ -11,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class TrackMetadataWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
@@ -56,8 +58,15 @@ class TrackMetadataWorker(context: Context, parameters: WorkerParameters) : Coro
                 TrackMetadataWork.artwork(applicationContext, profile)
                 return Result.success()
             }
-            val complete = repository.fetchArtwork(profile, api)
-            if (complete) Result.success() else Result.retry()
+            val batch = repository.fetchArtwork(profile, api, inputData.getInt("artworkOffset", 0))
+            when (artworkNextStep(batch)) {
+                ArtworkNextStep.COMPLETE -> Result.success()
+                ArtworkNextStep.UNAVAILABLE -> Result.failure(workDataOf("error" to "METADATA_ARTWORK_UNAVAILABLE"))
+                ArtworkNextStep.CONTINUE -> {
+                    TrackMetadataWork.continueArtwork(applicationContext, profile, batch.nextOffset)
+                    Result.success()
+                }
+            }
         } catch (error: CancellationException) { throw error
         } catch (error: Exception) {
             if (runAttemptCount >= 12 || error.message in setOf("SERVER_HTTP_404", "SERVER_HTTP_409", "SERVER_HTTP_422"))
@@ -66,11 +75,26 @@ class TrackMetadataWorker(context: Context, parameters: WorkerParameters) : Coro
     }
 }
 
+internal enum class ArtworkNextStep { COMPLETE, CONTINUE, UNAVAILABLE }
+
+internal fun artworkNextStep(batch: ArtworkBatchResult): ArtworkNextStep = when {
+    batch.remaining == 0 -> ArtworkNextStep.COMPLETE
+    batch.nextOffset >= batch.remaining -> ArtworkNextStep.UNAVAILABLE
+    else -> ArtworkNextStep.CONTINUE
+}
+
 object TrackMetadataWork {
     fun tag(track: String) = "metadata-track-$track"
     fun artwork(context: Context, profile: String) {
         WorkManager.getInstance(context).enqueueUniqueWork("metadata-art-$profile", ExistingWorkPolicy.KEEP,
             request(profile).build())
+    }
+    suspend fun continueArtwork(context: Context, profile: String, offset: Int) {
+        // Each successful page gets a fresh retry budget. A page with only stale 404s
+        // advances to the next offset and eventually stops after one full pass.
+        WorkManager.getInstance(context).enqueueUniqueWork("metadata-art-$profile", ExistingWorkPolicy.APPEND_OR_REPLACE,
+            request(profile).setInputData(workDataOf("profile" to profile, "artworkOffset" to offset))
+                .setInitialDelay(5, TimeUnit.SECONDS).build()).await()
     }
     fun command(context: Context, profile: String, track: String, revision: Long, action: String, fields: JsonObject? = null, candidate: String? = null): UUID {
         val operation = UUID.randomUUID().toString()
@@ -89,4 +113,5 @@ object TrackMetadataWork {
     private fun request(profile: String) = OneTimeWorkRequestBuilder<TrackMetadataWorker>()
         .setInputData(workDataOf("profile" to profile))
         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+        .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
 }
