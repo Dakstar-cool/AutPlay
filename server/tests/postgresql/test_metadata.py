@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import hashlib
 
+from pgvector.sqlalchemy import VECTOR
+from sqlalchemy import ForeignKeyConstraint
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.dialects.postgresql.base import PGDialect
+from sqlalchemy.orm import configure_mappers
+from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
+
 from autplay.adapters.postgresql.metadata import (
     EXPECTED_COLUMN_COUNT,
     EXPECTED_EXPLICIT_INDEX_NAMES,
@@ -13,20 +20,14 @@ from autplay.adapters.postgresql.metadata import (
     MAPPED_ROWS,
     metadata,
 )
-from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import ForeignKeyConstraint
-from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.dialects.postgresql.base import PGDialect
-from sqlalchemy.orm import configure_mappers
-from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 
 
 def test_complete_table_and_column_inventory() -> None:
     """Every reference table and column is present exactly once."""
     assert set(metadata.tables) == set(EXPECTED_TABLE_KEYS)
-    assert len(metadata.tables) == 170
+    assert len(metadata.tables) == 196
     assert sum(len(table.columns) for table in metadata.tables.values()) == EXPECTED_COLUMN_COUNT
-    assert EXPECTED_COLUMN_COUNT == 1921
+    assert EXPECTED_COLUMN_COUNT == 2216
     assert {
         key: len(table.columns) for key, table in metadata.tables.items()
     } == EXPECTED_TABLE_COLUMN_COUNTS
@@ -36,7 +37,7 @@ def test_complete_table_and_column_inventory() -> None:
 def test_all_rows_are_typed_mappers_without_relationship_behavior() -> None:
     """Mappings are storage rows, not a second domain model."""
     configure_mappers()
-    assert len(MAPPED_ROWS) == 170
+    assert len(MAPPED_ROWS) == 196
     assert {str(row.__table__) for row in MAPPED_ROWS} == set(EXPECTED_TABLE_KEYS)
     assert all(not list(sa_inspect(row).relationships) for row in MAPPED_ROWS)
 
@@ -71,7 +72,7 @@ def test_explicit_index_inventory_and_no_python_defaults() -> None:
     """All reference indexes are mapped and defaults remain database-owned."""
     indexes = {index.name for table in metadata.tables.values() for index in table.indexes}
     assert indexes == EXPECTED_EXPLICIT_INDEX_NAMES
-    assert len(indexes) == 156
+    assert len(indexes) == 173
     assert all(
         column.default is None for table in metadata.tables.values() for column in table.columns
     )
@@ -118,4 +119,4 @@ def test_complete_mapping_definition_fingerprint() -> None:
     )
     fingerprint = hashlib.sha256("\n".join(statements).encode()).hexdigest()
 
-    assert fingerprint == "f3f1f8db5c44bb46d1f8d07a6df85618b6b4af04fa568d2933696f327b893215"
+    assert fingerprint == "16140cff3b668afa5b29fd0bd79faeab821dfea93ca07313c93967033a9f746a"

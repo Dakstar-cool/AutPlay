@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "CANONICAL_JSON_LP_V1_GOLDEN",
+  "object_keys": {"$": ["a", "b"]},
+  "cases": [
+    {"name": "null", "value": null, "hex": "6e"},
+    {"name": "false", "value": false, "hex": "66"},
+    {"name": "true", "value": true, "hex": "74"},
+    {"name": "zero", "value": 0, "hex": "690000000000000000"},
+    {"name": "minus_one", "value": -1, "hex": "69ffffffffffffffff"},
+    {"name": "int64_min", "value": -9223372036854775808, "hex": "698000000000000000"},
+    {"name": "int64_max", "value": 9223372036854775807, "hex": "697fffffffffffffff"},
+    {"name": "nfc_utf8", "value": "é", "hex": "7300000002c3a9"},
+    {"name": "empty_array", "value": [], "hex": "6100000000"},
+    {"name": "empty_object", "value": {}, "hex": "6f00000000"},
+    {
+      "name": "nested_sorted",
+      "value": {"b": "é", "a": [true, null]},
+      "hex": "6f0000000200000001610000000f61000000020000000174000000016e0000000162000000077300000002c3a9",
+      "sha256": "e10ff5de64836563590aff6e63efd5833105f818a759260b83c3927e1ebb873c"
+    }
+  ]
+}

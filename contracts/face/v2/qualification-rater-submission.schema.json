@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.app/contracts/face/v2/qualification-rater-submission.schema.json",
+  "title": "FaceQualificationRaterSubmissionV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "study_id", "fixture_manifest_sha256", "rubric_version",
+    "rater_pseudonym", "consent_receipt_sha256", "recording_sha256",
+    "segments", "track_summary", "transition_sample_indices"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "study_id": {"$ref": "#/$defs/uuid"},
+    "fixture_manifest_sha256": {"$ref": "#/$defs/digest"},
+    "rubric_version": {"const": "FACE_QUALIFICATION_RUBRIC_V1"},
+    "rater_pseudonym": {"$ref": "#/$defs/uuid"},
+    "consent_receipt_sha256": {"$ref": "#/$defs/digest"},
+    "recording_sha256": {"$ref": "#/$defs/digest"},
+    "segments": {
+      "type": "array", "minItems": 12, "maxItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["segment_id", "axes", "confidence"],
+        "properties": {
+          "segment_id": {"$ref": "#/$defs/digest"},
+          "axes": {"$ref": "#/$defs/axes"},
+          "confidence": {"type": "integer", "minimum": 0, "maximum": 3}
+        }
+      }
+    },
+    "track_summary": {"$ref": "#/$defs/axes"},
+    "transition_sample_indices": {
+      "type": "array", "maxItems": 256,
+      "items": {"type": "integer", "minimum": 0, "maximum": 33177599999}
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "axes": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "POSITIVE_MELANCHOLIC", "CALM_ENERGETIC", "SOFT_AGGRESSIVE",
+        "LIGHT_DARK", "RELAXED_TENSE", "DIRECT_ATMOSPHERIC"
+      ],
+      "properties": {
+        "POSITIVE_MELANCHOLIC": {"$ref": "#/$defs/score"},
+        "CALM_ENERGETIC": {"$ref": "#/$defs/score"},
+        "SOFT_AGGRESSIVE": {"$ref": "#/$defs/score"},
+        "LIGHT_DARK": {"$ref": "#/$defs/score"},
+        "RELAXED_TENSE": {"$ref": "#/$defs/score"},
+        "DIRECT_ATMOSPHERIC": {"$ref": "#/$defs/score"}
+      }
+    },
+    "score": {"type": "integer", "minimum": -3, "maximum": 3}
+  }
+}

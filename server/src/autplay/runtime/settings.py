@@ -28,6 +28,9 @@ _ENV_PREFIX: Final = "AUTPLAY_"
 _MAX_CONFIG_BYTES: Final = 1_048_576
 _MAX_SECRET_BYTES: Final = 65_536
 _COMMON_ENV_FIELDS: Final = {
+    "serving_consent_ledger_path": "SERVING_CONSENT_LEDGER_PATH",
+    "serving_consent_ledger_key": "SERVING_CONSENT_LEDGER_KEY",
+    "serving_consent_ledger_key_id": "SERVING_CONSENT_LEDGER_KEY_ID",
     "training_consent_ledger_path": "TRAINING_CONSENT_LEDGER_PATH",
     "training_consent_ledger_key": "TRAINING_CONSENT_LEDGER_KEY",
     "training_consent_ledger_key_id": "TRAINING_CONSENT_LEDGER_KEY_ID",
@@ -117,6 +120,7 @@ _WORKER_ENV_FIELDS: Final = {
 }
 _SECRET_FIELDS: Final = frozenset(
     {
+        "serving_consent_ledger_key",
         "training_consent_ledger_key",
         "privacy_ledger_key",
         "database_url",
@@ -163,6 +167,9 @@ class _ExplicitSettings(BaseSettings):
     )
 
     profile: RuntimeProfile = RuntimeProfile.DEVELOPMENT
+    serving_consent_ledger_path: Path | None = None
+    serving_consent_ledger_key: SecretStr | None = Field(default=None, repr=False)
+    serving_consent_ledger_key_id: str | None = None
     training_consent_ledger_path: Path | None = None
     training_consent_ledger_key: SecretStr | None = Field(default=None, repr=False)
     training_consent_ledger_key_id: str | None = None
@@ -291,6 +298,33 @@ class _ExplicitSettings(BaseSettings):
                 raise ValueError("training consent and deletion require separate keys")
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.training_consent_ledger_key_id or ""):
                 raise ValueError("training consent ledger key identifier is invalid")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_serving_consent_ledger(self) -> Self:
+        supplied = (
+            self.serving_consent_ledger_path is not None,
+            self.serving_consent_ledger_key is not None,
+            self.serving_consent_ledger_key_id is not None,
+        )
+        if any(supplied) and not all(supplied):
+            raise ValueError("independent serving consent requires path, key and key identifier")
+        path = self.serving_consent_ledger_path
+        if path is None:
+            return self
+        if not path.is_absolute() or path.resolve().is_relative_to(self.vault_root.resolve()):
+            raise ValueError("serving consent ledger must be an absolute path outside the Vault")
+        for other in (self.privacy_ledger_path, self.training_consent_ledger_path):
+            if other is not None and path.resolve() == other.resolve():
+                raise ValueError("serving consent requires a separate ledger file")
+        key = self.serving_consent_ledger_key
+        if key is None or len(key.get_secret_value().encode()) < 32:
+            raise ValueError("serving consent ledger key is too short")
+        for other_key in (self.privacy_ledger_key, self.training_consent_ledger_key):
+            if other_key is not None and key.get_secret_value() == other_key.get_secret_value():
+                raise ValueError("serving consent requires a separate key")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.serving_consent_ledger_key_id or ""):
+            raise ValueError("serving consent ledger key identifier is invalid")
         return self
 
 

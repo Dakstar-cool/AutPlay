@@ -113,6 +113,12 @@ Exit: one production-signed APK and its supported install/update path have exact
 
 **State:** IN_PROGRESS; the neutral PCM-reactive renderer remains the safe production fallback.
 
+Face Contract v1 is implemented as a pure Python/Kotlin integration seam. The canonical production
+Face v2 timeline, persistence, authorized projection transport, operations and model qualification
+are not implemented at the `v1.0.0` baseline. Revision 15 of the approved ML delivery plan is
+copied to `docs/operations/ml/PLAN_REVISION_15.md`; implementation progress is tracked separately
+in `docs/operations/ml/IMPLEMENTATION_STATUS.md` on the isolated ML branch.
+
 The previously selected sequence places full Face qualification before PA3. Moving this phase after
 the core production launch requires an explicit user decision; it must not happen implicitly.
 

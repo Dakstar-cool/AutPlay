@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -41,6 +42,17 @@ from .models import (
 MAX_TEMPORAL_SNAPSHOT_BYTES = 4_194_304
 
 
+@contextmanager
+def _capture_session(
+    sessions: Callable[[], Session], provided: Session | None
+) -> Iterator[Session]:
+    if provided is not None:
+        yield provided
+    else:
+        with sessions() as opened, opened.begin():
+            yield opened
+
+
 @dataclass(frozen=True, slots=True)
 class AdaptiveSnapshotReference:
     snapshot_id: UUID
@@ -71,13 +83,14 @@ class SqlAlchemyAdaptiveRecommendationRepository:
         evidence: Sequence[TemporalEvidence],
         retained_until: datetime,
         policy: AdaptiveFeaturePolicy,
+        session: Session | None = None,
     ) -> AdaptiveSnapshotReference:
         selected = _validate_capture(
             baseline, profile, evidence, retained_until, policy, self._clock()
         )
         evidence_documents = tuple(temporal_evidence_document(value) for value in selected)
         profile_document = adaptive_profile_document(profile)
-        with self._sessions() as session, session.begin():
+        with _capture_session(self._sessions, session) as session:
             baseline_row = session.scalar(
                 select(RecommendationInputSnapshotRow)
                 .where(
@@ -186,11 +199,16 @@ class SqlAlchemyAdaptiveRecommendationRepository:
             return profile
 
     def load_sona_snapshot(
-        self, user_id: UUID, temporal_snapshot_id: UUID
+        self,
+        user_id: UUID,
+        temporal_snapshot_id: UUID,
+        *,
+        session: Session | None = None,
     ) -> SonaTemporalSnapshot | None:
         """Reload the exact retained event sequence for model algorithmic replay."""
 
-        with self._sessions() as session:
+        context = self._sessions() if session is None else nullcontext(session)
+        with context as session:
             row = session.scalar(
                 select(RecommendationTemporalSnapshotRow).where(
                     RecommendationTemporalSnapshotRow.user_id == user_id,

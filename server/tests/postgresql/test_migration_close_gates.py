@@ -12,6 +12,10 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0064_face_artifact_activation", "0063_sona_capture_authority"),
+    ("0063_sona_capture_authority", "0062_gpu_admission_authority"),
+    ("0062_gpu_admission_authority", "0061_ml_artifact_authority"),
+    ("0061_ml_artifact_authority", "0060_local_bridge_authority"),
     ("0060_local_bridge_authority", "0059_training_publication_seal"),
     ("0059_training_publication_seal", "0058_training_privacy_fence"),
     ("0058_training_privacy_fence", "0057_training_execution"),
@@ -193,7 +197,7 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == ("0060_local_bridge_authority")
+    assert _current_revision(database_harness, database_name) == ("0064_face_artifact_activation")
 
 
 def test_local_bridge_downgrade_refuses_durable_admission(
@@ -232,7 +236,7 @@ def test_local_bridge_downgrade_refuses_durable_admission(
     with pytest.raises(DBAPIError, match="refusing local bridge authority downgrade"):
         database_harness.downgrade(empty_database_name, "0059_training_publication_seal")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0060_local_bridge_authority"
+        "0064_face_artifact_activation"
     )
 
 

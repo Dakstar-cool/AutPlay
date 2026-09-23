@@ -361,6 +361,174 @@ POST_0030_TRIGGERS = frozenset(
     }
 )
 
+ML_R15_TABLES = frozenset(
+    {
+        ("ml", "artifact"),
+        ("ml", "artifact_migration_issue"),
+        ("ml", "artifact_license_decision"),
+        ("ml", "artifact_license_current"),
+        ("ml", "face_artifact_release"),
+        ("ml", "sona_artifact_release"),
+        ("ml", "control_step_up_credential"),
+        ("ml", "control_step_up_challenge"),
+        ("ml", "control_step_up_receipt"),
+    }
+)
+ML_R15_INDEXES = frozenset(
+    {
+        "ix_control_credential_actor",
+        "ix_control_step_up_expiry",
+        "ix_control_step_up_actor",
+    }
+)
+ML_R15_FUNCTIONS = frozenset(
+    {
+        "protect_ml_artifact_immutable",
+        "lock_ml_artifact_for_issue",
+        "protect_embedding_artifact_binding",
+        "enforce_artifact_license_sequence",
+        "advance_artifact_license_current",
+        "protect_artifact_license_current",
+        "enforce_device_key_generation",
+    }
+)
+ML_R15_TRIGGERS = frozenset(
+    {
+        "z_ml_artifact_immutable",
+        "a_artifact_migration_issue_lock",
+        "z_artifact_migration_issue_immutable",
+        "z_embedding_artifact_binding",
+        "a_artifact_license_sequence",
+        "z_artifact_license_current",
+        "z_artifact_license_immutable",
+        "z_artifact_license_current_derived",
+        "z_face_artifact_release_immutable",
+        "z_sona_artifact_release_immutable",
+        "z_device_key_generation",
+        "z_control_step_up_receipt_immutable",
+    }
+)
+ML_R15_GPU_TABLES = frozenset(
+    {
+        ("ml", "gpu_device_authority"),
+        ("ml", "gpu_reservation_current"),
+        ("ml", "gpu_admission_receipt"),
+    }
+)
+ML_R15_GPU_INDEXES = frozenset({"ix_gpu_current_lease", "ix_gpu_receipt_device_time"})
+ML_R15_GPU_FUNCTIONS = frozenset({"protect_gpu_current_projection", "apply_gpu_admission_receipt"})
+ML_R15_GPU_TRIGGERS = frozenset(
+    {
+        "z_gpu_device_derived",
+        "z_gpu_current_derived",
+        "a_gpu_receipt_apply",
+        "z_gpu_receipt_immutable",
+    }
+)
+ML_R15_SONA_CAPTURE_TABLES = frozenset(
+    {
+        ("ml", "sona_capture_bundle"),
+        ("ml", "sona_capture_lineage_cursor"),
+        ("ml", "sona_capture_target_dispatch"),
+        ("ml", "sona_shadow_work"),
+        ("ml", "sona_shadow_attempt"),
+        ("ml", "sona_shadow_evidence"),
+    }
+)
+ML_R15_SONA_CAPTURE_INDEXES = frozenset(
+    {
+        "ix_sona_capture_owner_expiry",
+        "ix_sona_cursor_active_owner_expiry",
+        "ix_sona_dispatch_owner_state",
+        "ix_sona_work_claim_owner",
+        "ix_sona_attempt_owner_work",
+        "ix_sona_evidence_owner_request",
+    }
+)
+ML_R15_SONA_CAPTURE_FUNCTIONS = frozenset(
+    {
+        "protect_sona_capture_update",
+        "fence_sona_capture_state",
+        "validate_sona_work_target",
+        "validate_sona_capture_bundle",
+        "validate_sona_evidence_publication",
+        "validate_sona_capture_child",
+        "validate_sona_attempt_publication",
+        "require_sona_success_evidence",
+    }
+)
+ML_R15_SONA_CAPTURE_TRIGGERS = frozenset(
+    {
+        "z_sona_bundle_immutable",
+        "z_sona_attempt_immutable",
+        "z_sona_evidence_immutable",
+        "z_sona_cursor_fence",
+        "z_sona_dispatch_fence",
+        "z_sona_work_fence",
+        "a_sona_work_target",
+        "a_sona_bundle_validate",
+        "a_sona_evidence_validate",
+        "a_sona_cursor_validate",
+        "a_sona_dispatch_validate",
+        "a_sona_attempt_validate",
+        "z_sona_success_evidence",
+    }
+)
+ML_R15_FACE_ACTIVATION_TABLES = frozenset(
+    {
+        ("ml", "face_execution_profile"),
+        ("ml", "face_semantic_interpreter"),
+        ("ml", "face_qualification_set"),
+        ("ml", "face_qualification_approval"),
+        ("ml", "face_timeline_activation"),
+        ("ml", "face_activation_current"),
+        ("ml", "face_analysis_policy_history"),
+        ("ml", "face_analysis_policy_current"),
+    }
+)
+ML_R15_FACE_ACTIVATION_INDEXES = frozenset(
+    {
+        "ix_face_interpreter_encoder",
+        "ix_face_qualification_state_expiry",
+        "ix_face_approval_state_expiry",
+        "uq_face_policy_actor_operation",
+        "ix_face_policy_owner_created",
+        "ix_face_policy_current_effective",
+    }
+)
+ML_R15_FACE_ACTIVATION_FUNCTIONS = frozenset(
+    {
+        "protect_face_activation_immutable",
+        "fence_face_policy_actor_purge",
+        "fence_face_policy_history_insert",
+        "fence_face_qualification_insert",
+        "fence_face_qualification_state",
+        "fence_face_activation_current",
+        "fence_face_policy_current",
+    }
+)
+ML_R15_FACE_ACTIVATION_TRIGGERS = frozenset(
+    {
+        "z_face_profile_immutable",
+        "z_face_profile_no_delete",
+        "z_face_interpreter_immutable",
+        "z_face_interpreter_no_delete",
+        "z_face_qualification_no_delete",
+        "z_face_approval_no_delete",
+        "z_face_activation_immutable",
+        "z_face_activation_no_delete",
+        "z_face_activation_current_no_delete",
+        "z_face_policy_history_immutable",
+        "a_face_policy_history_authority",
+        "z_face_qualification_insert",
+        "z_face_approval_insert",
+        "z_face_qualification_state",
+        "z_face_approval_state",
+        "z_face_activation_current",
+        "z_face_policy_current",
+    }
+)
+
 
 def test_migrated_database_has_exact_named_inventory(
     database_harness: DatabaseHarness, database_name: str
@@ -417,6 +585,10 @@ def test_migrated_database_has_exact_named_inventory(
         | PA2_TABLES
         | R1B_TABLES
         | POST_0030_TABLES
+        | ML_R15_TABLES
+        | ML_R15_GPU_TABLES
+        | ML_R15_SONA_CAPTURE_TABLES
+        | ML_R15_FACE_ACTIVATION_TABLES
     )
     assert index_names == (
         expected.indexes
@@ -428,9 +600,20 @@ def test_migrated_database_has_exact_named_inventory(
         | PA2_INDEXES
         | R1B_INDEXES
         | POST_0030_INDEXES
+        | ML_R15_INDEXES
+        | ML_R15_GPU_INDEXES
+        | ML_R15_SONA_CAPTURE_INDEXES
+        | ML_R15_FACE_ACTIVATION_INDEXES
     )
     assert function_names == (
-        expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS | POST_0030_FUNCTIONS
+        expected.functions
+        | A1C_FUNCTIONS
+        | R1B_FUNCTIONS
+        | POST_0030_FUNCTIONS
+        | ML_R15_FUNCTIONS
+        | ML_R15_GPU_FUNCTIONS
+        | ML_R15_SONA_CAPTURE_FUNCTIONS
+        | ML_R15_FACE_ACTIVATION_FUNCTIONS
     )
     assert trigger_names == (
         expected.triggers
@@ -439,6 +622,10 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_TRIGGERS
         | R1B_TRIGGERS
         | POST_0030_TRIGGERS
+        | ML_R15_TRIGGERS
+        | ML_R15_GPU_TRIGGERS
+        | ML_R15_SONA_CAPTURE_TRIGGERS
+        | ML_R15_FACE_ACTIVATION_TRIGGERS
     )
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0

@@ -1,0 +1,46 @@
+{
+  "required_entries": [
+    {
+      "role": "ENCODER_WEIGHTS",
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "role": "INTERPRETER_EXPORT",
+      "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "role": "CALIBRATION",
+      "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "policy_entries": [
+    {
+      "role": "ENCODER_WEIGHTS",
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "decision_sequence": 2,
+      "decision_generation": 4,
+      "max_offline_revocation_lag_ms": 604800000,
+      "disposition": "RETAIN_NON_DISTRIBUTABLE"
+    },
+    {
+      "role": "INTERPRETER_EXPORT",
+      "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "decision_sequence": 3,
+      "decision_generation": 5,
+      "max_offline_revocation_lag_ms": 172800000,
+      "disposition": "DELETE_AFTER_LEASE"
+    },
+    {
+      "role": "CALIBRATION",
+      "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "decision_sequence": 1,
+      "decision_generation": 1,
+      "max_offline_revocation_lag_ms": 259200000,
+      "disposition": "RETAIN_NON_DISTRIBUTABLE"
+    }
+  ],
+  "required_canonical": "{\"entries\":[{\"artifact_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"role\":\"CALIBRATION\"},{\"artifact_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role\":\"ENCODER_WEIGHTS\"},{\"artifact_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"role\":\"INTERPRETER_EXPORT\"}],\"v\":1}",
+  "required_sha256": "39575697fe03cf9a1b5f78db3f09d704530794340ebc4423ac562c2d04339c8b",
+  "policy_canonical": "{\"entries\":[{\"artifact_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"decision_generation\":1,\"decision_sequence\":1,\"disposition\":\"RETAIN_NON_DISTRIBUTABLE\",\"max_offline_revocation_lag_ms\":259200000,\"role\":\"CALIBRATION\"},{\"artifact_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"decision_generation\":4,\"decision_sequence\":2,\"disposition\":\"RETAIN_NON_DISTRIBUTABLE\",\"max_offline_revocation_lag_ms\":604800000,\"role\":\"ENCODER_WEIGHTS\"},{\"artifact_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"decision_generation\":5,\"decision_sequence\":3,\"disposition\":\"DELETE_AFTER_LEASE\",\"max_offline_revocation_lag_ms\":172800000,\"role\":\"INTERPRETER_EXPORT\"}],\"v\":1}",
+  "policy_sha256": "7747957b1fba09c7dc3b7fcf045f6b542f91cf23a02c96759c1c18c005fe4cd9"
+}

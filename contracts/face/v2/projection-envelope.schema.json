@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.app/contracts/face/v2/projection-envelope.schema.json",
+  "title": "Authorized FaceProjectionEnvelopeV2",
+  "x-autplay-implementation-status": "CONTRACT_ONLY_DISABLED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "projection_id", "server_profile_id", "user_id",
+    "timeline_identity", "semantic_key_sha256", "result_sha256", "byte_size",
+    "activation_epoch", "policy_generation", "redirect_generation",
+    "required_role_cardinality", "artifact_policy", "required_artifact_set_sha256",
+    "artifact_policy_list_sha256", "offline_lease_ms", "derived_output_disposition",
+    "source_presentation_map_sha256", "issued_at_ms", "authorized_until_ms",
+    "server_instance_id", "server_identity_epoch",
+    "server_identity_thumbprint_sha256", "server_key_id", "state",
+    "signature_algorithm", "signature_b64url"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "projection_id": {"$ref": "#/$defs/uuid"},
+    "server_profile_id": {"$ref": "#/$defs/uuid"},
+    "user_id": {"$ref": "#/$defs/uuid"},
+    "timeline_identity": {"$ref": "timeline-identity.schema.json"},
+    "semantic_key_sha256": {"$ref": "#/$defs/sha256"},
+    "result_sha256": {"$ref": "#/$defs/sha256"},
+    "byte_size": {"type": "integer", "minimum": 1, "maximum": 1048576},
+    "activation_epoch": {"$ref": "#/$defs/generation"},
+    "policy_generation": {"$ref": "#/$defs/generation"},
+    "redirect_generation": {
+      "type": "integer", "minimum": 0, "maximum": 9007199254740991
+    },
+    "required_role_cardinality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ENCODER_WEIGHTS", "INTERPRETER_EXPORT", "CALIBRATION",
+        "PREPROCESSING_EXECUTABLE", "DECODER_PROBE", "TIMELINE_CODEC"
+      ],
+      "properties": {
+        "ENCODER_WEIGHTS": {"type": "integer", "minimum": 1, "maximum": 256},
+        "INTERPRETER_EXPORT": {"type": "integer", "minimum": 1, "maximum": 256},
+        "CALIBRATION": {"type": "integer", "minimum": 0, "maximum": 256},
+        "PREPROCESSING_EXECUTABLE": {"type": "integer", "minimum": 0, "maximum": 256},
+        "DECODER_PROBE": {"type": "integer", "minimum": 0, "maximum": 256},
+        "TIMELINE_CODEC": {"type": "integer", "minimum": 0, "maximum": 256}
+      }
+    },
+    "artifact_policy": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role", "artifact_sha256", "decision_sequence", "decision_generation",
+          "max_offline_revocation_lag_ms", "disposition"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "ENCODER_WEIGHTS", "INTERPRETER_EXPORT", "CALIBRATION",
+              "PREPROCESSING_EXECUTABLE", "DECODER_PROBE", "TIMELINE_CODEC"
+            ]
+          },
+          "artifact_sha256": {"$ref": "#/$defs/sha256"},
+          "decision_sequence": {"$ref": "#/$defs/generation"},
+          "decision_generation": {"$ref": "#/$defs/generation"},
+          "max_offline_revocation_lag_ms": {
+            "type": "integer", "minimum": 1, "maximum": 9007199254740991
+          },
+          "disposition": {
+            "enum": ["DELETE_AFTER_LEASE", "RETAIN_NON_DISTRIBUTABLE"]
+          }
+        }
+      }
+    },
+    "required_artifact_set_sha256": {"$ref": "#/$defs/sha256"},
+    "artifact_policy_list_sha256": {"$ref": "#/$defs/sha256"},
+    "offline_lease_ms": {"type": "integer", "minimum": 1, "maximum": 604800000},
+    "derived_output_disposition": {
+      "enum": ["DELETE_AFTER_LEASE", "RETAIN_NON_DISTRIBUTABLE"]
+    },
+    "source_presentation_map_sha256": {"$ref": "#/$defs/sha256"},
+    "issued_at_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "authorized_until_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "server_instance_id": {"$ref": "#/$defs/uuid"},
+    "server_identity_epoch": {"$ref": "#/$defs/generation"},
+    "server_identity_thumbprint_sha256": {"$ref": "#/$defs/sha256"},
+    "server_key_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "state": {"const": "ACTIVE"},
+    "signature_algorithm": {"const": "ES256-P1363"},
+    "signature_b64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "generation": {
+      "type": "integer", "minimum": 1, "maximum": 9007199254740991
+    }
+  }
+}

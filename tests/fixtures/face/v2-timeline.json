@@ -1,0 +1,106 @@
+{
+  "schema_version": 2,
+  "identity": {
+    "schema_version": 2,
+    "timeline_codec_version": 2,
+    "source_timebase": "DECODED_SAMPLE_INDEX_V2",
+    "recording_id": "10000000-0000-4000-8000-000000000001",
+    "audio_variant_id": "20000000-0000-4000-8000-000000000002",
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "decoded_sample_rate": 48000,
+    "decoded_sample_count": 80000,
+    "source_presentation_map_sha256": "d28b8c2322def220d3b610d9e1b182f2364590d69830e752b4c11847ede31630",
+    "embedding_model_id": "30000000-0000-4000-8000-000000000003",
+    "embedding_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "semantic_interpreter_id": "40000000-0000-4000-8000-000000000004",
+    "interpreter_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "preprocessing_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "calibration_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "execution_profile_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "source_presentation_map": {
+    "schema_version": 1,
+    "kind": "SOURCE_PRESENTATION_MAP_V1",
+    "encoded_source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "decoded_sample_rate": 48000,
+    "decoded_sample_count": 80000,
+    "decoder_id": "ffmpeg",
+    "decoder_version": "7.1.1",
+    "probe_id": "ffprobe",
+    "probe_version": "7.1.1",
+    "leading_trim_samples": 1024,
+    "trailing_trim_samples": 0,
+    "encoder_delay_samples": 1024,
+    "encoder_padding_samples": 0,
+    "segments": [
+      {
+        "presentation_start_us": 0,
+        "presentation_end_us": 1000000,
+        "source_start_sample": 1024
+      },
+      {
+        "presentation_start_us": 1500000,
+        "presentation_end_us": 2000000,
+        "source_start_sample": 49024
+      }
+    ]
+  },
+  "track_character": {
+    "axes": {
+      "calm_energetic": {
+        "value": 0.25,
+        "confidence": 0.8,
+        "abstained": false,
+        "reason_code": null
+      },
+      "positive_melancholic": {
+        "value": null,
+        "confidence": null,
+        "abstained": true,
+        "reason_code": "SYNTHETIC_FIXTURE"
+      }
+    }
+  },
+  "keyframes": [
+    {
+      "sample_index": 1024,
+      "state": {
+        "axes": {
+          "calm_energetic": {
+            "value": 0.25,
+            "confidence": 0.8,
+            "abstained": false,
+            "reason_code": null
+          },
+          "positive_melancholic": {
+            "value": null,
+            "confidence": null,
+            "abstained": true,
+            "reason_code": "SYNTHETIC_FIXTURE"
+          }
+        }
+      }
+    },
+    {
+      "sample_index": 49024,
+      "state": {
+        "axes": {
+          "calm_energetic": {
+            "value": -0.25,
+            "confidence": 0.75,
+            "abstained": false,
+            "reason_code": null
+          }
+        }
+      }
+    }
+  ],
+  "events": [
+    {
+      "sample_index": 49024,
+      "event_type": "transition",
+      "strength": 0.5,
+      "confidence": 0.75
+    }
+  ]
+}

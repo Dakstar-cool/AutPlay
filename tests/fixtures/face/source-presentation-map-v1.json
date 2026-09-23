@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "SOURCE_PRESENTATION_MAP_V1",
+  "encoded_source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "decoded_sample_rate": 48000,
+  "decoded_sample_count": 80000,
+  "decoder_id": "ffmpeg",
+  "decoder_version": "7.1.1",
+  "probe_id": "ffprobe",
+  "probe_version": "7.1.1",
+  "leading_trim_samples": 1024,
+  "trailing_trim_samples": 0,
+  "encoder_delay_samples": 1024,
+  "encoder_padding_samples": 0,
+  "segments": [
+    {"presentation_start_us": 0, "presentation_end_us": 1000000, "source_start_sample": 1024},
+    {"presentation_start_us": 1500000, "presentation_end_us": 2000000, "source_start_sample": 49024}
+  ]
+}

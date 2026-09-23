@@ -44,6 +44,7 @@ from autplay.ports.recommendations import (
     OfflinePackRepository,
     PreparedUserRepresentation,
     Ranker,
+    RecommendationAtomicWriter,
     RecommendationFilter,
     RecommendationSnapshotRepository,
     RecommendationTraceRepository,
@@ -637,6 +638,7 @@ class RecommendationService:
         runner: RecommendationPipelineRunner | None = None,
         packs: OfflinePackRepository | None = None,
         snapshot_retention: timedelta = timedelta(days=30),
+        atomic_writer: RecommendationAtomicWriter | None = None,
     ) -> None:
         self._snapshots = snapshots
         self._traces = traces
@@ -646,6 +648,7 @@ class RecommendationService:
         self._runner = runner or RecommendationPipelineRunner()
         self._packs = packs
         self._snapshot_retention = snapshot_retention
+        self._atomic_writer = atomic_writer
 
     def recommend(
         self,
@@ -656,10 +659,24 @@ class RecommendationService:
     ) -> RecommendationResponse:
         now = self._clock()
         pipeline = self._registry.resolve(pipeline_key, pipeline_version)
+        request_id = self._ids()
+        if self._atomic_writer is not None:
+            return self._atomic_writer.capture_run_save(
+                user_id=query.user_id,
+                request_time=now,
+                capture_eligible=(
+                    query.surface is RecommendationSurface.RECOMMENDATIONS and not query.shadow
+                ),
+                retained_until=now + self._snapshot_retention,
+                pipeline=pipeline,
+                build_response=lambda snapshot: self._serve(
+                    query, pipeline, snapshot, request_id, now, persist=False
+                ),
+            )
         snapshot = self._snapshots.capture(
             query.user_id, retained_until=now + self._snapshot_retention
         )
-        return self._serve(query, pipeline, snapshot, self._ids(), now, persist=True)
+        return self._serve(query, pipeline, snapshot, request_id, now, persist=True)
 
     def exact_replay(self, user_id: UUID, request_id: UUID) -> RecommendationResponse:
         response = self._traces.exact(user_id, request_id)

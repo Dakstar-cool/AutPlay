@@ -4,23 +4,36 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from threading import Event
 from time import monotonic, sleep
 from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import create_engine, insert, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
+
+from autplay.adapters.postgresql.models import RecommendationRequestRow
+from autplay.adapters.postgresql.models.sona_capture import (
+    SonaCaptureBundleRow,
+    SonaCaptureLineageCursorRow,
+)
 from autplay.adapters.postgresql.models.training_consent import (
     TrainingConsentOperationRow,
     TrainingConsentRow,
 )
 from autplay.adapters.postgresql.models.training_work import TrainingCleanupClaimRow, TrainingRunRow
+from autplay.adapters.postgresql.recommendations import SqlAlchemyRecommendationRuntime
+from autplay.application.recommendations import (
+    RecommendationService,
+    StaticRecommendationVersionRegistry,
+)
 from autplay.application.training_consent import MAX_REVISION, TrainingConsentError
 from autplay.application.training_work import TrainingWorkError
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
+from autplay.domain.recommendations import RecommendationQuery, RecommendationSurface
 
 from .conftest import DatabaseHarness
 from .test_training_consent import PairingHarness, command, service
@@ -113,6 +126,69 @@ def test_old_backup_cannot_restore_grant_run_or_checkpoint_authority(
         restored_work.register(
             uuid4(), source_sha256="a" * 64, participants={pair.actor.user_id: 3}
         )
+
+
+def test_old_backup_cannot_restore_native_capture_after_consent_withdrawal(
+    pair: PairingHarness, database_harness: DatabaseHarness
+) -> None:
+    service(pair).decide(pair.actor, command(pair, "GRANTED"))
+    sessions = sessionmaker(pair.engine, class_=Session, expire_on_commit=False)
+    runtime = SqlAlchemyRecommendationRuntime(sessions)
+    recommendations = RecommendationService(
+        snapshots=runtime,
+        traces=runtime,
+        registry=StaticRecommendationVersionRegistry(),
+        ids=uuid4,
+        clock=lambda: datetime.now(UTC),
+        atomic_writer=runtime,
+        snapshot_retention=timedelta(days=181),
+    )
+    response = recommendations.recommend(
+        RecommendationQuery(pair.actor.user_id, RecommendationSurface.RECOMMENDATIONS)
+    )
+    capture_id = response.request.recommendation_request_id
+    baseline = runtime.load(pair.actor.user_id, response.request.snapshot.snapshot_id)
+    assert baseline is not None
+    digest = sha256(b"restore-capture-fixture").digest()
+    with sessions.begin() as session:
+        session.execute(
+            insert(SonaCaptureBundleRow).values(
+                recommendation_request_id=capture_id,
+                user_id=pair.actor.user_id,
+                baseline_snapshot_sha256=bytes.fromhex(
+                    response.request.snapshot.input_snapshot_sha256
+                ),
+                temporal_snapshot_sha256=digest,
+                candidate_membership_sha256=digest,
+                p11_ranking_sha256=digest,
+                bundle_sha256=sha256(b"{}").digest(),
+                consent_receipt_sha256=digest,
+                consent_generation=1,
+                cutoff_at_ms=0,
+                interaction_watermark=response.request.snapshot.interaction_watermark,
+                universe_count=len(baseline.tracks),
+                eligible_count=0,
+                bundle_document=b"{}",
+                created_at=response.request.created_at,
+                expires_at=response.request.created_at + timedelta(days=180),
+            )
+        )
+        session.execute(
+            insert(SonaCaptureLineageCursorRow).values(
+                recommendation_request_id=capture_id,
+                user_id=pair.actor.user_id,
+                expires_at=response.request.created_at + timedelta(days=180),
+            )
+        )
+    with restored_copy(pair, database_harness) as restored:
+        service(pair).decide(pair.actor, command(pair, "WITHDRAWN", 1))
+        with Session(restored.engine) as session:
+            assert session.get(SonaCaptureBundleRow, capture_id) is not None
+        assert service(restored).restore_guard() == 1
+        with Session(restored.engine) as session:
+            assert session.get(SonaCaptureBundleRow, capture_id) is None
+            assert session.get(SonaCaptureLineageCursorRow, capture_id) is None
+            assert session.get(RecommendationRequestRow, capture_id) is not None
 
 
 def test_failed_private_commit_still_blocks_work_and_exact_retry_uses_original_evidence(

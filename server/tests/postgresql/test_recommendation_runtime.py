@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from time import perf_counter, sleep
 from uuid import UUID, uuid4, uuid7
 
 import pytest
+from psycopg import Error as PsycopgError
+from sqlalchemy import create_engine, func, insert, select, text, update
+from sqlalchemy import event as sa_event
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
+
+from autplay.adapters.postgresql.adaptive_recommendations import (
+    SqlAlchemyAdaptiveRecommendationRepository,
+)
 from autplay.adapters.postgresql.models import (
     DeviceRow,
     OfflineRecommendationPackRow,
@@ -15,27 +26,33 @@ from autplay.adapters.postgresql.models import (
     RecommendationItemRow,
     RecommendationPipelineVersionRow,
     RecommendationRequestRow,
+    SonaCaptureBundleRow,
+    SonaCaptureLineageCursorRow,
     UserAccountRow,
 )
 from autplay.adapters.postgresql.recommendations import (
     SqlAlchemyOfflinePackRepository,
     SqlAlchemyRecommendationRuntime,
 )
+from autplay.adapters.postgresql.sona_capture import SqlAlchemySonaCaptureWriter
 from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
 )
+from autplay.application.sona_capture import SonaCaptureBundleV1
+from autplay.application.training_consent import TrainingCaptureGrant
+from autplay.domain.adaptive_recommendations import (
+    DEFAULT_ADAPTIVE_FEATURE_POLICY,
+    project_temporal_profile,
+)
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.recommendations import (
+    RecommendationInputSnapshot,
     RecommendationQuery,
+    RecommendationResponse,
     RecommendationSurface,
     ReplayInputUnavailable,
 )
-from psycopg import Error as PsycopgError
-from sqlalchemy import create_engine, select, text, update
-from sqlalchemy import event as sa_event
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
 
 
 def _principal(session: Session, name: str) -> Principal:
@@ -140,6 +157,7 @@ def test_owner_snapshot_atomic_trace_replay_pack_and_latency(database_url: str) 
             ids=uuid7,
             clock=lambda: datetime.now(UTC),
             packs=SqlAlchemyOfflinePackRepository(runtime),
+            atomic_writer=runtime,
         )
         started = perf_counter()
         response = service.recommend(
@@ -232,6 +250,7 @@ def test_manifest_immutability_atomic_failure_and_snapshot_owner(database_url: s
             registry=StaticRecommendationVersionRegistry(),
             ids=uuid7,
             clock=lambda: datetime.now(UTC),
+            atomic_writer=runtime,
         )
         response = service.recommend(
             RecommendationQuery(owner.user_id, RecommendationSurface.RECOMMENDATIONS)
@@ -266,6 +285,305 @@ def test_manifest_immutability_atomic_failure_and_snapshot_owner(database_url: s
             loaded = runtime.load(owner.user_id, snapshot.recommendation_input_snapshot_id)
             assert loaded is not None
             assert recording_id in {track.recording_id for track in loaded.tracks}
+    finally:
+        engine.dispose()
+
+
+def test_atomic_cpu_failure_rolls_back_captured_snapshot(database_url: str) -> None:
+    engine = create_engine(database_url)
+    try:
+        sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+        with sessions() as session:
+            owner = _principal(session, "atomic-rollback-owner")
+            session.commit()
+        runtime = SqlAlchemyRecommendationRuntime(sessions)
+        pipeline = StaticRecommendationVersionRegistry().resolve("cpu-baseline")
+
+        def fail_after_capture(_snapshot: object) -> RecommendationResponse:
+            raise RuntimeError("CPU failpoint after snapshot capture")
+
+        with pytest.raises(RuntimeError, match="CPU failpoint"):
+            runtime.capture_run_save(
+                user_id=owner.user_id,
+                request_time=datetime.now(UTC),
+                capture_eligible=False,
+                retained_until=datetime.now(UTC) + timedelta(days=30),
+                pipeline=pipeline,
+                build_response=fail_after_capture,
+            )
+        with sessions() as session:
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(RecommendationInputSnapshotRow)
+                    .where(RecommendationInputSnapshotRow.user_id == owner.user_id)
+                )
+                == 0
+            )
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(RecommendationRequestRow)
+                    .where(RecommendationRequestRow.user_id == owner.user_id)
+                )
+                == 0
+            )
+    finally:
+        engine.dispose()
+
+
+def test_native_capture_hook_commits_only_with_bundle_and_cursor(database_url: str) -> None:
+    engine = create_engine(database_url)
+    try:
+        sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+        with sessions() as session:
+            owner = _principal(session, "native-hook-owner")
+            session.commit()
+        query = RecommendationQuery(owner.user_id, RecommendationSurface.RECOMMENDATIONS)
+
+        def service_for(
+            capture: Callable[
+                [
+                    Session,
+                    RecommendationInputSnapshot,
+                    RecommendationResponse,
+                    TrainingCaptureGrant,
+                ],
+                SonaCaptureBundleV1 | None,
+            ],
+        ) -> RecommendationService:
+            runtime = SqlAlchemyRecommendationRuntime(
+                sessions,
+                native_capture=capture,
+                native_capture_gate=lambda _session, _owner: TrainingCaptureGrant(
+                    1, sha256(b"fixture").hexdigest()
+                ),
+            )
+            return RecommendationService(
+                snapshots=runtime,
+                traces=runtime,
+                registry=StaticRecommendationVersionRegistry(),
+                ids=uuid7,
+                clock=lambda: datetime.now(UTC),
+                atomic_writer=runtime,
+                snapshot_retention=timedelta(days=180, seconds=1),
+            )
+
+        def missing(
+            _session: Session,
+            _snapshot: RecommendationInputSnapshot,
+            _response: RecommendationResponse,
+            _grant: TrainingCaptureGrant,
+        ) -> None:
+            pass
+
+        with pytest.raises(ValueError, match="both consent gate and writer"):
+            SqlAlchemyRecommendationRuntime(sessions, native_capture=missing)
+        with pytest.raises(ValueError, match="bundle and cursor are required"):
+            service_for(missing).recommend(query)
+
+        def crash(
+            _session: Session,
+            _snapshot: RecommendationInputSnapshot,
+            _response: RecommendationResponse,
+            _grant: TrainingCaptureGrant,
+        ) -> None:
+            raise RuntimeError("capture failpoint after request flush")
+
+        with pytest.raises(RuntimeError, match="capture failpoint"):
+            service_for(crash).recommend(query)
+        with sessions() as session:
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(RecommendationInputSnapshotRow)
+                    .where(RecommendationInputSnapshotRow.user_id == owner.user_id)
+                )
+                == 0
+            )
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(RecommendationRequestRow)
+                    .where(RecommendationRequestRow.user_id == owner.user_id)
+                )
+                == 0
+            )
+
+        def capture(
+            session: Session,
+            snapshot: RecommendationInputSnapshot,
+            response: RecommendationResponse,
+            _grant: TrainingCaptureGrant,
+        ) -> None:
+            request_id, created_at = (
+                response.request.recommendation_request_id,
+                response.request.created_at,
+            )
+            digest = sha256(b"fixture").digest()
+            session.execute(
+                insert(SonaCaptureBundleRow).values(
+                    recommendation_request_id=request_id,
+                    user_id=owner.user_id,
+                    baseline_snapshot_sha256=bytes.fromhex(
+                        snapshot.reference.input_snapshot_sha256
+                    ),
+                    temporal_snapshot_sha256=digest,
+                    candidate_membership_sha256=digest,
+                    p11_ranking_sha256=digest,
+                    bundle_sha256=sha256(b"{}").digest(),
+                    consent_receipt_sha256=digest,
+                    consent_generation=1,
+                    cutoff_at_ms=0,
+                    interaction_watermark=snapshot.reference.interaction_watermark,
+                    universe_count=len(snapshot.tracks),
+                    eligible_count=0,
+                    bundle_document=b"{}",
+                    created_at=created_at,
+                    expires_at=created_at + timedelta(days=180),
+                )
+            )
+            session.execute(
+                insert(SonaCaptureLineageCursorRow).values(
+                    recommendation_request_id=request_id,
+                    user_id=owner.user_id,
+                    expires_at=created_at + timedelta(days=180),
+                )
+            )
+
+        service = service_for(capture)
+        with pytest.raises(ValueError, match="prepared native capture bundle is required"):
+            service.recommend(query)
+        with sessions() as session:
+            assert session.scalar(select(func.count()).select_from(RecommendationRequestRow)) == 0
+            assert session.scalar(select(func.count()).select_from(SonaCaptureBundleRow)) == 0
+    finally:
+        engine.dispose()
+
+
+def test_native_capture_writer_joins_p11_and_temporal_transaction(database_url: str) -> None:
+    engine = create_engine(database_url)
+    try:
+        sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+        with sessions.begin() as session:
+            owner = _principal(session, "native-writer-owner")
+            provider_id = uuid7()
+            session.execute(
+                text(
+                    "INSERT INTO identity.source_provider "
+                    "(provider_id,provider_key,display_name,adapter_id,adapter_version) "
+                    "VALUES (:id,'sona.writer.fixture','Sona writer fixture','fixture','1')"
+                ),
+                {"id": provider_id},
+            )
+            recording_id = _vault_recording(
+                session, owner.user_id, index=41, provider_id=provider_id
+            )
+        adaptive = SqlAlchemyAdaptiveRecommendationRepository(sessions)
+        writer = SqlAlchemySonaCaptureWriter()
+        fail_after_write = True
+        tamper_return = False
+        tamper_grant = False
+
+        def capture(
+            session: Session,
+            snapshot: RecommendationInputSnapshot,
+            response: RecommendationResponse,
+            grant: TrainingCaptureGrant,
+        ) -> SonaCaptureBundleV1:
+            profile = project_temporal_profile(
+                owner_user_id=owner.user_id,
+                cutoff_at_ms=int(response.request.created_at.timestamp() * 1000),
+                interaction_watermark=snapshot.reference.interaction_watermark,
+                evidence=(),
+            )
+            reference = adaptive.save_snapshot(
+                baseline=snapshot,
+                profile=profile,
+                evidence=(),
+                retained_until=snapshot.retained_until,
+                policy=DEFAULT_ADAPTIVE_FEATURE_POLICY,
+                session=session,
+            )
+            temporal = adaptive.load_sona_snapshot(
+                owner.user_id, reference.snapshot_id, session=session
+            )
+            assert temporal is not None
+            bundle = writer.write(
+                session,
+                baseline=snapshot,
+                response=response,
+                temporal=temporal,
+                consent_receipt_sha256=grant.receipt_sha256,
+                consent_generation=grant.revision,
+            )
+            assert bundle.universe_count == bundle.eligible_count == 1
+            assert str(recording_id) in bundle.document.decode("utf-8")
+            if fail_after_write:
+                raise RuntimeError("crash after complete native capture")
+            if tamper_grant:
+                return replace(bundle, consent_receipt_sha256="f" * 64)
+            if tamper_return:
+                return replace(bundle, p11_ranking_sha256="f" * 64)
+            return bundle
+
+        runtime = SqlAlchemyRecommendationRuntime(
+            sessions,
+            native_capture=capture,
+            native_capture_gate=lambda _session, _owner: TrainingCaptureGrant(
+                1, sha256(b"independent-consent-fixture").hexdigest()
+            ),
+        )
+        service = RecommendationService(
+            snapshots=runtime,
+            traces=runtime,
+            registry=StaticRecommendationVersionRegistry(),
+            ids=uuid7,
+            clock=lambda: datetime.now(UTC),
+            atomic_writer=runtime,
+            snapshot_retention=timedelta(days=180, seconds=1),
+        )
+        query = RecommendationQuery(owner.user_id, RecommendationSurface.RECOMMENDATIONS)
+        with pytest.raises(RuntimeError, match="crash after complete native capture"):
+            service.recommend(query)
+        with sessions() as session:
+            assert session.scalar(select(func.count()).select_from(RecommendationRequestRow)) == 0
+            assert session.scalar(select(func.count()).select_from(SonaCaptureBundleRow)) == 0
+            assert (
+                session.scalar(text("SELECT count(*) FROM ml.recommendation_temporal_snapshot"))
+                == 0
+            )
+
+        fail_after_write = False
+        tamper_return = True
+        with pytest.raises(ValueError, match="native capture does not bind"):
+            service.recommend(query)
+        with sessions() as session:
+            assert session.scalar(select(func.count()).select_from(RecommendationRequestRow)) == 0
+            assert session.scalar(select(func.count()).select_from(SonaCaptureBundleRow)) == 0
+
+        tamper_return = False
+        tamper_grant = True
+        with pytest.raises(ValueError, match="native capture consent receipt mismatch"):
+            service.recommend(query)
+        with sessions() as session:
+            assert session.scalar(select(func.count()).select_from(RecommendationRequestRow)) == 0
+            assert session.scalar(select(func.count()).select_from(SonaCaptureBundleRow)) == 0
+
+        tamper_grant = False
+        response = service.recommend(query)
+        with sessions() as session:
+            bundle = session.get(SonaCaptureBundleRow, response.request.recommendation_request_id)
+            cursor = session.get(
+                SonaCaptureLineageCursorRow, response.request.recommendation_request_id
+            )
+            assert bundle is not None and cursor is not None
+            assert bundle.eligible_count == 1
+            assert bundle.bundle_sha256 == sha256(bundle.bundle_document).digest()
+            assert (
+                session.scalar(text("SELECT count(*) FROM ml.recommendation_temporal_snapshot"))
+                == 1
+            )
     finally:
         engine.dispose()
 

@@ -10,7 +10,15 @@ import pytest
 from psycopg import Connection, sql
 
 from .conftest import DatabaseHarness
-from .schema_contract import MODULE_SCHEMAS, SchemaSnapshot, snapshot_schema
+from .schema_contract import (
+    EXPECTED_EXPLICIT_INDEX_COUNT,
+    EXPECTED_FUNCTION_COUNT,
+    EXPECTED_TABLE_COUNT,
+    EXPECTED_TRIGGER_COUNT,
+    MODULE_SCHEMAS,
+    SchemaSnapshot,
+    snapshot_schema,
+)
 
 APPLICATION_SCHEMAS = frozenset((*MODULE_SCHEMAS, "app_private"))
 REFERENCE_EXTENSIONS = frozenset(("pg_trgm", "vector"))
@@ -63,13 +71,13 @@ def test_full_head_snapshot_is_restored_after_clean_downgrade_to_base(
         first_extensions = _reference_extensions(connection)
         first_revision = _alembic_revision(connection)
 
-    assert len(first_head.tables) == 163
-    assert len(first_head.explicit_indexes) == 154
-    assert len(first_head.functions) == 59
-    assert len(first_head.triggers) == 118
+    assert len(first_head.tables) == EXPECTED_TABLE_COUNT
+    assert len(first_head.explicit_indexes) == EXPECTED_EXPLICIT_INDEX_COUNT
+    assert len(first_head.functions) == EXPECTED_FUNCTION_COUNT
+    assert len(first_head.triggers) == EXPECTED_TRIGGER_COUNT
     assert first_schemas == APPLICATION_SCHEMAS
     assert first_extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}
-    assert first_revision == "0060_local_bridge_authority"
+    assert first_revision == "0064_face_artifact_activation"
 
     database_harness.downgrade(empty_database_name, "base")
     with database_harness.connect(empty_database_name) as connection:

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "ids": [
+    "00000000-0000-0000-0000-00000000000b",
+    "00000000-0000-0000-0000-00000000000c",
+    "00000000-0000-0000-0000-00000000000d",
+    "00000000-0000-0000-0000-00000000000e"
+  ],
+  "document": {
+    "baseline_snapshot_id": "00000000-0000-0000-0000-00000000000c",
+    "baseline_snapshot_sha256": "3204da2db293bc0f178e0e32b8be07d890efdc924af54e911077ef8026812251",
+    "candidate_membership_sha256": "835448e47c913d531fb0c9c74843cf334f896ded46acb806e00ddf7357058c0b",
+    "candidate_recording_ids": ["00000000-0000-0000-0000-000000000002"],
+    "consent_generation": 1,
+    "consent_receipt_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "cutoff_at_ms": 1790164800000,
+    "eligible_count": 1,
+    "feature_policy_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ineligibility_reason": null,
+    "interaction_watermark": 7,
+    "kind": "SONA_CAPTURE_BUNDLE_V1",
+    "owner_user_id": "00000000-0000-0000-0000-00000000000b",
+    "p11_ranking_sha256": "fdd08799a3105e0fdd6494e342f23d60887ef9681f85f50c8ab4a32dc5c8cab0",
+    "pipeline_manifest_sha256": "50857a693fccfa10e7822d8bdf3b16c1cd3da99c3d8f0a52b7ebabacfe67c3cb",
+    "recommendation_request_id": "00000000-0000-0000-0000-00000000000d",
+    "request_sha256": "637e163769ba3a13f2bf845ce2976c12333b50226c122313bba136b79b94fcfb",
+    "schema_version": 1,
+    "temporal_snapshot_id": "00000000-0000-0000-0000-00000000000e",
+    "temporal_snapshot_sha256": "c5dfc83bfa20febdb7d06fc427e70565760b37357638fd621315cc588357d14c",
+    "universe_count": 1
+  },
+  "bundle_sha256": "a7c90afd9b9c4ac534002a9778e3117b771fcf419c7c4234c4ca9d7e37985417"
+}

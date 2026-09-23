@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.app/contracts/face/v2/timeline-identity.schema.json",
+  "title": "FaceTimelineIdentityV2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "timeline_codec_version", "source_timebase", "recording_id",
+    "audio_variant_id", "source_sha256", "decoded_sample_rate", "decoded_sample_count",
+    "source_presentation_map_sha256", "embedding_model_id", "embedding_manifest_sha256",
+    "semantic_interpreter_id", "interpreter_manifest_sha256", "preprocessing_sha256",
+    "calibration_sha256", "execution_profile_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "timeline_codec_version": {"const": 2},
+    "source_timebase": {"const": "DECODED_SAMPLE_INDEX_V2"},
+    "recording_id": {"$ref": "#/$defs/uuid"},
+    "audio_variant_id": {"$ref": "#/$defs/uuid"},
+    "source_sha256": {"$ref": "#/$defs/sha256"},
+    "decoded_sample_rate": {"type": "integer", "minimum": 8000, "maximum": 384000},
+    "decoded_sample_count": {"type": "integer", "minimum": 1, "maximum": 33177600000},
+    "source_presentation_map_sha256": {"$ref": "#/$defs/sha256"},
+    "embedding_model_id": {"$ref": "#/$defs/uuid"},
+    "embedding_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "semantic_interpreter_id": {"$ref": "#/$defs/uuid"},
+    "interpreter_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "preprocessing_sha256": {"$ref": "#/$defs/sha256"},
+    "calibration_sha256": {"$ref": "#/$defs/sha256"},
+    "execution_profile_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

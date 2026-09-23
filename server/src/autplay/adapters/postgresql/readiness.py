@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0060_local_bridge_authority"
+EXPECTED_MIGRATION_HEAD: Final = "0064_face_artifact_activation"
 
 
 @dataclass(frozen=True, slots=True)

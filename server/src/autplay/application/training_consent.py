@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.models.account import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
+from autplay.adapters.postgresql.models.sona_capture import SonaCaptureBundleRow
 from autplay.adapters.postgresql.models.training_consent import (
     TrainingConsentOperationRow,
     TrainingConsentRow,
@@ -17,10 +19,22 @@ from autplay.adapters.postgresql.models.training_consent import (
 from autplay.adapters.postgresql.models.training_work import TrainingParticipantRow, TrainingRunRow
 from autplay.domain.auth import Principal
 from autplay.domain.profile_pairing import canonical_sha256, iso8601
-from autplay.domain.training_consent import TrainingConsentHistory, TrainingConsentIntent
+from autplay.domain.training_consent import (
+    TrainingConsentEvidenceError,
+    TrainingConsentHistory,
+    TrainingConsentIntent,
+)
 from autplay.ports.training_consent import TrainingConsentLedger
 
 MAX_REVISION = 9_007_199_254_740_991
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingCaptureGrant:
+    """Current independent R1B authority held under the caller's account lock."""
+
+    revision: int
+    receipt_sha256: str
 
 
 class TrainingConsentError(RuntimeError):
@@ -46,9 +60,11 @@ class TrainingConsentService:
     @classmethod
     def _actor(cls, session: Session, principal: Principal) -> None:
         account = cls.lock_account(session, principal.user_id)
-        device = session.get(
-            DeviceRow, principal.device_id, with_for_update=True, populate_existing=True
-        )
+        device = session.execute(
+            select(DeviceRow.user_id, DeviceRow.revoked_at)
+            .where(DeviceRow.device_id == principal.device_id)
+            .with_for_update()
+        ).one_or_none()
         credential = session.get(
             UserSessionRow, principal.session_id, with_for_update=True, populate_existing=True
         )
@@ -56,8 +72,8 @@ class TrainingConsentService:
         if (
             principal.role.value != account.role
             or device is None
-            or device.user_id != account.user_id
-            or device.revoked_at is not None
+            or device[0] != account.user_id
+            or device[1] is not None
             or credential is None
             or credential.user_id != account.user_id
             or credential.device_id != principal.device_id
@@ -257,6 +273,16 @@ class TrainingConsentService:
             )
             session.add(receipt)
             session.flush()
+            if applied != "GRANTED" and session.scalar(
+                text("SELECT to_regclass('ml.sona_capture_bundle') IS NOT NULL")
+            ):
+                # The independent private intent was durable before this transaction.
+                # Remove native shadow inputs under the same account lock as withdrawal.
+                session.execute(
+                    delete(SonaCaptureBundleRow).where(
+                        SonaCaptureBundleRow.user_id == principal.user_id
+                    )
+                )
             return self._result(principal.user_id, row, receipt)
 
     @classmethod
@@ -290,6 +316,41 @@ class TrainingConsentService:
         ):
             raise TrainingConsentError("training_consent_required")
         self._require_evidence(session, user_id, row, history or self._ledger.read())
+
+    def capture_grant(self, session: Session, user_id: UUID) -> TrainingCaptureGrant | None:
+        """Return a provenance-bound receipt only for a proven current R1B grant.
+
+        The caller must keep this transaction open through native P11 capture.
+        A concurrent withdrawal uses the same account lock and cannot cross it.
+        """
+
+        if not session.in_transaction():
+            raise TrainingConsentError("training_consent_transaction_required")
+        self.lock_account(session, user_id)
+        row = session.get(TrainingConsentRow, user_id, with_for_update=True, populate_existing=True)
+        if row is None or row.decision != "GRANTED":
+            return None
+        try:
+            history = self._ledger.read()
+        except TrainingConsentEvidenceError:
+            return None
+        if not self._proven_grant(session, user_id, row, history):
+            return None
+        intent = history.latest[self._ledger.owner_tag(user_id)]
+        return TrainingCaptureGrant(
+            revision=row.revision,
+            receipt_sha256=canonical_sha256(
+                {
+                    "kind": "SONA_R1B_TRAINING_CAPTURE_CONSENT_RECEIPT_V1",
+                    "owner_user_id": str(user_id),
+                    "operation_id": str(intent.operation_id),
+                    "actor_tag": intent.actor_tag,
+                    "request_sha256": intent.request_sha256,
+                    "revision": intent.revision,
+                    "changed_at": iso8601(intent.changed_at),
+                }
+            ).hex(),
+        )
 
     def restore_guard(self) -> int:
         """Conservatively retire unmatched grants using ordinary +1 private policy mutations.
@@ -328,6 +389,9 @@ class TrainingConsentService:
                     for account in accounts
                 }
                 history = self._ledger.read()
+                has_capture_table = bool(
+                    session.scalar(text("SELECT to_regclass('ml.sona_capture_bundle') IS NOT NULL"))
+                )
                 # One batch may share several runs with an owner outside the batch. Lock their
                 # complete union in UUID order before any per-owner invalidation callback.
                 list(
@@ -357,6 +421,14 @@ class TrainingConsentService:
                         and self._proven_grant(session, account.user_id, row, history)
                     ):
                         continue
+                    if has_capture_table:
+                        # A restored row without a current independent grant cannot retain
+                        # any native shadow input, even if its old policy was already private.
+                        session.execute(
+                            delete(SonaCaptureBundleRow).where(
+                                SonaCaptureBundleRow.user_id == account.user_id
+                            )
+                        )
                     if (
                         row is not None
                         and row.decision != "GRANTED"

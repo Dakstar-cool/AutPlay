@@ -623,6 +623,7 @@ def build_recommendation_service(engine: Engine) -> RecommendationService:
         ids=Uuid7Generator().new,
         clock=SystemClock().now,
         packs=SqlAlchemyOfflinePackRepository(runtime),
+        atomic_writer=runtime,
     )
 
 

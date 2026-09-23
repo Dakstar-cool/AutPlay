@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -170,6 +170,21 @@ class RecommendationTraceRepository(Protocol):
     def exact(self, user_id: UUID, request_id: UUID) -> RecommendationResponse | None: ...
 
     def request(self, user_id: UUID, request_id: UUID) -> RecommendationRequestTrace | None: ...
+
+
+class RecommendationAtomicWriter(Protocol):
+    """Capture P11 input, run CPU ranking, and persist request/items in one transaction."""
+
+    def capture_run_save(
+        self,
+        *,
+        user_id: UUID,
+        request_time: datetime,
+        capture_eligible: bool,
+        retained_until: datetime,
+        pipeline: PipelineDefinition,
+        build_response: Callable[[RecommendationInputSnapshot], RecommendationResponse],
+    ) -> RecommendationResponse: ...
 
 
 class OfflinePackRepository(Protocol):

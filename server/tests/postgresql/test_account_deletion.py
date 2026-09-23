@@ -14,6 +14,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
 from autplay.adapters.filesystem.deletion_ledger import FilesystemDeletionLedger
 from autplay.adapters.postgresql.models import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.account_deletion import AccountDeletionRequestRow
@@ -35,10 +40,6 @@ from autplay.domain.account_deletion import AccountDeletionError
 from autplay.domain.account_recovery import AccountRecoveryError, new_code
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.profile_pairing import canonical_sha256, public_spki, sign_p1363
-from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import func, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
 
 from . import test_self_device_pairing as pairing_fixtures
 from .conftest import DatabaseHarness
@@ -98,6 +99,7 @@ def prepared(
         device = required(session.get(DeviceRow, pair.actor.device_id))
         device.public_key = public_spki(source_key)
         device.public_key_thumbprint_sha256 = hashlib.sha256(device.public_key).digest()
+        device.device_key_generation += 1
     body = request(
         pair,
         "request",

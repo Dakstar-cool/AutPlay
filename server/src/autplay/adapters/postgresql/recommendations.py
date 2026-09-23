@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from typing import cast
@@ -22,6 +23,9 @@ from autplay.application.recommendations import (
     recommendation_input_snapshot_document,
     recommendation_policy_snapshot_document,
 )
+from autplay.application.sona_capture import SonaCaptureBundleV1
+from autplay.application.sona_shadow import recommendation_ranking_sha256
+from autplay.application.training_consent import TrainingCaptureGrant
 from autplay.domain.recommendations import (
     CandidateContribution,
     ComponentVersionRef,
@@ -43,6 +47,8 @@ from .models import (
     RecommendationItemRow,
     RecommendationPipelineVersionRow,
     RecommendationRequestRow,
+    SonaCaptureBundleRow,
+    SonaCaptureLineageCursorRow,
 )
 
 _MAX_SNAPSHOT_TRACKS = RECOMMENDATION_MAX_SNAPSHOT_TRACKS
@@ -52,56 +58,78 @@ _SNAPSHOT_CLEANUP_BATCH = 100
 class SqlAlchemyRecommendationRuntime:
     """Short-transaction owner-filtered P11 persistence adapter."""
 
-    def __init__(self, sessions: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        sessions: Callable[[], Session],
+        *,
+        native_capture: Callable[
+            [Session, RecommendationInputSnapshot, RecommendationResponse, TrainingCaptureGrant],
+            SonaCaptureBundleV1 | None,
+        ]
+        | None = None,
+        native_capture_gate: Callable[[Session, UUID], TrainingCaptureGrant | None] | None = None,
+    ) -> None:
+        if (native_capture_gate is None) != (native_capture is None):
+            raise ValueError("native capture requires both consent gate and writer")
         self._sessions = sessions
+        self._native_capture = native_capture
+        self._native_capture_gate = native_capture_gate
 
     def capture(self, user_id: UUID, *, retained_until: datetime) -> RecommendationInputSnapshot:
         """Capture one bounded immutable ACL/catalog/history snapshot."""
         with self._sessions() as session:
-            # Keep the catalog/history rows and their watermark on one MVCC view.
             session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
-            session.execute(
-                text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
-                {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+            snapshot = self._capture_in_session(session, user_id, retained_until)
+            session.commit()
+            return snapshot
+
+    def _capture_in_session(
+        self, session: Session, user_id: UUID, retained_until: datetime
+    ) -> RecommendationInputSnapshot:
+        # Catalog/history rows and their watermark share one MVCC view.
+        session.execute(
+            text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
+            {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+        )
+        session.execute(
+            text(_PURGE_EXPIRED_SNAPSHOTS_SQL),
+            {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+        )
+        rows = session.execute(
+            text(_SNAPSHOT_SQL),
+            {"user_id": user_id, "limit": _MAX_SNAPSHOT_TRACKS},
+        ).mappings()
+        tracks = tuple(_track_from_mapping(row) for row in rows)
+        watermark = int(
+            session.scalar(
+                text(
+                    "SELECT COALESCE(max(server_sequence), 0) FROM sync.sync_event "
+                    "WHERE user_id = :user_id AND event_type IN "
+                    "('LISTENING_EVENT_RECORDED', 'RECOMMENDATION_IMPRESSION_RECORDED', "
+                    "'RECOMMENDATION_FEEDBACK_RECORDED', 'USER_TRACK_PREFERENCE_SET')"
+                ),
+                {"user_id": user_id},
             )
-            session.execute(
-                text(_PURGE_EXPIRED_SNAPSHOTS_SQL),
-                {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
-            )
-            rows = session.execute(
-                text(_SNAPSHOT_SQL),
-                {"user_id": user_id, "limit": _MAX_SNAPSHOT_TRACKS},
-            ).mappings()
-            tracks = tuple(_track_from_mapping(row) for row in rows)
-            watermark = int(
-                session.scalar(
-                    text(
-                        "SELECT COALESCE(max(server_sequence), 0) FROM sync.sync_event "
-                        "WHERE user_id = :user_id AND event_type IN "
-                        "('LISTENING_EVENT_RECORDED', 'RECOMMENDATION_IMPRESSION_RECORDED', "
-                        "'RECOMMENDATION_FEEDBACK_RECORDED', 'USER_TRACK_PREFERENCE_SET')"
-                    ),
-                    {"user_id": user_id},
-                )
-                or 0
-            )
-            document = recommendation_input_snapshot_document(
-                user_id,
-                interaction_watermark=watermark,
-                tracks=tracks,
-            )
-            encoded = _canonical_bytes(document)
-            availability_document = recommendation_availability_snapshot_document(tracks)
-            policy_document = recommendation_policy_snapshot_document(tracks)
-            snapshot_id = uuid7()
-            input_digest = sha256(encoded)
-            availability_digest = sha256(_canonical_bytes(availability_document)).hexdigest()
-            policy_digest = sha256(_canonical_bytes(policy_document))
-            catalog_snapshot = max(
-                (max(track.added_at_ms, track.last_played_at_ms or 0) for track in tracks),
-                default=0,
-            )
-            row = RecommendationInputSnapshotRow(
+            or 0
+        )
+        document = recommendation_input_snapshot_document(
+            user_id,
+            interaction_watermark=watermark,
+            tracks=tracks,
+        )
+        encoded = _canonical_bytes(document)
+        availability_document = recommendation_availability_snapshot_document(tracks)
+        policy_document = recommendation_policy_snapshot_document(tracks)
+        snapshot_id = uuid7()
+        input_digest = sha256(encoded)
+        availability_digest = sha256(_canonical_bytes(availability_document)).hexdigest()
+        policy_digest = sha256(_canonical_bytes(policy_document))
+        catalog_snapshot = max(
+            (max(track.added_at_ms, track.last_played_at_ms or 0) for track in tracks),
+            default=0,
+        )
+        session.add(
+            RecommendationInputSnapshotRow(
                 recommendation_input_snapshot_id=snapshot_id,
                 user_id=user_id,
                 input_snapshot_sha256=input_digest.digest(),
@@ -112,20 +140,19 @@ class SqlAlchemyRecommendationRuntime:
                 snapshot_document=document,
                 retained_until=retained_until,
             )
-            session.add(row)
-            session.commit()
-            return RecommendationInputSnapshot(
-                RecommendationSnapshotRef(
-                    snapshot_id,
-                    input_digest.hexdigest(),
-                    watermark,
-                    catalog_snapshot,
-                    availability_digest,
-                    policy_digest.hexdigest(),
-                ),
-                tracks,
-                retained_until,
-            )
+        )
+        return RecommendationInputSnapshot(
+            RecommendationSnapshotRef(
+                snapshot_id,
+                input_digest.hexdigest(),
+                watermark,
+                catalog_snapshot,
+                availability_digest,
+                policy_digest.hexdigest(),
+            ),
+            tracks,
+            retained_until,
+        )
 
     def load(self, user_id: UUID, snapshot_id: UUID) -> RecommendationInputSnapshot | None:
         """Load an unexpired retained snapshot without substituting current state."""
@@ -195,66 +222,123 @@ class SqlAlchemyRecommendationRuntime:
 
     def save(self, response: RecommendationResponse) -> None:
         """Atomically save the request and every final ranked item."""
+        if self._native_capture is not None:
+            raise ValueError("native capture requires the recommendation unit of work")
+        with self._sessions() as session:
+            self._save_in_session(session, response)
+            session.commit()
+
+    def capture_run_save(
+        self,
+        *,
+        user_id: UUID,
+        request_time: datetime,
+        capture_eligible: bool,
+        retained_until: datetime,
+        pipeline: PipelineDefinition,
+        build_response: Callable[[RecommendationInputSnapshot], RecommendationResponse],
+    ) -> RecommendationResponse:
+        """Commit snapshot and CPU response together, or roll back both."""
+        self.ensure_pipeline(pipeline)
+        with self._sessions() as session:
+            session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+            capture_grant = (
+                self._native_capture_gate(session, user_id)
+                if capture_eligible and self._native_capture_gate is not None
+                else None
+            )
+            if capture_grant is not None:
+                retained_until = max(retained_until, request_time + timedelta(days=180))
+            snapshot = self._capture_in_session(session, user_id, retained_until)
+            response = build_response(snapshot)
+            if (
+                response.request.query.user_id != user_id
+                or response.request.created_at != request_time
+                or response.request.snapshot != snapshot.reference
+                or response.request.pipeline != pipeline
+            ):
+                raise ValueError("atomic recommendation response does not match capture")
+            self._save_in_session(session, response)
+            if capture_grant is not None:
+                if retained_until < response.request.created_at + timedelta(days=180):
+                    raise ValueError("native capture requires 180-day baseline retention")
+                assert self._native_capture is not None
+                prepared = self._native_capture(session, snapshot, response, capture_grant)
+                session.flush()
+                bundle = session.get(
+                    SonaCaptureBundleRow, response.request.recommendation_request_id
+                )
+                cursor = session.get(
+                    SonaCaptureLineageCursorRow, response.request.recommendation_request_id
+                )
+                if bundle is None or cursor is None or bundle.user_id != user_id:
+                    raise ValueError("native capture bundle and cursor are required")
+                if prepared is None:
+                    raise ValueError("prepared native capture bundle is required")
+                if (
+                    prepared.consent_receipt_sha256 != capture_grant.receipt_sha256
+                    or prepared.consent_generation != capture_grant.revision
+                ):
+                    raise ValueError("native capture consent receipt mismatch")
+                _validate_native_capture_commit(prepared, bundle, cursor, snapshot, response)
+            session.commit()
+            return response
+
+    def _save_in_session(self, session: Session, response: RecommendationResponse) -> None:
         trace = response.request
         pipeline = trace.pipeline
-        with self._sessions() as session:
+        session.add(
+            RecommendationRequestRow(
+                recommendation_request_id=trace.recommendation_request_id,
+                user_id=trace.query.user_id,
+                context=trace.query.context,
+                surface=trace.query.surface.value,
+                pipeline_key=pipeline.pipeline_key,
+                pipeline_version=pipeline.version,
+                pipeline_manifest_sha256=bytes.fromhex(pipeline.manifest_sha256),
+                request_schema_version=trace.query.schema_version,
+                request_canonicalization_version=trace.query.canonicalization_version,
+                request_sha256=bytes.fromhex(trace.request_sha256),
+                recommendation_input_snapshot_id=trace.snapshot.snapshot_id,
+                input_snapshot_sha256=bytes.fromhex(trace.snapshot.input_snapshot_sha256),
+                interaction_watermark=trace.snapshot.interaction_watermark,
+                catalog_snapshot=trace.snapshot.catalog_snapshot,
+                availability_snapshot_ref=trace.snapshot.availability_snapshot,
+                policy_snapshot_sha256=bytes.fromhex(trace.snapshot.policy_snapshot_sha256),
+                request_document=trace.canonical_request,
+                shadow=trace.query.shadow,
+                model_bundle_version=f"{pipeline.pipeline_key}:{pipeline.version}",
+                candidate_policy_version=_component_version(pipeline, "candidate_generator"),
+                filter_policy_version=_component_version(pipeline, "filter"),
+                reranker_version=_component_version(pipeline, "reranker"),
+                seed=trace.query.seed,
+                request_features={
+                    "limit": trace.query.limit,
+                    "exploration": trace.query.exploration,
+                },
+                created_at=trace.created_at,
+            )
+        )
+        session.flush()
+        for item in response.items:
             session.add(
-                RecommendationRequestRow(
+                RecommendationItemRow(
                     recommendation_request_id=trace.recommendation_request_id,
-                    user_id=trace.query.user_id,
-                    context=trace.query.context,
-                    surface=trace.query.surface.value,
-                    pipeline_key=pipeline.pipeline_key,
-                    pipeline_version=pipeline.version,
-                    pipeline_manifest_sha256=bytes.fromhex(pipeline.manifest_sha256),
-                    request_schema_version=trace.query.schema_version,
-                    request_canonicalization_version=trace.query.canonicalization_version,
-                    request_sha256=bytes.fromhex(trace.request_sha256),
-                    recommendation_input_snapshot_id=trace.snapshot.snapshot_id,
-                    input_snapshot_sha256=bytes.fromhex(trace.snapshot.input_snapshot_sha256),
-                    interaction_watermark=trace.snapshot.interaction_watermark,
-                    catalog_snapshot=trace.snapshot.catalog_snapshot,
-                    availability_snapshot_ref=trace.snapshot.availability_snapshot,
-                    policy_snapshot_sha256=bytes.fromhex(trace.snapshot.policy_snapshot_sha256),
-                    request_document=trace.canonical_request,
-                    shadow=trace.query.shadow,
-                    model_bundle_version=f"{pipeline.pipeline_key}:{pipeline.version}",
-                    candidate_policy_version=_component_version(pipeline, "candidate_generator"),
-                    filter_policy_version=_component_version(pipeline, "filter"),
-                    reranker_version=_component_version(pipeline, "reranker"),
-                    seed=trace.query.seed,
-                    request_features={
-                        "limit": trace.query.limit,
-                        "exploration": trace.query.exploration,
+                    rank=item.source_rank,
+                    recording_id=item.recording_id,
+                    score=Decimal(str(item.score)),
+                    candidate_sources=[value.source_key for value in item.contributions],
+                    explanation_code=item.reason_code,
+                    availability_snapshot={"snapshot_sha256": trace.snapshot.availability_snapshot},
+                    contributions=[_contribution_document(value) for value in item.contributions],
+                    reason_codes=list(item.reason_codes),
+                    item_provenance={
+                        "artist_key": item.artist_key,
+                        "release_key": item.release_key,
+                        "section": item.section,
                     },
-                    created_at=trace.created_at,
                 )
             )
-            session.flush()
-            for item in response.items:
-                session.add(
-                    RecommendationItemRow(
-                        recommendation_request_id=trace.recommendation_request_id,
-                        rank=item.source_rank,
-                        recording_id=item.recording_id,
-                        score=Decimal(str(item.score)),
-                        candidate_sources=[value.source_key for value in item.contributions],
-                        explanation_code=item.reason_code,
-                        availability_snapshot={
-                            "snapshot_sha256": trace.snapshot.availability_snapshot
-                        },
-                        contributions=[
-                            _contribution_document(value) for value in item.contributions
-                        ],
-                        reason_codes=list(item.reason_codes),
-                        item_provenance={
-                            "artist_key": item.artist_key,
-                            "release_key": item.release_key,
-                            "section": item.section,
-                        },
-                    )
-                )
-            session.commit()
 
     def exact(self, user_id: UUID, request_id: UUID) -> RecommendationResponse | None:
         """Return persisted response bytes semantically, never rerunning the pipeline."""
@@ -382,6 +466,78 @@ class SqlAlchemyOfflinePackRepository:
             created_at=created_at,
             expires_at=expires_at,
         )
+
+
+def _validate_native_capture_commit(
+    prepared: SonaCaptureBundleV1,
+    bundle: SonaCaptureBundleRow,
+    cursor: SonaCaptureLineageCursorRow,
+    snapshot: RecommendationInputSnapshot,
+    response: RecommendationResponse,
+) -> None:
+    """Fence a hook that inserted placeholder or mismatched capture rows."""
+
+    trace = response.request
+    expected_expiry = trace.created_at + timedelta(days=180)
+    expected = (
+        prepared.recommendation_request_id == trace.recommendation_request_id,
+        prepared.owner_user_id == trace.query.user_id,
+        prepared.baseline_snapshot_sha256 == snapshot.reference.input_snapshot_sha256,
+        prepared.p11_ranking_sha256 == recommendation_ranking_sha256(response.items),
+        prepared.cutoff_at_ms == int(trace.created_at.timestamp() * 1000),
+        prepared.interaction_watermark == snapshot.reference.interaction_watermark,
+        prepared.universe_count == len(snapshot.tracks),
+        bundle.recommendation_request_id == prepared.recommendation_request_id,
+        bundle.user_id == prepared.owner_user_id,
+        bundle.baseline_snapshot_sha256.hex() == prepared.baseline_snapshot_sha256,
+        bundle.temporal_snapshot_sha256.hex() == prepared.temporal_snapshot_sha256,
+        bundle.candidate_membership_sha256.hex() == prepared.candidate_membership_sha256,
+        bundle.p11_ranking_sha256.hex() == prepared.p11_ranking_sha256,
+        bundle.bundle_sha256.hex() == prepared.bundle_sha256,
+        bundle.consent_receipt_sha256.hex() == prepared.consent_receipt_sha256,
+        bundle.consent_generation == prepared.consent_generation,
+        bundle.cutoff_at_ms == prepared.cutoff_at_ms,
+        bundle.interaction_watermark == prepared.interaction_watermark,
+        bundle.universe_count == prepared.universe_count,
+        bundle.eligible_count == prepared.eligible_count,
+        bundle.ineligibility_reason == prepared.ineligibility_reason,
+        bundle.bundle_document == prepared.document,
+        bundle.created_at == trace.created_at,
+        bundle.expires_at == expected_expiry,
+        cursor.recommendation_request_id == prepared.recommendation_request_id,
+        cursor.user_id == prepared.owner_user_id,
+        cursor.expires_at == expected_expiry,
+        cursor.state == "ACTIVE",
+    )
+    if not all(expected) or sha256(prepared.document).hexdigest() != prepared.bundle_sha256:
+        raise ValueError("native capture does not bind the committed P11 response")
+    try:
+        document = json.loads(prepared.document)
+        if not isinstance(document, dict) or rfc8785.dumps(document) != prepared.document:
+            raise ValueError("native capture document is not canonical")
+    except (UnicodeDecodeError, json.JSONDecodeError, rfc8785.CanonicalizationError) as error:
+        raise ValueError("native capture document is invalid") from error
+    candidate_ids = document.get("candidate_recording_ids")
+    if (
+        document.get("kind") != "SONA_CAPTURE_BUNDLE_V1"
+        or document.get("recommendation_request_id") != str(trace.recommendation_request_id)
+        or document.get("owner_user_id") != str(trace.query.user_id)
+        or document.get("request_sha256") != trace.request_sha256
+        or document.get("baseline_snapshot_sha256") != snapshot.reference.input_snapshot_sha256
+        or document.get("p11_ranking_sha256") != prepared.p11_ranking_sha256
+        or document.get("temporal_snapshot_sha256") != prepared.temporal_snapshot_sha256
+        or document.get("consent_receipt_sha256") != prepared.consent_receipt_sha256
+        or document.get("consent_generation") != prepared.consent_generation
+        or document.get("cutoff_at_ms") != prepared.cutoff_at_ms
+        or document.get("interaction_watermark") != prepared.interaction_watermark
+        or document.get("universe_count") != prepared.universe_count
+        or document.get("eligible_count") != prepared.eligible_count
+        or document.get("ineligibility_reason") != prepared.ineligibility_reason
+        or not isinstance(candidate_ids, list)
+        or len(candidate_ids) != prepared.eligible_count
+        or sha256(rfc8785.dumps(candidate_ids)).hexdigest() != prepared.candidate_membership_sha256
+    ):
+        raise ValueError("native capture document differs from the committed P11 response")
 
 
 def _is_replay_complete(row: RecommendationRequestRow) -> bool:

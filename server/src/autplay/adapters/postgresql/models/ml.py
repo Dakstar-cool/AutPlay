@@ -62,6 +62,7 @@ class EmbeddingModelRow(Base):
         BYTEA(),
         nullable=False,
     )
+    artifact_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
     license_id: Mapped[str] = mapped_column(
         Text(),
         nullable=False,
@@ -186,6 +187,16 @@ class EmbeddingModelRow(Base):
         CheckConstraint(
             "octet_length(weights_sha256) = 32",
             name="ck_embedding_model_weights_hash_len",
+        ),
+        CheckConstraint(
+            "artifact_sha256 IS NULL OR octet_length(artifact_sha256)=32",
+            name="embedding_artifact_sha256_check",
+        ),
+        ForeignKeyConstraint(
+            ["artifact_sha256"],
+            ["ml.artifact.artifact_sha256"],
+            name="embedding_artifact_fkey",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "octet_length(manifest_sha256) = 32",

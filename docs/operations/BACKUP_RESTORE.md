@@ -114,6 +114,35 @@ supply an arbitrary Windows path.
 7. Rebuild declared derived indexes, run auth/new-client bootstrap plus stream/sync smoke, and only
    then consider switching production routing.
 
+### Revision 15 ML metadata restore fence
+
+The `0061` backup includes `ml.artifact`, migration issues, the complete append-only artifact
+license decision history and its current projection, typed Face/Sona artifact releases, device
+key generations, and bounded step-up credential/challenge/receipt rows. An ML restore check must
+validate that each current license row points to the last decision for its artifact and preserves
+every denial or revocation generation. A missing license text/hash or unresolved migration issue never becomes
+an approval on restore.
+
+The `0062` backup includes reviewed GPU device policy, current reservation rows, and immutable
+admission receipts. A restored `ACTIVE` or `CANCELLED` reservation is not evidence that its prior
+process still owns usable CUDA state. Keep GPU serving unready after restore until the exact
+process exit or session unload and NVML release have been checked and recorded under the restored
+authority generation. Do not clear current rows or increment generations manually. This branch
+does not yet wire GPU serving.
+
+The `0063` backup includes owner-bound Sona capture bundles, active lineage cursors, exact target
+dispatch/work rows, append-only attempts and terminal shadow evidence. After restore, native
+capture and the shadow scanner stay disabled until independent consent and current owner/privacy
+authority have been revalidated, expired bundles have been purged, stale leases have been fenced,
+and each cursor's registry generation has been reconciled. Restored database rows alone never
+grant capture or serving consent. This branch does not yet implement that restore gate.
+The separately provisioned R1C serving-consent SQLite file and its distinct MAC key must be
+retained outside PostgreSQL backup generations. Its current independent head must be verified
+before any future serving projection can be accepted. The storage class is present but has no
+activation wiring yet. Optional runtime settings require a separate path and key; the offline
+`autplay.entrypoints.serving_consent_admin` command can initialize the file once or verify its
+head. It does not reconcile PostgreSQL, so R1C remains quarantined.
+
 ## Reproducible local drill
 
 ```powershell
@@ -196,10 +225,12 @@ The same materializer computes a candidate-complete, recording-ID-ordered
 closed if that pool does not equal the mandatory-filtered Sona candidate set. This artifact binds
 raw finite P11 heuristic scores and both request identities, but explicitly records
 `calibration_fit_bound=false`, `quality_eligible=false`, and
-`TEACHER_CALIBRATION_PARAMETERS_NOT_BOUND`. The current frozen teacher manifest names a temperature
-calibration policy but does not bind fitted temperatures or calibration-dataset ancestry. Do not
-fabricate teacher probabilities or treat the raw-score artifact as a calibrated teacher; a reviewed
-schema/approval decision is required before those parameters can enter quality evidence.
+`TEACHER_CALIBRATION_PARAMETERS_NOT_BOUND`. This paragraph describes the historical `0026`
+reconstruction artifact and its old teacher warning only. The later
+`SONA_P11_TEACHER_V2` implementation binds a validation-split calibration set, fitted per-head
+temperatures, exact P11 ancestry, and a fit digest; it does not make the reconstructed `0026`
+source quality-eligible. A new native, consented source and the separate signed approvals remain
+required for R1B quality evidence. Do not relabel the raw-score artifact as a calibrated teacher.
 
 ## Failure and rollback
 

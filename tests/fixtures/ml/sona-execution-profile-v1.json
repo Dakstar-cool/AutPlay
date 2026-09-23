@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "SONA_EXECUTION_PROFILE_V1",
+  "gpu_image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "python_version": "3.13.7",
+  "model_runtime_version": "torch-2.8.0",
+  "onnxruntime_version": "1.22.1",
+  "cuda_version": "12.8",
+  "cudnn_version": "9.10.2",
+  "nvidia_driver_version": "580.65.06",
+  "gpu_device_uuid": "GPU-12345678-1234-1234-1234-123456789abc",
+  "gpu_device_model": "NVIDIA fixture device",
+  "compute_capability": "8.9",
+  "execution_provider": "CUDAExecutionProvider",
+  "provider_options": {"device_id": 0, "do_copy_in_default_stream": true},
+  "graph_optimization_level": "ORT_ENABLE_ALL",
+  "graph_optimization_options": {"enable_mem_pattern": false, "enable_cpu_mem_arena": false},
+  "precision": "FP32",
+  "tensor_schemas": {
+    "inputs": [{"name": "history_ids", "dtype": "int64", "shape": ["batch", 512, 3]}],
+    "outputs": [{"name": "ranking_scores", "dtype": "float32", "shape": ["batch", 1024]}]
+  },
+  "determinism": {"enabled": true, "seed": 17, "flags": ["CUBLAS_WORKSPACE_CONFIG=:4096:8", "torch_deterministic_algorithms"]},
+  "thread_limits": {"intra_op": 1, "inter_op": 1, "max_concurrent_requests": 1},
+  "cpu_fallback_allowed": false,
+  "tokenizer_adapter_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "runtime_adapter_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "postprocessor_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}

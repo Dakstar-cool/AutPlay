@@ -1,0 +1,34 @@
+{
+  "required_entries": [
+    {
+      "role": "ENCODER_WEIGHTS",
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "role": "INTERPRETER_EXPORT",
+      "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "policy_entries": [
+    {
+      "role": "ENCODER_WEIGHTS",
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "decision_sequence": 1,
+      "decision_generation": 1,
+      "max_offline_revocation_lag_ms": 604800000,
+      "disposition": "RETAIN_NON_DISTRIBUTABLE"
+    },
+    {
+      "role": "INTERPRETER_EXPORT",
+      "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "decision_sequence": 1,
+      "decision_generation": 1,
+      "max_offline_revocation_lag_ms": 604800000,
+      "disposition": "RETAIN_NON_DISTRIBUTABLE"
+    }
+  ],
+  "required_canonical": "{\"entries\":[{\"artifact_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role\":\"ENCODER_WEIGHTS\"},{\"artifact_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"role\":\"INTERPRETER_EXPORT\"}],\"v\":1}",
+  "required_sha256": "9bdaaded97c6fd62862622a2b9681cd3bfed241c6729e3d6dd5bf9eaf783a38f",
+  "policy_canonical": "{\"entries\":[{\"artifact_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"decision_generation\":1,\"decision_sequence\":1,\"disposition\":\"RETAIN_NON_DISTRIBUTABLE\",\"max_offline_revocation_lag_ms\":604800000,\"role\":\"ENCODER_WEIGHTS\"},{\"artifact_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"decision_generation\":1,\"decision_sequence\":1,\"disposition\":\"RETAIN_NON_DISTRIBUTABLE\",\"max_offline_revocation_lag_ms\":604800000,\"role\":\"INTERPRETER_EXPORT\"}],\"v\":1}",
+  "policy_sha256": "c27e1c797070aedb2ef5119f8aadcf3c9cd98fa255ea83ad478bf7d2e4a797d3"
+}

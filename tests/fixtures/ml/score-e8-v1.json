@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "SCORE_E8_V1_GOLDEN",
+  "cases": [
+    {"name": "zero", "binary64_hex": "0x0.0p+0", "units": 0, "json_number": "0"},
+    {"name": "negative_zero", "binary64_hex": "-0x0.0p+0", "units": 0, "json_number": "0"},
+    {"name": "halfway_up", "binary64_hex": "0x1.3c0ca43db770ap+0", "units": 123456790, "json_number": "1.2345679"},
+    {"name": "halfway_down", "binary64_hex": "0x1.3c0ca412c452dp+0", "units": 123456788, "json_number": "1.23456788"},
+    {"name": "halfway_next_up", "binary64_hex": "0x1.3c0ca412c452ep+0", "units": 123456789, "json_number": "1.23456789"},
+    {"name": "halfway_next_down", "binary64_hex": "0x1.3c0ca412c452cp+0", "units": 123456788, "json_number": "1.23456788"},
+    {"name": "negative_halfway", "binary64_hex": "-0x1.3c0ca43db770ap+0", "units": -123456790, "json_number": "-1.2345679"},
+    {"name": "one_half_quantum", "binary64_hex": "0x1.5798ee2308c3ap-28", "units": 1, "json_number": "0.00000001"},
+    {"name": "half_quantum_next_up", "binary64_hex": "0x1.5798ee2308c3bp-28", "units": 1, "json_number": "0.00000001"},
+    {"name": "half_quantum_next_down", "binary64_hex": "0x1.5798ee2308c39p-28", "units": 0, "json_number": "0"},
+    {"name": "largest_accepted_binary64", "binary64_hex": "0x1.5798ee2308c39p+36", "units": 9223372036854774000, "json_number": "92233720368.54774"},
+    {"name": "smallest_accepted_binary64", "binary64_hex": "-0x1.5798ee2308c39p+36", "units": -9223372036854774000, "json_number": "-92233720368.54774"}
+  ]
+}

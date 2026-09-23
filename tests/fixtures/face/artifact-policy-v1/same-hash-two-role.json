@@ -1,0 +1,34 @@
+{
+  "required_entries": [
+    {
+      "role": "ENCODER_WEIGHTS",
+      "artifact_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "role": "INTERPRETER_EXPORT",
+      "artifact_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "policy_entries": [
+    {
+      "role": "ENCODER_WEIGHTS",
+      "artifact_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "decision_sequence": 1,
+      "decision_generation": 1,
+      "max_offline_revocation_lag_ms": 604800000,
+      "disposition": "RETAIN_NON_DISTRIBUTABLE"
+    },
+    {
+      "role": "INTERPRETER_EXPORT",
+      "artifact_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "decision_sequence": 1,
+      "decision_generation": 1,
+      "max_offline_revocation_lag_ms": 604800000,
+      "disposition": "RETAIN_NON_DISTRIBUTABLE"
+    }
+  ],
+  "required_canonical": "{\"entries\":[{\"artifact_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"role\":\"ENCODER_WEIGHTS\"},{\"artifact_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"role\":\"INTERPRETER_EXPORT\"}],\"v\":1}",
+  "required_sha256": "17714e0941ee22f636ecd95476138eb38f886b0d5c313ec096dcbdf797cad1ce",
+  "policy_canonical": "{\"entries\":[{\"artifact_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"decision_generation\":1,\"decision_sequence\":1,\"disposition\":\"RETAIN_NON_DISTRIBUTABLE\",\"max_offline_revocation_lag_ms\":604800000,\"role\":\"ENCODER_WEIGHTS\"},{\"artifact_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"decision_generation\":1,\"decision_sequence\":1,\"disposition\":\"RETAIN_NON_DISTRIBUTABLE\",\"max_offline_revocation_lag_ms\":604800000,\"role\":\"INTERPRETER_EXPORT\"}],\"v\":1}",
+  "policy_sha256": "ef0eb47bc567cc766fe6ace695bea07460cd3220710851506c818d61beefd6ea"
+}

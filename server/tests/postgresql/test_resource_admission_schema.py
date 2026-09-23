@@ -91,7 +91,7 @@ def test_edited_policy_blocks_downgrade_even_with_no_admissions(
         database_harness.downgrade(empty_database_name, "0034_self_device_pairing")
     with database_harness.connect(empty_database_name) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0060_local_bridge_authority",
+            "0064_face_artifact_activation",
         )
         assert connection.execute(
             "SELECT default_devices FROM account.resource_quota_policy"

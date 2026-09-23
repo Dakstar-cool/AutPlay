@@ -135,6 +135,9 @@ class DeviceRow(Base):
         BYTEA(),
         nullable=True,
     )
+    device_key_generation: Mapped[int] = mapped_column(
+        BigInteger(), nullable=False, server_default=text("0")
+    )
     public_key_thumbprint_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
@@ -184,6 +187,11 @@ class DeviceRow(Base):
             "public_key_thumbprint_sha256 IS NULL "
             "OR octet_length(public_key_thumbprint_sha256) = 32",
             name="ck_device_public_key_thumbprint_len",
+        ),
+        CheckConstraint(
+            "device_key_generation>=0 AND (device_key_generation<>0 OR public_key IS NULL) "
+            "AND (public_key IS NULL OR device_key_generation>=1)",
+            name="device_key_generation_shape",
         ),
         UniqueConstraint("user_id", "device_id", name="uq_device_user_pair"),
         CheckConstraint(

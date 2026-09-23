@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/ml/v1/face-analysis-policy-command.schema.json",
+  "title": "Self-only Face new-upload analysis policy command v1",
+  "x-autplay-implementation-status": "CONTRACT_ONLY_DISABLED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "expected_generation",
+    "enabled",
+    "scope"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "expected_generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740990
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "scope": {
+      "const": "NEW_UPLOADS"
+    }
+  }
+}

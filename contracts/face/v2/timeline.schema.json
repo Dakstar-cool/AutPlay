@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.app/contracts/face/v2/timeline.schema.json",
+  "title": "FaceTimelineV2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "identity", "source_presentation_map", "track_character",
+    "keyframes", "events"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "identity": {"$ref": "timeline-identity.schema.json"},
+    "source_presentation_map": {"$ref": "source-presentation-map.schema.json"},
+    "track_character": {"$ref": "semantic-state.schema.json"},
+    "keyframes": {
+      "type": "array", "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sample_index", "state"],
+        "properties": {
+          "sample_index": {"type": "integer", "minimum": 0, "maximum": 33177599999},
+          "state": {"$ref": "semantic-state.schema.json"}
+        }
+      }
+    },
+    "events": {
+      "type": "array", "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sample_index", "event_type", "strength", "confidence"],
+        "properties": {
+          "sample_index": {"type": "integer", "minimum": 0, "maximum": 33177599999},
+          "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+          "strength": {"type": "number", "minimum": 0, "maximum": 1},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    }
+  }
+}
