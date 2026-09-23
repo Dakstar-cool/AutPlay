@@ -415,6 +415,7 @@ def create_app(
                 commands=admin_command_service or build_admin_command_service(engine),
                 renderer=admin_renderer or AdminTemplateRenderer(),
                 origin=origin,
+                mobile_api_origin=resolved_settings.profile_api_origin,
                 source_secret=source_secret.get_secret_value().encode("utf-8"),
                 discovery_enabled=discovery is not None,
                 discovery_automation_enabled=(

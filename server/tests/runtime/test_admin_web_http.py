@@ -6,6 +6,9 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
+from starlette.testclient import TestClient
+
 from autplay.application.web_admin import LoginChallenge
 from autplay.domain.admin_commands import AdminCommand
 from autplay.domain.admin_views import (
@@ -30,8 +33,6 @@ from autplay.entrypoints.admin_web_http import (
     create_admin_web_router,
 )
 from autplay.web.renderer import AdminTemplateRenderer
-from fastapi import FastAPI
-from starlette.testclient import TestClient
 
 
 class _Renderer:
@@ -305,6 +306,7 @@ def _client(
     *,
     discovery_enabled: bool = False,
     discovery_automation_enabled: bool = False,
+    mobile_api_origin: str | None = None,
 ) -> tuple[TestClient, _Web]:
     web = _Web()
     commands = _Commands()
@@ -317,6 +319,7 @@ def _client(
             commands=commands,
             renderer=renderer or _Renderer(),
             origin="https://admin.test",
+            mobile_api_origin=mobile_api_origin,
             source_secret=b"s" * 32,
             discovery_enabled=discovery_enabled,
             discovery_automation_enabled=discovery_automation_enabled,
@@ -529,6 +532,23 @@ def test_actual_renderer_renders_dashboard_table_and_status() -> None:
     jobs = client.get("/admin/jobs?live=1")
     assert '<meta http-equiv="refresh"' in jobs.text
     assert "discovery.acquire" in jobs.text
+
+
+def test_dashboard_shows_private_server_addresses_only_after_login() -> None:
+    client, _ = _client(
+        AdminTemplateRenderer(),
+        mobile_api_origin="https://mobile.test:8443",
+    )
+    login = client.get("/admin/login")
+    assert "https://mobile.test:8443" not in login.text
+    unauthenticated = client.get("/admin/", follow_redirects=False)
+    assert unauthenticated.status_code == 303
+    client.cookies.set("__Host-autplay_admin", "session")
+    dashboard = client.get("/admin/?lang=ru")
+    assert dashboard.status_code == 200
+    assert "Адреса сервера" in dashboard.text
+    assert "https://admin.test" in dashboard.text
+    assert "https://mobile.test:8443" in dashboard.text
 
 
 @pytest.mark.parametrize("section", ["accounts", "music", "server"])

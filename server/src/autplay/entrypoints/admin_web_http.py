@@ -195,6 +195,7 @@ def create_admin_web_router(
     commands: AdminCommandsHttp,
     renderer: Renderer,
     origin: str,
+    mobile_api_origin: str | None = None,
     source_secret: bytes,
     discovery_enabled: bool = False,
     discovery_automation_enabled: bool = False,
@@ -392,6 +393,8 @@ def create_admin_web_router(
                 request,
                 authenticated=True,
                 navigation=admin_navigation("dashboard"),
+                web_origin=origin,
+                mobile_api_origin=mobile_api_origin,
                 **dashboard_context(dashboard_value, actor, locale=locale),
             )
         )

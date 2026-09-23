@@ -4,6 +4,16 @@
   <div><h1>{{ t("dashboard_title") }}</h1><p class="page-summary">{{ t("dashboard_intro") }}</p></div>
   <dl class="identity"><div><dt>{{ t("server_label") }}</dt><dd>{{ server_label }}</dd></div><div><dt>{{ t("current_account") }}</dt><dd>{{ account_label }}</dd></div><div><dt>{{ t("role") }}</dt><dd>{{ role }}</dd></div></dl>
 </header>
+{% if mobile_api_origin is defined and mobile_api_origin %}
+<section aria-labelledby="server-addresses-title">
+  <h2 id="server-addresses-title">{{ t("server_addresses_title") }}</h2>
+  <p class="page-summary">{{ t("server_addresses_hint") }}</p>
+  <dl class="facts">
+    <div><dt>{{ t("server_address_web") }}</dt><dd><code>{{ web_origin }}</code></dd></div>
+    <div><dt>{{ t("server_address_mobile") }}</dt><dd><code>{{ mobile_api_origin }}</code></dd></div>
+  </dl>
+</section>
+{% endif %}
 <section aria-labelledby="next-action-title">
   <h2 id="next-action-title">{{ t("next_action_title") }}</h2>
   <div class="section-grid">
