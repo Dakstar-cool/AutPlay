@@ -3,10 +3,9 @@
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
-
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.entrypoints import metadata_worker
+from sqlalchemy import create_engine
 
 
 @pytest.mark.parametrize("workload_version,expected", [(3, 0), (1, 3)])

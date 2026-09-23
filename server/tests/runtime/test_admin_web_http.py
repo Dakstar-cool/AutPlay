@@ -6,9 +6,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
-from starlette.testclient import TestClient
-
 from autplay.application.web_admin import LoginChallenge
 from autplay.domain.admin_commands import AdminCommand
 from autplay.domain.admin_views import (
@@ -33,6 +30,8 @@ from autplay.entrypoints.admin_web_http import (
     create_admin_web_router,
 )
 from autplay.web.renderer import AdminTemplateRenderer
+from fastapi import FastAPI
+from starlette.testclient import TestClient
 
 
 class _Renderer:
