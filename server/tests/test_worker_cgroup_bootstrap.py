@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,7 @@ def test_metadata_selects_only_the_fixed_entrypoint(monkeypatch: pytest.MonkeyPa
         "drop",
         (
             "exec",
-            bootstrap.sys.executable,
-            [bootstrap.sys.executable, "-m", "autplay.entrypoints.metadata_worker"],
+            sys.executable,
+            [sys.executable, "-m", "autplay.entrypoints.metadata_worker"],
         ),
     ]
