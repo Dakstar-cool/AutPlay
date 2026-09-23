@@ -48,6 +48,7 @@ $composeRuntime = Join-Path $repoRoot "deploy\compose\compose.runtime.yaml"
 $composeRelease = Join-Path $repoRoot "deploy\compose\compose.release.yaml"
 $composeAdminLocal = Join-Path $repoRoot "deploy\compose\compose.admin-local.yaml"
 $composePublicEdge = Join-Path $repoRoot "deploy\compose\compose.public-edge.yaml"
+$composeMetadataWorker = Join-Path $repoRoot "deploy\compose\compose.metadata-worker.yaml"
 $caddyfilePublicEdge = Join-Path $repoRoot "deploy\compose\Caddyfile.public-edge"
 $releaseNotes = Join-Path $repoRoot "docs\release\RELEASE_NOTES_$releaseVersion.md"
 $installGuide = Join-Path $repoRoot "docs\operations\INSTALL_AND_PAIR.md"
@@ -72,6 +73,7 @@ foreach ($requiredPath in @(
     $composeRelease,
     $composeAdminLocal,
     $composePublicEdge,
+    $composeMetadataWorker,
     $caddyfilePublicEdge,
     $releaseNotes,
     $installGuide,
@@ -286,6 +288,7 @@ try {
         $composeRelease,
         $composeAdminLocal,
         $composePublicEdge,
+        $composeMetadataWorker,
         $caddyfilePublicEdge
     )) {
         Copy-Item -LiteralPath $composeInput -Destination (Join-Path $installerStaging (Split-Path -Leaf $composeInput))

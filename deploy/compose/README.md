@@ -97,6 +97,11 @@ synthetic test values in a persistent deployment. The report format and command 
 in [`docs/design/AutPlay_Resource_Measurement_Report_v1.md`](../../docs/design/AutPlay_Resource_Measurement_Report_v1.md).
 Only after both commands succeed should the complete runtime be started.
 
+The separate metadata consumer is opt-in through `compose.metadata-worker.yaml`, its `metadata`
+profile and an explicitly reviewed `AUTPLAY_METADATA_WORKER_IMAGE` after those same measured-policy gates. See
+[`docs/operations/METADATA_WORKER.md`](../../docs/operations/METADATA_WORKER.md) for the exact
+activation and aggregate verification sequence.
+
 Render and validate before any host mutation:
 
 ```text

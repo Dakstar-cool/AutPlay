@@ -1,0 +1,71 @@
+# Opt-in production metadata execution. Layer after compose.release.yaml.
+# Enable only after both measured target policies have been reviewed and applied.
+services:
+  metadata-worker:
+    image: "${AUTPLAY_METADATA_WORKER_IMAGE:?set AUTPLAY_METADATA_WORKER_IMAGE to the reviewed metadata worker image tag}"
+    profiles: [metadata]
+    command:
+      - python
+      - -m
+      - autplay.entrypoints.worker_cgroup_bootstrap
+      - --worker
+      - metadata
+    user: "0:0"
+    cgroup: private
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID, SYS_ADMIN]
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=unconfined
+    pids_limit: 128
+    stop_grace_period: 15s
+    environment:
+      AUTPLAY_DATABASE_URL_FILE: /run/secrets/autplay-database-url
+      AUTPLAY_DATABASE_CONNECT_TIMEOUT_SECONDS: "2"
+      AUTPLAY_DATABASE_STATEMENT_TIMEOUT_MS: "5000"
+      AUTPLAY_PROFILE: production
+      AUTPLAY_VAULT_ROOT: /var/lib/autplay/vault
+      AUTPLAY_VAULT_MAX_OBJECT_BYTES: "2147483648"
+      AUTPLAY_VAULT_MAX_CHUNK_BYTES: "1048576"
+      AUTPLAY_VAULT_LOW_DISK_BYTES: "1073741824"
+      AUTPLAY_VAULT_TOOL_TIMEOUT_SECONDS: "120"
+      AUTPLAY_VAULT_TOOL_MAX_OUTPUT_BYTES: "262144"
+      AUTPLAY_PRIVACY_LEDGER_PATH: /var/lib/autplay/privacy-ledger/deletion.sqlite3
+      AUTPLAY_PRIVACY_LEDGER_KEY_FILE: /run/secrets/autplay-privacy-ledger-key
+      AUTPLAY_PRIVACY_LEDGER_KEY_ID: "${AUTPLAY_PRIVACY_LEDGER_KEY_ID:?set AUTPLAY_PRIVACY_LEDGER_KEY_ID to the retained deletion-ledger key revision}"
+      AUTPLAY_TRAINING_CONSENT_LEDGER_PATH: /var/lib/autplay/training-consent-ledger/consent.sqlite3
+      AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_FILE: /run/secrets/autplay-training-consent-ledger-key
+      AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID: "${AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID:?set AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID to the retained consent-ledger key revision}"
+      AUTPLAY_WORKER_HEARTBEAT_SECONDS: "30"
+      AUTPLAY_WORKER_LEASE_SECONDS: "120"
+      AUTPLAY_WORKER_POLL_INTERVAL_SECONDS: "1"
+    secrets:
+      - source: autplay-database-url
+        target: autplay-database-url
+      - source: autplay-privacy-ledger-key
+        target: autplay-privacy-ledger-key
+      - source: autplay-training-consent-ledger-key
+        target: autplay-training-consent-ledger-key
+    volumes:
+      - vault-data:/var/lib/autplay/vault:ro
+      - privacy-ledger-data:/var/lib/autplay/privacy-ledger
+      - training-consent-ledger-data:/var/lib/autplay/training-consent-ledger
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -m
+        - autplay.entrypoints.worker_cgroup_bootstrap
+        - --worker
+        - metadata
+        - --check-readiness
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0

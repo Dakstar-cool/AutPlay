@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from autplay.entrypoints import worker_cgroup_bootstrap as bootstrap
 
 
@@ -67,4 +68,31 @@ def test_readiness_drops_privilege_without_mounting(monkeypatch: pytest.MonkeyPa
     assert events == [
         ("drop", 999, 998),
         ("exec", "autplay-worker-cpu", ["autplay-worker-cpu", "--check-readiness"]),
+    ]
+
+
+def test_metadata_selects_only_the_fixed_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[object] = []
+    monkeypatch.setattr(bootstrap, "_autplay_identity", lambda: (999, 998))
+    monkeypatch.setattr(bootstrap, "_mount_private_cgroup", lambda: events.append("mount"))
+    monkeypatch.setattr(bootstrap, "_delegate", lambda *_: events.append("delegate"))
+    monkeypatch.setattr(bootstrap, "_drop_privileges", lambda *_: events.append("drop"))
+
+    def observe_exec(file: str, args: list[str], environment: dict[str, str]) -> None:
+        del environment
+        events.append(("exec", file, args))
+        raise ExecObserved
+
+    monkeypatch.setattr("autplay.entrypoints.worker_cgroup_bootstrap.os.execvpe", observe_exec)
+    with pytest.raises(ExecObserved):
+        bootstrap.main(["--worker", "metadata"])
+    assert events == [
+        "mount",
+        "delegate",
+        "drop",
+        (
+            "exec",
+            bootstrap.sys.executable,
+            [bootstrap.sys.executable, "-m", "autplay.entrypoints.metadata_worker"],
+        ),
     ]

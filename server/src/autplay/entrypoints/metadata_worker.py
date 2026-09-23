@@ -13,7 +13,9 @@ from uuid import UUID
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.postgresql.internal_io import internal_io_policy
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
+from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.adapters.system import Uuid7Generator
 from autplay.application.job_worker import JobWorkerSettings
@@ -30,7 +32,9 @@ from autplay.runtime.settings import SettingsLoadError, load_worker_settings
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--once", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true")
+    mode.add_argument("--check-readiness", action="store_true")
     namespace = parser.parse_args(argv)
     try:
         settings = load_worker_settings()
@@ -45,6 +49,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     result, deadline = 0, float("inf")
     try:
         enforce_privacy_restore_guard(settings, engine)
+        if namespace.check_readiness:
+            readiness = PostgreSQLReadinessProbe(engine).check()
+            if not readiness.ready:
+                sys.stderr.write(
+                    json.dumps({"event": readiness.code or "service_not_ready"}) + "\n"
+                )
+                result = 3
+            else:
+                with sessions.begin() as session:
+                    if internal_io_policy(session).workload_version < 2:
+                        raise ResourceAdmissionError("metadata_budget_unconfigured")
+                sys.stdout.write('{"status":"ready","service":"autplay-worker-metadata"}\n')
+            return result
         runtime = MetadataWorkerRuntime(
             settings,
             sessions,

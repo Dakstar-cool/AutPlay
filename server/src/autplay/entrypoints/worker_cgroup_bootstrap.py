@@ -12,7 +12,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
-SERVICE_NAME = "autplay-worker-cpu"
+_WORKER_COMMANDS = {
+    "cpu": ("autplay-worker-cpu",),
+    "metadata": (sys.executable, "-m", "autplay.entrypoints.metadata_worker"),
+}
 _MOUNTPOINT = Path("/tmp/autplay-cgroup")
 _DELEGATION = _MOUNTPOINT / "delegation"
 _CGROUP2_MAGIC = 0x63677270
@@ -101,7 +104,9 @@ def _drop_privileges(uid: int, gid: int) -> None:
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="autplay-worker-cgroup-bootstrap")
     parser.add_argument("--check-readiness", action="store_true")
+    parser.add_argument("--worker", choices=tuple(_WORKER_COMMANDS), default="cpu")
     options = parser.parse_args(arguments)
+    service_name = f"autplay-worker-{options.worker}"
     stage = "identity"
     try:
         uid, gid = _autplay_identity()
@@ -114,7 +119,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         stage = "privilege_drop"
         _drop_privileges(uid, gid)
         stage = "exec"
-        command = ["autplay-worker-cpu"]
+        command = list(_WORKER_COMMANDS[options.worker])
         if options.check_readiness:
             command.append("--check-readiness")
         os.execvpe(command[0], command, os.environ)
@@ -123,7 +128,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "event": f"resource_process_tree_{stage}_unavailable",
-                    "service": SERVICE_NAME,
+                    "service": service_name,
                 },
                 separators=(",", ":"),
             )
