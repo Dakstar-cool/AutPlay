@@ -63,6 +63,7 @@ import app.autplay.playback.presentation.PlaybackSourcePresentation
 import app.autplay.playback.presentation.RepeatModePresentation
 import app.autplay.playback.presentation.canSeek
 import app.autplay.ui.AutPlayArtwork
+import app.autplay.ui.HomeSwipeTargets
 import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayIconButton
 import app.autplay.ui.face.AutPlayResonanceLens
@@ -200,6 +201,7 @@ public fun NowPlayingScreen(
     onSetSessionTasteExcluded: (Boolean) -> Unit = {},
     onDownload: () -> Unit = {},
     downloadState: String? = null,
+    swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -293,8 +295,8 @@ public fun NowPlayingScreen(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
                 )
             }
-            AutPlayResonanceLens(
-                trackSeed = state.mediaId,
+            NowPlayingFaceCarousel(
+                mediaId = state.mediaId,
                 playbackMode = facePlaybackMode,
                 preference = when (preference) {
                     PlaybackPreferenceUiState.Neutral -> FacePreferenceMode.Neutral
@@ -302,6 +304,10 @@ public fun NowPlayingScreen(
                     PlaybackPreferenceUiState.Disliked -> FacePreferenceMode.Disliked
                 },
                 accessibilitySummary = stringResource(faceDescriptionResource(facePlaybackMode)),
+                targets = swipeTargets,
+                enabled = state.controls is PlaybackControlGate.Allowed,
+                onPrevious = onPrevious,
+                onNext = onNext,
                 modifier = Modifier.width(faceWidth),
             )
             Row(
@@ -373,7 +379,8 @@ public fun NowPlayingScreen(
                     AutPlayIcon.Previous,
                     R.string.action_previous,
                     onPrevious,
-                    enabled = state.previousMediaId != null && state.controls is PlaybackControlGate.Allowed,
+                    enabled = (swipeTargets.previous != null || state.previousMediaId != null) &&
+                        state.controls is PlaybackControlGate.Allowed,
                 )
                 PrimaryTransportButton(
                     icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
@@ -385,7 +392,8 @@ public fun NowPlayingScreen(
                     AutPlayIcon.Next,
                     R.string.action_next,
                     onNext,
-                    enabled = state.nextMediaId != null && state.controls is PlaybackControlGate.Allowed,
+                    enabled = (swipeTargets.next != null || state.nextMediaId != null) &&
+                        state.controls is PlaybackControlGate.Allowed,
                 )
                 AutPlayIconButton(
                     AutPlayIcon.Repeat,

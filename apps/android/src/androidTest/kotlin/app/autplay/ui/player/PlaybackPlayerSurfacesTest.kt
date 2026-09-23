@@ -13,6 +13,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.R
@@ -22,6 +24,8 @@ import app.autplay.playback.presentation.PlaybackControlLockReason
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.playback.presentation.PlaybackStatus
 import app.autplay.ui.AutPlayTheme
+import app.autplay.ui.HomeSwipeTarget
+import app.autplay.ui.HomeSwipeTargets
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -49,6 +53,27 @@ class PlaybackPlayerSurfacesTest {
         composeRule.runOnIdle { state.value = state.value.copy(previousMediaId = null, nextMediaId = null) }
         previous.assertIsNotEnabled()
         next.assertIsNotEnabled()
+    }
+
+    @Test fun fullPlayerSwipesToLibraryNeighbourWhenTheQueueHasNoNextEntry() {
+        var nextCalls = 0
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(
+                state = ordinaryState().copy(previousMediaId = null, nextMediaId = null),
+                onTogglePlayPause = {}, onToggleShuffle = {}, onCycleRepeat = {},
+                onSeekBegin = {}, onSeekUpdate = {}, onSeekCommit = {},
+                onLike = {}, onDislike = {}, feedbackEnabled = true,
+                onObservingChanged = {}, onNext = { nextCalls++ },
+                swipeTargets = HomeSwipeTargets(
+                    next = HomeSwipeTarget("next-library", "next-library", "Next song", "Artist"),
+                ),
+            )
+        } }
+
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_next)).assertIsEnabled()
+        composeRule.onNodeWithTag("player-track-carousel").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        assertEquals(1, nextCalls)
     }
 
     @Test
