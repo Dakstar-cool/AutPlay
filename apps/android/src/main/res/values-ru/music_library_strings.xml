@@ -22,6 +22,7 @@
     <string name="music_retry">Повторить</string>
     <string name="music_need_server">Подключите личный сервер для работы с Vault.</string>
     <string name="music_internet_title">В интернете</string>
+    <string name="music_search_internet">Искать в интернете</string>
     <string name="music_add_vault">Добавить в Vault</string>
     <string name="music_add_download">В Vault и на телефон</string>
     <string name="music_internet_empty">Подходящие треки не найдены.</string>

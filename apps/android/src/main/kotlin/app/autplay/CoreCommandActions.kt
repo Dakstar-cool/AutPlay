@@ -448,7 +448,7 @@ internal fun buildSearchCommandActions(
         if (SearchScope.Vault in activeScopes && activeBinding != null) {
             scope.launch {
                 runCatching {
-                    AutPlayRuntime.serverFeatures(context, activeBinding).searchLibrary(request.normalizedQuery)
+                    AutPlayRuntime.serverFeatures(context, activeBinding).searchLibrary(request.normalizedQuery, limit = 100)
                 }.mapCatching { rows ->
                     vaultProjector.project(activeBinding.serverProfileId.value, rows)
                 }.onSuccess { rows ->

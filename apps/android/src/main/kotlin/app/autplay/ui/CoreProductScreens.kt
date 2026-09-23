@@ -477,64 +477,13 @@ public fun SearchProductScreen(
         }
         item(key = "search:submit") {
             Button(
-                onClick = { internetQuery = state.query; internetRequest++; onSearch() },
+                onClick = { internetRequest = 0; onSearch() },
                 enabled = state.query.isNotBlank(),
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .testTag("local-search-submit"),
             ) {
                 Text(stringResource(R.string.search_action))
-            }
-        }
-        if (internetRequest > 0 && internetQuery == state.query) {
-            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest) }
-        }
-        if (state.loading) {
-            item(key = "search:loading") {
-                AutPlayStateSurface(
-                    AutPlayStateKind.Loading,
-                    stringResource(R.string.search_loading),
-                )
-            }
-        }
-        if (state.error) {
-            item(key = "search:error") {
-                AutPlayStateSurface(
-                    AutPlayStateKind.Error,
-                    stringResource(R.string.state_error_body),
-                    actionLabel = stringResource(R.string.action_retry),
-                    onAction = onRetry,
-                )
-            }
-        } else if (state.searched && !state.loading) {
-            item(key = "search:count") { Text(pluralStringResource(R.plurals.search_result_count, state.results.size, state.results.size)) }
-            if (state.results.isEmpty()) {
-                item(key = "search:empty") {
-                    AutPlayStateSurface(
-                        AutPlayStateKind.Empty,
-                        stringResource(R.string.search_empty),
-                    )
-                }
-            }
-        }
-        items(state.results, key = { "$SEARCH_RESULT_PREFIX${it.id}" }) { track ->
-            AutPlayCard(onClick = { onPlay(track.id) }) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    AutPlayArtwork(track.title, trackId = track.id)
-                    Column(Modifier.weight(1f)) {
-                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            track.artist ?: stringResource(R.string.library_unknown_artist),
-                            color = AutPlayTokens.colors.mutedText,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.action_play), Modifier.size(24.dp))
-                }
             }
         }
         if (state.vaultAvailable && state.vaultSelected) {
@@ -599,6 +548,64 @@ public fun SearchProductScreen(
                     }
                 }
             }
+        }
+        if (state.loading) {
+            item(key = "search:loading") {
+                AutPlayStateSurface(
+                    AutPlayStateKind.Loading,
+                    stringResource(R.string.search_loading),
+                )
+            }
+        }
+        if (state.error) {
+            item(key = "search:error") {
+                AutPlayStateSurface(
+                    AutPlayStateKind.Error,
+                    stringResource(R.string.state_error_body),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetry,
+                )
+            }
+        } else if (state.searched && !state.loading) {
+            item(key = "search:count") { Text(pluralStringResource(R.plurals.search_result_count, state.results.size, state.results.size)) }
+            if (state.results.isEmpty()) {
+                item(key = "search:empty") {
+                    AutPlayStateSurface(
+                        AutPlayStateKind.Empty,
+                        stringResource(R.string.search_empty),
+                    )
+                }
+            }
+        }
+        items(state.results, key = { "$SEARCH_RESULT_PREFIX${it.id}" }) { track ->
+            AutPlayCard(onClick = { onPlay(track.id) }) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    AutPlayArtwork(track.title, trackId = track.id)
+                    Column(Modifier.weight(1f)) {
+                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            track.artist ?: stringResource(R.string.library_unknown_artist),
+                            color = AutPlayTokens.colors.mutedText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.action_play), Modifier.size(24.dp))
+                }
+            }
+        }
+        if (state.vaultAvailable && (state.searched || state.vaultSearched)) {
+            item(key = "search:internet-action") {
+                OutlinedButton(onClick = { internetQuery = state.query; internetRequest++ }) {
+                    Text(stringResource(R.string.music_search_internet))
+                }
+            }
+        }
+        if (internetRequest > 0 && internetQuery == state.query) {
+            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest) }
         }
     }
 }
@@ -972,14 +979,6 @@ private val LIBRARY_CONTENT_PREFIXES = setOf(
 
 private fun searchListKeys(state: SearchScreenUiState): List<String> = buildList {
     addAll(listOf("search:heading", "search:scopes", "search:query", "search:submit"))
-    if (state.loading) add("search:loading")
-    if (state.error) {
-        add("search:error")
-    } else if (state.searched && !state.loading) {
-        add("search:count")
-        if (state.results.isEmpty()) add("search:empty")
-    }
-    state.results.forEach { add("$SEARCH_RESULT_PREFIX${it.id}") }
     if (state.vaultAvailable && state.vaultSelected) {
         add("search:vault-heading")
         when {
@@ -990,6 +989,15 @@ private fun searchListKeys(state: SearchScreenUiState): List<String> = buildList
         }
         state.vaultResults.forEach { add("$SEARCH_VAULT_RESULT_PREFIX${it.id}") }
     }
+    if (state.loading) add("search:loading")
+    if (state.error) {
+        add("search:error")
+    } else if (state.searched && !state.loading) {
+        add("search:count")
+        if (state.results.isEmpty()) add("search:empty")
+    }
+    state.results.forEach { add("$SEARCH_RESULT_PREFIX${it.id}") }
+    if (state.vaultAvailable && (state.searched || state.vaultSearched)) add("search:internet-action")
 }
 
 private fun libraryListKeys(state: LibraryScreenUiState): List<String> = buildList {

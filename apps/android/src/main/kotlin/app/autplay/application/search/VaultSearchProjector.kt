@@ -12,7 +12,7 @@ data class VaultSearchResult(
     val availability: String,
     val localUserTrackRefId: String?,
 ) {
-    val playable: Boolean get() = localUserTrackRefId != null
+    val playable: Boolean get() = localUserTrackRefId != null && availability in setOf("VAULT", "LOCAL")
 }
 
 /** Resolves bounded server identities against synced Room metadata without inventing remote fields. */
@@ -34,7 +34,13 @@ class VaultSearchProjector(private val database: AutPlayDatabase) {
                 availability = row.availabilityStatus,
                 localUserTrackRefId = local?.localUserTrackRefId,
             )
-        }
+        }.sortedWith(compareBy<VaultSearchResult> { result ->
+            when (result.availability) {
+                "VAULT" -> 0
+                "LOCAL" -> 1
+                else -> 2
+            }
+        })
     }
 
     companion object {

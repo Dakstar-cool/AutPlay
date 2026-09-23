@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import Select, and_, or_, select, update
+from sqlalchemy import Select, and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -483,7 +483,15 @@ class LibraryRepository:
                         UserTrackRefRow.raw_album.ilike(needle, escape="\\"),
                     ),
                 )
-                .order_by(LibraryEntryRow.added_at.desc(), LibraryEntryRow.library_entry_id)
+                .order_by(
+                    case(
+                        (LibraryEntryRow.availability_status == "VAULT", 0),
+                        (LibraryEntryRow.availability_status == "LOCAL", 1),
+                        else_=2,
+                    ),
+                    LibraryEntryRow.added_at.desc(),
+                    LibraryEntryRow.library_entry_id,
+                )
                 .limit(limit)
             )
         )
