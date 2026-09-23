@@ -164,6 +164,15 @@ internal fun MainAdaptiveShell(
             UiDestination.NowPlaying -> NowPlayingRouteRenderer(
                 downloadState = state.nowPlayingDownloadState,
                 state = state.playerState,
+                swipeTargets = state.homeSwipeTargets,
+                onPrevious = {
+                    if (state.homeSwipeTargets.previous != null) actions.skipHomeTrack(false)
+                    else state.nowPlayingActions.previous()
+                },
+                onNext = {
+                    if (state.homeSwipeTargets.next != null) actions.skipHomeTrack(true)
+                    else state.nowPlayingActions.next()
+                },
                 feedbackEnabled = state.nowPlayingFeedbackEnabled,
                 preference = state.nowPlayingPreference,
                 taste = state.nowPlayingTaste,

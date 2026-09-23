@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -38,6 +38,43 @@ def _principal(session: Session, name: str) -> Principal:
     )
     session.flush()
     return Principal(user_id, device_id, session_id, AccountRole.USER)
+
+
+def test_search_returns_vault_tracks_before_newer_pending_entries(database_url: str) -> None:
+    engine = create_engine(database_url)
+    now = datetime.now(UTC)
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "vault-search-owner")
+            repository = LibraryRepository(session)
+            vault_ref = repository.create_unresolved(
+                owner, CreateUnresolvedTrack(uuid4(), "shared search title", "artist"), now=now
+            )
+            vault_entry = repository.add_library_entry(
+                owner,
+                library_entry_id=uuid4(),
+                user_track_ref_id=vault_ref,
+                source="IMPORT",
+                availability_status="VAULT",
+                now=now,
+            )
+            pending_ref = repository.create_unresolved(
+                owner,
+                CreateUnresolvedTrack(uuid4(), "shared search title", "artist"),
+                now=now + timedelta(seconds=1),
+            )
+            repository.add_library_entry(
+                owner,
+                library_entry_id=uuid4(),
+                user_track_ref_id=pending_ref,
+                source="IMPORT",
+                availability_status="PENDING",
+                now=now + timedelta(seconds=1),
+            )
+            matches = repository.search_library(owner, query="shared search title", limit=1)
+            assert [row.library_entry_id for row in matches] == [vault_entry]
+    finally:
+        engine.dispose()
 
 
 def test_library_commands_and_queries_mask_cross_user_rows(database_url: str) -> None:

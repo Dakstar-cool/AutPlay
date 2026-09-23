@@ -3,6 +3,7 @@ package app.autplay.ui.player
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import app.autplay.playback.presentation.PlaybackPresentationState
+import app.autplay.ui.HomeSwipeTargets
 import app.autplay.ui.queue.QueueEditorUiActions
 import app.autplay.ui.queue.QueueEditorUiState
 
@@ -48,14 +49,18 @@ internal fun NowPlayingRouteRenderer(
     actions: NowPlayingRouteActions,
     modifier: Modifier = Modifier,
     downloadState: String? = null,
+    swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
+    onPrevious: () -> Unit = actions.previous,
+    onNext: () -> Unit = actions.next,
 ) {
     NowPlayingScreen(
         state = state,
         onTogglePlayPause = actions.togglePlayPause,
         onToggleShuffle = actions.toggleShuffle,
         onCycleRepeat = actions.cycleRepeat,
-        onPrevious = actions.previous,
-        onNext = actions.next,
+        onPrevious = onPrevious,
+        onNext = onNext,
+        swipeTargets = swipeTargets,
         onSeekBegin = actions.seekBegin,
         onSeekUpdate = actions.seekUpdate,
         onSeekCommit = actions.seekCommit,

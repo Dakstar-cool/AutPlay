@@ -36,7 +36,8 @@ internal fun RefreshSearchOnBindingEffect(
 ) {
     val bindingKey = binding?.serverProfileId?.value
     LaunchedEffect(bindingKey) {
-        if (binding == null) coreState.scopes = setOf(SearchScope.Local)
+        coreState.scopes = if (binding == null) setOf(SearchScope.Local)
+            else coreState.scopes + SearchScope.Local + SearchScope.Vault
         generation.invalidate()
         resultStore.invalidate()
         vaultResultStore.invalidate()
@@ -73,7 +74,7 @@ internal fun RefreshSearchOnBindingEffect(
         }
         setVaultLoading(true)
         runCatching {
-            AutPlayRuntime.serverFeatures(context, binding).searchLibrary(request.normalizedQuery)
+            AutPlayRuntime.serverFeatures(context, binding).searchLibrary(request.normalizedQuery, limit = 100)
         }.mapCatching { rows ->
             vaultProjector.project(binding.serverProfileId.value, rows)
         }.onSuccess { rows ->

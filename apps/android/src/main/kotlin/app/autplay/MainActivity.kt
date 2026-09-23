@@ -1285,11 +1285,6 @@ private fun OfflineLibraryScreen(
             else -> Unit
         }
     }
-    val visibleSearchResults = searchResultStore.visibleFor(
-        coreProductState.query,
-        coreProductState.scopes + SearchScope.Local,
-        activeProfileId,
-    )
     val searchContextIsCurrent = searchResultStore.matchesContext(
         coreProductState.query,
         coreProductState.scopes + SearchScope.Local,
@@ -1300,6 +1295,12 @@ private fun OfflineLibraryScreen(
         coreProductState.scopes + SearchScope.Local,
         activeProfileId,
     )
+    val vaultTrackIds = visibleVaultSearchResults.mapNotNull(VaultSearchResult::localUserTrackRefId).toSet()
+    val visibleSearchResults = searchResultStore.visibleFor(
+        coreProductState.query,
+        coreProductState.scopes + SearchScope.Local,
+        activeProfileId,
+    ).filterNot { it.localUserTrackRefId in vaultTrackIds }
     val untitledTrack = stringResource(R.string.player_nothing_playing)
     val queueControls = buildOfflineQueueControls(
         scope, { queueProjection }, queueEditorRepository, playbackOwner,

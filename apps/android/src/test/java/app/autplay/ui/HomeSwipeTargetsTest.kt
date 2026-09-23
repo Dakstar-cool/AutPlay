@@ -7,6 +7,7 @@ import app.autplay.domain.LocalId
 import app.autplay.playback.presentation.PlaybackControlGate
 import app.autplay.playback.presentation.PlaybackControlLockReason
 import app.autplay.playback.presentation.PlaybackPresentationState
+import app.autplay.playback.presentation.RepeatModePresentation
 import app.autplay.ui.core.CoreTrackSummary
 import app.autplay.ui.core.TrackAvailability
 import org.junit.Assert.assertEquals
@@ -27,13 +28,39 @@ class HomeSwipeTargetsTest {
         assertEquals("Artist 3", result.next?.artist)
     }
 
-    @Test fun controllerBoundariesDoNotInventQueueOrLibraryNeighbors() {
+    @Test fun controllerBoundariesContinueIntoAvailableLibrary() {
         val queue = queue(listOf(1, 2, 3), current = 2)
         val result = targets(playing(queue), trackId(2), queue)
-        assertEquals(HomeSwipeTargets(), result)
+        assertEquals(trackId(1), result.previous?.trackRefId)
+        assertEquals(trackId(3), result.next?.trackRefId)
+        assertNull(result.previous?.queueEntryId)
+        assertNull(result.next?.queueEntryId)
 
         val unknown = playing(queue).copy(previousMediaId = id(99).value, nextMediaId = id(2).value)
         assertEquals(HomeSwipeTargets(), targets(unknown, trackId(2), queue))
+    }
+
+    @Test fun lastTestQueueEntryWrapsToNewLibraryTracks() {
+        val queue = queue(listOf(1, 2), current = 2)
+        val library = listOf(track(3), track(1), track(2))
+        val result = targets(playing(queue), trackId(2), queue, library)
+        assertEquals(trackId(3), result.next?.trackRefId)
+        assertNull(result.next?.queueEntryId)
+    }
+
+    @Test fun repeatAllDoesNotTrapHomeInTwoOldTestFiles() {
+        val queue = queue(listOf(1, 2), current = 2)
+        val state = playing(queue).copy(nextMediaId = id(1).value, repeatMode = RepeatModePresentation.All)
+        val result = targets(state, trackId(2), queue, listOf(track(3), track(1), track(2)))
+        assertEquals(trackId(3), result.next?.trackRefId)
+        assertNull(result.next?.queueEntryId)
+    }
+
+    @Test fun syncedLibraryCanReplaceAQueueTrackOutsideThePresentationWindow() {
+        val queue = queue(listOf(1, 2), current = 2)
+        val result = targets(playing(queue), trackId(2), queue, listOf(track(3), track(4)))
+        assertEquals(trackId(3), result.next?.trackRefId)
+        assertEquals(trackId(4), result.previous?.trackRefId)
     }
 
     @Test fun repeatWrapUsesControllerTargetEvenAtTheLastListEntry() {

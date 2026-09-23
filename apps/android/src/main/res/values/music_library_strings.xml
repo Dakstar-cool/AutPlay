@@ -22,6 +22,7 @@
     <string name="music_retry">Try again</string>
     <string name="music_need_server">Connect your personal server to use Vault.</string>
     <string name="music_internet_title">On the internet</string>
+    <string name="music_search_internet">Search the internet</string>
     <string name="music_add_vault">Add to Vault</string>
     <string name="music_add_download">Add to Vault and download</string>
     <string name="music_internet_empty">No matching tracks were found.</string>

@@ -51,4 +51,6 @@ public class CoreProductUiState internal constructor(initial: CoreProductSavedSt
 public fun rememberCoreProductUiState(bindingKey: String?): CoreProductUiState = rememberSaveable(
     bindingKey,
     saver = CoreProductUiState.Saver,
-) { CoreProductUiState(CoreProductSavedState()) }
+) { CoreProductUiState(CoreProductSavedState(
+    scopes = if (bindingKey == null) setOf(SearchScope.Local) else setOf(SearchScope.Local, SearchScope.Vault),
+)) }

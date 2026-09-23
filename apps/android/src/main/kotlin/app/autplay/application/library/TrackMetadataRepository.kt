@@ -31,8 +31,12 @@ class TrackMetadataRepository(private val context: Context) {
         }
     }
 
-    suspend fun fetchArtwork(profile: String, api: ServerFeatureRepository): Boolean = withContext(Dispatchers.IO) {
-        for (metadata in database.trackMetadataDao().missingArtwork(profile, 40)) {
+    suspend fun fetchArtwork(profile: String, api: ServerFeatureRepository, shard: ArtworkShard, offset: Int = 0): ArtworkBatchResult = withContext(Dispatchers.IO) {
+        require(offset >= 0)
+        val dao = database.trackMetadataDao()
+        val before = dao.missingArtworkCount(profile, shard.lowerSha, shard.upperSha)
+        val batch = dao.missingArtwork(profile, shard.lowerSha, shard.upperSha, 40, offset)
+        for (metadata in batch) {
             val ref = database.libraryDao().trackRef(metadata.localUserTrackRefId) ?: continue
             if (ref.serverProfileId != profile || ref.deletedAtMs != null) continue
             val serverId = ref.serverUserTrackRefId ?: continue
@@ -50,7 +54,14 @@ class TrackMetadataRepository(private val context: Context) {
             check(digest(bytes) == sha) { "METADATA_ARTWORK_INTEGRITY" }
             storeArtwork(profile, bytes, sha)
         }
-        database.trackMetadataDao().missingArtwork(profile, 1).isEmpty()
+        val remaining = dao.missingArtworkCount(profile, shard.lowerSha, shard.upperSha)
+        // A stored cover or a refreshed 404 may remove several references at once.
+        // Restart at the head after progress; otherwise skip this unavailable page.
+        ArtworkBatchResult(remaining, when {
+            remaining < before -> 0
+            batch.isEmpty() -> remaining
+            else -> offset + batch.size
+        })
     }
 
     suspend fun storeArtwork(profile: String, bytes: ByteArray, sha: String = digest(bytes)): String = withContext(Dispatchers.IO) {
@@ -117,4 +128,15 @@ class TrackMetadataRepository(private val context: Context) {
     }
 
     private fun digest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+}
+
+data class ArtworkBatchResult(val remaining: Int, val nextOffset: Int)
+
+/** SHA-256 prefixes partition references without moving rows between concurrent workers. */
+enum class ArtworkShard(val lowerSha: String, val upperSha: String) {
+    FIRST("0", "4"), SECOND("4", "8"), THIRD("8", "c"), FOURTH("c", "g");
+
+    companion object {
+        fun fromIndex(index: Int): ArtworkShard? = entries.getOrNull(index)
+    }
 }
