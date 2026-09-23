@@ -519,6 +519,7 @@ internal fun buildLegacySecondaryRouteActions(
     ownerProvisioningCoordinator: OwnerProvisioningCoordinator?,
     pickPublicAccountInvitation: () -> Unit,
     scanPublicAccountInvitation: () -> Unit,
+    scanEnrollmentInvitation: () -> Unit,
     shareOwnerAccountInvitation: (AccountInvitation) -> Unit,
     admissionRuntime: app.autplay.application.profilepairing.AdmissionRuntime,
     admissionSnapshot: app.autplay.application.profilepairing.PairingFlowSnapshot?,
@@ -637,6 +638,7 @@ internal fun buildLegacySecondaryRouteActions(
             profilePairingRuntime.cancel()
         },
         exchangeInvitation = profilePairingRuntime::exchangeInvitation,
+        scanEnrollmentInvitation = scanEnrollmentInvitation,
         chooseLocalData = { choice ->
             when (choice) {
                 ExistingLocalDataChoice.KEEP_ON_PHONE -> profilePairingRuntime.chooseLocalData(false)

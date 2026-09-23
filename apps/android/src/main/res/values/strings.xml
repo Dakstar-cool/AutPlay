@@ -459,6 +459,14 @@
     <string name="profile_invitation_expiry_bounds">Allowed minute range: %1$d–%2$d.</string>
     <string name="profile_create_invitation">Create invitation</string>
     <string name="profile_invitation_created_title">Invitation created</string>
+    <string name="profile_invitation_qr_scan_hint">Scan this QR on the other phone. No photo is needed.</string>
+    <string name="profile_show_manual_invitation">Show manual code</string>
+    <string name="profile_hide_manual_invitation">Hide manual code</string>
+    <string name="profile_scan_invitation_qr">Scan device invitation QR</string>
+    <string name="qr_scan_hint">Point the camera at the AutPlay QR code. It scans automatically.</string>
+    <string name="qr_scan_cancel">Cancel</string>
+    <string name="qr_scan_camera_permission_required">Camera access is needed to scan the QR code.</string>
+    <string name="qr_scan_camera_unavailable">Camera unavailable. Close the scanner and try again.</string>
     <string name="profile_invitation_created_warning">This secret is shown once. Do not copy, share, log, export, or include it in screenshots.</string>
     <string name="profile_done">Done</string>
     <string name="profile_cancel_invitation">Cancel invitation</string>

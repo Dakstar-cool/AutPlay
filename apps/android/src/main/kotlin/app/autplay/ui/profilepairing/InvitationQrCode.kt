@@ -58,6 +58,9 @@ internal fun InvitationQrCode(envelope: String, modifier: Modifier = Modifier) {
             .size(224.dp)
             .clearAndSetSemantics { contentDescription = QR_CONTENT_DESCRIPTION },
     ) {
+        // Light modules must stay white even when the surrounding Material surface is gray.
+        // Keeping the full matrix opaque also preserves the QR quiet zone for camera decoders.
+        drawRect(color = Color.White)
         val module = size.minDimension / matrix.side
         for (y in 0 until matrix.side) {
             for (x in 0 until matrix.side) {

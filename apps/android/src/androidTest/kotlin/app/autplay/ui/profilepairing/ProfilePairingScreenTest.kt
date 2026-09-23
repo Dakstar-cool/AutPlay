@@ -265,6 +265,10 @@ class ProfilePairingScreenTest {
         compose.onNodeWithText(context.getString(R.string.profile_create_invitation))
             .performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(10, createdExpiry.get()) }
+        compose.onNodeWithContentDescription(QR_CONTENT_DESCRIPTION).assertIsDisplayed()
+        compose.onNodeWithContentDescription("One-time invitation secret").assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.profile_show_manual_invitation))
+            .assertIsDisplayed().performClick()
         compose.onNodeWithContentDescription("One-time invitation secret").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_cancel_invitation))
             .assertIsDisplayed().performClick()

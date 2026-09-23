@@ -1,10 +1,10 @@
 package app.autplay
 
+import android.app.Activity
 import android.app.LocaleManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -215,10 +215,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import java.util.concurrent.ConcurrentHashMap
-import com.google.zxing.BinaryBitmap
-import com.google.zxing.RGBLuminanceSource
-import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.qrcode.QRCodeReader
 
 internal const val BOOTSTRAP_LABEL = "AutPlay"
 internal const val ONBOARDING_REVISION = CURRENT_ONBOARDING_REVISION
@@ -759,10 +755,12 @@ private fun OfflineLibraryScreen(
         }
     }
     val publicInvitationQrScanner = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicturePreview(),
-    ) { bitmap ->
-        if (bitmap != null) {
-            val bytes = runCatching { decodePublicInvitationQr(bitmap) }.getOrElse { ByteArray(0) }
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val payload = result.data?.getStringExtra(EnrollmentQrScannerActivity.EXTRA_PAYLOAD)
+            ?.takeIf { result.resultCode == Activity.RESULT_OK && it.length in 2..16_384 }
+        if (payload != null) {
+            val bytes = payload.toByteArray(Charsets.UTF_8)
             try {
                 publicRegistrationCoordinator.importDocument(
                     app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE,
@@ -772,6 +770,13 @@ private fun OfflineLibraryScreen(
                 bytes.fill(0)
             }
         }
+    }
+    val enrollmentInvitationQrScanner = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        result.data?.getStringExtra(EnrollmentQrScannerActivity.EXTRA_PAYLOAD)
+            ?.takeIf { result.resultCode == Activity.RESULT_OK && it.length in 2..4096 }
+            ?.let(pairingRuntime::exchangeInvitation)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(binding, lifecycleOwner) {
@@ -1731,7 +1736,12 @@ private fun OfflineLibraryScreen(
                 arrayOf(app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE),
             )
         },
-        scanPublicAccountInvitation = { publicInvitationQrScanner.launch(null) },
+        scanPublicAccountInvitation = {
+            publicInvitationQrScanner.launch(Intent(context, EnrollmentQrScannerActivity::class.java))
+        },
+        scanEnrollmentInvitation = {
+            enrollmentInvitationQrScanner.launch(Intent(context, EnrollmentQrScannerActivity::class.java))
+        },
         shareOwnerAccountInvitation = { invitation ->
             val share = Intent(Intent.ACTION_SEND).apply {
                 type = app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE
@@ -2352,17 +2362,6 @@ private fun readBoundedPublicInvitationBytes(input: InputStream): ByteArray {
     return output.toByteArray().also {
         require(it.isNotEmpty()) { "ACCOUNT_INVITATION_EMPTY" }
     }
-}
-
-private fun decodePublicInvitationQr(bitmap: Bitmap): ByteArray {
-    require(bitmap.width in 1..4_096 && bitmap.height in 1..4_096) { "ACCOUNT_INVITATION_QR_SIZE_INVALID" }
-    val pixels = IntArray(bitmap.width * bitmap.height)
-    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    val result = QRCodeReader().decode(
-        BinaryBitmap(HybridBinarizer(RGBLuminanceSource(bitmap.width, bitmap.height, pixels))),
-    ).text.toByteArray(Charsets.UTF_8)
-    require(result.size in 2..16_384) { "ACCOUNT_INVITATION_QR_PAYLOAD_INVALID" }
-    return result
 }
 
 private fun readBoundedServerImportBytes(input: InputStream): ByteArray {

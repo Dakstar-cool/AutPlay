@@ -477,6 +477,14 @@
     <string name="profile_invitation_expiry_bounds">Допустимый диапазон минут: %1$d–%2$d.</string>
     <string name="profile_create_invitation">Создать приглашение</string>
     <string name="profile_invitation_created_title">Приглашение создано</string>
+    <string name="profile_invitation_qr_scan_hint">Сканируйте этот QR на другом телефоне. Делать фото не нужно.</string>
+    <string name="profile_show_manual_invitation">Показать код для ручного ввода</string>
+    <string name="profile_hide_manual_invitation">Скрыть код</string>
+    <string name="profile_scan_invitation_qr">Сканировать QR приглашения устройства</string>
+    <string name="qr_scan_hint">Наведите камеру на QR-код AutPlay. Сканирование произойдёт автоматически.</string>
+    <string name="qr_scan_cancel">Отмена</string>
+    <string name="qr_scan_camera_permission_required">Для сканирования QR-кода нужен доступ к камере.</string>
+    <string name="qr_scan_camera_unavailable">Камера недоступна. Закройте сканер и попробуйте снова.</string>
     <string name="profile_invitation_created_warning">Секрет показывается один раз. Не копируйте, не передавайте, не журналируйте, не экспортируйте его и не включайте в снимки экрана.</string>
     <string name="profile_done">Готово</string>
     <string name="profile_cancel_invitation">Отменить приглашение</string>

@@ -159,6 +159,7 @@ internal data class ProfilePairingActions(
     val confirmTrust: () -> Unit = {},
     val cancelPairing: () -> Unit = {},
     val exchangeInvitation: (String) -> Unit = {},
+    val scanEnrollmentInvitation: () -> Unit = {},
     val chooseLocalData: (ExistingLocalDataChoice) -> Unit = {},
     val reviewLocalData: () -> Unit = {},
     val cancelLocalDataReview: () -> Unit = {},
@@ -304,6 +305,9 @@ internal fun ProfilePairingScreen(
         }
 
         if (!publicFirstBindReserved && state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
+            Button(onClick = actions.scanEnrollmentInvitation) {
+                Text(stringResource(R.string.profile_scan_invitation_qr))
+            }
             OutlinedTextField(
                 value = invitation,
                 onValueChange = { invitation = it.take(4096) },
@@ -818,19 +822,26 @@ private fun InvitationManagement(
     }
 
     state.createdSecret?.let { secret ->
+        var showManualSecret by remember(secret) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { if (!busy) onDismissCreated() },
             title = { Text(stringResource(R.string.profile_invitation_created_title)) },
             text = {
                 Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-                    // Text is intentionally non-selectable and has no secret accessibility semantics.
-                    Text(
-                        text = secret,
-                        modifier = Modifier.clearAndSetSemantics {
-                            contentDescription = CREATED_INVITATION_SECRET_DESCRIPTION
-                        },
-                    )
                     InvitationQrCode(secret)
+                    Text(stringResource(R.string.profile_invitation_qr_scan_hint))
+                    OutlinedButton(onClick = { showManualSecret = !showManualSecret }) {
+                        Text(stringResource(if (showManualSecret) R.string.profile_hide_manual_invitation else R.string.profile_show_manual_invitation))
+                    }
+                    if (showManualSecret) {
+                        // The fallback is non-selectable; enrollment bearers must not enter the clipboard.
+                        Text(
+                            text = secret,
+                            modifier = Modifier.clearAndSetSemantics {
+                                contentDescription = CREATED_INVITATION_SECRET_DESCRIPTION
+                            },
+                        )
+                    }
                     Text(stringResource(R.string.profile_invitation_created_warning))
                 }
             },

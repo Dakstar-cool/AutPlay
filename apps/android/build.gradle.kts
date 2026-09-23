@@ -156,6 +156,9 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.squareup.okhttp)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     ksp(libs.androidx.room3.compiler)
 
