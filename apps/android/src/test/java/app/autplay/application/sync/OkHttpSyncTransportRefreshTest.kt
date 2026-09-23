@@ -126,6 +126,24 @@ class OkHttpSyncTransportRefreshTest {
         }
     }
 
+    @Test fun expiredBootstrapSnapshotIsDistinguishedFromOtherValidationErrors() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(422)
+                .setBody("""{"error":{"code":"bootstrap_snapshot_invalid","retryable":false}}"""))
+            server.enqueue(MockResponse().setResponseCode(422)
+                .setBody("""{"error":{"code":"request_validation_failed","retryable":false}}"""))
+            server.start()
+            val credentials = MutableCredentialStore(SessionCredentialEnvelopeCodec.encode(
+                SessionCredentialEnvelope("valid-access", "valid-refresh", 0),
+            ))
+            val transport = OkHttpSyncTransport(server.url("/api/v1").toString(), credentials)
+            val stale = runCatching { transport.bootstrap(BINDING, "old-snapshot", "next-page", 0) }.exceptionOrNull()
+            assertEquals(InvalidBootstrapSnapshotException::class.java, stale?.javaClass)
+            val unrelated = runCatching { transport.bootstrap(BINDING, null, null, 0) }.exceptionOrNull()
+            assertEquals("SYNC_HTTP_422", unrelated?.message)
+        }
+    }
+
     private class MutableCredentialStore(initial: ByteArray) : CredentialStore {
         private var value = initial.copyOf()
         override suspend fun read(profileId: ServerProfileId): ByteArray? = if (profileId in app.autplay.data.security.CredentialJournalSlots.all) null else value.copyOf()

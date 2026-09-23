@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import app.autplay.AutPlayRuntime
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncBindingInitializer
+import app.autplay.application.sync.SyncRunOutcome
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
 import java.io.IOException
@@ -30,9 +31,16 @@ class SyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWork
             val initial = ClientEventBinding(user, device, request.serverProfileId)
             val cursor = SyncBindingInitializer(database).ensure(initial)
             val binding = initial.copy(journalEpoch = LocalId(cursor.journalEpoch))
-            if (AutPlayRuntime.syncCoordinator(applicationContext, binding).run(binding)) {
-                Result.success()
-            } else Result.retry()
+            when (AutPlayRuntime.syncCoordinator(applicationContext, binding).runForWorker(binding)) {
+                SyncRunOutcome.COMPLETE -> Result.success()
+                SyncRunOutcome.RETRY -> Result.retry()
+                SyncRunOutcome.CONTINUE -> {
+                    // The preceding pages are committed. Chain a fresh bounded worker without
+                    // exponential failure backoff so large first snapshots can finish in time.
+                    AutPlayRuntime.syncScheduler(applicationContext).enqueue(request)
+                    Result.success()
+                }
+            }
         } catch (error: Exception) {
             when (syncWorkerErrorDisposition(error)) {
                 SyncWorkerErrorDisposition.CANCEL -> throw error
