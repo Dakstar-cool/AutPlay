@@ -30,7 +30,8 @@ AutPlay may be called production only when one exact release satisfies all of th
   one manifest;
 - the hardened `app.autplay` APK is signed with the retained production signer and its update or
   migration path from existing development-signed installs is explicit;
-- the exact production APK passes final Samsung A55 qualification against the exact target server;
+- the exact production APK passes final qualification on a physical Android device against the
+  exact target server;
 - Admin/account target Gates A-D pass against one recorded target identity and configuration;
 - the CPU worker uses reviewed real resource-report v1 and internal-I/O report v3 budgets;
 - the public edge passes certificate, external scan, renewal, rollback and real-mobile API/Range
@@ -54,8 +55,8 @@ AutPlay may be called production only when one exact release satisfies all of th
   closed to the existing deterministic CPU behavior.
 - Secrets, recovery material, private origins, raw device identifiers and personal paths never
   enter Git, routine logs or shared evidence.
-- Synthetic, emulator, M52 or disposable-server results cannot be relabelled as A55/target-server
-  production evidence.
+- Synthetic, emulator or disposable-server results cannot be relabelled as physical-device or
+  target-server production evidence.
 - Each phase updates only evidence tied to the exact source/artifact/configuration it verified.
 
 ## Execution order
@@ -80,7 +81,7 @@ Exit: a new task can identify current work from this plan without loading the P0
 
 1. Use `v1.0.0`, `versionCode 13` and direct APK distribution for the first production release.
 2. Use a controlled clean reinstall from development-signed `app.autplay` to the production
-   signer. The existing A55 and M52 installations are disposable test installations with no
+   signer. The existing qualification installation is a disposable test installation with no
    retained user-data requirement. Signer lineage and full export/import are therefore outside the
    first-release critical path. This decision must not be generalized to a future installation
    with valuable local-only state: uninstall removes the application sandbox.
@@ -88,7 +89,7 @@ Exit: a new task can identify current work from this plan without loading the P0
    outside the repository.
 4. Bind APK hash, certificate hash, package/version, source commit and Room schema to the release
    manifest.
-5. Run the final complete Samsung A55 release qualification, including upgrade/migration,
+5. Run the final complete physical-device release qualification, including upgrade/migration,
    local-first playback, process death, sync, pairing/recovery and accessibility surfaces.
 6. Reconcile Android audit Q3/Q4: record the already available hosted CI evidence and close Q4 only
    with the exact production artifact.
@@ -97,7 +98,7 @@ Tooling progress: the parameterized production signer and credential-free releas
 implemented. The finalizer binds the signed APK and Room schema to the verified Docker archive
 digest, single Alembic head and fresh release-audit package, while retaining
 `production_deployed=false`. This is implementation readiness, not exact-artifact evidence; the
-clean `v1.0.0` tag, interactive signing run and A55 qualification remain open.
+clean `v1.0.0` tag, interactive signing run and physical-device qualification remain open.
 
 Candidate-source validation on 2026-09-22: the complete Windows canonical gate passed after the
 `v1.0.0` / `versionCode 13` identity and release-audit/finalizer changes. It covered 301
@@ -105,9 +106,10 @@ contract/release tests, 41 GPU tests (2 expected Windows symlink skips), 300 acq
 expected platform/provider skips), 87 training tests, Android lint/unit/debug/trusted-LAN/minified
 release assembly, and 2,238 server tests against disposable PostgreSQL 18.4/pgvector 0.8.6 (59
 documented platform/image skips), followed by exact Compose cleanup. This result validates the
-candidate source tree only; it is not production-signing, exact APK/A55 or deployment evidence.
+candidate source tree only; it is not production-signing, exact APK/device or deployment evidence.
 
-Exit: one production-signed APK and its supported install/update path have exact A55 evidence.
+Exit: one production-signed APK and its supported install/update path have exact physical-device
+evidence.
 
 ### Phase 2 - complete AutPlay Face in the selected user sequence
 
@@ -134,10 +136,10 @@ decision defers semantic Face while retaining the neutral renderer.
 
 **State:** BLOCKED on target/operator evidence.
 
-- **Gate A:** canonical private HTTPS Admin origin, real Windows Hello and A55 platform passkeys,
+- **Gate A:** canonical private HTTPS Admin origin, real Windows Hello and Android platform passkeys,
   EN/RU desktop/mobile views, keyboard navigation, revocation and third-device network denial.
-- **Gate B:** repeat pairing/recovery/deletion/consent/quota ceremonies on the exact A55 and bind
-  their receipts to the exact deployed server identity and current migration.
+- **Gate B:** repeat pairing/recovery/deletion/consent/quota ceremonies on the chosen physical
+  Android device and bind their receipts to the exact deployed server identity and current migration.
 - **Gate C:** run the worst permitted combined workload on real server/storage/database/network,
   produce resource-report v1 and internal-I/O report v3, review them, then separately approve
   applying the budgets.

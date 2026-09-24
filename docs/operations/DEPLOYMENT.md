@@ -6,8 +6,8 @@ AutPlay has reproducible local runtime Compose files, GitHub Actions for CI plus
 release-candidate bundles, and a locally qualified PA3 production-edge candidate. Historical
 off-host restore and Android signer-custody/update gates have evidence, but the current `v0.4.0`
 distribution is still development-signed and not production-deployed. Live production remains
-blocked on the exact-release Android/A55 gate, Admin/account target Gates A-D, reviewed real worker
-budgets, and PA3 certificate/external-scan/renewal/rollback/real-mobile evidence. The normal runtime
+blocked on exact-release qualification on a physical Android device, Admin/account target Gates A-D,
+reviewed real worker budgets, and PA3 certificate/external-scan/renewal/rollback/real-mobile evidence. The normal runtime
 and trusted-LAN files remain development evidence and must not be exposed to the public Internet or
 pointed at personal/production data. See `PRODUCTION_READINESS_PLAN.md` for the active sequence and
 `PUBLIC_EDGE_PA3.md` for the exact edge procedure.

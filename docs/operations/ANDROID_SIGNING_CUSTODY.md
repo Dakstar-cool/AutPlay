@@ -49,7 +49,7 @@ its local data matters. Uninstalling normally deletes that package's private app
 
 ## First production transition decision
 
-The existing Samsung A55 and M52 installations are disposable test installations. The operator
+The existing qualification installation is a disposable test installation. The operator
 confirmed that their local application state does not need to be retained for the first production
 release. The accepted transition for `v1.0.0`, `versionCode 13`, is therefore a controlled clean
 reinstall followed by fresh production qualification. APK signer lineage and a full Room/data
@@ -70,7 +70,7 @@ The controlled transition is:
 4. install the exact production APK and verify package, version, APK SHA-256 and production
    certificate SHA-256 before first launch;
 5. grant media access again, re-index local media, create a new server binding and complete sync;
-6. repeat the exact-release A55 playback, process-death, pairing/recovery and accessibility gates.
+6. repeat the exact-release physical-device playback, process-death, pairing/recovery and accessibility gates.
 
 This is not a general migration promise. Any future development-signed installation containing
 valuable local-only data must stop before uninstall and receive a separately reviewed lineage or
@@ -192,7 +192,7 @@ uv run --frozen python -m scripts.finalize_production_release `
 The finalizer re-hashes every copied input, derives the Docker image digest from its configuration
 object, binds the repository's one Alembic head and runs the fresh release-audit gate. Its output is
 a signed-but-not-deployed `PRODUCTION_RELEASE_CANDIDATE`; live activation remains blocked until the
-exact A55, target, public-edge and operator gates pass.
+exact physical-device, target, public-edge and operator gates pass.
 
 ## Current evidence
 
