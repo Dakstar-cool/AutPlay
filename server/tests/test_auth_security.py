@@ -20,6 +20,7 @@ from autplay.adapters.security.tokens import (
     OpaqueRefreshTokenCodec,
 )
 from autplay.domain.auth import AccountRole, InvalidAccessTokenError, Principal, TokenPair
+from jwt.types import Options
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 SECRET = b"test-only-access-signing-secret-32-bytes-minimum"
@@ -180,6 +181,24 @@ def test_access_jwt_rejects_tampering_wrong_context_and_expiry() -> None:
         Hs256AccessTokenCodec(SECRET, issuer=ISSUER, audience="other").decode(token, now=NOW)
     with pytest.raises(InvalidAccessTokenError):
         _access_codec().decode(token, now=NOW + timedelta(minutes=2))
+
+
+@pytest.mark.parametrize("decode_complete", (False, True))
+def test_jwt_unverified_decode_preserves_reused_verification_options(
+    decode_complete: bool,
+) -> None:
+    """An unverified read must not disable claim checks on a later verified read."""
+
+    token = jwt.encode({"exp": 0}, SECRET, algorithm=ACCESS_TOKEN_ALGORITHM)
+    options: Options = {"verify_signature": False}
+    decode = jwt.decode_complete if decode_complete else jwt.decode
+
+    decode(token, options=options)
+    assert options == {"verify_signature": False}
+
+    options["verify_signature"] = True
+    with pytest.raises(jwt.ExpiredSignatureError):
+        decode(token, SECRET, algorithms=[ACCESS_TOKEN_ALGORITHM], options=options)
 
 
 def test_token_pair_representation_never_contains_bearer_values() -> None:
