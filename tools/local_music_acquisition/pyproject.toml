@@ -6,8 +6,10 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "playwright==1.60.0",
     "requests[socks]==2.34.2",
+    "urllib3==2.8.0",
     "yandex-music-downloader @ git+https://github.com/llistochek/yandex-music-downloader.git@9d33d6aaefae3cb882d02822e59cf0796c33a651",
-    "yt-dlp[default,pin]==2026.8.19",
+    # uv.lock pins the graph; yt-dlp's pin extra requires vulnerable urllib3 2.7.0.
+    "yt-dlp[default]==2026.8.19",
 ]
 
 [project.scripts]

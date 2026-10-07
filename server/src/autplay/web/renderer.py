@@ -24,7 +24,7 @@ STATIC_ASSET_DIGESTS: Final = {
     "qrcodegen-v1.js": "2511bc17f40a3c41d4a0578995db956b38997334d3d20113a5d4dc5c49c69480",
     "admin-forms-v1.js": "bc7f3c7cb164dd0b401f757842eac271c445c8a0a60cf3de58da8c16f782f048",
     "admin-v1.css": "b3c13018b1db8ec4c083b6f708ce473b1bf18aec620f73df81f7cbfc27d6b9ec",
-    "admin-v2.css": "f5e8e720d9d1313a10bc857e8a943f9ddc029703bda9c6c066bcd7047e8c68b9",
+    "admin-v2.css": "45e8868fb809852a77981ae29e3bd504d4daadd32bb2bd0f01723995bc870a3d",
     "passkeys-v1.js": "0e680bd5de574d07a0f728104ec11a962fdef5c0fc81e0849cf1ba5ed4acc2e5",
 }
 _MONTHS: Final = {
