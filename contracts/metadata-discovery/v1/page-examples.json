@@ -1,0 +1,179 @@
+[
+  {
+    "contract_version": "music-discovery-v1",
+    "source": "MusicBrainz",
+    "source_scope": "INTERNET",
+    "availability": "METADATA_ONLY",
+    "acquisition_allowed": false,
+    "capabilities": {
+      "direct_acquisition": false,
+      "track_source_search": true
+    },
+    "items": [
+      {
+        "id": "musicbrainz:artist:00000000-0000-0000-0000-000000000001",
+        "entity_type": "artist",
+        "entity_id": "00000000-0000-0000-0000-000000000001",
+        "title": "Example Artist",
+        "artist": null,
+        "release_id": null,
+        "recording_id": null,
+        "release_date": null,
+        "country": "GB",
+        "disambiguation": null,
+        "duration_ms": null,
+        "disc_number": null,
+        "track_number": null,
+        "recording_title": null,
+        "source": "MusicBrainz",
+        "availability": "METADATA_ONLY",
+        "acquisition_allowed": false,
+        "can_browse_tracks": true,
+        "download_search_query": null
+      }
+    ],
+    "limit": 25,
+    "offset": 0,
+    "total_count": 1,
+    "next_offset": null,
+    "truncated": false
+  },
+  {
+    "contract_version": "music-discovery-v1",
+    "source": "MusicBrainz",
+    "source_scope": "INTERNET",
+    "availability": "METADATA_ONLY",
+    "acquisition_allowed": false,
+    "capabilities": {
+      "direct_acquisition": false,
+      "track_source_search": true
+    },
+    "items": [
+      {
+        "id": "musicbrainz:release:00000000-0000-0000-0000-000000000002",
+        "entity_type": "release",
+        "entity_id": "00000000-0000-0000-0000-000000000002",
+        "title": "Example Album",
+        "artist": "Example Artist",
+        "release_id": "00000000-0000-0000-0000-000000000002",
+        "recording_id": null,
+        "release_date": "2001",
+        "country": null,
+        "disambiguation": null,
+        "duration_ms": null,
+        "disc_number": null,
+        "track_number": null,
+        "recording_title": null,
+        "source": "MusicBrainz",
+        "availability": "METADATA_ONLY",
+        "acquisition_allowed": false,
+        "can_browse_tracks": true,
+        "download_search_query": null
+      }
+    ],
+    "limit": 25,
+    "offset": 0,
+    "total_count": 1,
+    "next_offset": null,
+    "truncated": false
+  },
+  {
+    "contract_version": "music-discovery-v1",
+    "source": "MusicBrainz",
+    "source_scope": "INTERNET",
+    "availability": "METADATA_ONLY",
+    "acquisition_allowed": false,
+    "capabilities": {
+      "direct_acquisition": false,
+      "track_source_search": true
+    },
+    "items": [
+      {
+        "id": "musicbrainz:recording:00000000-0000-0000-0000-000000000003",
+        "entity_type": "recording",
+        "entity_id": "00000000-0000-0000-0000-000000000003",
+        "title": "Song (Live)",
+        "artist": "Example Artist",
+        "release_id": null,
+        "recording_id": "00000000-0000-0000-0000-000000000003",
+        "release_date": null,
+        "country": null,
+        "disambiguation": null,
+        "duration_ms": 180000,
+        "disc_number": null,
+        "track_number": null,
+        "recording_title": null,
+        "source": "MusicBrainz",
+        "availability": "METADATA_ONLY",
+        "acquisition_allowed": false,
+        "can_browse_tracks": false,
+        "download_search_query": "Example Artist Song (Live)"
+      }
+    ],
+    "limit": 25,
+    "offset": 0,
+    "total_count": 1,
+    "next_offset": null,
+    "truncated": false
+  },
+  {
+    "contract_version": "music-discovery-v1",
+    "source": "MusicBrainz",
+    "source_scope": "INTERNET",
+    "availability": "METADATA_ONLY",
+    "acquisition_allowed": false,
+    "capabilities": {
+      "direct_acquisition": false,
+      "track_source_search": true
+    },
+    "items": [
+      {
+        "id": "musicbrainz:release_track:00000000-0000-0000-0000-000000000004",
+        "entity_type": "release_track",
+        "entity_id": "00000000-0000-0000-0000-000000000004",
+        "title": "Song",
+        "artist": "Example Artist",
+        "release_id": "00000000-0000-0000-0000-000000000002",
+        "recording_id": "00000000-0000-0000-0000-000000000003",
+        "release_date": "2001",
+        "country": null,
+        "disambiguation": null,
+        "duration_ms": null,
+        "disc_number": 1,
+        "track_number": 1,
+        "recording_title": "Song (Live)",
+        "source": "MusicBrainz",
+        "availability": "METADATA_ONLY",
+        "acquisition_allowed": false,
+        "can_browse_tracks": false,
+        "download_search_query": "Example Artist Song (Live)"
+      },
+      {
+        "id": "musicbrainz:release_track:00000000-0000-0000-0000-000000000005",
+        "entity_type": "release_track",
+        "entity_id": "00000000-0000-0000-0000-000000000005",
+        "title": "Song",
+        "artist": "Example Artist",
+        "release_id": "00000000-0000-0000-0000-000000000002",
+        "recording_id": "00000000-0000-0000-0000-000000000003",
+        "release_date": "2001",
+        "country": null,
+        "disambiguation": null,
+        "duration_ms": null,
+        "disc_number": 1,
+        "track_number": 2,
+        "recording_title": "Song (Live)",
+        "source": "MusicBrainz",
+        "availability": "METADATA_ONLY",
+        "acquisition_allowed": false,
+        "can_browse_tracks": false,
+        "download_search_query": "Example Artist Song (Live)"
+      }
+    ],
+    "limit": 25,
+    "offset": 0,
+    "total_count": 2,
+    "next_offset": null,
+    "truncated": false
+  }
+]

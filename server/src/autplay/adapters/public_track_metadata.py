@@ -23,6 +23,8 @@ from autplay.domain.track_metadata import (
     MetadataCandidate,
     MetadataFields,
     MetadataQuery,
+    lookup_title,
+    normalized,
     validate_fields,
 )
 from autplay.ports.track_metadata import MetadataProviderError
@@ -160,6 +162,57 @@ def _lucene(value: str) -> str:
     return re.sub(r'([+\-!(){}\[\]^"~*?:\\/|&])', r"\\\1", value[:500])
 
 
+def _optional_text(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and 1 <= len(value.strip()) <= 500 else None
+
+
+def _types(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list) or len(value) > 12:
+        raise ValueError("types")
+    return tuple(dict.fromkeys(text for item in value if (text := _optional_text(item))))
+
+
+def _duration(value: Any) -> int | None:
+    return value if type(value) is int and 0 < value <= 3600000 else None
+
+
+def _expressions(query: MetadataQuery) -> tuple[str, ...]:
+    """At most three conservative rungs, all constrained by actual observed evidence."""
+    constraints: list[str] = []
+    if query.album:
+        constraints.append(f'release:"{_lucene(query.album)}"')
+    if query.release_mbid:
+        constraints.append(f"reid:{UUID(query.release_mbid)}")
+    if query.release_date:
+        # Known date precision stays a prefix, never a fabricated January date.
+        constraints.append(f"date:{query.release_date}*")
+    if query.duration_ms is not None:
+        duration = query.duration_ms
+        if type(duration) is not int or not 0 < duration <= 3600000:
+            raise ValueError("duration")
+        constraints.append(f"dur:[{max(1, duration - 2000)} TO {duration + 2000}]")
+    if query.artist.strip():
+        constraints.insert(0, f'artist:"{_lucene(query.artist)}"')
+    suffix = " AND ".join(constraints)
+    expressions: list[str] = []
+    if query.source_metadata and query.source_metadata.external_ids.get("isrc"):
+        isrc = query.source_metadata.external_ids["isrc"]
+        if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", isrc) is None:
+            raise ValueError("isrc")
+        expressions.append(f"isrc:{isrc}" + (f" AND {suffix}" if suffix else ""))
+    if query.title.strip() and query.artist.strip():
+        for title in (
+            query.title.strip(),
+            lookup_title(query.title, query.artist),
+            normalized(lookup_title(query.title, query.artist)),
+        ):
+            if title:
+                expression = f'recording:"{_lucene(title)}" AND {suffix}'
+                if expression not in expressions:
+                    expressions.append(expression)
+    return tuple(expressions[:3])
+
+
 class MusicBrainzMetadataProvider:
     def __init__(self, http: PublicMetadataHttp | None = None) -> None:
         self.http = http or PublicMetadataHttp()
@@ -172,25 +225,50 @@ class MusicBrainzMetadataProvider:
 
     def _search(self, query: MetadataQuery) -> tuple[MetadataCandidate, ...]:
         incomplete = False
+        if query.release_track_mbid and not (query.recording_mbid and query.release_mbid):
+            raise MetadataProviderError("metadata_release_track_context_invalid", retryable=False)
+        if query.recording_mbid and query.release_mbid:
+            # Exact native/embedded IDs permit one direct edition lookup. This
+            # complete membership proof is separate from truncated text search.
+            recording_id, release_id = (
+                str(UUID(query.recording_mbid)),
+                str(UUID(query.release_mbid)),
+            )
+            candidate = MetadataCandidate(
+                f"{recording_id}:{release_id}",
+                {"mb_recording_id": recording_id, "mb_release_id": release_id},
+                None,
+                100,
+                f"musicbrainz:release:{release_id}",
+            )
+            return (
+                self.release(candidate, release_track_mbid=query.release_track_mbid)
+                if query.release_track_mbid
+                else self.release(candidate),
+            )
         if query.recording_mbid:
             identity = str(UUID(query.recording_mbid))
             recording = self.http.json(
                 f"https://musicbrainz.org/ws/2/recording/{identity}?inc=artist-credits+releases&fmt=json"
             )
             recordings = [dict(recording, score=100)] if recording.get("id") else []
-        elif query.title.strip() and query.artist.strip():
-            expression = f'recording:"{_lucene(query.title)}" AND artist:"{_lucene(query.artist)}"'
-            params = urlencode({"query": expression, "limit": 5, "fmt": "json"})
-            data = self.http.json(f"https://musicbrainz.org/ws/2/recording?{params}")
-            recordings = data.get("recordings", [])
-            incomplete = int(data.get("count", len(recordings))) > len(recordings)
         else:
-            return ()
+            # Stop at the first non-empty result set. Wider queries cannot erase
+            # catalog ambiguity or a truncation veto from an earlier result set.
+            recordings = []
+            for expression in _expressions(query):
+                params = urlencode({"query": expression, "limit": 5, "fmt": "json"})
+                data = self.http.json(f"https://musicbrainz.org/ws/2/recording?{params}")
+                recordings = data.get("recordings", [])
+                incomplete = incomplete or int(data.get("count", len(recordings))) > len(recordings)
+                if recordings:
+                    break
         results: list[MetadataCandidate] = []
         seen: set[str] = set()
         incomplete = incomplete or len(recordings) > 5
         for recording in recordings[:5]:
             if not isinstance(recording, dict):
+                incomplete = True
                 continue
             releases = recording.get("releases", [])
             incomplete = (
@@ -213,13 +291,16 @@ class MusicBrainzMetadataProvider:
                     }
                 )
                 if not fields.get("mb_recording_id") or not fields.get("mb_release_id"):
+                    incomplete = True
                     continue
                 key = f"{fields['mb_recording_id']}:{fields['mb_release_id']}"
                 if key in seen:
+                    incomplete = True
                     continue
                 seen.add(key)
                 length = recording.get("length")
-                duration = length if isinstance(length, int) and length > 0 else None
+                duration = _duration(length)
+                group = release.get("release-group", {})
                 results.append(
                     MetadataCandidate(
                         key,
@@ -227,30 +308,46 @@ class MusicBrainzMetadataProvider:
                         duration,
                         int(recording.get("score", 0)),
                         f"musicbrainz:release:{fields['mb_release_id']}",
+                        release_status=_optional_text(release.get("status")),
+                        release_primary_type=_optional_text(group.get("primary-type")),
+                        release_secondary_types=_types(group.get("secondary-types", [])),
+                        recording_disambiguation=_optional_text(recording.get("disambiguation")),
+                        recording_title=_optional_text(recording.get("title")),
                     )
                 )
         # Prefer an observed edition title, but preserve multiple matching editions for review.
         if query.album:
-            from autplay.domain.track_metadata import normalized
-
             results.sort(
                 key=lambda item: (
                     normalized(str(item.fields.get("album", ""))) != normalized(query.album or "")
                 )
             )
         incomplete = incomplete or len(results) > 5
+        # An exact release ID can filter complete evidence, but cannot make an
+        # incomplete response safe by hiding the unreturned editions.
+        if query.release_mbid:
+            results = [
+                item for item in results if item.fields.get("mb_release_id") == query.release_mbid
+            ]
         return tuple(replace(item, auto_eligible=not incomplete) for item in results[:5])
 
-    def release(self, candidate: MetadataCandidate) -> MetadataCandidate:
+    def release(
+        self, candidate: MetadataCandidate, *, release_track_mbid: str | None = None
+    ) -> MetadataCandidate:
         try:
-            return self._release(candidate)
+            return self._release(candidate, release_track_mbid=release_track_mbid)
         except (TypeError, ValueError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_response_invalid", retryable=False) from error
 
-    def _release(self, candidate: MetadataCandidate) -> MetadataCandidate:
+    def _release(
+        self, candidate: MetadataCandidate, *, release_track_mbid: str | None = None
+    ) -> MetadataCandidate:
         identity = str(UUID(str(candidate.fields["mb_release_id"])))
+        requested_track = release_track_mbid or candidate.mb_release_track_id
+        if requested_track is not None:
+            requested_track = str(UUID(requested_track))
         data = self.http.json(
-            f"https://musicbrainz.org/ws/2/release/{identity}?inc=artist-credits+labels+release-groups+recordings&fmt=json"
+            f"https://musicbrainz.org/ws/2/release/{identity}?inc=artist-credits+labels+release-groups+recordings+genres&fmt=json"
         )
         if data.get("id") != identity:
             raise MetadataProviderError("metadata_release_missing", retryable=False)
@@ -276,25 +373,79 @@ class MusicBrainzMetadataProvider:
         ]
         if labels:
             fields.update(_fields({"label": labels[0]}))
-        for medium in data.get("media", []):
-            for track in medium.get("tracks", []):
-                if track.get("recording", {}).get("id") == fields.get("mb_recording_id"):
-                    fields.update(
-                        _fields(
-                            {
-                                "track_number": track.get("position"),
-                                "disc_number": medium.get("position"),
-                            }
-                        )
-                    )
-                    return MetadataCandidate(
-                        candidate.candidate_id,
-                        fields,
-                        candidate.duration_ms,
-                        candidate.score,
-                        candidate.source_id,
-                    )
-        raise MetadataProviderError("metadata_release_recording_missing", retryable=False)
+        genres = [item.get("name") for item in data.get("genres", []) if isinstance(item, dict)]
+        if genres:
+            fields.update(_fields({"genres": genres[:12]}))
+        matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        incomplete = False
+        media = data.get("media", [])
+        incomplete = int(data.get("medium-count", len(media))) > len(media)
+        requested_occurrences = 0
+        for medium in media:
+            tracks = medium.get("tracks", [])
+            incomplete = incomplete or int(medium.get("track-count", len(tracks))) > len(tracks)
+            for track in tracks:
+                if requested_track is not None and track.get("id") == requested_track:
+                    requested_occurrences += 1
+                if track.get("recording", {}).get("id") == fields.get("mb_recording_id") and (
+                    requested_track is None or track.get("id") == requested_track
+                ):
+                    matches.append((medium, track))
+        if not matches:
+            raise MetadataProviderError(
+                "metadata_release_track_missing"
+                if requested_track
+                else "metadata_release_recording_missing",
+                retryable=False,
+            )
+        # The same recording may occur twice on a deluxe release. Never claim
+        # the first position as exact, even for a manually selected edition.
+        ambiguous = incomplete or len(matches) != 1 or requested_occurrences > 1
+        duration = candidate.duration_ms
+        disambiguation = candidate.recording_disambiguation
+        recording_title = candidate.recording_title
+        release_track_id = None
+        fields.pop("track_number", None)
+        fields.pop("disc_number", None)
+        if not ambiguous:
+            medium, track = matches[0]
+            recording = track.get("recording", {})
+            if track.get("id") is not None:
+                release_track_id = str(UUID(track["id"]))
+            fields.update(
+                _fields(
+                    {
+                        "track_number": track.get("position"),
+                        "disc_number": medium.get("position"),
+                        "title": track.get("title") or recording.get("title"),
+                        "artist": _credit(track.get("artist-credit"))
+                        or _credit(recording.get("artist-credit")),
+                    }
+                )
+            )
+            duration = (
+                _duration(track.get("length")) or _duration(recording.get("length")) or duration
+            )
+            disambiguation = _optional_text(recording.get("disambiguation")) or disambiguation
+            recording_title = _optional_text(recording.get("title")) or recording_title
+        group = data.get("release-group", {})
+        status = _optional_text(data.get("status"))
+        return replace(
+            candidate,
+            fields=fields,
+            duration_ms=duration,
+            auto_eligible=candidate.auto_eligible
+            and not ambiguous
+            and normalized(status or "") == "official",
+            release_status=status,
+            release_primary_type=_optional_text(group.get("primary-type")),
+            release_secondary_types=_types(group.get("secondary-types", [])),
+            release_hydrated=True,
+            release_position_ambiguous=ambiguous,
+            recording_disambiguation=disambiguation,
+            recording_title=recording_title,
+            mb_release_track_id=release_track_id,
+        )
 
     def cover(self, release_id: str) -> bytes | None:
         identity = str(UUID(release_id))

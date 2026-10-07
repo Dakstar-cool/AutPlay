@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -18,8 +19,10 @@ from autplay.adapters.filesystem.provider_child import (
     ProviderChildError,
     ProviderCommand,
     download_youtube,
+    execute_command,
     youtube_arguments,
 )
+from autplay.adapters.filesystem.provider_media import SOURCE_METADATA_FILE, youtube_source_metadata
 from autplay.adapters.filesystem.provider_staging import FilesystemProviderStorage
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.filesystem.vault_child import ChildProtocolError, decode_document
@@ -37,6 +40,40 @@ from autplay.domain.vault import (
 from autplay.runtime.resource_io_deadline import ResourceIoDeadline
 from process_tree_support import provider_ticket, wait_tree_exit
 from provider_download_support import local_provider
+
+
+@pytest.mark.parametrize(
+    "fault", ["none", "invalid_json", "nested_json", "oversize", "different_id", "wrong_provider"]
+)
+def test_verified_audio_survives_invalid_optional_native_sidecar(
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    FilesystemVaultStorage(tmp_path)
+    payload = b"exact verified audio"
+    metadata = youtube_source_metadata({"id": "abcdefghijk", "track": "Song"}, "abcdefghijk")
+    assert metadata is not None
+    if fault == "different_id":
+        metadata["source_id"] = "different00"
+    if fault == "wrong_provider":
+        metadata["provider"] = "BANDCAMP"
+
+    def download(candidate: str, workspace: Path, maximum: int) -> Path:
+        assert candidate == "abcdefghijk" and maximum == 1024**2
+        source = workspace / "audio.test"
+        source.write_bytes(payload)
+        sidecar = b"{" if fault == "invalid_json" else json.dumps(metadata).encode()
+        if fault == "oversize":
+            sidecar = b" " * 16385
+        elif fault == "nested_json":
+            sidecar = b"[" * 2000 + b"]" * 2000
+        (workspace / SOURCE_METADATA_FILE).write_bytes(sidecar)
+        return source
+
+    result = execute_command(ProviderCommand.parse(command(tmp_path, uuid4())), download=download)
+    assert result.verified.byte_size == len(payload)
+    assert result.verified.sha256.hex == hashlib.sha256(payload).hexdigest()
+    assert result.source_metadata == (metadata if fault == "none" else None)
 
 
 def command(root: Path, execution_id: UUID) -> dict[str, object]:

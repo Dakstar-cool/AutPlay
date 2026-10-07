@@ -1,6 +1,5 @@
 package app.autplay.work
 
-import androidx.work.NetworkType
 import java.io.IOException
 import java.util.concurrent.CancellationException
 import org.junit.Assert.assertEquals
@@ -23,15 +22,6 @@ class ServerWorkerPoliciesTest {
             SyncWorkerErrorDisposition.CANCEL,
             syncWorkerErrorDisposition(CancellationException("cancelled")),
         )
-    }
-
-    @Test
-    fun syncNetworkPolicyHonorsMeteredSettingAtScheduleAndExecution() {
-        assertEquals(NetworkType.UNMETERED, requiredNetworkType(DeferredWorkKind.SYNC, false))
-        assertEquals(NetworkType.CONNECTED, requiredNetworkType(DeferredWorkKind.SYNC, true))
-        assertFalse(syncNetworkAllowed(allowMeteredNetwork = false, activeNetworkMetered = true))
-        assertTrue(syncNetworkAllowed(allowMeteredNetwork = true, activeNetworkMetered = true))
-        assertTrue(syncNetworkAllowed(allowMeteredNetwork = false, activeNetworkMetered = false))
     }
 
     @Test

@@ -10,6 +10,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.offline_process_evidence import OfflineProcessEvidenceProbe
+from autplay.adapters.postgresql.models.catalog_execution import CatalogExecutionRow
 from autplay.adapters.postgresql.models.ingest_cleanup import IngestCleanupExecutionRow
 from autplay.adapters.postgresql.models.ingest_execution import IngestExecutionRow
 from autplay.adapters.postgresql.models.metadata_execution import (
@@ -34,6 +35,7 @@ class OfflineExecutionDrainReport:
     training_stopping: int
     checked_pids: int
     checked_cgroups: int
+    catalog_executions: int = 0
 
 
 class PostgresOfflineExecutionDrain:
@@ -81,6 +83,14 @@ class PostgresOfflineExecutionDrain:
                     .with_for_update()
                 )
             )
+            catalogs = list(
+                session.scalars(
+                    select(CatalogExecutionRow)
+                    .where(CatalogExecutionRow.state != "CLOSED")
+                    .order_by(CatalogExecutionRow.execution_id)
+                    .with_for_update()
+                )
+            )
             maintenance = list(
                 session.scalars(
                     select(ProviderMaintenanceRow)
@@ -102,6 +112,7 @@ class PostgresOfflineExecutionDrain:
                 *(item.child_pid for item in ingests),
                 *(item.child_pid for item in ingest_cleanups),
                 *(item.child_pid for item in metadata),
+                *(item.child_pid for item in catalogs),
                 *(item.child_pid for item in maintenance),
                 *(item.child_pid for item in training),
             )
@@ -125,6 +136,7 @@ class PostgresOfflineExecutionDrain:
                 ("ingest", ingests),
                 ("ingest-cleanup", ingest_cleanups),
                 ("maintenance", maintenance),
+                ("catalog", catalogs),
             ):
                 for execution in rows:
                     digest = self._row_evidence(
@@ -135,6 +147,10 @@ class PostgresOfflineExecutionDrain:
                     execution.closure_evidence_sha256 = digest
                     execution.exit_code = 137
             gate = session.get(MetadataProviderGateRow, 1, with_for_update=True)
+            for catalog in catalogs:
+                if gate is not None and gate.catalog_execution_id == catalog.execution_id:
+                    gate.catalog_execution_id = gate.request_id = None
+                    gate.next_request_at = max(gate.next_request_at, now)
             for metadata_execution in metadata:
                 digest = self._row_evidence(
                     evidence.evidence_sha256, "metadata", metadata_execution.execution_id
@@ -145,7 +161,7 @@ class PostgresOfflineExecutionDrain:
                 metadata_execution.exit_code = 137
                 if gate is not None and gate.execution_id == metadata_execution.execution_id:
                     gate.execution_id = gate.request_id = None
-                    gate.next_request_at = now
+                    gate.next_request_at = max(gate.next_request_at, now)
             for training_execution in training:
                 if training_execution.state in {"PREPARED", "RUNNING"}:
                     session.execute(
@@ -179,6 +195,7 @@ class PostgresOfflineExecutionDrain:
                 len(training),
                 len(evidence.checked_pids),
                 len(evidence.checked_cgroups),
+                len(catalogs),
             )
 
     @staticmethod

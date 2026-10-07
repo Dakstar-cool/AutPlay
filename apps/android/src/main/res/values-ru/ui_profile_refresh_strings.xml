@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_stats_refresh">Обновить</string>
+    <string name="profile_stats_saved_history">Вся сохранённая история на устройстве · Топы по времени прослушивания</string>
+    <string name="profile_stats_refreshing">Обновляем статистику…</string>
+    <string name="profile_stats_initial">Нажмите «Обновить», чтобы загрузить историю прослушивания.</string>
+    <string name="profile_stats_load_error">Не удалось загрузить статистику. Нажмите «Обновить», чтобы повторить.</string>
+    <string name="profile_stats_refresh_error">Не удалось обновить. Показан предыдущий снимок статистики.</string>
+    <string name="profile_stats_listened_time">Время с музыкой</string>
+    <string name="profile_stats_time_note">Фактическое время воспроизведения. Текущее прослушивание учитывается после его завершения.</string>
+    <string name="profile_stats_top_genres">Топ-5 жанров</string>
+    <string name="profile_stats_top_tracks">Топ-5 треков</string>
+    <string name="profile_stats_top_artists">Топ-5 исполнителей</string>
+    <string name="profile_stats_genres_empty">У прослушанных треков пока нет сохранённых жанров.</string>
+    <string name="profile_stats_tracks_empty">Послушайте трек — здесь появится ваша любимая музыка.</string>
+    <string name="profile_stats_artists_empty">У прослушанных треков пока нет сохранённых имён исполнителей.</string>
+    <string name="profile_stats_genres_note">Если у трека несколько жанров, время прослушивания учитывается в каждом из них.</string>
+    <string name="profile_stats_duration_seconds">%1$d с</string>
+    <string name="profile_stats_duration_subsecond">&lt;1 с</string>
+</resources>

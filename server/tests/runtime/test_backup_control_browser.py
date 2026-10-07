@@ -116,8 +116,11 @@ def test_backup_control_is_responsive_localized_and_keyboard_accessible(
             page.goto(f"{base_url}/admin/recovery?lang=en", wait_until="networkidle")
 
             assert page.locator("html").get_attribute("lang") == "en"
-            assert page.locator("link[rel='stylesheet']").get_attribute("href") == (
-                "/admin/static/admin-v2.css?v=3"
+            assert (
+                page.locator(
+                    "link[rel='stylesheet'][href^='/admin/static/admin-v2.css']"
+                ).get_attribute("href")
+                == "/admin/static/admin-v2.css?v=11"
             )
             _assert_no_horizontal_overflow(page)
             assert page.locator("select").evaluate_all(
@@ -131,7 +134,9 @@ def test_backup_control_is_responsive_localized_and_keyboard_accessible(
             assert page.get_by_label("День автоматического резервного копирования").count() == 1
             _assert_no_horizontal_overflow(page)
 
-            for _ in range(12):
+            for _ in range(40):
+                if page.evaluate("document.activeElement?.id") == "backup-schedule-mode":
+                    break
                 page.keyboard.press("Tab")
             assert page.evaluate("document.activeElement?.id") == "backup-schedule-mode"
             assert page.locator("#backup-schedule-mode").evaluate(

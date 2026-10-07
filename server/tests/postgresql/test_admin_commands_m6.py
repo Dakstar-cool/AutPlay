@@ -6,8 +6,10 @@ from uuid import uuid4
 
 import pytest
 from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
+from autplay.adapters.postgresql.admin_views import PostgreSqlAdminViews
 from autplay.application.admin_commands import AdminCommandService
 from autplay.domain.admin_commands import AdminCommand
+from autplay.domain.admin_views import AdminDeviceItem
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import WebActor, WebAdminError
 from sqlalchemy import create_engine
@@ -176,6 +178,11 @@ def test_revoke_android_device_and_session_are_owner_scoped_and_atomic(
     )
     with pytest.raises(WebAdminError, match="forbidden"):
         service.revoke_android_device(AdminCommand(actor, uuid4(), other_device, b"o" * 32))
+    with Session(engine) as session:
+        visible = PostgreSqlAdminViews(session).devices(actor, limit=1)
+        assert len(visible.items) == 1 and visible.next_after is None
+        assert isinstance(visible.items[0], AdminDeviceItem)
+        assert visible.items[0].device_id == second_device
     with database_harness.connect(database_name) as connection:
         device_state = connection.execute(
             "SELECT revoked_at IS NOT NULL FROM account.device WHERE device_id=%s", (device_id,)

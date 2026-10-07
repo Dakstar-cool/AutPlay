@@ -1,0 +1,88 @@
+{
+  "source_sha256": {
+    "server/src/autplay/application/social.py": "c8b02fc0711bafd482660f7584ed58bfb8348ee2df2f11a757dfcef7bc1c635b",
+    "server/src/autplay/entrypoints/social_http.py": "72d63b6e04b185231eede38dd030b2150ac71be40d32a64fdb6b6e29ca07ff6f",
+    "server/src/autplay/adapters/postgresql/models/public_id.py": "cdc8d9f346e698a06abd1589e3acc67c7747f4ff6e957869ce500135421192d3",
+    "server/src/autplay/adapters/postgresql/models/__init__.py": "b897d2f280c8545ae131d88e48dcbaf8580159060f3000d453b2c1e2e05ad070",
+    "server/src/autplay/adapters/postgresql/metadata.py": "bb8bb816fb643521a541e0514c228bff647749069e8181fd5947ca38257f2b3f",
+    "server/src/autplay/adapters/postgresql/readiness.py": "017cdf7b6f386a2e4eab9be7d980e37d8aa401ecccb0efac0aafa47d4d6be775",
+    "server/migrations/versions/0063_social_public_id.py": "38db367efa573017afb78eada4d9e8476f99f6ad88df47c6fac147db5b0cfdfd",
+    "server/tests/postgresql/test_social_public_id.py": "721d8930223099046820319d5904dd08bcb7dabff1db0f7d08d729793d478506",
+    "server/tests/postgresql/test_social_s1c.py": "adaeb102b320b80e21f61727fab5ff9a7f5753c681121cf47bc384ec198a21dd",
+    "server/tests/postgresql/test_profile_statistics_s2.py": "80de583272c93cf5f590d299e145bb0c784b1220ebdd94a5b6cdfd95025723ef",
+    "server/tests/runtime/test_social_http.py": "2cab2c195b7aff95ab0c2e5228acf7a93c23cbaa283c0a4759bce65be828ff23",
+    "server/tests/postgresql/test_metadata.py": "ea4a000684aee15d7970c3b635babe0129851df357eaf0bb8b79441d6c3da9d7",
+    "server/tests/postgresql/test_inventory.py": "864616ef6fa75bef76551ee26d1b65a10357e506034efc3f329692d7af4babcd",
+    "server/tests/postgresql/schema_contract.py": "3e19368ec2b9ecb29dd60eb11c5340e7eb15c146163d72bafe24a1cea6b2e7bb",
+    "server/tests/postgresql/test_migrations.py": "a56e0c00642d14e77b26b1bda1ec08f0e438dd2bf907659c0735bd5fc5330d6b",
+    "server/tests/postgresql/test_migration_close_gates.py": "5bb55e4bc1cb5c210d72debcf64017365270678ae8a3b2a3d8d8926bbd5f1bab",
+    "tests/contract/test_social_contract_v1.py": "f047d7f277ce2f87fad2859996aa2fa06440dff00f74cfbf925980333c85cf2b",
+    "contracts/social/v1/public-id-command.schema.json": "d81b1e6fa6bab88d8fffe55c4051ebbb2c04a9b862691145d4958cf5ffc846f4",
+    "contracts/social/v1/public-id-view.schema.json": "ff6473c6a43885b9c9ba6e4af950d24713ee1604667969283d66b02c9aabd607",
+    "contracts/social/v1/contact-card.schema.json": "adedb43635fb4387d0503aa44de747d27fcbfb74955daef1d850ddcfdfe02c42",
+    "contracts/openapi/v1/autplay-social.openapi.json": "1650e9347324e2b9e6cc5819842ee3d9f9aed6af9885770f807cf7b9137316a0",
+    "tests/fixtures/social/v1/schema-examples.json": "6d99980aac7c0fee99193c2e3756393ea518b3375003b0a62b72c962c96fe5c0",
+    "deploy/compose/compose.yaml": "2a7d2fc993a4259eac9fda15c1243151e1e0d8f684b40b5260cae86d806b551a",
+    "deploy/compose/compose.test.yaml": "12a1d2a079bce56fd21cb95d3e19c86afe8cb67a964b360959601beb3eadf831",
+    "server/pyproject.toml": "092d870175522d29ffa4f395ef04398d54ca652697f1c877ba50d9367c990db5",
+    "server/uv.lock": "73176b06647eb08702177f805f56c4afee2ef0473327e160f647e92ac14d594d",
+    "pyproject.toml": "e5a1a2003535a60db21ef12a9b07ab68fb315cd3fc10b7403a9d1679138599d8",
+    "uv.lock": "c92a98fedc116f380663db42e9f1a9452b0ab16856e68a6a32702de3cbb95cde",
+    "docs/adr/ADR-055-same-server-public-id-exact-lookup.md": "2288a7b93208838f565dc4f26d6721a38391541ec76430b8baacd2226984bc76"
+  },
+  "database_versions": {
+    "postgresql": "18.4",
+    "pgvector": "0.8.6"
+  },
+  "disposable_project": "autplay-public-id-20261006-7c31",
+  "database_port": 6843,
+  "production_mutations": false,
+  "base_commit": "a17a4569ab462f2c650c757d1da433cdd58c0b03",
+  "python_version": "3.14.7",
+  "migration_head": "0063_social_public_id",
+  "source_identity_verified_unchanged": true,
+  "checks": {
+    "social_postgresql_and_http": {
+      "status": "passed",
+      "passed": 39,
+      "duration_seconds": 82.03,
+      "command": "uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests/postgresql/test_social_public_id.py server/tests/postgresql/test_social_s1c.py server/tests/postgresql/test_profile_statistics_s2.py server/tests/runtime/test_social_http.py -q --tb=short"
+    },
+    "contract": {
+      "status": "passed",
+      "passed": 9,
+      "command": "uv run --frozen python -m pytest tests/contract/test_social_contract_v1.py -q --tb=short"
+    },
+    "affected_server_ruff": {
+      "status": "passed",
+      "file_count": 13
+    },
+    "affected_server_ruff_format": {
+      "status": "passed",
+      "file_count": 13
+    },
+    "affected_social_mypy": {
+      "status": "passed",
+      "source_file_count": 4
+    },
+    "contract_ruff_format_mypy": {
+      "status": "passed",
+      "source_file_count": 1
+    },
+    "schema_migrations": {
+      "status": "passed",
+      "command": "uv run --project server --frozen python -m pytest -c server/pyproject.toml server/tests/postgresql/test_metadata.py server/tests/postgresql/test_inventory.py server/tests/postgresql/test_migrations.py server/tests/postgresql/test_migration_close_gates.py -q --tb=short",
+      "passed": 31,
+      "duration_seconds": 181.53
+    }
+  },
+  "whole_server_gate_claimed": false,
+  "disposable_cleanup": {
+    "status": "verified",
+    "remaining_test_databases": 0,
+    "remaining_project_containers": 0,
+    "remaining_project_volumes": 0,
+    "remaining_project_networks": 0
+  },
+  "total_distinct_selected_tests_passed": 79
+}

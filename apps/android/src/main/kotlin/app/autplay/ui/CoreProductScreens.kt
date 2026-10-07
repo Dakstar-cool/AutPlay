@@ -1,5 +1,7 @@
 package app.autplay.ui
 
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,6 +20,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -41,14 +46,22 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.application.search.LibrarySearchKind
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.ui.core.LibraryFilter
 import app.autplay.ui.core.LibrarySection
 import app.autplay.ui.core.LibrarySort
 import app.autplay.ui.core.ListAnchor
+import app.autplay.ui.core.browseSection
+import app.autplay.ui.core.browseFilter
+import app.autplay.ui.playlist.AddTrackToPlaylistDialog
+import app.autplay.ui.playlist.ManualPlaylistActions
+import app.autplay.ui.playlist.ManualPlaylistText
+import app.autplay.ui.playlist.ManualPlaylistUi
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 public data class CoreTrackUiItem(
@@ -142,6 +155,7 @@ public data class SearchScreenUiState(
     public val vaultResults: List<VaultSearchUiItem> = emptyList(),
     public val vaultSearched: Boolean = false,
     public val vaultError: Boolean = false,
+    public val kind: LibrarySearchKind = LibrarySearchKind.All,
 )
 
 public data class VaultSearchUiItem(
@@ -424,10 +438,11 @@ public fun SearchProductScreen(
     onVaultScopeChange: (Boolean) -> Unit = {},
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
+    onSearchKindChange: (LibrarySearchKind) -> Unit = {},
 ) {
-    var internetRequest by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
-    var internetQuery by rememberSaveable { mutableStateOf("") }
-    val listContextKey = "search:${state.query.trim().replace(Regex("\\s+"), " ")}:${state.vaultSelected}"
+    var internetRequest by rememberSaveable(state.kind, state.query) { androidx.compose.runtime.mutableIntStateOf(0) }
+    var internetQuery by rememberSaveable(state.kind, state.query) { mutableStateOf("") }
+    val listContextKey = "search:${state.kind.wireValue}:${state.query.trim().replace(Regex("\\s+"), " ")}:${state.vaultAvailable}"
     val listKeys = searchListKeys(state)
     val listState = rememberStableAnchorListState(
         contextKey = listContextKey,
@@ -454,63 +469,102 @@ public fun SearchProductScreen(
                 modifier = Modifier.semantics { heading() },
             )
         }
-        item(key = "search:scopes") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AutPlayChip(stringResource(R.string.search_local_scope), true, {}, enabled = false)
-                if (state.vaultAvailable) {
-                    AutPlayChip(
-                        stringResource(R.string.search_vault_scope),
-                        state.vaultSelected,
-                        { onVaultScopeChange(!state.vaultSelected) },
-                    )
-                }
-            }
-        }
         item(key = "search:query") {
             OutlinedTextField(
                 value = state.query,
                 onValueChange = onQueryChange,
                 label = { Text(stringResource(R.string.search_hint)) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {
+                    if (state.query.isNotBlank()) { internetRequest = 0; onSearch() }
+                }),
+                trailingIcon = {
+                    IconButton(
+                        onClick = { internetRequest = 0; onSearch() },
+                        enabled = state.query.isNotBlank(),
+                        modifier = Modifier.testTag("local-search-submit"),
+                    ) {
+                        AutPlayPlatformIcon(AutPlayIcon.Search, stringResource(R.string.search_action))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("unified-search-query"),
             )
         }
-        item(key = "search:submit") {
-            Button(
-                onClick = { internetRequest = 0; onSearch() },
-                enabled = state.query.isNotBlank(),
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .testTag("local-search-submit"),
-            ) {
-                Text(stringResource(R.string.search_action))
+        item(key = "search:kind") { LibrarySearchKindPicker(state.kind, onSearchKindChange) }
+        if (state.loading || (state.vaultAvailable && state.vaultLoading)) {
+            item(key = "search:loading") {
+                AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.search_loading))
             }
         }
-        if (state.vaultAvailable && state.vaultSelected) {
-            item(key = "search:vault-heading") {
-                AutPlaySectionHeader(stringResource(R.string.search_vault_results))
+        if (state.error) {
+            item(key = "search:error") {
+                AutPlayStateSurface(
+                    AutPlayStateKind.Error,
+                    stringResource(R.string.state_error_body),
+                    actionLabel = stringResource(R.string.action_retry),
+                    onAction = onRetry,
+                )
             }
-            when {
-                state.vaultLoading -> item(key = "search:vault-loading") {
-                    AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.search_vault_loading))
-                }
-                state.vaultError -> item(key = "search:vault-error") {
-                    AutPlayStateSurface(AutPlayStateKind.Offline, stringResource(R.string.search_vault_unavailable))
-                }
-                state.vaultSearched && state.vaultResults.isEmpty() -> item(key = "search:vault-empty") {
-                    AutPlayStateSurface(AutPlayStateKind.Empty, stringResource(R.string.search_vault_empty))
-                }
-                state.vaultSearched -> item(key = "search:vault-count") {
-                    Text(
-                        pluralStringResource(
-                            R.plurals.search_vault_result_count,
-                            state.vaultResults.size,
-                            state.vaultResults.size,
-                        ),
-                        color = AutPlayTokens.colors.mutedText,
-                    )
+        }
+        if (state.vaultAvailable && state.vaultError) {
+            item(key = "search:vault-error") {
+                AutPlayCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            stringResource(R.string.ui_library_refresh_vault_unavailable),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AutPlayTokens.colors.mutedText,
+                        )
+                        OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
+                    }
                 }
             }
+        }
+        if (state.searched || state.vaultSearched) {
+            item(key = "search:count") {
+                Text(
+                    pluralStringResource(
+                        R.plurals.ui_library_refresh_search_count,
+                        state.results.size + state.vaultResults.size,
+                        state.results.size + state.vaultResults.size,
+                    ),
+                    color = AutPlayTokens.colors.mutedText,
+                )
+            }
+            if (state.results.isEmpty() && state.vaultResults.isEmpty() &&
+                !state.loading && !state.vaultLoading && !state.error && !state.vaultError
+            ) {
+                item(key = "search:empty") {
+                    AutPlayStateSurface(AutPlayStateKind.Empty, stringResource(R.string.search_empty))
+                }
+            }
+        }
+        items(state.results, key = { "$SEARCH_RESULT_PREFIX${it.id}" }) { track ->
+            AutPlayCard(
+                modifier = Modifier.testTag("local-result-${track.id}"),
+                onClick = { onPlay(track.id) },
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    AutPlayArtwork(track.title, trackId = track.id)
+                    Column(Modifier.weight(1f)) {
+                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            track.artist ?: stringResource(R.string.library_unknown_artist),
+                            color = AutPlayTokens.colors.mutedText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.action_play), Modifier.size(24.dp))
+                }
+            }
+        }
+        if (state.vaultAvailable) {
             items(state.vaultResults, key = { "$SEARCH_VAULT_RESULT_PREFIX${it.id}" }) { track ->
                 AutPlayCard(
                     modifier = Modifier.testTag("vault-result-${track.id}"),
@@ -534,11 +588,6 @@ public fun SearchProductScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                stringResource(R.string.search_vault_source_availability, track.source, track.availability),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AutPlayTokens.colors.mutedText,
-                            )
                         }
                         if (track.playable) {
                             AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.action_play), Modifier.size(24.dp))
@@ -546,54 +595,6 @@ public fun SearchProductScreen(
                             Text(stringResource(R.string.search_vault_playback_unavailable), style = MaterialTheme.typography.labelSmall)
                         }
                     }
-                }
-            }
-        }
-        if (state.loading) {
-            item(key = "search:loading") {
-                AutPlayStateSurface(
-                    AutPlayStateKind.Loading,
-                    stringResource(R.string.search_loading),
-                )
-            }
-        }
-        if (state.error) {
-            item(key = "search:error") {
-                AutPlayStateSurface(
-                    AutPlayStateKind.Error,
-                    stringResource(R.string.state_error_body),
-                    actionLabel = stringResource(R.string.action_retry),
-                    onAction = onRetry,
-                )
-            }
-        } else if (state.searched && !state.loading) {
-            item(key = "search:count") { Text(pluralStringResource(R.plurals.search_result_count, state.results.size, state.results.size)) }
-            if (state.results.isEmpty()) {
-                item(key = "search:empty") {
-                    AutPlayStateSurface(
-                        AutPlayStateKind.Empty,
-                        stringResource(R.string.search_empty),
-                    )
-                }
-            }
-        }
-        items(state.results, key = { "$SEARCH_RESULT_PREFIX${it.id}" }) { track ->
-            AutPlayCard(onClick = { onPlay(track.id) }) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    AutPlayArtwork(track.title, trackId = track.id)
-                    Column(Modifier.weight(1f)) {
-                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            track.artist ?: stringResource(R.string.library_unknown_artist),
-                            color = AutPlayTokens.colors.mutedText,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.action_play), Modifier.size(24.dp))
                 }
             }
         }
@@ -605,7 +606,7 @@ public fun SearchProductScreen(
             }
         }
         if (internetRequest > 0 && internetQuery == state.query) {
-            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest) }
+            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest, state.kind) }
         }
     }
 }
@@ -625,10 +626,19 @@ public fun LibraryProductScreen(
     onOpenReview: () -> Unit = {},
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
+    onPlayNext: (String) -> Unit = {},
+    onAddToQueue: (String) -> Unit = {},
+    onDownload: (String) -> Unit = {},
+    onRepairAccess: () -> Unit = {},
+    manualPlaylists: List<ManualPlaylistUi> = emptyList(),
+    manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
 ) {
+    val displayState = state.copy(section = state.section.browseSection(), filter = state.filter.browseFilter())
+    var addTrackToPlaylistId by rememberSaveable { mutableStateOf<String?>(null) }
     var controlsExpanded by rememberSaveable { mutableStateOf(false) }
-    val listContextKey = "library:${state.section}:${state.sort}:${state.filter}"
-    val listKeys = libraryListKeys(state)
+    val listContextKey = "library:${displayState.section}:${displayState.sort}:${displayState.filter}"
+    val listKeys = libraryListKeys(displayState)
     val listState = rememberStableAnchorListState(
         contextKey = listContextKey,
         persistedAnchor = listAnchor,
@@ -648,20 +658,27 @@ public fun LibraryProductScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item(key = "library:heading") {
-            LibraryShortcutGrid(onSectionChange, onFilterChange)
+            Text(
+                stringResource(R.string.nav_library),
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+        item(key = "library:shortcuts") {
+            LibraryShortcutGrid(onSectionChange, onFilterChange, onOpenDownloads)
         }
         item(key = "library:sections") {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(LibrarySection.entries) { section ->
+                items(listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists, LibrarySection.Review)) { section ->
                     AutPlayChip(
                         text = librarySectionLabel(section),
-                        selected = state.section == section,
+                        selected = displayState.section == section,
                         onClick = { onSectionChange(section) },
                     )
                 }
             }
         }
-        if (state.section in setOf(LibrarySection.Tracks, LibrarySection.Offline, LibrarySection.Unavailable)) {
+        if (displayState.section in setOf(LibrarySection.Tracks, LibrarySection.Offline, LibrarySection.Unavailable)) {
             item(key = "library:controls") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
@@ -684,7 +701,7 @@ public fun LibraryProductScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(stringResource(R.string.library_filter_label), style = MaterialTheme.typography.labelLarge)
                                 Text(
-                                    "${librarySortLabel(state.sort)} · ${libraryFilterLabel(state.filter)}",
+                                    "${librarySortLabel(displayState.sort)} · ${libraryFilterLabel(displayState.filter)}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = AutPlayTokens.colors.mutedText,
                                     maxLines = 1,
@@ -699,7 +716,7 @@ public fun LibraryProductScreen(
                             items(LibrarySort.entries) { sort ->
                                 AutPlayChip(
                                     text = librarySortLabel(sort),
-                                    selected = state.sort == sort,
+                                    selected = displayState.sort == sort,
                                     onClick = { onSortChange(sort) },
                                 )
                             }
@@ -710,48 +727,16 @@ public fun LibraryProductScreen(
                                 listOf(
                                     LibraryFilter.All,
                                     LibraryFilter.Loved,
-                                    LibraryFilter.Downloaded,
-                                    LibraryFilter.Available,
-                                    LibraryFilter.Unavailable,
                                 ),
                             ) { filter ->
                                 AutPlayChip(
                                     text = libraryFilterLabel(filter),
-                                    selected = state.filter == filter,
+                                    selected = displayState.filter == filter,
                                     onClick = { onFilterChange(filter) },
                                 )
                             }
                         }
                     }
-                }
-            }
-        }
-        if (state.section in setOf(LibrarySection.Tracks, LibrarySection.Offline, LibrarySection.Unavailable)) {
-            item(key = "library:count") {
-                Text(
-                    pluralStringResource(R.plurals.library_track_count, state.tracks.size, state.tracks.size),
-                    color = AutPlayTokens.colors.mutedText,
-                )
-            }
-        }
-        if (state.localMode) {
-            item(key = "library:local-mode") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    AutPlayPlatformIcon(
-                        AutPlayIcon.Download,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        stringResource(R.string.library_local_mode),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = AutPlayTokens.colors.mutedText,
-                    )
                 }
             }
         }
@@ -791,7 +776,7 @@ public fun LibraryProductScreen(
                 )
             }
         }
-        when (state.section) {
+        when (displayState.section) {
             LibrarySection.Tracks, LibrarySection.Offline, LibrarySection.Unavailable -> {
                 if (state.tracks.isEmpty()) {
                     item(key = "library:tracks-empty") {
@@ -802,7 +787,13 @@ public fun LibraryProductScreen(
                     }
                 }
                 items(state.tracks, key = { "$LIBRARY_TRACK_PREFIX${it.id}" }) { track ->
-                    LibraryTrackCard(track, onSelect, onRemoveOrRestore, onLike)
+                    LibraryTrackCard(
+                        track, onSelect, onRemoveOrRestore, onLike,
+                        onPlayNext, onAddToQueue, onDownload, onRepairAccess,
+                        onAddToPlaylist = { addTrackToPlaylistId = it },
+                        canAddToPlaylist = manualPlaylists.isNotEmpty(),
+                        downloadsAvailable = !state.localMode,
+                    )
                 }
             }
             LibrarySection.Artists -> when (state.artistBrowseState) {
@@ -863,12 +854,28 @@ public fun LibraryProductScreen(
             }
         }
     }
+    addTrackToPlaylistId?.let { trackId ->
+        AddTrackToPlaylistDialog(
+            trackRefId = trackId,
+            playlists = manualPlaylists,
+            actions = manualPlaylistActions,
+            onDismiss = { addTrackToPlaylistId = null },
+            text = ManualPlaylistText(
+                selectPlaylist = stringResource(R.string.playlist_select_target),
+                add = stringResource(R.string.playlist_add_selected),
+                cancel = stringResource(R.string.action_cancel),
+            ),
+        )
+    }
+
 }
+
 
 @Composable
 private fun LibraryShortcutGrid(
     onSectionChange: (LibrarySection) -> Unit,
     onFilterChange: (LibraryFilter) -> Unit,
+    onOpenDownloads: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -882,13 +889,10 @@ private fun LibraryShortcutGrid(
                 },
             )
             LibraryShortcut(
-                label = libraryFilterLabel(LibraryFilter.Downloaded),
+                label = stringResource(R.string.nav_downloads),
                 icon = AutPlayIcon.Download,
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    onSectionChange(LibrarySection.Tracks)
-                    onFilterChange(LibraryFilter.Downloaded)
-                },
+                onClick = onOpenDownloads,
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -955,7 +959,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.collectionItems(
                 collection.subtitle?.let { Text(it, color = AutPlayTokens.colors.mutedText) }
                 collection.itemCount?.let { count ->
                     Text(
-                        pluralStringResource(R.plurals.library_track_count, count, count),
+                        pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, count, count),
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
@@ -978,30 +982,24 @@ private val LIBRARY_CONTENT_PREFIXES = setOf(
 )
 
 private fun searchListKeys(state: SearchScreenUiState): List<String> = buildList {
-    addAll(listOf("search:heading", "search:scopes", "search:query", "search:submit"))
-    if (state.vaultAvailable && state.vaultSelected) {
-        add("search:vault-heading")
-        when {
-            state.vaultLoading -> add("search:vault-loading")
-            state.vaultError -> add("search:vault-error")
-            state.vaultSearched && state.vaultResults.isEmpty() -> add("search:vault-empty")
-            state.vaultSearched -> add("search:vault-count")
-        }
-        state.vaultResults.forEach { add("$SEARCH_VAULT_RESULT_PREFIX${it.id}") }
-    }
-    if (state.loading) add("search:loading")
-    if (state.error) {
-        add("search:error")
-    } else if (state.searched && !state.loading) {
+    addAll(listOf("search:heading", "search:query", "search:kind"))
+    if (state.loading || (state.vaultAvailable && state.vaultLoading)) add("search:loading")
+    if (state.error) add("search:error")
+    if (state.vaultAvailable && state.vaultError) add("search:vault-error")
+    if (state.searched || state.vaultSearched) {
         add("search:count")
-        if (state.results.isEmpty()) add("search:empty")
+        if (state.results.isEmpty() && state.vaultResults.isEmpty() &&
+            !state.loading && !state.vaultLoading && !state.error && !state.vaultError
+        ) add("search:empty")
     }
     state.results.forEach { add("$SEARCH_RESULT_PREFIX${it.id}") }
+    if (state.vaultAvailable) state.vaultResults.forEach { add("$SEARCH_VAULT_RESULT_PREFIX${it.id}") }
     if (state.vaultAvailable && (state.searched || state.vaultSearched)) add("search:internet-action")
 }
 
 private fun libraryListKeys(state: LibraryScreenUiState): List<String> = buildList {
     add("library:heading")
+    add("library:shortcuts")
     add("library:sections")
     val isTrackSection = state.section in setOf(
         LibrarySection.Tracks,
@@ -1010,9 +1008,7 @@ private fun libraryListKeys(state: LibraryScreenUiState): List<String> = buildLi
     )
     if (isTrackSection) {
         add("library:controls")
-        add("library:count")
     }
-    if (state.localMode) add("library:local-mode")
     add("library:add")
     if (state.error) add("library:error")
     when (state.section) {
@@ -1066,14 +1062,16 @@ private fun rememberStableAnchorListState(
     }
     LaunchedEffect(listState, contextKey, orderedKeys) {
         snapshotFlow {
+            val firstVisibleItemIndex = listState.firstVisibleItemIndex
+            val firstVisibleItemScrollOffset = listState.firstVisibleItemScrollOffset
             listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
                 val key = item.key as? String
-                key != null && contentPrefixes.any(key::startsWith)
+                item.index >= firstVisibleItemIndex && key != null && contentPrefixes.any(key::startsWith)
             }?.let { item ->
                 ListAnchor(
                     contextKey = contextKey,
                     itemKey = item.key as String,
-                    scrollOffset = (-item.offset).coerceAtLeast(0),
+                    scrollOffset = if (item.index == firstVisibleItemIndex) firstVisibleItemScrollOffset else 0,
                 )
             }
         }.distinctUntilChanged().collect { anchor ->
@@ -1086,13 +1084,21 @@ private fun rememberStableAnchorListState(
 @Composable
 private fun LibraryTrackCard(
     track: CoreTrackUiItem,
-    onSelect: (String) -> Unit,
+    onPlay: (String) -> Unit,
     onRemoveOrRestore: (String) -> Unit,
     onLike: (String) -> Unit,
+    onPlayNext: (String) -> Unit,
+    onAddToQueue: (String) -> Unit,
+    onDownload: (String) -> Unit,
+    onRepairAccess: () -> Unit,
+    onAddToPlaylist: (String) -> Unit,
+    canAddToPlaylist: Boolean,
+    downloadsAvailable: Boolean,
 ) {
+    var menuOpen by rememberSaveable(track.id) { mutableStateOf(false) }
     Surface(
-        onClick = { onSelect(track.id) },
-        modifier = Modifier.fillMaxWidth(),
+        onClick = { onPlay(track.id) },
+        modifier = Modifier.fillMaxWidth().testTag("library-track-${track.id}"),
         shape = MaterialTheme.shapes.medium,
         color = if (track.selected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
@@ -1101,63 +1107,63 @@ private fun LibraryTrackCard(
         },
         tonalElevation = if (track.selected) 2.dp else 0.dp,
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                AutPlayArtwork(track.title, trackId = track.id)
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        track.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        track.artist ?: stringResource(R.string.library_unknown_artist),
-                        color = AutPlayTokens.colors.mutedText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (track.downloaded) {
-                    AutPlayPlatformIcon(
-                        icon = AutPlayIcon.Download,
-                        contentDescription = stringResource(R.string.nav_downloads),
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                if (track.selected) {
-                    AutPlayPlatformIcon(
-                        icon = AutPlayIcon.Check,
-                        contentDescription = stringResource(R.string.library_selected),
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            if (track.permissionRevoked) {
-                AutPlayStateSurface(
-                    AutPlayStateKind.PermissionRevoked,
-                    stringResource(R.string.library_permission_revoked),
+            AutPlayArtwork(track.title, trackId = track.id)
+            Column(Modifier.weight(1f)) {
+                Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    track.artist ?: stringResource(R.string.library_unknown_artist),
+                    color = AutPlayTokens.colors.mutedText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (track.selected) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onRemoveOrRestore(track.id) }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.action_remove))
+            AutPlayIconButton(
+                icon = AutPlayIcon.Favorite,
+                labelRes = if (track.loved) R.string.action_liked else R.string.action_like,
+                onClick = { onLike(track.id) },
+                modifier = Modifier.testTag("library-like-${track.id}"),
+            )
+            Box {
+                androidx.compose.material3.TextButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.heightIn(min = AutPlayTokens.dimensions.minimumTouchTarget)
+                        .testTag("library-actions-${track.id}"),
+                ) { Text(stringResource(R.string.ui_library_refresh_track_actions)) }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.queue_play_next)) },
+                        onClick = { menuOpen = false; onPlayNext(track.id) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.queue_add_to_end)) },
+                        onClick = { menuOpen = false; onAddToQueue(track.id) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.playlist_add_selected)) },
+                        enabled = canAddToPlaylist,
+                        onClick = { menuOpen = false; onAddToPlaylist(track.id) },
+                    )
+                    if (downloadsAvailable && !track.downloaded) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_download)) },
+                            onClick = { menuOpen = false; onDownload(track.id) },
+                        )
                     }
-                    OutlinedButton(
-                        onClick = { onLike(track.id) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(stringResource(if (track.loved) R.string.action_liked else R.string.action_like))
+                    if (track.permissionRevoked) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_choose_folder_again)) },
+                            onClick = { menuOpen = false; onRepairAccess() },
+                        )
                     }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_remove)) },
+                        onClick = { menuOpen = false; onRemoveOrRestore(track.id) },
+                    )
                 }
             }
         }

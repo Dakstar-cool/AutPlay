@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/metadata-discovery/v1/search-query.schema.json",
+  "title": "Music discovery search query v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["q", "kind"],
+  "properties": {
+    "q": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S"},
+    "kind": {"enum": ["artist", "album"]},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 25},
+    "offset": {"type": "integer", "minimum": 0, "maximum": 1000, "default": 0}
+  }
+}

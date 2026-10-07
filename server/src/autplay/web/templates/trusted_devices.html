@@ -1,5 +1,68 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% macro sort_link(key, label) %}
+{% set next_direction = ('desc' if sort_direction == 'asc' else 'asc') if sort_key == key else ('asc' if key == 'name' else 'desc') %}
+<a class="trusted-device-sort-link" data-sort="{{ key }}" href="{{ sort_urls[key] }}&amp;lang={{ locale }}" aria-label="{{ t(label) }}: {{ t('sort_descending') if next_direction == 'desc' else t('sort_ascending') }}">{{ t(label) }}<span aria-hidden="true">{{ ('↑' if sort_direction == 'asc' else '↓') if sort_key == key else '↕' }}</span></a>
+{% endmacro %}
 {% block content %}
-<header class="page-heading"><div><h1>{{ t("trusted_devices_title") }}</h1><p class="page-summary">{{ t("trusted_devices_intro") }}</p></div></header>
-{% if items %}<div class="table-scroll" tabindex="0" role="region" aria-label="{{ t("trusted_devices_title") }}"><table><thead><tr><th scope="col">{{ t("name") }}</th><th scope="col">{{ t("type") }}</th><th scope="col">{{ t("trust_state") }}</th><th scope="col">{{ t("active_sessions") }}</th><th scope="col">{{ t("developer_mode") }}</th><th scope="col">{{ t("action") }}</th></tr></thead><tbody>{% for item in items %}<tr><td>{{ item.device_label }}</td><td>{{ item.platform }}</td><td>{{ item.trust_state }}</td><td>{{ item.active_session_count }}</td><td>{% if item.device_id %}<strong>{{ t("enabled") if item.developer_mode_enabled else t("disabled") }}</strong><form method="post" action="/admin/trusted-devices/device/{{ item.device_id }}/developer-mode/{{ 'disable' if item.developer_mode_enabled else 'enable' }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ developer_operations[item.device_id|string]['disable' if item.developer_mode_enabled else 'enable'] }}"><button type="submit">{{ t("disable_developer_mode") if item.developer_mode_enabled else t("enable_developer_mode") }}</button></form>{% else %}{{ t("state_unavailable") }}{% endif %}</td><td class="actions">{% for action, label, consequence in (("remove-trust", "remove_trust", "remove_trust_consequence"), ("block", "block_future_admission", "block_future_admission_consequence"), ("unblock", "unblock_future_admission", "unblock_future_admission_consequence"), ("revoke-access", "revoke_access", "revoke_access_consequence"), ("revoke-and-remove", "revoke_and_remove", "revoke_and_remove_consequence")) %}<form method="post" action="/admin/trusted-devices/{{ item.key_reference }}/{{ action }}"><p>{{ t(consequence) }}</p><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ operations[item.key_reference|string][action] }}"><button{% if action in ("block", "revoke-access", "revoke-and-remove") %} class="danger"{% endif %} type="submit">{{ t(label) }}</button></form>{% endfor %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<section class="empty"><h2>{{ t("empty_title") }}</h2><p>{{ t("empty_body") }}</p></section>{% endif %}
+<header class="page-heading">
+  <div><h1>{{ t("trusted_devices_title") }}</h1><p class="page-summary">{{ t("trusted_devices_intro") }}</p></div>
+</header>
+{% if items %}
+<nav class="trusted-device-sort" aria-label="{{ t('sort_devices') }}">
+  <span>{{ t('sort_by') }}</span>{{ sort_link('name', 'name') }}{{ sort_link('connected_at', 'connected_at') }}
+</nav>
+<div class="table-scroll trusted-device-list" tabindex="0" role="region" aria-label="{{ t('trusted_devices_title') }}">
+<table class="trusted-device-table">
+  <thead><tr>
+    <th scope="col" aria-sort="{{ ('ascending' if sort_direction == 'asc' else 'descending') if sort_key == 'name' else 'none' }}">{{ sort_link('name', 'name') }}</th>
+    <th scope="col" aria-sort="{{ ('ascending' if sort_direction == 'asc' else 'descending') if sort_key == 'connected_at' else 'none' }}">{{ sort_link('connected_at', 'connected_at') }}</th>
+    <th scope="col">{{ t('active_sessions') }}</th>
+    <th scope="col">{{ t('action') }}</th>
+  </tr></thead>
+  <tbody>
+  {% for item in items %}
+  {% set device_index = loop.index %}
+  <tr class="trusted-device-card" aria-labelledby="trusted-device-{{ device_index }}">
+    <td class="trusted-device-name">
+      <div class="trusted-device-identity">
+        <span class="trusted-device-icon">{{ icon('nav_devices') }}</span>
+        <div>
+          <h2 id="trusted-device-{{ device_index }}">{{ item.device_label }}</h2>
+          <div class="trusted-device-tags">
+            <span class="trusted-device-platform">{{ 'Android' if item.platform == 'ANDROID' else item.platform }}</span>
+            <span class="pill{% if item.blocked %} pill-bad{% elif item.trust_state in ('ACTIVE', 'TRUSTED') %} pill-good{% endif %}">{{ t('device_blocked') if item.blocked else t('trust_active') if item.trust_state in ('ACTIVE', 'TRUSTED') else t('trust_removed') if item.trust_state == 'REMOVED' else item.trust_state }}</span>
+          </div>
+        </div>
+      </div>
+    </td>
+    <td class="trusted-device-date" data-label="{{ t('connected_at') }}">{{ format_datetime(item.connected_at) }}</td>
+    <td class="trusted-device-session-count" data-label="{{ t('active_sessions') }}">{{ item.active_session_count }}</td>
+    <td class="actions">
+      <div class="trusted-device-actions">
+        {% set block_action = 'unblock' if item.blocked else 'block' %}
+        {% set block_label = 'unblock_trusted_device' if item.blocked else 'block_trusted_device' %}
+        {% set block_consequence = 'unblock_future_admission_consequence' if item.blocked else 'block_future_admission_consequence' %}
+        <form method="post" action="/admin/trusted-devices/{{ item.key_reference }}/{{ block_action }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="operation_id" value="{{ operations[item.key_reference|string][block_action] }}">
+          <p class="visually-hidden" id="trusted-device-{{ device_index }}-block">{{ t(block_consequence) }}</p>
+          <button class="secondary" type="submit" title="{{ t(block_consequence) }}" aria-describedby="trusted-device-{{ device_index }}-block">{{ t(block_label) }}</button>
+        </form>
+        <form method="post" action="/admin/trusted-devices/{{ item.key_reference }}/revoke-and-remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="operation_id" value="{{ operations[item.key_reference|string]['revoke-and-remove'] }}">
+          <p class="visually-hidden" id="trusted-device-{{ device_index }}-delete">{{ t('revoke_and_remove_consequence') }}</p>
+          <button class="secondary danger-outline" type="submit" title="{{ t('revoke_and_remove_consequence') }}" aria-describedby="trusted-device-{{ device_index }}-delete">{{ t('delete_trusted_device') }}</button>
+        </form>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<section class="empty"><h2>{{ t("empty_title") }}</h2><p>{{ t("empty_body") }}</p></section>
+{% endif %}
 {% endblock %}

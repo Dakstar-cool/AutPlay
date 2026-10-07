@@ -1,0 +1,36 @@
+.vault-page { display: grid; gap: 1.25rem; }
+.vault-page .page-heading, .vault-page h2 { margin: 0; }
+.vault-page .panel { margin: 0; }
+.vault-page [hidden] { display: none !important; }
+.vault-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.vault-heading h2, .vault-heading h3 { min-width: 0; overflow-wrap: anywhere; }
+.vault-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.vault-summary div { min-width: 0; }
+.vault-summary dt { color: var(--muted); font-size: .78rem; }
+.vault-summary dd { margin: .35rem 0 0; font-size: clamp(1.25rem, 2vw, 1.7rem); font-weight: 650; overflow-wrap: anywhere; }
+.vault-observation, .vault-error-meta { color: var(--muted); font-size: .76rem; }
+.vault-problems { display: grid; gap: .75rem; }
+.vault-problem { border-left: .2rem solid var(--warning); }
+.vault-guidance { font-size: .85rem; }
+.vault-unavailable h2 { margin-top: 1rem; }
+.vault-filters, .vault-related { display: flex; flex-wrap: wrap; gap: .5rem; }
+.vault-filters { margin: 1.25rem 0; }
+.vault-filters a { padding: .5rem .8rem; border: 1px solid var(--border); border-radius: .5rem; font-size: .8rem; text-decoration: none; }
+.vault-filters a[aria-current] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 650; }
+.vault-error-group { padding: 1rem 0; border-top: 1px solid var(--border); }
+.vault-error-group p { font-size: .84rem; }
+.vault-error-group details { color: var(--muted); font-size: .75rem; }
+.vault-error-group summary { cursor: pointer; }
+.vault-error-group code { display: block; padding-top: .4rem; overflow-wrap: anywhere; }
+.vault-refresh-status { margin: 0; padding: .75rem 1rem; border: 1px solid var(--border); border-radius: .5rem; font-size: .85rem; }
+.vault-refresh-error { color: var(--danger); background: var(--surface); border-color: var(--danger); }
+.vault-stale .vault-overview { border-style: dashed; }
+.vault-page [aria-disabled="true"] { opacity: .65; cursor: wait; }
+@media (max-width: 40rem) {
+  .vault-page .page-heading { display: grid; gap: .85rem; }
+  .vault-page .page-heading .button { justify-self: start; }
+  .vault-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vault-heading { align-items: flex-start; }
+  .vault-filters a { flex: 1 1 auto; text-align: center; }
+  .vault-related .button { flex: 1 1 auto; }
+}

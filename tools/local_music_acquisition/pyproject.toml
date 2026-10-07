@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 local-music-acquire = "local_music_acquisition.cli:main"
+local-music-acquire-admin-agent = "local_music_acquisition.admin_agent:main"
 
 [build-system]
 requires = ["hatchling==1.28.0"]

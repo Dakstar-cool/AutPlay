@@ -98,6 +98,7 @@ internal fun buildHomeScreenUiState(
     problems: List<HomeProblemUiItem>,
     recommendationError: Boolean,
     untitledTrack: String,
+    unknownArtist: String = "",
 ): HomeScreenUiState {
     val playableTrackIds = libraryTracks.asSequence()
         .filter { it.availability == TrackAvailability.Available }
@@ -108,7 +109,7 @@ internal fun buildHomeScreenUiState(
     likedTrackIds = libraryTracks.filter { it.loved }.map { it.stableId }.toSet(),
     recommendationLoading = recommendationLoading,
     offlineFallback = offlineFallback,
-    releases = releases.map { HomeReleaseUiItem(it.stableId, it.title, it.artistName, null) },
+    releases = releases.map { HomeReleaseUiItem(it.stableId, it.title, it.artistName ?: unknownArtist, it.releaseDateText) },
     recommendations = recommendations,
     continueListening = continueListening?.takeIf { it.localUserTrackRefId in playableTrackIds }?.let { queue ->
         HomeContinueUiItem(
@@ -146,11 +147,7 @@ internal fun buildLibraryScreenUiState(
     lastImportedTitle: String? = null,
     error: Boolean,
 ): LibraryScreenUiState {
-    val effectiveFilter = when (section) {
-        LibrarySection.Offline -> LibraryFilter.Downloaded
-        LibrarySection.Unavailable -> LibraryFilter.Unavailable
-        else -> filter
-    }
+    val effectiveFilter = filter.browseFilter()
     val visibleTracks = filterAndSortTracks(tracks, effectiveFilter, sort).map { item ->
         CoreTrackUiItem(
             id = item.stableId,
@@ -165,9 +162,9 @@ internal fun buildLibraryScreenUiState(
     return LibraryScreenUiState(
         localMode = localMode,
         tracks = visibleTracks,
-        section = section,
+        section = section.browseSection(),
         sort = sort,
-        filter = filter,
+        filter = effectiveFilter,
         artists = artists.map { artist ->
             CoreArtistUiItem(
                 id = artist.key.artistId.value,
@@ -178,7 +175,7 @@ internal fun buildLibraryScreenUiState(
         },
         artistBrowseState = artistBrowseState,
         playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description) },
-        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName) },
+        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount) },
         reviewCount = reviewCount,
         importingLocalTrack = importingLocalTrack,
         lastImportedTitle = lastImportedTitle,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import Engine
@@ -258,10 +259,14 @@ def build_discovery_automation_service(engine: Engine) -> DiscoveryAutomationSer
     return DiscoveryAutomationService(SqlAlchemyDiscoveryAutomationRepository(sessions))
 
 
-def build_admin_view_service(engine: Engine) -> SqlAlchemyAdminViewService:
+def build_admin_view_service(
+    engine: Engine, *, vault_root: Path | None = None
+) -> SqlAlchemyAdminViewService:
     """Assemble owner-scoped read models with one short session per query."""
 
-    return SqlAlchemyAdminViewService(sessionmaker(engine, class_=Session, expire_on_commit=False))
+    return SqlAlchemyAdminViewService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False), vault_root=vault_root
+    )
 
 
 def build_admin_command_service(engine: Engine) -> AdminCommandService:

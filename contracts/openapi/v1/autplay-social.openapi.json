@@ -4,7 +4,10 @@
   "servers": [{"url": "/api/v1"}],
   "security": [{"bearerAuth": []}],
   "x-autplay-implementation-status": "IMPLEMENTED_S1D",
+  "x-autplay-public-id-extension": "ADR-055_USER_AUTHORIZED_SAME_SERVER_EXACT_LOOKUP",
   "paths": {
+    "/social/public-id": {"get": {"operationId": "getOwnPublicId", "x-autplay-authorization": "ACTIVE_SESSION_SAME_SERVER_EXACT_ONLY", "x-autplay-rate-limit": "60/account/15m", "responses": {"200": {"description": "Caller-owned registration; no automatic backfill", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublicIdView"}}}}, "401": {"$ref": "#/components/responses/PublicIdError"}, "404": {"$ref": "#/components/responses/PublicIdError"}, "409": {"$ref": "#/components/responses/PublicIdError"}, "422": {"$ref": "#/components/responses/PublicIdError"}, "429": {"$ref": "#/components/responses/PublicIdError"}}}, "put": {"operationId": "registerOwnPublicId", "x-autplay-authorization": "ACTIVE_SESSION_SAME_SERVER_EXACT_ONLY", "x-autplay-rate-limit": "10/new-operation/account/15m", "responses": {"200": {"description": "Canonical one-time registration; durable exact replay", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublicIdView"}}}}, "401": {"$ref": "#/components/responses/PublicIdError"}, "404": {"$ref": "#/components/responses/PublicIdError"}, "409": {"$ref": "#/components/responses/PublicIdError"}, "422": {"$ref": "#/components/responses/PublicIdError"}, "429": {"$ref": "#/components/responses/PublicIdError"}}, "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublicIdCommand"}}}}}},
+    "/social/accounts/by-public-id/{public_id}": {"get": {"operationId": "lookupAccountByPublicId", "x-autplay-authorization": "ACTIVE_SESSION_SAME_SERVER_EXACT_ONLY", "x-autplay-rate-limit": "30/account/15m; negative probes counted", "responses": {"200": {"description": "Exact signed contact card; missing, blocked and inactive targets are indistinguishable", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ContactCard"}}}}, "401": {"$ref": "#/components/responses/PublicIdError"}, "404": {"$ref": "#/components/responses/PublicIdError"}, "409": {"$ref": "#/components/responses/PublicIdError"}, "422": {"$ref": "#/components/responses/PublicIdError"}, "429": {"$ref": "#/components/responses/PublicIdError"}}, "parameters": [{"name": "public_id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "One complete ASCII ID, 3-24 letters/digits/underscores; case-insensitive; invalid IDs return the same 404; @ is display-only"}]}},
     "/social/contact-card": {
       "get": {
         "operationId": "getOwnContactCard",
@@ -251,6 +254,9 @@
       "InvitationId": {"name": "invitation_id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
     },
     "schemas": {
+      "PublicIdView": {"$ref": "../../social/v1/public-id-view.schema.json"},
+      "PublicIdCommand": {"$ref": "../../social/v1/public-id-command.schema.json"},
+      "PublicIdErrorEnvelope": {"type": "object", "additionalProperties": false, "required": ["error"], "properties": {"error": {"type": "object", "additionalProperties": false, "required": ["code", "message", "retryable", "request_id"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "retryable": {"type": "boolean"}, "request_id": {"type": "string"}}}}},
       "AdmissionRequest": {"$ref": "../../social/v1/admission-request.schema.json"},
       "AdmissionCreated": {"$ref": "../../social/v1/admission-created.schema.json"},
       "AdmissionPoll": {"$ref": "../../social/v1/admission-poll.schema.json"},
@@ -285,6 +291,6 @@
       "GuestCapability": {"$ref": "../../social/v1/guest-capability.schema.json"},
       "Error": {"type": "object", "additionalProperties": false, "required": ["code"], "properties": {"code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}
     },
-    "responses": {"Error": {"description": "Stable non-disclosing error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}}
+    "responses": {"PublicIdError": {"description": "Uniform non-disclosing error; no target name, UUID or owner hint", "headers": {"Cache-Control": {"$ref": "#/components/headers/NoStore"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublicIdErrorEnvelope"}}}}, "Error": {"description": "Stable non-disclosing error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}}
   }
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -21,6 +22,7 @@ from autplay.adapters.postgresql.models.vault import (
     VaultReplicaRow,
 )
 from autplay.adapters.postgresql.models.web_admin import WebSessionRow
+from autplay.adapters.postgresql.models.worker_health import WorkerHealthRow
 from autplay.domain.admin_views import (
     AdminAuditItem,
     AdminConfirmationTarget,
@@ -34,8 +36,11 @@ from autplay.domain.admin_views import (
     AdminSessionItem,
     AdminUnavailable,
     AdminVaultStatus,
+    AdminWorkerHealth,
 )
 from autplay.domain.web_admin import WebActor, WebAdminError
+
+from .admin_vault_issues import vault_issue_groups
 
 
 class PostgreSqlAdminViews:
@@ -52,20 +57,65 @@ class PostgreSqlAdminViews:
             return AdminDashboard(
                 "Unavailable", False, 0, False, postgresql_ready=True, vault_status="UNKNOWN"
             )
-        vault = self.vault(actor)
+        vault = self._vault_status(actor)
         vault_status = (
             "DEGRADED"
-            if vault.unhealthy_replicas or vault.quarantined_objects or vault.uploads_quarantined
+            if (
+                vault.unhealthy_replicas
+                or vault.quarantined_objects
+                or vault.uploads_quarantined
+                or vault.uploads_failed
+            )
             else "HEALTHY"
         )
+        observation = self._session.get(WorkerHealthRow, actor.server_instance_id)
+        worker = None
+        worker_status = "UNKNOWN"
+        if observation is not None:
+            now = self._session.scalar(select(func.clock_timestamp()))
+            assert now is not None
+            age_seconds = (now - observation.observed_at).total_seconds()
+            fresh = observation.running and 0 <= age_seconds <= 30
+            active_jobs, queued_jobs = self._session.execute(
+                select(
+                    func.count().filter(JobRow.state == "RUNNING", JobRow.lease_deadline > now),
+                    func.count().filter(JobRow.state.in_(("QUEUED", "RETRY_WAIT"))),
+                ).where(
+                    JobRow.user_id == actor.user_id,
+                    JobRow.schema_version == 1,
+                    JobRow.job_type.in_(
+                        (
+                            "vault.ingest",
+                            "library.import",
+                            "audio.standard_analysis",
+                            "discovery.acquire",
+                            "discovery.scan",
+                        )
+                    ),
+                )
+            ).one()
+            worker = AdminWorkerHealth(
+                observation.observed_at,
+                fresh,
+                observation.busy,
+                observation.cpu_percent if fresh else None,
+                observation.memory_bytes if fresh else None,
+                observation.memory_limit_bytes if fresh else None,
+                int(active_jobs),
+                int(queued_jobs),
+                max(0.0, 30 - age_seconds) if fresh else 0,
+            )
+            worker_status = "HEALTHY" if fresh else "UNAVAILABLE"
         return AdminDashboard(
             row.label_hint,
             True,
             row.capability_revision,
             False,
             postgresql_ready=True,
-            worker_status="UNKNOWN",
+            worker_status=worker_status,
             vault_status=vault_status,
+            worker=worker,
+            vault=vault,
         )
 
     def confirmation_target(
@@ -119,7 +169,9 @@ class PostgreSqlAdminViews:
         raise WebAdminError("forbidden")
 
     def devices(self, actor: WebActor, *, limit: int, after: str | None = None) -> AdminPage:
-        query = select(DeviceRow).where(DeviceRow.user_id == actor.user_id)
+        query = select(DeviceRow).where(
+            DeviceRow.user_id == actor.user_id, DeviceRow.revoked_at.is_(None)
+        )
         if after is not None:
             query = query.where(DeviceRow.device_id < _cursor(after))
         rows = self._session.scalars(
@@ -268,6 +320,11 @@ class PostgreSqlAdminViews:
         return self.audit(actor, limit=limit, after=after)
 
     def vault(self, actor: WebActor) -> AdminVaultStatus:
+        value = self._vault_status(actor)
+        issues, truncated = vault_issue_groups(self._session, actor)
+        return replace(value, issues=issues, issues_truncated=truncated)
+
+    def _vault_status(self, actor: WebActor) -> AdminVaultStatus:
         object_count, committed_bytes, quarantined_objects, last_verified_at = (
             self._session.execute(
                 select(
@@ -283,14 +340,19 @@ class PostgreSqlAdminViews:
                 ).select_from(VaultObjectRow)
             ).one()
         )
-        available_replicas, unhealthy_replicas = self._session.execute(
-            select(
-                func.count().filter(VaultReplicaRow.replica_status == "AVAILABLE"),
-                func.count().filter(
-                    VaultReplicaRow.replica_status.in_(("MISSING", "CORRUPT", "QUARANTINED"))
-                ),
-            ).select_from(VaultReplicaRow)
-        ).one()
+        available_replicas, unhealthy_replicas, missing, corrupt, quarantined_replicas = (
+            self._session.execute(
+                select(
+                    func.count().filter(VaultReplicaRow.replica_status == "AVAILABLE"),
+                    func.count().filter(
+                        VaultReplicaRow.replica_status.in_(("MISSING", "CORRUPT", "QUARANTINED"))
+                    ),
+                    func.count().filter(VaultReplicaRow.replica_status == "MISSING"),
+                    func.count().filter(VaultReplicaRow.replica_status == "CORRUPT"),
+                    func.count().filter(VaultReplicaRow.replica_status == "QUARANTINED"),
+                ).select_from(VaultReplicaRow)
+            ).one()
+        )
         open_count = (
             self._session.scalar(
                 select(func.count())
@@ -310,6 +372,16 @@ class PostgreSqlAdminViews:
             )
             or 0
         )
+        failed = (
+            self._session.scalar(
+                select(func.count())
+                .select_from(UploadSessionRow)
+                .where(
+                    UploadSessionRow.user_id == actor.user_id, UploadSessionRow.state == "FAILED"
+                )
+            )
+            or 0
+        )
         return AdminVaultStatus(
             int(object_count),
             int(committed_bytes),
@@ -320,6 +392,10 @@ class PostgreSqlAdminViews:
             quarantined,
             last_verified_at,
             False,
+            int(missing),
+            int(corrupt),
+            int(quarantined_replicas),
+            int(failed),
         )
 
     def recovery(self, actor: WebActor) -> AdminUnavailable:

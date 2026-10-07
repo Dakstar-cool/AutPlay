@@ -24,6 +24,7 @@ from ..audio_validation import audio_duration
 from ..matching import SEARCH_LIMIT, candidate_matches
 from ..source_catalog import track_url as _track_url
 from ..source_client import valid_client_id
+from ..source_metadata import yt_dlp_metadata
 from ._proxy_transport import socks_transport
 from ._yt_dlp_worker import _content_ref, _options, _probe_audio, _size_hook
 from .hitmo import _looks_like_audio, _publish_exclusive, _safe_filename
@@ -41,6 +42,39 @@ _ORIGINAL_FORMATS = {
 }
 _METADATA_LIMIT = 3
 _SEARCH_BYTES = 2 * 1024 * 1024
+
+
+class _NativeBandcampIE(BandcampIE):  # type: ignore[misc]
+    """Keep native membership IDs from the same page the pinned extractor verifies."""
+
+    _native_membership: dict[str, object]
+
+    @classmethod
+    def ie_key(cls) -> str:
+        return "Bandcamp"
+
+    def _extract_data_attr(
+        self, webpage: str, video_id: str, attr: str = "tralbum", fatal: bool = True
+    ) -> Any:
+        result = super()._extract_data_attr(webpage, video_id, attr, fatal)
+        if attr == "tralbum" and isinstance(result, dict):
+            current = result.get("current")
+            if isinstance(current, dict) and current.get("type") == "track":
+                self._native_membership = {
+                    "native_album_id": current.get("album_id"),
+                    "native_artist_id": current.get("band_id"),
+                    "track_id": current.get("id"),
+                }
+        return result
+
+    def _real_extract(self, url: str) -> dict[str, Any]:
+        self._native_membership = {}
+        result: dict[str, Any] = super()._real_extract(url)
+        if str(result.get("id")) == str(self._native_membership.get("track_id")):
+            result.update(
+                {key: value for key, value in self._native_membership.items() if key != "track_id"}
+            )
+        return result
 
 
 class _SourceError(RuntimeError):
@@ -363,7 +397,9 @@ def _download_track(request: dict[str, Any]) -> dict[str, Any]:
             if client_id is not None:
                 ydl.cache.store("soundcloud", "client_id", client_id)
             for extractor in (
-                (SoundcloudIE, SoundcloudSearchIE) if provider == "soundcloud" else (BandcampIE,)
+                (SoundcloudIE, SoundcloudSearchIE)
+                if provider == "soundcloud"
+                else (_NativeBandcampIE,)
             ):
                 ydl.add_info_extractor(extractor())
             selected = (
@@ -434,6 +470,7 @@ def _download_track(request: dict[str, Any]) -> dict[str, Any]:
             "status": "downloaded",
             "artifact_ref": _content_ref(published),
             "expected_duration_seconds": expected,
+            "source_metadata": yt_dlp_metadata(selected, provider=provider),
         }
 
 

@@ -65,7 +65,11 @@ S1D_SCHEMAS = {
     "guest-invitation.schema.json",
     "guest-redemption.schema.json",
 }
+PUBLIC_ID_SCHEMAS = {"public-id-command.schema.json", "public-id-view.schema.json"}
 REQUIRED_OPERATIONS = {
+    "getOwnPublicId",
+    "registerOwnPublicId",
+    "lookupAccountByPublicId",
     "submitAdmissionRequest",
     "pollAdmissionRequest",
     "recoverAdmissionCreationSecrets",
@@ -137,13 +141,15 @@ def load(path: Path) -> dict[str, Any]:
 
 def test_s1b_s1c_and_s1d_schema_statuses_and_examples_are_strict() -> None:
     names = {path.name for path in SCHEMAS.glob("*.schema.json")}
-    assert names == S1B_SCHEMAS | S1C_SCHEMAS | S1D_SCHEMAS
+    assert names == S1B_SCHEMAS | S1C_SCHEMAS | S1D_SCHEMAS | PUBLIC_ID_SCHEMAS
     for path in SCHEMAS.glob("*.schema.json"):
         schema = load(path)
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         assert schema["$id"] == f"https://autplay.local/contracts/social/v1/{path.name}"
         expected = (
-            "IMPLEMENTED_S1B"
+            "IMPLEMENTED_PUBLIC_ID"
+            if path.name in PUBLIC_ID_SCHEMAS
+            else "IMPLEMENTED_S1B"
             if path.name in S1B_SCHEMAS
             else "IMPLEMENTED_S1C"
             if path.name in S1C_SCHEMAS
@@ -153,7 +159,9 @@ def test_s1b_s1c_and_s1d_schema_statuses_and_examples_are_strict() -> None:
         Draft202012Validator.check_schema(schema)
 
     examples = load(FIXTURES / "schema-examples.json")["examples"]
-    assert {item["schema"] for item in examples} == S1B_SCHEMAS | S1C_SCHEMAS | S1D_SCHEMAS
+    assert {
+        item["schema"] for item in examples
+    } == S1B_SCHEMAS | S1C_SCHEMAS | S1D_SCHEMAS | PUBLIC_ID_SCHEMAS
     for item in examples:
         validator = Draft202012Validator(
             load(SCHEMAS / item["schema"]), format_checker=FormatChecker()
@@ -173,6 +181,29 @@ def test_invalid_public_shapes_fail() -> None:
             load(SCHEMAS / item["schema"]), format_checker=FormatChecker()
         )
         assert list(validator.iter_errors(item["instance"])), case["case_id"]
+
+
+def test_public_id_exact_ascii_shapes_and_registered_null_state_are_strict() -> None:
+    command = Draft202012Validator(
+        load(SCHEMAS / "public-id-command.schema.json"), format_checker=FormatChecker()
+    )
+    for value in ("ab", "a" * 25, "@alice", "alice\n", "alice ", "\u0430lice", "alice-1", 123):
+        assert list(
+            command.iter_errors(
+                {"operation_id": "33333333-3333-4333-8333-333333333333", "public_id": value}
+            )
+        )
+    view = Draft202012Validator(load(SCHEMAS / "public-id-view.schema.json"))
+    assert not list(view.iter_errors({"public_id": None, "status": "unregistered"}))
+    assert not list(view.iter_errors({"public_id": "alice_1", "status": "confirmed"}))
+    for item in (
+        {"public_id": None, "status": "confirmed"},
+        {"public_id": "alice_1", "status": "unregistered"},
+        {"public_id": "ALICE_1", "status": "confirmed"},
+        {"public_id": "alice_1\n", "status": "confirmed"},
+        {"public_id": "alice_1", "status": "confirmed", "account_id": "private"},
+    ):
+        assert list(view.iter_errors(item))
 
 
 def test_openapi_freezes_s1d_recovery_and_authority_surface() -> None:

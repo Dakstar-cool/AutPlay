@@ -1,0 +1,38 @@
+{
+  "archive_sha256": "e0aced879a2a8f34105d42552781120aa6f623154a6d3b9aab7a10a7f68f0a73",
+  "autostart": "Docker enabled and active; existing unless-stopped policy preserved",
+  "base_image_id": "sha256:3b89bdd445611e516559492d0d61f5ff80396328bbb26a733a7ff48e25de168c",
+  "checks": {
+    "anonymous_vault": "authentication required",
+    "assets": "HTTP and SHA-256 verified",
+    "dashboard": "disk and timestamp markup",
+    "database": "real production, read-only transactions",
+    "disk": {
+      "free_bytes": 151923052544,
+      "total_bytes": 738670403584,
+      "used_bytes": 549149769728
+    },
+    "external": {
+      "admin-local-time-v1.js": "HTTPS certificate and SHA-256 verified",
+      "phone_api_discovery": "HTTPS reachable",
+      "vault-disk-v1.css": "HTTPS certificate and SHA-256 verified",
+      "vault-v1.css": "HTTPS certificate and SHA-256 verified",
+      "vault-v1.js": "HTTPS certificate and SHA-256 verified"
+    },
+    "issues": {
+      "groups": 3,
+      "uploads_failed": 0,
+      "uploads_quarantined": 59
+    },
+    "vault_templates": "ru/en rendered"
+  },
+  "configuration": "preserved",
+  "deployed_at_utc": "2026-10-06T12:08:03Z",
+  "image_id": "sha256:1afca9623d7be0d8a3636c21414929018f6e1e47e7d60f793f993ff794b7be1e",
+  "migrations": false,
+  "restart_policy": "unless-stopped",
+  "rollback_container": "autplay-production-tailnet-admin-rollback-vault-20261006",
+  "runtime_files": 24,
+  "status": "DEPLOYED",
+  "unaffected_containers": 13
+}

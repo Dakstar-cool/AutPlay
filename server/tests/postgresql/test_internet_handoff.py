@@ -29,6 +29,7 @@ from autplay.adapters.postgresql.models import (
     UserTrackRefRow,
 )
 from autplay.adapters.postgresql.models.resource_admission import ResourceAdmissionRow
+from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
 from autplay.adapters.postgresql.provider_scratch import PostgresProviderScratchRepository
 from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
@@ -51,6 +52,17 @@ from .test_provider_staging import Writer, writer
 from .test_resource_admission_runtime import AdmissionHarness, admission, present
 
 __all__ = ["admission"]
+
+
+def native(target: InternetAcquisitionTarget) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "provider": "YOUTUBE",
+        "source_id": target.candidate_id,
+        "fields": {"title": "Song", "artist": "Artist", "album": "Native Album"},
+        "external_ids": {"native_album_id": "44"},
+        "artwork": [],
+    }
 
 
 def ready(
@@ -89,6 +101,7 @@ def assert_unbound(harness: AdmissionHarness, owned: Writer) -> None:
             and receipt.upload_session_id is None
         )
         assert session.scalar(select(func.count()).select_from(UploadSessionRow)) == 0
+        assert session.scalar(select(func.count()).select_from(TrackMetadataRow)) == 0
         assert (
             session.scalar(
                 select(func.count()).select_from(JobRow).where(JobRow.job_type == "vault.ingest")
@@ -101,10 +114,18 @@ def test_handoff_is_single_atomic_and_replay_precedes_revoked_authority(
     admission: AdmissionHarness, tmp_path: Path
 ) -> None:
     repository, owned, target, verified = ready(admission, tmp_path)
-    receipt = repository.handoff(owned.claim, target, owned.ticket.execution_id, verified)
+    evidence = native(target)
+    receipt = repository.handoff(
+        owned.claim, target, owned.ticket.execution_id, verified, source_metadata=evidence
+    )
     assert isinstance(receipt, InternetHandoffReceipt)
     assert receipt.target == target and receipt.sha256 == verified.sha256
-    assert repository.handoff(owned.claim, target, owned.ticket.execution_id, verified) == receipt
+    assert (
+        repository.handoff(
+            owned.claim, target, owned.ticket.execution_id, verified, source_metadata=evidence
+        )
+        == receipt
+    )
     with admission.sessions.begin() as session:
         source = present(session.get(InternetAcquisitionRow, target.acquisition_id))
         upload = present(session.get(UploadSessionRow, receipt.upload_id))
@@ -117,6 +138,10 @@ def test_handoff_is_single_atomic_and_replay_precedes_revoked_authority(
         )
         assert staging.state == "HANDED_OFF" and staging.upload_session_id == receipt.upload_id
         assert staging.sha256 == upload.declared_sha256 == verified.sha256.value
+        metadata = present(session.get(TrackMetadataRow, target.ref_id))
+        assert metadata.document["pending_acquisition_evidence"] == evidence
+        assert metadata.document["pending_acquisition_execution_id"] == str(receipt.execution_id)
+        assert metadata.job_id is None and metadata.document.get("fields", {}) == {}
         assert upload.staging_key == owned.key.value
         assert session.scalar(select(func.count()).select_from(UploadSessionRow)) == 1
         assert (
@@ -134,6 +159,25 @@ def test_handoff_is_single_atomic_and_replay_precedes_revoked_authority(
     ):
         with pytest.raises(TerminalJobError, match="music_handoff_conflict"):
             repository.handoff(owned.claim, target, owned.ticket.execution_id, changed)
+
+
+@pytest.mark.parametrize("optional", [None, {"invalid": True}])
+def test_missing_or_malformed_native_evidence_stages_unknown_performer_without_failing_audio(
+    admission: AdmissionHarness,
+    tmp_path: Path,
+    optional: dict[str, object] | None,
+) -> None:
+    repository, owned, target, verified = ready(admission, tmp_path)
+    receipt = repository.handoff(
+        owned.claim, target, owned.ticket.execution_id, verified, source_metadata=optional
+    )
+    with admission.sessions() as session:
+        metadata = present(session.get(TrackMetadataRow, target.ref_id))
+        assert metadata.document["pending_acquisition_evidence"] == {}
+        assert metadata.document["source_artist_explicit"] is False
+        assert metadata.job_id is None
+        assert present(session.get(UploadSessionRow, receipt.upload_id)).state == "SEALED"
+        assert present(session.get(ProviderStagingRow, receipt.execution_id)).state == "HANDED_OFF"
 
 
 @pytest.mark.parametrize("boundary", ["enqueue", "after_binding"])
@@ -155,10 +199,18 @@ def test_handoff_lost_transaction_never_strands_half_a_binding(
                 internet_acquisition, "require_internet_ingest_authority", enqueue_then_fail
             )
         with pytest.raises(RuntimeError, match=r"test\.abort_handoff"):
-            repository.handoff(owned.claim, target, owned.ticket.execution_id, verified)
+            repository.handoff(
+                owned.claim,
+                target,
+                owned.ticket.execution_id,
+                verified,
+                source_metadata=native(target),
+            )
     assert PostgresJobRepository.enqueue is original
     assert_unbound(admission, owned)
-    receipt = repository.handoff(owned.claim, target, owned.ticket.execution_id, verified)
+    receipt = repository.handoff(
+        owned.claim, target, owned.ticket.execution_id, verified, source_metadata=native(target)
+    )
     assert receipt.target == target
 
 
@@ -194,7 +246,9 @@ def test_handoff_rechecks_original_authority_target_and_exact_worker(
                     ),
                 )
     with pytest.raises((TerminalJobError, JobLeaseLost)):
-        repository.handoff(owned.claim, target, owned.ticket.execution_id, verified)
+        repository.handoff(
+            owned.claim, target, owned.ticket.execution_id, verified, source_metadata=native(target)
+        )
     assert_unbound(admission, owned)
 
 

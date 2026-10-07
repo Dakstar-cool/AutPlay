@@ -1,0 +1,14 @@
+{% from "icons.html" import icon %}
+{% for item in health %}
+<article class="status-card" data-component="{{ item.label }}"{% if item.valid_for is not none %} data-valid-for="{{ item.valid_for }}"{% endif %}>
+  {{ icon(item.label) }}
+  <div class="status-line"><h3>{{ t(item.label) }}</h3><span class="pill pill-{{ item.tone }}">{{ t(item.status) }}</span></div>
+  <p class="health-detail">{{ t(item.detail) }}</p>
+  {% if item.metrics %}
+  <dl class="health-metrics">{% for metric in item.metrics %}<div><dt>{{ t(metric.label) }}</dt><dd>{{ metric.value }}</dd></div>{% endfor %}</dl>
+  {% endif %}
+  {% if item.disk %}{% with disk=item.disk %}{% include "vault_disk.html" %}{% endwith %}{% endif %}
+  {% if item.observed_at %}<p class="health-updated">{{ t('worker_last_seen') }} {{ item.observed_at }}</p>{% endif %}
+  {% if item.link %}<a class="health-link" href="{{ item.link }}">{{ t('vault_details') }} {{ icon('arrow') }}</a>{% endif %}
+</article>
+{% endfor %}

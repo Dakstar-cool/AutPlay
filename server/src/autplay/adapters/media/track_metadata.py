@@ -1,6 +1,7 @@
 """Read embedded tags and decode artwork with bounded local CPU tools."""
 
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from autplay.adapters.media.tools import SubprocessExecutableRunner
@@ -14,6 +15,7 @@ _TAG_FIELDS = {
     "artist": "artist",
     "album": "album",
     "album_artist": "album_artist",
+    "albumartist": "album_artist",
     "date": "release_date",
     "year": "release_date",
     "originaldate": "original_release_date",
@@ -36,8 +38,8 @@ def fields_from_tags(tags: dict[str, object]) -> MetadataFields:
     for name, value in ordered:
         key = name.casefold().replace(" ", "_")
         target = _TAG_FIELDS.get(key)
-        if key in {"track", "disc"}:
-            target = f"{key}_number"
+        if key in {"track", "tracknumber", "track_number", "disc", "discnumber", "disc_number"}:
+            target = "track_number" if key.startswith("track") else "disc_number"
             try:
                 value = int(str(value).split("/", 1)[0])
             except ValueError:
@@ -65,7 +67,7 @@ class FfmpegMetadataReader:
                 "-protocol_whitelist",
                 "file,pipe",
                 "-show_entries",
-                "format_tags:stream_tags:stream=index,codec_type,width,height:stream_disposition=attached_pic",
+                "format=duration:format_tags:stream_tags:stream=index,codec_type,width,height:stream_disposition=attached_pic",
                 "-of",
                 "json",
                 str(path),
@@ -96,7 +98,14 @@ class FfmpegMetadataReader:
                 art = self._jpeg(path, int(picture["index"])) if picture else None
             except MetadataProviderError, MediaValidationError:
                 art = None
-            return EmbeddedMetadata(fields_from_tags(tags), art)
+            duration_ms = None
+            try:
+                duration = Decimal(str(data.get("format", {}).get("duration"))) * 1000
+                if duration.is_finite() and 0 < duration <= 3600000:
+                    duration_ms = int(duration)
+            except InvalidOperation, ValueError, TypeError:
+                pass
+            return EmbeddedMetadata(fields_from_tags(tags), art, duration_ms)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_tags_invalid", retryable=False) from error
 

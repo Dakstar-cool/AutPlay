@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block head %}
+<link rel="stylesheet" href="/admin/static/vault-v1.css?v=1">
+<script src="/admin/static/vault-v1.js?v=1" defer></script>
+{% endblock %}
+{% block content %}
+<div class="vault-page" data-vault-page data-refresh-url="{{ refresh_url }}"
+     data-loading="{{ t('vault_refresh_loading') }}" data-updated="{{ t('vault_refresh_updated') }}"
+     data-stale="{{ t('vault_status_stale') }}"
+     data-failed="{{ t('vault_refresh_failed') }}" data-expired="{{ t('vault_refresh_expired') }}"
+     data-denied="{{ t('vault_refresh_denied') }}">
+  <header class="page-heading">
+    <div><h1>{{ t('vault_title') }}</h1><p class="page-summary">{{ t('vault_page_intro') }}</p></div>
+    <a class="button secondary compact-button" href="{{ refresh_url }}" data-vault-refresh>{{ t('vault_refresh') }}</a>
+  </header>
+  <p class="vault-refresh-status" role="status" aria-live="polite" data-refresh-status hidden></p>
+  <a class="vault-login" href="/admin/login?lang={{ locale }}" data-vault-login hidden>{{ t('vault_sign_in') }}</a>
+  <div class="vault-view" data-vault-view data-unavailable="{{ 'true' if unavailable else 'false' }}">
+    {% if unavailable %}
+    <section class="panel vault-unavailable" aria-labelledby="unavailable-title">
+      <span class="pill pill-bad">{{ t('status_unavailable') }}</span>
+      <h2 id="unavailable-title">{{ t('unavailable_title') }}</h2>
+      <p>{{ t('vault_unavailable_detail') }}</p>
+      <p>{{ t('vault_unavailable_guidance') }}</p>
+    </section>
+    {% else %}
+    <section class="panel vault-overview" aria-labelledby="vault-overview-title">
+      <div class="vault-heading"><h2 id="vault-overview-title">{{ t('vault_overview') }}</h2><span class="pill pill-{{ tone }}">{{ t(status_key) }}</span></div>
+      <p>{{ t(health_detail) }}</p>
+      <dl class="vault-summary">{% for item in summary %}<div><dt>{{ t(item.label) }}</dt><dd>{{ item.value }}</dd></div>{% endfor %}</dl>
+      {% include "vault_disk.html" %}
+      <p class="vault-observation">{{ t('vault_observed_at') }}: {{ observed_at }} · {{ t('vault_last_verified') }}: {{ last_verified_at }}</p>
+      <p class="vault-observation">{{ t('vault_observation_note') }}</p>
+    </section>
+    <section class="vault-problems" aria-labelledby="vault-problems-title">
+      <h2 id="vault-problems-title">{{ t('vault_problems_title') }}</h2>
+      {% for item in warnings %}
+      <article class="panel vault-problem"><div class="vault-heading"><h3>{{ t(item.label) }}</h3><span class="pill pill-warn">{{ item.count }}</span></div><p>{{ t(item.detail) }}</p><p class="vault-guidance">{{ t(item.guidance) }}</p></article>
+      {% else %}<p class="notice">{{ t('vault_no_problems') }}</p>{% endfor %}
+    </section>
+    <section class="panel vault-errors" aria-labelledby="vault-errors-title">
+      <h2 id="vault-errors-title">{{ t('vault_errors_title') }}</h2>
+      <p class="page-summary">{{ t('vault_errors_intro') }}</p>
+      <nav class="vault-filters" aria-label="{{ t('vault_filter_label') }}">{% for item in filters %}<a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ t(item.label) }}</a>{% endfor %}</nav>
+      {% for item in issues %}
+      <article class="vault-error-group">
+        <div class="vault-heading"><h3>{{ t(item.reason_key) }}</h3><span class="pill pill-warn">{{ item.count }} {{ t('vault_cases') }}</span></div>
+        <p class="vault-error-meta">{{ t(item.scope_key) }} · {{ t(item.state_key) }} · {{ t('vault_last_error') }}: {{ item.last_occurred_at }}</p>
+        <p>{{ t(item.guidance_key) }}</p>
+        {% if item.code %}<details><summary>{{ t('diagnostic_code') }}</summary><code>{{ item.code }}</code></details>{% endif %}
+      </article>
+      {% else %}<p class="vault-empty">{{ t('vault_no_error_details' if has_issues else 'vault_no_errors') }}</p>{% endfor %}
+      {% if issues_truncated %}<p class="notice">{{ t('vault_errors_truncated') }}</p>{% endif %}
+    </section>
+    {% endif %}
+  </div>
+  <nav class="vault-related" aria-label="{{ t('vault_related') }}"><a class="button secondary compact-button" href="/admin/jobs?lang={{ locale }}">{{ t('nav_jobs') }}</a><a class="button secondary compact-button" href="/admin/audit?lang={{ locale }}">{{ t('nav_audit') }}</a></nav>
+</div>
+{% endblock %}

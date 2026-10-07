@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/public-id-view.schema.json",
+  "title": "Caller-owned same-server public ID registration",
+  "x-autplay-implementation-status": "IMPLEMENTED_PUBLIC_ID",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public_id", "status"],
+  "properties": {
+    "public_id": {"type": ["string", "null"], "pattern": "^[a-z0-9_]{3,24}$", "not": {"type": "string", "pattern": "[^a-z0-9_]"}},
+    "status": {"enum": ["unregistered", "confirmed"]}
+  },
+  "oneOf": [
+    {"properties": {"public_id": {"type": "null"}, "status": {"const": "unregistered"}}},
+    {"properties": {"public_id": {"type": "string"}, "status": {"const": "confirmed"}}}
+  ]
+}

@@ -21,6 +21,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 class CoreProductRepository(
     private val database: AutPlayDatabase,
 ) {
+    private val metadataAlbums = AlbumGroupRepository(database)
     fun libraryEntries(profileId: String?, limit: Int = 5_000): Flow<List<CoreLibraryEntrySummary>> {
         require(limit in 1..5_000)
         val effectiveProfileId = effectiveProfile(profileId)
@@ -116,10 +117,17 @@ class CoreProductRepository(
 
     fun releases(profileId: String?, limit: Int = 200): Flow<List<CoreReleaseSummary>> {
         require(limit in 1..500)
-        return database.catalogProjectionDao().releasesForProfile(effectiveProfile(profileId), limit).map { rows ->
-            rows.map { CoreReleaseSummary(it.localReleaseId, it.title, it.displayArtist) }
+        return combine(database.catalogProjectionDao().releasesForProfile(effectiveProfile(profileId), limit),
+            metadataAlbums.observe(profileId)) { canonical, groups ->
+            (groups.map { CoreReleaseSummary(it.group.stableId, it.group.title, it.group.albumArtist,
+                it.group.releaseDate, it.members.size) } +
+                canonical.map { CoreReleaseSummary(it.localReleaseId, it.title, it.displayArtist, it.releaseDateText) }).take(limit)
         }
     }
+
+    fun releaseChanges(): Flow<Unit> = database.invalidationTracker.createFlow(
+        "track_metadata_projection", "user_track_ref", "library_entry", "release_projection", "release_track_projection", "recording_projection",
+    ).map { }
 
     fun preferences(profileId: String?, limit: Int = 2_000): Flow<List<CoreTrackPreferenceSummary>> {
         require(limit in 1..5_000)
@@ -232,6 +240,21 @@ class CoreProductRepository(
     }
 
     suspend fun releaseDetail(localReleaseId: String, profileId: String?): CoreReleaseDetail? {
+        if (localReleaseId.startsWith(METADATA_ALBUM_PREFIX)) {
+            val album = metadataAlbums.snapshot(profileId).firstOrNull { it.group.stableId == localReleaseId } ?: return null
+            return CoreReleaseDetail(localReleaseId, null, album.group.title, album.group.albumArtist,
+                album.group.releaseDate, null, null, album.members.map { member ->
+                    CoreReleaseDetailTrack(
+                        localReleaseTrackId = "metadata-member:${member.localUserTrackRefId}",
+                        localRecordingId = member.localRecordingId,
+                        mediumPosition = member.discNumber,
+                        sequenceNo = member.trackNumber,
+                        numberText = member.trackNumber?.toString(),
+                        title = member.title.orEmpty(), artistName = member.artistName.orEmpty(),
+                        durationMs = member.durationMs, localUserTrackRefId = member.localUserTrackRefId,
+                    )
+                })
+        }
         val release = database.catalogProjectionDao().releaseForProfile(
             localReleaseId,
             effectiveProfile(profileId),
@@ -333,7 +356,8 @@ class CoreProductRepository(
     }
 }
 
-data class CoreReleaseSummary(val stableId: String, val title: String, val artistName: String)
+data class CoreReleaseSummary(val stableId: String, val title: String, val artistName: String?,
+    val releaseDateText: String? = null, val ownedTrackCount: Int? = null)
 data class CoreLibraryEntrySummary(
     val localLibraryEntryId: String,
     val localUserTrackRefId: String,
@@ -405,7 +429,7 @@ data class CoreReleaseDetail(
     val localReleaseId: String,
     val serverReleaseId: ServerId?,
     val title: String,
-    val artistName: String,
+    val artistName: String?,
     val releaseDateText: String?,
     val releaseType: String?,
     val artworkRef: String?,
@@ -414,9 +438,9 @@ data class CoreReleaseDetail(
 
 data class CoreReleaseDetailTrack(
     val localReleaseTrackId: String,
-    val localRecordingId: String,
-    val mediumPosition: Int,
-    val sequenceNo: Int,
+    val localRecordingId: String?,
+    val mediumPosition: Int?,
+    val sequenceNo: Int?,
     val numberText: String?,
     val title: String,
     val artistName: String,

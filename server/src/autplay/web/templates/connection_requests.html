@@ -1,15 +1,66 @@
 {% extends "base.html" %}
+{% block head %}
+<script src="/admin/static/pending-devices-v1.js" defer></script>
+{% if mobile_api_origin %}
+<script src="/admin/static/qrcodegen-v1.js" defer></script>
+<script src="/admin/static/server-connection-v1.js" defer></script>
+{% endif %}
+{% endblock %}
 {% block content %}
-<section class="auth-card" aria-labelledby="connection-requests-title">
-  <p class="eyebrow">AutPlay Admin</p><h1 id="connection-requests-title">{{ t("connection_requests_title") }}</h1>
-  <p>{{ t("connection_requests_intro") }}</p>
-  <p class="notice" role="note">{{ t("connection_requests_private_notice") }}</p>
-  <form method="post" action="/admin/connection-requests/resolve">
-    <label for="review-locator">{{ t("review_locator") }}</label>
-    <input id="review-locator" name="review_locator" type="password" autocomplete="off" required>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="operation_id" value="{{ operation_id }}">
-    <button type="submit">{{ t("review_connection_request") }}</button>
-  </form>
+<header class="page-heading">
+  <div><h1 id="connection-requests-title">{{ t("connection_requests_title") }}</h1><p class="page-summary">{{ t("connection_setup_intro") }}</p></div>
+</header>
+{% if mobile_api_origin %}
+<section class="section-card connection-setup" aria-labelledby="connection-setup-title" data-server-connection data-server-origin="{{ mobile_api_origin }}" data-qr-label="{{ t('connection_qr_label') }}" data-qr-error="{{ t('connection_qr_error') }}" data-copy-success="{{ t('connection_copy_success') }}" data-copy-error="{{ t('connection_copy_error') }}">
+  <div class="connection-qr">
+    <div data-server-qr></div>
+    <p data-qr-status role="status" aria-live="polite"></p>
+    <noscript><p>{{ t("connection_qr_error") }}</p></noscript>
+  </div>
+  <div class="connection-details">
+    <h2 id="connection-setup-title">{{ t("connection_setup_title") }}</h2>
+    <ol class="connection-steps">
+      <li>{{ t("connection_step_scan") }}</li>
+      <li>{{ t("connection_step_trust") }}</li>
+      <li>{{ t("connection_step_request") }}</li>
+    </ol>
+    <label for="connection-server-address">{{ t("server_address_mobile") }}</label>
+    <input id="connection-server-address" data-server-address type="url" readonly value="{{ mobile_api_origin }}" autocomplete="off" spellcheck="false">
+    <div class="connection-address-actions">
+      <a href="{{ mobile_api_origin }}" class="connection-server-link">{{ mobile_api_origin }}</a>
+      <button type="button" class="secondary" data-copy-server-address>{{ t("connection_copy_address") }}</button>
+    </div>
+    <p data-copy-status role="status" aria-live="polite"></p>
+    <p class="field-help">{{ t("connection_address_hint") }}</p>
+    <p class="field-help">{{ t("server_address_web") }}: <a href="{{ web_origin }}/admin/">{{ web_origin }}/admin/</a></p>
+  </div>
+</section>
+{% endif %}
+<section class="section-card connection-review" aria-labelledby="connection-review-title" data-pending-devices>
+  <h2 id="connection-review-title">{{ t("connection_review_title") }}</h2>
+  <p>{{ t("pending_requests_intro") }}</p>
+  <a class="connection-refresh" href="/admin/connection-requests?lang={{ locale }}">{{ t("refresh_pending_requests") }}</a>
+  {% for item in pending_requests %}
+  <article class="pending-device" aria-labelledby="pending-title-{{ item.request_id }}">
+    <h3 id="pending-title-{{ item.request_id }}">{{ item.device_model_hint or item.device_label }}</h3>
+    <p>{{ item.platform }} · {{ item.app_version }}</p>
+    <p class="field-help">{{ t("requested_at") }}: {{ format_datetime(item.requested_at) }} · {{ t("expires") }}: {{ format_datetime(item.expires_at) }}</p>
+    <form method="post" action="/admin/connection-requests/pending/{{ item.request_id }}/trust">
+      <label for="device-name-{{ item.request_id }}">{{ t("new_device_name") }}</label>
+      <input id="device-name-{{ item.request_id }}" name="device_name" value="{{ item.device_model_hint or item.device_label }}" maxlength="120" required autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="operation_id" value="{{ pending_operations[item.request_id|string] }}">
+      <p class="field-help">{{ t("pending_trust_consequence") }}</p>
+      <div class="pending-device-actions">
+        <button type="submit">{{ t("trust_device") }}</button>
+        <button type="submit" class="secondary" formaction="/admin/connection-requests/pending/{{ item.request_id }}/approve-once">{{ t("approve_once") }}</button>
+        <button type="submit" class="danger" formnovalidate formaction="/admin/connection-requests/pending/{{ item.request_id }}/reject">{{ t("reject_request") }}</button>
+        <button type="submit" class="danger" formnovalidate formaction="/admin/connection-requests/pending/{{ item.request_id }}/block">{{ t("block_device") }}</button>
+      </div>
+    </form>
+  </article>
+  {% else %}
+  <p class="notice" role="status">{{ t("pending_requests_empty") }}</p>
+  {% endfor %}
 </section>
 {% endblock %}

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -14,8 +15,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from autplay.adapters.postgresql.models.account import UserAccountRow, UserSessionRow
+from autplay.adapters.postgresql.models.account import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
+from autplay.adapters.postgresql.models.public_id import PublicIdRegistrationRow
 from autplay.adapters.postgresql.models.social import (
     FriendRequestRow,
     FriendRoomInvitationRow,
@@ -59,20 +61,136 @@ class SocialService:
         with self._sessions.begin() as s:
             account = self._account(s, principal.user_id)
             self._rate(s, "CONTACT_CARD", str(principal.user_id), 60, now)
-            instance = s.scalar(select(ServerInstanceRow))
-            if instance is None:
-                raise SocialError("friend_request_unavailable")
-            payload: dict[str, object] = {
-                "server_instance_id": str(instance.server_instance_id),
-                "account_id": str(account.user_id),
-                "display_name_hint": account.display_name[:120],
-                "issued_at": iso8601(now),
-                "expires_at": iso8601(now + timedelta(days=30)),
-            }
-            payload["signature_b64url"] = sign_p1363(
-                self._private_key, "autplay:s1c:social-contact-card:v1\n", canonical_sha256(payload)
+            return self._signed_contact_card(s, account, now)
+
+    def get_public_id(self, principal: Principal, now: datetime) -> dict[str, object]:
+        with self._sessions.begin() as s:
+            self._public_id_principal(s, principal, now)
+            self._rate(s, "PUBLIC_ID_READ", str(principal.user_id), 60, now)
+            row = s.get(PublicIdRegistrationRow, principal.user_id)
+            return self._public_id_view(row.public_id if row is not None else None)
+
+    def register_public_id(
+        self, principal: Principal, body: dict[str, object], now: datetime
+    ) -> dict[str, object]:
+        public_id = self._normalize_public_id(str(body["public_id"]))
+        operation_id = UUID(str(body["operation_id"]))
+        request: dict[str, object] = {"public_id": public_id}
+        result: dict[str, object]
+        with self._sessions.begin() as s:
+            self._operation_lock(s, operation_id)
+            self._public_id_principal(s, principal, now)
+            replay = s.get(SocialOperationReceiptRow, operation_id)
+            if replay is not None:
+                if (
+                    replay.actor_user_id != principal.user_id
+                    or replay.actor_device_id != principal.device_id
+                    or replay.action != "REGISTER_PUBLIC_ID"
+                    or replay.request_sha256 != canonical_sha256(request)
+                ):
+                    raise SocialError("operation_conflict")
+                result = cast(dict[str, object], json.loads(replay.result_json))
+            else:
+                self._rate(s, "PUBLIC_ID_WRITE", str(principal.user_id), 10, now)
+                s.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:v,0))"),
+                    {"v": f"public-id-handle:{public_id}"},
+                )
+                own = s.get(PublicIdRegistrationRow, principal.user_id)
+                owner = s.scalar(
+                    select(PublicIdRegistrationRow.user_id).where(
+                        PublicIdRegistrationRow.public_id == public_id
+                    )
+                )
+                if own is not None and own.public_id != public_id:
+                    result = {"error": "public_id_already_registered"}
+                elif owner is not None and owner != principal.user_id:
+                    result = {"error": "public_id_taken"}
+                else:
+                    if own is None:
+                        s.add(
+                            PublicIdRegistrationRow(
+                                user_id=principal.user_id, public_id=public_id, created_at=now
+                            )
+                        )
+                    result = self._public_id_view(public_id)
+                self._receipt(
+                    s, operation_id, principal, "REGISTER_PUBLIC_ID", result, request, now
+                )
+        # Commit denied attempts too: negative probes consume the bounded budget,
+        # and retrying the same operation cannot change its recorded outcome.
+        if "error" in result:
+            raise SocialError(str(result["error"]))
+        return result
+
+    def lookup_public_id(
+        self, principal: Principal, public_id: str, now: datetime
+    ) -> dict[str, object]:
+        try:
+            normalized = self._normalize_public_id(public_id)
+        except ValueError:
+            normalized = None
+        result: dict[str, object] | None = None
+        with self._sessions.begin() as s:
+            target = (
+                s.scalar(
+                    select(PublicIdRegistrationRow.user_id).where(
+                        PublicIdRegistrationRow.public_id == normalized
+                    )
+                )
+                if normalized is not None
+                else None
             )
-            return payload
+            # Use the existing ordered account-pair locks so disable/delete/block
+            # cannot race card issuance, and validate the caller even on misses.
+            target_active = self._lock_profile_statistics_accounts(
+                s, principal, target or principal.user_id, now
+            )
+            self._public_id_principal(s, principal, now)
+            self._rate(s, "PUBLIC_ID_LOOKUP", str(principal.user_id), 30, now)
+            if (
+                target is not None
+                and target_active
+                and not self._blocked(s, principal.user_id, target)
+            ):
+                account = s.get(UserAccountRow, target)
+                if account is not None and self._private_key is not None:
+                    result = self._signed_contact_card(s, account, now)
+        if result is None:
+            raise SocialError("public_id_not_found")
+        return result
+
+    def _public_id_principal(self, s: Session, principal: Principal, now: datetime) -> None:
+        self._lock_profile_statistics_accounts(s, principal, principal.user_id, now)
+        device = s.get(DeviceRow, principal.device_id)
+        if device is None or device.user_id != principal.user_id or device.revoked_at is not None:
+            raise SocialError("auth_attention_required")
+
+    def _normalize_public_id(self, value: str) -> str:
+        if re.fullmatch(r"[A-Za-z0-9_]{3,24}", value, flags=re.ASCII) is None:
+            raise ValueError("invalid public ID")
+        return value.lower()
+
+    def _public_id_view(self, public_id: str | None) -> dict[str, object]:
+        return {"public_id": public_id, "status": "confirmed" if public_id else "unregistered"}
+
+    def _signed_contact_card(
+        self, s: Session, account: UserAccountRow, now: datetime
+    ) -> dict[str, object]:
+        instance = s.scalar(select(ServerInstanceRow))
+        if instance is None or self._private_key is None:
+            raise SocialError("friend_request_unavailable")
+        payload: dict[str, object] = {
+            "server_instance_id": str(instance.server_instance_id),
+            "account_id": str(account.user_id),
+            "display_name_hint": account.display_name[:120],
+            "issued_at": iso8601(now),
+            "expires_at": iso8601(now + timedelta(days=30)),
+        }
+        payload["signature_b64url"] = sign_p1363(
+            self._private_key, "autplay:s1c:social-contact-card:v1\n", canonical_sha256(payload)
+        )
+        return payload
 
     def snapshot(self, principal: Principal, now: datetime) -> dict[str, object]:
         with self._sessions.begin() as s:
@@ -212,6 +330,7 @@ class SocialService:
         request: dict[str, object] = {"body": body}
         request_hash = canonical_sha256(request)
         with self._sessions.begin() as s:
+            self._operation_lock(s, op)
             replay = s.get(SocialOperationReceiptRow, op)
             if replay is not None:
                 self._active_principal(s, principal, now)
@@ -354,9 +473,10 @@ class SocialService:
     def set_settings(
         self, principal: Principal, body: dict[str, object], now: datetime
     ) -> dict[str, object]:
+        operation_id = UUID(str(body["operation_id"]))
         with self._sessions.begin() as s:
+            self._operation_lock(s, operation_id)
             self._active_principal(s, principal, now)
-            operation_id = UUID(str(body["operation_id"]))
             request: dict[str, object] = {
                 key: body[key]
                 for key in (
@@ -425,6 +545,7 @@ class SocialService:
         }
         request_hash = canonical_sha256(request)
         with self._sessions.begin() as s:
+            self._operation_lock(s, operation_id)
             self._active_principal(s, principal, now)
             replay = s.get(SocialOperationReceiptRow, operation_id)
             if replay is not None:
@@ -575,6 +696,7 @@ class SocialService:
         request: dict[str, object] = {"room_id": str(room_id), "target": str(target)}
         request_hash = canonical_sha256(request)
         with self._sessions.begin() as s:
+            self._operation_lock(s, operation_id)
             self._active_principal(s, principal, now)
             replay = s.get(SocialOperationReceiptRow, operation_id)
             if replay is not None:
@@ -684,6 +806,7 @@ class SocialService:
         result: dict[str, object] | None = None
         terminal_error: str | None = None
         with self._sessions.begin() as s:
+            self._operation_lock(s, operation_id)
             self._active_principal(s, principal, now)
             replay = s.get(SocialOperationReceiptRow, operation_id)
             if replay is not None:
@@ -814,6 +937,7 @@ class SocialService:
         request: dict[str, object] = {"invitation_id": str(invitation_id)}
         request_hash = canonical_sha256(request)
         with self._sessions.begin() as s:
+            self._operation_lock(s, operation_id)
             self._active_principal(s, principal, now)
             replay = s.get(SocialOperationReceiptRow, operation_id)
             if replay is not None:
@@ -1028,6 +1152,13 @@ class SocialService:
             target_account is not None
             and target_account.status == "ACTIVE"
             and target_account.deleted_at is None
+        )
+
+    def _operation_lock(self, s: Session, operation_id: UUID) -> None:
+        """Serialize the shared receipt namespace before any account/session lock."""
+        s.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:v,0))"),
+            {"v": f"social-operation:{operation_id}"},
         )
 
     def _pair_lock(self, s: Session, a: UUID, b: UUID) -> None:
@@ -1299,7 +1430,9 @@ class SocialService:
                 actor_device_id=principal.device_id,
                 action=action,
                 request_sha256=canonical_sha256(request),
-                result_code=str(result.get("state", result.get("outcome", "APPLIED"))),
+                result_code=str(
+                    result.get("state", result.get("outcome", result.get("error", "APPLIED")))
+                ),
                 result_target_id=_result_uuid(result, "request_id", "invitation_id"),
                 result_room_id=_result_uuid(result, "room_id"),
                 result_json=json.dumps(result, sort_keys=True),

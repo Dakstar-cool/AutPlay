@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_surface_shuffle_on">Случайный порядок включён</string>
+    <string name="player_surface_shuffle_off">Случайный порядок выключен</string>
+</resources>

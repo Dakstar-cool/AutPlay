@@ -4,7 +4,7 @@
 
 **Baseline:** `v0.4.0`, source commit `627adf86a6ba67f08676ecec839bd043fc9e113b`
 
-**Updated:** 2026-09-22
+**Updated:** 2026-10-07
 
 This is the single active plan for moving AutPlay from the published development release to a
 production release. Historical P00-P14 prompts, milestone handoffs and dated evidence remain
@@ -21,6 +21,37 @@ Closed foundations do not need to be replayed: P00-P14, Frontend M1-M4, Product 
 M6, A1A-A1C, S1A-S1D, S2, L1, PA1/PA2 and personal-server backup/recovery have accepted evidence.
 P12 A-030 remains an approved optional deferral; P13 is qualified only for its trusted-local,
 single-API topology.
+
+## Product scope decision - 2026-10-07
+
+The user cancelled AutPlay Face in full: the local PCM-reactive Face/Resonance Lens and
+Semantic Face are removed from the product scope. They are not deferred, optional release
+features or a neutral renderer to retain. Full Face qualification is no longer a prerequisite
+for PA3 or production. The former Phase 2 is retired; other phase identifiers remain stable
+for existing evidence links.
+
+The two Android chats agreed ownership of removal and transition compatibility. Main Android
+Face removal now has scoped 2026-10-07 debug-artifact evidence: 491 unit tests, 35 selected
+Android tests, successful build/lint and A55 update with 56 database tables/settings preserved.
+APK SHA-256: `89db70d86c830d569f2894aa5f8b06e3a7b1ad54541561ba712452fbb3c3b59b`;
+all 20 DEX files contain zero retired Face descriptors. Local evidence is
+`local-checkpoints/notification-feedback-20261007/final-validation.json`.
+This is main Android removal evidence, not production-release or whole-R15 qualification.
+The stale ML branch must reconcile its dormant Face wiring before integration. The separately
+developed three-second transition cuts are not part of this artifact; final A55 cover swipes
+were not repeated, so earlier physical swipe evidence remains tied to its earlier candidate.
+
+The subsequent [combined playback integration](../release/PLAYBACK_INTEGRATION_2026-10-07.md)
+includes the transition cuts and final notification order. Its frozen debug APK has 493 passing
+unit tests and 43 passing selected Android tests; debug/trustedLan/release builds and lint pass.
+It has separate source/artifact identity and was not installed on the physical A55 or published
+as a new APK release. The earlier removal artifact above remains historical.
+
+R15 continues with Sona/Sona-Lite, native evidence capture, release watch and observability.
+Face milestones M3-M7 and their release/dependency gates are cancelled. Sona quality,
+consent, model/license, activation and P11 fallback requirements remain independent.
+Historical migrations/evidence and shared Sona foundations are preserved; cancellation
+does not authorize destructive schema changes or deletion of user music/data.
 
 ## Production definition of done
 
@@ -51,7 +82,7 @@ AutPlay may be called production only when one exact release satisfies all of th
   server call.
 - PostgreSQL/Vault migrations have no destructive fallback. Back up before persistent-target
   mutation and never roll schema backward during process/image rollback.
-- CPU serving remains independent of GPU, Face and Sona-Lite. Missing optional ML input fails
+- CPU serving remains independent of GPU and Sona-Lite. Missing optional ML input fails
   closed to the existing deterministic CPU behavior.
 - Secrets, recovery material, private origins, raw device identifiers and personal paths never
   enter Git, routine logs or shared evidence.
@@ -110,27 +141,6 @@ candidate source tree only; it is not production-signing, exact APK/device or de
 
 Exit: one production-signed APK and its supported install/update path have exact physical-device
 evidence.
-
-### Phase 2 - complete AutPlay Face in the selected user sequence
-
-**State:** IN_PROGRESS; the neutral PCM-reactive renderer remains the safe production fallback.
-
-The previously selected sequence places full Face qualification before PA3. Moving this phase after
-the core production launch requires an explicit user decision; it must not happen implicitly.
-
-1. Supply and authorize a representative initial music set; 10-20 tracks are a pilot, not final
-   quality evidence.
-2. Resolve the exact model/license conflict before any distribution or commercial use.
-3. Freeze interpretation/calibration criteria and held-out quality thresholds.
-4. Implement the versioned semantic timeline, cache, lineage, persistence, API/job/lease,
-   activation, retention/export/delete and garbage-collection lifecycle.
-5. Add continuous semantic rendering and perceptual palette interpolation while preserving unknown
-   values, abstention and neutral fallback.
-6. Qualify CPU/GPU behavior as applicable, physical-device performance, battery/frame behavior,
-   reduced motion and the full accessibility matrix.
-
-Exit: a reviewed model/interpreter and timeline are production-qualified, or an explicit scope
-decision defers semantic Face while retaining the neutral renderer.
 
 ### Phase 3 - Admin/account target acceptance
 
@@ -191,7 +201,7 @@ These items are real planned work but do not silently block the deterministic lo
 | Item | State | Next prerequisite |
 | --- | --- | --- |
 | Smooth track transitions and deferred Wave switch | NOT_STARTED | Select transition mechanism/duration; prove natural current-track completion and next-track selection from the new Wave |
-| Admin download-script control | NOT_STARTED | Define controls, authorization, cancellation, audit and acceptance criteria with the user |
+| Admin download-script control | PRIVATE TARGET PILOT | [2026-09-30 deployment](ADMIN_ACQUISITION_DEPLOYMENT_2026-09-30.md); owner acceptance with authorized jobs, cancellation and audit policy remain |
 | R1B Sona-Lite shadow quality | BLOCKED | Authorized complete candidate sets, mature causal outcomes, replay histories, one approved embedding model and sufficient chronological span |
 | R1C recommendation activation | NOT_STARTED | R1B PASS plus explicit activation, monitoring and rollback decision |
 | P12 A-030 GPU evidence | DEFERRED | Approved model, real CUDA OOM/batch reduction and throughput/p95/VRAM/quality evidence |
@@ -200,11 +210,9 @@ These items are real planned work but do not silently block the deterministic lo
 
 ## Remaining decisions
 
-1. Record the explicit scope decision to ship the production core with the neutral Face and
-   continue semantic Face afterward, if the selected sequence is to change.
-2. Define the forward-fix rollback support and artifact-retention window for `v1.0.0`.
-3. Confirm verified offline image transport and its immutable retention policy.
-4. Confirm that smooth transitions and Admin download controls belong to the first post-production
+1. Define the forward-fix rollback support and artifact-retention window for `v1.0.0`.
+2. Confirm verified offline image transport and its immutable retention policy.
+3. Confirm that smooth transitions and Admin download controls belong to the first post-production
    feature release.
 
 ## Evidence and document policy

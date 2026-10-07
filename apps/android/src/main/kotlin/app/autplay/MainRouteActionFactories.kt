@@ -94,7 +94,23 @@ internal fun buildNowPlayingRouteActions(
     seekUpdate = playerAdapter::updateSeek,
     seekCommit = playbackActions::commitDirectSeek,
     like = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "LIKED", reportError) },
-    dislike = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "DISLIKED", reportError) },
+    dislike = dislike@{
+        val trackRefId = currentTrackRefId() ?: return@dislike
+        val queueEntryId = currentQueueEntryId() ?: return@dislike
+        val activeBinding = binding()
+        scope.launch {
+            applyPlaybackDislike(
+                advance = { playbackOwner.dispatch(PlaybackCommand.NextIfCurrent(LocalId(queueEntryId))) },
+                record = {
+                    sliceRepository.setPlaybackPreference(
+                        activeBinding, LocalId(trackRefId), LocalId.random(), "DISLIKED", null,
+                        System.currentTimeMillis(),
+                    )
+                },
+                reportError = reportError,
+            )
+        }
+    },
     clearPreference = { recordPlaybackPreference(currentTrackRefId, scope, sliceRepository, binding, "NEUTRAL", reportError) },
     setCurrentListenTasteExcluded = { excluded ->
         val entryId = currentQueueEntryId() ?: return@NowPlayingRouteActions
@@ -519,6 +535,7 @@ internal fun buildLegacySecondaryRouteActions(
     ownerProvisioningCoordinator: OwnerProvisioningCoordinator?,
     pickPublicAccountInvitation: () -> Unit,
     scanPublicAccountInvitation: () -> Unit,
+    scanServerQr: () -> Unit,
     scanEnrollmentInvitation: () -> Unit,
     shareOwnerAccountInvitation: (AccountInvitation) -> Unit,
     admissionRuntime: app.autplay.application.profilepairing.AdmissionRuntime,
@@ -536,8 +553,10 @@ internal fun buildLegacySecondaryRouteActions(
     selfPairingActions: SelfPairingActions = SelfPairingActions(),
     accountRecoveryActions: AccountRecoveryActions = AccountRecoveryActions(),
     accountDeletionActions: AccountDeletionActions = AccountDeletionActions(),
+    refreshOwnerStatistics: () -> Unit = {},
 ): LegacySecondaryRouteActions = LegacySecondaryRouteActions(
     manualPlaylists = manualPlaylists,
+    refreshOwnerStatistics = refreshOwnerStatistics,
     openPlaylist = openPlaylist,
     importActions = importActions,
     downloadSelectedTrack = {
@@ -632,6 +651,7 @@ internal fun buildLegacySecondaryRouteActions(
         accountRecovery = accountRecoveryActions,
         accountDeletion = accountDeletionActions,
         startDiscovery = profilePairingRuntime::startDiscovery,
+        scanServerQr = scanServerQr,
         confirmTrust = profilePairingRuntime::confirmTrust,
         cancelPairing = {
             admissionRuntime.cancel()
@@ -703,8 +723,6 @@ internal fun buildLegacySecondaryRouteActions(
             val error = updateFrontendSettings(settingsStore, transform)
             if (error != null) {
                 reportError(error)
-            } else {
-                binding()?.let { syncScheduler.reconcile(syncWorkRequest(it)) }
             }
         }
     },

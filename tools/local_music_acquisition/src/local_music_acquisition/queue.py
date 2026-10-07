@@ -31,6 +31,7 @@ from .queue_store import (
     verify_receipt,
     write_json,
 )
+from .source_metadata import bounded_source_metadata
 
 
 def _key(item: PlaylistItem) -> str:
@@ -183,6 +184,9 @@ class _VerifiedProvider:
                     "identity_version": artifact.identity_version,
                 }
             )
+            evidence = bounded_source_metadata(artifact.source_metadata, provider=self.name)
+            if evidence is not None:
+                receipt["source_metadata"] = evidence
             write_json(output_directory / "receipt.json", receipt)
         except PlaylistDownloadError as error:
             raise ProviderFailure(self.name, str(error)) from error

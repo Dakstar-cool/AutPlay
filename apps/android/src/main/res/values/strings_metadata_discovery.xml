@@ -1,0 +1,18 @@
+<resources>
+    <string name="music_catalogue_title">Music catalogue</string>
+    <string name="music_catalogue_metadata_only">Catalogue descriptions. Select a track to find an audio source.</string>
+    <string name="music_catalogue_back">Back to catalogue results</string>
+    <string name="music_catalogue_browse">Browse tracks</string>
+    <string name="music_catalogue_find_source">Find an audio source</string>
+    <string name="music_catalogue_disc">Disc %1$d</string>
+    <string name="music_catalogue_track">Track %1$d</string>
+    <string name="music_catalogue_more">More results</string>
+    <string name="music_catalogue_truncated">More catalogue entries exist beyond the available page range.</string>
+    <string name="music_catalogue_disabled">The catalogue is disabled on this server.</string>
+    <string name="music_catalogue_busy">The catalogue is busy. Please try again later.</string>
+    <string name="music_catalogue_unavailable">The catalogue is unavailable. Please try again later.</string>
+    <string name="music_catalogue_expired">This selection expired. Select the track again.</string>
+    <string name="music_catalogue_retry_selection">Refresh this selection</string>
+    <string name="music_catalogue_unavailable_selection">This catalogue selection is unavailable.</string>
+    <string name="music_catalogue_conflict">The source search changed. Select the track again.</string>
+</resources>

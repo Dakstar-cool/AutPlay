@@ -24,6 +24,10 @@ class SafeFtsQueryBuilder(
         }
     }
 
+    /** Fixed columns restrict every token; callers still bind the complete MATCH expression. */
+    fun build(rawInput: String, kind: LibrarySearchKind): String? =
+        build(rawInput)?.let { expression -> "${kind.ftsColumns}:($expression)" }
+
     private fun tokenize(input: String): List<String> {
         val tokens = mutableListOf<String>()
         val current = StringBuilder()

@@ -135,6 +135,7 @@ class DeviceAdmissionRow(Base):
     device_public_key_spki: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     device_key_thumbprint_sha256: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     nickname: Mapped[str] = mapped_column(Text, nullable=False)
+    approved_device_name: Mapped[str | None] = mapped_column(Text)
     device_model_hint: Mapped[str | None] = mapped_column(Text)
     platform: Mapped[str] = mapped_column(Text, nullable=False)
     app_version: Mapped[str] = mapped_column(Text, nullable=False)
@@ -185,6 +186,10 @@ class DeviceAdmissionRow(Base):
         ),
         CheckConstraint(
             "length(nickname) BETWEEN 1 AND 120", name="device_admission_nickname_check"
+        ),
+        CheckConstraint(
+            "approved_device_name IS NULL OR length(approved_device_name) BETWEEN 1 AND 120",
+            name="device_admission_approved_name_check",
         ),
         CheckConstraint(
             "device_model_hint IS NULL OR length(device_model_hint) <= 96",

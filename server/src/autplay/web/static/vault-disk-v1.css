@@ -1,0 +1,8 @@
+.vault-disk { margin-top: 1rem; min-width: 0; }
+.vault-disk-heading { display: flex; justify-content: space-between; gap: .75rem; font-size: .875rem; }
+.vault-disk progress { display: block; width: 100%; height: .5rem; margin: .6rem 0; border: 0; border-radius: 1rem; overflow: hidden; appearance: none; background: #e6edf2; color: #087f8c; }
+.vault-disk progress::-webkit-progress-bar { background: #e6edf2; }
+.vault-disk progress::-webkit-progress-value { background: #087f8c; border-radius: 1rem; }
+.vault-disk progress::-moz-progress-bar { background: #087f8c; border-radius: 1rem; }
+.vault-disk p { margin: .35rem 0; font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }
+.vault-disk .vault-disk-note { color: #65758b; font-size: .75rem; }

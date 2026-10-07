@@ -472,6 +472,38 @@ def test_admin_backup_control_requires_web_targets_and_absolute_spool(tmp_path: 
     assert enabled.admin_backup_targets_json == targets
 
 
+def test_admin_acquisition_control_requires_enabled_web_and_absolute_root(tmp_path: Path) -> None:
+    base = {
+        "database_url": SecretStr(DATABASE_URL),
+        "auth_signing_secret": SecretStr(AUTH_SECRET),
+        "public_access_source_hmac_secret": SecretStr(PUBLIC_SOURCE_SECRET),
+    }
+    with pytest.raises(ValueError, match="Admin acquisition control requires enabled Web"):
+        ApiSettings.model_validate(base | {"admin_acquisition_control_root": tmp_path / "control"})
+    with pytest.raises(ValueError, match="Admin acquisition control requires enabled Web"):
+        ApiSettings.model_validate(
+            base
+            | {
+                "admin_web_enabled": True,
+                "admin_web_origin": "http://127.0.0.1:8787",
+                "admin_web_source_hmac_secret": SecretStr("b" * 32),
+                "admin_web_csrf_hmac_secret": SecretStr("c" * 32),
+                "admin_acquisition_control_root": Path("relative-control"),
+            }
+        )
+    enabled = ApiSettings.model_validate(
+        base
+        | {
+            "admin_web_enabled": True,
+            "admin_web_origin": "http://127.0.0.1:8787",
+            "admin_web_source_hmac_secret": SecretStr("b" * 32),
+            "admin_web_csrf_hmac_secret": SecretStr("c" * 32),
+            "admin_acquisition_control_root": tmp_path / "control",
+        }
+    )
+    assert enabled.admin_acquisition_control_root == tmp_path / "control"
+
+
 def test_worker_settings_never_receive_api_signing_secret() -> None:
     settings = load_worker_settings(
         environ={

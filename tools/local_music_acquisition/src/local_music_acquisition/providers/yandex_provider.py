@@ -20,10 +20,11 @@ from typing import Any
 import requests
 import ymd.core as ymd_core
 from Crypto.Cipher import AES
-from yandex_music import Client, Track
+from yandex_music import Album, Client, Track
 from yandex_music.exceptions import UnauthorizedError, YandexMusicError
 
 from ..models import AcquiredArtifact, PlaylistItem, ProviderFailure, ProviderMiss
+from ..source_metadata import native_metadata
 from .jamendo import sanitize_filename
 
 _QUALITY = {
@@ -376,4 +377,92 @@ class YandexProvider:
             self.name,
             _content_ref(destination),
             identity_version=" / ".join(version) or None,
+            source_metadata=_native_metadata(match, item.album),
         )
+
+
+def _native_metadata(track: Track, requested_album: str | None) -> dict[str, object] | None:
+    """Preserve the exact recording version and only a single evidenced album edition."""
+    title = track.title
+    version = getattr(track, "version", None)
+    if (
+        isinstance(title, str)
+        and isinstance(version, str)
+        and version
+        and _identity(version) not in _title_identity(title).versions
+    ):
+        title = f"{title} ({version})"
+    fields: dict[str, object] = {
+        "title": title,
+        "artist": _artist_names(track.artists),
+    }
+    albums = (
+        track.albums
+        if isinstance(track.albums, list)
+        and all(isinstance(album, Album) for album in track.albums)
+        else []
+    )
+    if requested_album and len(albums) > 1:
+        albums = [
+            a
+            for a in albums
+            if isinstance(a.title, str) and _identity(a.title) == _identity(requested_album)
+        ]
+    images: list[dict[str, object]] = []
+    album_id = None
+    if len(albums) == 1:
+        album = albums[0]
+        album_id = album.id
+        fields.update(
+            album=album.title,
+            album_artist=_artist_names(album.artists),
+        )
+        release_date = album.release_date
+        if isinstance(release_date, str) and release_date:
+            # The provider reports ISO dates/timestamps; keep the day it explicitly gives.
+            fields["release_date"] = release_date.split("T", 1)[0]
+        elif type(album.year) is int:
+            fields["release_date"] = str(album.year)
+        if type(album.original_release_year) is int:
+            fields["original_release_date"] = str(album.original_release_year)
+        if album.genre:
+            fields["genres"] = [album.genre]
+        position = album.track_position
+        if position:
+            fields["track_number"] = getattr(position, "index", None)
+            fields["disc_number"] = getattr(position, "volume", None)
+        if isinstance(album.cover_uri, str) and album.cover_uri:
+            images.append(
+                {
+                    "kind": "album",
+                    "url": "https://" + album.cover_uri.replace("%%", "600x600"),
+                    "source_id": f"album:{album.id}",
+                }
+            )
+    if not images and isinstance(track.cover_uri, str) and track.cover_uri:
+        images.append(
+            {
+                "kind": "track",
+                "url": "https://" + track.cover_uri.replace("%%", "600x600"),
+                "source_id": str(track.id),
+            }
+        )
+    return native_metadata(
+        "yandex",
+        track.id,
+        fields,
+        native_album_id=album_id,
+        native_artist_id=getattr(track.artists[0], "id", None)
+        if isinstance(track.artists, list) and len(track.artists) == 1
+        else None,
+        artwork=images,
+    )
+
+
+def _artist_names(artists: object) -> str | None:
+    if not isinstance(artists, list) or not 1 <= len(artists) <= 12:
+        return None
+    names = [getattr(artist, "name", None) for artist in artists]
+    if not all(isinstance(name, str) and name for name in names):
+        return None
+    return ", ".join(str(name) for name in names)

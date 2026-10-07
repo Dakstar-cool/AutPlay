@@ -21,6 +21,19 @@ class AdminConfirmationTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminWorkerHealth:
+    observed_at: datetime
+    fresh: bool
+    busy: bool
+    cpu_percent: float | None
+    memory_bytes: int | None
+    memory_limit_bytes: int | None
+    active_jobs: int
+    queued_jobs: int
+    fresh_for_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
 class AdminDashboard:
     label: str
     api_ready: bool
@@ -30,6 +43,8 @@ class AdminDashboard:
     postgresql_ready: bool = True
     worker_status: str = "UNKNOWN"
     vault_status: str = "UNKNOWN"
+    worker: AdminWorkerHealth | None = None
+    vault: AdminVaultStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +120,23 @@ class AdminRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminDiskUsage:
+    total_bytes: int
+    used_bytes: int
+    free_bytes: int
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AdminVaultIssue:
+    scope: str
+    state: str
+    error_code: str
+    count: int
+    last_occurred_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class AdminVaultStatus:
     object_count: int
     committed_bytes: int
@@ -115,6 +147,13 @@ class AdminVaultStatus:
     uploads_quarantined: int
     last_verified_at: datetime | None
     reconciliation_available: bool
+    missing_replicas: int = 0
+    corrupt_replicas: int = 0
+    quarantined_replicas: int = 0
+    uploads_failed: int = 0
+    issues: tuple[AdminVaultIssue, ...] = ()
+    issues_truncated: bool = False
+    disk: AdminDiskUsage | None = None
 
 
 __all__ = (
@@ -122,6 +161,7 @@ __all__ = (
     "AdminConfirmationTarget",
     "AdminDashboard",
     "AdminDeviceItem",
+    "AdminDiskUsage",
     "AdminImportItem",
     "AdminInvitationItem",
     "AdminJobItem",
@@ -130,5 +170,7 @@ __all__ = (
     "AdminReviewItem",
     "AdminSessionItem",
     "AdminUnavailable",
+    "AdminVaultIssue",
     "AdminVaultStatus",
+    "AdminWorkerHealth",
 )

@@ -69,4 +69,14 @@ class JamendoProvider:
             raise ProviderFailure(self.name, error.code) from error
         except OSError as error:
             raise ProviderFailure(self.name, "operational_failure") from error
-        return AcquiredArtifact(self.name, artifact_ref)
+        track = getattr(result, "track", None)
+        return AcquiredArtifact(
+            self.name,
+            artifact_ref,
+            expected_duration_seconds=track.duration_seconds
+            if isinstance(track, jamendo.TrackCandidate)
+            else None,
+            source_metadata=track.source_metadata
+            if isinstance(track, jamendo.TrackCandidate)
+            else None,
+        )

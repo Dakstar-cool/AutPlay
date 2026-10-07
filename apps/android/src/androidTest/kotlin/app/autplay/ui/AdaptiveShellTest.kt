@@ -22,6 +22,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -29,6 +30,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.application.artist.ArtistAppearance
@@ -91,11 +94,48 @@ class AdaptiveShellTest {
         }
 
         composeRule.onNodeWithText(context.getString(R.string.nav_search)).performClick()
+        val navigationBounds = composeRule.onNodeWithTag("compact-navigation").getUnclippedBoundsInRoot()
+        assertEquals(61f, (navigationBounds.bottom - navigationBounds.top).value, 0.5f)
         composeRule.onNodeWithText("route:search").assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.nav_library)).performClick()
         composeRule.onNodeWithText("route:library").assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_open_settings)).performClick()
         composeRule.onNodeWithText("route:settings").assertIsDisplayed()
+    }
+
+    @Test
+    fun directNowPlayingCanCollapseToHomeWithoutABackStack() {
+        val playback = PlaybackPresentationState(mediaId = "fixture", title = "Track", artist = "Artist", isPlaying = true)
+        composeRule.setContent {
+            var selected by remember { mutableStateOf<UiDestination>(UiDestination.NowPlaying) }
+            AutPlayTheme {
+                AutPlayAdaptiveShell(
+                    selectedDestination = selected,
+                    onDestinationSelected = { selected = it },
+                    nowPlayingBar = {
+                        app.autplay.ui.player.PlaybackMiniPlayer(playback, {}, {}, {})
+                    },
+                ) { destination, _, _ ->
+                    if (destination == UiDestination.NowPlaying) {
+                        NowPlayingScreen(
+                            state = playback,
+                            onTogglePlayPause = {}, onToggleShuffle = {}, onCycleRepeat = {},
+                            onSeekBegin = {}, onSeekUpdate = {}, onSeekCommit = {},
+                            onLike = {}, onDislike = {}, feedbackEnabled = true, onObservingChanged = {},
+                        )
+                    } else Text("route:${destination.route}")
+                }
+            }
+        }
+        composeRule.onNodeWithTag("player-cover").performTouchInput { swipeDown() }
+        composeRule.onNodeWithText("route:home").assertIsDisplayed()
+        composeRule.onNodeWithTag("compact-navigation").assertIsDisplayed()
+        composeRule.onNodeWithTag("persistent-mini-player").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_pause)).assertIsDisplayed()
+        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        java.io.File(context.cacheDir, "player-layout-compact-navigation.png").outputStream().use {
+            check(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
     }
 
     @Test
@@ -293,7 +333,7 @@ class AdaptiveShellTest {
         }
 
         composeRule.onNodeWithText("Local result").assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.search_vault_unavailable)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.ui_library_refresh_vault_unavailable)).assertIsDisplayed()
     }
 
     @Test
@@ -334,7 +374,7 @@ class AdaptiveShellTest {
     }
 
     @Test
-    fun completedEmptyVaultSearchHasItsOwnEmptyState() {
+    fun completedEmptySearchHasOneCombinedEmptyState() {
         composeRule.setContent {
             AutPlayTheme {
                 SearchProductScreen(
@@ -355,8 +395,9 @@ class AdaptiveShellTest {
         }
 
         composeRule.onNodeWithTag("search-product-list")
-            .performScrollToNode(hasText(context.getString(R.string.search_vault_empty)))
-        composeRule.onNodeWithText(context.getString(R.string.search_vault_empty)).assertIsDisplayed()
+            .performScrollToNode(hasText(context.getString(R.string.search_empty)))
+        composeRule.onNodeWithText(context.getString(R.string.search_empty)).assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText(context.getString(R.string.search_vault_empty)).fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -386,29 +427,76 @@ class AdaptiveShellTest {
     @Test
     fun searchRestoresStableRowAnchorAfterRowsReload() {
         val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
+        val searchState = mutableStateOf(SearchScreenUiState("query", emptyList(), searched = true))
+        val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
             AutPlayTheme {
                 SearchProductScreen(
-                    state = SearchScreenUiState("query", rows, searched = true),
+                    state = searchState.value,
                     contentPadding = PaddingValues(),
                     onQueryChange = {},
                     onSearch = {},
                     onPlay = {},
-                    listAnchor = ListAnchor("search:query:false", "search-result:track-20", 0),
+                    listAnchor = ListAnchor("search:all:query:false", "search-result:track-20", 0),
+                    onListAnchorChange = { restoredAnchor.set(it) },
                 )
             }
         }
 
+        composeRule.runOnIdle {
+            assertTrue(restoredAnchor.get() == null)
+            searchState.value = SearchScreenUiState("query", rows, searched = true)
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) { restoredAnchor.get() != null }
         composeRule.onNodeWithText("Track 20").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("search:all:query:false", restoredAnchor.get()?.contextKey)
+            assertEquals("search-result:track-20", restoredAnchor.get()?.itemKey)
+            assertEquals(0, restoredAnchor.get()?.scrollOffset)
+        }
+    }
+
+    @Test
+    fun searchRestoresStableRowAnchorWithNonzeroOffsetAfterRowsReload() {
+        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
+        val searchState = mutableStateOf(SearchScreenUiState("query", emptyList(), searched = true))
+        val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
+        composeRule.setContent {
+            AutPlayTheme {
+                SearchProductScreen(
+                    state = searchState.value,
+                    contentPadding = PaddingValues(),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onPlay = {},
+                    listAnchor = ListAnchor("search:all:query:false", "search-result:track-20", 37),
+                    onListAnchorChange = { restoredAnchor.set(it) },
+                )
+            }
+        }
+
+        composeRule.runOnIdle {
+            assertTrue(restoredAnchor.get() == null)
+            searchState.value = SearchScreenUiState("query", rows, searched = true)
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) { restoredAnchor.get() != null }
+        composeRule.onNodeWithText("Track 20").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("search:all:query:false", restoredAnchor.get()?.contextKey)
+            assertEquals("search-result:track-20", restoredAnchor.get()?.itemKey)
+            assertEquals(37, restoredAnchor.get()?.scrollOffset)
+        }
     }
 
     @Test
     fun libraryRestoresStableRowAnchorAfterRowsReload() {
         val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
+        val libraryState = mutableStateOf(LibraryScreenUiState(localMode = true, tracks = emptyList()))
+        val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
             AutPlayTheme {
                 LibraryProductScreen(
-                    state = LibraryScreenUiState(localMode = true, tracks = rows),
+                    state = libraryState.value,
                     contentPadding = PaddingValues(),
                     onAddLocal = {},
                     onSelect = {},
@@ -419,16 +507,65 @@ class AdaptiveShellTest {
                         "library-track:track-20",
                         0,
                     ),
+                    onListAnchorChange = { restoredAnchor.set(it) },
                 )
             }
         }
 
+        composeRule.runOnIdle {
+            assertTrue(restoredAnchor.get() == null)
+            libraryState.value = LibraryScreenUiState(localMode = true, tracks = rows)
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) { restoredAnchor.get() != null }
         composeRule.onNodeWithText("Library track 20").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("library:Tracks:RecentlyAdded:All", restoredAnchor.get()?.contextKey)
+            assertEquals("library-track:track-20", restoredAnchor.get()?.itemKey)
+            assertEquals(0, restoredAnchor.get()?.scrollOffset)
+        }
     }
 
     @Test
-    fun mediumLibrarySelectionOpensFullPageDetail() {
+    fun libraryRestoresStableRowAnchorWithNonzeroOffsetAfterRowsReload() {
+        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
+        val libraryState = mutableStateOf(LibraryScreenUiState(localMode = true, tracks = emptyList()))
+        val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
+        composeRule.setContent {
+            AutPlayTheme {
+                LibraryProductScreen(
+                    state = libraryState.value,
+                    contentPadding = PaddingValues(),
+                    onAddLocal = {},
+                    onSelect = {},
+                    onRemoveOrRestore = {},
+                    onLike = {},
+                    listAnchor = ListAnchor(
+                        "library:Tracks:RecentlyAdded:All",
+                        "library-track:track-20",
+                        37,
+                    ),
+                    onListAnchorChange = { restoredAnchor.set(it) },
+                )
+            }
+        }
+
+        composeRule.runOnIdle {
+            assertTrue(restoredAnchor.get() == null)
+            libraryState.value = LibraryScreenUiState(localMode = true, tracks = rows)
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) { restoredAnchor.get() != null }
+        composeRule.onNodeWithText("Library track 20").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("library:Tracks:RecentlyAdded:All", restoredAnchor.get()?.contextKey)
+            assertEquals("library-track:track-20", restoredAnchor.get()?.itemKey)
+            assertEquals(37, restoredAnchor.get()?.scrollOffset)
+        }
+    }
+
+    @Test
+    fun mediumLibraryTapPlaysWithoutOpeningDetail() {
         var observedWidthClass: UiWidthClass? = null
+        var playedTrack: String? = null
         composeRule.setContent {
             var selectedDetail by remember { mutableStateOf<DetailTarget?>(null) }
             val actions = CoreProductRouteActions(
@@ -457,7 +594,7 @@ class AdaptiveShellTest {
                 openDetail = { selectedDetail = it },
                 openReview = {},
                 changeLibraryAnchor = {},
-                playTrack = {},
+                playTrack = { playedTrack = it },
                 playPlaylistEntry = {},
                 downloadTrack = {},
                 repairAccess = {},
@@ -496,8 +633,9 @@ class AdaptiveShellTest {
         composeRule.onNodeWithTag("library-product-list")
             .performScrollToNode(hasText("Medium track"))
         composeRule.onNodeWithText("Medium track").performClick()
-        composeRule.onNodeWithText(context.getString(R.string.detail_unavailable)).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_back)).performClick()
+        composeRule.runOnIdle { assertEquals("medium-track", playedTrack) }
+        composeRule.onNodeWithTag("library-product-list").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText(context.getString(R.string.detail_unavailable)).fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithText("Medium track").assertIsDisplayed()
     }
 

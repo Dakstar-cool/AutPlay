@@ -75,6 +75,13 @@ if [[ -n "${ACQUISITION_JAMENDO_ID:-}" ]]; then
 else
     options+=(--disable-jamendo)
 fi
+if [[ -n "${ACQUISITION_YANDEX_TOKEN:-}" ]]; then
+    yandex_token=$(realpath -e -- "$ACQUISITION_YANDEX_TOKEN")
+    test -f "$yandex_token"
+    [[ "$yandex_token" != *','* && "$yandex_token" != *$'\n'* ]]
+    mounts+=(--mount "type=bind,src=$yandex_token,dst=/run/secrets/yandex-token,readonly")
+    options+=(--yandex-token-file /run/secrets/yandex-token --yandex-rights-confirmed)
+fi
 for catalog_name in NORMALIZATION SOURCE; do
     variable="ACQUISITION_${catalog_name}_CATALOG"
     if [[ -n "${!variable:-}" ]]; then

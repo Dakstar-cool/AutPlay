@@ -12,19 +12,39 @@ import org.junit.Test
 
 class OnboardingStateTest {
     @Test
-    fun completingPersistsOnlyTheDeviceLocalRevision() = runBlocking {
+    fun completingPersistsTheNormalizedDeviceLocalIdAndRevisionTogether() = runBlocking {
         val store = FakeSettingsStore()
 
-        assertTrue(completeOnboarding(store))
+        assertTrue(completeOnboarding(store, "@Local_Listener"))
         assertEquals(ONBOARDING_REVISION, store.value.onboardingRevision)
+        assertEquals("local_listener", store.value.pendingPublicId)
+        assertTrue(hasCompletedOnboarding(store.value))
     }
 
     @Test
     fun failedWriteKeepsOnboardingOpen() = runBlocking {
         val store = FakeSettingsStore(failWrites = true)
 
-        assertFalse(completeOnboarding(store))
+        assertFalse(completeOnboarding(store, "local_listener"))
         assertEquals(0, store.value.onboardingRevision)
+        assertEquals(null, store.value.pendingPublicId)
+    }
+
+    @Test
+    fun existingCompletedEducationStillRequiresAnIdAfterUpgrade() {
+        assertFalse(hasCompletedOnboarding(NonSecretSettings(onboardingRevision = ONBOARDING_REVISION)))
+        assertTrue(hasCompletedOnboarding(NonSecretSettings(
+            onboardingRevision = ONBOARDING_REVISION,
+            pendingPublicId = "local_listener",
+        )))
+    }
+
+    @Test
+    fun invalidPublicIdCannotCompleteOnboarding() = runBlocking {
+        val store = FakeSettingsStore()
+        assertFalse(completeOnboarding(store, "invalid name"))
+        assertEquals(0, store.value.onboardingRevision)
+        assertEquals(null, store.value.pendingPublicId)
     }
 
     private class FakeSettingsStore(

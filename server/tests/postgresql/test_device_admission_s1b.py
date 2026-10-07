@@ -44,7 +44,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from psycopg import Connection
 from sqlalchemy import create_engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+
+from .conftest import DatabaseHarness
 
 REQUEST_DOMAIN = "autplay:s1b:admission-request:v1\n"
 POLL_DOMAIN = "autplay:s1b:admission-poll:v1\n"
@@ -247,8 +250,9 @@ def _form_values(document: str) -> dict[str, str]:
     return dict(re.findall(r'name="([^\"]+)" value="([^\"]*)"', document))
 
 
+@pytest.mark.parametrize("pending_flow", [False, True])
 def test_actual_http_and_web_routers_complete_recovery_review_and_exchange(
-    admission_runtime: _Runtime, database_connection: Connection[Any]
+    admission_runtime: _Runtime, database_connection: Connection[Any], pending_flow: bool
 ) -> None:
     request, key, request_hash = _admission_request(
         admission_runtime, source="127.0.0.1", nonce_marker=70
@@ -324,30 +328,36 @@ def test_actual_http_and_web_routers_complete_recovery_review_and_exchange(
 
     client.cookies.set("__Host-autplay_admin", credentials.bearer.decode("ascii"))
     review_start = client.get("/admin/connection-requests")
-    resolve_form = _form_values(review_start.text) | {
-        "review_locator": str(rotated["review_locator"])
-    }
-    resolved = client.post(
-        "/admin/connection-requests/resolve",
-        data=resolve_form,
-        headers={"Origin": "https://admin.test"},
-        follow_redirects=False,
-    )
-    assert resolved.status_code == 303
-    review = client.get("/admin/connection-requests/review")
-    assert review.status_code == 200
-    assert "M" * 96 in review.text
-    assert "API version" in review.text and ">1<" in review.text
-    assert "Requested" in review.text
-    assert str(rotated["review_locator"]) not in review.text
-    assert str(rotated["poll_bearer"]) not in review.text
-    decision = client.post(
-        "/admin/connection-requests/decision/approve-once",
-        data=_form_values(review.text),
-        headers={"Origin": "https://admin.test"},
-        follow_redirects=False,
-    )
-    assert decision.status_code == 303
+    assert review_start.status_code == 200
+    assert str(rotated["review_locator"]) not in review_start.text
+    assert str(rotated["poll_bearer"]) not in review_start.text
+    if pending_flow:
+        decision_url = f"/admin/connection-requests/pending/{request['request_id']}/trust"
+        decision_form = _form_values(review_start.text) | {"device_name": "  Kitchen phone  "}
+        decision = client.post(
+            decision_url,
+            data=decision_form,
+            headers={"Origin": "https://admin.test"},
+            follow_redirects=False,
+        )
+        assert decision.status_code == 303
+        replayed = client.post(
+            decision_url,
+            data=decision_form,
+            headers={"Origin": "https://admin.test"},
+            follow_redirects=False,
+        )
+        assert replayed.status_code == 303
+        changed_name = client.post(
+            decision_url,
+            data=decision_form | {"device_name": "Changed name"},
+            headers={"Origin": "https://admin.test"},
+            follow_redirects=False,
+        )
+        assert changed_name.status_code == 403
+        assert 'name="device_name"' not in client.get("/admin/connection-requests").text
+    else:
+        _resolve_legacy_http_review(client, review_start.text, rotated)
 
     poll = _signed(
         key,
@@ -407,7 +417,143 @@ def test_actual_http_and_web_routers_complete_recovery_review_and_exchange(
         )
     )["devices"]
     assert isinstance(devices, list)
-    assert devices[0]["device_name"] == f"S1B HTTP owner · {'M' * 96}"
+    expected_name = "Kitchen phone" if pending_flow else "M" * 96
+    assert devices[0]["device_name"] == f"S1B HTTP owner · {expected_name}"
+    if pending_flow:
+        trusted = client.get("/admin/trusted-devices")
+        assert trusted.status_code == 200 and "Kitchen phone" in trusted.text
+        key_reference = re.search(r"/admin/trusted-devices/([^/]+)/revoke-and-remove", trusted.text)
+        assert key_reference is not None
+        revoked = client.post(
+            f"/admin/trusted-devices/{key_reference.group(1)}/revoke-and-remove",
+            data=_form_values(trusted.text),
+            headers={"Origin": "https://admin.test"},
+            follow_redirects=False,
+        )
+        assert revoked.status_code == 303
+        assert "Kitchen phone" not in client.get("/admin/trusted-devices").text
+        assert database_connection.execute(
+            "SELECT device_name, revoked_at IS NOT NULL FROM account.device WHERE device_id=%s",
+            (UUID(str(enrolled["device_id"])),),
+        ).fetchone() == ("Kitchen phone", True)
+
+
+def test_pending_approval_preserves_request_evidence_and_rechecks_ownership_and_expiry(
+    admission_runtime: _Runtime, database_connection: Connection[Any]
+) -> None:
+    request, created, _, request_hash = _admission(admission_runtime)
+    request_id = UUID(str(request["request_id"]))
+    owner = _web_actor(admission_runtime, database_connection)
+    other = _web_actor(admission_runtime, database_connection)
+    user = _web_actor(admission_runtime, database_connection, AccountRole.USER)
+    assert len(admission_runtime.service.pending_device_admissions(owner)) == 1
+    with pytest.raises(ProfilePairingError, match="admission_request_unavailable"):
+        admission_runtime.service.pending_device_admissions(user)
+    for invalid_name in ("", "  ", "n" * 121, "Phone\nName", "Phone\u202ename"):
+        with pytest.raises(ProfilePairingError, match="admission_request_unavailable"):
+            admission_runtime.service.decide_device_admission(
+                owner,
+                request_id,
+                "TRUST_DEVICE",
+                uuid4(),
+                b"n" * 32,
+                web_session_id=owner.web_session_id,
+                from_pending_list=True,
+                device_name=invalid_name,
+            )
+    admission_runtime.service.bind_device_admission_review(
+        actor=other,
+        web_session_id=other.web_session_id,
+        locator=str(created["review_locator"]),
+        operation_id=uuid4(),
+        request_sha256=b"b" * 32,
+    )
+    assert admission_runtime.service.pending_device_admissions(owner) == []
+    with pytest.raises(ProfilePairingError, match="admission_request_unavailable"):
+        admission_runtime.service.decide_device_admission(
+            owner,
+            request_id,
+            "TRUST_DEVICE",
+            uuid4(),
+            b"n" * 32,
+            web_session_id=owner.web_session_id,
+            from_pending_list=True,
+            device_name="Kitchen phone",
+        )
+    row = database_connection.execute(
+        "SELECT nickname, request_sha256, approved_device_name, state "
+        "FROM account.device_admission WHERE request_id=%s",
+        (request_id,),
+    ).fetchone()
+    assert row == (request["nickname"], bytes.fromhex(request_hash), None, "PENDING")
+    admission_runtime.clock.advance(timedelta(minutes=16))
+    assert admission_runtime.service.pending_device_admissions(other) == []
+    with pytest.raises(ProfilePairingError, match="admission_request_unavailable"):
+        admission_runtime.service.decide_device_admission(
+            other,
+            request_id,
+            "TRUST_DEVICE",
+            uuid4(),
+            b"n" * 32,
+            web_session_id=other.web_session_id,
+            from_pending_list=True,
+            device_name="Kitchen phone",
+        )
+
+
+def test_named_admission_refuses_destructive_downgrade(
+    admission_runtime: _Runtime,
+    database_connection: Connection[Any],
+    database_harness: DatabaseHarness,
+    database_name: str,
+) -> None:
+    request, _, _, _ = _admission(admission_runtime)
+    owner = _web_actor(admission_runtime, database_connection)
+    admission_runtime.service.decide_device_admission(
+        owner,
+        UUID(str(request["request_id"])),
+        "TRUST_DEVICE",
+        uuid4(),
+        b"n" * 32,
+        web_session_id=owner.web_session_id,
+        from_pending_list=True,
+        device_name="Kitchen phone",
+    )
+    with pytest.raises(DBAPIError, match="refusing device-name downgrade"):
+        database_harness.downgrade(database_name, "0060_local_bridge_authority")
+    assert database_connection.execute(
+        "SELECT approved_device_name FROM account.device_admission WHERE request_id=%s",
+        (UUID(str(request["request_id"])),),
+    ).fetchone() == ("Kitchen phone",)
+
+
+def _resolve_legacy_http_review(
+    client: TestClient, review_start: str, rotated: dict[str, Any]
+) -> None:
+    resolve_form = {
+        name: value for name, value in _form_values(review_start).items() if name != "device_name"
+    } | {"review_locator": str(rotated["review_locator"])}
+    resolved = client.post(
+        "/admin/connection-requests/resolve",
+        data=resolve_form,
+        headers={"Origin": "https://admin.test"},
+        follow_redirects=False,
+    )
+    assert resolved.status_code == 303
+    review = client.get("/admin/connection-requests/review")
+    assert review.status_code == 200
+    assert "M" * 96 in review.text
+    assert "API version" in review.text and ">1<" in review.text
+    assert "Requested" in review.text
+    assert str(rotated["review_locator"]) not in review.text
+    assert str(rotated["poll_bearer"]) not in review.text
+    decision = client.post(
+        "/admin/connection-requests/decision/approve-once",
+        data=_form_values(review.text),
+        headers={"Origin": "https://admin.test"},
+        follow_redirects=False,
+    )
+    assert decision.status_code == 303
 
 
 def test_fresh_submit_retires_an_expired_pending_request_for_the_same_key(
@@ -715,6 +861,71 @@ def test_exchange_replay_trust_removal_and_revocation_remain_distinct(
         operation_id=uuid4(),
         request_sha256=b"v" * 32,
     )
+    assert database_connection.execute(
+        "SELECT revoked_at IS NOT NULL FROM account.user_session WHERE session_id=%s",
+        (UUID(str(enrolled["session_id"])),),
+    ).fetchone() == (True,)
+
+
+def test_trusted_device_block_state_is_current_and_account_scoped(
+    admission_runtime: _Runtime, database_connection: Connection[Any]
+) -> None:
+    request, created, key, request_hash = _admission(admission_runtime)
+    owner = _web_actor(admission_runtime, database_connection)
+    other = _web_actor(admission_runtime, database_connection)
+    _bind_and_decide(admission_runtime, owner, created, "TRUST_DEVICE")
+    exchange = _signed(
+        key,
+        EXCHANGE_DOMAIN,
+        {
+            "request_id": request["request_id"],
+            "request_sha256": request_hash,
+            "exchange_id": str(uuid4()),
+            "binding_commit_id": str(uuid4()),
+            "poll_bearer_sha256": hashlib.sha256(
+                str(created["poll_bearer"]).encode("ascii")
+            ).hexdigest(),
+            "expected_server_instance_id": request["expected_server_instance_id"],
+            "expected_identity_epoch": request["expected_identity_epoch"],
+            "expected_identity_thumbprint_sha256": request["expected_identity_thumbprint_sha256"],
+            "expected_api_origin": "https://api.test.invalid",
+            "expected_stream_origin": "https://stream.test.invalid",
+            "approved_account_id": str(owner.user_id),
+            "device_key_thumbprint_sha256": request["device_key_thumbprint_sha256"],
+            "device_public_key_jwk": _jwk(key),
+            "next_refresh_token_sha256": hashlib.sha256(b"block-state-refresh").hexdigest(),
+            "client_nonce_b64url": _nonce(80),
+        },
+    )
+    enrolled, _ = admission_runtime.service.exchange_device_admission(
+        exchange, str(created["poll_bearer"])
+    )
+    adapter = DeviceAdmissionWebAdapter(admission_runtime.service)
+    item = adapter.trusted_devices(owner)[0]
+    assert item.blocked is False
+    assert item.connected_at == admission_runtime.clock.value
+
+    admission_runtime.service.manage_trusted_key(
+        principal=other,
+        thumbprint=bytes.fromhex(str(request["device_key_thumbprint_sha256"])),
+        action="BLOCK_FUTURE_ADMISSION",
+        operation_id=uuid4(),
+        request_sha256=b"b" * 32,
+    )
+    assert adapter.trusted_devices(owner)[0].blocked is False
+    for action, blocked in (
+        ("BLOCK_FUTURE_ADMISSION", True),
+        ("UNBLOCK_FUTURE_ADMISSION", False),
+        ("BLOCK_FUTURE_ADMISSION", True),
+    ):
+        adapter.manage_trusted_device(owner, item.key_reference, action, uuid4(), b"c" * 32)
+        current = adapter.trusted_devices(owner)[0]
+        assert current.key_reference == item.key_reference and current.blocked is blocked
+        assert current.active_session_count == 1
+    adapter.manage_trusted_device(
+        owner, item.key_reference, "REVOKE_AND_REMOVE", uuid4(), b"d" * 32
+    )
+    assert adapter.trusted_devices(owner) == ()
     assert database_connection.execute(
         "SELECT revoked_at IS NOT NULL FROM account.user_session WHERE session_id=%s",
         (UUID(str(enrolled["session_id"])),),

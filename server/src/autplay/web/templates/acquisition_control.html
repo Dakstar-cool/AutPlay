@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block head %}{% if live %}<meta http-equiv="refresh" content="10;url=/admin/acquisition?lang={{ locale }}&amp;live=1">{% endif %}{% endblock %}
+{% block content %}
+<div class="acquisition-page">
+  <header class="page-heading acquisition-heading">
+    <div><h1>{{ t("acquisition_title") }}</h1><p class="page-summary">{{ t("acquisition_intro") }}</p></div>
+    <div class="jobs-controls acquisition-refresh">
+      <a class="button secondary compact-button" href="/admin/acquisition?lang={{ locale }}">{{ t("refresh_now") }}</a>
+      <a class="button secondary compact-button" href="/admin/acquisition?lang={{ locale }}{% if not live %}&amp;live=1{% endif %}">{{ t("stop_live_refresh") if live else t("start_live_refresh") }}</a>
+    </div>
+  </header>
+  {% if notice %}<p class="notice" role="status">{{ t(notice) }}</p>{% endif %}
+  <div class="acquisition-agent{% if agent_online %} acquisition-agent-online{% endif %}" role="status">
+    <strong>{{ t("acquisition_agent") }}: {{ t("acquisition_agent_online") if agent_online else t("acquisition_agent_offline") }}</strong>
+    {% if agent_sources %}<span>{{ agent_sources|join(" · ") }}</span>{% endif %}
+  </div>
+  <p class="acquisition-scope">{{ t("acquisition_scope") }}</p>
+  <nav class="acquisition-jumps" aria-label="{{ t('acquisition_title') }}">
+    <a href="#acquisition-dashboard-title">{{ t("acquisition_dashboard_title") }}</a>
+    <a href="#acquisition-upload-title">{{ t("acquisition_upload_title") }}</a>
+    <a href="#acquisition-track-title">{{ t("acquisition_track_title") }}</a>
+    <a href="#acquisition-group-title">{{ t("acquisition_group_title") }}</a>
+    {% if discovery_enabled %}<a href="#acquisition-lookup-title">{{ t("acquisition_lookup_title") }}</a>{% endif %}
+  </nav>
+
+  {% macro concurrency(workers=2, youtube=1, soundcloud=1, save=false) %}
+    <details class="acquisition-settings">
+      <summary>{{ t("acquisition_sharding") }}{% if save %} · {{ workers }}{% endif %}</summary>
+      <div class="acquisition-settings-grid">
+        <label>{{ t("acquisition_workers") }} <select name="workers">{% for n in (1, 2, 3, 4) %}<option value="{{ n }}"{% if n == workers %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+        <label>{{ t("acquisition_youtube_lanes") }} <select name="yt_dlp_concurrency">{% for n in (1, 2) %}<option value="{{ n }}"{% if n == youtube %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+        <label>{{ t("acquisition_soundcloud_lanes") }} <select name="soundcloud_concurrency">{% for n in (1, 2) %}<option value="{{ n }}"{% if n == soundcloud %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+      </div>
+      {% if save %}<div class="acquisition-settings-save"><button type="submit">{{ t("acquisition_save_workers") }}</button></div>{% endif %}
+    </details>
+  {% endmacro %}
+
+  <section class="acquisition-dashboard" aria-labelledby="acquisition-dashboard-title">
+    <h2 id="acquisition-dashboard-title">{{ t("acquisition_dashboard_title") }}</h2>
+    {% if queues %}
+      <div class="job-list">
+        {% for queue in queues %}
+          <article class="job-card acquisition-queue">
+            {% set queue_tone = {'running': 'active', 'finished': 'good', 'paused': 'warn', 'failed': 'bad'}.get(queue.state, 'neutral') %}
+            <div class="job-card-heading"><div class="queue-heading"><h3>{{ t('acquisition_queue') }} {{ loop.index }}</h3><code class="queue-identifier" title="{{ queue.queue_id }}">#{{ (queue.queue_id|string)[:8] }}</code></div><span class="pill pill-{{ queue_tone }}">{{ t('acquisition_state_' ~ queue.state) if queue.state in ('queued', 'running', 'paused', 'finished', 'failed') else queue.state }}</span></div>
+            <dl class="facts acquisition-facts">
+              <div><dt>{{ t("acquisition_requested") }}</dt><dd>{{ queue.requested }}</dd></div>
+              <div><dt>{{ t("acquisition_downloaded") }}</dt><dd>{{ queue.counts.downloaded }}</dd></div>
+              <div><dt>{{ t("acquisition_pending") }}</dt><dd>{{ queue.counts.pending + queue.counts.running + queue.counts.retry }}</dd></div>
+              <div><dt>{{ t("acquisition_not_found") }}</dt><dd>{{ queue.counts.not_found }}</dd></div>
+              <div><dt>{{ t("failed") }}</dt><dd>{{ queue.counts.failed }}</dd></div>
+              <div><dt>{{ t("acquisition_review") }}</dt><dd>{{ queue.counts.needs_review }}</dd></div>
+            </dl>
+            {% if queue.requested %}<progress value="{{ queue.counts.downloaded }}" max="{{ queue.requested }}" aria-label="{{ t('acquisition_downloaded') }}">{{ queue.counts.downloaded }} / {{ queue.requested }}</progress>{% endif %}
+            {% if queue.providers %}
+              <details class="provider-details"><summary>{{ t("acquisition_provider_metrics") }}</summary>
+              <div class="table-scroll" tabindex="0" role="region" aria-label="{{ t('acquisition_provider_metrics') }}">
+                <table><thead><tr><th scope="col">{{ t("acquisition_source") }}</th><th scope="col">{{ t("acquisition_requests") }}</th><th scope="col">{{ t("acquisition_downloaded") }}</th><th scope="col">{{ t("acquisition_misses") }}</th><th scope="col">{{ t("failed") }}</th><th scope="col">{{ t("acquisition_deferred") }}</th><th scope="col">{{ t("status") }}</th></tr></thead>
+                  <tbody>{% for provider in queue.providers %}<tr><td data-label="{{ t('acquisition_source') }}">{{ provider.name }}</td><td data-label="{{ t('acquisition_requests') }}">{{ provider.counts.requests }}</td><td data-label="{{ t('acquisition_downloaded') }}">{{ provider.counts.downloaded }}</td><td data-label="{{ t('acquisition_misses') }}">{{ provider.counts.misses }}</td><td data-label="{{ t('failed') }}">{{ provider.counts.failures }}</td><td data-label="{{ t('acquisition_deferred') }}">{{ provider.counts.deferred }}</td><td data-label="{{ t('status') }}">{{ t("acquisition_circuit_open") if provider.circuit_open else t("acquisition_circuit_ready") }}</td></tr>{% endfor %}</tbody>
+                </table>
+              </div>
+              </details>
+            {% endif %}
+            {% if queue.last_error %}<p class="notice" role="alert">{{ queue.last_error }}</p>{% endif %}
+            <form method="post" action="/admin/acquisition/{{ queue.queue_id }}/configure" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ configure_operation_ids[queue.queue_id|string] }}">{{ concurrency(queue.workers, queue.yt_dlp_concurrency, queue.soundcloud_concurrency, true) }}</form>
+            {% if queue.requested %}<div class="jobs-controls acquisition-actions">{% for action in ("run", "pause", "resume", "retry", "retry_not_found", "verify") %}<form method="post" action="/admin/acquisition/{{ queue.queue_id }}/{{ action }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ action_operation_ids[queue.queue_id|string][action] }}"><button type="submit" class="secondary compact-button">{{ t("acquisition_action_" + action) }}</button></form>{% endfor %}</div>{% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}<p class="empty">{{ t("acquisition_empty") }}</p>{% endif %}
+  </section>
+
+  <div class="acquisition-grid">
+    <section class="acquisition-card" aria-labelledby="acquisition-upload-title">
+      <h2 id="acquisition-upload-title">{{ t("acquisition_upload_title") }}</h2><p>{{ t("acquisition_upload_intro") }}</p>
+      <form method="post" action="/admin/acquisition/upload" enctype="multipart/form-data" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ upload_operation_id }}"><label>{{ t("collection_file") }} <input name="playlist" type="file" accept=".txt,text/plain" required></label>{{ concurrency() }}<button type="submit">{{ t("acquisition_enqueue") }}</button></form>
+    </section>
+    <section class="acquisition-card" aria-labelledby="acquisition-track-title">
+      <h2 id="acquisition-track-title">{{ t("acquisition_track_title") }}</h2>
+      <form method="post" action="/admin/acquisition/track" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ track_operation_id }}"><label>{{ t("artist") }} <input name="artist" required maxlength="200" autocomplete="off"></label><label>{{ t("name") }} <input name="title" required maxlength="200" autocomplete="off"></label>{{ concurrency() }}<button type="submit">{{ t("acquisition_enqueue") }}</button></form>
+    </section>
+    <section class="acquisition-card" aria-labelledby="acquisition-group-title">
+      <h2 id="acquisition-group-title">{{ t("acquisition_group_title") }}</h2><p>{{ t("acquisition_group_intro") }}</p>
+      <form method="post" action="/admin/acquisition/artist-group" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ group_operation_id }}"><label>{{ t("artist") }} <input name="artist" required maxlength="200" autocomplete="off"></label><label>{{ t("acquisition_titles") }} <textarea name="titles" required rows="5" maxlength="12000"></textarea></label>{{ concurrency() }}<button type="submit">{{ t("acquisition_enqueue") }}</button></form>
+      {% if discovery_enabled %}<p><a href="/admin/discovery?lang={{ locale }}">{{ t("acquisition_artist_discovery") }}</a></p>{% endif %}
+    </section>
+    {% if discovery_enabled %}
+      <section class="acquisition-card" aria-labelledby="acquisition-lookup-title">
+        <h2 id="acquisition-lookup-title">{{ t("acquisition_lookup_title") }}</h2><p>{{ t("acquisition_lookup_intro") }}</p>
+        <form method="post" action="/admin/acquisition/search" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ search_operation_id }}"><label>{{ t("name") }} <input name="query" maxlength="200" required autocomplete="off"></label><button type="submit">{{ t("search") }}</button></form>
+        <form method="post" action="/admin/acquisition/artist-search" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ artist_search_operation_id }}"><label>{{ t("artist") }} <input name="artist" maxlength="200" required autocomplete="off"></label><button type="submit">{{ t("acquisition_find_artist") }}</button></form>
+      </section>
+    {% endif %}
+  </div>
+
+  {% if search_results or artist_results %}
+    <section class="acquisition-card acquisition-results" aria-labelledby="acquisition-results-title">
+      <h2 id="acquisition-results-title">{{ t("acquisition_results_title") }}</h2>
+      <form method="post" action="/admin/acquisition/selection" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ selection_operation_id }}">
+        <div class="table-scroll" tabindex="0" role="region" aria-label="{{ t('acquisition_results_title') }}">
+          <table><thead><tr><th scope="col">{{ t("select") }}</th><th scope="col">{{ t("artist") }}</th><th scope="col">{{ t("name") }}</th><th scope="col">{{ t("license") }}</th></tr></thead><tbody>
+            {% for candidate in search_results %}<tr><td data-label="{{ t('select') }}"><input type="checkbox" name="selection" value="{{ candidate.artist }}&#9;{{ candidate.title }}" aria-label="{{ candidate.artist }} — {{ candidate.title }}"></td><td data-label="{{ t('artist') }}">{{ candidate.artist }}</td><td data-label="{{ t('name') }}"><a href="{{ candidate.share_url }}" rel="noreferrer">{{ candidate.title }}</a></td><td data-label="{{ t('license') }}"><a href="{{ candidate.license_url }}" rel="noreferrer">CC</a></td></tr>{% endfor %}
+            {% for page in artist_results %}{% for candidate in page.tracks %}<tr><td data-label="{{ t('select') }}"><input type="checkbox" name="selection" value="{{ candidate.artist }}&#9;{{ candidate.title }}" aria-label="{{ candidate.artist }} — {{ candidate.title }}"></td><td data-label="{{ t('artist') }}">{{ candidate.artist }}</td><td data-label="{{ t('name') }}"><a href="{{ candidate.share_url }}" rel="noreferrer">{{ candidate.title }}</a></td><td data-label="{{ t('license') }}"><a href="{{ candidate.license_url }}" rel="noreferrer">CC</a></td></tr>{% endfor %}{% endfor %}
+          </tbody></table>
+        </div>
+        {{ concurrency() }}<button type="submit">{{ t("acquisition_enqueue_selected") }}</button>
+      </form>
+    </section>
+  {% elif search_mode %}<p class="notice" role="status">{{ t("acquisition_no_matches") }}</p>{% endif %}
+</div>
+{% endblock %}

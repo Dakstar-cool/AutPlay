@@ -75,22 +75,11 @@
     <string name="search_loading">Searching the local library…</string>
     <string name="search_local_scope">Local</string>
     <string name="search_vault_scope">Vault</string>
-    <string name="search_vault_results">Personal Vault</string>
     <string name="search_vault_loading">Searching your personal Vault…</string>
-    <string name="search_vault_unavailable">The personal Vault is unavailable. Local results remain usable.</string>
     <string name="search_vault_empty">No matching items in the personal Vault.</string>
     <string name="search_vault_metadata_unavailable">Metadata unavailable on this device</string>
-    <string name="search_vault_source_availability">%1$s · %2$s</string>
     <string name="search_vault_playback_unavailable">Unavailable here</string>
-    <plurals name="search_vault_result_count">
-        <item quantity="one">%d Vault item found. Add or sync it to play on this device.</item>
-        <item quantity="other">%d Vault items found. Add or sync them to play on this device.</item>
-    </plurals>
     <string name="search_empty">No local results</string>
-    <plurals name="search_result_count">
-        <item quantity="one">%d result</item>
-        <item quantity="other">%d results</item>
-    </plurals>
 
     <string name="library_title">My music</string>
     <string name="library_local_mode">Stored on this phone and available offline</string>
@@ -99,7 +88,6 @@
     <string name="library_add_local_success">Added “%1$s” to the local collection</string>
     <string name="library_empty_body">Choose a music folder or add a local track to get started.</string>
     <string name="library_unknown_artist">Unknown artist</string>
-    <string name="library_permission_revoked">Access to this file was revoked. Keep the track and choose a folder again or use an authorized Vault source.</string>
     <string name="library_sort_label">Sort</string>
     <string name="library_filter_label">Filter</string>
     <string name="library_section_tracks">Tracks</string>
@@ -132,10 +120,6 @@
     <string name="detail_artist_related_item">Related item</string>
     <string name="library_review_empty">There are no imports requiring review.</string>
     <string name="library_collection_empty">No collections in this section yet.</string>
-    <plurals name="library_track_count">
-        <item quantity="one">%d local track</item>
-        <item quantity="other">%d local tracks</item>
-    </plurals>
     <plurals name="library_review_count">
         <item quantity="one">%d import requires review</item>
         <item quantity="other">%d imports require review</item>
@@ -147,9 +131,11 @@
     <string name="action_like">Like</string>
     <string name="action_liked">Liked</string>
     <string name="player_taste_exclusion_title">Taste Profile</string>
-    <string name="player_taste_exclusion_description">Exclude listening evidence without changing Like or Dislike.</string>
-    <string name="player_exclude_current_listen">Exclude this listen</string>
-    <string name="player_exclude_session">Exclude this queue session</string>
+    <string name="player_collapse">Collapse player</string>
+    <string name="player_section_expanded">Expanded</string>
+    <string name="player_section_collapsed">Collapsed</string>
+    <string name="player_exclude_listen_short">Exclude listen</string>
+    <string name="player_exclude_session_short">Exclude session</string>
     <string name="player_taste_listen_unavailable">Start listening before excluding the current listen.</string>
     <string name="player_taste_exclusion_error">Couldn’t update Taste Profile exclusion. Try again.</string>
     <string name="action_dislike">Dislike</string>
@@ -175,12 +161,7 @@
     <string name="detail_release_date">Release date</string>
 
     <string name="player_nothing_playing">Nothing playing</string>
-    <string name="face_description_idle">Resonance Lens is neutral and waiting for playback</string>
-    <string name="face_description_playing">Resonance Lens is using a neutral local response to playback</string>
-    <string name="face_description_paused">Resonance Lens is neutral; playback is paused</string>
-    <string name="face_description_buffering">Resonance Lens is neutral; playback is buffering</string>
     <string name="player_unknown_artist">Unknown artist</string>
-    <string name="player_queue_context">Current queue</string>
     <string name="player_buffering">Buffering</string>
     <string name="player_timeline_unknown">Timeline unavailable</string>
     <string name="player_timeline_live">Live or unknown duration</string>
@@ -192,10 +173,6 @@
     <string name="player_repeat_one">Repeat one</string>
     <string name="player_repeat_all">Repeat all</string>
     <string name="player_progress_description">%1$s of %2$s</string>
-    <string name="player_source_local">On this device</string>
-    <string name="player_source_vault">Personal Vault</string>
-    <string name="player_source_download">Downloaded</string>
-    <string name="player_source_unknown">Source is being resolved</string>
     <string name="player_controls_unavailable">Controls are unavailable for this item.</string>
     <string name="player_source_unavailable">This track has metadata but no playable audio on this device. Import its audio file or download an available Vault version.</string>
 
@@ -211,7 +188,6 @@
     <string name="track_untitled">Untitled track</string>
 
     <string name="expanded_queue_title">Up next</string>
-    <string name="library_selected">Selected track</string>
     <string name="queue_editor_title">Playback queue</string>
     <string name="queue_editor_empty">Add a track to build your queue.</string>
     <string name="queue_editor_unavailable">The queue is unavailable. Playback remains unchanged.</string>
@@ -402,14 +378,16 @@
     <string name="profile_revoke_device">Remove this device</string>
     <string name="profile_disconnect">Disconnect server from this phone</string>
     <string name="profile_personal_server">Personal server</string>
-    <string name="admission_copy_review_locator">Copy review locator</string>
-    <string name="admission_copy_comparison_code">Copy comparison code</string>
-    <string name="admission_review_locator_clipboard_label">AutPlay review locator</string>
-    <string name="admission_comparison_code_clipboard_label">AutPlay comparison code</string>
+    <string name="admission_request_intro">Send a request, then approve and name this device in the server admin panel.</string>
+    <string name="admission_request_approval">Request approval</string>
+    <string name="admission_waiting_for_admin">Waiting for approval in the server admin panel. The status updates automatically. Local music remains available.</string>
+    <string name="admission_check_status">Check status</string>
+    <string name="admission_cancel">Cancel</string>
     <string name="profile_connection_local">Not connected — local mode continues</string>
     <string name="profile_server_origin">Server address</string>
     <string name="profile_server_origin_hint">Use the private address supplied by your server administrator.</string>
     <string name="profile_check_server">Check server</string>
+    <string name="profile_scan_server_qr">Scan server QR</string>
     <string name="profile_connection_checking">Checking server</string>
     <string name="profile_connection_trust">Confirm server trust</string>
     <string name="profile_trust_explanation">An address finds a server but does not prove its identity. Confirm only the server you expect.</string>
@@ -506,7 +484,13 @@
     <string name="settings_network">Personal server and shared listening</string>
     <string name="settings_personal_server_body">Connect and manage your personal server from one trusted connection flow.</string>
     <string name="settings_open_personal_server">Open personal server</string>
-    <string name="settings_metered_sync">Synchronize using mobile data</string>
+    <string name="settings_metered_downloads">Download tracks using mobile data</string>
+    <string name="settings_download_network_summary">Save tracks for offline listening</string>
+    <string name="settings_playback">Playback</string>
+    <string name="settings_playback_summary">Transitions between tracks</string>
+    <string name="settings_smooth_track_transitions">Smooth track transitions</string>
+    <string name="settings_smooth_track_transitions_body">Joins tracks by skipping the last 3 seconds of the current track and the first 3 seconds of the next. Volume stays unchanged. Short tracks stay whole; the final track keeps its full ending.</string>
+    <string name="settings_download_network_body">Applies only to saving tracks for offline listening. Your library and metadata sync over any available connection.</string>
     <string name="settings_wave_prefetch_off">Do not prepare tracks in advance</string>
     <string name="settings_wave_prefetch_next">Prepare the next track</string>
     <string name="settings_wave_prefetch_three">Prepare the next three tracks</string>
@@ -520,26 +504,18 @@
         <item quantity="one">Turns off in about %1$d minute</item>
         <item quantity="other">Turns off in about %1$d minutes</item>
     </plurals>
-    <string name="player_sleep_timer_body">Stop playback automatically after a selected time.</string>
     <string name="player_sleep_timer_cancel">Turn off timer</string>
     <string name="player_sleep_timer_dial_description">Sleep timer, 1 to 60 minutes</string>
     <string name="player_sleep_timer_set">Set timer</string>
     <string name="player_sleep_timer_after_track">After the current track</string>
     <string name="player_sleep_timer_after_track_active">Playback will pause after the current track.</string>
-    <string name="player_wave_by_track">Wave by track</string>
-    <string name="player_wave_by_track_body">A future personal mix inspired by the current track.</string>
-    <string name="player_wave_by_track_unavailable">Wave by track is not available yet</string>
-    <string name="player_coming_soon">Coming soon</string>
     <string name="recommendation_for_you">Recommended for you</string>
-    <string name="social_friends">Friends</string>
     <string name="social_refresh">Refresh</string>
-    <string name="social_updating">Updating friends…</string>
     <string name="social_create_contact_card">Create my contact card</string>
     <string name="social_contact_card_ready">Your share card is ready. Share it only with people you trust.</string>
     <string name="social_share_contact_card">Share contact card</string>
     <string name="social_friend_contact_card">Friend contact card</string>
     <string name="social_add_friend_from_contact_card">Add friend from contact card</string>
-    <string name="social_add_friend">Add friend</string>
     <string name="social_no_friends">No friends yet. Your music library and playback stay private and available.</string>
     <string name="social_wave_invitations">Wave invitations</string>
     <string name="social_wave_invite">Wave invite</string>
@@ -580,7 +556,6 @@
     <string name="social_error_reconnect">Reconnect your personal server to continue.</string>
     <string name="social_error_generic">Could not update friends. Your previous view is still shown.</string>
     <string name="statistics_title">Listening statistics</string>
-    <string name="statistics_owner_private_note">Calculated on this device for this profile. Taste-excluded listens are included and never shown in the friend aggregate.</string>
     <string name="statistics_loading">Calculating statistics…</string>
     <string name="statistics_empty">No listening sessions in this period yet.</string>
     <plurals name="statistics_window_days">
@@ -600,16 +575,8 @@
         <item quantity="one">%1$d track</item>
         <item quantity="other">%1$d tracks</item>
     </plurals>
-    <plurals name="statistics_play_count">
-        <item quantity="one">%1$d play</item>
-        <item quantity="other">%1$d plays</item>
-    </plurals>
     <string name="statistics_duration_hours_minutes">%1$d h %2$d min</string>
     <string name="statistics_duration_minutes">%1$d min</string>
-    <string name="statistics_top_tracks">Top tracks · 30 days</string>
-    <string name="statistics_top_artists">Top artists · 30 days</string>
-    <string name="statistics_top_track_row">%1$d. %2$s — %3$s · %4$s</string>
-    <string name="statistics_top_artist_row">%1$d. %2$s · %3$s</string>
     <string name="statistics_friend_title">Friend statistics</string>
     <string name="statistics_friend_through">Through %1$s UTC</string>
     <string name="statistics_unavailable">Statistics unavailable</string>

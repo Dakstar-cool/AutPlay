@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/metadata-discovery/v1/page.schema.json",
+  "title": "Private MusicBrainz discovery page v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "source", "source_scope", "availability", "acquisition_allowed", "capabilities", "items", "limit", "offset", "total_count", "next_offset", "truncated"],
+  "properties": {
+    "contract_version": {"const": "music-discovery-v1"},
+    "source": {"const": "MusicBrainz"},
+    "source_scope": {"const": "INTERNET"},
+    "availability": {"const": "METADATA_ONLY"},
+    "acquisition_allowed": {"const": false},
+    "capabilities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["direct_acquisition", "track_source_search"],
+      "properties": {"direct_acquisition": {"const": false}, "track_source_search": {"const": true}}
+    },
+    "items": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/card"}},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+    "offset": {"type": "integer", "minimum": 0, "maximum": 1000},
+    "total_count": {"type": "integer", "minimum": 0, "maximum": 1000000},
+    "next_offset": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000},
+    "truncated": {"type": "boolean"}
+  },
+  "$defs": {
+    "text": {"type": ["string", "null"], "minLength": 1, "maxLength": 500},
+    "uuid": {"type": ["string", "null"], "format": "uuid"},
+    "card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "entity_type", "entity_id", "title", "artist", "release_id", "recording_id", "release_date", "country", "disambiguation", "duration_ms", "disc_number", "track_number", "recording_title", "source", "availability", "acquisition_allowed", "can_browse_tracks", "download_search_query"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^musicbrainz:(artist|release|recording|release_track):[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"},
+        "entity_type": {"enum": ["artist", "release", "recording", "release_track"]},
+        "entity_id": {"type": "string", "format": "uuid"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 500},
+        "artist": {"$ref": "#/$defs/text"},
+        "release_id": {"$ref": "#/$defs/uuid"},
+        "recording_id": {"$ref": "#/$defs/uuid"},
+        "release_date": {"type": ["string", "null"], "pattern": "^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$"},
+        "country": {"$ref": "#/$defs/text"},
+        "disambiguation": {"$ref": "#/$defs/text"},
+        "duration_ms": {"type": ["integer", "null"], "minimum": 1, "maximum": 86400000},
+        "disc_number": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000},
+        "track_number": {"type": ["integer", "null"], "minimum": 1, "maximum": 10000},
+        "recording_title": {"$ref": "#/$defs/text"},
+        "source": {"const": "MusicBrainz"},
+        "availability": {"const": "METADATA_ONLY"},
+        "acquisition_allowed": {"const": false},
+        "can_browse_tracks": {"type": "boolean"},
+        "download_search_query": {"type": ["string", "null"], "minLength": 1, "maxLength": 200}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"entity_type": {"enum": ["artist", "release"]}}},
+          "then": {"properties": {"can_browse_tracks": {"const": true}, "download_search_query": {"type": "null"}}},
+          "else": {"properties": {"can_browse_tracks": {"const": false}}}
+        }
+      ]
+    }
+  }
+}

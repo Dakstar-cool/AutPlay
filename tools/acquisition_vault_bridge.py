@@ -14,6 +14,7 @@ import json
 import math
 import os
 import signal
+import sys
 import time
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -38,6 +39,37 @@ class Receipt:
     payload: bytes
     signature: tuple[int, int]
     completed_at_ns: int = 0
+    source_metadata: dict[str, object] | None = None
+
+    @property
+    def metadata_sha256(self) -> str:
+        payload = json.dumps(
+            self.source_metadata or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+
+def metadata_evidence(raw: object, provider: str) -> dict[str, object] | None:
+    """Use the application contract; malformed optional metadata never rejects audio."""
+    if raw is None:
+        return None
+    from autplay.domain.track_metadata import sanitize_source_metadata, source_metadata_document
+
+    try:
+        source = sanitize_source_metadata(raw)
+        content_provider = {
+            "jamendo": "JAMENDO",
+            "yandex": "YANDEX",
+            "bandcamp": "BANDCAMP",
+            "soundcloud": "SOUNDCLOUD",
+            "yt_dlp": "YOUTUBE",
+            "hitmo": "HITMO",
+        }.get(provider, provider.upper())
+        if source.provider != content_provider:
+            return None
+        return source_metadata_document(source)
+    except ValueError, TypeError, UnicodeError:
+        return None
 
 
 def read_receipt(path: Path, root: Path) -> Receipt:
@@ -79,7 +111,13 @@ def read_receipt(path: Path, root: Path) -> Receipt:
             value is not None and (not isinstance(value, str) or len(value) > 1_000)
         ):
             raise ReceiptError("receipt_metadata_invalid")
-    if not fields["title"].strip() or not fields["artist"].strip():
+    title, artist = fields["title"], fields["artist"]
+    if (
+        not isinstance(title, str)
+        or not isinstance(artist, str)
+        or not title.strip()
+        or not artist.strip()
+    ):
         raise ReceiptError("receipt_metadata_invalid")
     seconds = doc.get("duration_seconds")
     if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds <= 0:
@@ -109,6 +147,7 @@ def read_receipt(path: Path, root: Path) -> Receipt:
         payload,
         (stat.st_size, stat.st_mtime_ns),
         path.stat().st_mtime_ns,
+        metadata_evidence(doc.get("source_metadata"), doc["provider"]),
     )
 
 
@@ -128,6 +167,8 @@ def save(path: Path, value: dict[str, Any]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     temporary.replace(path)
+    if sys.platform == "win32":
+        return  # Directory fsync is unavailable; the file and atomic replace are durable.
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(directory)
@@ -139,13 +180,14 @@ class Backend:
     """Reuse owner-scoped application commands, fenced ingest and sync publication."""
 
     def __init__(self, owner: UUID, *, provision: bool = False) -> None:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
         from autplay.application.imports import ImportService
         from autplay.domain.resource_admission import LocalBridgeClaim
         from autplay.entrypoints.composition import build_vault_http_service
         from autplay.entrypoints.resource_composition import ResourceIoRuntime
         from autplay.runtime.settings import load_api_settings
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
 
         settings = load_api_settings()
         self.engine = create_engine(
@@ -163,6 +205,21 @@ class Backend:
         self.bridge = LocalBridgeClaim(self.owner, self.device)
         self.resource = ResourceIoRuntime(settings, maximum=16)
         self.resource.start()
+
+    def schedule_metadata(self, receipt: Receipt, checkpoint: dict[str, Any]) -> None:
+        """A separate transaction schedules existing deferred work without provider I/O."""
+        from autplay.application.track_metadata import TrackMetadataService
+
+        operation_id = uuid5(
+            NAMESPACE_URL,
+            f"acquisition-metadata-v1:{self.owner}:{receipt.identity}:{receipt.metadata_sha256}",
+        )
+        TrackMetadataService(self.sessions).accept_acquisition(
+            self.principal,
+            UUID(checkpoint["ref_id"]),
+            operation_id=operation_id,
+            evidence=receipt.source_metadata or {},
+        )
 
     def close(self) -> None:
         pending = asyncio.run(self.resource.shutdown())
@@ -207,9 +264,10 @@ class Backend:
         return Principal(self.owner, self.device, UUID(int=0), AccountRole.OWNER)
 
     def advance(self, receipt: Receipt, checkpoint: dict[str, Any]) -> dict[str, Any]:
+        from sqlalchemy import select
+
         from autplay.adapters.postgresql.library_runtime import LibraryRepository
         from autplay.adapters.postgresql.models import ImportEntryRow, LibraryEntryRow
-        from sqlalchemy import select
 
         state = dict(checkpoint)
         if "import_id" not in state:
@@ -230,22 +288,31 @@ class Backend:
             if not report.entries or not report.entries[0].decision_id:
                 return state
             entry = report.entries[0]
+            predecessor = entry.decision_id
+            if predecessor is None:
+                return state
             with self.sessions() as session:
                 stored = session.get(ImportEntryRow, entry.import_entry_id)
+                if stored is None:
+                    raise ReceiptError("import_entry_missing")
                 recording = stored.selected_recording_id
             if recording is None:
-                result = self.imports.review(
+                reviewed = self.imports.review(
                     self.principal,
                     import_id,
                     entry.import_entry_id,
-                    predecessor_decision_id=entry.decision_id,
+                    predecessor_decision_id=predecessor,
                     action="CREATE_RECORDING",
                     selected_rank=None,
                     idempotency_key="acquisition:" + receipt.identity,
                 )
-                recording = result.recording_id
+                recording = reviewed.recording_id
+            if recording is None:
+                raise ReceiptError("import_recording_missing")
             with self.sessions() as session:
                 stored = session.get(ImportEntryRow, entry.import_entry_id)
+                if stored is None or stored.user_track_ref_id is None:
+                    raise ReceiptError("import_ref_missing")
                 ref_id = stored.user_track_ref_id
                 library_id = LibraryRepository(session).add_library_entry(
                     self.principal,
@@ -300,22 +367,26 @@ class Backend:
             return {**state, "state": "INGESTING"}
         if upload.state not in {"COMMITTED", "REUSED"}:
             raise ReceiptError("upload_" + upload.state.lower())
+        from sqlalchemy.dialects.postgresql import insert
+
         from autplay.adapters.postgresql.models import (
             RecordingCanonicalVariantRow,
             SyncEventRow,
             UploadSessionRow,
         )
         from autplay.application.sync import CatalogArtistSyncPublisher
-        from sqlalchemy.dialects.postgresql import insert
 
         with self.sessions() as session:
             committed = session.get(UploadSessionRow, upload_id)
             if (
-                committed.user_id != self.owner
+                committed is None
+                or committed.user_id != self.owner
                 or committed.device_id != self.device
                 or committed.target_recording_id != UUID(state["recording_id"])
                 or committed.state not in {"COMMITTED", "REUSED"}
+                or committed.computed_sha256 is None
                 or committed.computed_sha256.hex() != receipt.sha256
+                or committed.audio_variant_id is None
             ):
                 raise ReceiptError("committed_upload_mismatch")
             # Only the verified result of this owned upload can supply a new selection.
@@ -395,7 +466,12 @@ class Backend:
             ResourceKind,
             ResourceRequest,
         )
+        from autplay.entrypoints.composition import _DirectVaultHttpService
         from autplay.entrypoints.vault_http import AdmittedChunk
+
+        vault = self.vault
+        if isinstance(vault, _DirectVaultHttpService):
+            raise ReceiptError("bridge_requires_admitted_vault")
 
         operation_id = uuid5(
             NAMESPACE_URL,
@@ -427,7 +503,7 @@ class Backend:
                 payload,
                 digest,
             )
-            return await io.perform(lambda: self.vault.append_admitted(command, io))
+            return await io.perform(lambda: vault.append_admitted(command, io))
         finally:
             try:
                 await io.close()
@@ -440,20 +516,76 @@ def select_work(receipts: dict[str, Receipt], checkpoints: dict[str, Any], limit
     pending = (
         r
         for key, r in receipts.items()
-        if checkpoints.get(key, {}).get("state") not in {"PUBLISHED", "NEEDS_REVIEW"}
+        if checkpoints.get(key, {}).get("state") != "NEEDS_REVIEW"
+        and (
+            checkpoints.get(key, {}).get("state") != "PUBLISHED"
+            or (
+                metadata_pending(r, checkpoints[key])
+                and (
+                    checkpoints[key].get("metadata_sha256") != r.metadata_sha256
+                    or checkpoints[key].get("metadata_retry_at", 0) <= time.time()
+                )
+            )
+        )
     )
     return [
         r.identity
         for r in sorted(
-            pending, key=lambda r: r.completed_at_ns or r.path.stat().st_mtime_ns, reverse=True
+            pending,
+            key=lambda r: (
+                checkpoints.get(r.identity, {}).get("state") == "PUBLISHED",
+                -(r.completed_at_ns or r.path.stat().st_mtime_ns),
+            ),
         )[:limit]
     ]
+
+
+def metadata_pending(receipt: Receipt, checkpoint: dict[str, Any]) -> bool:
+    if checkpoint.get("metadata_sha256") != receipt.metadata_sha256:
+        return True
+    return checkpoint.get("metadata_state") not in {"SCHEDULED", "FAILED"}
+
+
+def advance_metadata_checkpoint(
+    backend: Backend, receipt: Receipt, previous: dict[str, Any]
+) -> dict[str, Any]:
+    """Only metadata retries change here; published audio is a permanent success."""
+    digest = receipt.metadata_sha256
+    if not metadata_pending(receipt, previous):
+        return previous
+    changed = previous.get("metadata_sha256") != digest
+    state = {**previous, "metadata_sha256": digest, "metadata_state": "PENDING"}
+    if changed:
+        for key in ("metadata_retry_at", "metadata_failures", "metadata_error"):
+            state.pop(key, None)
+    if state.get("metadata_retry_at", 0) > time.time():
+        return state
+    try:
+        if state["signature"] != list(receipt.signature):
+            raise ReceiptError("source_changed")
+        backend.schedule_metadata(receipt, state)
+    except Exception as error:
+        attempts = state.get("metadata_failures", 0) + 1
+        return {
+            **state,
+            "metadata_state": "FAILED" if attempts >= 5 else "PENDING",
+            "metadata_failures": attempts,
+            "metadata_error": str(error)
+            if isinstance(error, ReceiptError)
+            else type(error).__name__,
+            "metadata_retry_at": time.time() + min(300, 10 * 2 ** min(attempts, 5)),
+        }
+    for key in ("metadata_retry_at", "metadata_failures", "metadata_error"):
+        state.pop(key, None)
+    return {**state, "metadata_state": "SCHEDULED", "metadata_scheduled_at": time.time()}
 
 
 def advance_checkpoint(
     backend: Backend, receipt: Receipt, previous: dict[str, Any]
 ) -> dict[str, Any]:
     """Advance an isolated identity; retry state never mutates another receipt."""
+    if previous.get("state") == "PUBLISHED":
+        return advance_metadata_checkpoint(backend, receipt, previous)
     if previous.get("retry_at", 0) > time.time():
         return previous
     try:
@@ -469,6 +601,8 @@ def advance_checkpoint(
         updated.pop("error", None)
         updated.pop("retry_at", None)
         updated.pop("failures", None)
+        if updated["state"] == "PUBLISHED":
+            return advance_metadata_checkpoint(backend, receipt, updated)
         return updated
     except ReceiptError as error:
         return {**previous, "state": "NEEDS_REVIEW", "error": str(error)}
@@ -492,6 +626,8 @@ def completed_work(in_flight: dict[str, Future[dict[str, Any]]]) -> dict[str, di
 
 
 def main() -> int:
+    if sys.platform == "win32":
+        raise ReceiptError("bridge_platform_unsupported")
     import fcntl
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -593,6 +729,13 @@ def main() -> int:
                 "invalid_receipts": invalid,
                 "waiting": sum(key not in checkpoints for key in receipts),
                 "states": dict(Counter(v["state"] for v in checkpoints.values())),
+                "metadata_states": dict(
+                    Counter(
+                        v.get("metadata_state", "PENDING")
+                        for v in checkpoints.values()
+                        if v["state"] == "PUBLISHED"
+                    )
+                ),
                 "scan_seconds": round(scan_seconds, 3),
                 "in_flight": len(in_flight),
             }

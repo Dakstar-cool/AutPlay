@@ -349,7 +349,10 @@ def test_worker_downloads_real_http_audio_and_rejects_short_fragments(
     thread.start()
     try:
         selected = _info(
-            formats=[_format(url=f"http://127.0.0.1:{server.server_port}/fixture.mp3")]
+            formats=[_format(url=f"http://127.0.0.1:{server.server_port}/fixture.mp3")],
+            album="Actual Album",
+            release_date="20200102",
+            native_album_id="44" if provider == "bandcamp" else None,
         )
         monkeypatch.setattr(worker, "_select", lambda *args: selected)
         output = tmp_path / "result"
@@ -364,6 +367,8 @@ def test_worker_downloads_real_http_audio_and_rejects_short_fragments(
             result = worker._download(request)
             assert result["status"] == "downloaded"
             assert result["expected_duration_seconds"] == 12
+            assert result["source_metadata"]["fields"]["album"] == "Actual Album"
+            assert result["source_metadata"]["fields"]["release_date"] == "2020-01-02"
             assert (output / "Artist - Song.mp3").read_bytes() == audio.read_bytes()
         else:
             with pytest.raises(worker._SourceError, match="downloaded_content_invalid"):
@@ -373,3 +378,30 @@ def test_worker_downloads_real_http_audio_and_rejects_short_fragments(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_builtin_bandcamp_extractor_retains_only_exact_track_membership(monkeypatch):
+    extractor = worker._NativeBandcampIE()
+    monkeypatch.setattr(
+        worker.BandcampIE,
+        "_extract_data_attr",
+        lambda *args: {"current": {"type": "track", "id": 1, "album_id": 22, "band_id": 33}},
+    )
+
+    def extract(*args):
+        extractor._extract_data_attr("fixture", "track")
+        return {"id": "1", "album": "Album", "artist": "Artist", "track": "Song"}
+
+    monkeypatch.setattr(worker.BandcampIE, "_real_extract", extract)
+    result = extractor._real_extract("https://artist.bandcamp.com/track/song")
+    assert extractor.ie_key() == "Bandcamp"
+    assert result["native_album_id"] == 22
+    assert result["native_artist_id"] == 33
+    monkeypatch.setattr(
+        worker.BandcampIE,
+        "_extract_data_attr",
+        lambda *args: {"current": {"type": "track", "id": 99, "album_id": 22}},
+    )
+    assert "native_album_id" not in extractor._real_extract(
+        "https://artist.bandcamp.com/track/song"
+    )

@@ -190,6 +190,10 @@ internal fun rememberOfflineCoreDetailState(
             repository.trackMetadataChanges(target.stableId, profileId).collectLatest {
                 state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
             }
+        } else if (target?.kind == DetailKind.Release) {
+            repository.releaseChanges().collectLatest {
+                state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
+            }
         } else state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
     }
     return state

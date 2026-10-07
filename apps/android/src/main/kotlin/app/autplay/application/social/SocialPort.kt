@@ -8,6 +8,15 @@ import kotlinx.serialization.json.buildJsonObject
 
 /** Small authenticated boundary for S1C. Social state deliberately stays server-authoritative. */
 interface SocialPort {
+    suspend fun ownPublicId(profileId: ServerProfileId): SocialResult<String?> =
+        SocialResult.Failure("server_unavailable")
+    suspend fun registerPublicId(
+        profileId: ServerProfileId,
+        operationId: String,
+        publicId: String,
+    ): SocialResult<PublicIdRegistrationReceipt> = SocialResult.Failure("server_unavailable")
+    suspend fun lookupPublicId(profileId: ServerProfileId, publicId: String): SocialResult<ContactCard> =
+        SocialResult.Failure("server_unavailable")
     suspend fun contactCard(profileId: ServerProfileId): SocialResult<ContactCard>
     suspend fun snapshot(profileId: ServerProfileId): SocialResult<SocialSnapshot>
     suspend fun friendshipCommand(profileId: ServerProfileId, command: FriendshipCommand): SocialResult<Unit>
@@ -148,7 +157,13 @@ enum class RoomInvitationStatus { PENDING, ACCEPTED, EXPIRED, CANCELLED, FULL, U
 data class FriendSummary(val accountId: String, val displayNameHint: String?, val status: FriendshipStatus, val presence: AggregatePresence = AggregatePresence.OFFLINE) { init { validateUuid(accountId) } }
 data class RoomInvitationSummary(val invitationId: String, val roomId: String, val roomEpoch: String, val status: RoomInvitationStatus, val expiresAt: String) { init { validateUuid(invitationId); validateUuid(roomId); require(roomEpoch.length in 1..128) } }
 data class SocialSnapshot(val friends: List<FriendSummary> = emptyList(), val sentInvitations: List<RoomInvitationSummary> = emptyList(), val receivedInvitations: List<RoomInvitationSummary> = emptyList(), val presence: PresenceSettings = PresenceSettings(false, false, false)) {
-    init { require(friends.size <= 500); require(sentInvitations.size <= 100); require(receivedInvitations.size <= 100); require(friends.map { it.accountId }.distinct().size == friends.size) }
+    init {
+        require(friends.size <= 500)
+        require(sentInvitations.size <= 100)
+        require(receivedInvitations.size <= 100)
+        // Crossed requests remain separate pending directions until an explicit acceptance.
+        require(friends.map { it.accountId to it.status }.distinct().size == friends.size)
+    }
 }
 data class AcceptedRoomInvitation(val roomId: String) { init { validateUuid(roomId) } }
 

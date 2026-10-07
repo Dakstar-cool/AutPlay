@@ -37,6 +37,24 @@ class PlaybackPersistenceRepositoryTest {
         context.deleteDatabase(databaseName)
     }
 
+    @Test fun libraryContinuationPersistsTappedEntryAndItsSuccessor() = runBlocking {
+        val repository = PlaybackPersistenceRepository(database)
+        val trackIds = listOf(id(201), id(202), id(203))
+        trackIds.forEach { database.libraryDao().upsertTrackRef(track(it, uuid(204)).copy(serverUserTrackRefId = it.value)) }
+        val library = trackIds.map {
+            app.autplay.application.library.CoreLibraryEntrySummary(it.value, it.value, null, null, 0, "AVAILABLE", false, false)
+        }
+        val entries = app.autplay.continuationTrackIds(trackIds[1].value, "LIBRARY", library).map {
+            NewPlaybackQueueEntry(LocalId.random(), LocalId(it), "LIBRARY", "LOCAL_THEN_VAULT")
+        }
+        repository.activateQueue(id(205), entries, "LIBRARY", null, null, "GENERAL", 1,
+            startEntryId = entries[1].queueEntryId)
+        val restored = requireNotNull(repository.restoreActive())
+        assertEquals(1, restored.media.currentIndex)
+        assertEquals(trackIds[2].value, restored.entries[restored.media.currentIndex + 1].localUserTrackRefId)
+        assertEquals(entries[1].queueEntryId.value, restored.snapshot.currentEntryId)
+    }
+
     @Test fun presentationQueueSourcesBecomeOrganicBeforeJournalCreation() = runBlocking {
         val repository = PlaybackPersistenceRepository(database)
         val profile = uuid(108)

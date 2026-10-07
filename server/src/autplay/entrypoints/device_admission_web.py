@@ -11,7 +11,11 @@ from autplay.application.profile_pairing import ProfilePairingService
 from autplay.domain.auth import Principal
 from autplay.domain.profile_pairing import ProfilePairingError
 from autplay.domain.web_admin import WebActor, WebAdminError
-from autplay.entrypoints.admin_web_http import DeviceAdmissionReview, TrustedDeviceWebItem
+from autplay.entrypoints.admin_web_http import (
+    DeviceAdmissionReview,
+    PendingDeviceAdmission,
+    TrustedDeviceWebItem,
+)
 
 _T = TypeVar("_T")
 
@@ -58,6 +62,47 @@ class DeviceAdmissionWebAdapter:
             sas_3x4=(sas[:4], sas[4:8], sas[8:]),
         )
 
+    def pending_reviews(self, actor: WebActor) -> tuple[PendingDeviceAdmission, ...]:
+        rows = self._call(lambda: self._service.pending_device_admissions(actor))
+        return tuple(
+            PendingDeviceAdmission(
+                request_id=UUID(str(row["request_id"])),
+                device_label=str(row["nickname"]),
+                platform=str(row["platform"]),
+                app_version=str(row["app_version"]),
+                device_model_hint=(
+                    str(row["device_model_hint"]) if row["device_model_hint"] is not None else None
+                ),
+                requested_at=datetime.fromisoformat(
+                    str(row["requested_at"]).replace("Z", "+00:00")
+                ),
+                expires_at=datetime.fromisoformat(str(row["expires_at"]).replace("Z", "+00:00")),
+            )
+            for row in rows
+        )
+
+    def decide_pending_review(
+        self,
+        actor: WebActor,
+        request_id: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+        device_name: str | None,
+    ) -> None:
+        self._call(
+            lambda: self._service.decide_device_admission(
+                actor,
+                request_id,
+                action,
+                operation_id,
+                request_sha256,
+                web_session_id=actor.web_session_id,
+                from_pending_list=True,
+                device_name=device_name,
+            )
+        )
+
     def decide_review(
         self,
         actor: WebActor,
@@ -89,6 +134,8 @@ class DeviceAdmissionWebAdapter:
                 int(row["active_session_count"]),
                 UUID(str(row["device_id"])) if row.get("device_id") is not None else None,
                 bool(row.get("developer_mode_enabled", False)),
+                bool(row["blocked"]),
+                datetime.fromisoformat(str(row["connected_at"])),
             )
             for row in rows
         )

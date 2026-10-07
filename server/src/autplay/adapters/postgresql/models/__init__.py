@@ -30,6 +30,8 @@ from .catalog import (
     ReleaseTrackRow,
     WorkRow,
 )
+from .catalog_execution import CatalogExecutionRow
+from .catalogue_context import InternetCatalogueContextRow, InternetSearchContextRow
 from .discovery import (
     AcquisitionAttemptRow,
     ArtistPolicyRevisionRow,
@@ -126,6 +128,7 @@ from .public_access import (
     AccountProvisioningRateWindowRow,
     AccountRegistrationReceiptRow,
 )
+from .public_id import PublicIdRegistrationRow
 from .resource_admission import (
     AccountQuotaOverrideRow,
     QuotaOperationReceiptRow,
@@ -202,8 +205,10 @@ from .web_admin import (
     WebTerminalReceiptRow,
 )
 from .web_passkeys import WebPasskeyCeremonyRow, WebPasskeyRevocationRow, WebPasskeyRow
+from .worker_health import WorkerHealthRow
 
 MAPPED_ROWS: tuple[type[Base], ...] = (
+    WorkerHealthRow,
     TrainingRunRow,
     TrainingParticipantRow,
     TrainingPublicationRevocationRow,
@@ -244,6 +249,8 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     TrackMetadataRevisionRow,
     TrackMetadataRow,
     InternetSearchRow,
+    InternetCatalogueContextRow,
+    InternetSearchContextRow,
     InternetAcquisitionRow,
     UserAccountRow,
     DeviceRow,
@@ -263,6 +270,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     GuestPreflightRow,
     GuestTimingReportRow,
     GuestRateWindowRow,
+    PublicIdRegistrationRow,
     ServerInstanceRow,
     EnrollmentInvitationRow,
     EnrollmentExchangeReceiptRow,
@@ -309,6 +317,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     ReleaseTrackRow,
     CatalogChangeSetRow,
     CatalogChangeItemRow,
+    CatalogExecutionRow,
     AuditEventRow,
     SourceProviderRow,
     RecordingIdentifierRow,
@@ -407,6 +416,7 @@ __all__ = (
     "CandidateActionReceiptRow",
     "CatalogChangeItemRow",
     "CatalogChangeSetRow",
+    "CatalogExecutionRow",
     "DeviceAdmissionExchangeReceiptRow",
     "DeviceAdmissionRateWindowRow",
     "DeviceAdmissionRow",
@@ -443,6 +453,8 @@ __all__ = (
     "IngestExecutionRow",
     "InternalIoPolicyRow",
     "InternetAcquisitionRow",
+    "InternetCatalogueContextRow",
+    "InternetSearchContextRow",
     "InternetSearchRow",
     "JobAttemptRow",
     "JobDependencyRow",
@@ -467,6 +479,7 @@ __all__ = (
     "ProfileStatisticsSettingsRow",
     "ProviderMaintenanceRow",
     "ProviderStagingRow",
+    "PublicIdRegistrationRow",
     "QuotaOperationReceiptRow",
     "RecommendationAdaptiveProfileRow",
     "RecommendationInputSnapshotRow",
@@ -540,4 +553,5 @@ __all__ = (
     "WebSessionRow",
     "WebTerminalReceiptRow",
     "WorkRow",
+    "WorkerHealthRow",
 )

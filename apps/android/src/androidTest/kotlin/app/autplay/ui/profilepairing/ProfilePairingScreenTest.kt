@@ -1,6 +1,5 @@
 package app.autplay.ui.profilepairing
 
-import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -71,42 +70,22 @@ class ProfilePairingScreenTest {
     }
 
     @Test
-    fun admissionReviewLocatorAndComparisonCodeCanBeCopiedExactly() {
+    fun pendingAdmissionShowsAdminApprovalWithoutCodes() {
+        val polls = AtomicInteger(0)
         render(
             ProfilePairingUiState(
                 pairing = connectedState(),
-                admission = AdmissionUiState(
-                    AdmissionState.AwaitingComparison(
-                        approvedCheckpoint(),
-                        "ara6hVVJoUHZe6rx3sGJ8",
-                        "876961153582",
-                    ),
-                ),
+                admission = AdmissionUiState(AdmissionState.Pending(approvedCheckpoint())),
             ),
+            ProfilePairingActions(admission = AdmissionActions(poll = polls::incrementAndGet)),
         )
-        val clipboard = compose.activity.getSystemService(ClipboardManager::class.java)
-
-        compose.onNodeWithText(context.getString(R.string.admission_copy_review_locator))
-            .performScrollTo().performClick()
-        compose.runOnIdle {
-            assertEquals("ara6hVVJoUHZe6rx3sGJ8", clipboard.primaryClip?.getItemAt(0)?.text)
-            assertEquals(
-                true,
-                clipboard.primaryClipDescription?.extras
-                    ?.getBoolean("android.content.extra.IS_SENSITIVE"),
-            )
-        }
-
-        compose.onNodeWithText(context.getString(R.string.admission_copy_comparison_code))
-            .performScrollTo().performClick()
-        compose.runOnIdle {
-            assertEquals("8769-6115-3582", clipboard.primaryClip?.getItemAt(0)?.text)
-            assertEquals(
-                true,
-                clipboard.primaryClipDescription?.extras
-                    ?.getBoolean("android.content.extra.IS_SENSITIVE"),
-            )
-        }
+        compose.onNodeWithText(context.getString(R.string.admission_waiting_for_admin))
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Copy review locator")
+            .assertDoesNotExist()
+        compose.onNodeWithText("Copy comparison code")
+            .assertDoesNotExist()
+        compose.waitUntil(5_000L) { polls.get() > 0 }
     }
 
     @Test

@@ -42,8 +42,12 @@ Only a qualified interpreter can feed the later Face Timeline/Operations milesto
 `sha256`, `size_bytes`, and `playlist_index`. Run it with an offline FFmpeg 8.1.2 container, a
 read-only music mount, and an empty output directory. It deduplicates source hashes, selects eight
 tracks from each duration tercile (preferring different artists), verifies full source hashes,
-decodes every selected file completely, and writes three 12-second mono 16 kHz float32 clips per
-track. Source files, titles, and `sources.private.json` remain private and outside Git.
+decodes every selected file completely, and writes three mono 16 kHz float32 clips per track,
+lasting 10, 12, and 14 seconds. Each source hash deterministically chooses a different start
+within an early, middle, or late region, with at least one second of source headroom after the
+requested clip. The v2 manifest records each requested duration and validates the start, length,
+and source boundary. Existing v1 manifests from the fixed 12-second experiment remain readable.
+Source files, titles, and `sources.private.json` remain private and outside Git.
 
 Run `/opt/face/evaluate_audio.py --baseline musicnn-deam` or `--baseline effnet-jamendo` with the
 same limits above, using `/opt/face/.venv/bin/python` as the entrypoint and the prepared directory

@@ -12,6 +12,11 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0065_internet_catalogue_context", "0064_metadata_catalog_gate"),
+    ("0064_metadata_catalog_gate", "0063_social_public_id"),
+    ("0063_social_public_id", "0062_cpu_worker_health"),
+    ("0062_cpu_worker_health", "0061_admission_device_name"),
+    ("0061_admission_device_name", "0060_local_bridge_authority"),
     ("0060_local_bridge_authority", "0059_training_publication_seal"),
     ("0059_training_publication_seal", "0058_training_privacy_fence"),
     ("0058_training_privacy_fence", "0057_training_execution"),
@@ -193,7 +198,7 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == ("0060_local_bridge_authority")
+    assert _current_revision(database_harness, database_name) == ("0065_internet_catalogue_context")
 
 
 def test_local_bridge_downgrade_refuses_durable_admission(
@@ -232,7 +237,7 @@ def test_local_bridge_downgrade_refuses_durable_admission(
     with pytest.raises(DBAPIError, match="refusing local bridge authority downgrade"):
         database_harness.downgrade(empty_database_name, "0059_training_publication_seal")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0060_local_bridge_authority"
+        "0065_internet_catalogue_context"
     )
 
 

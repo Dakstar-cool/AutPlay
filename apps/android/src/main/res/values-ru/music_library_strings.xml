@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="music_download_track">Скачать трек</string>
-    <string name="music_download_body">Сохранить из Vault для прослушивания без интернета.</string>
     <string name="music_saved_offline">Доступен без интернета</string>
     <string name="music_downloading">Скачивается…</string>
     <string name="music_phone_title">Музыка на телефоне</string>

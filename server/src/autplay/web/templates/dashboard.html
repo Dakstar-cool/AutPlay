@@ -1,42 +1,46 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block head %}<script src="/admin/static/dashboard-health-v1.js?v=1" defer></script>{% endblock %}
 {% block content %}
 <header class="page-heading">
   <div><h1>{{ t("dashboard_title") }}</h1><p class="page-summary">{{ t("dashboard_intro") }}</p></div>
-  <dl class="identity"><div><dt>{{ t("server_label") }}</dt><dd>{{ server_label }}</dd></div><div><dt>{{ t("current_account") }}</dt><dd>{{ account_label }}</dd></div><div><dt>{{ t("role") }}</dt><dd>{{ role }}</dd></div></dl>
 </header>
-{% if mobile_api_origin is defined and mobile_api_origin %}
-<section aria-labelledby="server-addresses-title">
-  <h2 id="server-addresses-title">{{ t("server_addresses_title") }}</h2>
-  <p class="page-summary">{{ t("server_addresses_hint") }}</p>
-  <dl class="facts">
-    <div><dt>{{ t("server_address_web") }}</dt><dd><code>{{ web_origin }}</code></dd></div>
-    <div><dt>{{ t("server_address_mobile") }}</dt><dd><code>{{ mobile_api_origin }}</code></dd></div>
-  </dl>
+<dl class="identity dashboard-identity"><div><dt>{{ t("server_label") }}</dt><dd>{{ server_label }}</dd></div><div><dt>{{ t("current_account") }}</dt><dd>{{ t('role_' ~ account_label|lower) if account_label in ('OWNER', 'ADMIN') else account_label }}</dd></div><div><dt>{{ t("role") }}</dt><dd>{{ t('role_' ~ role|lower) if role in ('OWNER', 'ADMIN') else role }}</dd></div></dl>
+<section aria-labelledby="health-title">
+  <h2 id="health-title">{{ t("status") }}</h2>
+  <div class="status-grid" data-health-refresh="/admin/?lang={{ locale }}&amp;fragment=health" data-stale-label="{{ t('worker_no_signal') }}" data-stale-detail="{{ t('worker_refresh_failed') }}">
+    {% include "dashboard_health.html" %}
+  </div>
 </section>
-{% endif %}
 <section aria-labelledby="next-action-title">
   <h2 id="next-action-title">{{ t("next_action_title") }}</h2>
   <div class="section-grid">
   {% for section in navigation %}{% if section.children %}
     <article class="section-card">
-      <h3><a href="{{ section.href }}?lang={{ locale }}">{{ t(section.label) }}</a></h3>
-      <ul>{% for item in section.children %}<li><a href="{{ item.href }}?lang={{ locale }}">{{ t(item.label) }}</a></li>{% endfor %}</ul>
+      <div class="section-card-heading">{{ icon(section.label) }}<h3><a href="{{ section.href }}?lang={{ locale }}">{{ t(section.label) }}</a></h3></div>
+      <p>{{ t(section.href.rsplit('/', 1)[-1] ~ '_section_intro') }}</p>
+      <ul>{% for item in section.children %}<li><a href="{{ item.href }}?lang={{ locale }}">{{ t(item.label) }}{{ icon('arrow') }}</a></li>{% endfor %}</ul>
     </article>
   {% endif %}{% endfor %}
   </div>
 </section>
-<section aria-labelledby="health-title">
-  <h2 id="health-title">{{ t("status") }}</h2>
-  <div class="status-grid">
-  {% for item in health %}
-    <article class="status-card"><div class="status-line"><h3>{{ t(item.label) }}</h3><span class="pill pill-{{ item.tone }}">{{ t(item.status) }}</span></div><p>{{ t(item.detail) }}</p></article>
-  {% endfor %}
-  </div>
+<div class="dashboard-panels">
+{% if mobile_api_origin is defined and mobile_api_origin %}
+<section class="section-card" aria-labelledby="server-addresses-title">
+  <h2 id="server-addresses-title">{{ t("server_addresses_title") }}</h2>
+  <p>{{ t("server_addresses_hint") }}</p>
+  <dl class="facts">
+    <div><dt>{{ t("server_address_web") }}</dt><dd><code>{{ web_origin }}</code></dd></div>
+    <div><dt>{{ t("server_address_mobile") }}</dt><dd><code>{{ mobile_api_origin }}</code></dd></div>
+  </dl>
+  <a class="button secondary" href="/admin/connection-requests?lang={{ locale }}">{{ t("connection_setup_title") }}</a>
 </section>
-<section aria-labelledby="capability-title">
+{% endif %}
+<section class="section-card" aria-labelledby="capability-title">
   <h2 id="capability-title">{{ t("details") }}</h2>
   <dl class="facts">{% for item in facts %}<div><dt>{{ t(item.label) }}</dt><dd>{% if item.value is string and item.value.startswith('status_') %}{{ t(item.value) }}{% else %}{{ item.value }}{% endif %}</dd></div>{% endfor %}</dl>
 </section>
+</div>
 <section class="danger-zone" aria-label="{{ t('sign_out') }}">
   <a class="button secondary" href="{{ logout_current_url }}?lang={{ locale }}">{{ t("sign_out") }}</a>
   <a class="button secondary" href="{{ logout_all_url }}?lang={{ locale }}">{{ t("logout_all") }}</a>

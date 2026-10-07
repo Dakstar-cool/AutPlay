@@ -33,9 +33,13 @@ from autplay.domain.resource_execution import ExitKind, ProcessExitEvidence, Pro
 from autplay.runtime import provider_maintenance as maintenance_runtime
 from autplay.runtime.provider_maintenance import ProcessProviderMaintenanceStorage
 from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .conftest import DatabaseHarness
+from .historical_guard_support import (
+    assert_current_context_refusal,
+    internet_acquisition_for_execution,
+)
 from .test_provider_scratch import handed_off
 from .test_provider_staging import writer
 from .test_resource_admission_runtime import AdmissionHarness, admission, present
@@ -264,8 +268,12 @@ def test_run_identity_closure_and_downgrade_are_guarded(
     with admission.sessions.begin() as session, pytest.raises(IntegrityError):
         present(session.get(ProviderMaintenanceRow, ticket.execution_id)).claim_id = uuid4()
         session.flush()
-    with pytest.raises(DBAPIError, match="Refusing to discard"):
-        database_harness.downgrade(database_name, "0041_provider_scratch")
+    acquisition_id = internet_acquisition_for_execution(
+        database_harness, database_name, owned.execution_id
+    )
+    assert_current_context_refusal(
+        database_harness, database_name, acquisition_id, "0041_provider_scratch"
+    )
     proof = ProcessExitEvidence(ExitKind.PROCESS_EXIT, b"p" * 32, 0, child)
     assert repository.confirm(ticket, proof) == repository.confirm(ticket, proof)
     with admission.sessions.begin() as session, pytest.raises(IntegrityError):

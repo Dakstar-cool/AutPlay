@@ -23,9 +23,10 @@ from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.vault import OpaqueStorageKey, Sha256Digest, VaultLimits
 from autplay.ports.jobs import EnqueueJob
 from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import IntegrityError
 
 from .conftest import DatabaseHarness
+from .historical_guard_support import assert_current_context_refusal
 from .test_resource_admission_runtime import AdmissionHarness, admission, fence, present
 from .test_resource_worker_admission import internet
 
@@ -168,8 +169,9 @@ def test_internet_upload_lineage_is_unique_immutable_and_excludes_device_api(
             ),
             {"copy": uuid4(), "id": upload_id},
         )
-    with pytest.raises(DBAPIError, match="Refusing to discard Internet ingest lineage"):
-        database_harness.downgrade(database_name, "0038_worker_resource_wait")
+    assert_current_context_refusal(
+        database_harness, database_name, claim.acquisition_id, "0038_worker_resource_wait"
+    )
 
 
 def test_device_upload_replay_is_bound_to_the_original_device(admission: AdmissionHarness) -> None:

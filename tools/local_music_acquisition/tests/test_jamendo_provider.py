@@ -101,6 +101,32 @@ def test_permission_refresh_keeps_strict_candidate_validation() -> None:
         jamendo.parse_search_response(payload, limit=1, strict_candidates=True)
 
 
+def test_native_metadata_comes_from_refreshed_download_not_playlist(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    from local_music_acquisition.source_metadata import native_metadata
+
+    candidate = _candidate("Artist", "Title")
+    evidence = native_metadata(
+        "jamendo",
+        "1",
+        {"title": "Title", "album": "Source Album", "release_date": "2020"},
+        native_album_id="22",
+    )
+    refreshed = replace(candidate, album="Source Album", source_metadata=evidence)
+    audio_path = tmp_path / "song.mp3"
+    audio_path.write_bytes(b"ID3-fixture")
+    monkeypatch.setattr(jamendo, "search_tracks", lambda *args, **kwargs: (candidate,))
+    monkeypatch.setattr(
+        jamendo,
+        "download_track",
+        lambda *args, **kwargs: SimpleNamespace(audio_path=audio_path, track=refreshed),
+    )
+    artifact = _provider().acquire(PlaylistItem(1, "Artist", "Title", "TXT Album"), tmp_path)
+    assert artifact.source_metadata == evidence
+    assert artifact.expected_duration_seconds == 180
+
+
 def test_jamendo_transport_retries_once_with_bounded_wall_clock(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

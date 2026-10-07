@@ -30,8 +30,6 @@ class TrackMetadataWorker(context: Context, parameters: WorkerParameters) : Coro
             } catch (_: Exception) { Result.retry() }
         }
         if (runAttemptCount >= 12) return Result.failure(workDataOf("error" to "METADATA_RELOAD_REQUIRED"))
-        val metered = applicationContext.getSystemService(android.net.ConnectivityManager::class.java)?.isActiveNetworkMetered ?: true
-        if (!syncNetworkAllowed(settings.syncOnMeteredNetwork, metered)) return Result.retry()
         val binding = ClientEventBinding(settings.activeUserId ?: return Result.failure(), settings.deviceId ?: return Result.failure(), settings.activeServerProfileId)
         return try {
             val api = AutPlayRuntime.serverFeatures(applicationContext, binding)

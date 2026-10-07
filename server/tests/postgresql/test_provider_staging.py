@@ -24,9 +24,10 @@ from autplay.domain.resource_execution import (
 from autplay.domain.vault import OpaqueStorageKey
 from autplay.entrypoints.vault_reconciliation import build_vault_reconciliation_service
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import IntegrityError
 
 from .conftest import DatabaseHarness
+from .historical_guard_support import assert_current_context_refusal
 from .test_resource_admission_runtime import AdmissionHarness, admission, fence, present
 from .test_resource_execution import shift_clock
 from .test_resource_worker_admission import internet, successor
@@ -188,8 +189,9 @@ def test_provider_receipt_identity_proof_and_transitions_are_immutable(
             ),
             {"value": b"x" * 32, "execution": owned.ticket.execution_id},
         )
-    with pytest.raises(DBAPIError, match="Refusing to discard provider staging ownership"):
-        database_harness.downgrade(database_name, "0039_internet_ingest_lineage")
+    assert_current_context_refusal(
+        database_harness, database_name, owned.claim.acquisition_id, "0039_internet_ingest_lineage"
+    )
 
 
 def test_legacy_provider_execution_without_staging_receipt_can_only_drain(

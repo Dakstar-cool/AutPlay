@@ -7,16 +7,127 @@ write. Fragment downloaders must never run: even stdout mode can write files.
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import re
 import shutil
 import sys
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from autplay.adapters.media.tools import SubprocessExecutableRunner
+from autplay.domain.track_metadata import (
+    MAX_SOURCE_METADATA_BYTES,
+    sanitize_source_metadata,
+    source_metadata_document,
+)
 from autplay.domain.vault import VaultError
+
+SOURCE_METADATA_FILE = "source-metadata.json"
+# The existing private protocol encodes Unicode as ASCII escapes.
+PROVIDER_RESULT_BYTES = 6 * MAX_SOURCE_METADATA_BYTES + 1024
+
+
+def youtube_source_metadata(info: dict[str, Any], candidate_id: str) -> dict[str, object] | None:
+    """Only credits and dates actually reported for the exact downloaded track."""
+    if info.get("id") != candidate_id:
+        return None
+    fields: dict[str, object] = {}
+    for target, source in (
+        ("title", "track"),
+        ("artist", "artist"),
+        ("album", "album"),
+        ("album_artist", "album_artist"),
+        ("track_number", "track_number"),
+        ("disc_number", "disc_number"),
+        ("genres", "genres"),
+        ("mb_recording_id", "mb_recording_id"),
+        ("mb_release_id", "mb_release_id"),
+        ("mb_release_group_id", "mb_release_group_id"),
+    ):
+        value = info.get(source)
+        if isinstance(value, str) and len(value) <= 500:
+            fields[target] = value.strip()
+        elif type(value) is int:
+            fields[target] = value
+        elif target == "genres" and isinstance(value, list):
+            fields[target] = [
+                part.strip()
+                for part in value[:12]
+                if isinstance(part, str) and 1 <= len(part.strip()) <= 100
+            ]
+    for name in ("artist", "album_artist"):
+        values = info.get(name + "s")
+        if (
+            name not in fields
+            and isinstance(values, list)
+            and 1 <= len(values) <= 12
+            and all(isinstance(part, str) and 1 <= len(part.strip()) <= 500 for part in values)
+        ):
+            joined = ", ".join(part.strip() for part in values)
+            if len(joined) <= 500:
+                fields[name] = joined
+    for key in ("release_date", "original_release_date"):
+        value = info.get(key)
+        if isinstance(value, str) and len(value) <= 10:
+            if re.fullmatch(r"[0-9]{8}", value):
+                value = f"{value[:4]}-{value[4:6]}-{value[6:]}"
+            fields[key] = value
+    if not fields.get("release_date"):
+        year, timestamp = info.get("release_year"), info.get("release_timestamp")
+        if type(year) is int and 1 <= year <= 9999:
+            fields["release_date"] = f"{year:04d}"
+        elif isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+            with suppress(ValueError, OverflowError, OSError):
+                fields["release_date"] = datetime.fromtimestamp(timestamp, UTC).date().isoformat()
+    external: dict[str, object] = {}
+    for key in ("isrc", "native_album_id", "native_artist_id"):
+        value = info.get(key)
+        if isinstance(value, str) and len(value) <= 128:
+            external[key] = value.strip().upper() if key == "isrc" else value.strip()
+    artwork: list[dict[str, object]] = []
+    image = info.get("thumbnail")
+    if isinstance(image, str) and len(image) <= 2048:
+        try:
+            host = urlsplit(image).hostname or ""
+        except ValueError:
+            host = ""
+        if host in {"ytimg.com", "youtube.com"} or host.endswith((".ytimg.com", ".youtube.com")):
+            artwork.append({"kind": "thumbnail", "url": image, "source_id": candidate_id})
+    try:
+        return source_metadata_document(
+            sanitize_source_metadata(
+                {
+                    "schema_version": 1,
+                    "provider": "YOUTUBE",
+                    "source_id": candidate_id,
+                    "fields": fields,
+                    "external_ids": external,
+                    "artwork": artwork,
+                }
+            )
+        )
+    except ValueError, TypeError, OverflowError:
+        return None
+
+
+def write_source_metadata(info: dict[str, Any], candidate_id: str) -> None:
+    """A fixed private sidecar is optional; media stdout remains byte-for-byte audio."""
+    with suppress(ValueError, TypeError, OverflowError, OSError):
+        evidence = youtube_source_metadata(info, candidate_id)
+        if evidence is None:
+            return
+        payload = json.dumps(evidence, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(payload) > MAX_SOURCE_METADATA_BYTES:
+            return
+        with Path(SOURCE_METADATA_FILE).open("xb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+
 
 MEDIA_ERROR_EXIT_CODES = {
     "provider_token_configuration_invalid": 20,
@@ -248,6 +359,7 @@ def main() -> int:
             if len(selected) != 1:
                 return 2
             stream_format(ydl, selected[0])
+            write_source_metadata(info, sys.argv[1])
         return 0
     except ProviderMediaError as error:
         return MEDIA_ERROR_EXIT_CODES[error.code]

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,11 +20,11 @@ import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayPlatformIcon
 import app.autplay.ui.AutPlayTokens
 import app.autplay.ui.PreferenceSection
-import app.autplay.ui.UiDestination
 import app.autplay.ui.profilepairing.publicRegistrationBlocksOrdinaryFirstBind
 import app.autplay.ui.profilepairing.ProfilePairingUiState
 import app.autplay.application.publicaccess.PublicAccountRegistrationState
 import app.autplay.ui.social.SocialPanel
+import app.autplay.ui.social.SocialPublicIdPanel
 import app.autplay.ui.statistics.OwnerProfileStatisticsCard
 
 internal fun profileRequiresConnectionAttention(profile: ProfilePairingUiState): Boolean {
@@ -49,10 +48,10 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
     val profile = state.profilePairing
     val connected = profile.pairing is PairingState.Connected
     val activeFlow = profileRequiresConnectionAttention(profile)
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer) {
-            Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(AutPlayTokens.dimensions.sectionSpacing)) {
+        Surface(shape = MaterialTheme.shapes.extraLarge, color = AutPlayTokens.colors.raisedSurface) {
+            Row(Modifier.fillMaxWidth().padding(AutPlayTokens.dimensions.screenPadding), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Surface(shape = CircleShape, color = AutPlayTokens.colors.softAccent, contentColor = MaterialTheme.colorScheme.primary) {
                     AutPlayPlatformIcon(AutPlayIcon.Profile, null, Modifier.padding(16.dp).size(30.dp))
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -61,12 +60,16 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
                         if (connected) profile.serverLabel ?: stringResource(R.string.profile_connection_connected)
                         else stringResource(R.string.profile_connection_local),
                         style = MaterialTheme.typography.bodyMedium,
+                        color = AutPlayTokens.colors.mutedText,
                     )
                 }
             }
         }
         if (activeFlow) ProfileFrontendScreen(profile, actions.profilePairing)
-        OwnerProfileStatisticsCard(state.ownerStatistics)
+        OwnerProfileStatisticsCard(state.ownerStatisticsState, actions.refreshOwnerStatistics)
+        if (!state.socialAvailable) {
+            SocialPublicIdPanel(state.social, actions.social, serverAvailable = false)
+        }
         PreferenceSection(stringResource(R.string.profile_friends), AutPlayIcon.Wave, stringResource(R.string.profile_friends_summary)) {
             if (state.socialAvailable) SocialPanel(state.social, actions.social)
             else Text(stringResource(R.string.profile_friends_local), color = AutPlayTokens.colors.mutedText)
@@ -77,9 +80,6 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
             stringResource(if (connected) R.string.profile_account_devices_summary else R.string.profile_connect_optional_summary),
         ) {
             ProfileFrontendScreen(profile, actions.profilePairing)
-        }
-        OutlinedButton(onClick = { actions.navigate(UiDestination.Settings) }, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.nav_settings))
         }
     }
 }

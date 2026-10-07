@@ -1,7 +1,6 @@
 package app.autplay.work
 
 import android.content.Context
-import android.net.ConnectivityManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.autplay.AutPlayRuntime
@@ -23,9 +22,6 @@ class SyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWork
         val user = settings.activeUserId ?: return Result.success()
         val device = settings.deviceId ?: return Result.success()
         if (settings.activeServerProfileId != request.serverProfileId) return Result.success()
-        val metered = applicationContext.getSystemService(ConnectivityManager::class.java)
-            ?.isActiveNetworkMetered ?: true
-        if (!syncNetworkAllowed(settings.syncOnMeteredNetwork, metered)) return Result.retry()
         return try {
             val database = AutPlayRuntime.database(applicationContext)
             val initial = ClientEventBinding(user, device, request.serverProfileId)
@@ -60,8 +56,3 @@ internal fun syncWorkerErrorDisposition(error: Exception): SyncWorkerErrorDispos
         SyncWorkerErrorDisposition.FAILURE
     else -> SyncWorkerErrorDisposition.RETRY
 }
-
-internal fun syncNetworkAllowed(
-    allowMeteredNetwork: Boolean,
-    activeNetworkMetered: Boolean,
-): Boolean = allowMeteredNetwork || !activeNetworkMetered

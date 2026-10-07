@@ -51,6 +51,8 @@ class InternetAcquisitionRepository(Protocol):
         target: InternetAcquisitionTarget,
         execution_id: UUID,
         verified: VerifiedStagedFile,
+        *,
+        source_metadata: dict[str, object] | None = None,
     ) -> InternetHandoffReceipt:
         """Persist one verified, exited provider result and its ingest job atomically."""
         ...
@@ -64,6 +66,7 @@ class InternetAcquisitionRepository(Protocol):
 class ProviderFileReceipt:
     execution_id: UUID
     verified: VerifiedStagedFile
+    source_metadata: dict[str, object] | None = None
 
 
 class ProviderExecutor(Protocol):
@@ -141,7 +144,13 @@ class ControlledInternetAcquisitionHandler:
             raise RetryableJobError("resource_service_unavailable")
         result = self._executor.execute(claim, admitted, target.candidate_id)
         context.raise_if_cancelled()
-        self._repository.handoff(claim, target, result.execution_id, result.verified)
+        self._repository.handoff(
+            claim,
+            target,
+            result.execution_id,
+            result.verified,
+            source_metadata=result.source_metadata,
+        )
         # RELEASED is terminal for this stable operation ID. Failed attempts must
         # remain rebindable; their executions keep their own charge until exit.
         # Release only after the durable handoff, never from a retry's finally.

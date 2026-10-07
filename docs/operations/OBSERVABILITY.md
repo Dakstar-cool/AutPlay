@@ -15,6 +15,29 @@ Labels are bounded. Room/user/device/Recording identifiers, tokens, URLs, paths 
 forbidden as metric labels. Structured logs use sanitized request IDs and the existing recursive
 redaction boundary.
 
+## Authenticated Web Admin health cards
+
+The CPU process publishes its latest observation every five seconds in `jobs.worker_health`
+(migration `0062_cpu_worker_health`). One row per personal server bounds retention. A new reporting
+process fences older writers and their shutdown reports. No worker IDs, paths or job payloads reach
+the browser. Identity must resolve to exactly one server; ambiguous identity leaves telemetry absent.
+
+CPU utilization is the cgroup-v2 `cpu.stat` usage delta divided by elapsed time and the smaller of
+`cpu.max` quota and effective CPU set. It covers the container and child processes, including media
+tools. Memory uses `memory.current` / `memory.max` (container accounting, including cache). Missing
+controllers or unlimited memory limits remain unknown; unsupported hosts never fabricate zero.
+The independent reporter runs while a job is executing and while the worker is idle. Telemetry uses
+an independent short-transaction pool; collection/publishing errors never change job/lease outcomes.
+
+The dashboard refreshes health cards every ten seconds. A stopped process or heartbeat older than
+thirty seconds is shown as no contact, with expired load values hidden. A browser unable to refresh
+for thirty seconds also hides its previous readings. Queue/active-job counts are scoped to the
+current account and CPU-supported job types. Idle describes process activity, not low CPU usage.
+
+Vault warnings show counts of missing/corrupt/quarantined replicas, quarantined objects and the
+current account's quarantined uploads. Both dashboard and Vault detail use the same warning rule.
+These are persisted integrity observations, not a live disk capacity or mount probe.
+
 ## Minimum dashboard panels
 
 | Panel | Query/measure | Alert |

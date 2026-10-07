@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_surface_shuffle_on">Shuffle on</string>
+    <string name="player_surface_shuffle_off">Shuffle off</string>
+</resources>

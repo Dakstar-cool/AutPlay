@@ -31,6 +31,13 @@ def metadata_child_launch(*, proxy: str | None = None) -> tuple[list[str], dict[
     return arguments, environment
 
 
+def catalog_child_launch(*, proxy: str | None = None) -> tuple[list[str], dict[str, str]]:
+    arguments, environment = _python_child_launch("autplay.adapters.filesystem.catalog_child")
+    if proxy is not None:
+        environment["AUTPLAY_METADATA_PROXY"] = proxy
+    return arguments, environment
+
+
 def training_child_launch() -> tuple[list[str], dict[str, str]]:
     """Launch the optional training package from its own pinned environment."""
 

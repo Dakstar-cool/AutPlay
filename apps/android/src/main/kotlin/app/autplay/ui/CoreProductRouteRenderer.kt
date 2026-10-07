@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.ui.core.DetailTarget
+import app.autplay.application.search.LibrarySearchKind
+import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.LibraryFilter
 import app.autplay.ui.core.LibrarySection
 import app.autplay.ui.core.LibrarySort
@@ -46,6 +48,7 @@ internal data class CoreProductRouteActions(
     val addToQueue: (String) -> Unit = {},
     val manualPlaylists: List<ManualPlaylistUi> = emptyList(),
     val manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
+    val changeSearchKind: (LibrarySearchKind) -> Unit = {},
 )
 
 @Composable
@@ -97,6 +100,7 @@ internal fun CoreProductRouteRenderer(
             state = searchState,
             contentPadding = contentPadding,
             onQueryChange = actions.changeQuery,
+            onSearchKindChange = actions.changeSearchKind,
             onSearch = actions.submitSearch,
             onPlay = actions.playSearchResult,
             onPlayVault = actions.playVaultSearchResult,
@@ -105,7 +109,9 @@ internal fun CoreProductRouteRenderer(
             listAnchor = searchListAnchor,
             onListAnchorChange = actions.changeSearchAnchor,
         )
-        UiDestination.Library -> if (widthClass != UiWidthClass.Expanded && selectedDetail != null) {
+        UiDestination.Library -> if (widthClass != UiWidthClass.Expanded &&
+            selectedDetail != null && selectedDetail.kind != DetailKind.Track
+        ) {
             CoreProductDetailScreen(
                 state = detailState,
                 contentPadding = contentPadding,
@@ -120,14 +126,19 @@ internal fun CoreProductRouteRenderer(
                 onDownload = actions.downloadTrack,
                 onRepairAccess = actions.repairAccess,
                 onOpenReview = actions.openReview,
-                onOpenDetail = actions.openDetail,
+                onOpenDetail = { target ->
+                    if (target.kind == DetailKind.Track) actions.playTrack(target.stableId)
+                    else actions.openDetail(target)
+                },
             )
         } else {
             LibraryProductScreen(
-                state = libraryState,
+                state = libraryState.copy(tracks = libraryState.tracks.map { track ->
+                    track.copy(selected = track.id == currentTrackRefId)
+                }),
                 contentPadding = contentPadding,
                 onAddLocal = actions.addLocal,
-                onSelect = actions.selectTrack,
+                onSelect = actions.playTrack,
                 onRemoveOrRestore = actions.removeOrRestore,
                 onLike = actions.likeTrack,
                 onSectionChange = actions.changeLibrarySection,
@@ -137,6 +148,13 @@ internal fun CoreProductRouteRenderer(
                 onOpenReview = actions.openReview,
                 listAnchor = libraryListAnchor,
                 onListAnchorChange = actions.changeLibraryAnchor,
+                onOpenDownloads = actions.openOffline,
+                onPlayNext = actions.playNext,
+                onAddToQueue = actions.addToQueue,
+                onDownload = actions.downloadTrack,
+                onRepairAccess = actions.repairAccess,
+                manualPlaylists = actions.manualPlaylists,
+                manualPlaylistActions = actions.manualPlaylistActions,
             )
         }
         else -> error("CORE_PRODUCT_DESTINATION_REQUIRED")

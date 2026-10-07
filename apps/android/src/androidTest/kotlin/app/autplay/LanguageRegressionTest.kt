@@ -20,12 +20,12 @@ class LanguageRegressionTest {
     @Before fun prepare() = runBlocking {
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
-        applicationNonSecretSettingsStore(context).update(NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION))
+        applicationNonSecretSettingsStore(context).update(NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "language_fixture"))
     }
     @After fun finish(): Unit = runBlocking {
         activity?.close()
         InstrumentationRegistry.getInstrumentation().runOnMainSync { synchronizeFrameworkAppLanguage(context, AppLanguage.System) }
-        applicationNonSecretSettingsStore(context).update(NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION))
+        applicationNonSecretSettingsStore(context).update(NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "language_fixture"))
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
         Unit
@@ -34,7 +34,7 @@ class LanguageRegressionTest {
         activity = ActivityScenario.launch(MainActivity::class.java)
         for (language in listOf(AppLanguage.English, AppLanguage.Russian, AppLanguage.System)) {
             runBlocking {
-                applicationNonSecretSettingsStore(context).update(NonSecretSettings(appLanguage = language.storedValue, onboardingRevision = CURRENT_ONBOARDING_REVISION))
+                applicationNonSecretSettingsStore(context).update(NonSecretSettings(appLanguage = language.storedValue, onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "language_fixture"))
             }
             InstrumentationRegistry.getInstrumentation().runOnMainSync { synchronizeFrameworkAppLanguage(context, language) }
             awaitNavigation(language)

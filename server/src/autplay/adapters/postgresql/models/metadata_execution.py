@@ -89,12 +89,18 @@ class MetadataProviderGateRow(Base):
     execution_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("library.metadata_execution.execution_id")
     )
+    catalog_execution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("library.catalog_execution.execution_id")
+    )
     request_id: Mapped[UUID | None] = mapped_column()
     next_request_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True))
     __table_args__ = (
         CheckConstraint("singleton_id=1", name="metadata_provider_gate_singleton_check"),
         CheckConstraint(
-            "(execution_id IS NULL)=(request_id IS NULL)",
+            "(request_id IS NULL AND execution_id IS NULL AND catalog_execution_id IS NULL) OR "
+            "(request_id IS NOT NULL AND ((execution_id IS NOT NULL "
+            "AND catalog_execution_id IS NULL) "
+            "OR (execution_id IS NULL AND catalog_execution_id IS NOT NULL)))",
             name="metadata_provider_gate_owner_check",
         ),
         {"schema": "library"},

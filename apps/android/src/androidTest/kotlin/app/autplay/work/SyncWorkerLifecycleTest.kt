@@ -84,7 +84,7 @@ class SyncWorkerLifecycleTest {
         } finally { fixture.close() }
     }
 
-    @Test fun policyReconciliationCancelsActiveLeaseAndWaitsForRealUnmeteredNetwork() = runBlocking {
+    @Test fun syncRunsOnMeteredNetworkWhenOfflineDownloadsAreWifiOnly() = runBlocking {
         val fixture = Fixture()
         assumeTrue(
             "Changing the system Wi-Fi transport requires a disposable emulator",
@@ -92,28 +92,12 @@ class SyncWorkerLifecycleTest {
         )
         try {
             fixture.start()
-            fixture.holdPush = true
-            val event = fixture.record()
-            fixture.await { fixture.pushEntered.count == 0L }
-            assertEquals(NetworkType.CONNECTED, fixture.work().single().constraints.requiredNetworkType)
+            fixture.settings.update(fixture.settings.settings.first().copy(downloadOnMeteredNetwork = false))
             fixture.wifi(false)
             fixture.await { fixture.network.activeNetworkInfo?.isConnected == true && fixture.network.isActiveNetworkMetered }
-            fixture.settings.update(fixture.settings.settings.first().copy(syncOnMeteredNetwork = false))
-            fixture.scheduler.reconcile(fixture.request)
-            fixture.await { fixture.database.journalDao().event(event)?.state == "PENDING" }
-            val pending = requireNotNull(fixture.database.journalDao().event(event))
-            assertEquals(0, pending.attemptCount)
-            assertEquals(null, pending.leaseToken)
-            val replacement = fixture.work().last { !it.state.isFinished }
-            assertEquals(NetworkType.UNMETERED, replacement.constraints.requiredNetworkType)
-            assertEquals(WorkInfo.State.ENQUEUED, replacement.state)
-            val requestsBeforeWifi = fixture.server.requestCount
-            fixture.release.countDown()
-            delay(500)
-            assertEquals(requestsBeforeWifi, fixture.server.requestCount)
-            fixture.wifi(true)
-            fixture.await { !fixture.network.isActiveNetworkMetered }
+            val event = fixture.record()
             fixture.awaitAck(event)
+            assertTrue(fixture.work().all { it.constraints.requiredNetworkType == NetworkType.CONNECTED })
             assertEquals(1, fixture.sentHashes.distinct().size)
         } finally { fixture.close() }
     }
@@ -222,7 +206,7 @@ class SyncWorkerLifecycleTest {
             server.start()
             val origin = server.url("/").toString().trimEnd('/')
             settings.update(NonSecretSettings(activeServerProfileId = profile, activeUserId = binding.userId,
-                deviceId = binding.deviceId, serverBaseUrl = origin, streamBaseUrl = origin, syncOnMeteredNetwork = true))
+                deviceId = binding.deviceId, serverBaseUrl = origin, streamBaseUrl = origin, downloadOnMeteredNetwork = true))
             database.journalDao().insertLineage(JournalLineageEntity(ids[4], ids[1], ids[2], ids[3], 1, 1))
             database.syncDao().upsertCursor(SyncCursorEntity(ids[0], ids[4], ids[2], ids[3], "fixture-cursor", 0, 0, null, "READY", null, 1))
             database.libraryDao().upsertTrackRef(UserTrackRefEntity(ids[5], ids[6], null, null, "RESOLVED",

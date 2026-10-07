@@ -172,6 +172,59 @@ administrator session. The administrative API publication is always literal `127
 separate mobile API contains no administrative Web routes. Cleartext admin Web remains forbidden
 outside literal loopback.
 
+### Optional Admin music acquisition control
+
+`compose.acquisition-control.yaml` adds `/admin/acquisition` for the standalone
+TXT downloader. It exposes playlist upload, exact artist/title jobs, artist
+groups with explicit titles, queue status, pause/resume, retry and verification.
+When server Jamendo Discovery is enabled, title and artist lookup can feed
+selected exact identities into the same file queue; downloads still follow
+the standalone agent's operator-approved source order.
+Worker counts are 1–4; YouTube and SoundCloud provider lanes are 1–2. Each
+playlist has its own immutable queue. The page never grants the API process
+Docker access, provider credentials or the music output directory.
+
+Prepare a private host spool owned by the agent UID and a shared group that
+contains the agent. Set `AUTPLAY_RUNTIME_ACQUISITION_SHARED_GID` to that group's
+numeric ID; the overlay adds the Admin container to it. Give the root and its
+`requests`, `playlists`, and `status` directories mode `2770` (setgid).
+The API and agent publish private group-readable files with mode `0660`.
+Add this overlay after the private Admin overlay:
+
+```text
+AUTPLAY_RUNTIME_ACQUISITION_CONTROL_ROOT=/srv/autplay/operator/acquisition-control
+AUTPLAY_RUNTIME_ACQUISITION_SHARED_GID=<agent group ID>
+docker compose <normal -f arguments> -f deploy/compose/compose.acquisition-control.yaml config --quiet
+```
+
+Run one agent outside the API container with the tested downloader environment
+and the existing `run-queue.sh` launcher. The launcher and its environment file
+remain the only source of provider enablement and rights confirmation:
+
+Set at least one approved source explicitly before starting the agent:
+`ACQUISITION_JAMENDO_ID` for Jamendo, or `ACQUISITION_ENABLE_HITMO=1`,
+`ACQUISITION_ENABLE_YOUTUBE=1`, `ACQUISITION_ENABLE_SOUNDCLOUD=1` or
+`ACQUISITION_ENABLE_BANDCAMP=1`, or a protected `ACQUISITION_YANDEX_TOKEN`
+file where your download rights permit it.
+Unset source switches default to disabled in this agent.
+
+```sh
+cd tools/local_music_acquisition
+uv run --frozen local-music-acquire-admin-agent \
+  --control-root /srv/autplay/operator/acquisition-control \
+  --queue-root /srv/autplay/operator/acquisition/web-queues \
+  --output-dir /srv/autplay/music-downloads-v2 \
+  --launcher /usr/local/lib/autplay-acquisition/run-queue.sh
+```
+
+The agent must have permission to run the fixed launcher and write its queue
+and output directories. Run only one agent per spool. Do not run the older
+`autplay-acquisition.service` against the same output at the same time; the
+downloader output lock rejects concurrent processes. A queue pass ends after
+its current work. Use **Run pass** to continue pending work after a cooldown,
+and **Resume** to remove a pause before running it. Downloaded files remain
+outside the AutPlay library and Vault until a separate import.
+
 ### Optional Admin backup control
 
 `compose.backup-control.yaml` adds the owner-only `/admin/recovery` control page without granting

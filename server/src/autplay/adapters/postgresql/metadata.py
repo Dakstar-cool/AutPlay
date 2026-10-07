@@ -28,6 +28,8 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
     ]
 )
 EXPECTED_TABLE_KEYS: tuple[str, ...] = (
+    "jobs.worker_health",
+    "social.public_id_registration",
     "ml.training_checkpoint",
     "ml.training_execution",
     "ml.training_run",
@@ -53,8 +55,11 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "account.self_pairing_command",
     "account.self_pairing_rate",
     "discovery.internet_search",
+    "discovery.internet_catalogue_context",
+    "discovery.internet_search_context",
     "discovery.internet_acquisition",
     "library.metadata_execution",
+    "library.catalog_execution",
     "library.metadata_provider_gate",
     "library.metadata_artwork",
     "library.track_metadata",
@@ -200,6 +205,8 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.guest_rate_window",
 )
 EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
+    "jobs.worker_health": 9,
+    "social.public_id_registration": 3,
     "ml.training_run": 16,
     "ml.training_participant": 4,
     "ml.training_publication_revocation": 4,
@@ -222,9 +229,12 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "account.resource_io_execution": 20,
     "account.quota_operation_receipt": 9,
     "discovery.internet_search": 7,
+    "discovery.internet_catalogue_context": 6,
+    "discovery.internet_search_context": 4,
     "discovery.internet_acquisition": 17,
     "library.metadata_execution": 21,
-    "library.metadata_provider_gate": 4,
+    "library.metadata_provider_gate": 5,
+    "library.catalog_execution": 19,
     "library.metadata_artwork": 3,
     "library.track_metadata": 10,
     "library.track_metadata_revision": 6,
@@ -239,7 +249,7 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "account.enrollment_exchange_receipt": 9,
     "account.session_rotation_receipt": 7,
     "account.profile_lifecycle_command": 12,
-    "account.device_admission": 29,
+    "account.device_admission": 30,
     "account.device_admission_nonce": 4,
     "account.device_admission_exchange_receipt": 9,
     "account.device_admission_rate_window": 5,
@@ -400,6 +410,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_io_permit_operation",
         "ix_quota_receipt_created",
         "internet_search_owner_time",
+        "internet_catalogue_context_owner_time",
         "ix_device_user_active",
         "ix_user_session_user_active",
         "ix_enrollment_invitation_user_active",
@@ -531,7 +542,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 1921
+EXPECTED_COLUMN_COUNT = 1964
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

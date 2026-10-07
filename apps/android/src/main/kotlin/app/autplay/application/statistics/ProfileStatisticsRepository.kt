@@ -1,84 +1,75 @@
 package app.autplay.application.statistics
 
+import androidx.room3.withReadTransaction
+import app.autplay.application.library.TrackMetadata
 import app.autplay.data.local.AutPlayDatabase
-import app.autplay.data.local.dao.OwnerStatisticsWindowProjection
 import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import java.util.Locale
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onStart
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 
-/** Local-only owner statistics. No server or persistent aggregate participates in this flow. */
+/** Explicit local snapshot reads. Playback, Room invalidation and day rollover never refresh it. */
 class ProfileStatisticsRepository(
     private val database: AutPlayDatabase,
     private val clock: Clock = Clock.systemDefaultZone(),
-    private val zoneId: ZoneId = clock.zone,
-    /** Test seam for calendar changes; production also observes listening_event invalidations. */
-    private val cutoffInvalidations: Flow<Unit>? = null,
 ) {
-    @OptIn(ExperimentalCoroutinesApi::class)
-    fun observe(profileId: String?): Flow<OwnerProfileStatistics> {
-        val effectiveProfileId = profileId ?: LEGACY_PROFILE_ID
+    suspend fun refresh(profileId: String?): OwnerProfileStatistics = database.withReadTransaction {
+        val owner = profileId ?: "legacy-unscoped"
+        val through = clock.millis()
         val dao = database.historyDao()
-        val invalidations = cutoffInvalidations ?: merge(
-            localDayRolloverInvalidations(clock, zoneId),
-            database.invalidationTracker.createFlow("listening_event", emitInitialState = false).map { Unit },
-        )
-        return invalidations.onStart { emit(Unit) }.flatMapLatest {
-            val cutoffs = ProfileStatisticsCutoffs.current(clock, zoneId)
-            combine(
-                dao.ownerWindow(effectiveProfileId, cutoffs.last7DaysFromMs, cutoffs.throughMs),
-                dao.ownerWindow(effectiveProfileId, cutoffs.last30DaysFromMs, cutoffs.throughMs),
-                dao.ownerWindow(effectiveProfileId, cutoffs.last365DaysFromMs, cutoffs.throughMs),
-                dao.ownerTopTracks(effectiveProfileId, cutoffs.last30DaysFromMs, cutoffs.throughMs, TOP_LIST_LIMIT),
-                dao.ownerTopArtists(effectiveProfileId, cutoffs.last30DaysFromMs, cutoffs.throughMs, TOP_LIST_LIMIT),
-            ) { last7, last30, last365, tracks, artists ->
-                OwnerProfileStatistics(
-                    throughMs = cutoffs.throughMs,
-                    last7Days = last7.toDomain(7),
-                    last30Days = last30.toDomain(30),
-                    last365Days = last365.toDomain(365),
-                    topTracks30Days = tracks.map {
-                        OwnerTopTrack(it.identityKey, it.title, it.artistName, it.playSessionCount, it.listenedMs)
-                    },
-                    topArtists30Days = artists.map {
-                        OwnerTopArtist(it.artistName, it.playSessionCount, it.listenedMs)
-                    },
-                )
+        val genres = mutableMapOf<String, OwnerTopGenre>()
+        var afterTrackId = ""
+        do {
+            val page = dao.ownerGenreSourcesPage(owner, through, afterTrackId, GENRE_PAGE_SIZE)
+            page.forEach { row ->
+                metadataGenres(row.payloadJson).forEach { genre ->
+                    val key = genre.lowercase(Locale.ROOT)
+                    val previous = genres[key]
+                    genres[key] = OwnerTopGenre(previous?.genre ?: genre, (previous?.listenedMs ?: 0) + row.listenedMs)
+                }
             }
-        }
+            page.lastOrNull()?.let { afterTrackId = it.localTrackRefId }
+        } while (page.size == GENRE_PAGE_SIZE)
+        OwnerProfileStatistics(
+            throughMs = through,
+            listenedMs = dao.ownerListenedMs(owner, through),
+            topGenres = genres.values.sortedWith(compareByDescending<OwnerTopGenre> { it.listenedMs }.thenBy { it.genre }).take(5),
+            topTracks = dao.ownerTopTracksSnapshot(owner, through, 5).map {
+                OwnerTopTrack(it.identityKey, it.title, it.artistName, it.playSessionCount, it.listenedMs)
+            },
+            topArtists = dao.ownerTopArtistsSnapshot(owner, through, 5).map {
+                OwnerTopArtist(it.artistName, it.playSessionCount, it.listenedMs)
+            },
+        )
     }
 
-    private fun OwnerStatisticsWindowProjection.toDomain(days: Int) = OwnerStatisticsWindow(
-        days = days,
-        playSessionCount = playSessionCount,
-        listenedMs = listenedMs,
-        uniqueTrackCount = uniqueTrackCount,
-    )
+    /** One-shot compatibility adapter. New callers use refresh and an explicit snapshot owner. */
+    fun observe(profileId: String?): Flow<OwnerProfileStatistics> = flow { emit(refresh(profileId)) }
 
     private companion object {
-        const val LEGACY_PROFILE_ID = "legacy-unscoped"
-        const val TOP_LIST_LIMIT = 5
+        const val GENRE_PAGE_SIZE = 200
     }
 }
 
-private fun localDayRolloverInvalidations(clock: Clock, zoneId: ZoneId): Flow<Unit> = flow {
-    while (true) {
-        val nextLocalDayMs = LocalDate.now(clock.withZone(zoneId))
-            .plusDays(1)
-            .atStartOfDay(zoneId)
-            .toInstant()
-            .toEpochMilli()
-        delay((nextLocalDayMs - clock.millis()).coerceAtLeast(1L))
-        emit(Unit)
-    }
+/** Only real, bounded metadata genres participate; malformed/unknown data stays unavailable. */
+internal fun metadataGenres(payload: String): List<String> {
+    if (payload.length > 140_000) return emptyList()
+    val metadata = runCatching { TrackMetadata.decode(Json.parseToJsonElement(payload).jsonObject) }.getOrNull()
+        ?: return emptyList()
+    val values = metadata.fields["genres"] as? JsonArray ?: return emptyList()
+    if (values.size > 12) return emptyList()
+    return values.mapNotNull { value ->
+        (value as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.takeIf {
+            it.length in 1..100 && it.none { character -> character.code < 32 }
+        }
+    }.distinctBy { it.lowercase(Locale.ROOT) }
 }
 
 /** Calendar-day windows include the current local day and are capped at the injected current time. */
@@ -107,33 +98,21 @@ data class ProfileStatisticsCutoffs(
     }
 }
 
+/** Entire retained history of one owner, with a single inclusive upper cutoff for every ranking. */
 data class OwnerProfileStatistics(
     val throughMs: Long,
-    val last7Days: OwnerStatisticsWindow,
-    val last30Days: OwnerStatisticsWindow,
-    val last365Days: OwnerStatisticsWindow,
-    val topTracks30Days: List<OwnerTopTrack>,
-    val topArtists30Days: List<OwnerTopArtist>,
+    val listenedMs: Long,
+    val topGenres: List<OwnerTopGenre>,
+    val topTracks: List<OwnerTopTrack>,
+    val topArtists: List<OwnerTopArtist>,
 ) {
     init {
-        require(topTracks30Days.size <= 5)
-        require(topArtists30Days.size <= 5)
+        require(listenedMs >= 0)
+        require(topGenres.size <= 5 && topTracks.size <= 5 && topArtists.size <= 5)
     }
 }
 
-data class OwnerStatisticsWindow(
-    val days: Int,
-    val playSessionCount: Long,
-    val listenedMs: Long,
-    val uniqueTrackCount: Long,
-) {
-    init {
-        require(days in setOf(7, 30, 365))
-        require(playSessionCount >= 0)
-        require(listenedMs >= 0)
-        require(uniqueTrackCount >= 0)
-    }
-}
+data class OwnerTopGenre(val genre: String, val listenedMs: Long)
 
 data class OwnerTopTrack(
     /** Used only for stable in-memory rendering; never leaves the owner device. */

@@ -7,9 +7,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 
 /**
  * Volatile social orchestration. It intentionally does not cache the social graph, contact-card
@@ -21,14 +20,114 @@ class SocialRuntime(
     private val scope: CoroutineScope,
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val onAcceptedRoom: (String) -> Unit = {},
+    initialPublicIdCandidate: String? = null,
 ) {
-    private val mutableState = MutableStateFlow(SocialRuntimeState())
+    private val mutableState = MutableStateFlow(SocialRuntimeState(
+        publicIdRegistration = initialPublicIdCandidate?.let(::normalizeSocialPublicId)
+            ?.let { PublicIdRegistrationState.Pending(it) } ?: PublicIdRegistrationState.Missing,
+    ))
     val state: StateFlow<SocialRuntimeState> = mutableState.asStateFlow()
     private var lastHeartbeatMs = Long.MIN_VALUE
     private var friendStatisticsGeneration = 0L
     private var friendStatisticsJob: Job? = null
+    private var lookupGeneration = 0L
+    private var lookupJob: Job? = null
 
-    fun load() = launchSnapshot { port.snapshot(profileId) }
+    fun load(): Job {
+        loadPublicId()
+        return launchSnapshot { port.snapshot(profileId) }
+    }
+
+    /** The server's existing name wins over any local candidate; a confirmed name is never renamed. */
+    fun loadPublicId() {
+        if (mutableState.value.publicIdLoading) return
+        mutableState.update { it.copy(publicIdLoading = true, publicIdErrorCode = null) }
+        scope.launch {
+            when (val result = port.ownPublicId(profileId)) {
+                is SocialResult.Success -> {
+                    val registration = mutableState.value.publicIdRegistration
+                    val candidate = registration.publicIdOrNull()
+                    mutableState.update {
+                        it.copy(
+                            publicIdLoading = false,
+                            publicIdRegistration = result.value?.let { confirmed -> PublicIdRegistrationState.Confirmed(confirmed) }
+                                ?: if (registration is PublicIdRegistrationState.Conflict) registration
+                                else candidate?.let { pending -> PublicIdRegistrationState.Pending(pending) } ?: PublicIdRegistrationState.Missing,
+                            publicIdErrorCode = null,
+                        )
+                    }
+                    if (result.value == null && candidate != null && registration !is PublicIdRegistrationState.Conflict) registerPublicId(candidate)
+                }
+                is SocialResult.Failure -> mutableState.update {
+                    it.copy(publicIdLoading = false, publicIdErrorCode = result.code)
+                }
+            }
+        }
+    }
+
+    /** The host first persists this candidate; a network failure preserves Pending, never Confirmed. */
+    fun registerPublicId(input: String) {
+        val publicId = normalizeSocialPublicId(input)
+        if (publicId == null) {
+            mutableState.update { it.copy(publicIdErrorCode = "public_id_invalid") }
+            return
+        }
+        if (mutableState.value.publicIdLoading || mutableState.value.publicIdRegistration is PublicIdRegistrationState.Confirmed) return
+        mutableState.update {
+            it.copy(publicIdRegistration = PublicIdRegistrationState.Pending(publicId), publicIdLoading = true, publicIdErrorCode = null)
+        }
+        scope.launch {
+            when (val result = port.registerPublicId(profileId, uuid(), publicId)) {
+                is SocialResult.Success -> mutableState.update {
+                    it.copy(
+                        publicIdLoading = false,
+                        publicIdRegistration = if (result.value.publicId == publicId) PublicIdRegistrationState.Confirmed(publicId) else it.publicIdRegistration,
+                        publicIdErrorCode = if (result.value.publicId == publicId) null else "server_unavailable",
+                    )
+                }
+                is SocialResult.Failure -> {
+                    mutableState.update {
+                        it.copy(
+                            publicIdLoading = false,
+                            publicIdRegistration = if (result.code == "public_id_taken") PublicIdRegistrationState.Conflict(publicId) else it.publicIdRegistration,
+                            publicIdErrorCode = if (result.code == "public_id_taken") null else result.code,
+                        )
+                    }
+                    if (result.code == "public_id_already_registered") loadPublicId()
+                }
+            }
+        }
+    }
+
+    fun lookupPublicId(input: String) {
+        val publicId = normalizeSocialPublicId(input) ?: return
+        val generation = ++lookupGeneration
+        lookupJob?.cancel()
+        mutableState.update { it.copy(publicIdLookup = PublicIdLookupState.Loading(publicId)) }
+        lookupJob = scope.launch {
+            val result = port.lookupPublicId(profileId, publicId)
+            if (generation == lookupGeneration) mutableState.update {
+                it.copy(publicIdLookup = when (result) {
+                    is SocialResult.Success -> PublicIdLookupState.Found(publicId, result.value)
+                    is SocialResult.Failure -> PublicIdLookupState.Unavailable(publicId, result.code)
+                })
+            }
+        }
+    }
+
+    fun clearPublicIdLookup() {
+        lookupGeneration += 1
+        lookupJob?.cancel()
+        lookupJob = null
+        mutableState.update { it.copy(publicIdLookup = PublicIdLookupState.Idle) }
+    }
+
+    fun sendFoundFriendRequest() {
+        if (mutableState.value.loading) return
+        val found = mutableState.value.publicIdLookup as? PublicIdLookupState.Found ?: return
+        if (mutableState.value.snapshot.friends.any { it.accountId == found.contactCard.accountId }) return
+        command(FriendshipCommand(uuid(), FriendshipAction.SEND_REQUEST, contactCard = found.contactCard.asJson()))
+    }
     fun loadContactCard() = scope.launch {
         mutableState.value = mutableState.value.copy(loading = true, errorCode = null)
         when (val result = port.contactCard(profileId)) {
@@ -37,13 +136,17 @@ class SocialRuntime(
         }
     }
     fun importContactCard(value: String) {
-        val card = runCatching { parseCard(value) }.getOrNull()
+        val card = parseSocialContactCardInput(value)
         if (card == null) { mutableState.value = mutableState.value.copy(errorCode = "friend_request_unavailable"); return }
         command(FriendshipCommand(uuid(), FriendshipAction.SEND_REQUEST, contactCard = card.asJson()))
     }
     fun command(command: FriendshipCommand) = launchMutation {
         if (command.action == FriendshipAction.REMOVE_FRIEND || command.action == FriendshipAction.BLOCK_USER) {
             command.targetAccountId?.let(::clearFriendProfileStatisticsFor)
+        }
+        if (command.action == FriendshipAction.BLOCK_USER) {
+            val found = mutableState.value.publicIdLookup as? PublicIdLookupState.Found
+            if (found?.contactCard?.accountId == command.targetAccountId) clearPublicIdLookup()
         }
         port.friendshipCommand(profileId, command)
     }
@@ -154,6 +257,7 @@ class SocialRuntime(
                 mutableState.value = current.copy(
                     loading = false,
                     snapshot = result.value,
+                    snapshotLoaded = true,
                     friendStatistics = if (friendStillPresent) current.friendStatistics else FriendProfileStatisticsState.Idle,
                     errorCode = null,
                 )
@@ -168,12 +272,6 @@ class SocialRuntime(
             is SocialResult.Failure -> mutableState.value = mutableState.value.copy(loading = false, errorCode = result.code)
         }
     }
-    private fun parseCard(value: String): ContactCard {
-        require(value.length <= MAX_CARD_CHARS)
-        val root = Json.parseToJsonElement(value).jsonObject
-        return ContactCard(root.required("server_instance_id"), root.required("account_id"), root.required("display_name_hint").take(120), root.required("issued_at"), root.required("expires_at"), root.required("signature_b64url"))
-    }
-    private fun kotlinx.serialization.json.JsonObject.required(name: String) = requireNotNull(this[name]) { "missing $name" }.toString().trim('"')
     private fun clearFriendProfileStatisticsFor(accountId: String) {
         if (mutableState.value.friendStatistics.accountIdOrNull() == accountId) clearFriendProfileStatistics()
     }
@@ -188,7 +286,7 @@ class SocialRuntime(
         is FriendProfileStatisticsState.Unavailable -> accountId
     }
     private fun uuid() = UUID.randomUUID().toString()
-    private companion object { const val HEARTBEAT_MIN_INTERVAL_MS = 30_000L; const val MAX_CARD_CHARS = 4_096 }
+    private companion object { const val HEARTBEAT_MIN_INTERVAL_MS = 30_000L }
 }
 
 data class SocialRuntimeState(
@@ -201,4 +299,10 @@ data class SocialRuntimeState(
     val friendStatistics: FriendProfileStatisticsState = FriendProfileStatisticsState.Idle,
     /** Stable, non-personal error code for UI copy. Prior server state remains intact on failure. */
     val errorCode: String? = null,
+    /** An empty default is not a confirmed empty friend list. This flag is volatile as well. */
+    val snapshotLoaded: Boolean = false,
+    val publicIdRegistration: PublicIdRegistrationState = PublicIdRegistrationState.Missing,
+    val publicIdLoading: Boolean = false,
+    val publicIdErrorCode: String? = null,
+    val publicIdLookup: PublicIdLookupState = PublicIdLookupState.Idle,
 )

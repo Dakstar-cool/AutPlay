@@ -1,5 +1,6 @@
 """Bounded loopback provider and private launcher shared by process/DB proofs."""
 
+import json
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -23,6 +24,7 @@ def local_provider(
     *,
     fail_first: bool = False,
     duration_seconds: float = 0,
+    source_metadata: dict[str, object] | None = None,
 ) -> Iterator[LocalProvider]:
     requested = threading.Event()
     stopped = threading.Event()
@@ -59,6 +61,8 @@ def local_provider(
         arguments, environment = provider_child_launch()
         script = Path(__file__).parent / "fixtures" / "provider_download_child.py"
         environment["AUTPLAY_TEST_PROVIDER_URL"] = f"http://127.0.0.1:{server.server_port}/audio"
+        if source_metadata is not None:
+            environment["AUTPLAY_TEST_PROVIDER_METADATA"] = json.dumps(source_metadata)
         return [arguments[0], "-I", str(script)], environment
 
     try:

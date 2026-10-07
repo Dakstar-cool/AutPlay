@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +27,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.autplay.application.playback.ActiveQueueContext
 import app.autplay.application.profilepairing.PairingState
+import app.autplay.application.social.AggregatePresence
+import app.autplay.application.social.FriendSummary
+import app.autplay.application.social.FriendshipStatus
+import app.autplay.application.social.PublicIdRegistrationState
+import app.autplay.application.social.SocialRuntimeState
+import app.autplay.application.social.SocialSnapshot
+import app.autplay.application.statistics.OwnerProfileStatistics
+import app.autplay.application.statistics.OwnerProfileStatisticsState
+import app.autplay.application.statistics.OwnerTopArtist
+import app.autplay.application.statistics.OwnerTopGenre
+import app.autplay.application.statistics.OwnerTopTrack
 import app.autplay.application.library.CorePlaylistDetail
 import app.autplay.application.library.CorePlaylistDetailEntry
 import app.autplay.application.library.CoreReleaseDetail
@@ -44,19 +54,16 @@ import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.playback.presentation.PlaybackStatus
 import app.autplay.playback.presentation.PlaybackSourcePresentation
 import app.autplay.playback.presentation.RepeatModePresentation
-import app.autplay.playback.PlaybackAudioContourFrame
-import app.autplay.playback.PlaybackAudioContourRuntime
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.NowPlayingScreen
 import app.autplay.ui.player.PlaybackPreferenceUiState
-import app.autplay.ui.face.AutPlayResonanceLens
-import app.autplay.ui.face.FacePlaybackMode
-import app.autplay.ui.face.FacePreferenceMode
-import app.autplay.ui.face.FaceReferenceAnchor
 import app.autplay.ui.profilepairing.ProfilePairingActions
 import app.autplay.ui.profilepairing.ProfilePairingScreen
 import app.autplay.ui.profilepairing.ProfilePairingUiState
 import app.autplay.ui.settings.SettingsProductScreen
+import app.autplay.ui.social.SocialActions
+import app.autplay.ui.social.SocialPanel
+import app.autplay.ui.statistics.OwnerProfileStatisticsCard
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 import app.autplay.application.artist.ArtistAppearance
@@ -103,45 +110,6 @@ class M3VisualEvidenceActivity : ComponentActivity() {
             ) {
                 Surface(Modifier.fillMaxSize()) {
                     when (activeScreen) {
-                        "face-pupil" -> ReactivePupilEvidence()
-                        "face-matrix" -> Column(
-                            Modifier
-                                .fillMaxSize()
-                                .systemBarsPadding()
-                                .verticalScroll(rememberScrollState())
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Text(
-                                "Resonance Lens reference anchors",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
-                            )
-                            FaceReferenceAnchor.entries.chunked(3).forEach { anchors ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    anchors.forEach { anchor ->
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                                        ) {
-                                            AutPlayResonanceLens(
-                                                trackSeed = anchor.name,
-                                                playbackMode = FacePlaybackMode.Idle,
-                                                preference = FacePreferenceMode.Neutral,
-                                                accessibilitySummary = anchor.name,
-                                                referenceAnchor = anchor,
-                                            )
-                                            Text(
-                                                anchor.name,
-                                                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         "player", "player-local", "player-dragging", "player-buffering", "no-player" -> NowPlayingScreen(
                             state = when (activeScreen) {
                                 "no-player" -> PlaybackPresentationState()
@@ -197,7 +165,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                             modifier = Modifier.systemBarsPadding(),
                         )
                         "onboarding" -> WelcomeOnboardingScreen(
-                            onComplete = { true },
+                            onComplete = { _, _ -> true },
                             modifier = Modifier.systemBarsPadding(),
                         )
                         "profile" -> Column(
@@ -207,9 +175,38 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 .verticalScroll(rememberScrollState())
                                 .padding(16.dp),
                         ) {
+                            OwnerProfileStatisticsCard(
+                                state = OwnerProfileStatisticsState(
+                                    snapshot = OwnerProfileStatistics(
+                                        throughMs = 1_791_280_800_000,
+                                        listenedMs = 18_360_000,
+                                        topGenres = listOf(OwnerTopGenre("Jazz", 9_600_000), OwnerTopGenre("Ambient", 5_400_000)),
+                                        topTracks = listOf(OwnerTopTrack("fixture-track", "Quiet Signals", "Mara Lin", 12, 2_928_000)),
+                                        topArtists = listOf(OwnerTopArtist("Mara Lin", 36, 7_200_000)),
+                                    ),
+                                ),
+                                onRefresh = {},
+                            )
                             ProfilePairingScreen(
                                 state = ProfilePairingUiState(PairingState.NotConnected),
                                 actions = ProfilePairingActions(),
+                            )
+                        }
+                        "friends" -> Column(
+                            Modifier.fillMaxSize().systemBarsPadding()
+                                .verticalScroll(rememberScrollState()).padding(16.dp),
+                        ) {
+                            SocialPanel(
+                                state = SocialRuntimeState(
+                                    snapshotLoaded = true,
+                                    publicIdRegistration = PublicIdRegistrationState.Confirmed("music_listener"),
+                                    snapshot = SocialSnapshot(friends = listOf(
+                                        FriendSummary("11111111-1111-4111-8111-111111111111", "Mara", FriendshipStatus.FRIEND, AggregatePresence.ONLINE),
+                                        FriendSummary("22222222-2222-4222-8222-222222222222", "Sofia", FriendshipStatus.PENDING_INBOUND),
+                                        FriendSummary("33333333-3333-4333-8333-333333333333", "Owen", FriendshipStatus.PENDING_OUTBOUND),
+                                    )),
+                                ),
+                                actions = SocialActions(),
                             )
                         }
                         "settings" -> Column(
@@ -230,7 +227,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 onNavigate = {},
                             )
                         }
-                        "search", "search-vault-offline" -> AutPlayAdaptiveShell(
+                        "search", "search-vault", "search-vault-offline" -> AutPlayAdaptiveShell(
                             selectedDestination = UiDestination.Search,
                             onDestinationSelected = {},
                         ) { _, padding, _ ->
@@ -239,9 +236,13 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                     query = "quiet",
                                     results = listOf(CoreTrackUiItem("search-track", "Quiet Signals", "Mara Lin")),
                                     searched = true,
-                                    vaultAvailable = activeScreen == "search-vault-offline",
-                                    vaultSelected = activeScreen == "search-vault-offline",
+                                    vaultAvailable = activeScreen != "search",
+                                    vaultSelected = activeScreen != "search",
                                     vaultError = activeScreen == "search-vault-offline",
+                                    vaultSearched = activeScreen == "search-vault",
+                                    vaultResults = if (activeScreen == "search-vault") listOf(
+                                        VaultSearchUiItem("fixture-vault", "Quiet Horizon", "Sofia Reed", "VAULT", "AVAILABLE", true),
+                                    ) else emptyList(),
                                 ),
                                 contentPadding = padding,
                                 onQueryChange = {},
@@ -570,48 +571,3 @@ class M3VisualEvidenceActivity : ComponentActivity() {
         const val RELEASE_ID = "55555555-5555-4555-8555-555555555555"
     }
 }
-
-@Composable
-private fun ReactivePupilEvidence() {
-    DisposableEffect(Unit) {
-        PlaybackAudioContourRuntime.setSurfaceObserving(PUPIL_EVIDENCE_SURFACE_ID, true)
-        PlaybackAudioContourRuntime.publish(
-            PlaybackAudioContourFrame(
-                energy = 0.18f,
-                contour = listOf(
-                    0.02f, 0.03f, 0.04f, 0.05f,
-                    0.07f, 0.10f, 0.13f, 0.17f,
-                    0.20f, 0.24f, 0.21f, 0.18f,
-                ),
-            ),
-        )
-        onDispose {
-            PlaybackAudioContourRuntime.setSurfaceObserving(PUPIL_EVIDENCE_SURFACE_ID, false)
-        }
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .systemBarsPadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(
-            "Reactive optical pupil · deterministic PCM fixture",
-            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
-        )
-        AutPlayResonanceLens(
-            trackSeed = "reactive-pupil-evidence",
-            playbackMode = FacePlaybackMode.Playing,
-            preference = FacePreferenceMode.Neutral,
-            accessibilitySummary = "Reactive optical pupil evidence",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            "High-energy late attack: bounded dilation, gaze shift and neutral-palette color lift",
-            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-        )
-    }
-}
-
-private const val PUPIL_EVIDENCE_SURFACE_ID = "reactive-pupil-evidence-fixture"

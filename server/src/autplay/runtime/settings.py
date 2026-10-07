@@ -49,6 +49,7 @@ _COMMON_ENV_FIELDS: Final = {
     "vault_low_disk_bytes": "VAULT_LOW_DISK_BYTES",
 }
 _API_ENV_FIELDS: Final = {
+    "catalog_cgroup_root": "CATALOG_CGROUP_ROOT",
     "acoustid_client_key": "ACOUSTID_CLIENT_KEY",
     "metadata_proxy": "METADATA_PROXY",
     "internet_music_enabled": "INTERNET_MUSIC_ENABLED",
@@ -78,6 +79,7 @@ _API_ENV_FIELDS: Final = {
     "admin_web_csrf_hmac_secret": "ADMIN_WEB_CSRF_HMAC_SECRET",
     "admin_backup_targets_json": "ADMIN_BACKUP_TARGETS_JSON",
     "admin_backup_control_root": "ADMIN_BACKUP_CONTROL_ROOT",
+    "admin_acquisition_control_root": "ADMIN_ACQUISITION_CONTROL_ROOT",
     "jamendo_enabled": "JAMENDO_ENABLED",
     "discovery_automation_enabled": "DISCOVERY_AUTOMATION_ENABLED",
     "jamendo_client_id": "JAMENDO_CLIENT_ID",
@@ -298,6 +300,7 @@ class ApiSettings(_ExplicitSettings):
     """Validated settings available only to the HTTP API process."""
 
     internet_music_enabled: bool = False
+    catalog_cgroup_root: Path | None = None
     acoustid_client_key: SecretStr = Field(default=SecretStr(""), repr=False)
     metadata_proxy: SecretStr | None = Field(default=None, repr=False)
 
@@ -340,6 +343,7 @@ class ApiSettings(_ExplicitSettings):
     )
     admin_backup_targets_json: str | None = Field(default=None, min_length=2, max_length=32_768)
     admin_backup_control_root: Path | None = None
+    admin_acquisition_control_root: Path | None = None
     jamendo_enabled: bool = False
     discovery_automation_enabled: bool = False
     jamendo_client_id: SecretStr | None = Field(
@@ -351,6 +355,13 @@ class ApiSettings(_ExplicitSettings):
         default=150 * 1024 * 1024, ge=1_024, le=1024 * 1024 * 1024
     )
     jamendo_minimum_request_interval_seconds: float = Field(default=1.0, ge=1.0, le=60.0)
+
+    @field_validator("catalog_cgroup_root")
+    @classmethod
+    def _validate_catalog_cgroup_root(cls, value: Path | None) -> Path | None:
+        if value is not None and (not value.is_absolute() or ".." in value.parts):
+            raise ValueError("catalog cgroup root must be an absolute delegated directory")
+        return value
 
     @field_validator("host")
     @classmethod
@@ -446,6 +457,10 @@ class ApiSettings(_ExplicitSettings):
 
             assert self.admin_backup_targets_json is not None
             parse_backup_targets(self.admin_backup_targets_json)
+        if self.admin_acquisition_control_root is not None and (
+            not self.admin_web_enabled or not self.admin_acquisition_control_root.is_absolute()
+        ):
+            raise ValueError("Admin acquisition control requires enabled Web and absolute root")
         if self.jamendo_enabled:
             if not self.admin_web_enabled:
                 raise ValueError("Jamendo manual discovery requires admin Web")

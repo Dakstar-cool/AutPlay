@@ -186,6 +186,8 @@ R1B_TRIGGERS = frozenset(
 )
 POST_0030_TABLES = frozenset(
     {
+        ("jobs", "worker_health"),
+        ("social", "public_id_registration"),
         ("account", "account_deletion_hold"),
         ("account", "account_deletion_request"),
         ("account", "account_purge_receipt"),
@@ -209,8 +211,11 @@ POST_0030_TABLES = frozenset(
         ("account", "web_passkey_revocation"),
         ("discovery", "internet_acquisition"),
         ("discovery", "internet_search"),
+        ("discovery", "internet_catalogue_context"),
+        ("discovery", "internet_search_context"),
         ("library", "metadata_artwork"),
         ("library", "metadata_execution"),
+        ("library", "catalog_execution"),
         ("library", "metadata_provider_gate"),
         ("library", "track_metadata"),
         ("library", "track_metadata_revision"),
@@ -232,6 +237,7 @@ POST_0030_TABLES = frozenset(
 POST_0030_INDEXES = frozenset(
     {
         "internet_search_owner_time",
+        "internet_catalogue_context_owner_time",
         "ix_admission_account_state",
         "ix_admission_lease_expiry",
         "ix_admission_waiting",
@@ -290,6 +296,8 @@ POST_0030_FUNCTIONS = frozenset(
         "protect_internet_ingest_lineage",
         "protect_metadata_evidence",
         "protect_metadata_execution",
+        "protect_catalog_execution",
+        "protect_catalogue_context",
         "protect_metadata_provider_gate",
         "protect_music_snapshot",
         "protect_orphan_object_claim",
@@ -342,6 +350,9 @@ POST_0030_TRIGGERS = frozenset(
         "m_training_io_admission",
         "metadata_artwork_immutable",
         "metadata_execution_guard",
+        "catalog_execution_guard",
+        "internet_catalogue_context_immutable",
+        "internet_search_context_immutable",
         "metadata_provider_gate_guard",
         "metadata_revision_immutable",
         "orphan_object_claim_guard",

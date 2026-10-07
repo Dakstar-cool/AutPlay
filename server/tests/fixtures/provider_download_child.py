@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from autplay.adapters.filesystem.provider_child import main
+from autplay.adapters.filesystem.provider_media import SOURCE_METADATA_FILE
 
 
 def download(candidate: str, workspace: Path, maximum: int) -> Path:
@@ -20,6 +21,9 @@ def download(candidate: str, workspace: Path, maximum: int) -> Path:
             output.write(block)
             if size > maximum:
                 break
+    metadata = os.environ.get("AUTPLAY_TEST_PROVIDER_METADATA")
+    if metadata is not None:
+        (workspace / SOURCE_METADATA_FILE).write_text(metadata, encoding="utf-8")
     return source
 
 

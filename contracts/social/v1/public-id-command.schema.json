@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autplay.local/contracts/social/v1/public-id-command.schema.json",
+  "title": "Same-server public ID registration command",
+  "x-autplay-implementation-status": "IMPLEMENTED_PUBLIC_ID",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation_id", "public_id"],
+  "properties": {
+    "operation_id": {"type": "string", "format": "uuid"},
+    "public_id": {"type": "string", "minLength": 3, "maxLength": 24, "pattern": "^[A-Za-z0-9_]{3,24}$", "not": {"pattern": "[^A-Za-z0-9_]"}}
+  }
+}

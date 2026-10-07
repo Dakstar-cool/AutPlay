@@ -8,6 +8,8 @@ from pathlib import Path
 from uuid import UUID
 
 from autplay.adapters.child_process import provider_child_launch
+from autplay.adapters.filesystem.provider_child import ProviderCommandResult
+from autplay.adapters.filesystem.provider_media import PROVIDER_RESULT_BYTES
 from autplay.adapters.filesystem.vault_child import ChildProtocolError, decode_document
 from autplay.adapters.filesystem.vault_process import ChildLaunch, ProcessTreeFactory
 from autplay.application.internet_acquisition import ProviderFileReceipt
@@ -17,6 +19,7 @@ from autplay.domain.resource_admission import (
     ActivationFence,
     ResourceAdmissionError,
 )
+from autplay.domain.track_metadata import sanitize_source_metadata, source_metadata_document
 from autplay.domain.vault import Sha256Digest, VaultLimits, VerifiedStagedFile
 
 from .vault_io import VaultIoCoordinator, VaultIoSession
@@ -90,9 +93,9 @@ class ProviderIoExecutor:
             launch=self._launch,
             command=lambda io: self._download(io, candidate_id),
         )
-        return ProviderFileReceipt(identity, verified)
+        return ProviderFileReceipt(identity, verified.verified, verified.source_metadata)
 
-    def _download(self, io: VaultIoSession, candidate_id: str) -> VerifiedStagedFile:
+    def _download(self, io: VaultIoSession, candidate_id: str) -> ProviderCommandResult:
         maximum = min(self._limits.max_object_bytes, 2 * 1024**3)
         io.child.go(
             {
@@ -108,7 +111,7 @@ class ProviderIoExecutor:
             }
         )
         tag, payload = io.child.read_result()
-        document = decode_document(payload)
+        document = decode_document(payload, maximum=PROVIDER_RESULT_BYTES)
         if tag == b"E" and set(document) == {"code"}:
             code = document["code"]
             if isinstance(code, str) and code in _TERMINAL_PROVIDER_ERRORS:
@@ -116,7 +119,10 @@ class ProviderIoExecutor:
             if isinstance(code, str) and code in _RETRYABLE_PROVIDER_ERRORS:
                 raise ResourceAdmissionError(code)
             raise ResourceAdmissionError("resource_provider_failed")
-        if tag != b"R" or set(document) != {"byte_size", "sha256"}:
+        if tag != b"R" or set(document) not in (
+            {"byte_size", "sha256"},
+            {"byte_size", "sha256", "source_metadata"},
+        ):
             raise ResourceAdmissionError("resource_provider_failed")
         size, digest = document["byte_size"], document["sha256"]
         if (
@@ -132,4 +138,12 @@ class ProviderIoExecutor:
             raise ResourceAdmissionError("resource_provider_failed") from error
         if sha256.hex != digest:
             raise ResourceAdmissionError("resource_provider_failed")
-        return VerifiedStagedFile(size, sha256)
+        evidence: dict[str, object] | None = None
+        if "source_metadata" in document:
+            try:
+                native = sanitize_source_metadata(document["source_metadata"])
+                if native.provider == "YOUTUBE" and native.source_id == candidate_id:
+                    evidence = source_metadata_document(native)
+            except ValueError, TypeError, OverflowError:
+                pass
+        return ProviderCommandResult(VerifiedStagedFile(size, sha256), evidence)

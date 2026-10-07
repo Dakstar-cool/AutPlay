@@ -105,7 +105,7 @@ internal fun MainAdaptiveShell(
             hasMedia = state.playerState.mediaId != null,
         ),
         nowPlayingBar = {
-            if (shouldShowPersistentPlayerChrome(state.destination, state.playerState.mediaId != null)) {
+            if (state.playerState.mediaId != null) {
                 PlaybackMiniPlayer(
                     state = state.playerState,
                     onOpen = { actions.navigate(UiDestination.NowPlaying) },
@@ -118,7 +118,9 @@ internal fun MainAdaptiveShell(
             }
         },
         detailPane = {
-            if (state.destination == UiDestination.Library && state.selectedDetail != null) {
+            if (state.destination == UiDestination.Library && state.selectedDetail != null &&
+                state.selectedDetail.kind != app.autplay.ui.core.DetailKind.Track
+            ) {
                 CoreProductDetailScreen(
                     state = state.coreDetailState,
                     onPlayTrack = actions.playTrack,

@@ -13,7 +13,7 @@
     <div><dt>{{ t("backup_state") }}</dt><dd>{{ t("backup_state_" ~ snapshot.status.state|lower) }}</dd></div>
     <div><dt>{{ t("backup_written") }}</dt><dd>{{ format_bytes(snapshot.status.bytes_written) }}</dd></div>
     <div><dt>{{ t("backup_available") }}</dt><dd>{{ format_bytes(snapshot.status.available_bytes) }}</dd></div>
-    <div><dt>{{ t("backup_updated") }}</dt><dd>{{ snapshot.status.updated_at }}</dd></div>
+    <div><dt>{{ t("backup_updated") }}</dt><dd>{{ local_time(snapshot.status.updated_at) }}</dd></div>
   </dl>
   {% if snapshot.status.max_backup_bytes %}<p>{{ t("backup_usage") }}: {{ format_bytes(snapshot.status.bytes_written) }} / {{ format_bytes(snapshot.status.max_backup_bytes) }}.</p>{% endif %}
 </section>

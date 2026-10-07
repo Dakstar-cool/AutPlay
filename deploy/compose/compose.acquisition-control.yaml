@@ -1,0 +1,12 @@
+# Optional private spool for the owner-only acquisition control page.
+# The API has no Docker socket, music output mount, or provider credentials.
+services:
+  api:
+    group_add:
+      - "${AUTPLAY_RUNTIME_ACQUISITION_SHARED_GID:?set the operator agent shared group ID}"
+    environment:
+      AUTPLAY_ADMIN_ACQUISITION_CONTROL_ROOT: /var/lib/autplay/acquisition-control
+    volumes:
+      - type: bind
+        source: "${AUTPLAY_RUNTIME_ACQUISITION_CONTROL_ROOT:?set an owner-controlled host spool directory}"
+        target: /var/lib/autplay/acquisition-control

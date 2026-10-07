@@ -7,10 +7,10 @@ import importlib.util
 import json
 import os
 import sys
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
@@ -26,6 +26,10 @@ from autplay.adapters.postgresql.models.resource_admission import (
     ResourceAdmissionRow,
     ResourceIoExecutionRow,
     ResourceIoPermitRow,
+)
+from autplay.adapters.postgresql.models.track_metadata import (
+    TrackMetadataRevisionRow,
+    TrackMetadataRow,
 )
 from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
@@ -48,8 +52,9 @@ _SPEC.loader.exec_module(bridge)
 
 
 @pytest.mark.usefixtures("internal_io_budget")
+@pytest.mark.parametrize("metadata_fail_first", [False, True])
 def test_receipt_replay_publishes_one_playable_entry(
-    database_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    database_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata_fail_first: bool
 ) -> None:
     monkeypatch.setenv("AUTPLAY_DATABASE_URL", database_url)
     monkeypatch.setenv("AUTPLAY_AUTH_SIGNING_SECRET", "test-only-auth-" * 4)
@@ -61,7 +66,7 @@ def test_receipt_replay_publishes_one_playable_entry(
     with Session(engine) as session:
         session.add(UserAccountRow(user_id=owner, display_name="owner", role="OWNER"))
         session.commit()
-    audio_dir = tmp_path / "music/tracks/key/fixture"
+    audio_dir = tmp_path / "music/tracks/key/jamendo"
     audio_dir.mkdir(parents=True)
     payload = b"immutable bridge test bytes"
     (audio_dir / "sample.flac").write_bytes(payload)
@@ -71,17 +76,42 @@ def test_receipt_replay_publishes_one_playable_entry(
             {
                 "schema_version": 1,
                 "key": "key",
-                "provider": "fixture",
+                "provider": "jamendo",
                 "filename": "sample.flac",
                 "sha256": hashlib.sha256(payload).hexdigest(),
                 "bytes": len(payload),
                 "duration_seconds": 2,
                 "item": {"title": "Song", "artist": "Artist", "album": None},
+                "source_metadata": {
+                    "schema_version": 1,
+                    "provider": "JAMENDO",
+                    "source_id": "123",
+                    "fields": {
+                        "title": "Song",
+                        "artist": "Artist",
+                        "album": "Source Album",
+                        "release_date": "2020",
+                        "track_number": 2,
+                    },
+                    "external_ids": {"native_album_id": "44"},
+                    "artwork": [],
+                },
             }
         )
     )
     receipt = bridge.read_receipt(receipt_path, tmp_path / "music")
     backend = bridge.Backend(owner, provision=True)
+    schedule_metadata = backend.schedule_metadata
+    metadata_calls = 0
+
+    def schedule(receipt: Any, checkpoint: dict[str, Any]) -> None:
+        nonlocal metadata_calls
+        metadata_calls += 1
+        if metadata_fail_first and metadata_calls == 1:
+            raise RuntimeError("simulated metadata handoff outage")
+        schedule_metadata(receipt, checkpoint)
+
+    monkeypatch.setattr(backend, "schedule_metadata", schedule)
 
     class Media:
         def inspect(self, path: Path) -> AudioTechnicalMetadata:
@@ -128,6 +158,13 @@ def test_receipt_replay_publishes_one_playable_entry(
             if checkpoint["state"] == "PUBLISHED":
                 break
         assert checkpoint["state"] == "PUBLISHED"
+        if metadata_fail_first:
+            assert checkpoint["metadata_state"] == "PENDING"
+            with backend.sessions() as session:
+                assert session.scalar(select(LibraryEntryRow.availability_status)) == "VAULT"
+            checkpoint["metadata_retry_at"] = 0
+            checkpoint = bridge.advance_checkpoint(backend, receipt, checkpoint)
+        assert checkpoint["metadata_state"] == "SCHEDULED"
         with backend.sessions() as session:
             assert session.scalar(select(func.count()).select_from(LibraryEntryRow)) == 1
             assert session.scalar(select(func.count()).select_from(UserSessionRow)) == 0
@@ -144,6 +181,51 @@ def test_receipt_replay_publishes_one_playable_entry(
             assert len(published) == 1
             assert published[0].payload["server_user_track_ref_id"] == checkpoint["ref_id"]
             assert published[0].payload["availability_status"] == "VAULT"
+            metadata = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))
+            assert metadata is not None
+            assert metadata.document["acquisition_evidence"] == receipt.source_metadata
+            metadata_identity = (metadata.revision, metadata.generation, metadata.job_id)
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 1
+        # Commit succeeded but its local acknowledgment was lost: concurrent replay is one command.
+        missing_ack = {
+            key: value for key, value in checkpoint.items() if not key.startswith("metadata_")
+        }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            replays = list(
+                pool.map(
+                    lambda _: bridge.advance_checkpoint(backend, receipt, missing_ack), range(2)
+                )
+            )
+        assert all(
+            result["state"] == "PUBLISHED" and result["metadata_state"] == "SCHEDULED"
+            for result in replays
+        )
+        with backend.sessions() as session:
+            metadata = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))
+            assert metadata is not None
+            assert (metadata.revision, metadata.generation, metadata.job_id) == metadata_identity
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 1
+        # A richer source receipt updates only metadata; audio/import/library identity stays fixed.
+        changed_doc = json.loads(receipt_path.read_text())
+        changed_doc["source_metadata"]["fields"]["album"] = "Other Edition"
+        changed_doc["source_metadata"]["external_ids"]["native_album_id"] = "45"
+        receipt_path.write_text(json.dumps(changed_doc))
+        changed = bridge.read_receipt(receipt_path, tmp_path / "music")
+        assert changed.identity == receipt.identity
+        updated = bridge.advance_checkpoint(backend, changed, checkpoint)
+        assert updated["metadata_state"] == "SCHEDULED"
+        assert updated["upload_id"] == checkpoint["upload_id"]
+        assert updated["variant_id"] == checkpoint["variant_id"]
+        with backend.sessions() as session:
+            metadata = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))
+            assert metadata is not None
+            assert (
+                metadata.document["acquisition_evidence"]["external_ids"]["native_album_id"] == "45"
+            )
+            assert metadata.document["acquisition_refresh_pending"] is True
+            assert metadata.generation == metadata_identity[1]
+            assert session.scalar(select(func.count()).select_from(LibraryEntryRow)) == 1
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 2
         # Tampered completed bytes never enter import or upload.
         (audio_dir / "sample.flac").write_bytes(b"x" * len(payload))
         with pytest.raises(bridge.ReceiptError, match="integrity_mismatch"):

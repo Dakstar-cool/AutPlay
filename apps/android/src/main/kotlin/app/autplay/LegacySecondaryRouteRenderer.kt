@@ -35,7 +35,7 @@ import app.autplay.ui.UiDestination
 import app.autplay.ui.profilepairing.ProfilePairingActions
 import app.autplay.ui.profilepairing.ProfilePairingUiState
 import app.autplay.application.social.SocialRuntimeState
-import app.autplay.application.statistics.OwnerProfileStatistics
+import app.autplay.application.statistics.OwnerProfileStatisticsState
 import app.autplay.ui.social.SocialActions
 import app.autplay.ui.social.SocialPanel
 import app.autplay.ui.statistics.OwnerProfileStatisticsCard
@@ -62,7 +62,7 @@ internal data class LegacySecondaryRouteState(
     val selectedTrackUploadEligible: Boolean,
     val settings: NonSecretSettings,
     val profilePairing: ProfilePairingUiState,
-    val ownerStatistics: OwnerProfileStatistics?,
+    val ownerStatisticsState: OwnerProfileStatisticsState = OwnerProfileStatisticsState(),
     val social: SocialRuntimeState,
     val socialAvailable: Boolean,
     val stableError: String?,
@@ -71,6 +71,7 @@ internal data class LegacySecondaryRouteState(
 
 internal data class LegacySecondaryRouteActions(
     val manualPlaylists: ManualPlaylistActions = ManualPlaylistActions(),
+    val refreshOwnerStatistics: () -> Unit = {},
     val openPlaylist: (String) -> Unit,
     val importActions: LegacyImportRouteActions,
     val downloadSelectedTrack: () -> Unit,

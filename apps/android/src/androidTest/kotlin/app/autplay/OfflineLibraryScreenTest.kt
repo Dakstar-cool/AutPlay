@@ -1,9 +1,13 @@
 package app.autplay
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -11,8 +15,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -59,6 +65,7 @@ class OfflineLibraryScreenTest {
                 deviceId = DeviceId("41111111-1111-4111-8111-111111111111"),
                 serverBaseUrl = "https://offline.test",
                 onboardingRevision = CURRENT_ONBOARDING_REVISION,
+                pendingPublicId = "activity_fixture",
             ),
         )
     }
@@ -69,43 +76,82 @@ class OfflineLibraryScreenTest {
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
         applicationNonSecretSettingsStore(context).update(
-            NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION),
+            NonSecretSettings(
+                onboardingRevision = CURRENT_ONBOARDING_REVISION,
+                pendingPublicId = "activity_fixture",
+            ),
         )
     }
 
     @Test
-    fun offlineCommandRemainsVisibleAfterActivityRecreation() {
+    fun libraryRowRemainsVisibleAfterActivityRecreation() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
-        composeRule.onNodeWithText(trackCount(0)).assertIsDisplayed()
+        openLibrary()
+        assertEmptyLibrary()
         runBlocking { seedLibraryTrack(PROFILE) }
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(trackCount(1)).fetchSemanticsNodes().isNotEmpty()
-        }
+        assertSingleTrackVisible()
 
         scenario?.recreate()
 
-        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
-        composeRule.onNodeWithText(trackCount(1)).assertIsDisplayed()
+        openLibrary()
+        assertSingleTrackVisible()
     }
 
     @Test
     fun freshLaunchWithoutServerConfigurationPersistsStandaloneChangeAcrossRecreation() = runBlocking {
         applicationNonSecretSettingsStore(context).update(
-            NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION),
+            NonSecretSettings(
+                onboardingRevision = CURRENT_ONBOARDING_REVISION,
+                pendingPublicId = "activity_fixture",
+            ),
         )
         scenario = ActivityScenario.launch(MainActivity::class.java)
 
-        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
-        composeRule.onNodeWithText(context.getString(R.string.library_local_mode)).assertIsDisplayed()
+        openLibrary()
+        assertEmptyLibrary()
         seedLibraryTrack("legacy-unscoped")
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(trackCount(1)).fetchSemanticsNodes().isNotEmpty()
-        }
+        assertSingleTrackVisible()
         scenario?.recreate()
-        composeRule.onNode(hasText(context.getString(R.string.nav_library)) and hasClickAction()).performClick()
-        composeRule.onNodeWithText(trackCount(1)).assertIsDisplayed()
+        openLibrary()
+        assertSingleTrackVisible()
         Unit
+    }
+
+    @Test
+    fun libraryTrackTapCreatesTheExactQueueAndKeepsLibraryOpen() = runBlocking {
+        seedLibraryTrack(PROFILE)
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        openLibrary()
+        assertSingleTrackVisible()
+        composeRule.onNodeWithTag("library-track-$TRACK").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runBlocking {
+                val dao = AutPlayRuntime.database(context).queueDao()
+                val snapshot = dao.activeSnapshotOnce() ?: return@runBlocking false
+                val entries = dao.entries(snapshot.queueSnapshotId, 10)
+                entries.size == 1 && entries.single().localUserTrackRefId == TRACK &&
+                    snapshot.currentEntryId == entries.single().queueEntryId
+            }
+        }
+        composeRule.onNodeWithTag("library-product-list").assertIsDisplayed()
+        assertSingleTrackVisible()
+        // This unavailable fixture proves queue activation and navigation, not audio playback.
+        Unit
+    }
+
+    @Test
+    fun libraryDownloadShortcutOpensDownloadsAndRestoresThatRoute() {
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        openLibrary()
+        val downloads = context.getString(R.string.nav_downloads)
+        scrollLibraryTo(hasText(downloads) and hasClickAction())
+        composeRule.onNode(hasText(downloads) and hasClickAction()).performClick()
+        assertDownloadsRoute()
+
+        scenario?.recreate()
+
+        assertDownloadsRoute()
     }
 
     @Test
@@ -209,8 +255,51 @@ class OfflineLibraryScreenTest {
         extractorVersionsJson = "{\"schema_version\":1}",
     )
 
-    private fun trackCount(count: Int): String =
-        context.resources.getQuantityString(R.plurals.library_track_count, count, count)
+    private fun openLibrary() {
+        waitForNavigation(context.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithTag("library-product-list").assertIsDisplayed()
+        composeRule.onNode(
+            hasText(context.getString(R.string.library_section_offline)) and hasClickAction(),
+        ).assertDoesNotExist()
+        composeRule.onNode(
+            hasText(context.getString(R.string.library_filter_unavailable)) and hasClickAction(),
+        ).assertDoesNotExist()
+    }
+
+    private fun scrollLibraryTo(matcher: SemanticsMatcher) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("library-product-list").performScrollToNode(matcher)
+            }.isSuccess
+        }
+    }
+
+    private fun assertEmptyLibrary() {
+        val empty = context.getString(R.string.library_empty_body)
+        scrollLibraryTo(hasText(empty))
+        composeRule.onNodeWithText(empty).assertIsDisplayed()
+        composeRule.onAllNodesWithTag("library-track-$TRACK").assertCountEquals(0)
+    }
+
+    private fun assertSingleTrackVisible() {
+        scrollLibraryTo(hasTestTag("library-track-$TRACK"))
+        composeRule.onAllNodesWithTag("library-track-$TRACK").assertCountEquals(1)
+        composeRule.onNodeWithTag("library-track-$TRACK")
+            .assert(hasText("Offline sample"))
+            .assert(hasText("AutPlay test"))
+            .assertIsDisplayed()
+    }
+
+    private fun assertDownloadsRoute() {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("downloads-list").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("downloads-list").assertIsDisplayed()
+        val empty = context.getString(R.string.downloads_empty)
+        composeRule.onNodeWithTag("downloads-list").performScrollToNode(hasText(empty))
+        composeRule.onNodeWithText(empty).assertIsDisplayed()
+        composeRule.onNodeWithTag("library-product-list").assertDoesNotExist()
+    }
 
     private suspend fun seedLibraryTrack(profileId: String) {
         val database = AutPlayRuntime.database(context)

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_friends_refresh_public_id_label">Публичный ID (@имя)</string>
+    <string name="ui_friends_refresh_public_id_rules">3–24 латинские буквы, цифры или подчёркивания. Регистр букв не имеет значения.</string>
+    <string name="ui_friends_refresh_onboarding_pending">Выберите имя, чтобы продолжить. Музыка работает без сети; сервер закрепит ID после подключения. Если имя занято, его можно будет изменить.</string>
+    <string name="ui_friends_refresh_my_id">Мой ID</string>
+    <string name="ui_friends_refresh_id_confirmed">Закреплён за вашим аккаунтом на этом сервере. Друзья найдут вас по точному ID.</string>
+    <string name="ui_friends_refresh_id_pending">Ещё не закреплён. Пока сервер не подтвердил имя, это локальный выбор. Музыку можно слушать без сети.</string>
+    <string name="ui_friends_refresh_id_conflict">Этот ID занят. Выберите другое имя; музыка и подключение к серверу остаются доступны.</string>
+    <string name="ui_friends_refresh_register_id">Закрепить ID</string>
+    <string name="ui_friends_refresh_save_id">Сохранить имя</string>
+    <string name="ui_friends_refresh_id_checking">Проверяем ваш ID…</string>
+    <string name="ui_friends_refresh_id_connection_required">Не удалось подтвердить ID. Подключитесь или обновите данные, чтобы повторить проверку.</string>
+    <string name="ui_friends_refresh_mutual_only">Дружба начинается после принятия заявки получателем. Музыка и медиатека остаются личными.</string>
+    <string name="ui_friends_refresh_find_title">Найти друга</string>
+    <string name="ui_friends_refresh_same_server">Введите точный ID человека на том же сервере.</string>
+    <string name="ui_friends_refresh_exact_id">ID друга (@имя)</string>
+    <string name="ui_friends_refresh_find">Найти</string>
+    <string name="ui_friends_refresh_searching">Ищем…</string>
+    <string name="ui_friends_refresh_lookup_connection_required">Для поиска нужно подключение к вашему серверу.</string>
+    <string name="ui_friends_refresh_lookup_unavailable">Этот ID недоступен. Проверьте имя и сервер.</string>
+    <string name="ui_friends_refresh_already_friends">Вы уже друзья.</string>
+    <string name="ui_friends_refresh_incoming_below">От этого человека есть входящая заявка. Примите или отклоните её ниже.</string>
+    <string name="ui_friends_refresh_send_request">Отправить заявку</string>
+    <string name="ui_friends_refresh_incoming">Входящие заявки · %1$d</string>
+    <string name="ui_friends_refresh_outgoing">Отправленные заявки · %1$d</string>
+    <string name="ui_friends_refresh_confirmed">Друзья · %1$d</string>
+    <string name="ui_friends_refresh_blocked">Заблокированные · %1$d</string>
+    <string name="ui_friends_refresh_no_incoming">Входящих заявок нет.</string>
+    <string name="ui_friends_refresh_no_outgoing">Ожидающих отправленных заявок нет.</string>
+    <string name="ui_friends_refresh_not_loaded">Обновите данные, чтобы загрузить список с сервера.</string>
+    <string name="ui_friends_refresh_privacy">Статус и приглашения в Wave</string>
+    <string name="ui_friends_refresh_remove_title">Удалить из друзей?</string>
+    <string name="ui_friends_refresh_remove_body">Новые приглашения для друзей станут недоступны. Если вы уже в одной комнате Wave, оба останутся в ней до обычного выхода.</string>
+    <string name="ui_friends_refresh_block_title">Заблокировать человека?</string>
+    <string name="ui_friends_refresh_block_body">Дружба и ожидающие приглашения будут отменены. Сначала выйдите из общей комнаты Wave; ведущему нужно передать или закрыть комнату, затем выйти.</string>
+    <string name="ui_friends_refresh_contact_tools">Контактные карточки</string>
+    <string name="ui_friends_refresh_contact_tools_body">Также можно поделиться подписанной контактной карточкой или вставить её для отправки заявки на этом сервере.</string>
+    <string name="ui_friends_refresh_hide_card_input">Скрыть ввод карточки</string>
+    <string name="ui_friends_refresh_invalid_card">Не удалось прочитать контактную карточку. Вставьте её целиком из сообщения друга.</string>
+    <string name="ui_friends_refresh_review_request">Проверить заявку</string>
+    <string name="ui_friends_refresh_card_preview">Имя в карточке: %1$s</string>
+    <string name="ui_friends_refresh_exit_wave_first">Перед блокировкой выйдите из общей комнаты Wave. Ведущему нужно передать или закрыть комнату, затем выйти и повторить попытку.</string>
+    <string name="ui_friends_refresh_request_unavailable">Не удалось отправить или изменить заявку. Обновите список; контактная карточка должна быть действующей и с этого сервера.</string>
+    <string name="ui_friends_refresh_rate_limited">Слишком много попыток. Немного подождите перед повтором.</string>
+</resources>

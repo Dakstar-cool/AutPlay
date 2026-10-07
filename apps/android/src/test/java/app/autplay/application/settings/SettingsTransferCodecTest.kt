@@ -20,24 +20,30 @@ class SettingsTransferCodecTest {
             streamBaseUrl = "https://stream.private.example",
             libraryRootTreeUri = "content://provider/tree/music",
             onboardingRevision = 1,
+            pendingPublicId = "local_listener",
         )
         val portable = NonSecretSettings(
             appLanguage = "RU",
             appearanceMode = "DARK",
             accentPalette = "BLUE",
-            syncOnMeteredNetwork = true,
+            downloadOnMeteredNetwork = true,
             wavePrefetchMode = "NEXT_3",
             developerMode = true,
+            smoothTrackTransitions = true,
+            pendingPublicId = "portable_listener",
         )
 
         val encoded = SettingsTransferCodec.encode(portable)
+        assertEquals(true, "download_on_metered_network" in encoded.decodeToString())
+        assertEquals(false, "sync_on_metered_network" in encoded.decodeToString())
         val restored = SettingsTransferCodec.decode(encoded, current)
 
         assertEquals("RU", restored.appLanguage)
         assertEquals("DARK", restored.appearanceMode)
         assertEquals("BLUE", restored.accentPalette)
-        assertEquals(true, restored.syncOnMeteredNetwork)
+        assertEquals(true, restored.downloadOnMeteredNetwork)
         assertEquals("NEXT_3", restored.wavePrefetchMode)
+        assertEquals(true, restored.smoothTrackTransitions)
         assertEquals(false, restored.developerMode)
         assertNull(encoded.decodeToString().takeIf { "developer" in it })
         assertEquals(current.activeServerProfileId, restored.activeServerProfileId)
@@ -45,6 +51,8 @@ class SettingsTransferCodecTest {
         assertEquals(current.streamBaseUrl, restored.streamBaseUrl)
         assertEquals(current.libraryRootTreeUri, restored.libraryRootTreeUri)
         assertEquals(1, restored.onboardingRevision)
+        assertEquals("local_listener", restored.pendingPublicId)
+        assertNull(encoded.decodeToString().takeIf { "public_id" in it || "portable_listener" in it })
         assertNull(encoded.decodeToString().takeIf { "private.example" in it })
         assertNull(encoded.decodeToString().takeIf { "stream.private.example" in it })
         assertNull(encoded.decodeToString().takeIf { "onboarding" in it })
@@ -71,5 +79,28 @@ class SettingsTransferCodecTest {
         )
 
         assertEquals("KLINGON", restored.appLanguage)
+        assertEquals(false, restored.downloadOnMeteredNetwork)
+    }
+
+    @Test fun legacySettingsImportKeepsTheExistingPlaybackPreference() {
+        for (version in listOf(1, 2)) {
+            val networkKey = if (version == 1) "sync_on_metered_network" else "download_on_metered_network"
+            val restored = SettingsTransferCodec.decode(
+                """{"schema_version":$version,"appearance_mode":"SYSTEM","accent_palette":"CORAL","$networkKey":false,"wave_prefetch_mode":"NEXT"}""".encodeToByteArray(),
+                NonSecretSettings(smoothTrackTransitions = true),
+            )
+            assertEquals(true, restored.smoothTrackTransitions)
+        }
+    }
+
+    @Test fun settingsImportCannotReplaceTheDeviceLocalPublicId() {
+        for (version in 1..3) {
+            val networkKey = if (version == 1) "sync_on_metered_network" else "download_on_metered_network"
+            val restored = SettingsTransferCodec.decode(
+                """{"schema_version":$version,"appearance_mode":"SYSTEM","accent_palette":"CORAL","$networkKey":false,"wave_prefetch_mode":"NEXT","pending_public_id":"imported_name"}""".encodeToByteArray(),
+                NonSecretSettings(pendingPublicId = "local_listener"),
+            )
+            assertEquals("local_listener", restored.pendingPublicId)
+        }
     }
 }

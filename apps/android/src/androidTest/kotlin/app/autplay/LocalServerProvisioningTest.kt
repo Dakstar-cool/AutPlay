@@ -124,7 +124,7 @@ class LocalServerProvisioningTest {
                 deviceId = binding.deviceId,
                 serverBaseUrl = serverBaseUrl,
                 streamBaseUrl = streamBaseUrl,
-                syncOnMeteredNetwork = false,
+                downloadOnMeteredNetwork = false,
             ),
         )
     }

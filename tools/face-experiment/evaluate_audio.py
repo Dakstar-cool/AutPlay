@@ -22,7 +22,7 @@ def read_signal(root: Path, clip: dict) -> np.ndarray:
     path = root / clip["file"]
     if path.name != clip["file"] or path.is_symlink():
         raise ValueError("clip_path_invalid")
-    if not 640000 <= path.stat().st_size <= 768000:
+    if path.stat().st_size != clip["samples"] * 4:
         raise ValueError("clip_size_invalid")
     raw = path.read_bytes()
     if len(raw) != clip["samples"] * 4 or hashlib.sha256(raw).hexdigest() != clip["pcm_sha256"]:
@@ -66,6 +66,7 @@ def main() -> None:
                 "track_id": clip["track_id"],
                 "clip_index": clip["clip_index"],
                 "clip_start_ms": clip["clip_start_ms"],
+                "clip_duration_ms": clip.get("clip_duration_ms", 12_000),
                 "pcm_sha256": clip["pcm_sha256"],
                 "duration_seconds": len(signal) / 16000,
                 "elapsed_seconds": elapsed,

@@ -12,12 +12,20 @@ import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import app.autplay.playback.VaultPlaybackDataSource
+import app.autplay.data.settings.applicationNonSecretSettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /** Process-singleton Media3 download execution state and physically separate cache policies. */
 @UnstableApi
 object MediaDownloadComponents {
     private val lock = Any()
     @Volatile private var state: State? = null
+    private val policyScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     fun get(context: Context): State = state ?: synchronized(lock) {
         state ?: create(context.applicationContext).also { state = it }
@@ -52,7 +60,17 @@ object MediaDownloadComponents {
             downloadCache,
             upstream,
             executor,
-        ).apply { maxParallelDownloads = MAX_PARALLEL_DOWNLOADS }
+        ).apply {
+            maxParallelDownloads = MAX_PARALLEL_DOWNLOADS
+            // Restored requests remain Wi-Fi-only until the persisted preference is loaded.
+            setRequirements(downloadNetworkRequirements(allowMeteredNetwork = false))
+        }
+        policyScope.launch {
+            applicationNonSecretSettingsStore(context).settings
+                .map { it.downloadOnMeteredNetwork }
+                .distinctUntilChanged()
+                .collect { manager.setRequirements(downloadNetworkRequirements(it)) }
+        }
         return State(provider, downloadCache, streamCache, manager, executor)
     }
 

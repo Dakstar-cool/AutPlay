@@ -2,6 +2,7 @@
 {% block head %}{% if passkeys_enabled|default(false) %}<script src="/admin/static/passkeys-v1.js" defer></script>{% endif %}{% endblock %}
 {% block content %}
 <section class="auth-card" aria-labelledby="login-title">
+  <span class="brand-mark auth-mark">{{ icon('brand') }}</span>
   <p class="eyebrow">AutPlay Admin</p>
   <h1 id="login-title">{{ t("login_title") }}</h1>
   <p>{{ t("passkey_login_intro") if passkeys_enabled|default(false) else t("login_intro") }}</p>

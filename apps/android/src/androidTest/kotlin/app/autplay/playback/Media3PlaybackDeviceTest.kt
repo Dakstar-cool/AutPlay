@@ -85,49 +85,6 @@ class Media3PlaybackDeviceTest {
         assertFalse(callback.isControllerAllowed("example.attacker", false))
     }
 
-    @Test fun reactiveRendererProjectsDecodedPcmWithoutAudioCapturePermission() {
-        val ready = CountDownLatch(1)
-        val failure = AtomicReference<PlaybackException?>()
-        val sink = PlaybackAudioContourSink()
-        val player = AtomicReference<ExoPlayer>()
-        PlaybackAudioContourRuntime.setSurfaceObserving("device-test", true)
-        try {
-            instrumentation.runOnMainSync {
-                player.set(
-                    ExoPlayer.Builder(context, ReactivePlaybackRenderersFactory(context, sink))
-                        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context)))
-                        .build()
-                        .also { instance ->
-                            instance.volume = 0f
-                            instance.addListener(object : Player.Listener {
-                                override fun onPlaybackStateChanged(playbackState: Int) {
-                                    if (playbackState == Player.STATE_READY) ready.countDown()
-                                }
-
-                                override fun onPlayerError(error: PlaybackException) {
-                                    failure.set(error)
-                                    ready.countDown()
-                                }
-                            })
-                            instance.setMediaItem(MediaItem.fromUri("content://$testPackageName.readable/audio/tone"))
-                            instance.playWhenReady = true
-                            instance.prepare()
-                        },
-                )
-            }
-            assertTrue("Reactive Media3 player did not reach READY", ready.await(10, TimeUnit.SECONDS))
-            val deadline = SystemClock.elapsedRealtime() + 5_000L
-            while (sink.snapshot().energy <= 0.001f && SystemClock.elapsedRealtime() < deadline) {
-                SystemClock.sleep(50L)
-            }
-            assertNull(failure.get()?.message, failure.get())
-            assertTrue("Decoded PCM did not reach the bounded visual projection", sink.snapshot().energy > 0.001f)
-        } finally {
-            instrumentation.runOnMainSync { player.get()?.release() }
-            PlaybackAudioContourRuntime.setSurfaceObserving("device-test", false)
-        }
-    }
-
     @Test fun pauseAtEndStopsAtArmedItemBoundaryBeforeSuccessorPlayback() {
         val pausedAtBoundary = CountDownLatch(1)
         val transitionCount = AtomicInteger(0)

@@ -48,6 +48,8 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
             is PlaybackCommand.RefreshQueue -> intent.setAction(AutPlayPlaybackService.ACTION_REFRESH_QUEUE)
                 .putExtra(AutPlayPlaybackService.EXTRA_QUEUE_SNAPSHOT_ID, command.queueSnapshotId.value)
             PlaybackCommand.Next -> intent.action = AutPlayPlaybackService.ACTION_NEXT
+            is PlaybackCommand.NextIfCurrent -> intent.setAction(AutPlayPlaybackService.ACTION_NEXT_IF_CURRENT)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.expectedQueueEntryId.value)
             PlaybackCommand.Previous -> intent.action = AutPlayPlaybackService.ACTION_PREVIOUS
             PlaybackCommand.Resume -> intent.action = AutPlayPlaybackService.ACTION_RESUME
             PlaybackCommand.Pause -> intent.action = AutPlayPlaybackService.ACTION_PAUSE
@@ -161,6 +163,9 @@ sealed interface PlaybackCommand {
     data class RefreshQueue(val queueSnapshotId: LocalId) : PlaybackCommand
 
     data object Next : PlaybackCommand
+
+    /** Skip feedback must never advance an item that replaced the one the user rated. */
+    data class NextIfCurrent(val expectedQueueEntryId: LocalId) : PlaybackCommand
 
     data object Previous : PlaybackCommand
 

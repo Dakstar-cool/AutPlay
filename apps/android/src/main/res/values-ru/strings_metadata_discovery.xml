@@ -1,0 +1,18 @@
+<resources>
+    <string name="music_catalogue_title">Музыкальный каталог</string>
+    <string name="music_catalogue_metadata_only">Сведения из каталога. Выберите трек, чтобы найти источник аудио.</string>
+    <string name="music_catalogue_back">К результатам каталога</string>
+    <string name="music_catalogue_browse">Показать треки</string>
+    <string name="music_catalogue_find_source">Найти источник аудио</string>
+    <string name="music_catalogue_disc">Диск %1$d</string>
+    <string name="music_catalogue_track">Трек %1$d</string>
+    <string name="music_catalogue_more">Ещё результаты</string>
+    <string name="music_catalogue_truncated">В каталоге есть другие записи за пределами доступных страниц.</string>
+    <string name="music_catalogue_disabled">Каталог отключён на этом сервере.</string>
+    <string name="music_catalogue_busy">Каталог занят. Повторите попытку позже.</string>
+    <string name="music_catalogue_expired">Выбор устарел. Выберите трек заново.</string>
+    <string name="music_catalogue_retry_selection">Обновить этот выбор</string>
+    <string name="music_catalogue_unavailable_selection">Выбранная запись каталога недоступна.</string>
+    <string name="music_catalogue_conflict">Поиск источника изменился. Выберите трек заново.</string>
+    <string name="music_catalogue_unavailable">Каталог недоступен. Попробуйте позже.</string>
+</resources>

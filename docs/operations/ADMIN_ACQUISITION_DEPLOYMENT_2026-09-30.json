@@ -1,0 +1,32 @@
+{
+  "admin_container_id": "78381d8069e39efeba1da826eb6963faeb564b5924d3e1a20613b33e45e45f19",
+  "admin_image_id": "sha256:270355780d7ff08f5c6b977a310e6fbb6771add4b745572b45f3cb80ddfd8c0e",
+  "agent_source_sha256": "7d3bb34656a6d36a0c17f81e219c07ac1bbc050048cbdebf873a08a98d64123f",
+  "base_image_id": "sha256:92fceaee35e6b0c55aacd49ab1a410ec842c1ebeb6221c4d15393629b8d842d6",
+  "checked_at_utc": "2026-09-29T21:56:04.990480+00:00",
+  "checks": [
+    "agent_heartbeat",
+    "api_agent_command_roundtrip",
+    "api_agent_command_roundtrip_after_group_fix",
+    "candidate_route_and_template",
+    "port_binding_preserved",
+    "private_edge_303",
+    "shared_group_supplementary",
+    "spool_permissions"
+  ],
+  "database_migration_run": false,
+  "download_job_run": false,
+  "enabled_sources": [
+    "bandcamp",
+    "hitmo",
+    "jamendo",
+    "soundcloud",
+    "yt_dlp"
+  ],
+  "overlay_archive_sha256": "ea4419672263c46e5d074e7215ef344264d4e3d9830c36aca13ceccd2c14647c",
+  "rollback_container_id": "40d14ba17242b2adac6f89cef595764c1b577fb3f1ce4a5aac05e39eadd6d1dc",
+  "schema_version": 1,
+  "shared_group_id": 1000,
+  "source_commit": "a17a456",
+  "status": "ACTIVE"
+}

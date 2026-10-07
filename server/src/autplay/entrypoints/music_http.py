@@ -17,6 +17,7 @@ class SearchBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=1, max_length=200)
     operation_id: UUID
+    catalogue_context_id: UUID | None = None
 
 
 class SelectBody(BaseModel):
@@ -77,7 +78,11 @@ def create_music_router(
             raise ApiError(
                 "music_search_disabled", "Internet search is unavailable on this server.", 503
             )
-        return service.search(request.state.principal, body.query, body.operation_id)
+        if body.catalogue_context_id is None:
+            return service.search(request.state.principal, body.query, body.operation_id)
+        return service.search(
+            request.state.principal, body.query, body.operation_id, body.catalogue_context_id
+        )
 
     @router.post("/internet/acquisitions")
     def select(body: SelectBody, request: Request) -> dict[str, Any]:

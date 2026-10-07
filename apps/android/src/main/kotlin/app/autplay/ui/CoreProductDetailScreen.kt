@@ -249,7 +249,7 @@ public fun CoreProductDetailScreen(
                         onClick = track.localUserTrackRefId?.let { trackRefId -> { onPlayTrack(trackRefId) } },
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(track.numberText ?: track.sequenceNo.toString())
+                            Text(track.numberText ?: track.sequenceNo?.toString().orEmpty())
                             Column {
                                 Text(track.title, style = MaterialTheme.typography.titleMedium)
                                 Text(track.artistName, color = AutPlayTokens.colors.mutedText)

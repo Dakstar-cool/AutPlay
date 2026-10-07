@@ -61,6 +61,7 @@ class HomeRecommendationScreenTest {
                 deviceId = DeviceId(DEVICE),
                 serverBaseUrl = "https://offline.test",
                 onboardingRevision = CURRENT_ONBOARDING_REVISION,
+                pendingPublicId = "activity_fixture",
             ),
         )
         val db = AutPlayDatabase.open(context)
@@ -111,6 +112,7 @@ class HomeRecommendationScreenTest {
                 deviceId = DeviceId(OTHER_DEVICE),
                 serverBaseUrl = "https://offline.test",
                 onboardingRevision = CURRENT_ONBOARDING_REVISION,
+                pendingPublicId = "activity_fixture",
             ),
         )
         scrollHomeTo(hasText(context.getString(R.string.home_empty_recommendations)))

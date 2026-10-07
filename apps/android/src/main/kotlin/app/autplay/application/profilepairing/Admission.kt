@@ -155,6 +155,7 @@ class AdmissionRuntime(
     private var pollBearer: ByteArray? = null
     private var activeGenerationId: String? = null
     private var lastForegroundPollAtMs: Long? = null
+    private var foregroundPollInFlight = false
     private var recoveryCheckpoint: AdmissionCheckpoint? = null
     private val trustedRuntime = TrustedReenrollmentRuntime(scope, keys, port, persistTrustedReenrollment, keyAlias)
 
@@ -185,7 +186,7 @@ class AdmissionRuntime(
         when (val result = port.request(AdmissionRequest(exact, signed.json))) {
             is PairingNetworkResult.Success -> if (activeGenerationId == exact.generationId && stateFlow.value is AdmissionState.RequestReady) {
                 pollBearer?.fill(0); pollBearer = result.value.pollBearer.copyOf(); persistCheckpoint(exact)
-                stateFlow.value = AdmissionState.AwaitingComparison(exact, result.value.reviewLocator, AdmissionProof.sasDecimal12(exact))
+                stateFlow.value = AdmissionState.Pending(exact)
             }
             is PairingNetworkResult.Failure -> if (activeGenerationId == exact.generationId) stateFlow.value = failure(result.code, exact)
         }
@@ -194,10 +195,12 @@ class AdmissionRuntime(
     fun confirmComparison() { val current = stateFlow.value as? AdmissionState.AwaitingComparison ?: return; stateFlow.value = AdmissionState.Pending(current.checkpoint) }
     fun poll() = scope.launch {
         val current = stateFlow.value as? AdmissionState.Pending ?: return@launch
+        if (foregroundPollInFlight) return@launch
         val now = System.currentTimeMillis()
         if (lastForegroundPollAtMs?.let { now - it < 2_000L } == true) return@launch
         lastForegroundPollAtMs = now
         val bearer = pollBearer?.copyOf() ?: run { recover(current.checkpoint); return@launch }
+        foregroundPollInFlight = true
         try {
             val wire = signed(current.checkpoint, AdmissionProof.POLL_DOMAIN, mapOf(
                 "request_id" to JsonPrimitive(current.checkpoint.requestId),
@@ -217,7 +220,7 @@ class AdmissionRuntime(
                     stateFlow.value = failure(result.code, current.checkpoint)
                 }
             }
-        } finally { bearer.fill(0) }
+        } finally { foregroundPollInFlight = false; bearer.fill(0) }
     }
     fun confirmAccount() = scope.launch {
         val current = stateFlow.value as? AdmissionState.Approved ?: return@launch
@@ -271,7 +274,7 @@ class AdmissionRuntime(
         when (val result = port.recover(AdmissionRequest(checkpoint, request.json))) {
             is PairingNetworkResult.Success -> if (activeGenerationId == checkpoint.generationId) {
                 pollBearer?.fill(0); pollBearer = result.value.pollBearer.copyOf()
-                stateFlow.value = AdmissionState.AwaitingComparison(checkpoint, result.value.reviewLocator, AdmissionProof.sasDecimal12(checkpoint))
+                stateFlow.value = AdmissionState.Pending(checkpoint)
             }
             is PairingNetworkResult.Failure -> if (activeGenerationId == checkpoint.generationId) stateFlow.value = failure(result.code, checkpoint)
         }

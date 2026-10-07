@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import app.autplay.application.search.LocalTrackSearchRepository
+import app.autplay.application.search.searchOwnerContextKey
 import app.autplay.application.search.LocalTrackSearchResult
 import app.autplay.application.search.VaultSearchProjector
 import app.autplay.application.search.VaultSearchResult
@@ -12,6 +13,8 @@ import app.autplay.ui.core.CoreProductUiState
 import app.autplay.ui.core.SearchGenerationGuard
 import app.autplay.ui.core.SearchResultStore
 import app.autplay.ui.core.SearchScope
+import app.autplay.ui.core.automaticSearchScopes
+import kotlinx.coroutines.CancellationException
 
 /** Replays a saved query after a binding change without growing the root composable CFG. */
 @Composable
@@ -34,10 +37,10 @@ internal fun RefreshSearchOnBindingEffect(
     setVaultSearched: (Boolean) -> Unit,
     reportError: (String) -> Unit,
 ) {
-    val bindingKey = binding?.serverProfileId?.value
+    val bindingKey = binding.searchOwnerContextKey()
+    val profileId = binding?.serverProfileId?.value
     LaunchedEffect(bindingKey) {
-        coreState.scopes = if (binding == null) setOf(SearchScope.Local)
-            else coreState.scopes + SearchScope.Local + SearchScope.Vault
+        coreState.scopes = automaticSearchScopes(bindingKey)
         generation.invalidate()
         resultStore.invalidate()
         vaultResultStore.invalidate()
@@ -48,14 +51,14 @@ internal fun RefreshSearchOnBindingEffect(
         setVaultError(false)
         setVaultResults(emptyList())
         setVaultSearched(false)
-        if (!completed) return@LaunchedEffect
+        if (!completed || coreState.query.isBlank()) return@LaunchedEffect
 
-        val activeScopes = coreState.scopes + SearchScope.Local
-        val request = generation.begin(coreState.query, activeScopes, bindingKey)
+        val activeScopes = automaticSearchScopes(bindingKey)
+        val request = generation.begin(coreState.query, activeScopes, bindingKey, coreState.searchKind)
         resultStore.start(request)
         vaultResultStore.start(request)
         setLoading(true)
-        runCatching { repository.search(request.normalizedQuery, bindingKey) }
+        runCatching { repository.search(request.normalizedQuery, profileId, kind = request.kind) }
             .onSuccess { rows ->
                 if (generation.accepts(request) && resultStore.accept(request, rows)) {
                     setResults(resultStore.results)
@@ -63,6 +66,7 @@ internal fun RefreshSearchOnBindingEffect(
                 }
             }
             .onFailure {
+                if (it is CancellationException) throw it
                 if (generation.accepts(request)) {
                     setLoading(false)
                     setError(true)
@@ -74,7 +78,7 @@ internal fun RefreshSearchOnBindingEffect(
         }
         setVaultLoading(true)
         runCatching {
-            AutPlayRuntime.serverFeatures(context, binding).searchLibrary(request.normalizedQuery, limit = 100)
+            AutPlayRuntime.serverFeatures(context, binding).searchLibrary(request.normalizedQuery, limit = 100, kind = request.kind)
         }.mapCatching { rows ->
             vaultProjector.project(binding.serverProfileId.value, rows)
         }.onSuccess { rows ->
@@ -84,6 +88,7 @@ internal fun RefreshSearchOnBindingEffect(
                 setVaultLoading(false)
             }
         }.onFailure {
+            if (it is CancellationException) throw it
             if (generation.accepts(request)) {
                 setVaultLoading(false)
                 setVaultError(true)

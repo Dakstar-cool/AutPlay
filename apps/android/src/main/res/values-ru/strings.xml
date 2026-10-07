@@ -77,26 +77,11 @@
     <string name="search_loading">Идёт поиск в локальной медиатеке…</string>
     <string name="search_local_scope">Локально</string>
     <string name="search_vault_scope">Хранилище</string>
-    <string name="search_vault_results">Личное хранилище</string>
     <string name="search_vault_loading">Ищем в личном хранилище…</string>
-    <string name="search_vault_unavailable">Личное хранилище недоступно. Локальные результаты остаются доступны.</string>
     <string name="search_vault_empty">В личном хранилище ничего не найдено.</string>
     <string name="search_vault_metadata_unavailable">Метаданные недоступны на этом устройстве</string>
-    <string name="search_vault_source_availability">%1$s · %2$s</string>
     <string name="search_vault_playback_unavailable">Здесь недоступно</string>
-    <plurals name="search_vault_result_count">
-        <item quantity="one">Найден %d объект. Добавьте или синхронизируйте его для воспроизведения на устройстве.</item>
-        <item quantity="few">Найдено %d объекта. Добавьте или синхронизируйте их для воспроизведения на устройстве.</item>
-        <item quantity="many">Найдено %d объектов. Добавьте или синхронизируйте их для воспроизведения на устройстве.</item>
-        <item quantity="other">Найдено %d объекта. Добавьте или синхронизируйте их для воспроизведения на устройстве.</item>
-    </plurals>
     <string name="search_empty">Локальных результатов нет</string>
-    <plurals name="search_result_count">
-        <item quantity="one">%d результат</item>
-        <item quantity="few">%d результата</item>
-        <item quantity="many">%d результатов</item>
-        <item quantity="other">%d результата</item>
-    </plurals>
 
     <string name="library_title">Моя музыка</string>
     <string name="library_local_mode">Хранится на телефоне и доступна без сети</string>
@@ -105,7 +90,6 @@
     <string name="library_add_local_success">Трек «%1$s» добавлен в локальную коллекцию</string>
     <string name="library_empty_body">Выберите папку с музыкой или добавьте локальный трек.</string>
     <string name="library_unknown_artist">Неизвестный исполнитель</string>
-    <string name="library_permission_revoked">Доступ к файлу отозван. Сохраните трек и снова выберите папку либо используйте разрешённый источник Vault.</string>
     <string name="library_sort_label">Сортировка</string>
     <string name="library_filter_label">Фильтр</string>
     <string name="library_section_tracks">Треки</string>
@@ -138,12 +122,6 @@
     <string name="detail_artist_related_item">Связанный объект</string>
     <string name="library_review_empty">Нет импортов, требующих проверки.</string>
     <string name="library_collection_empty">В этом разделе пока нет коллекций.</string>
-    <plurals name="library_track_count">
-        <item quantity="one">%d локальный трек</item>
-        <item quantity="few">%d локальных трека</item>
-        <item quantity="many">%d локальных треков</item>
-        <item quantity="other">%d локального трека</item>
-    </plurals>
     <plurals name="library_review_count">
         <item quantity="one">%d импорт требует проверки</item>
         <item quantity="few">%d импорта требуют проверки</item>
@@ -157,9 +135,11 @@
     <string name="action_like">Нравится</string>
     <string name="action_liked">Понравилось</string>
     <string name="player_taste_exclusion_title">Профиль вкуса</string>
-    <string name="player_taste_exclusion_description">Исключайте прослушивание из профиля вкуса независимо от отметок «Нравится».</string>
-    <string name="player_exclude_current_listen">Исключить это прослушивание</string>
-    <string name="player_exclude_session">Исключить эту сессию очереди</string>
+    <string name="player_collapse">Свернуть плеер</string>
+    <string name="player_section_expanded">Развернуто</string>
+    <string name="player_section_collapsed">Свернуто</string>
+    <string name="player_exclude_listen_short">Исключить прослушивание</string>
+    <string name="player_exclude_session_short">Исключить сессию</string>
     <string name="player_taste_listen_unavailable">Начните прослушивание, чтобы исключить текущий факт.</string>
     <string name="player_taste_exclusion_error">Не удалось обновить исключение. Повторите попытку.</string>
     <string name="action_dislike">Не нравится</string>
@@ -185,12 +165,7 @@
     <string name="detail_release_date">Дата выпуска</string>
 
     <string name="player_nothing_playing">Ничего не играет</string>
-    <string name="face_description_idle">Resonance Lens нейтрален и ожидает воспроизведения</string>
-    <string name="face_description_playing">Resonance Lens нейтрально реагирует на локальное воспроизведение</string>
-    <string name="face_description_paused">Resonance Lens нейтрален; воспроизведение приостановлено</string>
-    <string name="face_description_buffering">Resonance Lens нейтрален; идёт буферизация</string>
     <string name="player_unknown_artist">Неизвестный исполнитель</string>
-    <string name="player_queue_context">Текущая очередь</string>
     <string name="player_buffering">Буферизация</string>
     <string name="player_timeline_unknown">Шкала времени недоступна</string>
     <string name="player_timeline_live">Прямая трансляция или неизвестная длительность</string>
@@ -202,10 +177,6 @@
     <string name="player_repeat_one">Повтор трека</string>
     <string name="player_repeat_all">Повтор очереди</string>
     <string name="player_progress_description">%1$s из %2$s</string>
-    <string name="player_source_local">На этом устройстве</string>
-    <string name="player_source_vault">Личный Vault</string>
-    <string name="player_source_download">Загружено</string>
-    <string name="player_source_unknown">Источник определяется</string>
     <string name="player_controls_unavailable">Управление недоступно для этого трека.</string>
     <string name="player_source_unavailable">Для трека есть только метаданные, но нет доступного аудио. Импортируйте аудиофайл или скачайте доступную версию из Vault.</string>
 
@@ -221,7 +192,6 @@
     <string name="track_untitled">Трек без названия</string>
 
     <string name="expanded_queue_title">Далее</string>
-    <string name="library_selected">Выбранный трек</string>
     <string name="queue_editor_title">Очередь воспроизведения</string>
     <string name="queue_editor_empty">Добавьте трек, чтобы собрать очередь.</string>
     <string name="queue_editor_unavailable">Очередь недоступна. Воспроизведение не изменено.</string>
@@ -416,14 +386,16 @@
     <string name="profile_revoke_device">Удалить это устройство</string>
     <string name="profile_disconnect">Отключить сервер от телефона</string>
     <string name="profile_personal_server">Личный сервер</string>
-    <string name="admission_copy_review_locator">Копировать локатор</string>
-    <string name="admission_copy_comparison_code">Копировать код</string>
-    <string name="admission_review_locator_clipboard_label">Локатор запроса AutPlay</string>
-    <string name="admission_comparison_code_clipboard_label">Код сравнения AutPlay</string>
+    <string name="admission_request_intro">Отправьте заявку, затем подтвердите устройство и задайте ему имя в админке сервера.</string>
+    <string name="admission_request_approval">Запросить подключение</string>
+    <string name="admission_waiting_for_admin">Ожидаем подтверждения в админке сервера. Статус обновляется автоматически. Локальная музыка остаётся доступной.</string>
+    <string name="admission_check_status">Проверить статус</string>
+    <string name="admission_cancel">Отмена</string>
     <string name="profile_connection_local">Не подключено — локальный режим продолжает работать</string>
     <string name="profile_server_origin">Адрес сервера</string>
     <string name="profile_server_origin_hint">Используйте приватный адрес, полученный от администратора сервера.</string>
     <string name="profile_check_server">Проверить сервер</string>
+    <string name="profile_scan_server_qr">Сканировать QR сервера</string>
     <string name="profile_connection_checking">Проверяем сервер</string>
     <string name="profile_connection_trust">Подтвердите доверие к серверу</string>
     <string name="profile_trust_explanation">Адрес помогает найти сервер, но не доказывает его личность. Подтверждайте только ожидаемый сервер.</string>
@@ -524,7 +496,13 @@
     <string name="settings_network">Личный сервер и совместное прослушивание</string>
     <string name="settings_personal_server_body">Подключайте и управляйте личным сервером в едином доверенном сценарии подключения.</string>
     <string name="settings_open_personal_server">Открыть личный сервер</string>
-    <string name="settings_metered_sync">Синхронизировать через мобильный интернет</string>
+    <string name="settings_metered_downloads">Скачивать треки через мобильный интернет</string>
+    <string name="settings_download_network_summary">Сохранение треков для офлайн-прослушивания</string>
+    <string name="settings_playback">Воспроизведение</string>
+    <string name="settings_playback_summary">Переключение между треками</string>
+    <string name="settings_smooth_track_transitions">Плавное переключение треков</string>
+    <string name="settings_smooth_track_transitions_body">Для склейки пропускаются последние 3 секунды текущего трека и первые 3 секунды следующего. Громкость сохраняется. Короткие треки звучат целиком; последний трек доигрывает до конца.</string>
+    <string name="settings_download_network_body">Только для сохранения треков на устройстве. Библиотека и метаданные синхронизируются при любом доступном подключении.</string>
     <string name="settings_wave_prefetch_off">Не подготавливать треки заранее</string>
     <string name="settings_wave_prefetch_next">Подготовить следующий трек</string>
     <string name="settings_wave_prefetch_three">Подготовить три следующих трека</string>
@@ -540,26 +518,18 @@
         <item quantity="many">Отключение примерно через %1$d минут</item>
         <item quantity="other">Отключение примерно через %1$d минуты</item>
     </plurals>
-    <string name="player_sleep_timer_body">Автоматически остановить музыку через выбранное время.</string>
     <string name="player_sleep_timer_cancel">Отключить таймер</string>
     <string name="player_sleep_timer_dial_description">Таймер сна, от 1 до 60 минут</string>
     <string name="player_sleep_timer_set">Запустить таймер</string>
     <string name="player_sleep_timer_after_track">После текущего трека</string>
     <string name="player_sleep_timer_after_track_active">Воспроизведение остановится после текущего трека.</string>
-    <string name="player_wave_by_track">Волна по треку</string>
-    <string name="player_wave_by_track_body">Будущая персональная подборка на основе текущего трека.</string>
-    <string name="player_wave_by_track_unavailable">Волна по треку пока недоступна</string>
-    <string name="player_coming_soon">Скоро</string>
     <string name="recommendation_for_you">Рекомендовано для вас</string>
-    <string name="social_friends">Друзья</string>
     <string name="social_refresh">Обновить</string>
-    <string name="social_updating">Обновляем список друзей…</string>
     <string name="social_create_contact_card">Создать мою карточку контакта</string>
     <string name="social_contact_card_ready">Карточка готова. Делитесь ею только с теми, кому доверяете.</string>
     <string name="social_share_contact_card">Поделиться карточкой</string>
     <string name="social_friend_contact_card">Карточка контакта друга</string>
     <string name="social_add_friend_from_contact_card">Добавить друга по карточке контакта</string>
-    <string name="social_add_friend">Добавить друга</string>
     <string name="social_no_friends">Друзей пока нет. Медиатека и воспроизведение остаются приватными и доступными.</string>
     <string name="social_wave_invitations">Приглашения в Волну</string>
     <string name="social_wave_invite">Приглашение в Волну</string>
@@ -600,7 +570,6 @@
     <string name="social_error_reconnect">Переподключите личный сервер, чтобы продолжить.</string>
     <string name="social_error_generic">Не удалось обновить друзей. Предыдущие данные сохранены на экране.</string>
     <string name="statistics_title">Статистика прослушивания</string>
-    <string name="statistics_owner_private_note">Рассчитано на устройстве только для этого профиля. Прослушивания, исключённые из профиля вкуса, входят в личную статистику и не показываются друзьям.</string>
     <string name="statistics_loading">Считаем статистику…</string>
     <string name="statistics_empty">За этот период прослушиваний пока нет.</string>
     <plurals name="statistics_window_days">
@@ -628,18 +597,8 @@
         <item quantity="many">%1$d треков</item>
         <item quantity="other">%1$d трека</item>
     </plurals>
-    <plurals name="statistics_play_count">
-        <item quantity="one">%1$d прослушивание</item>
-        <item quantity="few">%1$d прослушивания</item>
-        <item quantity="many">%1$d прослушиваний</item>
-        <item quantity="other">%1$d прослушивания</item>
-    </plurals>
     <string name="statistics_duration_hours_minutes">%1$d ч %2$d мин</string>
     <string name="statistics_duration_minutes">%1$d мин</string>
-    <string name="statistics_top_tracks">Популярные треки · 30 дней</string>
-    <string name="statistics_top_artists">Популярные исполнители · 30 дней</string>
-    <string name="statistics_top_track_row">%1$d. %2$s — %3$s · %4$s</string>
-    <string name="statistics_top_artist_row">%1$d. %2$s · %3$s</string>
     <string name="statistics_friend_title">Статистика друга</string>
     <string name="statistics_friend_through">По %1$s UTC включительно</string>
     <string name="statistics_unavailable">Статистика недоступна</string>

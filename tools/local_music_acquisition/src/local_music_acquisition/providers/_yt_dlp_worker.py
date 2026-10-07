@@ -21,6 +21,7 @@ from ..audio_validation import audio_duration
 from ..matching import SEARCH_LIMIT
 from ..preflight import node_status
 from ..source_catalog import track_url
+from ..source_metadata import yt_dlp_metadata
 from ..xray import proxy_address
 from ._proxy_transport import socks_transport
 from .hitmo import _looks_like_audio, _publish_exclusive, _safe_filename
@@ -164,12 +165,12 @@ def _find_url(ydl: Any, url: str, *, artist: str, title: str) -> dict[str, objec
     return _find_exact([detail], artist=artist, title=title)
 
 
-def _download(request: dict[str, object]) -> dict[str, str]:
+def _download(request: dict[str, object]) -> dict[str, object]:
     with socks_transport(request.get("proxy_url")):
         return _download_track(request)
 
 
-def _download_track(request: dict[str, object]) -> dict[str, str]:
+def _download_track(request: dict[str, object]) -> dict[str, object]:
     artist = request.get("artist")
     title = request.get("title")
     output_value = request.get("output_directory")
@@ -251,9 +252,11 @@ def _download_track(request: dict[str, object]) -> dict[str, str]:
         try:
             with YoutubeDL(download_options) as ydl:
                 if source_url is not None:
-                    ydl.process_ie_result(selected, download=True)
+                    downloaded_info = ydl.process_ie_result(selected, download=True)
                 else:
-                    ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+                    downloaded_info = ydl.extract_info(
+                        f"https://www.youtube.com/watch?v={video_id}", download=True
+                    )
         except DownloadError:
             return {"status": "failed", "code": "download_failed"}
         candidates = [
@@ -281,12 +284,24 @@ def _download_track(request: dict[str, object]) -> dict[str, str]:
             artifact_ref = _content_ref(published)
         except OSError:
             return {"status": "failed", "code": "publish_failed"}
-    return {"status": "downloaded", "artifact_ref": artifact_ref}
+    return {
+        "status": "downloaded",
+        "artifact_ref": artifact_ref,
+        "source_metadata": yt_dlp_metadata(
+            downloaded_info
+            if isinstance(downloaded_info, dict)
+            and downloaded_info.get("id") == video_id
+            and candidate_matches(downloaded_info, artist=artist, title=title)
+            else selected,
+            provider="yt_dlp",
+        ),
+    }
 
 
 def main() -> int:
     # The Python API otherwise loads plugins from default user and system locations.
     plugin_dirs.value = []
+    response: dict[str, object]
     try:
         raw = sys.stdin.read(32 * 1024 + 1)
         if len(raw) > 32 * 1024:

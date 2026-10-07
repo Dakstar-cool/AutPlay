@@ -21,6 +21,7 @@ from autplay.adapters.postgresql.models import (
     UploadSessionRow,
 )
 from autplay.adapters.postgresql.models.resource_admission import ResourceAdmissionRow
+from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
 from autplay.adapters.windows_process_tree import WindowsJobTree
 from autplay.application.internet_acquisition import ControlledInternetAcquisitionHandler
 from autplay.application.internet_music import INTERNET_ACQUIRE_JOB, InternetMusicService
@@ -52,6 +53,14 @@ def test_job_download_handoff_and_retry_keep_one_operation(
     acquisition_id = UUID(service.select(actor, search, "candidate00")["acquisition_id"])
     FilesystemVaultStorage(tmp_path)
     payload = b"provider HTTP data" * 4096
+    native: dict[str, object] = {
+        "schema_version": 1,
+        "provider": "YOUTUBE",
+        "source_id": "candidate00",
+        "fields": {"title": "Song (Live)", "artist": "Artist", "album": "Native Album"},
+        "external_ids": {"native_album_id": "44"},
+        "artwork": [],
+    }
     coordinator = VaultIoCoordinator(admission.service, maximum=1)
     coordinator.start()
     retrying = failure in {"http", "control", "worker"}
@@ -60,6 +69,7 @@ def test_job_download_handoff_and_retry_keep_one_operation(
             payload,
             fail_first=failure == "http",
             duration_seconds=32 if failure == "long" else 0,
+            source_metadata=native,
         ) as provider:
             handler = ControlledInternetAcquisitionHandler(
                 PostgresInternetAcquisitionRepository(admission.sessions),
@@ -123,6 +133,10 @@ def test_job_download_handoff_and_retry_keep_one_operation(
         with admission.sessions() as session:
             source = present(session.get(InternetAcquisitionRow, acquisition_id))
             assert source.error_code is None
+            metadata = present(session.get(TrackMetadataRow, source.user_track_ref_id))
+            assert metadata.document["pending_acquisition_evidence"] == native
+            assert metadata.document["pending_acquisition_id"] == str(acquisition_id)
+            assert metadata.job_id is None
             upload = present(session.get(UploadSessionRow, source.upload_id))
             assert upload.expected_size == len(payload)
             receipts = session.scalars(select(ProviderStagingRow)).all()

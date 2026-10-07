@@ -4,6 +4,7 @@ import androidx.datastore.core.okio.OkioStorage
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
@@ -31,6 +32,54 @@ import org.junit.rules.TemporaryFolder
 class DataStoreNonSecretSettingsStoreTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun smoothTransitionsPersistAcrossRecreationAndUnrelatedSettingsEdits() = runBlocking {
+        val file = temporaryFolder.root.resolve("playback.preferences_pb")
+        val firstScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(firstScope, file)
+            assertFalse(store.settings.first().smoothTrackTransitions)
+            store.mutate { it.copy(smoothTrackTransitions = true) }
+            store.mutate { it.copy(accentPalette = "BLUE") }
+        } finally { firstScope.coroutineContext[Job]?.cancelAndJoin() }
+        val secondScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(secondScope, file)
+            assertTrue(store.settings.first().smoothTrackTransitions)
+            assertEquals("BLUE", store.settings.first().accentPalette)
+            store.mutate { it.copy(smoothTrackTransitions = false) }
+            assertFalse(store.settings.first().smoothTrackTransitions)
+        } finally { secondScope.coroutineContext[Job]?.cancelAndJoin() }
+    }
+
+    @Test
+    fun legacyMeteredPreferenceMigratesToDownloadsAndKeepsUnknownPreferences() = runBlocking {
+        val file = temporaryFolder.root.resolve("download-policy.preferences_pb")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val dataStore = PreferenceDataStoreFactory.create(
+                storage = OkioStorage(FileSystem.SYSTEM, PreferencesSerializer) { file.toOkioPath() },
+                scope = scope,
+            )
+            val legacy = booleanPreferencesKey("sync_on_metered_network")
+            val download = booleanPreferencesKey("download_on_metered_network")
+            val future = stringPreferencesKey("future_preference")
+            dataStore.edit { it[legacy] = true; it[future] = "preserved" }
+            val store = DataStoreNonSecretSettingsStore(dataStore)
+            assertTrue(store.settings.first().downloadOnMeteredNetwork)
+            store.mutate { it.copy(downloadOnMeteredNetwork = false) }
+            assertFalse(store.settings.first().downloadOnMeteredNetwork)
+            val persisted = dataStore.data.first()
+            assertNull(persisted[legacy])
+            assertEquals(false, persisted[download])
+            assertEquals("preserved", persisted[future])
+        } finally { scope.coroutineContext[Job]?.cancelAndJoin() }
+        val reopenedScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            assertFalse(hostPreferenceStore(reopenedScope, file).settings.first().downloadOnMeteredNetwork)
+        } finally { reopenedScope.coroutineContext[Job]?.cancelAndJoin() }
+    }
 
     @Test
     fun requiredRecoverySetupAndExactSaveEvidenceSurviveRecreationWithoutLegacyBackfill() = runBlocking {
@@ -82,6 +131,34 @@ class DataStoreNonSecretSettingsStoreTest {
             storage = OkioStorage(FileSystem.SYSTEM, PreferencesSerializer) { file.toOkioPath() },
             scope = scope,
         ))
+
+    @Test
+    fun pendingPublicIdSurvivesRecreationAndPreservesExistingBinding() = runBlocking {
+        val file = temporaryFolder.root.resolve("public-id.preferences_pb")
+        val original = NonSecretSettings(
+            activeServerProfileId = ServerProfileId("11111111-1111-4111-8111-111111111111"),
+            activeUserId = UserId("22222222-2222-4222-8222-222222222222"),
+            deviceId = DeviceId("33333333-3333-4333-8333-333333333333"),
+            serverBaseUrl = "https://api.example.test",
+            streamBaseUrl = "https://stream.example.test",
+            libraryRootTreeUri = "content://provider/tree/music",
+            onboardingRevision = CURRENT_ONBOARDING_REVISION,
+        )
+        val firstScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(firstScope, file)
+            store.update(original)
+            store.mutate { it.copy(pendingPublicId = "local_listener") }
+            store.mutate { it.copy(accentPalette = "BLUE") }
+        } finally { firstScope.coroutineContext[Job]?.cancelAndJoin() }
+        val reopenedScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(reopenedScope, file)
+            assertEquals(original.copy(pendingPublicId = "local_listener", accentPalette = "BLUE"), store.settings.first())
+            assertTrue(runCatching { store.mutate { it.copy(pendingPublicId = "invalid ID") } }.isFailure)
+            assertEquals("local_listener", store.settings.first().pendingPublicId)
+        } finally { reopenedScope.coroutineContext[Job]?.cancelAndJoin() }
+    }
 
     @Test
     fun incompleteRecoverySetupCannotBeReadAsAnOptionalLegacyAccount() = runBlocking {

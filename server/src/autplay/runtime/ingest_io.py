@@ -19,6 +19,7 @@ from autplay.adapters.filesystem.vault_process import (
     ProcessTreeFactory,
     RetainedVaultProcess,
 )
+from autplay.domain.catalog_execution import CatalogExecutionTicket
 from autplay.domain.ingest_cleanup import IngestCleanupTicket
 from autplay.domain.ingest_execution import (
     MAX_INGEST_COORDINATOR_ENTRIES,
@@ -39,6 +40,7 @@ from autplay.runtime.resource_io_deadline import ResourceIoDeadline
 class IngestExecutionRepository[
     Ticket: IngestExecutionTicket
     | IngestCleanupTicket
+    | CatalogExecutionTicket
     | MetadataExecutionTicket = IngestExecutionTicket
 ](Protocol):
     def prepare(self, ticket: Ticket) -> IngestExecutionStatus[Ticket]: ...
@@ -60,7 +62,12 @@ class IngestWork:
 
 
 @dataclass
-class _Retained[Ticket: IngestExecutionTicket | IngestCleanupTicket | MetadataExecutionTicket]:
+class _Retained[
+    Ticket: IngestExecutionTicket
+    | IngestCleanupTicket
+    | MetadataExecutionTicket
+    | CatalogExecutionTicket
+]:
     child: RetainedVaultProcess[Ticket]
     action: Callable[
         [RetainedVaultProcess[Ticket], IngestExecutionStatus[Ticket], Callable[[], None]], object
@@ -83,7 +90,10 @@ class _Retained[Ticket: IngestExecutionTicket | IngestCleanupTicket | MetadataEx
 
 
 class _IngestCoordinator[
-    Ticket: IngestExecutionTicket | IngestCleanupTicket | MetadataExecutionTicket
+    Ticket: IngestExecutionTicket
+    | IngestCleanupTicket
+    | MetadataExecutionTicket
+    | CatalogExecutionTicket
 ]:
     """Owned worker and independent watchdog; registry entries are not CPU admission.
 
@@ -97,7 +107,7 @@ class _IngestCoordinator[
     def __init__(
         self,
         repository: IngestExecutionRepository[Ticket],
-        settings: IngestChildSettings,
+        settings: IngestChildSettings | None,
         *,
         tree_factory: ProcessTreeFactory,
         maximum: int = 1,
@@ -110,12 +120,18 @@ class _IngestCoordinator[
         if error_prefix not in {"ingest", "metadata"}:
             raise ValueError("internal_execution_prefix_invalid")
         self._error_prefix = error_prefix
-        self._repository, self._settings = repository, settings
+        self._repository, self._child_settings = repository, settings
         self._tree_factory, self._launch, self._maximum = tree_factory, launch, maximum
         self._on_drained = on_drained
         self._lock = threading.Lock()
         self._entries: dict[UUID, _Retained[Ticket]] = {}
         self._closing = False
+
+    @property
+    def _settings(self) -> IngestChildSettings:
+        if self._child_settings is None:
+            raise self._failure("settings_unavailable")
+        return self._child_settings
 
     def _failure(self, suffix: str) -> ResourceAdmissionError:
         return ResourceAdmissionError(f"{self._error_prefix}_{suffix}")

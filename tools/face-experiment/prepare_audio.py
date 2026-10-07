@@ -9,6 +9,8 @@ import math
 import subprocess
 from pathlib import Path
 
+from audio_inputs import clip_plan
+
 
 def sha256(path: Path) -> str:
     with path.open("rb") as handle:
@@ -111,8 +113,9 @@ def main() -> None:
             120,
         )
         track_id = f"track-{index:03d}"
-        starts = sorted({0, (item["duration_ms"] - 12000) // 2, item["duration_ms"] - 12000})
-        for segment_index, start in enumerate(starts):
+        for segment_index, (start, clip_duration_ms) in enumerate(
+            clip_plan(item["sha256"], item["duration_ms"])
+        ):
             pcm = run(
                 [
                     "ffmpeg",
@@ -123,7 +126,7 @@ def main() -> None:
                     "-ss",
                     f"{start / 1000:.3f}",
                     "-t",
-                    "12",
+                    f"{clip_duration_ms / 1000:.3f}",
                     "-i",
                     str(path),
                     "-map",
@@ -139,7 +142,11 @@ def main() -> None:
                     "pipe:1",
                 ]
             )
-            if len(pcm) % 4 or not 16000 * 10 * 4 <= len(pcm) <= 16000 * 12 * 4:
+            samples = len(pcm) // 4
+            if (
+                len(pcm) % 4
+                or not (clip_duration_ms - 500) * 16 <= samples <= (clip_duration_ms + 100) * 16
+            ):
                 raise ValueError("pcm_length_invalid")
             name = f"{track_id}-clip-{segment_index}.f32le"
             (args.output / name).write_bytes(pcm)
@@ -149,7 +156,8 @@ def main() -> None:
                     "clip_index": segment_index,
                     "file": name,
                     "clip_start_ms": start,
-                    "samples": len(pcm) // 4,
+                    "clip_duration_ms": clip_duration_ms,
+                    "samples": samples,
                     "pcm_sha256": hashlib.sha256(pcm).hexdigest(),
                 }
             )
@@ -160,11 +168,12 @@ def main() -> None:
     private_bytes = (json.dumps(private, ensure_ascii=False, indent=2) + "\n").encode()
     (args.output / "sources.private.json").write_bytes(private_bytes)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "sample_rate": 16000,
         "encoding": "f32le",
         "source_manifest_sha256": hashlib.sha256(private_bytes).hexdigest(),
         "selection": "8 per duration tercile; distinct artists preferred; SHA256 tiebreak",
+        "clip_selection": "source SHA256 seeded starts in separated fifths; 10/12/14 seconds",
         "available_tracks": len(inventory),
         "available_unique_sources": len(seen_hashes),
         "probe_rejected_count": len(rejected),

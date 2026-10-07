@@ -30,9 +30,9 @@ class AdmissionRuntimeTest {
         val port = FakePort(); val persisted = MutableStateFlow<AdmissionCheckpoint?>(null)
         val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, { persisted.value = it })
         runtime.request(snapshot()).join()
-        val comparing = runtime.state.value as AdmissionState.AwaitingComparison
+        assertTrue(runtime.state.value is AdmissionState.Pending)
         assertFalse(AdmissionCheckpointCodec.encode(requireNotNull(persisted.value)).contains("poll-secret"))
-        runtime.confirmComparison(); runtime.poll().join()
+        runtime.poll().join()
         assertTrue(runtime.state.value is AdmissionState.Approved)
         assertEquals(0, port.exchangeCalls)
         runtime.confirmAccount().join()
@@ -43,12 +43,11 @@ class AdmissionRuntimeTest {
                 .matches(Regex("[A-Za-z0-9_-]{43}")),
         )
         assertEquals(null, persisted.value)
-        assertTrue(comparing.sas.matches(Regex("\\d{12}")))
     }
 
     @Test fun stalePollCannotOverwriteCancelledState() = runBlocking {
         val port = FakePort(); val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, {})
-        runtime.request(snapshot()).join(); runtime.confirmComparison(); runtime.cancel().join(); runtime.poll().join()
+        runtime.request(snapshot()).join(); runtime.cancel().join(); runtime.poll().join()
         assertEquals(AdmissionState.Cancelled, runtime.state.value)
     }
 
@@ -64,7 +63,7 @@ class AdmissionRuntimeTest {
         val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, { persisted = it })
         runtime.request(snapshot()).join(); val checkpoint = requireNotNull(persisted)
         runtime.cancel().join(); runtime.recover(checkpoint).join()
-        assertTrue(runtime.state.value is AdmissionState.AwaitingComparison)
+        assertTrue(runtime.state.value is AdmissionState.Pending)
         assertEquals("autplay.m5.${checkpoint.serverProfileId.value}", FakeKeys.lastAlias)
         assertTrue(requireNotNull(port.lastRecoveryWire).contains("\"recovery_nonce_b64url\""))
         assertFalse(requireNotNull(port.lastRecoveryWire).contains("\"client_nonce_b64url\""))
@@ -86,7 +85,7 @@ class AdmissionRuntimeTest {
         runtime.retry(snapshot()).join()
 
         assertEquals(1, port.requestCalls)
-        assertTrue(runtime.state.value is AdmissionState.AwaitingComparison)
+        assertTrue(runtime.state.value is AdmissionState.Pending)
         assertTrue(requireNotNull(persisted).requestId != stale.requestId)
     }
 
@@ -134,16 +133,16 @@ class AdmissionRuntimeTest {
         port.pollGate = CompletableDeferred(); port.pollFailure = "server_identity_changed"
         val stalePoll = runtime.poll()
         runtime.cancel().join(); runtime.request(snapshot()).join()
-        val afterPollRestart = runtime.state.value as AdmissionState.AwaitingComparison
+        val afterPollRestart = runtime.state.value as AdmissionState.Pending
         port.pollGate?.complete(Unit); stalePoll.join()
         assertEquals(afterPollRestart, runtime.state.value)
 
         port.pollGate = null; port.pollFailure = null
-        runtime.confirmComparison(); runtime.poll().join()
+        runtime.poll().join()
         port.exchangeGate = CompletableDeferred(); port.exchangeFailure = "server_identity_changed"
         val staleExchange = runtime.confirmAccount()
         runtime.cancel().join(); runtime.request(snapshot()).join()
-        val afterExchangeRestart = runtime.state.value as AdmissionState.AwaitingComparison
+        val afterExchangeRestart = runtime.state.value as AdmissionState.Pending
         port.exchangeGate?.complete(Unit); staleExchange.join()
         assertEquals(afterExchangeRestart, runtime.state.value)
     }

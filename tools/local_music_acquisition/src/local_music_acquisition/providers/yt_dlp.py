@@ -22,6 +22,7 @@ from ..models import (
 from ..related import RelatedCandidate
 from ..source_catalog import SourceCatalog
 from ..source_client import read_client_id
+from ..source_metadata import bounded_source_metadata
 from ..xray import XrayError, XrayManager
 
 _SAFE_CODE = re.compile(r"[a-z0-9_.-]{1,100}")
@@ -173,6 +174,9 @@ class YtDlpProvider:
             if source
             else "recording-match-v2",
             expected_duration_seconds=expected_duration or expected,
+            source_metadata=bounded_source_metadata(
+                response.get("source_metadata"), provider=self.name
+            ),
         )
 
     def discover(self, item: PlaylistItem) -> list[RelatedCandidate]:

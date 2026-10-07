@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_friends_refresh_public_id_label">Public ID (@name)</string>
+    <string name="ui_friends_refresh_public_id_rules">3–24 Latin letters, digits or underscores. Uppercase and lowercase letters are equivalent.</string>
+    <string name="ui_friends_refresh_onboarding_pending">Choose a name to continue. Your music works offline; your server will reserve this ID when you connect. If it is taken, you can choose another.</string>
+    <string name="ui_friends_refresh_my_id">My ID</string>
+    <string name="ui_friends_refresh_id_confirmed">Reserved for your account on this server. Friends can find you by this exact ID.</string>
+    <string name="ui_friends_refresh_id_pending">Not reserved yet. This name is a local choice until your server confirms it; local playback remains available.</string>
+    <string name="ui_friends_refresh_id_conflict">This ID is taken. Choose another name; your music and server connection remain available.</string>
+    <string name="ui_friends_refresh_register_id">Reserve ID</string>
+    <string name="ui_friends_refresh_save_id">Save name</string>
+    <string name="ui_friends_refresh_id_checking">Checking your ID…</string>
+    <string name="ui_friends_refresh_id_connection_required">Could not confirm the ID. Connect or refresh to try again.</string>
+    <string name="ui_friends_refresh_mutual_only">Friendship starts after the recipient accepts a request. Your music and library stay private.</string>
+    <string name="ui_friends_refresh_find_title">Find a friend</string>
+    <string name="ui_friends_refresh_same_server">Enter the exact ID of someone on the same server.</string>
+    <string name="ui_friends_refresh_exact_id">Friend ID (@name)</string>
+    <string name="ui_friends_refresh_find">Find</string>
+    <string name="ui_friends_refresh_searching">Searching…</string>
+    <string name="ui_friends_refresh_lookup_connection_required">Search needs a connection to your server.</string>
+    <string name="ui_friends_refresh_lookup_unavailable">This ID is unavailable. Check the name and server.</string>
+    <string name="ui_friends_refresh_already_friends">You are already friends.</string>
+    <string name="ui_friends_refresh_incoming_below">There is an incoming request from this person. Accept or decline it below.</string>
+    <string name="ui_friends_refresh_send_request">Send request</string>
+    <string name="ui_friends_refresh_incoming">Incoming requests · %1$d</string>
+    <string name="ui_friends_refresh_outgoing">Sent requests · %1$d</string>
+    <string name="ui_friends_refresh_confirmed">Friends · %1$d</string>
+    <string name="ui_friends_refresh_blocked">Blocked · %1$d</string>
+    <string name="ui_friends_refresh_no_incoming">No incoming requests.</string>
+    <string name="ui_friends_refresh_no_outgoing">No pending sent requests.</string>
+    <string name="ui_friends_refresh_not_loaded">Refresh to load this list from your server.</string>
+    <string name="ui_friends_refresh_privacy">Presence and Wave invitations</string>
+    <string name="ui_friends_refresh_remove_title">Remove friend?</string>
+    <string name="ui_friends_refresh_remove_body">New friend invitations will stop. If you already share a Wave room, both memberships remain until you leave normally.</string>
+    <string name="ui_friends_refresh_block_title">Block this person?</string>
+    <string name="ui_friends_refresh_block_body">This removes the friendship and pending invitations. If you share a Wave room, leave it first; a host must transfer or close the room before leaving.</string>
+    <string name="ui_friends_refresh_contact_tools">Contact cards</string>
+    <string name="ui_friends_refresh_contact_tools_body">You can also share or paste a signed contact card to send a request on this server.</string>
+    <string name="ui_friends_refresh_hide_card_input">Hide card input</string>
+    <string name="ui_friends_refresh_invalid_card">Could not read this contact card. Paste the complete card shared by your friend.</string>
+    <string name="ui_friends_refresh_review_request">Review request</string>
+    <string name="ui_friends_refresh_card_preview">Name on the card: %1$s</string>
+    <string name="ui_friends_refresh_exit_wave_first">Leave the shared Wave room before blocking. A host must transfer or close it, then leave and try again.</string>
+    <string name="ui_friends_refresh_request_unavailable">Could not send or change this request. Refresh the list; a contact card must be current and from this server.</string>
+    <string name="ui_friends_refresh_rate_limited">Too many attempts. Wait a little before trying again.</string>
+</resources>

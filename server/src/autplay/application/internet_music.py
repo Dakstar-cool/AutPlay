@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.internet_music import InternetMusicProvider, InternetMusicProviderError
+from autplay.adapters.postgresql.catalogue_context import PostgresCatalogueContextRepository
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.library_runtime import LibraryRepository
 from autplay.adapters.postgresql.models import (
@@ -61,7 +62,13 @@ class InternetMusicService:
         self.library = MusicLibraryService(sessions, vault)
         self.provider = provider or InternetMusicProvider()
 
-    def search(self, principal: Principal, query: str, operation_id: UUID) -> dict[str, Any]:
+    def search(
+        self,
+        principal: Principal,
+        query: str,
+        operation_id: UUID,
+        catalogue_context_id: UUID | None = None,
+    ) -> dict[str, Any]:
         query = " ".join(query.split())
         if not 1 <= len(query) <= 200:
             raise MusicError("music_query_invalid", "Enter a music query.", 422)
@@ -70,7 +77,14 @@ class InternetMusicService:
             if row is not None:
                 if row.user_id != principal.user_id or row.query != query:
                     raise MusicError("music_operation_conflict", "The operation conflicts.", 409)
+                PostgresCatalogueContextRepository(session).replay(
+                    principal.user_id, operation_id, query, catalogue_context_id
+                )
                 return self._search_view(row)
+            if catalogue_context_id is not None:
+                PostgresCatalogueContextRepository(session).load(
+                    principal.user_id, catalogue_context_id, admission=True
+                )
             count = session.scalar(
                 select(func.count())
                 .select_from(InternetSearchRow)
@@ -101,7 +115,16 @@ class InternetMusicService:
             if existing is not None:
                 if existing.user_id != principal.user_id or existing.query != query:
                     raise MusicError("music_operation_conflict", "The operation conflicts.", 409)
+                PostgresCatalogueContextRepository(session).replay(
+                    principal.user_id, operation_id, query, catalogue_context_id
+                )
                 return self._search_view(existing)
+            context_repository = PostgresCatalogueContextRepository(session)
+            catalogue_context = (
+                context_repository.load(principal.user_id, catalogue_context_id, admission=True)
+                if catalogue_context_id
+                else None
+            )
             row = InternetSearchRow(
                 search_id=operation_id,
                 user_id=principal.user_id,
@@ -112,6 +135,9 @@ class InternetMusicService:
             )
             session.add(row)
             session.flush()
+            context_repository.bind_search(
+                principal.user_id, operation_id, query, catalogue_context
+            )
             return self._search_view(row)
 
     def select(self, principal: Principal, search_id: UUID, candidate_id: str) -> dict[str, Any]:

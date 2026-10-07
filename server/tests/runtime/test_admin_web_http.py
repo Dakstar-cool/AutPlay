@@ -25,6 +25,7 @@ from autplay.domain.web_admin import (
 )
 from autplay.entrypoints.admin_web_http import (
     DeviceAdmissionReview,
+    PendingDeviceAdmission,
     Renderer,
     TrustedDeviceWebItem,
     create_admin_web_router,
@@ -257,6 +258,32 @@ class _Admission:
             sas_3x4=("0123", "4567", "8901"),
         )
 
+    def pending_reviews(self, actor: WebActor) -> tuple[PendingDeviceAdmission, ...]:
+        review = self.review(actor)
+        return (
+            PendingDeviceAdmission(
+                review.request_id,
+                review.device_label,
+                review.platform,
+                review.app_version,
+                review.device_model_hint,
+                review.requested_at,
+                review.expires_at,
+            ),
+        )
+
+    def decide_pending_review(
+        self,
+        actor: WebActor,
+        request_id: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+        device_name: str | None,
+    ) -> None:
+        self.decide_review(actor, request_id, action, operation_id, request_sha256)
+        self.calls[-1] += (device_name,)
+
     def decide_review(
         self,
         actor: WebActor,
@@ -306,6 +333,7 @@ def _client(
     discovery_enabled: bool = False,
     discovery_automation_enabled: bool = False,
     mobile_api_origin: str | None = None,
+    origin: str = "https://admin.test",
 ) -> tuple[TestClient, _Web]:
     web = _Web()
     commands = _Commands()
@@ -317,7 +345,7 @@ def _client(
             views=_Views(),
             commands=commands,
             renderer=renderer or _Renderer(),
-            origin="https://admin.test",
+            origin=origin,
             mobile_api_origin=mobile_api_origin,
             source_secret=b"s" * 32,
             discovery_enabled=discovery_enabled,
@@ -325,11 +353,52 @@ def _client(
             device_admission=admission,
         )
     )
-    return TestClient(app, base_url="https://admin.test"), web
+    return TestClient(app, base_url=origin), web
 
 
 def _form(text: str) -> dict[str, str]:
     return dict(re.findall(r'name="([^\"]+)" value="([^\"]*)"', text))
+
+
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_connection_setup_exposes_mobile_address_only_to_authenticated_admins(locale: str) -> None:
+    mobile_origin = "https://mobile.test:8443"
+    client, _web = _client(AdminTemplateRenderer(), _Admission(), mobile_api_origin=mobile_origin)
+    anonymous = client.get("/admin/connection-requests", follow_redirects=False)
+    assert anonymous.status_code == 303 and mobile_origin not in anonymous.text
+    client.cookies.set("__Host-autplay_admin", "session")
+    response = client.get(f"/admin/connection-requests?lang={locale}&server=https://wrong.test")
+    assert response.status_code == 200
+    assert f'data-server-origin="{mobile_origin}"' in response.text
+    assert f'href="{mobile_origin}"' in response.text
+    assert 'href="https://admin.test/admin/"' in response.text
+    assert 'data-server-origin="https://admin.test"' not in response.text
+    assert "https://wrong.test" not in response.text
+    assert 'name="device_name"' in response.text
+    assert 'name="review_locator"' not in response.text
+    assert "locator-secret" not in response.text
+    assert 'src="/admin/static/qrcodegen-v1.js"' in response.text
+    assert 'src="/admin/static/server-connection-v1.js"' in response.text
+
+
+def test_connection_setup_does_not_encode_admin_url_when_mobile_address_is_unconfigured() -> None:
+    client, _web = _client(AdminTemplateRenderer(), _Admission())
+    client.cookies.set("__Host-autplay_admin", "session")
+    response = client.get("/admin/connection-requests")
+    assert response.status_code == 200 and 'name="device_name"' in response.text
+    assert "data-server-origin=" not in response.text
+
+
+@pytest.mark.parametrize(
+    "asset", ["qrcodegen-v1.js", "server-connection-v1.js", "pending-devices-v1.js"]
+)
+def test_server_connection_scripts_use_verified_same_origin_assets(asset: str) -> None:
+    client, _web = _client()
+    response = client.get(f"/admin/static/{asset}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert "immutable" in response.headers["cache-control"]
+    assert "sha256-" in response.headers["etag"]
 
 
 def test_connection_request_uses_body_only_locator_and_session_scoped_review() -> None:
@@ -338,7 +407,9 @@ def test_connection_request_uses_body_only_locator_and_session_scoped_review() -
     client.cookies.set("__Host-autplay_admin", "session")
     start = client.get("/admin/connection-requests")
     assert start.status_code == 200 and "locator-secret" not in start.text
-    form = _form(start.text) | {"review_locator": "locator-secret"}
+    form = {key: value for key, value in _form(start.text).items() if key != "device_name"} | {
+        "review_locator": "locator-secret"
+    }
     missing_origin = client.post("/admin/connection-requests/resolve", data=form)
     assert missing_origin.status_code == 403 and not admission.calls
     resolved = client.post(
@@ -363,13 +434,52 @@ def test_connection_request_uses_body_only_locator_and_session_scoped_review() -
     assert admission.calls[-1][1] == web.actor.user_id
 
 
+@pytest.mark.parametrize("action", ["trust", "approve-once", "reject", "block"])
+def test_pending_request_decision_needs_no_locator_and_keeps_admin_name(action: str) -> None:
+    admission = _Admission()
+    client, web = _client(AdminTemplateRenderer(), admission)
+    client.cookies.set("__Host-autplay_admin", "session")
+    start = client.get("/admin/connection-requests?lang=ru")
+    assert start.status_code == 200 and 'name="review_locator"' not in start.text
+    assert "Название устройства" in start.text and "0123" not in start.text
+    form = _form(start.text) | {"device_name": "Kitchen phone"}
+    url = f"/admin/connection-requests/pending/{admission.request_id}/{action}"
+    assert client.post(url, data=form).status_code == 403
+    assert not admission.calls
+    submitted = client.post(
+        url, data=form, headers={"Origin": "https://admin.test"}, follow_redirects=False
+    )
+    assert submitted.status_code == 303
+    assert admission.calls[-1][1] == web.actor.user_id
+    assert admission.calls[-1][-1] == (
+        "Kitchen phone" if action in {"trust", "approve-once"} else None
+    )
+
+
+def test_pending_request_disallows_account_override_and_invalid_csrf() -> None:
+    admission = _Admission()
+    client, _ = _client(AdminTemplateRenderer(), admission)
+    client.cookies.set("__Host-autplay_admin", "session")
+    form = _form(client.get("/admin/connection-requests").text)
+    url = f"/admin/connection-requests/pending/{admission.request_id}/trust"
+    for invalid in (form | {"account_id": str(uuid4())}, form | {"csrf_token": "bad"}):
+        assert (
+            client.post(url, data=invalid, headers={"Origin": "https://admin.test"}).status_code
+            == 403
+        )
+    assert not admission.calls
+
+
 def test_trusted_device_actions_are_exact_and_consequence_specific() -> None:
     admission = _Admission()
     client, _ = _client(AdminTemplateRenderer(), admission)
     client.cookies.set("__Host-autplay_admin", "session")
     page = client.get("/admin/trusted-devices")
     assert page.status_code == 200
-    assert "Remove trust" in page.text and "Revoke access and remove trust" in page.text
+    assert ">Delete</button>" in page.text and ">Block</button>" in page.text
+    assert f'/admin/trusted-devices/{admission.key_reference}/remove-trust"' not in page.text
+    assert f'/admin/trusted-devices/{admission.key_reference}/revoke-access"' not in page.text
+    assert f'/admin/trusted-devices/{admission.key_reference}/unblock"' not in page.text
     form = _form(page.text)
     response = client.post(
         f"/admin/trusted-devices/{admission.key_reference}/revoke-and-remove",
@@ -385,7 +495,7 @@ def test_developer_mode_requires_exact_admin_web_device_action() -> None:
     client, _ = _client(AdminTemplateRenderer(), admission)
     client.cookies.set("__Host-autplay_admin", "session")
     page = client.get("/admin/trusted-devices")
-    assert page.status_code == 200 and "Allow on this device" in page.text
+    assert page.status_code == 200 and "/developer-mode/" not in page.text
     form = _form(page.text)
     denied = client.post(
         f"/admin/trusted-devices/device/{admission.device_id}/developer-mode/enable",
@@ -400,6 +510,73 @@ def test_developer_mode_requires_exact_admin_web_device_action() -> None:
     )
     assert approved.status_code == 303
     assert admission.calls[-1][0:2] == ("DEVELOPER_MODE", True)
+
+
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("", ("Bravo", "alpha", "Undated")),
+        ("&sort=name&direction=asc", ("alpha", "Bravo", "Undated")),
+        ("&sort=name&direction=desc", ("Undated", "Bravo", "alpha")),
+        ("&sort=connected_at&direction=asc", ("alpha", "Bravo", "Undated")),
+        ("&sort=connected_at&direction=desc", ("Bravo", "alpha", "Undated")),
+        ("&sort=unsupported&direction=invalid", ("Bravo", "alpha", "Undated")),
+    ],
+)
+def test_trusted_devices_sort_real_dates_and_case_insensitive_names(
+    locale: str, query: str, expected: tuple[str, ...]
+) -> None:
+    class SortingAdmission(_Admission):
+        def trusted_devices(self, actor: WebActor) -> tuple[TrustedDeviceWebItem, ...]:
+            assert actor
+            return (
+                TrustedDeviceWebItem(
+                    uuid4(),
+                    "alpha",
+                    "ANDROID",
+                    "ACTIVE",
+                    1,
+                    connected_at=datetime(2025, 12, 20, tzinfo=UTC),
+                ),
+                TrustedDeviceWebItem(uuid4(), "Undated", "ANDROID", "ACTIVE", 0),
+                TrustedDeviceWebItem(
+                    uuid4(),
+                    "Bravo",
+                    "ANDROID",
+                    "ACTIVE",
+                    1,
+                    connected_at=datetime(2026, 1, 2, tzinfo=UTC),
+                ),
+            )
+
+    admission = SortingAdmission()
+    client, _ = _client(AdminTemplateRenderer(), admission)
+    client.cookies.set("__Host-autplay_admin", "session")
+    response = client.get(f"/admin/trusted-devices?lang={locale}{query}")
+    assert response.status_code == 200
+    names = re.findall(r'<h2 id="trusted-device-\d+">([^<]+)</h2>', response.text)
+    assert tuple(names) == expected
+    assert '<time datetime="2026-01-02T00:00:00+00:00" data-local-time>' in response.text
+    assert '<time datetime="2025-12-20T00:00:00+00:00" data-local-time>' in response.text
+    assert not admission.calls
+
+
+def test_diagnostics_redirects_to_single_audit_page_with_current_authority() -> None:
+    client, _ = _client(AdminTemplateRenderer())
+    cursor = uuid4()
+    path = f"/admin/diagnostics?lang=ru&after={cursor}"
+    anonymous = client.get(path, follow_redirects=False)
+    assert anonymous.status_code == 303 and anonymous.headers["location"] == "/admin/login"
+    client.cookies.set("__Host-autplay_admin", "session")
+    response = client.get(path, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/admin/audit?lang=ru&after={cursor}"
+    assert "no-store" in response.headers["cache-control"]
+    assert "content-security-policy" in response.headers
+    server = client.get("/admin/server?lang=ru")
+    assert server.status_code == 200 and 'href="/admin/audit?lang=ru"' in server.text
+    assert "/admin/diagnostics" not in server.text
 
 
 def test_login_and_security_headers() -> None:
@@ -524,13 +701,14 @@ def test_actual_renderer_renders_dashboard_table_and_status() -> None:
         ("/admin/server", "Check storage"),
         ("/admin/devices", "Phone"),
         ("/admin/jobs?live=1", "33%"),
-        ("/admin/vault", "This information is unavailable"),
     ):
         response = client.get(path)
         assert response.status_code == 200 and text in response.text
     jobs = client.get("/admin/jobs?live=1")
     assert '<meta http-equiv="refresh"' in jobs.text
     assert "discovery.acquire" in jobs.text
+    vault = client.get("/admin/vault")
+    assert vault.status_code == 503 and "This information is unavailable" in vault.text
 
 
 def test_dashboard_shows_private_server_addresses_only_after_login() -> None:
@@ -647,3 +825,18 @@ def test_due_rotation_refuses_command_and_revoked_retry_clears_cookie() -> None:
     )
     assert retried.status_code == 303 and web.retry_calls == 1
     assert "Max-Age=0" in retried.headers["set-cookie"]
+
+
+def test_health_fragment_has_identical_authentication_and_cookie_rotation() -> None:
+    client, web = _client(AdminTemplateRenderer())
+    anonymous = client.get("/admin/?lang=ru&fragment=health", follow_redirects=False)
+    assert anonymous.status_code == 303 and anonymous.headers["location"] == "/admin/login"
+    client.cookies.set("__Host-autplay_admin", "session")
+    web.rotate = True
+    fragment = client.get("/admin/?lang=ru&fragment=health")
+    assert fragment.status_code == 200
+    assert fragment.text.count('data-component="') == 4
+    assert "<html" not in fragment.text
+    assert "rotated" in fragment.headers["set-cookie"]
+    assert fragment.headers["cache-control"] == "no-store"
+    assert "content-security-policy" in fragment.headers

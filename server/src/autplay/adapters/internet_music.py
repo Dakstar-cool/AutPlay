@@ -14,6 +14,7 @@ from autplay.adapters.filesystem.provider_media import (
     ProviderMediaError,
     classify_download_error,
     po_token_url,
+    youtube_source_metadata,
 )
 
 
@@ -100,14 +101,15 @@ class InternetMusicProvider:
             if row.get("is_live") or duration is None or not 1 <= duration <= 7200:
                 continue
             seen.add(identity)
+            native = youtube_source_metadata(row, identity)
+            fields = native.get("fields") if native is not None else None
+            artist = fields.get("artist") if isinstance(fields, dict) else None
             candidates.append(
                 {
                     "candidate_id": identity,
                     "provider": "YouTube",
                     "title": str(row.get("title") or "Audio")[:500],
-                    "artist": str(row.get("uploader") or row.get("channel") or "Unknown artist")[
-                        :500
-                    ],
+                    "artist": artist or "Unknown artist",
                     "duration_ms": int(duration * 1000),
                     "rank": len(candidates) + 1,
                 }

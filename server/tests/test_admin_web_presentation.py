@@ -11,6 +11,7 @@ from autplay.domain.admin_views import (
     AdminReviewItem,
     AdminUnavailable,
     AdminVaultStatus,
+    AdminWorkerHealth,
 )
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import WebActor
@@ -177,3 +178,52 @@ def test_discovery_navigation_exposes_only_enabled_surfaces() -> None:
     assert [child.href for item in enabled for child in item.children if child.current] == [
         "/admin/discovery/automation"
     ]
+
+
+def test_server_navigation_has_one_event_log() -> None:
+    items = navigation("audit", quotas_enabled=True)
+    server = next(item for item in items if item.href == "/admin/server")
+    assert server.current
+    assert [child.href for child in server.children].count("/admin/audit") == 1
+    assert "/admin/diagnostics" not in [child.href for child in server.children]
+    assert [child.href for child in server.children if child.current] == ["/admin/audit"]
+
+
+def test_dashboard_uses_real_load_and_hides_expired_readings() -> None:
+    actor = WebActor(uuid4(), uuid4(), uuid4(), AccountRole.OWNER, 0)
+    now = datetime.now(UTC)
+    for fresh in (True, False):
+        dashboard = AdminDashboard(
+            "Private",
+            True,
+            1,
+            False,
+            worker_status="HEALTHY" if fresh else "UNAVAILABLE",
+            vault_status="DEGRADED",
+            worker=AdminWorkerHealth(now, fresh, True, 75.5, 1048576, 8388608, 2, 4),
+            vault=AdminVaultStatus(2, 2048, 1, 0, 3, 0, 2, None, False, 1, 1, 1),
+        )
+        context = dashboard_context(dashboard, actor, locale="ru")
+        html = AdminTemplateRenderer().render(
+            "dashboard.html", locale="ru", context=_base("dashboard", "ru") | context
+        )
+        assert ("75,5%" in html) is fresh
+        assert ("Обрабатывает" in html) is fresh
+        assert (">Нет связи</span>" in html) is not fresh
+        assert "Отсутствующие копии" in html and "Повреждённые копии" in html
+        assert "Копии в карантине" in html
+        assert "/admin/vault?lang=ru" in html
+        assert "data-health-refresh=" in html
+        assert "dashboard-health-v1.js" in html
+
+
+def test_vault_detail_and_dashboard_agree_on_quarantine_only_warning() -> None:
+    actor = WebActor(uuid4(), uuid4(), uuid4(), AccountRole.OWNER, 0)
+    value = AdminVaultStatus(1, 0, 1, 0, 0, 0, 0, None, False)
+    assert status_context(value, "vault", locale="en")["status_key"] == "status_degraded"
+    dashboard = AdminDashboard("Private", True, 1, False, vault_status="DEGRADED", vault=value)
+    context = dashboard_context(dashboard, actor, locale="en")
+    html = AdminTemplateRenderer().render(
+        "dashboard.html", locale="en", context=_base("dashboard", "en") | context
+    )
+    assert "Quarantined objects" in html

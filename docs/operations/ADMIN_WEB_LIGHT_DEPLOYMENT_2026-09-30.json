@@ -1,0 +1,144 @@
+{
+  "autostart": {
+    "acquisition_agent_active": "active",
+    "acquisition_agent_enabled": "enabled",
+    "admin_service_active": "active",
+    "admin_service_enabled": "enabled",
+    "docker_active": "active",
+    "docker_enabled": "enabled",
+    "linger": "yes",
+    "physical_reboot_tested": false,
+    "recovery_from_stopped_container": "passed",
+    "restart_policy": "unless-stopped"
+  },
+  "base_image_id": "sha256:a8142f684974b944a2e2d67342cd59422dcebdd594d32f53e5d6f3583a6d5811",
+  "deployed_at_utc": "2026-09-30T17:02:04Z",
+  "image_id": "sha256:4a31596f33116ca28bf17c3dbb0fc6ae0439351639a99730b14d8a00fe785767",
+  "image_tag": "autplay-admin-light:20260930-a17a456-v1",
+  "new_container_id": "46f6c0681729c4731e71d4ac5749b4b1d822767e0d4184f063ca446b241184f3",
+  "old_container_id": "c59bce61160284a0940518f2b8b0646120314717087758a189c68110dd398d05",
+  "overlay_files": [
+    {
+      "after_sha256": "6ebd810298bfc56b2a1c2fd0f227b7926a31ac8c6765e1b201b9be9047e1c0e2",
+      "before_sha256": "851c5de756399bd3d89911782c2cd389e5ab121f4dc87458f601482078696f9d",
+      "path": "server/src/autplay/web/renderer.py"
+    },
+    {
+      "after_sha256": "26aa4b3a6804a95948af6da1bee00c11657e662650baf3b7b079b90b06671cdd",
+      "before_sha256": "cc9d46545d296cca30015571233e41152f91cfd7d375ee1a02a4e8991aa23d54",
+      "path": "server/src/autplay/web/templates/base.html"
+    },
+    {
+      "after_sha256": "f31023c104163719aaa58782a2f1c65ee9b45e4f187f5b7fb5104e804072f1aa",
+      "before_sha256": "0ac6b6d97803eb831ffedbdebac532536539a3f83cb51f6eef5747429e335bf8",
+      "path": "server/src/autplay/web/templates/dashboard.html"
+    },
+    {
+      "after_sha256": "085f64215805cd9c66cb39823a26d4a888f76fb859bb86bbf0f773d841721d8e",
+      "before_sha256": "897f86eec9d1ce9b925393dae1c19f295ce227ff97c3c33532eeaa11bcd5b4f1",
+      "path": "server/src/autplay/web/templates/login.html"
+    },
+    {
+      "after_sha256": "8038f4f1cf9dbee183806236edb672fa577f65516c89eb78e80f334d7ecb9558",
+      "before_sha256": "4ccb1f76c3f45aaac0d1424795bd31fcb6435a0c3537bda98a9f15907f5bf31d",
+      "path": "server/src/autplay/web/templates/section.html"
+    },
+    {
+      "after_sha256": "0e8acccb44d80a5b52e515aca99175a7bc9776468e27e342605b30958573d08d",
+      "before_sha256": "6d0d1bed8f9ac93f3da2a8cce27963245766e8d8ee0f961ceefb765fe38ca6fd",
+      "path": "server/src/autplay/web/templates/acquisition_control.html"
+    },
+    {
+      "after_sha256": "47ca4ce251818f9077de13c64d69c7273b28818cd44a25f06ab16ec199a40b08",
+      "before_sha256": null,
+      "path": "server/src/autplay/web/templates/icons.html"
+    },
+    {
+      "after_sha256": "916d45b997977a3953ad4602e6fe8bacb8e33012d753e26092f817818c8d2b59",
+      "before_sha256": "fb7c13106765db93a02c1dc023f179569273ec4184a8c403b3f83c3a9accc729",
+      "path": "server/src/autplay/web/static/admin-v2.css"
+    },
+    {
+      "after_sha256": "af383c859941fa68f8c9fcccc3d73b2c20db939aae5368a85f8bca0d65b56892",
+      "before_sha256": "66de73151fd55fdad24ed1821d2480cfcc991b71015fe03cecb2145c22ae793e",
+      "path": "server/src/autplay/web/i18n/en.json"
+    },
+    {
+      "after_sha256": "2027732a496a09be62c97956d3f18b3cf48ac1da99860e56f73c511fa0fad7e1",
+      "before_sha256": "73c4f0bda8f1bbc065019b9da6ab291798e4bf39c8d6e8f3154ebfca61c7f823",
+      "path": "server/src/autplay/web/i18n/ru.json"
+    }
+  ],
+  "persistent_data_migrations": false,
+  "production_baseline_overrides": {
+    "autplay/web/templates/dashboard.html": "7b6661476e2aba22b2ea665435e9c35d9fcbc511d565daef1453720982a76d8c",
+    "autplay/web/templates/login.html": "68fe0fbf42a7530c82a84d27f756737b7710cefb796373a38eba93ffcb3ae8f6",
+    "autplay/web/templates/section.html": "7c9f5ccaadc0af5431d5622483b8091f0452670e3bd1f76c60189090ad5239f7"
+  },
+  "rollback_container": "autplay-production-tailnet-admin-rollback-light-20260930",
+  "runtime_configuration": "preserved",
+  "source_base_commit": "a17a4569ab462f2c650c757d1da433cdd58c0b03",
+  "status": "DEPLOYED",
+  "unaffected_containers": [
+    {
+      "name": "autplay-production-mobile-api-1",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-production-worker-cpu-1",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-music-worker",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-production-operator",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-production-stream-1",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-production-api-1",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-music-po-token",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-acquisition-vault-bridge",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-music-proxy",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-production-tailnet-mobile-edge",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "autplay-production-postgres-1",
+      "restart_policy": "unless-stopped"
+    },
+    {
+      "name": "open-webui",
+      "restart_policy": "always"
+    }
+  ],
+  "verification": {
+    "acquisition_agent": "online",
+    "css_sha256": "916d45b997977a3953ad4602e6fe8bacb8e33012d753e26092f817818c8d2b59",
+    "http": {
+      "/admin/": 303,
+      "/admin/acquisition": 303,
+      "/admin/login?lang=en": 200,
+      "/admin/login?lang=ru": 200,
+      "/admin/static/admin-v2.css?v=5": 200
+    },
+    "templates": "compiled"
+  }
+}

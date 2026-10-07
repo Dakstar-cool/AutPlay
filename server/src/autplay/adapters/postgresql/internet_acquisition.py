@@ -19,9 +19,11 @@ from autplay.application.internet_acquisition import (
 from autplay.application.job_worker import JobLeaseLost
 from autplay.application.music_library import MusicError, MusicLibraryService
 from autplay.application.sync import _acquire_sync_owner_publish_lock
+from autplay.application.track_metadata import TrackMetadataService
 from autplay.domain.discovery import DiscoveryError
 from autplay.domain.jobs import JobKey, RetryableJobError, TerminalJobError
 from autplay.domain.resource_admission import AcquisitionClaim, ResourceAdmissionError
+from autplay.domain.track_metadata import sanitize_source_metadata, source_metadata_document
 from autplay.domain.vault import Sha256Digest, VaultLimits, VerifiedStagedFile
 from autplay.ports.jobs import EnqueueJob
 
@@ -317,6 +319,8 @@ class PostgresInternetAcquisitionRepository:
         target: InternetAcquisitionTarget,
         execution_id: UUID,
         verified: VerifiedStagedFile,
+        *,
+        source_metadata: dict[str, object] | None = None,
     ) -> InternetHandoffReceipt:
         if (
             type(verified.byte_size) is not int
@@ -377,6 +381,25 @@ class PostgresInternetAcquisitionRepository:
             ):
                 raise TerminalJobError("music_staging_unavailable")
             now = self._now(session)
+            evidence = None
+            if source_metadata is not None:
+                try:
+                    native = sanitize_source_metadata(source_metadata)
+                    if native.provider == "YOUTUBE" and native.source_id == target.candidate_id:
+                        evidence = source_metadata_document(native)
+                except ValueError, TypeError, OverflowError:
+                    pass
+            # Unknown credits never turn a legacy uploader/display label into a performer.
+            try:
+                TrackMetadataService.stage_acquisition_in_transaction(
+                    session,
+                    claim=claim,
+                    target=target,
+                    execution_id=execution_id,
+                    evidence=evidence or {},
+                )
+            except ResourceAdmissionError as error:
+                raise TerminalJobError("source_authorization_unavailable") from error
             staging.state, staging.sealed_at, staging.updated_at = "SEALED", now, now
             staging.byte_size, staging.sha256 = verified.byte_size, verified.sha256.value
             session.flush()

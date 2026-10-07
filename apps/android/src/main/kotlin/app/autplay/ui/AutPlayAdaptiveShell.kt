@@ -8,9 +8,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Badge
@@ -18,9 +24,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
@@ -28,13 +32,23 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +56,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.ui.player.LocalPlayerCollapse
+import app.autplay.ui.player.LocalPlayerCollapseTargetTop
 
 private val CompactBreakpoint: Dp = 600.dp
 private val ExpandedBreakpoint: Dp = 840.dp
@@ -82,21 +98,17 @@ public fun AutPlayAdaptiveShell(
             }
         }
         if (selectedDestination == UiDestination.NowPlaying) {
-            Scaffold(
-                snackbarHost = snackbarHost,
-                topBar = {
-                    AutPlayTopBar(
-                        destination = selectedDestination,
-                        canNavigateBack = canNavigateBack,
-                        onNavigateBack = onNavigateBack,
-                        onProfileClick = onProfileClick,
-                        onSettingsClick = onSettingsClick,
-                        onNowPlayingClick = onNowPlayingClick,
-                        nowPlayingAvailable = false,
-                        immersive = true,
-                    )
-                },
-            ) { padding -> routeContent(padding) }
+            CompositionLocalProvider(LocalPlayerCollapse provides {
+                if (canNavigateBack) onNavigateBack() else onDestinationSelected(UiDestination.Home)
+            }) {
+                PlayerCollapseShell(
+                    widthClass = widthClass,
+                    unreadSyncConflicts = unreadSyncConflicts,
+                    nowPlayingBar = nowPlayingBar,
+                    snackbarHost = snackbarHost,
+                    routeContent = routeContent,
+                )
+            }
         } else if (widthClass == UiWidthClass.Compact) {
             CompactShell(
                 selectedDestination,
@@ -134,6 +146,47 @@ public fun AutPlayAdaptiveShell(
 }
 
 internal fun shouldUseDarkStatusBarIcons(lightTheme: Boolean): Boolean = lightTheme
+
+@Composable
+private fun PlayerCollapseShell(
+    widthClass: UiWidthClass,
+    unreadSyncConflicts: Int,
+    nowPlayingBar: @Composable () -> Unit,
+    snackbarHost: @Composable () -> Unit,
+    routeContent: @Composable (PaddingValues) -> Unit,
+) {
+    val density = LocalDensity.current
+    var miniTopPx by remember { mutableStateOf<Float?>(null) }
+    var playerContentTopPx by remember { mutableStateOf<Float?>(null) }
+    val targetTop = miniTopPx?.let { miniTop ->
+        playerContentTopPx?.let { contentTop -> with(density) { (miniTop - contentTop).coerceAtLeast(0f).toDp() } }
+    }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .padding(start = if (widthClass == UiWidthClass.Compact) 0.dp else 128.dp)
+                .clearAndSetSemantics {},
+        ) {
+            Box(Modifier.fillMaxWidth().onGloballyPositioned { miniTopPx = it.positionInRoot().y }) {
+                nowPlayingBar()
+            }
+            if (widthClass == UiWidthClass.Compact) {
+                HorizontalDivider(color = AutPlayTokens.colors.border.copy(alpha = 0.65f))
+                CompactNavigationBar(UiDestination.Home, unreadSyncConflicts, {})
+            } else {
+                Box(Modifier.navigationBarsPadding())
+            }
+        }
+        CompositionLocalProvider(LocalPlayerCollapseTargetTop provides targetTop) {
+            Scaffold(containerColor = Color.Transparent, snackbarHost = snackbarHost) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)
+                    .onGloballyPositioned { playerContentTopPx = it.positionInRoot().y }) {
+                    routeContent(PaddingValues())
+                }
+            }
+        }
+    }
+}
 
 /** Public for previews and deterministic width-class tests. */
 public fun widthClassFor(width: Dp): UiWidthClass = when {
@@ -174,22 +227,33 @@ private fun CompactShell(
             Column {
                 nowPlayingBar()
                 HorizontalDivider(color = AutPlayTokens.colors.border.copy(alpha = 0.65f))
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    tonalElevation = 0.dp,
-                ) {
-                    UiDestination.compactNavigation.forEach { destination ->
-                        CompactNavigationItem(
-                            destination,
-                            selectedDestination,
-                            unreadSyncConflicts,
-                            onDestinationSelected,
-                        )
-                    }
-                }
+                CompactNavigationBar(selectedDestination, unreadSyncConflicts, onDestinationSelected)
             }
         },
     ) { padding -> content(padding) }
+}
+
+@Composable
+private fun CompactNavigationBar(
+    selectedDestination: UiDestination,
+    unreadSyncConflicts: Int,
+    onDestinationSelected: (UiDestination) -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLowest) {
+        BoxWithConstraints(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            val inlineLabels = maxWidth >= 360.dp
+            Row(
+                Modifier.fillMaxWidth().height(61.dp).padding(horizontal = 6.dp)
+                    .selectableGroup().testTag("compact-navigation"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                UiDestination.compactNavigation.forEach { destination ->
+                    CompactNavigationItem(destination, selectedDestination, unreadSyncConflicts,
+                        onDestinationSelected, inlineLabels)
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -243,7 +307,12 @@ private fun RailShell(
                     nowPlayingAvailable,
                 )
             },
-            bottomBar = nowPlayingBar,
+            bottomBar = {
+                Column {
+                    nowPlayingBar()
+                    Box(Modifier.navigationBarsPadding())
+                }
+            },
         ) { padding ->
             if (widthClass == UiWidthClass.Expanded) {
                 Row(Modifier.fillMaxSize()) {
@@ -313,21 +382,45 @@ private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
     selectedDestination: UiDestination,
     unreadSyncConflicts: Int,
     onDestinationSelected: (UiDestination) -> Unit,
+    inlineLabels: Boolean,
 ) {
     val label = stringResource(destination.labelRes)
-    NavigationBarItem(
-        selected = destination == selectedDestination,
-        onClick = { onDestinationSelected(destination) },
-        icon = { DestinationIcon(destination, unreadSyncConflicts) },
-        label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis) },
-        colors = NavigationBarItemDefaults.colors(
-            selectedIconColor = MaterialTheme.colorScheme.primary,
-            selectedTextColor = MaterialTheme.colorScheme.primary,
-            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f),
-            unselectedIconColor = AutPlayTokens.colors.mutedText,
-            unselectedTextColor = AutPlayTokens.colors.mutedText,
-        ),
-    )
+    val selected = destination == selectedDestination
+    val color = if (selected) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.mutedText
+    Box(
+        Modifier.weight(1f).fillMaxHeight()
+            .selectable(selected, role = Role.Tab, onClick = { onDestinationSelected(destination) })
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        val itemIcon: @Composable () -> Unit = {
+            Box(
+                Modifier.background(
+                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else Color.Transparent,
+                    RoundedCornerShape(10.dp),
+                ).padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
+                CompositionLocalProvider(LocalContentColor provides color) {
+                    DestinationIcon(destination, unreadSyncConflicts)
+                }
+            }
+        }
+        val itemLabel: @Composable () -> Unit = {
+            Text(label, color = color, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        }
+        if (inlineLabels) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                itemIcon()
+                itemLabel()
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                itemIcon()
+                itemLabel()
+            }
+        }
+    }
 }
 
 private fun topBarTitle(destination: UiDestination): Int = when (destination) {

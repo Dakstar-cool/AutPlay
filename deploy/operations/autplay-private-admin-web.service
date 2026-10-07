@@ -1,0 +1,13 @@
+[Unit]
+Description=Ensure private AutPlay Admin Web is running
+
+[Service]
+Type=oneshot
+ExecStart=/srv/autplay/operator/admin-web/ensure-private-admin-web.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=6min
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,7 @@
+<resources>
+    <string name="search_kind_label">Искать по: %1$s</string>
+    <string name="search_kind_all">Всем полям</string>
+    <string name="search_kind_track">Названию трека</string>
+    <string name="search_kind_artist">Исполнителю</string>
+    <string name="search_kind_album">Альбому</string>
+</resources>

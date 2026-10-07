@@ -32,12 +32,16 @@ from autplay.adapters.postgresql.discovery_automation_runtime import (
 )
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
 from autplay.adapters.postgresql.readiness import PostgreSQLReadinessProbe
-from autplay.adapters.postgresql.runtime_database import create_runtime_engine
+from autplay.adapters.postgresql.runtime_database import (
+    create_resource_control_engine,
+    create_runtime_engine,
+)
 from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
     TransactionalIngestRepository,
 )
 from autplay.adapters.postgresql.web_admin import SqlAlchemyWebAdminRepository
+from autplay.adapters.postgresql.worker_health import PostgreSqlWorkerHealth
 from autplay.adapters.system import Uuid7Generator
 from autplay.application.account_recovery import cleanup_expired_recovery_operations
 from autplay.application.bulk_discovery import BulkDiscoveryService
@@ -78,6 +82,7 @@ from autplay.ports.transactions import JobUnitOfWorkFactory
 from autplay.runtime.discovery_io import DiscoveryIoExecutor
 from autplay.runtime.logging import configure_json_logging
 from autplay.runtime.settings import SettingsLoadError, load_worker_settings
+from autplay.runtime.worker_health import CgroupWorkerSampler, WorkerHealthReporter
 
 SERVICE_NAME = "autplay-worker-cpu"
 _LOGGER = logging.getLogger("autplay.worker_cpu")
@@ -284,6 +289,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     result = 0
     pending: tuple[UUID, ...] = ()
     stop_scope = ExitStack()
+    health_reporter: WorkerHealthReporter | None = None
     try:
         from autplay.entrypoints.privacy_deletion import (
             build_privacy_deletion_service,
@@ -440,6 +446,18 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 ),
             ),
         )
+        health_engine = create_resource_control_engine(runtime_settings)
+        health_reporter = WorkerHealthReporter(
+            PostgreSqlWorkerHealth(sessionmaker(health_engine, expire_on_commit=False)),
+            CgroupWorkerSampler(busy=lambda: worker.busy),
+            on_close=health_engine.dispose,
+        )
+        try:
+            health_reporter.start()
+        except RuntimeError:
+            health_engine.dispose()
+            health_reporter = None
+            _LOGGER.warning("worker_health_unavailable")
         try:
 
             def cleanup() -> int:
@@ -550,8 +568,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
         )
         result = 3
     finally:
-        deadline = monotonic() + 5
         process_stop.set()
+        if health_reporter is not None:
+            health_reporter.stop()
+        deadline = monotonic() + 5
         try:
             if provider_runtime is not None:
                 pending += asyncio.run(

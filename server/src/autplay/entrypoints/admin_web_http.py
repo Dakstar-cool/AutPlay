@@ -6,14 +6,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
+from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
 from autplay.application.web_admin import LoginChallenge
 from autplay.domain.admin_commands import AdminCommand
-from autplay.domain.admin_views import AdminConfirmationTarget, AdminDashboard, AdminPage
+from autplay.domain.admin_views import (
+    AdminConfirmationTarget,
+    AdminDashboard,
+    AdminPage,
+    AdminVaultStatus,
+)
+from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import (
     AuthenticatedWebSession,
     WebActor,
@@ -40,6 +48,7 @@ from autplay.web.presentation import (
     status_context,
 )
 from autplay.web.renderer import read_static_asset, resolve_locale
+from autplay.web.vault import vault_context
 
 
 class Renderer(Protocol):
@@ -147,6 +156,21 @@ class TrustedDeviceWebItem:
     active_session_count: int
     device_id: UUID | None = None
     developer_mode_enabled: bool = False
+    blocked: bool = False
+    connected_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PendingDeviceAdmission:
+    """Non-secret metadata for an explicit pending-device approval."""
+
+    request_id: UUID
+    device_label: str
+    platform: str
+    app_version: str
+    device_model_hint: str | None
+    requested_at: datetime
+    expires_at: datetime
 
 
 class DeviceAdmissionWebHttp(Protocol):
@@ -157,6 +181,18 @@ class DeviceAdmissionWebHttp(Protocol):
     ) -> None: ...
 
     def review(self, actor: WebActor) -> DeviceAdmissionReview: ...
+
+    def pending_reviews(self, actor: WebActor) -> tuple[PendingDeviceAdmission, ...]: ...
+
+    def decide_pending_review(
+        self,
+        actor: WebActor,
+        request_id: UUID,
+        action: str,
+        operation_id: UUID,
+        request_sha256: bytes,
+        device_name: str | None,
+    ) -> None: ...
 
     def decide_review(
         self,
@@ -198,6 +234,7 @@ def create_admin_web_router(
     mobile_api_origin: str | None = None,
     source_secret: bytes,
     discovery_enabled: bool = False,
+    acquisition_enabled: bool = False,
     discovery_automation_enabled: bool = False,
     device_admission: DeviceAdmissionWebHttp | None = None,
     passkeys_enabled: bool = False,
@@ -211,6 +248,7 @@ def create_admin_web_router(
         return navigation(
             surface,
             discovery_enabled=discovery_enabled,
+            acquisition_enabled=acquisition_enabled,
             discovery_automation_enabled=discovery_automation_enabled,
             passkeys_enabled=passkeys_enabled,
         )
@@ -261,7 +299,42 @@ def create_admin_web_router(
 
     @router.get("/static/admin-forms-v1.js")
     def static_forms() -> Response:
-        payload, digest = read_static_asset("admin-forms-v1.js")
+        return javascript("admin-forms-v1.js")
+
+    @router.get("/static/qrcodegen-v1.js")
+    def static_qrcodegen() -> Response:
+        return javascript("qrcodegen-v1.js")
+
+    @router.get("/static/server-connection-v1.js")
+    def static_server_connection() -> Response:
+        return javascript("server-connection-v1.js")
+
+    @router.get("/static/pending-devices-v1.js")
+    def static_pending_devices() -> Response:
+        return javascript("pending-devices-v1.js")
+
+    @router.get("/static/dashboard-health-v1.js")
+    def static_dashboard_health() -> Response:
+        return javascript("dashboard-health-v1.js")
+
+    @router.get("/static/vault-v1.js")
+    def static_vault_javascript() -> Response:
+        return javascript("vault-v1.js")
+
+    @router.get("/static/vault-v1.css")
+    def static_vault_stylesheet() -> Response:
+        return stylesheet("vault-v1.css")
+
+    @router.get("/static/vault-disk-v1.css")
+    def static_vault_disk_stylesheet() -> Response:
+        return stylesheet("vault-disk-v1.css")
+
+    @router.get("/static/admin-local-time-v1.js")
+    def static_local_time_javascript() -> Response:
+        return javascript("admin-local-time-v1.js")
+
+    def javascript(name: str) -> Response:
+        payload, digest = read_static_asset(name)
         value = apply_admin_security_headers(
             PlainTextResponse(payload, media_type="text/javascript")
         )
@@ -389,7 +462,9 @@ def create_admin_web_router(
         )
         value = response(
             render(
-                "dashboard.html",
+                "dashboard_health.html"
+                if request.query_params.get("fragment") == "health"
+                else "dashboard.html",
                 request,
                 authenticated=True,
                 navigation=admin_navigation("dashboard"),
@@ -571,19 +646,71 @@ def create_admin_web_router(
         authenticated = admission_safe_get(request)
         if isinstance(authenticated, Response):
             return authenticated
+        try:
+            pending = device_admission.pending_reviews(authenticated.actor)
+        except WebAdminError:
+            return error("connection_request_unavailable", 403)
         value = response(
             render(
                 "connection_requests.html",
                 request,
                 authenticated=True,
+                mobile_api_origin=mobile_api_origin,
+                web_origin=origin,
                 navigation=admin_navigation("connection-requests"),
                 csrf_token=encode_request_integrity_token(authenticated.csrf),
                 operation_id=str(uuid4()),
+                pending_requests=pending,
+                pending_operations={str(item.request_id): str(uuid4()) for item in pending},
             )
         )
         if authenticated.rotated_bearer is not None:
             cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
         return value
+
+    @router.post("/connection-requests/pending/{request_id}/{action}")
+    async def connection_requests_pending_decision(
+        request_id: UUID, action: str, request: Request
+    ) -> Response:
+        actions = {
+            "approve-once": "APPROVE_ONCE",
+            "trust": "TRUST_DEVICE",
+            "reject": "REJECT",
+            "block": "BLOCK_DEVICE",
+        }
+        if device_admission is None or action not in actions:
+            return admission_unavailable()
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id", "device_name"}),
+            )
+            operation_id = UUID(form["operation_id"])
+            device_name = form["device_name"] if action in {"approve-once", "trust"} else None
+            request_hash = canonical_form_request_hash("POST", request.url.path, form)
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor,
+                decode_request_integrity_token(form["csrf_token"]),
+                operation_id,
+            )
+            device_admission.decide_pending_review(
+                authenticated.actor,
+                request_id,
+                actions[action],
+                operation_id,
+                request_hash,
+                device_name,
+            )
+        except ValueError, WebAdminError:
+            return error("connection_request_unavailable", 403)
+        return apply_admin_security_headers(
+            RedirectResponse("/admin/connection-requests", status_code=303)
+        )
 
     @router.post("/connection-requests/resolve")
     async def connection_requests_resolve(request: Request) -> Response:
@@ -692,6 +819,42 @@ def create_admin_web_router(
             items = device_admission.trusted_devices(authenticated.actor)
         except WebAdminError:
             return error("trusted_device_unavailable", 403)
+        sort_key = request.query_params.get("sort", "connected_at")
+        if sort_key not in {"name", "connected_at"}:
+            sort_key = "connected_at"
+        default_direction = "asc" if sort_key == "name" else "desc"
+        sort_direction = request.query_params.get("direction", default_direction)
+        if sort_direction not in {"asc", "desc"}:
+            sort_direction = default_direction
+        reverse = sort_direction == "desc"
+        if sort_key == "name":
+            items = tuple(
+                sorted(items, key=lambda item: item.device_label.casefold(), reverse=reverse)
+            )
+        else:
+            dated = sorted(
+                (item for item in items if item.connected_at is not None),
+                key=lambda item: item.connected_at or datetime.min.replace(tzinfo=UTC),
+                reverse=reverse,
+            )
+            items = tuple(dated) + tuple(item for item in items if item.connected_at is None)
+        sort_urls = {
+            key: "/admin/trusted-devices?"
+            + urlencode(
+                {
+                    "sort": key,
+                    "direction": ("desc" if sort_direction == "asc" else "asc")
+                    if sort_key == key
+                    else "asc"
+                    if key == "name"
+                    else "desc",
+                }
+            )
+            for key in ("name", "connected_at")
+        }
+        locale = resolve_locale(
+            request.query_params.get("lang"), request.headers.get("accept-language")
+        )
         value = response(
             render(
                 "trusted_devices.html",
@@ -699,6 +862,17 @@ def create_admin_web_router(
                 authenticated=True,
                 navigation=admin_navigation("trusted-devices"),
                 items=items,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+                sort_urls=sort_urls,
+                language_url="/admin/trusted-devices?"
+                + urlencode(
+                    {
+                        "sort": sort_key,
+                        "direction": sort_direction,
+                        "lang": "ru" if locale == "en" else "en",
+                    }
+                ),
                 csrf_token=encode_request_integrity_token(authenticated.csrf),
                 operations={
                     str(item.key_reference): {
@@ -805,6 +979,56 @@ def create_admin_web_router(
             RedirectResponse("/admin/trusted-devices", status_code=303)
         )
 
+    @router.get("/vault")
+    def vault_page(request: Request) -> Response:
+        locale = resolve_locale(
+            request.query_params.get("lang"), request.headers.get("accept-language")
+        )
+        try:
+            authenticated = web.authenticate_safe_get(
+                request.cookies.get(cookies.session_name, "").encode()
+            )
+        except SQLAlchemyError, OSError:
+            value = response(
+                render("vault.html", request, **vault_context(None, locale=locale)), 503
+            )
+            value.headers["Retry-After"] = "10"
+            return value
+        except WebAdminError:
+            value = apply_admin_security_headers(
+                RedirectResponse(f"/admin/login?lang={locale}", status_code=303)
+            )
+            cookies.clear_session(value)
+            return value
+        if authenticated.actor.role not in {AccountRole.OWNER, AccountRole.ADMIN}:
+            return error("forbidden", 403)
+        try:
+            status = views.status(authenticated.actor, "vault")
+        except SQLAlchemyError, OSError:
+            status = None
+        except WebAdminError as failure:
+            if failure.code == "forbidden":
+                return error("forbidden", 403)
+            status = None
+        context = vault_context(
+            status, locale=locale, scope=request.query_params.get("scope", "all")
+        )
+        value = response(
+            render(
+                "vault.html",
+                request,
+                authenticated=True,
+                navigation=admin_navigation("vault"),
+                **context,
+            ),
+            200 if isinstance(status, AdminVaultStatus) else 503,
+        )
+        if value.status_code == 503:
+            value.headers["Retry-After"] = "10"
+        if authenticated.rotated_bearer is not None:
+            cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
+        return value
+
     @router.get("/{surface}")
     def page(surface: str, request: Request) -> Response:
         try:
@@ -819,6 +1043,20 @@ def create_admin_web_router(
         locale = resolve_locale(
             request.query_params.get("lang"), request.headers.get("accept-language")
         )
+        if surface == "diagnostics":
+            query = urlencode(
+                {
+                    key: request.query_params[key]
+                    for key in ("lang", "after")
+                    if key in request.query_params
+                }
+            )
+            value = apply_admin_security_headers(
+                RedirectResponse("/admin/audit" + (f"?{query}" if query else ""), status_code=303)
+            )
+            if authenticated.rotated_bearer is not None:
+                cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
+            return value
         try:
             if surface in {"accounts", "music", "server"}:
                 context = section_context(surface, admin_navigation(surface))

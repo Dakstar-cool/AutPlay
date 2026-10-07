@@ -19,6 +19,22 @@ interface TrackMetadataDao {
     fun changes(profile: String): Flow<Long>
     @Query("SELECT * FROM track_metadata_projection WHERE server_profile_id=:profile AND local_user_track_ref_id IN (:tracks)")
     suspend fun forTracks(profile: String, tracks: List<String>): List<TrackMetadataEntity>
+    @Query("""
+        SELECT m.local_user_track_ref_id AS localUserTrackRefId, m.payload_json AS payloadJson,
+               u.local_recording_id AS localRecordingId, u.raw_title AS rawTitle,
+               u.raw_artist AS rawArtist, u.raw_duration_ms AS rawDurationMs,
+               (SELECT MAX(l.added_at_ms) FROM library_entry l
+                WHERE l.server_profile_id=m.server_profile_id AND l.local_user_track_ref_id=m.local_user_track_ref_id
+                  AND l.removed_at_ms IS NULL) AS addedAtMs,
+               m.updated_at_ms AS metadataUpdatedAtMs
+        FROM track_metadata_projection m
+        JOIN user_track_ref u ON u.local_user_track_ref_id=m.local_user_track_ref_id AND u.server_profile_id=m.server_profile_id
+        WHERE m.server_profile_id=:profile AND m.local_user_track_ref_id>:afterTrackId AND u.deleted_at_ms IS NULL
+          AND EXISTS (SELECT 1 FROM library_entry l WHERE l.server_profile_id=m.server_profile_id
+                      AND l.local_user_track_ref_id=m.local_user_track_ref_id AND l.removed_at_ms IS NULL)
+        ORDER BY m.local_user_track_ref_id ASC LIMIT :limit
+    """)
+    suspend fun albumSourcesPage(profile: String, afterTrackId: String, limit: Int): List<MetadataAlbumSourceRow>
     @Query("SELECT * FROM metadata_artwork_cache WHERE server_profile_id=:profile AND sha256=:sha")
     suspend fun artwork(profile: String, sha: String): MetadataArtworkEntity?
     @Query("SELECT a.* FROM metadata_artwork_cache a JOIN track_metadata_projection m ON m.server_profile_id=a.server_profile_id AND m.artwork_sha256=a.sha256 WHERE m.server_profile_id=:profile AND m.local_user_track_ref_id=:track")

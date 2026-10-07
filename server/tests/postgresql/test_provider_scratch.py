@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from threading import Barrier
-from time import monotonic, sleep
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,10 +13,7 @@ from autplay.adapters.filesystem.provider_staging import FilesystemProviderStora
 from autplay.adapters.postgresql.models import ProviderStagingRow, UploadSessionRow, UserAccountRow
 from autplay.adapters.postgresql.provider_cleanup import PostgresProviderCleanupRepository
 from autplay.adapters.postgresql.provider_scratch import PostgresProviderScratchRepository
-from autplay.adapters.postgresql.resource_limits import (
-    RESOURCE_ADMISSION_LOCK,
-    lock_resource_admission,
-)
+from autplay.adapters.postgresql.resource_limits import RESOURCE_ADMISSION_LOCK
 from autplay.application.provider_scratch import (
     ProviderScratchClaim,
     ProviderScratchService,
@@ -26,10 +22,14 @@ from autplay.application.provider_scratch import (
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.vault import StorageOperationError
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from .conftest import DatabaseHarness, prepare_adjacent_downgrade
-from .test_discovery_authority_clock import _blocked_by
+from .conftest import DatabaseHarness
+from .historical_guard_support import (
+    HEAD65,
+    assert_current_context_refusal,
+    internet_acquisition_for_execution,
+)
 from .test_discovery_handoff import ready as ready_a1
 from .test_internet_handoff import ready as ready_internet
 from .test_provider_staging import writer
@@ -239,45 +239,27 @@ def test_scratch_receipts_are_immutable_and_cannot_complete_without_a_claim(
         session.flush()
 
 
-def test_downgrade_waits_for_inflight_claim_and_refuses_to_discard_it(
+def test_current_head_receipt_refusal_preserves_handoff_and_claim(
     admission: AdmissionHarness,
     tmp_path: Path,
     database_harness: DatabaseHarness,
     database_name: str,
 ) -> None:
     owned = handed_off(admission, tmp_path)
-    prepare_adjacent_downgrade(database_harness, database_name, "0041_provider_scratch")
-    with admission.sessions() as blocker, ThreadPoolExecutor(max_workers=1) as pool:
-        lock_resource_admission(blocker)
-        row = present(blocker.get(ProviderStagingRow, owned.execution_id, with_for_update=True))
-        row.scratch_claim_id = provider_scratch_id(owned.execution_id)
-        row.scratch_claimed_at = row.updated_at = present(
-            blocker.scalar(select(func.clock_timestamp()))
-        )
-        blocker.flush()
-        pid = present(blocker.scalar(select(func.pg_backend_pid())))
-        pending = pool.submit(database_harness.downgrade, database_name, "0040_provider_staging")
-        try:
-            with admission.sessions() as observer:
-                until = monotonic() + 5
-                while not _blocked_by(observer, pid):
-                    assert not pending.done() and monotonic() < until
-                    sleep(0.005)
-            blocker.commit()
-        finally:
-            blocker.rollback()
-        with pytest.raises(DBAPIError, match="Refusing to discard provider scratch ownership"):
-            pending.result(timeout=10)
-    assert (
-        PostgresProviderScratchRepository(admission.sessions).claim(owned.execution_id) is not None
+    repository = PostgresProviderScratchRepository(admission.sessions)
+    claim = present(repository.claim(owned.execution_id))
+    acquisition_id = internet_acquisition_for_execution(
+        database_harness, database_name, owned.execution_id
     )
+    assert_current_context_refusal(
+        database_harness, database_name, acquisition_id, "0040_provider_staging"
+    )
+    assert repository.claim(owned.execution_id) == claim
     with database_harness.connect(database_name) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0041_provider_scratch",
-        )
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD65,)
 
 
-def test_existing_unclaimed_handoff_survives_adjacent_downgrade_and_upgrade(
+def test_current_head_receipt_refusal_preserves_unclaimed_handoff_and_bytes(
     admission: AdmissionHarness,
     tmp_path: Path,
     database_harness: DatabaseHarness,
@@ -285,7 +267,13 @@ def test_existing_unclaimed_handoff_survives_adjacent_downgrade_and_upgrade(
 ) -> None:
     owned = handed_off(admission, tmp_path)
     original = owned.staged.read_bytes()
-    database_harness.downgrade(database_name, "0040_provider_staging")
+    original_identity = owned.staged.stat()
+    acquisition_id = internet_acquisition_for_execution(
+        database_harness, database_name, owned.execution_id
+    )
+    assert_current_context_refusal(
+        database_harness, database_name, acquisition_id, "0040_provider_staging"
+    )
     with database_harness.connect(database_name) as connection:
         assert connection.execute(
             "SELECT state,upload_session_id FROM vault.provider_staging WHERE execution_id=%s",
@@ -293,9 +281,11 @@ def test_existing_unclaimed_handoff_survives_adjacent_downgrade_and_upgrade(
         ).fetchone() == ("HANDED_OFF", owned.upload_id)
         assert connection.execute(
             "SELECT count(*) FROM information_schema.columns WHERE table_schema='vault' "
-            "AND table_name='provider_staging' AND column_name LIKE 'scratch_%'"
-        ).fetchone() == (0,)
-    database_harness.upgrade(database_name)
+            "AND table_name='provider_staging' "
+            "AND column_name IN ('scratch_claim_id','scratch_claimed_at','scratch_retired_at')"
+        ).fetchone() == (3,)
+    assert owned.staged.read_bytes() == original
+    assert os.path.samestat(original_identity, owned.staged.stat())
     with admission.sessions() as session:
         row = present(session.get(ProviderStagingRow, owned.execution_id))
         assert row.scratch_claim_id is None
@@ -306,3 +296,4 @@ def test_existing_unclaimed_handoff_survives_adjacent_downgrade_and_upgrade(
     assert repository.pending() == (owned.execution_id,)
     assert ProviderScratchService(repository, owned.storage).retire(owned.execution_id)
     assert owned.staged.read_bytes() == original
+    assert os.path.samestat(original_identity, owned.staged.stat())

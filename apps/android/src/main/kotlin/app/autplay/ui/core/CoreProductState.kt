@@ -2,6 +2,7 @@ package app.autplay.ui.core
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import app.autplay.application.search.LibrarySearchKind
 
 public enum class SearchScope {
     Local,
@@ -13,6 +14,7 @@ public data class SearchRequestKey(
     public val normalizedQuery: String,
     public val scopes: Set<SearchScope>,
     public val bindingKey: String?,
+    public val kind: LibrarySearchKind = LibrarySearchKind.All,
 )
 
 public fun normalizeSearchQuery(rawQuery: String): String = rawQuery.trim().replace(Regex("\\s+"), " ")
@@ -22,12 +24,14 @@ public class SearchGenerationGuard(initialGeneration: Long = 0L) {
     private var nextGeneration: Long = initialGeneration
     private var active: SearchRequestKey? = null
 
-    public fun begin(rawQuery: String, scopes: Set<SearchScope>, bindingKey: String?): SearchRequestKey {
+    public fun begin(rawQuery: String, scopes: Set<SearchScope>, bindingKey: String?,
+        kind: LibrarySearchKind = LibrarySearchKind.All): SearchRequestKey {
         val key = SearchRequestKey(
             generation = ++nextGeneration,
             normalizedQuery = normalizeSearchQuery(rawQuery),
             scopes = scopes.toSet(),
             bindingKey = bindingKey,
+            kind = kind,
         )
         active = key
         return key
@@ -59,15 +63,17 @@ public class SearchResultStore<T> {
     }
 
     /** Suppresses rows synchronously when composition has already moved to another request context. */
-    public fun visibleFor(rawQuery: String, scopes: Set<SearchScope>, bindingKey: String?): List<T> {
-        return if (matchesContext(rawQuery, scopes, bindingKey)) results else emptyList()
+    public fun visibleFor(rawQuery: String, scopes: Set<SearchScope>, bindingKey: String?,
+        kind: LibrarySearchKind = LibrarySearchKind.All): List<T> {
+        return if (matchesContext(rawQuery, scopes, bindingKey, kind)) results else emptyList()
     }
 
-    public fun matchesContext(rawQuery: String, scopes: Set<SearchScope>, bindingKey: String?): Boolean =
+    public fun matchesContext(rawQuery: String, scopes: Set<SearchScope>, bindingKey: String?,
+        kind: LibrarySearchKind = LibrarySearchKind.All): Boolean =
         active?.let { key ->
             key.normalizedQuery == normalizeSearchQuery(rawQuery) &&
                 key.scopes == scopes &&
-                key.bindingKey == bindingKey
+                key.bindingKey == bindingKey && key.kind == kind
         } == true
 
     public fun invalidate() {
@@ -126,6 +132,7 @@ public data class CoreProductSavedState(
     public val selectedDetail: DetailTarget? = null,
     public val searchListAnchor: ListAnchor? = null,
     public val libraryListAnchor: ListAnchor? = null,
+    public val searchKind: LibrarySearchKind = LibrarySearchKind.All,
 ) {
     public fun encode(): List<String> = listOf(
         STATE_VERSION,
@@ -138,15 +145,18 @@ public data class CoreProductSavedState(
         selectedDetail?.stableId?.let(::encodeText).orEmpty(),
         searchListAnchor?.encode().orEmpty(),
         libraryListAnchor?.encode().orEmpty(),
+        searchKind.wireValue,
     )
 
     public companion object {
-        private const val STATE_VERSION: String = "2"
+        private const val STATE_VERSION: String = "3"
+        private const val V2_STATE_VERSION: String = "2"
         private const val LEGACY_STATE_VERSION: String = "1"
 
         public fun decode(values: List<String>): CoreProductSavedState? {
             if (values.firstOrNull() == LEGACY_STATE_VERSION) return decodeV1(values)
-            if (values.size != 10 || values[0] != STATE_VERSION) return null
+            val version = values.firstOrNull()
+            if (!((version == STATE_VERSION && values.size == 11) || (version == V2_STATE_VERSION && values.size == 10))) return null
             return runCatching {
                 val detailKind = values[6].takeIf(String::isNotEmpty)?.let(DetailKind::valueOf)
                 val detailId = values[7].takeIf(String::isNotEmpty)?.let(::decodeText)
@@ -161,6 +171,8 @@ public data class CoreProductSavedState(
                     selectedDetail = detailKind?.let { DetailTarget(it, checkNotNull(detailId)) },
                     searchListAnchor = values[8].takeIf(String::isNotEmpty)?.let(::decodeListAnchor),
                     libraryListAnchor = values[9].takeIf(String::isNotEmpty)?.let(::decodeListAnchor),
+                    searchKind = if (version == STATE_VERSION) LibrarySearchKind.entries.firstOrNull { it.wireValue == values[10] }
+                        ?: LibrarySearchKind.All else LibrarySearchKind.All,
                 )
             }.getOrNull()
         }

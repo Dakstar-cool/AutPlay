@@ -1,10 +1,35 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 from autplay.adapters.internet_music import InternetMusicProvider, InternetMusicProviderError
+
+
+def test_search_credits_only_explicit_performers_and_never_the_uploader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entries = [
+        {"id": "abcdefghijk", "title": "Song", "duration": 12, "uploader": "Channel owner"},
+        {
+            "id": "123456789ab",
+            "title": "Song",
+            "duration": 12,
+            "artist": "Performer",
+            "uploader": "Misleading channel",
+        },
+    ]
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, json.dumps({"entries": entries}).encode(), b""
+        ),
+    )
+    result = InternetMusicProvider().search("Song")
+    assert [item["artist"] for item in result] == ["Unknown artist", "Performer"]
 
 
 def test_download_requires_private_token_provider_before_starting_process(

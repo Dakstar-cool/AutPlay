@@ -103,6 +103,8 @@ def execute(command: dict[str, object], source: BinaryIO, destination: BinaryIO)
                     if action == "EMBEDDED":
                         embedded = reader.read(path)
                         document, result = {"fields": embedded.fields}, embedded.artwork
+                        if embedded.duration_ms is not None:
+                            document["duration_ms"] = embedded.duration_ms
                     else:
                         fingerprint = ChromaprintTool(
                             "fpcalc",

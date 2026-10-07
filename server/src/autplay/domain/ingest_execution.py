@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from .catalog_execution import CatalogExecutionTicket
 from .ingest_cleanup import IngestCleanupTicket
 from .jobs import LeaseFence
 from .metadata_execution import MetadataExecutionTicket
@@ -33,6 +34,7 @@ class IngestExecutionStatus[
     Ticket: IngestExecutionTicket
     | IngestCleanupTicket
     | MetadataExecutionTicket
+    | CatalogExecutionTicket
     | TrainingExecutionTicket = IngestExecutionTicket
 ]:
     ticket: Ticket

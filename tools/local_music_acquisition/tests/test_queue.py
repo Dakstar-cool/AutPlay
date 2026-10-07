@@ -39,6 +39,7 @@ class Provider:
         self.audio = audio
         self.calls = 0
         self.action = action
+        self.source_metadata = None
 
     def acquire(self, item, output: Path) -> AcquiredArtifact:
         self.calls += 1
@@ -48,7 +49,11 @@ class Provider:
             raise ProviderFailure(self.name, "timeout")
         output.mkdir(parents=True, exist_ok=True)
         (output / "track.wav").write_bytes(self.audio)
-        return AcquiredArtifact(self.name, "sha256:" + hashlib.sha256(self.audio).hexdigest()[:12])
+        return AcquiredArtifact(
+            self.name,
+            "sha256:" + hashlib.sha256(self.audio).hexdigest()[:12],
+            source_metadata=self.source_metadata,
+        )
 
 
 def setup_queue(tmp_path: Path, text: str = "Artist - Track\n") -> tuple[Path, Path]:
@@ -74,6 +79,35 @@ def test_resume_deduplicates_rows_and_verifies_real_audio(tmp_path: Path, audio:
     assert len(list(output.glob("tracks/*/*/*.wav"))) == 1
     assert "Artist" not in json.dumps(second)
     assert str(tmp_path) not in json.dumps(second)
+
+
+def test_native_evidence_survives_atomic_receipt_restart_without_redownload(tmp_path, audio):
+    from local_music_acquisition.source_metadata import native_metadata
+
+    root, output = setup_queue(tmp_path)
+    provider = Provider(audio)
+    provider.source_metadata = native_metadata(
+        "fixture", "123", {"album": "Native Album", "release_date": "2020"}, native_album_id="44"
+    )
+    first = queue.run_queue(root, providers=(provider,))
+    path = next(output.glob("tracks/*/receipt.json"))
+    receipt = read_json(path)
+    assert receipt["source_metadata"] == provider.source_metadata
+    assert receipt["item"]["album"] is None
+    assert queue.run_queue(root, providers=(provider,)) == first
+    assert provider.calls == 1
+    assert "Native Album" not in json.dumps(first)
+    assert "source_metadata" not in json.dumps(first)
+
+
+def test_invalid_optional_evidence_never_consumes_audio_retry(tmp_path, audio):
+    root, output = setup_queue(tmp_path)
+    provider = Provider(audio)
+    provider.source_metadata = {"schema_version": 999, "provider": "FIXTURE", "source_id": "123"}
+    result = queue.run_queue(root, providers=(provider,))
+    assert result["downloaded"] == 1
+    assert result["retry"] == 0
+    assert "source_metadata" not in read_json(next(output.glob("tracks/*/receipt.json")))
 
 
 def test_new_recovery_queue_does_not_reuse_previous_attempt_directory(

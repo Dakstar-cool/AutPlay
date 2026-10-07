@@ -4,7 +4,7 @@ import hashlib
 import json
 
 import pytest
-from audio_inputs import load_manifest
+from audio_inputs import clip_plan, load_manifest
 
 
 def sample(tmp_path):
@@ -74,4 +74,39 @@ def test_provenance_validation(tmp_path, mutation):
         assert load_manifest(tmp_path)[1] == manifest
     else:
         with pytest.raises(ValueError):
+            load_manifest(tmp_path)
+
+
+@pytest.mark.parametrize("source_duration_ms", [24_000, 30_000, 129_600, 3_600_000])
+def test_clip_plan_varies_starts_and_lengths_within_source(source_duration_ms):
+    plan = clip_plan("a" * 64, source_duration_ms)
+    assert plan == clip_plan("a" * 64, source_duration_ms)
+    assert [duration for _, duration in plan] == [10_000, 12_000, 14_000]
+    starts = [start for start, _ in plan]
+    assert starts == sorted(starts)
+    assert len(set(starts)) == 3
+    assert all(start + duration <= source_duration_ms - 1_000 for start, duration in plan)
+    assert plan != clip_plan("b" * 64, source_duration_ms)
+
+
+@pytest.mark.parametrize("mutation", ["valid", "start", "duration", "samples"])
+def test_variable_clip_manifest(tmp_path, mutation):
+    manifest, sources = sample(tmp_path)
+    manifest["schema_version"] = 2
+    plan = clip_plan(sources["tracks"][0]["sha256"], 30_000)
+    for clip, (start, duration) in zip(manifest["clips"], plan, strict=True):
+        clip["clip_start_ms"] = start
+        clip["clip_duration_ms"] = duration
+        clip["samples"] = duration * 16
+    if mutation == "start":
+        manifest["clips"][0]["clip_start_ms"] += 1
+    elif mutation == "duration":
+        manifest["clips"][1]["clip_duration_ms"] += 1_000
+    elif mutation == "samples":
+        manifest["clips"][2]["samples"] -= 16_000
+    (tmp_path / "clips.json").write_text(json.dumps(manifest))
+    if mutation == "valid":
+        assert load_manifest(tmp_path)[1] == manifest
+    else:
+        with pytest.raises(ValueError, match="clip_metadata_invalid"):
             load_manifest(tmp_path)

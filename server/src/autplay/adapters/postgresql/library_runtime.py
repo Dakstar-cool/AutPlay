@@ -21,6 +21,7 @@ from autplay.domain.library import (
     validate_playlist_name,
     validate_position_key,
 )
+from autplay.domain.music_search import MusicSearchKind, validate_music_search
 
 from .models import (
     LibraryEntryRow,
@@ -31,6 +32,7 @@ from .models import (
     UserTrackPreferenceRow,
     UserTrackRefRow,
 )
+from .models.track_metadata import TrackMetadataRow
 
 
 class LibraryRepository:
@@ -459,14 +461,36 @@ class LibraryRepository:
         )
 
     def search_library(
-        self, principal: Principal, *, query: str, limit: int
+        self,
+        principal: Principal,
+        *,
+        query: str,
+        limit: int,
+        kind: MusicSearchKind = MusicSearchKind.ALL,
     ) -> list[LibraryEntryRow]:
         # LIKE wildcards are literal user characters; this avoids accidental broad scans.
-        normalized_query = query.strip()
-        if not normalized_query:
-            raise LibraryCommandError("search_query_invalid")
+        normalized_query, kind = validate_music_search(query, limit, kind)
         escaped = normalized_query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         needle = f"%{escaped}%"
+        fields = TrackMetadataRow.document["fields"]
+        effective = {
+            key: case(
+                # A present JSON null is an explicit clear, not a raw-field fallback.
+                (fields.op("?")(key), fields[key].astext),
+                else_=raw,
+            )
+            for key, raw in (
+                ("title", UserTrackRefRow.raw_title),
+                ("artist", UserTrackRefRow.raw_artist),
+                ("album", UserTrackRefRow.raw_album),
+            )
+        }
+        keys = {
+            MusicSearchKind.ALL: ("title", "artist", "album"),
+            MusicSearchKind.TRACK: ("title",),
+            MusicSearchKind.ARTIST: ("artist",),
+            MusicSearchKind.ALBUM: ("album",),
+        }[kind]
         return list(
             self._session.scalars(
                 select(LibraryEntryRow)
@@ -474,14 +498,16 @@ class LibraryRepository:
                     UserTrackRefRow,
                     UserTrackRefRow.user_track_ref_id == LibraryEntryRow.user_track_ref_id,
                 )
+                .outerjoin(
+                    TrackMetadataRow,
+                    TrackMetadataRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+                )
                 .where(
                     LibraryEntryRow.user_id == principal.user_id,
+                    UserTrackRefRow.user_id == principal.user_id,
+                    UserTrackRefRow.deleted_at.is_(None),
                     LibraryEntryRow.removed_at.is_(None),
-                    or_(
-                        UserTrackRefRow.raw_title.ilike(needle, escape="\\"),
-                        UserTrackRefRow.raw_artist.ilike(needle, escape="\\"),
-                        UserTrackRefRow.raw_album.ilike(needle, escape="\\"),
-                    ),
+                    or_(*(effective[key].ilike(needle, escape="\\") for key in keys)),
                 )
                 .order_by(
                     case(

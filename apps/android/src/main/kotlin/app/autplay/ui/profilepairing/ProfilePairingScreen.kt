@@ -156,6 +156,7 @@ internal enum class ProfileRemoteAction { LOGOUT_CURRENT, LOGOUT_ALL, REVOKE_CUR
 /** UI callbacks only; they may start application-owned work but Compose never performs I/O itself. */
 internal data class ProfilePairingActions(
     val startDiscovery: (String) -> Unit = {},
+    val scanServerQr: () -> Unit = {},
     val confirmTrust: () -> Unit = {},
     val cancelPairing: () -> Unit = {},
     val exchangeInvitation: (String) -> Unit = {},
@@ -239,6 +240,10 @@ internal fun ProfilePairingScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = AutPlayTokens.colors.mutedText,
                         )
+                        OutlinedButton(
+                            onClick = actions.scanServerQr,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                        ) { Text(stringResource(R.string.profile_scan_server_qr)) }
                         OutlinedTextField(
                             value = origin,
                             onValueChange = { origin = it.take(2048) },

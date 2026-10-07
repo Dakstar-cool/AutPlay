@@ -19,6 +19,7 @@ class MetadataProviderError(RuntimeError):
 class EmbeddedMetadata:
     fields: MetadataFields
     artwork: bytes | None = None
+    duration_ms: int | None = None
 
 
 class EmbeddedMetadataReader(Protocol):
@@ -35,5 +36,7 @@ class MetadataByteWork(Protocol):
 
 class PublicMetadataProvider(Protocol):
     def search(self, query: MetadataQuery) -> tuple[MetadataCandidate, ...]: ...
-    def release(self, candidate: MetadataCandidate) -> MetadataCandidate: ...
+    def release(
+        self, candidate: MetadataCandidate, *, release_track_mbid: str | None = None
+    ) -> MetadataCandidate: ...
     def cover(self, release_id: str) -> bytes | None: ...

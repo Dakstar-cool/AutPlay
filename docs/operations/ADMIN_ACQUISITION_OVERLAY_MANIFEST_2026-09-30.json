@@ -1,0 +1,17 @@
+{
+  "base_image_tag": "autplay-admin-integrated:20260921-a55-v14",
+  "files": {
+    "Dockerfile": "033c01869dc538da0c8204179a02789b45682a0e6144331e823c7c566dd6387b",
+    "autplay/application/acquisition_control.py": "1ddb16867278d0737539f23c8cd2cdb0ae5ea4652b9c755df594d138ee42a398",
+    "autplay/entrypoints/acquisition_control_http.py": "975c2fbb031c00e64df13fc6e8139ad385b64e54d6c1fc015f41e41a97fa23df",
+    "autplay/entrypoints/admin_web_http.py": "316a678013d491d3039265d92758fd2103fbdab8e1d8e515a44c5a28c3e1d915",
+    "autplay/entrypoints/api.py": "01f0d5247bb467192e9dd3e26913fb7b553cf2da52efd7ae49e41ac8b499ffab",
+    "autplay/runtime/settings.py": "1a54f91746dc3e58c49a616eb304471e73e7dd625cffdc4bc42f4b5015c893fc",
+    "autplay/web/i18n/en.json": "4fd32d6a6ded9a9b606a7edf18752ab871396c6dd9191e6317d1d4a0256a8311",
+    "autplay/web/i18n/ru.json": "7c314539a9bfc6e24315a2153ec4d2c6551d9aa70fcfb35558a66ad71c0ec5a1",
+    "autplay/web/presentation.py": "591b59c13efe88ab90d6129735ccfab7e74c284b32f25bd3b4745794feaf567b",
+    "autplay/web/templates/acquisition_control.html": "20f88fcfef810788cba134f877f41397b000f9a68b3abf3237155a392d23cca1"
+  },
+  "schema_version": 1,
+  "source_head": "a17a456"
+}

@@ -1,17 +1,26 @@
 package app.autplay.ui.statistics
 
 import androidx.activity.ComponentActivity
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.R
 import app.autplay.application.statistics.OwnerProfileStatistics
-import app.autplay.application.statistics.OwnerStatisticsWindow
+import app.autplay.application.statistics.OwnerProfileStatisticsState
 import app.autplay.application.statistics.OwnerTopArtist
+import app.autplay.application.statistics.OwnerTopGenre
 import app.autplay.application.statistics.OwnerTopTrack
+import app.autplay.ui.AutPlayTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,32 +29,56 @@ import org.junit.runner.RunWith
 class ProfileStatisticsCardTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val snapshot = OwnerProfileStatistics(
+        throughMs = 1,
+        listenedMs = 3_600_000,
+        topGenres = listOf(OwnerTopGenre("Jazz", 3_600_000)),
+        topTracks = listOf(OwnerTopTrack("local-only", "Local song", "Local artist", 3, 3_600_000)),
+        topArtists = listOf(OwnerTopArtist("Local artist", 3, 3_600_000)),
+    )
 
     @Test
-    fun ownerCardRendersLocalStatisticsWithoutAnyServerState() {
-        val statistics = OwnerProfileStatistics(
-            throughMs = 1,
-            last7Days = OwnerStatisticsWindow(7, 2, 3_600_000, 1),
-            last30Days = OwnerStatisticsWindow(30, 4, 7_200_000, 2),
-            last365Days = OwnerStatisticsWindow(365, 9, 10_800_000, 3),
-            topTracks30Days = listOf(OwnerTopTrack("local-only", "Local song", "Local artist", 3, 1_000)),
-            topArtists30Days = listOf(OwnerTopArtist("Local artist", 3, 1_000)),
-        )
-        compose.setContent { MaterialTheme { OwnerProfileStatisticsCard(statistics) } }
+    fun ownerCardShowsOnlySavedTimeAndThreeTopsWithWorkingRefresh() {
+        var refreshes = 0
+        compose.setContent {
+            AutPlayTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    OwnerProfileStatisticsCard(OwnerProfileStatisticsState(snapshot), { refreshes++ })
+                }
+            }
+        }
+        compose.onNodeWithText(context.getString(R.string.profile_stats_refresh)).performClick()
+        assertEquals(1, refreshes)
+        compose.onNodeWithText(context.getString(R.string.profile_stats_listened_time)).assertIsDisplayed()
+        compose.onNodeWithText("Jazz").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Local song").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.profile_stats_top_artists)).performScrollTo().assertIsDisplayed()
+        listOf(7, 30, 365).forEach { days ->
+            compose.onNodeWithText(context.resources.getQuantityString(R.plurals.statistics_window_days, days, days)).assertDoesNotExist()
+        }
+    }
 
-        compose.onNodeWithText(context.getString(R.string.statistics_title)).assertIsDisplayed()
-        compose.onNodeWithText(
-            context.resources.getQuantityString(R.plurals.statistics_window_days, 7, 7),
-        ).assertIsDisplayed()
-        val plays = context.resources.getQuantityString(R.plurals.statistics_play_count, 3, 3L)
-        compose.onNodeWithText(
-            context.getString(
-                R.string.statistics_top_track_row,
-                1,
-                "Local song",
-                "Local artist",
-                plays,
-            ),
-        ).assertIsDisplayed()
+    @Test
+    fun refreshingKeepsSavedDataAndDisablesRepeatedTaps() {
+        compose.setContent {
+            AutPlayTheme { OwnerProfileStatisticsCard(OwnerProfileStatisticsState(snapshot, loading = true), {}) }
+        }
+        compose.onNodeWithText(context.getString(R.string.profile_stats_refresh)).assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.profile_stats_refreshing)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.profile_stats_listened_time)).assertIsDisplayed()
+    }
+
+    @Test
+    fun emptyGenresAndErrorAreExplicitWhileOldSnapshotRemainsVisible() {
+        compose.setContent {
+            AutPlayTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    OwnerProfileStatisticsCard(OwnerProfileStatisticsState(snapshot.copy(topGenres = emptyList()), refreshFailed = true), {})
+                }
+            }
+        }
+        compose.onNodeWithText(context.getString(R.string.profile_stats_refresh_error)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.profile_stats_genres_empty)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Local song").performScrollTo().assertIsDisplayed()
     }
 }

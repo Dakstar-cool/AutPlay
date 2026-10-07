@@ -1,5 +1,23 @@
 # Local music acquisition
 
+## Native metadata after download
+
+Durable queue receipts retain optional bounded `source_metadata` from the actual selected
+publication: recording credits and version, album, release date at its known precision,
+track/disc position, external IDs and artwork hints. Provider album/artist IDs are namespaced
+by the content provider. Ambiguous album editions are left unresolved. Playlist fields and
+the verified audio identity remain unchanged; invalid optional evidence does not fail audio.
+Uploader names, upload dates, playlists and generic thumbnails are not album metadata.
+
+The Vault bridge schedules owner-scoped metadata enrichment after audio publication through
+the existing server metadata service. Published audio remains available while metadata retries
+run separately (at most five handoff attempts). Older published checkpoints receive the same
+handoff without downloading again. Changing source evidence retries metadata only. Explicit
+native album membership allows later tracks to join the same album even when MusicBrainz has
+no matching edition; album artist stays unknown when the source does not provide it.
+Native artwork URLs are bounded evidence hints; the downloader does not fetch covers or treat
+SoundCloud avatar fallbacks and waveform images as album artwork.
+
 Переносимый локальный модуль для ограниченной загрузки пользовательского TXT-плейлиста.
 Он не входит в серверный runtime AutPlay и не меняет продуктовую границу провайдеров.
 
@@ -11,6 +29,10 @@
 For selective SOCKS5 downloads, see [on-demand Xray configuration](SERVER_QUEUE.md#on-demand-xray-for-acquisition).
 Xray starts only when a selected provider begins acquisition and stops after the last
 active download's idle timeout or when the acquisition runtime exits.
+
+The optional [Admin Web acquisition control](../../deploy/compose/README.md#optional-admin-music-acquisition-control)
+uses a separate operator agent and private command spool. The API process does not run
+this downloader or receive its provider credentials.
 
 Порядок контуров фиксирован:
 

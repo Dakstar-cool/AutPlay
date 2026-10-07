@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import unicodedata
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -13,7 +14,7 @@ from uuid import UUID, uuid4
 
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -811,6 +812,44 @@ class ProfilePairingService:
             s.add(row)
             return _admission_created(row, locator, bearer), False
 
+    def pending_device_admissions(self, actor: WebActor) -> list[dict[str, object]]:
+        """List bounded, proven pending requests for an explicit self-account Web decision."""
+        with self._sessions.begin() as s:
+            _, now = self._lock_admin_actor(
+                s, actor, web_session_id=actor.web_session_id, mutation=False
+            )
+            instance = self._instance(s, now)
+            rows = s.scalars(
+                select(DeviceAdmissionRow)
+                .where(
+                    DeviceAdmissionRow.state == "PENDING",
+                    DeviceAdmissionRow.expires_at > now,
+                    DeviceAdmissionRow.server_instance_id == instance.server_instance_id,
+                    DeviceAdmissionRow.identity_epoch == instance.identity_epoch,
+                    DeviceAdmissionRow.identity_thumbprint_sha256
+                    == instance.identity_thumbprint_sha256,
+                    or_(
+                        DeviceAdmissionRow.review_web_session_id.is_(None),
+                        DeviceAdmissionRow.review_web_session_id == actor.web_session_id,
+                    ),
+                )
+                .order_by(DeviceAdmissionRow.created_at.desc(), DeviceAdmissionRow.request_id)
+                .limit(50)
+            ).all()
+            return [
+                {
+                    "request_id": str(row.request_id),
+                    "nickname": row.nickname,
+                    "device_model_hint": row.device_model_hint,
+                    "platform": row.platform,
+                    "app_version": row.app_version,
+                    "api_major": row.api_major,
+                    "requested_at": iso8601(row.requested_at),
+                    "expires_at": iso8601(row.expires_at),
+                }
+                for row in rows
+            ]
+
     def bind_device_admission_review(
         self,
         *,
@@ -1037,6 +1076,9 @@ class ProfilePairingService:
         request_sha256: bytes,
         review_binding: str | None = None,
         web_session_id: UUID | None = None,
+        *,
+        from_pending_list: bool = False,
+        device_name: str | None = None,
     ) -> dict[str, object]:
         """Typed M6 seam: Web supplies its authenticated actor, never a target account."""
         if actor.role not in {AccountRole.OWNER, AccountRole.ADMIN} or action not in {
@@ -1046,6 +1088,18 @@ class ProfilePairingService:
             "BLOCK_DEVICE",
         }:
             raise ProfilePairingError("unauthorized")
+        if from_pending_list and (
+            not isinstance(actor, WebActor) or web_session_id != actor.web_session_id
+        ):
+            raise ProfilePairingError("unauthorized")
+        if device_name is not None:
+            device_name = device_name.strip()
+            if (
+                action not in {"APPROVE_ONCE", "TRUST_DEVICE"}
+                or not 1 <= len(device_name) <= 120
+                or any(unicodedata.category(character).startswith("C") for character in device_name)
+            ):
+                raise ProfilePairingError("admission_request_unavailable")
         now = _now()
         with self._sessions.begin() as s:
             account, now = self._lock_admin_actor(s, actor, web_session_id=web_session_id)
@@ -1076,8 +1130,18 @@ class ProfilePairingService:
                 row.state, row.decided_at = "EXPIRED", now
             if row.state != "PENDING":
                 raise ProfilePairingError("admission_request_unavailable")
-            if web_session_id is not None and row.review_web_session_id != web_session_id:
+            if from_pending_list:
+                instance = self._instance(s, now)
+                if (
+                    row.review_web_session_id not in {None, web_session_id}
+                    or row.server_instance_id != instance.server_instance_id
+                    or row.identity_epoch != instance.identity_epoch
+                    or row.identity_thumbprint_sha256 != instance.identity_thumbprint_sha256
+                ):
+                    raise ProfilePairingError("admission_request_unavailable")
+            elif web_session_id is not None and row.review_web_session_id != web_session_id:
                 raise ProfilePairingError("admission_request_unavailable")
+            row.approved_device_name = device_name
             row.approved_user_id = (
                 actor.user_id if action in {"APPROVE_ONCE", "TRUST_DEVICE"} else None
             )
@@ -1232,7 +1296,7 @@ class ProfilePairingService:
             device = DeviceRow(
                 device_id=device_id,
                 user_id=account.user_id,
-                device_name=row.device_model_hint or row.nickname,
+                device_name=row.approved_device_name or row.device_model_hint or row.nickname,
                 platform="ANDROID",
                 app_version=row.app_version,
                 public_key=row.device_public_key_spki,
@@ -1420,14 +1484,31 @@ class ProfilePairingService:
     def list_trusted_device_keys(self, principal: Principal | WebActor) -> dict[str, object]:
         """M6-safe projection: raw cryptographic thumbprints never enter HTML."""
         with self._sessions() as s:
-            rows = s.scalars(
-                select(TrustedDeviceKeyRow)
-                .where(TrustedDeviceKeyRow.user_id == principal.user_id)
+            rows = s.execute(
+                select(
+                    TrustedDeviceKeyRow,
+                    (
+                        DeviceKeyBlockRow.blocked_at.is_not(None)
+                        & DeviceKeyBlockRow.unblocked_at.is_(None)
+                    ).label("blocked"),
+                )
+                .outerjoin(
+                    DeviceKeyBlockRow,
+                    (DeviceKeyBlockRow.user_id == TrustedDeviceKeyRow.user_id)
+                    & (
+                        DeviceKeyBlockRow.device_key_thumbprint_sha256
+                        == TrustedDeviceKeyRow.device_key_thumbprint_sha256
+                    ),
+                )
+                .where(
+                    TrustedDeviceKeyRow.user_id == principal.user_id,
+                    TrustedDeviceKeyRow.removed_at.is_(None),
+                )
                 .order_by(TrustedDeviceKeyRow.created_at.desc())
                 .limit(100)
             ).all()
             items: list[dict[str, object]] = []
-            for row in rows:
+            for row, blocked in rows:
                 admission = s.get(DeviceAdmissionRow, row.approved_request_id)
                 known_device = s.scalar(
                     select(DeviceRow)
@@ -1454,7 +1535,7 @@ class ProfilePairingService:
                     {
                         "key_reference": str(row.key_reference),
                         "device_label": (
-                            admission.nickname
+                            admission.approved_device_name or admission.nickname
                             if admission is not None
                             else known_device.device_name
                             if known_device is not None
@@ -1468,8 +1549,12 @@ class ProfilePairingService:
                             else "ANDROID"
                         ),
                         "created_at": iso8601(row.created_at),
+                        "connected_at": iso8601(
+                            known_device.created_at if known_device is not None else row.created_at
+                        ),
                         "removed_at": None if row.removed_at is None else iso8601(row.removed_at),
                         "revision": row.revision,
+                        "blocked": bool(blocked),
                         "active_session_count": int(active_sessions or 0),
                         "device_id": None if known_device is None else str(known_device.device_id),
                         "developer_mode_enabled": False
@@ -1804,7 +1889,7 @@ class ProfilePairingService:
                 .limit(1)
             )
             device_name = (
-                approved.nickname
+                approved.approved_device_name or approved.nickname
                 if approved is not None
                 else known_device.device_name
                 if known_device is not None

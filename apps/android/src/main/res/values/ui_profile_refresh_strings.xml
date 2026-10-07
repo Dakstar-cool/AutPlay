@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_stats_refresh">Refresh</string>
+    <string name="profile_stats_saved_history">All saved history on this device · Ranked by listening time</string>
+    <string name="profile_stats_refreshing">Refreshing statistics…</string>
+    <string name="profile_stats_initial">Refresh to load your listening history.</string>
+    <string name="profile_stats_load_error">Statistics could not be loaded. Tap Refresh to try again.</string>
+    <string name="profile_stats_refresh_error">Refresh failed. Your previous snapshot is still shown.</string>
+    <string name="profile_stats_listened_time">Time spent listening</string>
+    <string name="profile_stats_time_note">Recorded playback time. The current unfinished listen is included after it ends.</string>
+    <string name="profile_stats_top_genres">Top 5 genres</string>
+    <string name="profile_stats_top_tracks">Top 5 tracks</string>
+    <string name="profile_stats_top_artists">Top 5 artists</string>
+    <string name="profile_stats_genres_empty">No genres are saved for the tracks you have listened to yet.</string>
+    <string name="profile_stats_tracks_empty">Listen to a track to see your favourites here.</string>
+    <string name="profile_stats_artists_empty">No artist names are saved for the tracks you have listened to yet.</string>
+    <string name="profile_stats_genres_note">A track with several genres contributes its listening time to each one.</string>
+    <string name="profile_stats_duration_seconds">%1$d s</string>
+    <string name="profile_stats_duration_subsecond">&lt;1 s</string>
+</resources>

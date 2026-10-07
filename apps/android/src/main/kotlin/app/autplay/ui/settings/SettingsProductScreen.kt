@@ -86,6 +86,17 @@ internal fun SettingsProductScreen(
             }
         }
 
+        SettingsSection(icon = AutPlayIcon.Play, titleRes = R.string.settings_playback) {
+            SettingsSwitchRow(
+                label = stringResource(R.string.settings_smooth_track_transitions),
+                checked = settings.smoothTrackTransitions,
+                onCheckedChange = { enabled ->
+                    onUpdate { current -> current.copy(smoothTrackTransitions = enabled) }
+                },
+            )
+            Text(stringResource(R.string.settings_smooth_track_transitions_body), color = AutPlayTokens.colors.mutedText)
+        }
+
         SettingsSection(icon = AutPlayIcon.Library, titleRes = R.string.settings_library_access) {
             PhoneMusicTools(settings)
             Text(
@@ -127,11 +138,15 @@ internal fun SettingsProductScreen(
             OutlinedButton(onClick = { onNavigate(UiDestination.SyncStatus) }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.nav_sync_status))
             }
+        }
+
+        SettingsSection(icon = AutPlayIcon.Download, titleRes = R.string.nav_downloads) {
+            Text(stringResource(R.string.settings_download_network_body), color = AutPlayTokens.colors.mutedText)
             SettingsSwitchRow(
-                label = stringResource(R.string.settings_metered_sync),
-                checked = settings.syncOnMeteredNetwork,
+                label = stringResource(R.string.settings_metered_downloads),
+                checked = settings.downloadOnMeteredNetwork,
                 onCheckedChange = { enabled ->
-                    onUpdate { current -> current.copy(syncOnMeteredNetwork = enabled) }
+                    onUpdate { current -> current.copy(downloadOnMeteredNetwork = enabled) }
                 },
             )
         }
@@ -275,7 +290,9 @@ private fun SettingsSection(
         summary = stringResource(when (titleRes) {
             R.string.settings_appearance -> R.string.settings_appearance_summary
             R.string.settings_library_access -> R.string.settings_library_summary
+            R.string.settings_playback -> R.string.settings_playback_summary
             R.string.settings_network -> R.string.settings_connection_summary
+            R.string.nav_downloads -> R.string.settings_download_network_summary
             R.string.nav_wave_rooms -> R.string.settings_wave_summary
             R.string.settings_statistics_privacy -> R.string.settings_privacy_summary
             R.string.settings_transfer -> R.string.settings_transfer_summary

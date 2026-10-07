@@ -1,0 +1,7 @@
+<resources>
+    <string name="search_kind_label">Search by: %1$s</string>
+    <string name="search_kind_all">All fields</string>
+    <string name="search_kind_track">Track title</string>
+    <string name="search_kind_artist">Artist</string>
+    <string name="search_kind_album">Album</string>
+</resources>

@@ -76,6 +76,7 @@ import app.autplay.application.library.CoreReleaseDetail
 import app.autplay.application.library.CoreTrackDetail
 import app.autplay.application.artist.RoomArtistCatalogPort
 import app.autplay.application.search.LocalTrackSearchRepository
+import app.autplay.application.search.searchOwnerContextKey
 import app.autplay.application.search.LocalTrackSearchResult
 import app.autplay.application.search.VaultSearchProjector
 import app.autplay.application.search.VaultSearchResult
@@ -126,8 +127,8 @@ import app.autplay.application.publicaccess.PublicAccountRegistrationState
 import app.autplay.application.social.ContactCard
 import app.autplay.application.social.SocialRuntime
 import app.autplay.application.social.SocialRuntimeState
-import app.autplay.application.statistics.OwnerProfileStatistics
 import app.autplay.application.statistics.ProfileStatisticsRepository
+import app.autplay.application.statistics.ProfileStatisticsSnapshotOwner
 import app.autplay.data.local.RoomM5LocalIntentMaterializer
 import app.autplay.data.security.AndroidKeystoreCredentialStore
 import app.autplay.data.security.AndroidM5DeviceKeyStore
@@ -174,6 +175,7 @@ import app.autplay.ui.settings.SettingsProductScreen
 import app.autplay.ui.core.SearchGenerationGuard
 import app.autplay.ui.core.SearchResultStore
 import app.autplay.ui.core.SearchScope
+import app.autplay.ui.core.automaticSearchScopes
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 import app.autplay.ui.core.CoreTrackSummary
@@ -219,17 +221,31 @@ import java.util.concurrent.ConcurrentHashMap
 internal const val BOOTSTRAP_LABEL = "AutPlay"
 internal const val ONBOARDING_REVISION = CURRENT_ONBOARDING_REVISION
 
+internal fun hasCompletedOnboarding(settings: NonSecretSettings): Boolean =
+    settings.onboardingRevision >= ONBOARDING_REVISION &&
+        settings.pendingPublicId?.let { app.autplay.application.social.normalizeSocialPublicId(it) == it } == true
+
 internal suspend fun completeOnboarding(
     settingsStore: NonSecretSettingsStore,
-): Boolean = runCatching {
-    settingsStore.mutate {
-        it.copy(onboardingRevision = ONBOARDING_REVISION)
+    publicId: String,
+): Boolean {
+    val normalized = app.autplay.application.social.normalizeSocialPublicId(publicId) ?: return false
+    return try {
+        settingsStore.mutate {
+            it.copy(onboardingRevision = ONBOARDING_REVISION, pendingPublicId = normalized)
+        }
+        true
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
     }
-}.isSuccess
+}
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
     private val pendingPublicAccountInvitation = MutableStateFlow<ByteArray?>(null)
+    private val pendingPlaybackOpen = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -254,6 +270,7 @@ class MainActivity : ComponentActivity() {
         val syncStatusRepository = SyncStatusRepository(database)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
+        consumePlaybackOpen(intent)
         consumeSharedDocument(intent)
         setContent {
             AutPlayBootstrap(
@@ -268,13 +285,23 @@ class MainActivity : ComponentActivity() {
                 importRepository,
                 recommendationRepository,
                 pendingPublicAccountInvitation,
+                pendingPlaybackOpen,
             )
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
+        consumePlaybackOpen(intent)
         consumeSharedDocument(intent)
+    }
+
+    private fun consumePlaybackOpen(source: Intent?) {
+        if (source?.action != app.autplay.playback.PlaybackNotification.ACTION_OPEN_PLAYER ||
+            source.getBooleanExtra(app.autplay.playback.PlaybackNotification.EXTRA_OPEN_HANDLED, false)) return
+        source.putExtra(app.autplay.playback.PlaybackNotification.EXTRA_OPEN_HANDLED, true)
+        pendingPlaybackOpen.value = true
     }
 
     private fun consumeSharedDocument(source: Intent?) {
@@ -320,6 +347,7 @@ internal fun AutPlayBootstrap(
     importRepository: LocalImportReviewRepository? = null,
     recommendationRepository: OfflineRecommendationRepository? = null,
     pendingPublicAccountInvitation: MutableStateFlow<ByteArray?>? = null,
+    pendingPlaybackOpen: MutableStateFlow<Boolean>? = null,
 ) {
     if (settingsStore == null || searchRepository == null || sliceRepository == null ||
         playbackRepository == null || playbackOwner == null || downloadRepository == null || syncStatusRepository == null || syncScheduler == null || importRepository == null || recommendationRepository == null
@@ -509,7 +537,7 @@ internal fun AutPlayBootstrap(
                     preferExistingBinding = settings.m5Binding != null,
                 )
             }
-            val onboardingComplete = settings.onboardingRevision >= ONBOARDING_REVISION
+            val onboardingComplete = hasCompletedOnboarding(settings)
             LaunchedEffect(
                 admissionRuntime,
                 pairingRuntime,
@@ -549,10 +577,11 @@ internal fun AutPlayBootstrap(
             var onboardingCompletionRoute by rememberSaveable { mutableStateOf<String?>(null) }
             AutPlayTheme(appearanceFrom(settings)) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    if (settings.onboardingRevision < ONBOARDING_REVISION) {
+                    if (!onboardingComplete) {
                         WelcomeOnboardingScreen(
-                            onComplete = { destination ->
-                                completeOnboarding(settingsStore).also { completed ->
+                            initialPublicId = settings.pendingPublicId,
+                            onComplete = { destination, publicId ->
+                                completeOnboarding(settingsStore, publicId).also { completed ->
                                     if (completed) onboardingCompletionRoute = destination.route
                                 }
                             },
@@ -584,6 +613,7 @@ internal fun AutPlayBootstrap(
                                 publicRegistrationState,
                                 pairingSafeError,
                                 initialDestination = initialDestination,
+                                pendingPlaybackOpen = pendingPlaybackOpen,
                                 clearPairingSafeError = { pairingSafeError = null },
                             )
                         }
@@ -670,6 +700,7 @@ private fun OfflineLibraryScreen(
     publicRegistrationState: PublicAccountRegistrationState,
     pairingSafeError: String?,
     initialDestination: UiDestination = UiDestination.Home,
+    pendingPlaybackOpen: MutableStateFlow<Boolean>? = null,
     clearPairingSafeError: () -> Unit,
 ) {
     val activeProfileId = binding?.serverProfileId?.value
@@ -771,6 +802,13 @@ private fun OfflineLibraryScreen(
             }
         }
     }
+    val serverQrScanner = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        result.data?.getStringExtra(EnrollmentQrScannerActivity.EXTRA_PAYLOAD)
+            ?.takeIf { result.resultCode == Activity.RESULT_OK }
+            ?.let { pairingRuntime.startDiscovery(it.trim()) }
+    }
     val enrollmentInvitationQrScanner = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -799,17 +837,30 @@ private fun OfflineLibraryScreen(
             }
         }
     }
-    var socialRuntime by remember(activeProfileId, settings.serverBaseUrl, waveCoordinator) {
+    val socialScope = remember(binding, settings.serverBaseUrl, waveCoordinator) {
+        CoroutineScope(scope.coroutineContext + kotlinx.coroutines.SupervisorJob(scope.coroutineContext[kotlinx.coroutines.Job]))
+    }
+    DisposableEffect(socialScope) {
+        onDispose { socialScope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+    var socialRuntime by remember(socialScope) {
         mutableStateOf<SocialRuntime?>(null)
     }
-    LaunchedEffect(binding, settings.serverBaseUrl, waveCoordinator) {
+    LaunchedEffect(socialScope) {
         socialRuntime = if (binding == null || settings.serverBaseUrl == null) null else runCatching {
-            AutPlayRuntime.socialRuntime(context, binding, scope) { roomId ->
-                scope.launch { waveCoordinator?.join(roomId) }
+            AutPlayRuntime.socialRuntime(context, binding, socialScope) { roomId ->
+                socialScope.launch { waveCoordinator?.join(roomId) }
             }
-        }.getOrNull()
+        }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
     }
-    val emptySocialState = remember { flowOf(SocialRuntimeState()) }
+    val emptySocialState = remember(settings.pendingPublicId) {
+        flowOf(SocialRuntimeState(
+            publicIdRegistration = settings.pendingPublicId
+                ?.let { app.autplay.application.social.normalizeSocialPublicId(it) }
+                ?.let { app.autplay.application.social.PublicIdRegistrationState.Pending(it) }
+                ?: app.autplay.application.social.PublicIdRegistrationState.Missing,
+        ))
+    }
     val socialState by (socialRuntime?.state ?: emptySocialState).collectAsState(
         initial = SocialRuntimeState(),
     )
@@ -829,10 +880,13 @@ private fun OfflineLibraryScreen(
     val profileStatisticsRepository = remember(context) {
         ProfileStatisticsRepository(AutPlayRuntime.database(context))
     }
-    val ownerStatistics by remember(profileStatisticsRepository, activeProfileId) {
-        profileStatisticsRepository.observe(activeProfileId)
-            .map<OwnerProfileStatistics, OwnerProfileStatistics?> { it }
-    }.collectAsState(initial = null)
+    val statisticsOwner = remember(profileStatisticsRepository, activeProfileId, binding?.userId) {
+        ProfileStatisticsSnapshotOwner(scope, activeProfileId, profileStatisticsRepository::refresh)
+    }
+    val ownerStatisticsState by statisticsOwner.state.collectAsState()
+    DisposableEffect(statisticsOwner) {
+        onDispose { statisticsOwner.close() }
+    }
     val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
     val libraryEntries by remember(coreProductRepository, activeProfileId) {
         coreProductRepository.libraryEntries(activeProfileId)
@@ -860,7 +914,15 @@ private fun OfflineLibraryScreen(
         queueEditorRepository.observeActive(activeProfileId)
     }.collectAsState(initial = null)
     val navigation = rememberAutPlayNavigationState(initialDestination)
+    LaunchedEffect(navigation, pendingPlaybackOpen) {
+        pendingPlaybackOpen?.collect { requested ->
+            if (requested && pendingPlaybackOpen.compareAndSet(true, false)) navigation.navigate(UiDestination.NowPlaying)
+        }
+    }
     val destination = navigation.current
+    LaunchedEffect(destination, statisticsOwner) {
+        if (destination == UiDestination.Profile) statisticsOwner.loadIfNeeded()
+    }
     val historyRepository = remember(context) { HistoryRepository(AutPlayRuntime.database(context)) }
     var historyState by remember(activeProfileId) { mutableStateOf(HistoryUiState()) }
     var historyGeneration by remember(activeProfileId) { mutableIntStateOf(0) }
@@ -902,6 +964,11 @@ private fun OfflineLibraryScreen(
     }
     val view = legacyView(destination)
     val coreProductState = rememberCoreProductUiState(activeProfileId)
+    LaunchedEffect(destination, coreProductState) {
+        if (destination == UiDestination.Library && coreProductState.consumeLegacyDownloadsRedirect()) {
+            navigation.navigate(UiDestination.Downloads)
+        }
+    }
     val coreActionGate = remember { SingleFlightActionGate() }
     var searchCompleted by rememberSaveable { mutableStateOf(false) }
     var searchSessionId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1046,10 +1113,6 @@ private fun OfflineLibraryScreen(
         ) {
             selectedTrackRefId = null
         }
-    }
-    LaunchedEffect(selectedTrackRefId) {
-        selectedTrackRefId?.let { coreProductState.selectDetail(DetailTarget(DetailKind.Track, it)) }
-            ?: if (coreProductState.selectedDetail?.kind == DetailKind.Track) coreProductState.clearDetail() else Unit
     }
     RefreshSearchOnBindingEffect(
         binding = binding,
@@ -1269,11 +1332,14 @@ private fun OfflineLibraryScreen(
         navigation.navigate(UiDestination.Library)
     }
     fun openOfflineLibrary() {
-        coreProductState.librarySection = LibrarySection.Offline
-        navigation.navigate(UiDestination.Library)
+        navigation.navigate(UiDestination.Downloads)
     }
     fun openCoreDetail(target: DetailTarget) {
-        selectedTrackRefId = target.takeIf { it.kind == DetailKind.Track }?.stableId
+        if (target.kind == DetailKind.Track) {
+            coreCommandActions.startTrack(target.stableId, "LIBRARY", "LIBRARY", null)
+            return
+        }
+        selectedTrackRefId = null
         coreProductState.selectDetail(target)
         navigation.navigate(UiDestination.Library)
     }
@@ -1287,20 +1353,23 @@ private fun OfflineLibraryScreen(
     }
     val searchContextIsCurrent = searchResultStore.matchesContext(
         coreProductState.query,
-        coreProductState.scopes + SearchScope.Local,
-        activeProfileId,
+        automaticSearchScopes(activeProfileId),
+        binding.searchOwnerContextKey(),
+        coreProductState.searchKind,
     )
-    val visibleVaultSearchResults = vaultSearchResultStore.visibleFor(
-        coreProductState.query,
-        coreProductState.scopes + SearchScope.Local,
-        activeProfileId,
-    )
-    val vaultTrackIds = visibleVaultSearchResults.mapNotNull(VaultSearchResult::localUserTrackRefId).toSet()
     val visibleSearchResults = searchResultStore.visibleFor(
         coreProductState.query,
-        coreProductState.scopes + SearchScope.Local,
-        activeProfileId,
-    ).filterNot { it.localUserTrackRefId in vaultTrackIds }
+        automaticSearchScopes(activeProfileId),
+        binding.searchOwnerContextKey(),
+        coreProductState.searchKind,
+    )
+    val localSearchTrackIds = visibleSearchResults.map(LocalTrackSearchResult::localUserTrackRefId).toSet()
+    val visibleVaultSearchResults = vaultSearchResultStore.visibleFor(
+        coreProductState.query,
+        automaticSearchScopes(activeProfileId),
+        binding.searchOwnerContextKey(),
+        coreProductState.searchKind,
+    ).filterNot { it.localUserTrackRefId in localSearchTrackIds }
     val untitledTrack = stringResource(R.string.player_nothing_playing)
     val queueControls = buildOfflineQueueControls(
         scope, { queueProjection }, queueEditorRepository, playbackOwner,
@@ -1321,12 +1390,15 @@ private fun OfflineLibraryScreen(
         downloads = downloads,
     )
     fun openHomeProblems() {
-        coreProductState.librarySection = when {
-            homeProblemCounts.reviewRequired > 0 -> LibrarySection.Review
-            homeProblemCounts.permissionRevoked > 0 -> LibrarySection.Unavailable
-            else -> LibrarySection.Offline
+        if (homeProblemCounts.reviewRequired > 0) {
+            coreProductState.librarySection = LibrarySection.Review
+            navigation.navigate(UiDestination.Library)
+        } else if (homeProblemCounts.permissionRevoked > 0) {
+            coreProductState.librarySection = LibrarySection.Tracks
+            navigation.navigate(UiDestination.Library)
+        } else {
+            navigation.navigate(UiDestination.Downloads)
         }
-        navigation.navigate(UiDestination.Library)
     }
     val totalHomeProblems = homeProblemCounts.permissionRevoked +
         homeProblemCounts.reviewRequired + homeProblemCounts.failedDownloads
@@ -1354,6 +1426,7 @@ private fun OfflineLibraryScreen(
         problems = homeProblems,
         recommendationError = homeError,
         untitledTrack = untitledTrack,
+        unknownArtist = stringResource(R.string.library_unknown_artist),
     )
     val libraryScreenState = buildLibraryScreenUiState(
         localMode = binding == null,
@@ -1389,6 +1462,7 @@ private fun OfflineLibraryScreen(
     val presentedDetailLoading = coreProductState.selectedDetail != null &&
         (coreDetailState.loading || !detailRequestIsCurrent) && !presentedDetailError
     val searchScreenState = SearchScreenUiState(
+        kind = coreProductState.searchKind,
         query = coreProductState.query,
         results = visibleSearchResults.map { result ->
             CoreTrackUiItem(
@@ -1438,6 +1512,7 @@ private fun OfflineLibraryScreen(
         openOffline = ::openOfflineLibrary,
         openProblems = ::openHomeProblems,
         changeQuery = searchCommandActions.changeQuery,
+        changeSearchKind = searchCommandActions.changeKind,
         submitSearch = searchCommandActions.submit,
         playSearchResult = coreCommandActions.startSearchTrack,
         playVaultSearchResult = coreCommandActions.startVaultSearchTrack,
@@ -1447,7 +1522,10 @@ private fun OfflineLibraryScreen(
         selectTrack = { selectedTrackRefId = it },
         removeOrRestore = coreCommandActions.updateLibraryMembership,
         likeTrack = coreCommandActions.likeTrack,
-        changeLibrarySection = { coreProductState.librarySection = it },
+        changeLibrarySection = { section ->
+            if (section == LibrarySection.Offline) navigation.navigate(UiDestination.Downloads)
+            else coreProductState.librarySection = section
+        },
         changeLibrarySort = { coreProductState.librarySort = it },
         changeLibraryFilter = { coreProductState.libraryFilter = it },
         openCollection = ::openCoreCollection,
@@ -1604,6 +1682,32 @@ private fun OfflineLibraryScreen(
     )
     val socialActions = SocialActions(
         refresh = { socialRuntime?.load() },
+        submitPublicId = submit@{ value ->
+            val normalized = app.autplay.application.social.normalizeSocialPublicId(value) ?: return@submit
+            val runtime = socialRuntime
+            if (runtime?.state?.value?.let {
+                    it.publicIdLoading || it.publicIdRegistration is app.autplay.application.social.PublicIdRegistrationState.Confirmed
+                } == true
+            ) return@submit
+            val activeBinding = binding
+            scope.launch {
+                runCatching {
+                    settingsStore.mutate { latest ->
+                        check(latest.activeServerProfileId == activeBinding?.serverProfileId &&
+                            latest.activeUserId == activeBinding?.userId && latest.deviceId == activeBinding?.deviceId
+                        ) { "PUBLIC_ID_CONTEXT_CHANGED" }
+                        latest.copy(pendingPublicId = normalized)
+                    }
+                    runtime?.registerPublicId(normalized)
+                }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    stableError = "PUBLIC_ID_SAVE_UNAVAILABLE"
+                }
+            }
+        },
+        lookupPublicId = { socialRuntime?.lookupPublicId(it) },
+        clearPublicIdLookup = { socialRuntime?.clearPublicIdLookup() },
+        sendFoundFriendRequest = { socialRuntime?.sendFoundFriendRequest() },
         createContactCard = { socialRuntime?.loadContactCard() },
         shareContactCard = { card: ContactCard ->
             val share = Intent(Intent.ACTION_SEND).apply {
@@ -1704,7 +1808,7 @@ private fun OfflineLibraryScreen(
                 app.autplay.ui.profilepairing.AdmissionUiState(admissionState)
             } else null,
         ),
-        ownerStatistics = ownerStatistics,
+        ownerStatisticsState = ownerStatisticsState,
         social = socialState,
         socialAvailable = socialRuntime != null,
         stableError = stableError,
@@ -1740,6 +1844,9 @@ private fun OfflineLibraryScreen(
         scanPublicAccountInvitation = {
             publicInvitationQrScanner.launch(Intent(context, EnrollmentQrScannerActivity::class.java))
         },
+        scanServerQr = {
+            serverQrScanner.launch(Intent(context, EnrollmentQrScannerActivity::class.java))
+        },
         scanEnrollmentInvitation = {
             enrollmentInvitationQrScanner.launch(Intent(context, EnrollmentQrScannerActivity::class.java))
         },
@@ -1763,6 +1870,7 @@ private fun OfflineLibraryScreen(
         exportSettings = { activityLaunchers.exportSettings.launch("autplay-settings.json") },
         importSettings = { activityLaunchers.importSettings.launch(arrayOf("application/json", "text/json")) },
         refreshDeveloperMode = { scope.launch { refreshDeveloperModeApproval() } },
+        refreshOwnerStatistics = statisticsOwner::refresh,
         social = socialActions,
         manualPlaylists = manualPlaylistActions,
         openPlaylist = { openCoreDetail(DetailTarget(DetailKind.Playlist, it)) },

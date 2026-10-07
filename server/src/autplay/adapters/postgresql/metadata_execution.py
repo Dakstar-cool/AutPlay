@@ -262,7 +262,7 @@ class PostgresMetadataExecutionRepository:
             gate = session.get(MetadataProviderGateRow, 1, with_for_update=True)
             if gate is not None and gate.execution_id == ticket.execution_id:
                 gate.execution_id = gate.request_id = None
-                gate.next_request_at = now + timedelta(milliseconds=1100)
+                gate.next_request_at = max(gate.next_request_at, now + timedelta(milliseconds=1100))
             session.flush()
             return _status(row)
 
@@ -274,7 +274,7 @@ class PostgresMetadataExecutionRepository:
             )
             if gate is None:
                 raise ResourceAdmissionError("metadata_provider_gate_unavailable")
-            if gate.execution_id is not None:
+            if gate.request_id is not None:
                 return (gate.execution_id, gate.request_id) == (
                     running.ticket.execution_id,
                     request_id,
@@ -296,7 +296,9 @@ class PostgresMetadataExecutionRepository:
             ):
                 raise ResourceAdmissionError("metadata_provider_gate_stale")
             gate.execution_id = gate.request_id = None
-            gate.next_request_at = _now(session) + timedelta(milliseconds=1100)
+            gate.next_request_at = max(
+                gate.next_request_at, _now(session) + timedelta(milliseconds=1100)
+            )
 
     def defer(self, ticket: MetadataExecutionTicket) -> None:
         deferred = False

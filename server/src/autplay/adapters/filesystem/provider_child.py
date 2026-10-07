@@ -6,8 +6,10 @@ acknowledgement. Errors never delete partial provider files or claim tree exit.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import threading
@@ -19,9 +21,14 @@ from typing import BinaryIO, Literal, cast
 from uuid import UUID, uuid4
 
 from autplay.adapters.child_process import provider_child_launch
+from autplay.domain.track_metadata import (
+    MAX_SOURCE_METADATA_BYTES,
+    sanitize_source_metadata,
+    source_metadata_document,
+)
 from autplay.domain.vault import VaultError, VaultLimits, VerifiedStagedFile
 
-from .provider_media import MEDIA_ERROR_EXIT_CODES
+from .provider_media import MEDIA_ERROR_EXIT_CODES, PROVIDER_RESULT_BYTES, SOURCE_METADATA_FILE
 from .provider_staging import FilesystemProviderStorage
 from .vault_child import (
     MAX_COMMAND_BYTES,
@@ -35,6 +42,46 @@ from .vault_child import (
 PROVIDER_READ_BYTES = 32 * 1024
 PROVIDER_COMMAND_SECONDS = 240
 type ProviderDownload = Callable[[str, Path, int], Path]
+
+
+def read_source_metadata(workspace: Path, candidate_id: str) -> dict[str, object] | None:
+    """Bound optional extractor evidence before IPC; never follow a link."""
+    try:
+        path = workspace / SOURCE_METADATA_FILE
+        status = path.lstat()
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or path.is_symlink()
+            or status.st_nlink != 1
+            or not 1 <= status.st_size <= MAX_SOURCE_METADATA_BYTES
+        ):
+            return None
+        descriptor = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        )
+        with os.fdopen(descriptor, "rb") as source:
+            opened = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != (status.st_dev, status.st_ino)
+            ):
+                return None
+            payload = source.read(MAX_SOURCE_METADATA_BYTES + 1)
+        if len(payload) > MAX_SOURCE_METADATA_BYTES:
+            return None
+        evidence = sanitize_source_metadata(json.loads(payload))
+        if evidence.provider != "YOUTUBE" or evidence.source_id != candidate_id:
+            return None
+        return source_metadata_document(evidence)
+    except ValueError, TypeError, OverflowError, RecursionError, OSError:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCommandResult:
+    verified: VerifiedStagedFile
+    source_metadata: dict[str, object] | None
 
 
 class ProviderChildError(ValueError):
@@ -178,11 +225,12 @@ def download_youtube(candidate: str, workspace: Path, maximum: int) -> Path:
 
 def execute_command(
     command: ProviderCommand, *, download: ProviderDownload = download_youtube
-) -> VerifiedStagedFile:
+) -> ProviderCommandResult:
     storage = FilesystemProviderStorage(command.root)
     workspace = storage.create_workspace(command.execution_id)
     source = download(command.candidate_id, workspace, command.limits.max_object_bytes)
-    return storage.copy_verified_source(command.execution_id, source, limits=command.limits)
+    verified = storage.copy_verified_source(command.execution_id, source, limits=command.limits)
+    return ProviderCommandResult(verified, read_source_metadata(workspace, command.candidate_id))
 
 
 def main(*, download: ProviderDownload = download_youtube) -> int:
@@ -202,15 +250,16 @@ def main(*, download: ProviderDownload = download_youtube) -> int:
         command = ProviderCommand.parse(decode_document(payload))
         threading.Thread(target=watchdog, name="provider-command-deadline", daemon=True).start()
         result = execute_command(command, download=download)
+        document: dict[str, object] = {
+            "byte_size": result.verified.byte_size,
+            "sha256": result.verified.sha256.hex,
+        }
+        if result.source_metadata is not None:
+            document["source_metadata"] = result.source_metadata
         write_frame(
             destination,
             b"R",
-            encode_document(
-                {
-                    "byte_size": result.byte_size,
-                    "sha256": result.sha256.hex,
-                }
-            ),
+            encode_document(document, maximum=PROVIDER_RESULT_BYTES),
         )
         return 0
     except (VaultError, ValueError, TypeError, KeyError, OverflowError, OSError) as error:

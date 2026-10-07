@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from yandex_music import Artist, Track
+from yandex_music import Album, Artist, Track, TrackPosition
 
 from local_music_acquisition.models import PlaylistItem, ProviderFailure, ProviderMiss
 from local_music_acquisition.providers import yandex_provider
@@ -27,6 +27,12 @@ def test_yandex_download_uses_pinned_library_and_publishes_exact_match(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     track = _track()
+    # SDK annotations do not guarantee that optional upstream leaves are well formed.
+    track.albums = [Album(id=22, title="Native Album", year=2020)]
+    track.albums[0].release_date = 123
+    track.albums[0].cover_uri = {"malformed": "optional"}
+    track.albums[0].artists = None
+    track.albums[0].track_position = {}
     search = SimpleNamespace(tracks=SimpleNamespace(results=[track]))
     client = SimpleNamespace(search=lambda *_args, **_kwargs: search)
     payload = b"ID3" + b"x" * 2048
@@ -53,6 +59,9 @@ def test_yandex_download_uses_pinned_library_and_publishes_exact_match(
     destination = tmp_path / "Artist - Title.mp3"
     assert destination.read_bytes() == payload
     assert artifact.artifact_ref == ("sha256:" + hashlib.sha256(payload).hexdigest()[:12])
+    assert artifact.source_metadata["fields"]["album"] == "Native Album"
+    assert artifact.source_metadata["fields"]["release_date"] == "2020"
+    assert artifact.source_metadata["external_ids"]["native_album_id"] == "22"
 
 
 @pytest.mark.parametrize(
@@ -87,6 +96,43 @@ def test_yandex_multiple_exact_versions_are_left_ambiguous(tmp_path: Path) -> No
 
     with pytest.raises(ProviderMiss, match=r"yandex\.ambiguous_match"):
         _provider(client).acquire(PlaylistItem(1, "Artist", "Title"), tmp_path)
+
+
+def test_native_album_membership_version_positions_and_cover_are_preserved():
+    track = _track(title="Alive", version="Live")
+    track.albums = [
+        Album(
+            id=22,
+            title="Album",
+            year=2020,
+            artists=[Artist("9", name="Album Artist")],
+            cover_uri="avatars.yandex.net/get-music-content/fixture/%%",
+            track_position=TrackPosition(volume=2, index=3),
+        )
+    ]
+    result = yandex_provider._native_metadata(track, None)
+    assert result is not None
+    assert result["fields"] == {
+        "title": "Alive (Live)",
+        "artist": "Artist",
+        "album": "Album",
+        "album_artist": "Album Artist",
+        "release_date": "2020",
+        "track_number": 3,
+        "disc_number": 2,
+    }
+    assert result["external_ids"] == {"native_album_id": "22", "native_artist_id": "1"}
+    assert result["artwork"][0]["kind"] == "album"
+
+
+def test_unresolved_multiple_albums_never_choose_the_first_edition():
+    track = _track(version="Remix")
+    track.albums = [Album(id=22, title="Album", year=2020), Album(id=23, title="Album", year=2021)]
+    result = yandex_provider._native_metadata(track, "Album")
+    assert result is not None
+    assert result["fields"] == {"title": "Title (Remix)", "artist": "Artist"}
+    assert result["external_ids"] == {"native_artist_id": "1"}
+    assert result["artwork"] == []
 
 
 class _StreamingResponse:

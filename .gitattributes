@@ -13,3 +13,6 @@ gradlew.bat text eol=crlf
 *.toml text eol=lf
 *.yaml text eol=lf
 *.sql text eol=lf
+
+# Preserve the upstream bytes/hash recorded in static/THIRD_PARTY.txt.
+server/src/autplay/web/static/qrcodegen-v1.js whitespace=-blank-at-eol

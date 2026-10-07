@@ -1,9 +1,5 @@
 package app.autplay.ui.profilepairing
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.os.PersistableBundle
 import app.autplay.R
 import app.autplay.application.profilepairing.AdmissionState
 import androidx.compose.foundation.layout.Arrangement
@@ -12,9 +8,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 
 /** Presentation-only S1B copy. It never renders the poll bearer and does not make it saveable. */
 internal data class AdmissionUiState(val admission: AdmissionState = AdmissionState.RequestReady)
@@ -25,26 +26,26 @@ internal data class AdmissionActions(
 
 @Composable
 internal fun AdmissionPanel(state: AdmissionUiState, actions: AdmissionActions) {
-    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val poll = rememberUpdatedState(actions.poll)
+    LaunchedEffect(state.admission, lifecycleOwner) {
+        if (state.admission is AdmissionState.Pending) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                repeat(300) {
+                    poll.value()
+                    delay(3_000L)
+                }
+            }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (val value = state.admission) {
-            AdmissionState.RequestReady -> { Text("Request approval from your personal server"); Button(onClick = actions.request) { Text("Request approval") } }
+            AdmissionState.RequestReady -> { Text(stringResource(R.string.admission_request_intro)); Button(onClick = actions.request) { Text(stringResource(R.string.admission_request_approval)) } }
             is AdmissionState.AwaitingComparison -> {
-                val formattedCode = value.sas.chunked(4).joinToString("-")
-                val locatorLabel = stringResource(R.string.admission_review_locator_clipboard_label)
-                val codeLabel = stringResource(R.string.admission_comparison_code_clipboard_label)
-                Text("Open review locator: ${value.reviewLocator}")
-                OutlinedButton(
-                    onClick = { copySensitiveText(context, locatorLabel, value.reviewLocator) },
-                ) { Text(stringResource(R.string.admission_copy_review_locator)) }
-                Text("Compare this code in the browser: $formattedCode")
-                OutlinedButton(
-                    onClick = { copySensitiveText(context, codeLabel, formattedCode) },
-                ) { Text(stringResource(R.string.admission_copy_comparison_code)) }
-                Button(onClick = actions.confirmComparison) { Text("I compared the code") }
-                OutlinedButton(onClick = actions.cancel) { Text("Cancel") }
+                LaunchedEffect(value.checkpoint) { actions.confirmComparison() }
+                Text(stringResource(R.string.admission_waiting_for_admin))
             }
-            is AdmissionState.Pending -> { Text("Waiting for approval. Local library and playback remain available."); Button(onClick = actions.poll) { Text("Check status") }; OutlinedButton(onClick = actions.cancel) { Text("Cancel") } }
+            is AdmissionState.Pending -> { Text(stringResource(R.string.admission_waiting_for_admin)); Button(onClick = actions.poll) { Text(stringResource(R.string.admission_check_status)) }; OutlinedButton(onClick = actions.cancel) { Text(stringResource(R.string.admission_cancel)) } }
             is AdmissionState.Approved -> { Text("Approved for ${value.account.label} (${value.account.userId.value}). Confirm this account before connecting."); Button(onClick = actions.confirmAccount) { Text("Confirm account") }; OutlinedButton(onClick = actions.cancel) { Text("Cancel") } }
             is AdmissionState.Exchanging -> Text("Connecting approved device…")
             AdmissionState.Connected -> Text("Connected")
@@ -59,13 +60,3 @@ internal fun AdmissionPanel(state: AdmissionUiState, actions: AdmissionActions) 
 }
 
 @Composable private fun Terminal(copy: String, actions: AdmissionActions) { Text(copy); Button(onClick = actions.retry) { Text("Try again") } }
-
-private const val SENSITIVE_CLIPBOARD_EXTRA = "android.content.extra.IS_SENSITIVE"
-
-private fun copySensitiveText(context: Context, label: String, value: String) {
-    val clip = ClipData.newPlainText(label, value)
-    clip.description.extras = PersistableBundle().apply {
-        putBoolean(SENSITIVE_CLIPBOARD_EXTRA, true)
-    }
-    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
-}

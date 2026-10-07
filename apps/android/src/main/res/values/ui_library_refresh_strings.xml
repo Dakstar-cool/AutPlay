@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_library_refresh_track_actions">More</string>
+    <string name="ui_library_refresh_vault_unavailable">Vault search is unavailable.</string>
+    <plurals name="ui_library_refresh_search_count">
+        <item quantity="one">%d result</item>
+        <item quantity="other">%d results</item>
+    </plurals>
+    <plurals name="ui_library_refresh_collection_track_count">
+        <item quantity="one">%d track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
+</resources>

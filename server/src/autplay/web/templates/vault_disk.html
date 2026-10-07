@@ -1,0 +1,8 @@
+<section class="vault-disk" aria-label="{{ t('vault_disk_title') }}" data-vault-disk>
+  {% if disk.available %}
+  <div class="vault-disk-heading"><span>{{ t('vault_disk_title') }}</span><strong>{{ disk.percent_text }}</strong></div>
+  <progress max="100" value="{{ disk.percent }}" aria-label="{{ t('vault_disk_title') }}">{{ disk.percent_text }}</progress>
+  <p>{{ t('vault_disk_used') }} {{ disk.used }} / {{ disk.total }} · {{ t('vault_disk_free') }} {{ disk.free }}</p>
+  <p class="vault-disk-note">{{ t('vault_disk_note') }}</p>
+  {% else %}<p class="vault-disk-note">{{ t('vault_disk_unavailable') }}</p>{% endif %}
+</section>

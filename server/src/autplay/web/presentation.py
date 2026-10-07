@@ -21,6 +21,7 @@ from autplay.domain.admin_views import (
 from autplay.domain.web_admin import WebActor
 
 from .renderer import format_bytes, format_count, format_datetime
+from .vault import disk_context
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,9 +49,9 @@ _NAVIGATION: Final = (
     ("/admin/jobs", "nav_jobs", "jobs"),
     ("/admin/review", "nav_review", "review"),
     ("/admin/recovery", "nav_recovery", "recovery"),
-    ("/admin/diagnostics", "nav_diagnostics", "diagnostics"),
     ("/admin/audit", "nav_audit", "audit"),
     ("/admin/discovery", "nav_discovery", "discovery"),
+    ("/admin/acquisition", "nav_acquisition", "acquisition"),
     (
         "/admin/discovery/automation",
         "nav_discovery_automation",
@@ -72,8 +73,8 @@ _SECTIONS: Final = (
             "passkeys",
         ),
     ),
-    ("music", "nav_music", ("jobs", "review", "discovery", "discovery-automation")),
-    ("server", "nav_server", ("quotas", "vault", "diagnostics", "recovery", "audit")),
+    ("music", "nav_music", ("jobs", "review", "discovery", "discovery-automation", "acquisition")),
+    ("server", "nav_server", ("quotas", "vault", "recovery", "audit")),
 )
 
 
@@ -81,6 +82,7 @@ def navigation(
     surface: str,
     *,
     discovery_enabled: bool = False,
+    acquisition_enabled: bool = False,
     discovery_automation_enabled: bool = False,
     passkeys_enabled: bool = False,
     quotas_enabled: bool = False,
@@ -90,6 +92,7 @@ def navigation(
         candidate: NavigationItem(href, label, current=surface == candidate)
         for href, label, candidate in _NAVIGATION
         if (discovery_enabled or candidate != "discovery")
+        and (acquisition_enabled or candidate != "acquisition")
         and (discovery_automation_enabled or candidate != "discovery-automation")
         and (passkeys_enabled or candidate != "passkeys")
         and (quotas_enabled or candidate != "quotas")
@@ -120,9 +123,7 @@ def section_context(surface: str, items: tuple[NavigationItem, ...]) -> dict[str
 def dashboard_context(
     dashboard: AdminDashboard, actor: WebActor, *, locale: str
 ) -> dict[str, object]:
-    del locale
-
-    def health(label: str, status: str, detail: str) -> dict[str, str]:
+    def health(label: str, status: str, detail: str) -> dict[str, object]:
         normalized = status.upper()
         return {
             "label": label,
@@ -137,7 +138,71 @@ def dashboard_context(
                 "UNAVAILABLE": "bad",
             }.get(normalized, "warn"),
             "detail": detail,
+            "metrics": (),
+            "observed_at": None,
+            "link": None,
+            "valid_for": None,
+            "disk": None,
         }
+
+    worker = health("component_worker", dashboard.worker_status, "component_worker_detail")
+    if dashboard.worker is not None:
+        value = dashboard.worker
+        worker["observed_at"] = format_datetime(value.observed_at, locale)
+        if value.fresh:
+            worker["valid_for"] = value.fresh_for_seconds
+            worker["status"] = "worker_busy" if value.busy else "worker_idle"
+            worker["detail"] = "worker_load_detail"
+            cpu = "—" if value.cpu_percent is None else f"{value.cpu_percent:.1f}%"
+            if locale == "ru":
+                cpu = cpu.replace(".", ",")
+            memory = format_bytes(value.memory_bytes, locale)
+            if value.memory_limit_bytes is not None:
+                memory += " / " + format_bytes(value.memory_limit_bytes, locale)
+            worker["metrics"] = (
+                {"label": "worker_cpu", "value": cpu},
+                {"label": "worker_memory", "value": memory},
+                {"label": "worker_active_jobs", "value": format_count(value.active_jobs, locale)},
+                {"label": "worker_queued_jobs", "value": format_count(value.queued_jobs, locale)},
+            )
+        else:
+            worker["status"] = "worker_no_signal"
+            worker["detail"] = "worker_stale_detail"
+    vault = health("component_vault", dashboard.vault_status, "component_vault_detail")
+    vault["link"] = f"/admin/vault?lang={locale}"
+    vault["disk"] = disk_context(dashboard.vault.disk if dashboard.vault else None, locale=locale)
+    if dashboard.vault is not None:
+        storage = dashboard.vault
+        problems = (
+            ("vault_missing_replicas", storage.missing_replicas),
+            ("vault_corrupt_replicas", storage.corrupt_replicas),
+            ("vault_quarantined_replicas", storage.quarantined_replicas),
+            ("vault_quarantined", storage.quarantined_objects),
+            ("uploads_quarantined", storage.uploads_quarantined),
+            ("vault_uploads_failed", storage.uploads_failed),
+        )
+        details = tuple(
+            {"label": label, "value": format_count(count, locale)}
+            for label, count in problems
+            if count
+        )
+        if storage.unhealthy_replicas and not any(count for _, count in problems[:3]):
+            details = (
+                {
+                    "label": "vault_unhealthy",
+                    "value": format_count(storage.unhealthy_replicas, locale),
+                },
+                *details,
+            )
+        vault["metrics"] = details
+        integrity_issue = storage.unhealthy_replicas or storage.quarantined_objects
+        vault["detail"] = (
+            "vault_attention_detail"
+            if integrity_issue
+            else "vault_upload_attention_detail"
+            if details
+            else "vault_healthy_detail"
+        )
 
     return {
         "server_label": dashboard.label,
@@ -154,8 +219,8 @@ def dashboard_context(
                 "HEALTHY" if dashboard.postgresql_ready else "UNAVAILABLE",
                 "component_postgresql_detail",
             ),
-            health("component_worker", dashboard.worker_status, "component_worker_detail"),
-            health("component_vault", dashboard.vault_status, "component_vault_detail"),
+            worker,
+            vault,
         ),
         "facts": (
             {"label": "version", "value": dashboard.build_version},
@@ -251,13 +316,17 @@ def status_context(value: object, surface: str, *, locale: str) -> dict[str, obj
             "facts": (),
         }
     if isinstance(value, AdminVaultStatus):
+        degraded = bool(
+            value.unhealthy_replicas
+            or value.quarantined_objects
+            or value.uploads_quarantined
+            or value.uploads_failed
+        )
         return {
             "page_title_key": "vault_title",
             "page_intro_key": "vault_intro",
-            "tone": "healthy" if value.unhealthy_replicas == 0 else "degraded",
-            "status_key": (
-                "status_healthy" if value.unhealthy_replicas == 0 else "status_degraded"
-            ),
+            "tone": "degraded" if degraded else "healthy",
+            "status_key": ("status_degraded" if degraded else "status_healthy"),
             "unavailable": False,
             "facts": (
                 {"label": "vault_objects", "value": value.object_count},
@@ -265,6 +334,9 @@ def status_context(value: object, surface: str, *, locale: str) -> dict[str, obj
                 {"label": "vault_quarantined", "value": value.quarantined_objects},
                 {"label": "vault_replicas", "value": value.available_replicas},
                 {"label": "vault_unhealthy", "value": value.unhealthy_replicas},
+                {"label": "vault_missing_replicas", "value": value.missing_replicas},
+                {"label": "vault_corrupt_replicas", "value": value.corrupt_replicas},
+                {"label": "vault_quarantined_replicas", "value": value.quarantined_replicas},
                 {"label": "uploads_open", "value": value.uploads_open},
                 {"label": "uploads_quarantined", "value": value.uploads_quarantined},
             ),
@@ -291,12 +363,6 @@ def _columns(surface: str) -> tuple[dict[str, str], ...]:
         "imports": (("adapter", "type"), ("mode", "details"), ("created", "created")),
         "review": (("state", "status"),),
         "audit": (
-            ("time", "time"),
-            ("action", "action"),
-            ("target", "target"),
-            ("reason", "reason"),
-        ),
-        "diagnostics": (
             ("time", "time"),
             ("action", "action"),
             ("target", "target"),

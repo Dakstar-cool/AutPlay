@@ -6,10 +6,16 @@ import app.autplay.data.security.RefreshingSessionCredentials
 import app.autplay.data.security.SessionAccess
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.data.network.withAutPlayRedirectPolicy
+import app.autplay.data.network.readCancellable
 import app.autplay.domain.ServerProfileId
 import java.nio.charset.StandardCharsets
+import java.time.Duration
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -31,8 +37,35 @@ class OkHttpSocialPort(
     client: OkHttpClient = OkHttpClient(),
     private val m5Rotation: M5SessionRotationClient? = null,
 ) : SocialPort {
-    private val client = client.withAutPlayRedirectPolicy()
-    private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl.trimEnd('/'), credentials, client, m5Rotation = m5Rotation)
+    override suspend fun ownPublicId(profileId: ServerProfileId) = request(
+        profileId, "GET", "/social/public-id", null, MAX_SETTINGS_RESPONSE_CHARS,
+    ) { root ->
+        when (root.requiredString("status")) {
+            "unregistered" -> { require(root["public_id"] == JsonNull); null }
+            "confirmed" -> root.requiredString("public_id").also(::requireCanonicalPublicId)
+            else -> error("unsupported public ID state")
+        }
+    }
+    override suspend fun registerPublicId(
+        profileId: ServerProfileId,
+        operationId: String,
+        publicId: String,
+    ): SocialResult<PublicIdRegistrationReceipt> {
+        validateUuid(operationId)
+        requireCanonicalPublicId(publicId)
+        return request(profileId, "PUT", "/social/public-id", buildJsonObject {
+            put("operation_id", operationId); put("public_id", publicId)
+        }, MAX_SETTINGS_RESPONSE_CHARS) { root ->
+            require(root.requiredString("status") == "confirmed")
+            PublicIdRegistrationReceipt(root.requiredString("public_id")).also { require(it.publicId == publicId) }
+        }
+    }
+    override suspend fun lookupPublicId(profileId: ServerProfileId, publicId: String): SocialResult<ContactCard> {
+        requireCanonicalPublicId(publicId)
+        return request(profileId, "GET", "/social/accounts/by-public-id/$publicId", null, MAX_SETTINGS_RESPONSE_CHARS, ::card)
+    }
+    private val client = client.newBuilder().cache(null).callTimeout(Duration.ofSeconds(30)).build().withAutPlayRedirectPolicy()
+    private val sessionCredentials = RefreshingSessionCredentials(apiBaseUrl.trimEnd('/'), credentials, this.client, m5Rotation = m5Rotation)
 
     override suspend fun contactCard(profileId: ServerProfileId) = request(profileId, "GET", "/social/contact-card", null) { card(it) }
     override suspend fun snapshot(profileId: ServerProfileId) = request(profileId, "GET", "/social/snapshot", null) { snapshot(it) }
@@ -90,19 +123,20 @@ class OkHttpSocialPort(
         body: JsonObject?,
         maxResponseChars: Int = MAX_RESPONSE_CHARS,
         decode: (JsonObject) -> T,
-    ): SocialResult<T> = try {
+    ): SocialResult<T> = withContext(Dispatchers.IO) { try {
         var access = sessionCredentials.access(profileId)
         try {
             var result = execute(method, path, body, access, maxResponseChars)
             if (result.first == 401) { val generation = access.generation; access.close(); access = sessionCredentials.refreshAfterRejection(profileId, generation); result = execute(method, path, body, access, maxResponseChars) }
             val root = result.second
-            if (result.first !in 200..299) return SocialResult.Failure(errorCode(root))
+            if (result.first !in 200..299) return@withContext SocialResult.Failure(errorCode(root))
             SocialResult.Success(decode(root))
         } finally { access.close() }
     } catch (_: SessionRequiredException) { SocialResult.Failure("auth_attention_required") }
-    catch (_: Exception) { SocialResult.Failure("server_unavailable") }
+    catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { SocialResult.Failure("server_unavailable") } }
 
-    private fun execute(
+    private suspend fun execute(
         method: String,
         path: String,
         value: JsonObject?,
@@ -110,15 +144,17 @@ class OkHttpSocialPort(
         maxResponseChars: Int,
     ): Pair<Int, JsonObject> {
         val url = apiBaseUrl.trimEnd('/') + path
-        val builder = Request.Builder().url(url).header("Authorization", "Bearer " + access.token.toString(StandardCharsets.UTF_8)).header("Accept", "application/json")
+        val builder = Request.Builder().url(url).header("Authorization", "Bearer " + access.token.toString(StandardCharsets.UTF_8)).header("Accept", "application/json").header("Cache-Control", "no-store").header("Pragma", "no-cache")
         when (method) { "GET" -> builder.get(); "PUT" -> builder.put(requireNotNull(value).toString().toRequestBody(JSON)); else -> builder.post(requireNotNull(value).toString().toRequestBody(JSON)) }
-        return client.newCall(builder.build()).execute().use { response ->
-            val raw = response.body.string(); require(raw.length <= maxResponseChars)
+        return client.newCall(builder.build()).readCancellable { response ->
+            val source = response.body.source()
+            require(!source.request(maxResponseChars.toLong() + 1))
+            val raw = source.readUtf8()
             response.code to (if (raw.isBlank()) buildJsonObject {} else Json.parseToJsonElement(raw).jsonObject)
         }
     }
 
-    private fun card(root: JsonObject) = ContactCard(root.requiredString("server_instance_id"), root.requiredString("account_id"), root.requiredString("display_name_hint").take(120), root.requiredString("issued_at"), root.requiredString("expires_at"), root.requiredString("signature_b64url"))
+    private fun card(root: JsonObject) = ContactCard(root.requiredString("server_instance_id"), root.requiredString("account_id"), root.requiredString("display_name_hint"), root.requiredString("issued_at"), root.requiredString("expires_at"), root.requiredString("signature_b64url"))
     private fun snapshot(root: JsonObject): SocialSnapshot {
         val friends = ArrayList<FriendSummary>()
         fun people(name: String, status: FriendshipStatus) { root[name]?.jsonArray?.take(500)?.forEach { entry -> entry.jsonObject.let { friends += FriendSummary(it.requiredString("account_id"), it["display_name_hint"]?.jsonPrimitive?.contentOrNull?.take(80), status, it["presence"]?.jsonPrimitive?.contentOrNull?.let(AggregatePresence::valueOf) ?: AggregatePresence.OFFLINE) } } }

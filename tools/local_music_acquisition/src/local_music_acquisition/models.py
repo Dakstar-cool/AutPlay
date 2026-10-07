@@ -36,6 +36,7 @@ class AcquiredArtifact:
     artifact_ref: str
     identity_version: str | None = None
     expected_duration_seconds: float | None = None
+    source_metadata: dict[str, object] | None = None
 
 
 class ProviderMiss(RuntimeError):

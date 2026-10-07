@@ -1,8 +1,13 @@
 # AutPlay Face Product Concept v1
 
+> **Retired by explicit user decision, 2026-10-07:** AutPlay Face, including the local
+> PCM-reactive renderer and Semantic Face, is cancelled. This concept is historical design
+> evidence, not current product scope, an implementation instruction or a release gate.
+> Current authority: `docs/operations/PRODUCTION_READINESS_PLAN.md` and the revised R15 plan.
+
 | Поле | Значение |
 | --- | --- |
-| Статус | Принятое продуктовое направление; реализация не начата |
+| Статус | Отменено решением пользователя 2026-10-07; историческая концепция |
 | Версия | 1.0 |
 | Дата | 2026-08-30 |
 | Область | Визуальная идентичность Now Playing, музыкальная семантика, состояния приложения и границы MVP |

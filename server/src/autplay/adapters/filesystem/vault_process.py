@@ -13,6 +13,7 @@ from uuid import UUID
 
 from autplay.adapters.child_process import vault_child_launch
 from autplay.adapters.process_tree import ProcessTree
+from autplay.domain.catalog_execution import CatalogExecutionTicket
 from autplay.domain.ingest_cleanup import IngestCleanupTicket
 from autplay.domain.ingest_execution import IngestExecutionStatus, IngestExecutionTicket
 from autplay.domain.metadata_execution import MetadataExecutionTicket
@@ -34,6 +35,7 @@ from autplay.domain.resource_execution import (
 from autplay.domain.training_execution import TrainingExecutionTicket
 from autplay.runtime.resource_io_deadline import ResourceIoDeadline
 
+from .catalog_protocol import read_catalog_packet
 from .ingest_protocol import MAX_INGEST_REPLY
 from .inventory_protocol import MAX_INVENTORY_REPLY_BYTES
 from .metadata_protocol import read_packet, write_packet
@@ -55,6 +57,7 @@ class RetainedVaultProcess[
     | IngestExecutionTicket
     | IngestCleanupTicket
     | MetadataExecutionTicket
+    | CatalogExecutionTicket
     | TrainingExecutionTicket = ExecutionTicket
 ]:
     """One single-threaded pipe owner, with concurrent stop/poll from the supervisor.
@@ -77,6 +80,7 @@ class RetainedVaultProcess[
             "VAULT_INGEST",
             "VAULT_INGEST_CLEANUP",
             "TRACK_METADATA",
+            "MUSIC_CATALOG",
             "SHARED_TRAINING",
         } and (tree_factory is None or launch is None):
             raise ResourceAdmissionError("resource_process_tree_unavailable")
@@ -169,6 +173,7 @@ class RetainedVaultProcess[
         IngestTicket: IngestExecutionTicket
         | IngestCleanupTicket
         | MetadataExecutionTicket
+        | CatalogExecutionTicket
         | TrainingExecutionTicket
     ](
         self,
@@ -189,6 +194,7 @@ class RetainedVaultProcess[
                         "VAULT_INGEST",
                         "VAULT_INGEST_CLEANUP",
                         "TRACK_METADATA",
+                        "MUSIC_CATALOG",
                         "SHARED_TRAINING",
                     }
                     and not self._tree_attached
@@ -235,6 +241,26 @@ class RetainedVaultProcess[
 
     def read_result(self) -> tuple[bytes, bytes]:
         return self._read()
+
+    def catalog_result(self) -> tuple[bytes, dict[str, object], bytes | None]:
+        """Read one bounded result after the sole catalog GO; no new network grant."""
+        with self._pipe_lock:
+            self.deadline.check()
+            with self._lock:
+                if (
+                    not isinstance(self.ticket, CatalogExecutionTicket)
+                    or not self._allowed
+                    or not self._go_sent
+                    or not self._tree_attached
+                ):
+                    raise ResourceAdmissionError("metadata_execution_stale")
+            _, source = self._pipes()
+            tag, envelope = read_frame(source, maximum=65536)
+            if tag not in {b"R", b"E"}:
+                raise ChildProtocolError()
+            document, payload = read_catalog_packet(source, envelope)
+            self.deadline.check()
+            return tag, document, payload
 
     def ingest_exchange(self, action: str) -> tuple[bytes, bytes]:
         """One bounded phase, owned by the ingest pipe worker after durable GO."""

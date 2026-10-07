@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from typing import Any, Final
 
 import uvicorn
@@ -18,23 +18,31 @@ from starlette.responses import Response
 from autplay.adapters.postgresql.readiness import (
     PostgreSQLReadinessProbe,
     ReadinessProbe,
+    ReadinessResult,
 )
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
+from autplay.adapters.public_music_search import MusicBrainzDiscoveryProvider
+from autplay.application.acquisition_control import AcquisitionControlService
 from autplay.application.auth import AuthService
 from autplay.application.backup_control import (
     BackupControlService,
     parse_backup_targets,
 )
+from autplay.application.catalogue_context import CatalogueContextService
 from autplay.application.discovery_automation import DiscoveryAutomationService
 from autplay.application.guest_room import GuestRoomService
 from autplay.application.internet_music import InternetMusicService
+from autplay.application.music_discovery import MusicDiscoveryService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
 from autplay.application.track_metadata import TrackMetadataService
 from autplay.application.training_consent import TrainingConsentService
 from autplay.application.web_admin import WebAdminService
+from autplay.domain.auth import Principal
+from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.entrypoints.account_deletion_http import create_account_deletion_router
 from autplay.entrypoints.account_recovery_http import create_account_recovery_router
+from autplay.entrypoints.acquisition_control_http import create_acquisition_control_router
 from autplay.entrypoints.admin_web_http import (
     AdminCommandsHttp,
     AdminViewsHttp,
@@ -43,6 +51,7 @@ from autplay.entrypoints.admin_web_http import (
 )
 from autplay.entrypoints.auth_http import bearer_authentication, create_auth_router
 from autplay.entrypoints.backup_control_http import create_backup_control_router
+from autplay.entrypoints.catalog_composition import CatalogRuntime
 from autplay.entrypoints.composition import (
     build_account_deletion_service,
     build_account_recovery_service,
@@ -82,6 +91,8 @@ from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
 from autplay.entrypoints.metadata_http import create_metadata_router
+from autplay.entrypoints.music_catalogue_context_http import create_catalogue_context_router
+from autplay.entrypoints.music_discovery_http import create_music_discovery_router
 from autplay.entrypoints.music_http import create_music_router
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.entrypoints.public_access_http import (
@@ -101,6 +112,7 @@ from autplay.entrypoints.training_consent_http import create_training_consent_ro
 from autplay.entrypoints.vault_http import AdmittedUploadService, UploadService, create_vault_router
 from autplay.entrypoints.wave_http import WaveBroadcaster, create_wave_router
 from autplay.entrypoints.web_passkey_http import create_web_passkey_router
+from autplay.ports.music_discovery import MusicDiscoveryHttp
 from autplay.runtime.http import (
     RequestRuntimeMiddleware,
     error_response,
@@ -140,11 +152,15 @@ def create_app(
     admin_view_service: AdminViewsHttp | None = None,
     admin_command_service: AdminCommandsHttp | None = None,
     backup_control_service: BackupControlService | None = None,
+    acquisition_control_service: AcquisitionControlService | None = None,
     admin_renderer: Renderer | None = None,
     discovery_service: ManualDiscoveryHttp | None = None,
     discovery_automation_service: DiscoveryAutomationService | None = None,
     resource_io: VaultIoCoordinator | None = None,
     resource_runtime: ResourceIoRuntime | None = None,
+    music_discovery_service: MusicDiscoveryService | None = None,
+    catalog_runtime: CatalogRuntime | None = None,
+    catalogue_context_service: CatalogueContextService | None = None,
 ) -> FastAPI:
     """Create one API instance without connecting to PostgreSQL at import time."""
 
@@ -179,24 +195,60 @@ def create_app(
         if resolved_settings.discovery_automation_enabled
         else None
     )
+    catalog = catalog_runtime
+    catalog_unavailable: ReadinessResult | None = None
+    music_discovery = music_discovery_service
+    catalogue_context = catalogue_context_service
+    if resolved_settings.internet_music_enabled and (
+        music_discovery is None or catalogue_context is None
+    ):
+        try:
+            catalog = catalog or CatalogRuntime(resolved_settings)
+        except ResourceAdmissionError as error:
+            catalog_unavailable = ReadinessResult(False, "music_catalog", error.code)
+        if catalog is not None:
+
+            def catalogue_http_factory(principal: Principal) -> nullcontext[MusicDiscoveryHttp]:
+                assert catalog is not None
+                return nullcontext(catalog.work.http(principal))
+
+            @contextmanager
+            def provider_factory(principal: Principal) -> Iterator[MusicBrainzDiscoveryProvider]:
+                with catalogue_http_factory(principal) as http:
+                    yield MusicBrainzDiscoveryProvider(http)
+
+            music_discovery = music_discovery or MusicDiscoveryService(provider_factory)
+            catalogue_context = catalogue_context or CatalogueContextService(
+                sessionmaker(engine, class_=Session, expire_on_commit=False), catalogue_http_factory
+            )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         from autplay.entrypoints.privacy_deletion import enforce_privacy_restore_guard
 
-        enforce_privacy_restore_guard(resolved_settings, engine)
-        if resource_runtime is not None:
-            resource_runtime.start()
-        elif resource_io is not None:
-            resource_io.start()
         try:
+            enforce_privacy_restore_guard(resolved_settings, engine)
+            if resource_runtime is not None:
+                resource_runtime.start()
+            elif resource_io is not None:
+                resource_io.start()
             yield
         finally:
-            if resource_runtime is not None:
-                application.state.unconfirmed_resource_io = await resource_runtime.shutdown()
-            elif resource_io is not None:
-                application.state.unconfirmed_resource_io = await resource_io.shutdown()
-            engine.dispose()
+            try:
+                if catalog is not None:
+                    application.state.unconfirmed_catalog_io = await run_in_threadpool(
+                        catalog.shutdown, timeout=5
+                    )
+            finally:
+                try:
+                    if resource_runtime is not None:
+                        application.state.unconfirmed_resource_io = (
+                            await resource_runtime.shutdown()
+                        )
+                    elif resource_io is not None:
+                        application.state.unconfirmed_resource_io = await resource_io.shutdown()
+                finally:
+                    engine.dispose()
 
     app = ResourceIoFastAPI(
         title="AutPlay API",
@@ -210,6 +262,9 @@ def create_app(
     app.state.metrics = runtime_metrics
     app.state.readiness_probe = probe
     app.state.auth_service = authentication
+    app.state.catalog_runtime = catalog
+    app.state.music_discovery_service = music_discovery
+    app.state.catalogue_context_service = catalogue_context
     install_error_handlers(app)
     app.add_middleware(RequestRuntimeMiddleware, metrics=runtime_metrics)
     api_router = APIRouter(prefix=API_V1_PREFIX)
@@ -227,6 +282,20 @@ def create_app(
             ),
             authenticated=bearer_authentication(authentication),
             internet_enabled=resolved_settings.internet_music_enabled,
+        )
+    )
+    api_router.include_router(
+        create_music_discovery_router(
+            music_discovery,
+            authenticated=bearer_authentication(authentication),
+            enabled=resolved_settings.internet_music_enabled,
+        )
+    )
+    api_router.include_router(
+        create_catalogue_context_router(
+            catalogue_context,
+            authenticated=bearer_authentication(authentication),
+            enabled=resolved_settings.internet_music_enabled,
         )
     )
     api_router.include_router(
@@ -408,16 +477,34 @@ def create_app(
                     ),
                 )
             )
+        acquisition = acquisition_control_service
+        if acquisition is None and resolved_settings.admin_acquisition_control_root is not None:
+            acquisition = AcquisitionControlService(
+                resolved_settings.admin_acquisition_control_root
+            )
+        if acquisition is not None:
+            app.include_router(
+                create_acquisition_control_router(
+                    web=web,
+                    acquisition=acquisition,
+                    renderer=admin_renderer or AdminTemplateRenderer(),
+                    origin=origin,
+                    discovery_enabled=discovery is not None,
+                    discovery=discovery,
+                )
+            )
         app.include_router(
             create_admin_web_router(
                 web=web,
-                views=admin_view_service or build_admin_view_service(engine),
+                views=admin_view_service
+                or build_admin_view_service(engine, vault_root=resolved_settings.vault_root),
                 commands=admin_command_service or build_admin_command_service(engine),
                 renderer=admin_renderer or AdminTemplateRenderer(),
                 origin=origin,
                 mobile_api_origin=resolved_settings.profile_api_origin,
                 source_secret=source_secret.get_secret_value().encode("utf-8"),
                 discovery_enabled=discovery is not None,
+                acquisition_enabled=acquisition is not None,
                 discovery_automation_enabled=(
                     discovery is not None and resolved_settings.discovery_automation_enabled
                 ),
@@ -436,6 +523,12 @@ def create_app(
     async def health_ready(request: Request) -> Response:
         result = await run_in_threadpool(probe.check)
         runtime_metrics.set_readiness(result.component, ready=result.ready)
+        if result.ready and resolved_settings.internet_music_enabled:
+            if catalog_unavailable is not None:
+                result = catalog_unavailable
+            elif catalog is not None:
+                result = await run_in_threadpool(catalog.check)
+            runtime_metrics.set_readiness(result.component, ready=result.ready)
         if not result.ready:
             return error_response(
                 request_id=str(request.state.request_id),

@@ -53,6 +53,7 @@ interface LibraryDao {
     @Upsert suspend fun upsertEntries(rows: List<LibraryEntryEntity>)
     @Upsert suspend fun upsertPreference(row: UserTrackPreferenceEntity)
     @Query("SELECT * FROM user_track_preference WHERE local_user_track_ref_id = :trackRefId") suspend fun preference(trackRefId: String): UserTrackPreferenceEntity?
+    @Query("SELECT * FROM user_track_preference WHERE local_user_track_ref_id = :trackRefId") fun observePreference(trackRefId: String): Flow<UserTrackPreferenceEntity?>
     @Query("SELECT * FROM user_track_preference WHERE server_profile_id = :profileId ORDER BY updated_at_ms DESC, local_user_track_ref_id ASC LIMIT :limit") fun preferencesForProfile(profileId: String, limit: Int): Flow<List<UserTrackPreferenceEntity>>
     @Query("SELECT * FROM library_entry WHERE removed_at_ms IS NULL ORDER BY added_at_ms DESC LIMIT :limit") fun activeEntries(limit: Int): Flow<List<LibraryEntryEntity>>
     @Query("SELECT * FROM library_entry ORDER BY added_at_ms DESC LIMIT :limit") fun entries(limit: Int): Flow<List<LibraryEntryEntity>>
@@ -389,88 +390,64 @@ interface HistoryDao {
     @Query("SELECT e.listening_event_id AS listeningEventId, e.local_user_track_ref_id AS localUserTrackRefId, u.raw_title AS title, u.raw_artist AS artist, e.started_at_ms AS startedAtMs, e.played_ms AS playedMs, e.track_duration_ms AS trackDurationMs, e.completion_ratio AS completionRatio, e.event_origin AS eventOrigin, e.context AS context, e.excluded_from_taste AS excludedFromTaste FROM listening_event e JOIN user_track_ref u ON u.local_user_track_ref_id = e.local_user_track_ref_id WHERE e.server_profile_id = :profileId AND (e.started_at_ms < :beforeStartedAtMs OR (e.started_at_ms = :beforeStartedAtMs AND e.listening_event_id < :beforeEventId)) ORDER BY e.started_at_ms DESC, e.listening_event_id DESC LIMIT :limit")
     suspend fun presentationNextPage(profileId: String, beforeStartedAtMs: Long, beforeEventId: String, limit: Int): List<HistoryPresentationRow>
 
-    @Query(
-        """
-        SELECT COUNT(*) AS play_session_count,
-               COALESCE(SUM(played_ms), 0) AS listened_ms,
-               COUNT(DISTINCT COALESCE(
-                   user_track_ref.server_recording_id,
-                   listening_event.server_recording_id,
-                   user_track_ref.local_recording_id,
-                   listening_event.local_user_track_ref_id
-               )) AS unique_track_count
-        FROM listening_event
-        JOIN user_track_ref
-          ON user_track_ref.local_user_track_ref_id = listening_event.local_user_track_ref_id
-         AND user_track_ref.server_profile_id = listening_event.server_profile_id
-        WHERE listening_event.server_profile_id = :profileId
-          AND listening_event.started_at_ms >= :fromInclusiveMs
-          AND listening_event.started_at_ms <= :throughInclusiveMs
-          AND listening_event.played_ms > 0
-        """,
-    )
-    fun ownerWindow(
-        profileId: String,
-        fromInclusiveMs: Long,
-        throughInclusiveMs: Long,
-    ): Flow<OwnerStatisticsWindowProjection>
+    /** Includes every retained playback outcome, even when its track is removed from the library. */
+    @Query("SELECT COALESCE(SUM(played_ms), 0) FROM listening_event WHERE server_profile_id = :profileId AND started_at_ms <= :throughInclusiveMs AND played_ms > 0")
+    suspend fun ownerListenedMs(profileId: String, throughInclusiveMs: Long): Long
 
     @Query(
         """
-        SELECT COALESCE(
-                   user_track_ref.server_recording_id,
-                   listening_event.server_recording_id,
-                   user_track_ref.local_recording_id,
-                   listening_event.local_user_track_ref_id
-               ) AS identity_key,
-               MAX(user_track_ref.raw_title) AS title,
-               MAX(user_track_ref.raw_artist) AS artist_name,
+        SELECT CASE
+                   WHEN u.server_recording_id IS NOT NULL THEN 'server:' || u.server_recording_id
+                   WHEN e.server_recording_id IS NOT NULL THEN 'server:' || e.server_recording_id
+                   WHEN u.local_recording_id IS NOT NULL THEN 'local:' || u.local_recording_id
+                   ELSE 'track:' || e.local_user_track_ref_id
+               END AS identity_key,
+               MAX(NULLIF(TRIM(u.raw_title), '')) AS title,
+               MAX(NULLIF(TRIM(u.raw_artist), '')) AS artist_name,
                COUNT(*) AS play_session_count,
-               COALESCE(SUM(listening_event.played_ms), 0) AS listened_ms
-        FROM listening_event
-        JOIN user_track_ref
-          ON user_track_ref.local_user_track_ref_id = listening_event.local_user_track_ref_id
-         AND user_track_ref.server_profile_id = listening_event.server_profile_id
-        WHERE listening_event.server_profile_id = :profileId
-          AND listening_event.started_at_ms >= :fromInclusiveMs
-          AND listening_event.started_at_ms <= :throughInclusiveMs
-          AND listening_event.played_ms > 0
+               SUM(e.played_ms) AS listened_ms
+        FROM listening_event e
+        JOIN user_track_ref u ON u.local_user_track_ref_id = e.local_user_track_ref_id
+                             AND u.server_profile_id = e.server_profile_id
+        WHERE e.server_profile_id = :profileId AND e.started_at_ms <= :throughInclusiveMs AND e.played_ms > 0
         GROUP BY identity_key
-        ORDER BY play_session_count DESC, listened_ms DESC, identity_key ASC
+        ORDER BY listened_ms DESC, play_session_count DESC, identity_key ASC
         LIMIT :limit
         """,
     )
-    fun ownerTopTracks(
-        profileId: String,
-        fromInclusiveMs: Long,
-        throughInclusiveMs: Long,
-        limit: Int,
-    ): Flow<List<OwnerTopTrackProjection>>
+    suspend fun ownerTopTracksSnapshot(profileId: String, throughInclusiveMs: Long, limit: Int): List<OwnerTopTrackProjection>
 
     @Query(
         """
-        SELECT NULLIF(TRIM(user_track_ref.raw_artist), '') AS artist_name,
-               COUNT(*) AS play_session_count,
-               COALESCE(SUM(listening_event.played_ms), 0) AS listened_ms
-        FROM listening_event
-        JOIN user_track_ref
-          ON user_track_ref.local_user_track_ref_id = listening_event.local_user_track_ref_id
-         AND user_track_ref.server_profile_id = listening_event.server_profile_id
-        WHERE listening_event.server_profile_id = :profileId
-          AND listening_event.started_at_ms >= :fromInclusiveMs
-          AND listening_event.started_at_ms <= :throughInclusiveMs
-          AND listening_event.played_ms > 0
-        GROUP BY NULLIF(TRIM(user_track_ref.raw_artist), '')
-        ORDER BY play_session_count DESC, listened_ms DESC, artist_name ASC
+        SELECT TRIM(u.raw_artist) AS artist_name, COUNT(*) AS play_session_count, SUM(e.played_ms) AS listened_ms
+        FROM listening_event e
+        JOIN user_track_ref u ON u.local_user_track_ref_id = e.local_user_track_ref_id
+                             AND u.server_profile_id = e.server_profile_id
+        WHERE e.server_profile_id = :profileId AND e.started_at_ms <= :throughInclusiveMs AND e.played_ms > 0
+          AND NULLIF(TRIM(u.raw_artist), '') IS NOT NULL
+        GROUP BY TRIM(u.raw_artist)
+        ORDER BY listened_ms DESC, play_session_count DESC, artist_name ASC
         LIMIT :limit
         """,
     )
-    fun ownerTopArtists(
-        profileId: String,
-        fromInclusiveMs: Long,
-        throughInclusiveMs: Long,
-        limit: Int,
-    ): Flow<List<OwnerTopArtistProjection>>
+    suspend fun ownerTopArtistsSnapshot(profileId: String, throughInclusiveMs: Long, limit: Int): List<OwnerTopArtistProjection>
+
+    /** Page by stable track identity, not event count; no archive horizon or top-track cutoff. */
+    @Query(
+        """
+        SELECT e.local_user_track_ref_id AS local_track_ref_id, SUM(e.played_ms) AS listened_ms, m.payload_json
+        FROM listening_event e
+        JOIN track_metadata_projection m ON m.local_user_track_ref_id = e.local_user_track_ref_id
+                                        AND m.server_profile_id = e.server_profile_id
+        WHERE e.server_profile_id = :profileId AND e.started_at_ms <= :throughInclusiveMs AND e.played_ms > 0
+          AND e.local_user_track_ref_id > :afterTrackId
+        GROUP BY e.local_user_track_ref_id
+        ORDER BY e.local_user_track_ref_id ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun ownerGenreSourcesPage(profileId: String, throughInclusiveMs: Long, afterTrackId: String, limit: Int): List<OwnerGenreSourceProjection>
+
 }
 
 data class HistoryPresentationRow(
@@ -487,10 +464,10 @@ data class HistoryPresentationRow(
     val excludedFromTaste: Boolean,
 )
 
-data class OwnerStatisticsWindowProjection(
-    @androidx.room3.ColumnInfo(name = "play_session_count") val playSessionCount: Long,
+data class OwnerGenreSourceProjection(
+    @androidx.room3.ColumnInfo(name = "local_track_ref_id") val localTrackRefId: String,
     @androidx.room3.ColumnInfo(name = "listened_ms") val listenedMs: Long,
-    @androidx.room3.ColumnInfo(name = "unique_track_count") val uniqueTrackCount: Long,
+    @androidx.room3.ColumnInfo(name = "payload_json") val payloadJson: String,
 )
 
 data class OwnerTopTrackProjection(

@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | `ci-server.yml` | Pull request, `master`, manual, weekly cold run | Canonical Linux server/database gate with disposable PostgreSQL cleanup |
 | `ci-android.yml` | Pull request, `master`, manual | Canonical Linux Android host gate and seven-day APK/test evidence |
+| `ci-android-connected.yml` | Manual, twice-weekly schedule | Android API 26 lifecycle, WorkManager, Room and process-death checks with seven-day test evidence |
 | `ci-gpu-static.yml` | GPU/server-path pull request/`master`, manual | Isolated GPU lock/lint/format/type/unit checks on a CPU runner |
 | `release-candidate.yml` | Version tag or manual selection of an existing tag | Unsigned APK, CPU Docker image archive, commit/artifact-bound release-audit package and SHA-256 manifest retained for 14 days |
 

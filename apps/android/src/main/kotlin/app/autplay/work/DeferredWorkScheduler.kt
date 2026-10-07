@@ -12,6 +12,7 @@ import androidx.work.await
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
+import kotlinx.coroutines.flow.first
 
 /** Kinds of finite deferred work owned by WorkManager, never media byte transfer. */
 enum class DeferredWorkKind {
@@ -58,7 +59,6 @@ interface DeferredWorkScheduler {
 class WorkManagerDeferredWorkScheduler(
     private val workManager: WorkManager,
     private val workerClass: Class<out ListenableWorker>,
-    private val allowMeteredNetwork: suspend () -> Boolean = { false },
 ) : DeferredWorkScheduler {
     override suspend fun enqueue(request: DeferredWorkRequest) {
         enqueue(request, ExistingWorkPolicy.APPEND_OR_REPLACE)
@@ -66,7 +66,12 @@ class WorkManagerDeferredWorkScheduler(
 
     /** Foreground polling must not accumulate a chain while offline or while sync is running. */
     suspend fun enqueueIfIdle(request: DeferredWorkRequest) {
-        enqueue(request, ExistingWorkPolicy.KEEP)
+        val legacyRestriction = request.kind == DeferredWorkKind.SYNC &&
+            workManager.getWorkInfosForUniqueWorkFlow(request.uniqueName()).first().any {
+                !it.state.isFinished && it.constraints.requiredNetworkType == NetworkType.UNMETERED
+            }
+        // Replace a pre-upgrade Wi-Fi-only request once; the journal intent remains in Room.
+        enqueue(request, if (legacyRestriction) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP)
     }
 
     override suspend fun reconcile(request: DeferredWorkRequest) {
@@ -80,9 +85,7 @@ class WorkManagerDeferredWorkScheduler(
             .setInputData(request.toInputData())
             .setConstraints(
                 Constraints.Builder()
-                    .setRequiredNetworkType(
-                        requiredNetworkType(request.kind, allowMeteredNetwork()),
-                    )
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build(),
             )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, java.time.Duration.ofSeconds(10))
@@ -94,15 +97,6 @@ class WorkManagerDeferredWorkScheduler(
             workRequest,
         ).await()
     }
-}
-
-internal fun requiredNetworkType(
-    kind: DeferredWorkKind,
-    allowMeteredNetwork: Boolean,
-): NetworkType = if (kind == DeferredWorkKind.SYNC && !allowMeteredNetwork) {
-    NetworkType.UNMETERED
-} else {
-    NetworkType.CONNECTED
 }
 
 /** Parses the stable-ID-only input supplied by [WorkManagerDeferredWorkScheduler]. */

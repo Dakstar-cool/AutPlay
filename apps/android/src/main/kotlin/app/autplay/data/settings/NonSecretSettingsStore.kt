@@ -52,7 +52,7 @@ data class NonSecretSettings(
     val serverBaseUrl: String? = null,
     /** Stream service origin. It may differ from the API origin in local deployments. */
     val streamBaseUrl: String? = null,
-    val syncOnMeteredNetwork: Boolean = false,
+    val downloadOnMeteredNetwork: Boolean = false,
     val appLanguage: String = "SYSTEM",
     val appearanceMode: String = "DARK",
     val accentPalette: String = "CORAL",
@@ -60,8 +60,11 @@ data class NonSecretSettings(
     val developerMode: Boolean = false,
     val libraryRootTreeUri: String? = null,
     val wavePrefetchMode: String = "NEXT",
+    val smoothTrackTransitions: Boolean = false,
     /** Versioned first-run education checkpoint. It is device-local and is never transferred. */
     val onboardingRevision: Int = 0,
+    /** Device-local requested public ID. Only the active server can confirm its uniqueness. */
+    val pendingPublicId: String? = null,
     /** M5 non-secret checkpoint. A matching secret marker is required before remote use. */
     val m5Binding: M5BindingCheckpoint? = null,
     /** Signed public identity/capability evidence needed to fail closed across process restart. */
@@ -171,15 +174,19 @@ class DataStoreNonSecretSettingsStore(
         settings.streamBaseUrl?.let { preferences[STREAM_SERVICE_BASE_URL] = it }
                 ?: preferences.remove(STREAM_SERVICE_BASE_URL)
         preferences.remove(LEGACY_SERVER_BASE_URL)
-        preferences[SYNC_ON_METERED_NETWORK] = settings.syncOnMeteredNetwork
+        preferences[DOWNLOAD_ON_METERED_NETWORK] = settings.downloadOnMeteredNetwork
+        preferences.remove(LEGACY_SYNC_ON_METERED_NETWORK)
         preferences[APP_LANGUAGE] = settings.appLanguage
         preferences[DEVELOPER_MODE] = settings.developerMode
         preferences[APPEARANCE_MODE] = settings.appearanceMode
         preferences[ACCENT_PALETTE] = settings.accentPalette
+        preferences[SMOOTH_TRACK_TRANSITIONS] = settings.smoothTrackTransitions
         settings.libraryRootTreeUri?.let { preferences[LIBRARY_ROOT_TREE_URI] = it }
                 ?: preferences.remove(LIBRARY_ROOT_TREE_URI)
         preferences[WAVE_PREFETCH_MODE] = settings.wavePrefetchMode
         preferences[ONBOARDING_REVISION_KEY] = settings.onboardingRevision
+        settings.pendingPublicId?.let { preferences[PENDING_PUBLIC_ID] = it }
+            ?: preferences.remove(PENDING_PUBLIC_ID)
         settings.m5Binding?.let { binding ->
             preferences[M5_BINDING_COMMIT_ID] = binding.bindingCommitId
             preferences[M5_SERVER_INSTANCE_ID] = binding.serverInstanceId
@@ -233,14 +240,17 @@ class DataStoreNonSecretSettingsStore(
         deviceId = preferences[DEVICE_ID]?.let(::DeviceId),
         serverBaseUrl = apiOrigin,
         streamBaseUrl = preferences[STREAM_SERVICE_BASE_URL] ?: legacyOrigin ?: apiOrigin,
-        syncOnMeteredNetwork = preferences[SYNC_ON_METERED_NETWORK] ?: false,
+        downloadOnMeteredNetwork = preferences[DOWNLOAD_ON_METERED_NETWORK]
+            ?: preferences[LEGACY_SYNC_ON_METERED_NETWORK] ?: false,
         appLanguage = preferences[APP_LANGUAGE] ?: "SYSTEM",
         developerMode = preferences[DEVELOPER_MODE] ?: false,
         appearanceMode = preferences[APPEARANCE_MODE] ?: "DARK",
         accentPalette = preferences[ACCENT_PALETTE] ?: "CORAL",
+        smoothTrackTransitions = preferences[SMOOTH_TRACK_TRANSITIONS] ?: false,
         libraryRootTreeUri = preferences[LIBRARY_ROOT_TREE_URI],
         wavePrefetchMode = preferences[WAVE_PREFETCH_MODE] ?: "NEXT",
         onboardingRevision = preferences[ONBOARDING_REVISION_KEY] ?: 0,
+        pendingPublicId = preferences[PENDING_PUBLIC_ID],
         m5Binding = m5Binding(preferences),
         m5TrustEvidence = m5TrustEvidence(preferences),
         m5LocalDataDecision = preferences[M5_LOCAL_DATA_DECISION],
@@ -292,6 +302,9 @@ class DataStoreNonSecretSettingsStore(
     }
 
     private fun validate(settings: NonSecretSettings) {
+        require(settings.pendingPublicId == null || Regex("^[a-z0-9_]{3,24}$").matches(settings.pendingPublicId)) {
+            "PUBLIC_ID_INVALID"
+        }
         val bindingParts = listOf(
             settings.activeServerProfileId,
             settings.activeUserId,
@@ -339,17 +352,20 @@ class DataStoreNonSecretSettingsStore(
     }
 
     private companion object {
+        val PENDING_PUBLIC_ID = stringPreferencesKey("pending_public_id")
         val ACTIVE_SERVER_PROFILE_ID = stringPreferencesKey("active_server_profile_id")
         val ACTIVE_USER_ID = stringPreferencesKey("active_user_id")
         val DEVICE_ID = stringPreferencesKey("device_id")
         val LEGACY_SERVER_BASE_URL = stringPreferencesKey("server_base_url")
         val API_SERVICE_BASE_URL = stringPreferencesKey("api_service_base_url")
         val STREAM_SERVICE_BASE_URL = stringPreferencesKey("stream_service_base_url")
-        val SYNC_ON_METERED_NETWORK = booleanPreferencesKey("sync_on_metered_network")
+        val DOWNLOAD_ON_METERED_NETWORK = booleanPreferencesKey("download_on_metered_network")
+        val LEGACY_SYNC_ON_METERED_NETWORK = booleanPreferencesKey("sync_on_metered_network")
         val APP_LANGUAGE = stringPreferencesKey("app_language")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
         val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
         val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
+        val SMOOTH_TRACK_TRANSITIONS = booleanPreferencesKey("smooth_track_transitions")
         val LIBRARY_ROOT_TREE_URI = stringPreferencesKey("library_root_tree_uri")
         val WAVE_PREFETCH_MODE = stringPreferencesKey("wave_prefetch_mode")
         val M5_BINDING_COMMIT_ID = stringPreferencesKey("m5_binding_commit_id")

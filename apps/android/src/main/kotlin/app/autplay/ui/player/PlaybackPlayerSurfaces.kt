@@ -2,9 +2,11 @@ package app.autplay.ui.player
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +33,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -37,18 +41,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
@@ -63,12 +75,12 @@ import app.autplay.playback.presentation.PlaybackSourcePresentation
 import app.autplay.playback.presentation.RepeatModePresentation
 import app.autplay.playback.presentation.canSeek
 import app.autplay.ui.AutPlayArtwork
+import app.autplay.ui.AutPlayArtworkPlaceholder
+import app.autplay.ui.rememberTrackArtwork
+import app.autplay.ui.rememberSystemAnimationsEnabled
 import app.autplay.ui.HomeSwipeTargets
 import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayIconButton
-import app.autplay.ui.face.AutPlayResonanceLens
-import app.autplay.ui.face.FacePlaybackMode
-import app.autplay.ui.face.FacePreferenceMode
 import app.autplay.ui.queue.QueueEditorPanel
 import app.autplay.ui.queue.QueueEditorUiActions
 import app.autplay.ui.queue.QueueEditorUiState
@@ -76,7 +88,6 @@ import app.autplay.ui.AutPlayPlatformIcon
 import app.autplay.ui.AutPlayStateKind
 import app.autplay.ui.AutPlayStateSurface
 import app.autplay.ui.AutPlayTokens
-import app.autplay.ui.playbackVisualPalette
 import app.autplay.ui.TrackChangeAnimation
 import app.autplay.ui.TrackDisplayInfo
 
@@ -207,9 +218,9 @@ public fun NowPlayingScreen(
         onObservingChanged(true)
         onDispose { onObservingChanged(false) }
     }
+    val collapse = LocalPlayerCollapse.current
     if (state.mediaId == null) {
-        BoxWithConstraints(modifier.fillMaxSize()) {
-            val idleFaceWidth = (maxWidth - 48.dp).coerceAtLeast(1.dp).coerceAtMost(420.dp)
+        Box(modifier.fillMaxSize()) {
             Column(
                 Modifier
                     .fillMaxSize()
@@ -218,26 +229,35 @@ public fun NowPlayingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                AutPlayResonanceLens(
-                    trackSeed = "autplay-idle",
-                    playbackMode = FacePlaybackMode.Idle,
-                    preference = FacePreferenceMode.Neutral,
-                    accessibilitySummary = stringResource(R.string.face_description_idle),
-                    modifier = Modifier.width(idleFaceWidth),
-                )
-                Spacer(Modifier.height(18.dp))
                 AutPlayStateSurface(
                     AutPlayStateKind.PlaybackUnavailable,
                     stringResource(R.string.player_nothing_playing),
                 )
             }
+            IconButton(
+                onClick = { collapse?.invoke() },
+                enabled = collapse != null,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            ) {
+                Icon(painterResource(R.drawable.ic_autplay_expand), stringResource(R.string.player_collapse))
+            }
         }
         return
     }
-    val facePlaybackMode = facePlaybackMode(state.playbackStatus, state.isPlaying)
-    val visualSeed = state.title ?: state.mediaId
-    val palette = remember(visualSeed) { playbackVisualPalette(visualSeed) }
+    val collapseMotion = rememberPlayerCollapseMotion()
+    val animations = rememberSystemAnimationsEnabled()
+    val collapseGesture = Modifier.playerCollapseGesture(collapse, collapseMotion, animations)
+    val collapseTargetTop = LocalPlayerCollapseTargetTop.current
     var showSleepTimer by rememberSaveable { mutableStateOf(false) }
+    var showQueue by rememberSaveable { mutableStateOf(false) }
+    val queueSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    if (showQueue) {
+        ModalBottomSheet(onDismissRequest = { showQueue = false }, sheetState = queueSheetState) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                QueueEditorPanel(queueState, queueActions)
+            }
+        }
+    }
     val sleepTimerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     if (showSleepTimer) {
         ModalBottomSheet(
@@ -265,175 +285,250 @@ public fun NowPlayingScreen(
     BoxWithConstraints(
         modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        palette.first().copy(alpha = 0.12f),
-                        palette.last().copy(alpha = 0.05f),
-                        MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
-                        MaterialTheme.colorScheme.background,
-                    ),
-                ),
-            ),
+            .graphicsLayer { translationY = collapseMotion.offset }
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("now-playing-panel"),
     ) {
-        val faceWidth = (maxWidth - 40.dp).coerceAtLeast(1.dp).coerceAtMost(420.dp)
-        val artworkSize = (maxWidth * 0.18f).coerceIn(56.dp, 72.dp)
-        Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = AutPlayTokens.colors.glassSurface,
-                border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
+        val artworkWidth = maxWidth
+        val density = LocalDensity.current
+        val collapseTravel = with(density) {
+            (collapseTargetTop ?: (maxHeight - 88.dp)).coerceIn(0.dp, maxHeight).toPx()
+        }
+        SideEffect { collapseMotion.travel = collapseTravel }
+        Column(Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    "${stringResource(R.string.player_queue_context)} · ${stringResource(sourceLabel(state.source))}",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
-                )
-            }
-            NowPlayingFaceCarousel(
-                mediaId = state.mediaId,
-                playbackMode = facePlaybackMode,
-                preference = when (preference) {
-                    PlaybackPreferenceUiState.Neutral -> FacePreferenceMode.Neutral
-                    PlaybackPreferenceUiState.Liked -> FacePreferenceMode.Liked
-                    PlaybackPreferenceUiState.Disliked -> FacePreferenceMode.Disliked
-                },
-                accessibilitySummary = stringResource(faceDescriptionResource(facePlaybackMode)),
-                targets = swipeTargets,
-                enabled = state.controls is PlaybackControlGate.Allowed,
-                onPrevious = onPrevious,
-                onNext = onNext,
-                modifier = Modifier.width(faceWidth),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AutPlayArtwork(
-                    title = state.title ?: stringResource(R.string.player_nothing_playing),
-                    size = artworkSize,
-                    trackId = state.localTrackRefId,
-                )
-                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
-                    Text(
-                        state.title ?: stringResource(R.string.player_nothing_playing),
-                        style = MaterialTheme.typography.headlineMedium,
-                        textAlign = TextAlign.Start,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        state.artist ?: stringResource(R.string.player_unknown_artist),
-                        color = AutPlayTokens.colors.mutedText,
-                        textAlign = TextAlign.Start,
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp).heightIn(min = 48.dp)
+                        .then(collapseGesture).testTag("player-collapse-header"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    IconButton(onClick = { collapse?.let { collapseMotion.collapse(animations, it) } }, enabled = collapse != null) {
+                        Icon(painterResource(R.drawable.ic_autplay_expand), stringResource(R.string.player_collapse))
+                    }
+                    Text(stringResource(R.string.nav_now_playing), style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.size(48.dp))
+                }
+                Box(Modifier.width(artworkWidth).then(collapseGesture).testTag("player-cover")) {
+                    NowPlayingArtworkCarousel(
+                        mediaId = state.mediaId,
+                        title = state.title ?: stringResource(R.string.player_nothing_playing),
+                        trackId = state.localTrackRefId,
+                        targets = swipeTargets,
+                        enabled = state.controls is PlaybackControlGate.Allowed,
+                        onPrevious = onPrevious,
+                        onNext = onNext,
+                        animations = animations,
                     )
                 }
-                PreferenceIconButton(
-                    icon = AutPlayIcon.ThumbDown,
-                    labelRes = R.string.action_dislike,
-                    selected = preference == PlaybackPreferenceUiState.Disliked,
-                    enabled = feedbackEnabled,
-                    onClick = {
-                        if (preference == PlaybackPreferenceUiState.Disliked) onClearPreference() else onDislike()
-                    },
-                )
-                PreferenceIconButton(
-                    icon = AutPlayIcon.ThumbUp,
-                    labelRes = R.string.action_like,
-                    selected = preference == PlaybackPreferenceUiState.Liked,
-                    enabled = feedbackEnabled,
-                    onClick = {
-                        if (preference == PlaybackPreferenceUiState.Liked) onClearPreference() else onLike()
-                    },
-                )
-            }
-            TasteExclusionControls(
-                listenExcluded = listenExcludedFromTaste,
-                sessionExcluded = sessionExcludedFromTaste,
-                listenActionAvailable = listenTasteActionAvailable,
-                sessionActionAvailable = sessionTasteActionAvailable,
-                errorCode = tasteExclusionError,
-                onSetListenExcluded = onSetCurrentListenTasteExcluded,
-                onSetSessionExcluded = onSetSessionTasteExcluded,
-            )
-            PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
-            DirectControlMessage(state)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AutPlayIconButton(
-                    AutPlayIcon.Shuffle,
-                    R.string.player_shuffle,
-                    onToggleShuffle,
-                    enabled = state.shuffleEnabled,
-                )
-                AutPlayIconButton(
-                    AutPlayIcon.Previous,
-                    R.string.action_previous,
-                    onPrevious,
-                    enabled = (swipeTargets.previous != null || state.previousMediaId != null) &&
-                        state.controls is PlaybackControlGate.Allowed,
-                )
-                PrimaryTransportButton(
-                    icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
-                    labelRes = if (state.isPlaying) R.string.action_pause else R.string.action_play,
-                    onClick = onTogglePlayPause,
-                    enabled = state.controls is PlaybackControlGate.Allowed,
-                )
-                AutPlayIconButton(
-                    AutPlayIcon.Next,
-                    R.string.action_next,
-                    onNext,
-                    enabled = (swipeTargets.next != null || state.nextMediaId != null) &&
-                        state.controls is PlaybackControlGate.Allowed,
-                )
-                AutPlayIconButton(
-                    AutPlayIcon.Repeat,
-                    repeatLabel(state.repeatMode),
-                    onCycleRepeat,
-                    enabled = state.repeatEnabled,
-                )
-            }
-            if (state.source == PlaybackSourcePresentation.Vault || downloadState != null) PlayerFeatureCard(
-                icon = AutPlayIcon.Download,
-                title = stringResource(when (downloadState) {
-                    "COMPLETED" -> R.string.music_saved_offline
-                    "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> R.string.music_downloading
-                    else -> R.string.music_download_track
-                }),
-                body = stringResource(R.string.music_download_body),
-                onClick = onDownload,
-                enabled = state.source == PlaybackSourcePresentation.Vault &&
-                    downloadState !in setOf("COMPLETED", "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED"),
-                modifier = Modifier.testTag("player-download-track"),
-            )
-            PlayerFeatureCard(
-                icon = AutPlayIcon.Timer,
-                title = stringResource(R.string.player_sleep_timer),
-                body = when {
-                    stopAfterCurrentTrackActive -> stringResource(R.string.player_sleep_timer_after_track_active)
-                    sleepTimerRemainingMinutes != null -> pluralStringResource(
-                        R.plurals.player_sleep_timer_active,
-                        sleepTimerRemainingMinutes,
-                        sleepTimerRemainingMinutes,
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                            Text(
+                                state.title ?: stringResource(R.string.player_nothing_playing),
+                                style = MaterialTheme.typography.headlineSmall,
+                                textAlign = TextAlign.Start,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                state.artist ?: stringResource(R.string.player_unknown_artist),
+                                color = AutPlayTokens.colors.mutedText,
+                                textAlign = TextAlign.Start,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        PreferenceIconButton(
+                            icon = AutPlayIcon.ThumbDown,
+                            labelRes = R.string.action_dislike,
+                            selected = preference == PlaybackPreferenceUiState.Disliked,
+                            enabled = feedbackEnabled,
+                            onClick = {
+                                if (preference == PlaybackPreferenceUiState.Disliked) onClearPreference() else onDislike()
+                            },
+                        )
+                        PreferenceIconButton(
+                            icon = AutPlayIcon.ThumbUp,
+                            labelRes = R.string.action_like,
+                            selected = preference == PlaybackPreferenceUiState.Liked,
+                            enabled = feedbackEnabled,
+                            onClick = {
+                                if (preference == PlaybackPreferenceUiState.Liked) onClearPreference() else onLike()
+                            },
+                        )
+                    }
+                    PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
+                    DirectControlMessage(state)
+                    val timerLabel = when {
+                            stopAfterCurrentTrackActive -> stringResource(R.string.player_sleep_timer_after_track_active)
+                            sleepTimerRemainingMinutes != null -> pluralStringResource(
+                                R.plurals.player_sleep_timer_active,
+                                sleepTimerRemainingMinutes,
+                                sleepTimerRemainingMinutes,
+                            )
+                            else -> stringResource(R.string.player_sleep_timer)
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        if (state.source == PlaybackSourcePresentation.Vault || downloadState != null) {
+                            Surface(
+                                onClick = onDownload,
+                                enabled = state.source == PlaybackSourcePresentation.Vault &&
+                                    downloadState !in setOf("COMPLETED", "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED"),
+                                color = Color.Transparent,
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("player-download-track"),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    AutPlayPlatformIcon(AutPlayIcon.Download, null, tint = MaterialTheme.colorScheme.primary)
+                                    Text(stringResource(when (downloadState) {
+                                        "COMPLETED" -> R.string.music_saved_offline
+                                        "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> R.string.music_downloading
+                                        else -> R.string.music_download_track
+                                    }), style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        } else Spacer(Modifier.weight(1f))
+                        IconButton(
+                            onClick = { showSleepTimer = true }, enabled = state.controls is PlaybackControlGate.Allowed,
+                            modifier = Modifier.testTag("player-sleep-timer").semantics { stateDescription = timerLabel },
+                        ) {
+                            AutPlayPlatformIcon(AutPlayIcon.Timer, stringResource(R.string.player_sleep_timer),
+                                tint = if (sleepTimerRemainingMinutes != null || stopAfterCurrentTrackActive)
+                                    MaterialTheme.colorScheme.primary else AutPlayTokens.colors.mutedText)
+                        }
+                        IconButton(onClick = { showQueue = true }, modifier = Modifier.testTag("player-open-queue")) {
+                            AutPlayPlatformIcon(AutPlayIcon.Playlist, stringResource(R.string.queue_editor_title),
+                                tint = AutPlayTokens.colors.mutedText)
+                        }
+                    }
+                    TasteExclusionControls(
+                        listenExcluded = listenExcludedFromTaste,
+                        sessionExcluded = sessionExcludedFromTaste,
+                        listenActionAvailable = listenTasteActionAvailable,
+                        sessionActionAvailable = sessionTasteActionAvailable,
+                        errorCode = tasteExclusionError,
+                        onSetListenExcluded = onSetCurrentListenTasteExcluded,
+                        onSetSessionExcluded = onSetSessionTasteExcluded,
                     )
-                    else -> stringResource(R.string.player_sleep_timer_body)
-                },
-                onClick = { showSleepTimer = true },
-                enabled = state.controls is PlaybackControlGate.Allowed,
-                modifier = Modifier.testTag("player-sleep-timer"),
-            )
-            QueueEditorPanel(queueState, queueActions)
-            FutureWaveByTrackCard()
-            Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+            PlayerTransportControls(state, swipeTargets, onToggleShuffle, onCycleRepeat, onPrevious, onNext, onTogglePlayPause)
+        }
+    }
+}
+
+/** Uses the existing artwork provider and placeholder, with a full-image player presentation. */
+@Composable
+internal fun PlayerArtwork(title: String, trackId: String?, modifier: Modifier = Modifier, painter: Painter? = null) {
+    val artworkPainter = painter ?: rememberTrackArtwork(trackId)
+    val intrinsic = artworkPainter?.intrinsicSize
+    val aspectRatio = intrinsic?.takeIf {
+        it.width.isFinite() && it.height.isFinite() && it.width > 0f && it.height > 0f
+    }?.let { it.width / it.height } ?: 1f
+    Box(
+        modifier.fillMaxWidth().aspectRatio(aspectRatio).clip(MaterialTheme.shapes.small)
+            .semantics { contentDescription = title },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (artworkPainter != null) {
+            Image(artworkPainter, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        } else {
+            AutPlayArtworkPlaceholder(title, Modifier.fillMaxSize())
+        }
+    }
+}
+
+@Composable
+private fun PlayerTransportControls(
+    state: PlaybackPresentationState,
+    swipeTargets: HomeSwipeTargets,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp).testTag("player-transport-controls"),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlayerModeButton(
+            icon = AutPlayIcon.Shuffle,
+            label = stringResource(R.string.player_shuffle),
+            stateLabel = stringResource(if (state.shuffleModeEnabled) R.string.player_surface_shuffle_on else R.string.player_surface_shuffle_off),
+            active = state.shuffleModeEnabled,
+            enabled = state.shuffleEnabled,
+            onClick = onToggleShuffle,
+            tag = "player-shuffle",
+        )
+        AutPlayIconButton(AutPlayIcon.Previous, R.string.action_previous, onPrevious,
+            enabled = (swipeTargets.previous != null || state.previousMediaId != null) && state.controls is PlaybackControlGate.Allowed)
+        PrimaryTransportButton(
+            icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
+            labelRes = if (state.isPlaying) R.string.action_pause else R.string.action_play,
+            onClick = onTogglePlayPause,
+            enabled = state.controls is PlaybackControlGate.Allowed,
+        )
+        AutPlayIconButton(AutPlayIcon.Next, R.string.action_next, onNext,
+            enabled = (swipeTargets.next != null || state.nextMediaId != null) && state.controls is PlaybackControlGate.Allowed)
+        PlayerModeButton(
+            icon = AutPlayIcon.Repeat,
+            label = stringResource(repeatLabel(state.repeatMode)),
+            stateLabel = stringResource(repeatLabel(state.repeatMode)),
+            active = state.repeatMode != RepeatModePresentation.Off,
+            enabled = state.repeatEnabled,
+            onClick = onCycleRepeat,
+            tag = "player-repeat",
+            one = state.repeatMode == RepeatModePresentation.One,
+        )
+    }
+}
+
+@Composable
+private fun PlayerModeButton(
+    icon: AutPlayIcon,
+    label: String,
+    stateLabel: String,
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    tag: String,
+    one: Boolean = false,
+) {
+    val tint = when {
+        !enabled -> AutPlayTokens.colors.mutedText.copy(alpha = 0.38f)
+        active -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> AutPlayTokens.colors.mutedText
+    }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.75f else 0.25f)) else null,
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(AutPlayTokens.dimensions.minimumTouchTarget).testTag(tag).semantics {
+                contentDescription = label
+                stateDescription = stateLabel
+                selected = active
+            },
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                AutPlayPlatformIcon(icon, null, Modifier.size(24.dp), tint = tint)
+                if (one) Text("1", Modifier.background(MaterialTheme.colorScheme.primaryContainer),
+                    style = MaterialTheme.typography.labelSmall, color = tint)
+            }
         }
     }
 }
@@ -448,27 +543,32 @@ private fun TasteExclusionControls(
     onSetListenExcluded: (Boolean) -> Unit,
     onSetSessionExcluded: (Boolean) -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text(stringResource(R.string.player_taste_exclusion_title), style = MaterialTheme.typography.titleSmall)
-            Text(
-                stringResource(R.string.player_taste_exclusion_description),
-                style = MaterialTheme.typography.bodySmall,
-                color = AutPlayTokens.colors.mutedText,
-            )
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val expansionLabel = stringResource(if (expanded) R.string.player_section_expanded else R.string.player_section_collapsed)
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = AutPlayTokens.colors.border)
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-taste-toggle")
+                .clickable { expanded = !expanded }
+                .semantics { stateDescription = expansionLabel },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(stringResource(R.string.player_taste_exclusion_title), Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium, color = AutPlayTokens.colors.mutedText)
+            Icon(painterResource(R.drawable.ic_autplay_expand), null,
+                Modifier.size(18.dp).graphicsLayer { rotationZ = if (expanded) 180f else 0f },
+                tint = AutPlayTokens.colors.mutedText)
+        }
+        if (expanded) {
             TasteExclusionRow(
-                label = stringResource(R.string.player_exclude_current_listen),
+                label = stringResource(R.string.player_exclude_listen_short),
                 checked = listenExcluded,
                 enabled = listenActionAvailable,
                 testTag = "taste-exclude-listen",
                 onCheckedChange = onSetListenExcluded,
             )
             TasteExclusionRow(
-                label = stringResource(R.string.player_exclude_session),
+                label = stringResource(R.string.player_exclude_session_short),
                 checked = sessionExcluded,
                 enabled = sessionActionAvailable,
                 testTag = "taste-exclude-session",
@@ -481,14 +581,14 @@ private fun TasteExclusionControls(
                     color = AutPlayTokens.colors.mutedText,
                 )
             }
-            if (errorCode != null) {
-                Text(
-                    stringResource(R.string.player_taste_exclusion_error),
-                    modifier = Modifier.testTag("taste-exclusion-error"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+        }
+        if (errorCode != null) {
+            Text(
+                stringResource(R.string.player_taste_exclusion_error),
+                modifier = Modifier.testTag("taste-exclusion-error"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -505,7 +605,7 @@ private fun TasteExclusionRow(
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -528,15 +628,11 @@ private fun PreferenceIconButton(
         shape = CircleShape,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         contentColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(
-            1.dp,
-            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f) else AutPlayTokens.colors.border,
-        ),
     ) {
         IconButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(52.dp).semantics {
+            modifier = Modifier.size(48.dp).semantics {
                 contentDescription = label
                 if (selected) stateDescription = label
             },
@@ -547,88 +643,6 @@ private fun PreferenceIconButton(
                 modifier = Modifier.size(24.dp),
                 tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
-        }
-    }
-}
-
-@Composable
-private fun PlayerFeatureCard(
-    icon: AutPlayIcon,
-    title: String,
-    body: String,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = 76.dp),
-        shape = MaterialTheme.shapes.large,
-        color = AutPlayTokens.colors.glassSurface,
-        border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AutPlayPlatformIcon(
-                icon = icon,
-                contentDescription = null,
-                modifier = Modifier.size(26.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(body, style = MaterialTheme.typography.bodySmall, color = AutPlayTokens.colors.mutedText)
-            }
-        }
-    }
-}
-
-@Composable
-private fun FutureWaveByTrackCard() {
-    val unavailable = stringResource(R.string.player_wave_by_track_unavailable)
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 92.dp)
-            .testTag("player-wave-by-track")
-            .semantics {
-                contentDescription = unavailable
-                disabled()
-            },
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AutPlayPlatformIcon(
-                icon = AutPlayIcon.Wave,
-                contentDescription = null,
-                modifier = Modifier.size(30.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.player_wave_by_track), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.player_wave_by_track_body),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)) {
-                Text(
-                    stringResource(R.string.player_coming_soon),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
         }
     }
 }
@@ -723,6 +737,7 @@ private fun PrimaryTransportButton(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun PlaybackTimeline(
     state: PlaybackPresentationState,
     onSeekBegin: (Long) -> Unit,
@@ -747,34 +762,46 @@ private fun PlaybackTimeline(
     )
     val accessibilityLabel = stringResource(R.string.player_seek_description)
     Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth()) {
-            PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(48.dp).padding(vertical = 22.dp))
-            Slider(
-                value = displayed.toFloat(),
-                onValueChange = { value ->
-                    val target = value.toLong().coerceIn(0, duration)
-                    if (!dragging) {
-                        dragging = true
-                        onSeekBegin(target)
-                    } else {
-                        onSeekUpdate(target)
-                    }
-                },
-                onValueChangeFinished = {
-                    dragging = false
-                    onSeekCommit()
-                },
-                valueRange = 0f..duration.toFloat(),
-                enabled = state.canSeek,
-                modifier = Modifier.fillMaxWidth().semantics {
-                    contentDescription = accessibilityLabel
-                    stateDescription = accessibilityState
-                },
-            )
-        }
+        Slider(
+            value = displayed.toFloat(),
+            onValueChange = { value ->
+                val target = value.toLong().coerceIn(0, duration)
+                if (!dragging) {
+                    dragging = true
+                    onSeekBegin(target)
+                } else {
+                    onSeekUpdate(target)
+                }
+            },
+            onValueChangeFinished = {
+                dragging = false
+                onSeekCommit()
+            },
+            valueRange = 0f..duration.toFloat(),
+            enabled = state.canSeek,
+            thumb = {
+                Box(
+                    Modifier.size(12.dp).background(
+                        if (state.canSeek) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.mutedText,
+                        CircleShape,
+                    ),
+                )
+            },
+            track = {
+                PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(4.dp))
+            },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+                contentDescription = accessibilityLabel
+                stateDescription = accessibilityState
+            },
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(formatDuration(displayed), style = MaterialTheme.typography.labelMedium)
-            Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium)
+            Text(
+                formatDuration(duration),
+                style = MaterialTheme.typography.labelMedium,
+                color = AutPlayTokens.colors.mutedText,
+            )
         }
     }
 }
@@ -819,27 +846,6 @@ private fun repeatLabel(mode: RepeatModePresentation): Int = when (mode) {
     RepeatModePresentation.Off -> R.string.player_repeat_off
     RepeatModePresentation.One -> R.string.player_repeat_one
     RepeatModePresentation.All -> R.string.player_repeat_all
-}
-
-internal fun facePlaybackMode(status: PlaybackStatus, isPlaying: Boolean): FacePlaybackMode = when (status) {
-    PlaybackStatus.Buffering -> FacePlaybackMode.Buffering
-    PlaybackStatus.Ready -> if (isPlaying) FacePlaybackMode.Playing else FacePlaybackMode.Paused
-    PlaybackStatus.Idle,
-    PlaybackStatus.Ended -> FacePlaybackMode.Idle
-}
-
-internal fun faceDescriptionResource(mode: FacePlaybackMode): Int = when (mode) {
-    FacePlaybackMode.Idle -> R.string.face_description_idle
-    FacePlaybackMode.Playing -> R.string.face_description_playing
-    FacePlaybackMode.Paused -> R.string.face_description_paused
-    FacePlaybackMode.Buffering -> R.string.face_description_buffering
-}
-
-private fun sourceLabel(source: PlaybackSourcePresentation): Int = when (source) {
-    PlaybackSourcePresentation.Local -> R.string.player_source_local
-    PlaybackSourcePresentation.Download -> R.string.player_source_download
-    PlaybackSourcePresentation.Vault -> R.string.player_source_vault
-    PlaybackSourcePresentation.Unknown -> R.string.player_source_unknown
 }
 
 private fun formatDuration(valueMs: Long): String {

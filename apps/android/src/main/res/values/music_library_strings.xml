@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="music_download_track">Download track</string>
-    <string name="music_download_body">Save from Vault to listen without an internet connection.</string>
     <string name="music_saved_offline">Available offline</string>
     <string name="music_downloading">Downloading…</string>
     <string name="music_phone_title">Music on this phone</string>

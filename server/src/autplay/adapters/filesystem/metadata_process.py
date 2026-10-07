@@ -85,13 +85,15 @@ class ProcessMetadataWork:
     def read_audio(self) -> EmbeddedMetadata:
         document, artwork = self.exchange({"action": "EMBEDDED"})
         raw = document.get("fields")
+        duration = document.get("duration_ms")
         if (
-            set(document) != {"fields"}
+            set(document) not in ({"fields"}, {"fields", "duration_ms"})
             or not isinstance(raw, dict)
             or (artwork is not None and len(artwork) > 2 * 1024 * 1024)
+            or (duration is not None and (type(duration) is not int or not 0 < duration <= 3600000))
         ):
             raise ChildProtocolError()
-        return EmbeddedMetadata(validate_fields(raw), artwork)
+        return EmbeddedMetadata(validate_fields(raw), artwork, duration)
 
     def fingerprint(self) -> ChromaprintEvidence:
         document, payload = self.exchange({"action": "FINGERPRINT"})

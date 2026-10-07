@@ -42,16 +42,12 @@ object AutPlayRuntime {
         databaseInstance ?: AutPlayDatabase.open(context.applicationContext).also { databaseInstance = it }
     }
 
-    /** Builds the durable sync scheduler with the latest persisted metered-network policy. */
+    /** Metadata sync runs on every connected network, independently of offline downloads. */
     fun syncScheduler(context: Context): WorkManagerDeferredWorkScheduler {
         val applicationContext = context.applicationContext
         return WorkManagerDeferredWorkScheduler(
             WorkManager.getInstance(applicationContext),
             SyncWorker::class.java,
-            allowMeteredNetwork = {
-                applicationNonSecretSettingsStore(applicationContext)
-                    .settings.first().syncOnMeteredNetwork
-            },
         )
     }
 
@@ -110,12 +106,6 @@ object AutPlayRuntime {
             m5Rotation = m5Rotation(context),
             beforeRequest = {
                 checkActiveRequestBinding(context, binding, settings, "SYNC_PROFILE_NOT_ACTIVE")
-                val latest = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
-                val metered = context.getSystemService(android.net.ConnectivityManager::class.java)
-                    ?.isActiveNetworkMetered ?: true
-                check(app.autplay.work.syncNetworkAllowed(latest.syncOnMeteredNetwork, metered)) {
-                    "SYNC_NETWORK_POLICY_BLOCKED"
-                }
             },
         ), afterSync = { completed ->
             app.autplay.work.TrackMetadataWork.artwork(context.applicationContext, completed.serverProfileId.value)
@@ -172,7 +162,9 @@ object AutPlayRuntime {
     /** Creates the bounded server-surface adapter for the active profile only. */
     suspend fun serverFeatures(context: Context, binding: ClientEventBinding): ServerFeatureRepository {
         val settings = applicationNonSecretSettingsStore(context.applicationContext).settings.first()
-        check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) {
+        check(settings.activeServerProfileId == binding.serverProfileId && settings.activeUserId == binding.userId &&
+            settings.deviceId == binding.deviceId && settings.serverBaseUrl != null
+        ) {
             "SERVER_PROFILE_NOT_ACTIVE"
         }
         return ServerFeatureRepository(
@@ -238,6 +230,7 @@ object AutPlayRuntime {
             ),
             scope,
             onAcceptedRoom = onAcceptedRoom,
+            initialPublicIdCandidate = settings.pendingPublicId,
         )
     }
 

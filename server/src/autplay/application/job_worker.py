@@ -217,6 +217,7 @@ class JobWorker:
         self._worker_id = worker_id
         self._registry = registry or JobHandlerRegistry()
         self._settings = settings or JobWorkerSettings()
+        self._busy = threading.Event()
 
     def run_once(self) -> WorkerTick:
         """Recover expired leases, then execute at most one supported job."""
@@ -244,8 +245,17 @@ class JobWorker:
             return WorkerTick(WorkerOutcome.IDLE, len(recovered))
 
         lease = leases[0]
-        outcome = self._execute(lease, self._registry.handler_for(lease.key))
+        self._busy.set()
+        try:
+            outcome = self._execute(lease, self._registry.handler_for(lease.key))
+        finally:
+            self._busy.clear()
         return WorkerTick(outcome, len(recovered), str(lease.fence.job_id))
+
+    @property
+    def busy(self) -> bool:
+        """Report process activity without exposing the job or its payload."""
+        return self._busy.is_set()
 
     @property
     def idle_poll_interval(self) -> timedelta:

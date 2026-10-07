@@ -12,6 +12,7 @@ from autplay.adapters.postgresql.library_runtime import LibraryRepository
 from autplay.adapters.postgresql.models import LibraryEntryRow, ListeningEventRow, PlaylistRow
 from autplay.domain.auth import Principal
 from autplay.domain.library import AppendListeningEvent, CreateUnresolvedTrack, PreferenceValue
+from autplay.domain.music_search import MusicSearchKind
 
 
 class LibraryService:
@@ -57,10 +58,17 @@ class LibraryService:
             )
 
     def query_search(
-        self, principal: Principal, query: str, limit: int
+        self,
+        principal: Principal,
+        query: str,
+        limit: int,
+        *,
+        kind: MusicSearchKind = MusicSearchKind.ALL,
     ) -> Sequence[LibraryEntryRow]:
         with self._sessions() as session:
-            return LibraryRepository(session).search_library(principal, query=query, limit=limit)
+            return LibraryRepository(session).search_library(
+                principal, query=query, limit=limit, kind=kind
+            )
 
     # These are deliberately application commands, not HTTP writes. P09 sync is their transport.
     def create_unresolved(self, principal: Principal, command: CreateUnresolvedTrack) -> UUID:

@@ -114,7 +114,7 @@ class ServerWorkersAuthenticationTest {
             settings.update(NonSecretSettings(
                 activeServerProfileId = if (mode == Mode.WRONG_PROFILE) ServerProfileId(ids[0]) else profile,
                 activeUserId = UserId(ids[7]), deviceId = DeviceId(ids[8]), serverBaseUrl = origin,
-                streamBaseUrl = origin, syncOnMeteredNetwork = true, m5Binding = checkpoint,
+                streamBaseUrl = origin, downloadOnMeteredNetwork = true, m5Binding = checkpoint,
             ))
             seed()
             if (upload) VaultUploadWorkScheduler.enqueue(context, ids[14])

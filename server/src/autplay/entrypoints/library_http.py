@@ -19,6 +19,8 @@ from autplay.adapters.postgresql.models import (
     PlaylistRow,
 )
 from autplay.domain.auth import Principal
+from autplay.domain.library import LibraryCommandError
+from autplay.domain.music_search import MusicSearchKind, normalize_music_query
 from autplay.runtime.http import ApiError
 
 _MAX_CURSOR_BYTES = 200
@@ -46,7 +48,14 @@ class LibraryQueryService(Protocol):
         before: datetime | None = None,
         before_id: UUID | None = None,
     ) -> Sequence[object]: ...
-    def query_search(self, principal: Principal, query: str, limit: int) -> Sequence[object]: ...
+    def query_search(
+        self,
+        principal: Principal,
+        query: str,
+        limit: int,
+        *,
+        kind: MusicSearchKind = MusicSearchKind.ALL,
+    ) -> Sequence[object]: ...
 
 
 def create_library_router(
@@ -75,11 +84,18 @@ def create_library_router(
         request: Request,
         q: str = Query(min_length=1, max_length=200),
         limit: int = Query(50, ge=1, le=100),
+        kind: MusicSearchKind = MusicSearchKind.ALL,
     ) -> JSONResponse:
-        query = q.strip()
-        if not query:
-            raise ApiError("search_query_invalid", "The search query is invalid.", 422)
-        rows = service.query_search(_principal(request), query, limit)
+        try:
+            query = normalize_music_query(q)
+        except LibraryCommandError:
+            raise ApiError("search_query_invalid", "The search query is invalid.", 422) from None
+        # Keep default calls compatible with existing query-service adapters.
+        rows = (
+            service.query_search(_principal(request), query, limit)
+            if kind == MusicSearchKind.ALL
+            else service.query_search(_principal(request), query, limit, kind=kind)
+        )
         return _page([_entry(cast(LibraryEntryRow, row)) for row in rows])
 
     @router.get("/playlists", response_model=None)

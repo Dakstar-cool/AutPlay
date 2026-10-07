@@ -10,7 +10,7 @@ import kotlinx.serialization.json.put
 
 /** Bounded, secret-free transfer format for device-local UI preferences. */
 object SettingsTransferCodec {
-    private const val SCHEMA_VERSION = 1
+    private const val SCHEMA_VERSION = 3
     private const val MAX_BYTES = 64 * 1024
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -19,14 +19,16 @@ object SettingsTransferCodec {
         put("app_language", settings.appLanguage)
         put("appearance_mode", settings.appearanceMode)
         put("accent_palette", settings.accentPalette)
-        put("sync_on_metered_network", settings.syncOnMeteredNetwork)
+        put("download_on_metered_network", settings.downloadOnMeteredNetwork)
         put("wave_prefetch_mode", settings.wavePrefetchMode)
+        put("smooth_track_transitions", settings.smoothTrackTransitions)
     }.toString().encodeToByteArray()
 
     fun decode(bytes: ByteArray, current: NonSecretSettings): NonSecretSettings {
         require(bytes.size <= MAX_BYTES) { "SETTINGS_IMPORT_TOO_LARGE" }
         val root = json.parseToJsonElement(bytes.decodeToString()).jsonObject
-        require(root.getValue("schema_version").jsonPrimitive.content.toInt() == SCHEMA_VERSION) {
+        val version = root.getValue("schema_version").jsonPrimitive.content.toInt()
+        require(version in 1..SCHEMA_VERSION) {
             "SETTINGS_SCHEMA_UNSUPPORTED"
         }
         val appearance = root.getValue("appearance_mode").jsonPrimitive.content
@@ -42,8 +44,12 @@ object SettingsTransferCodec {
             appLanguage = appLanguage,
             appearanceMode = appearance,
             accentPalette = palette,
-            syncOnMeteredNetwork = root.getValue("sync_on_metered_network").jsonPrimitive.boolean,
+            downloadOnMeteredNetwork = root.getValue(
+                if (version == 1) "sync_on_metered_network" else "download_on_metered_network",
+            ).jsonPrimitive.boolean,
             wavePrefetchMode = prefetch,
+            smoothTrackTransitions = root["smooth_track_transitions"]?.jsonPrimitive?.boolean
+                ?: current.smoothTrackTransitions,
         )
     }
 }

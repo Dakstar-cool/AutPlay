@@ -22,7 +22,7 @@ import tempfile
 import time
 import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Never, Protocol
@@ -99,6 +99,7 @@ class TrackCandidate:
     license_url: str
     share_url: str
     download_url: str
+    source_metadata: dict[str, object] | None = field(default=None, compare=False)
 
     @property
     def duration(self) -> str:
@@ -538,6 +539,8 @@ def sanitize_filename(value: str) -> str:
 
 
 def _parse_candidate(value: Mapping[str, object]) -> TrackCandidate:
+    from ..source_metadata import native_metadata
+
     track_id = _required_digits(value, "id")
     title = _required_text(value, "name", 500)
     artist = _required_text(value, "artist_name", 500)
@@ -549,6 +552,28 @@ def _parse_candidate(value: Mapping[str, object]) -> TrackCandidate:
         raise JamendoToolError("license_url_invalid")
     if not _is_jamendo_share_url(share_url):
         raise JamendoToolError("share_url_invalid")
+    album_id = value.get("album_id")
+    images: list[dict[str, object]] = []
+    if isinstance(album_id, str) and album_id.isdigit() and value.get("album_image"):
+        images.append(
+            {"kind": "album", "url": value["album_image"], "source_id": f"album:{album_id}"}
+        )
+    elif value.get("image"):
+        images.append({"kind": "track", "url": value["image"], "source_id": track_id})
+    evidence = native_metadata(
+        "jamendo",
+        track_id,
+        {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "release_date": value.get("releasedate"),
+            "track_number": value.get("position"),
+        },
+        native_album_id=album_id,
+        native_artist_id=value.get("artist_id"),
+        artwork=images,
+    )
     return TrackCandidate(
         track_id,
         title,
@@ -558,6 +583,7 @@ def _parse_candidate(value: Mapping[str, object]) -> TrackCandidate:
         license_url,
         share_url,
         _required_download_url(value, track_id),
+        evidence,
     )
 
 

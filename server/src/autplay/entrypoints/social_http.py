@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -10,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
 
 from autplay.application.social import SocialError, SocialService
 from autplay.domain.auth import Principal
@@ -69,6 +70,18 @@ class ContactCardBody(StrictBody):
     signature_b64url: str = Field(pattern="^[A-Za-z0-9_-]{86}$")
 
 
+class PublicIdBody(StrictBody):
+    operation_id: UUID
+    public_id: str = Field(min_length=3, max_length=24, pattern="^[A-Za-z0-9_]{3,24}$")
+
+    @field_validator("public_id")
+    @classmethod
+    def exact_ascii_id(cls, value: str) -> str:
+        if re.fullmatch(r"[A-Za-z0-9_]{3,24}", value, flags=re.ASCII) is None:
+            raise ValueError("invalid public ID")
+        return value
+
+
 class FriendshipCommandBody(StrictBody):
     operation_id: UUID
     action: str = Field(
@@ -116,6 +129,9 @@ def create_social_router(
     statistics_router = APIRouter(
         dependencies=[Depends(authenticated)], route_class=_ProfileStatisticsRoute
     )
+    public_id_router = APIRouter(
+        dependencies=[Depends(authenticated)], route_class=_ProfileStatisticsRoute
+    )
 
     def p(request: Request) -> Principal:
         value = request.state.principal
@@ -140,6 +156,7 @@ def create_social_router(
                         "presence_private",
                         "profile_statistics_unavailable",
                         "room_invitation_unavailable",
+                        "public_id_not_found",
                     }
                     else (401 if error.code == "auth_attention_required" else 409)
                 )
@@ -155,6 +172,20 @@ def create_social_router(
     def private(response: Response) -> None:
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
+
+    @public_id_router.get("/public-id")
+    def public_id_get(request: Request) -> object:
+        return call(lambda: service.get_public_id(p(request), n()))
+
+    @public_id_router.put("/public-id")
+    def public_id_put(request: Request, body: PublicIdBody) -> object:
+        return call(
+            lambda: service.register_public_id(p(request), body.model_dump(mode="json"), n())
+        )
+
+    @public_id_router.get("/accounts/by-public-id/{public_id}")
+    def public_id_lookup(request: Request, public_id: str) -> object:
+        return call(lambda: service.lookup_public_id(p(request), public_id, n()))
 
     @router.get("/contact-card")
     def contact_card(request: Request, response: Response) -> object:
@@ -236,6 +267,7 @@ def create_social_router(
         return call(lambda: service.friend_profile_statistics(p(request), account_id, n()))
 
     router.include_router(statistics_router)
+    router.include_router(public_id_router)
 
     return router
 

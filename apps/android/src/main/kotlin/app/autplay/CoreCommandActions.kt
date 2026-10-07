@@ -14,6 +14,8 @@ import app.autplay.application.recommendation.HomeRecommendationItem
 import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.recommendation.RecommendationPresentationResult
 import app.autplay.application.search.LocalTrackSearchRepository
+import app.autplay.application.search.LibrarySearchKind
+import app.autplay.application.search.searchOwnerContextKey
 import app.autplay.application.search.LocalTrackSearchResult
 import app.autplay.application.search.VaultSearchProjector
 import app.autplay.application.search.VaultSearchResult
@@ -28,6 +30,7 @@ import app.autplay.ui.core.DetailTarget
 import app.autplay.ui.core.SearchGenerationGuard
 import app.autplay.ui.core.SearchResultStore
 import app.autplay.ui.core.SearchScope
+import app.autplay.ui.core.automaticSearchScopes
 import app.autplay.ui.core.SingleFlightActionGate
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.CoroutineScope
@@ -111,8 +114,15 @@ internal fun buildCoreCommandActions(
             val impression = presentationResults[key] ?: return@feedback
             val actionKey = "home-feedback:$key"
             if (!actionGate.begin(actionKey)) return@feedback
+            val ratedPlayback = app.autplay.playback.PlaybackRuntimeState.state.value.takeIf {
+                preference == "DISLIKED" && it.localUserTrackRefId == item.localUserTrackRefId
+            }
             scope.launch {
                 try {
+                    ratedPlayback?.queueEntryId?.let { entryId ->
+                        runCatching { playbackOwner.dispatch(PlaybackCommand.NextIfCurrent(LocalId(entryId))) }
+                            .onFailure { reportError("QUEUE_NAVIGATION_UNAVAILABLE") }
+                    }
                     runCatching {
                         sliceRepository.setPlaybackPreference(
                             activeBinding,
@@ -139,21 +149,24 @@ internal fun buildCoreCommandActions(
                 try {
                     runCatching {
                         val snapshotId = LocalId.random()
+                        val trackIds = continuationTrackIds(trackRefId, queueType, libraryEntries())
+                        val entries = trackIds.map { id ->
+                            NewPlaybackQueueEntry(
+                                queueEntryId = LocalId.random(),
+                                trackRefId = LocalId(id),
+                                sourceOrigin = sourceOrigin,
+                                sourceAudioPolicy = "LOCAL_THEN_VAULT",
+                            )
+                        }
                         playbackRepository.activateQueue(
                             snapshotId = snapshotId,
-                            entries = listOf(
-                                NewPlaybackQueueEntry(
-                                    queueEntryId = LocalId.random(),
-                                    trackRefId = LocalId(trackRefId),
-                                    sourceOrigin = sourceOrigin,
-                                    sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                                ),
-                            ),
+                            entries = entries,
                             queueType = queueType,
                             sourceContextId = sourceContextId,
                             serverProfileId = binding()?.serverProfileId?.value,
                             listeningContext = "GENERAL",
                             nowMs = System.currentTimeMillis(),
+                            startEntryId = entries.first { it.trackRefId.value == trackRefId }.queueEntryId,
                         )
                         playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
                     }.onFailure { reportError("PLAYBACK_UNAVAILABLE") }
@@ -381,6 +394,7 @@ internal data class SearchCommandActions(
     val reset: () -> Unit,
     val changeQuery: (String) -> Unit,
     val changeVaultScope: (Boolean) -> Unit,
+    val changeKind: (LibrarySearchKind) -> Unit,
 )
 
 internal fun buildSearchCommandActions(
@@ -414,8 +428,9 @@ internal fun buildSearchCommandActions(
     fun submit() {
         if (coreState.query.isBlank()) return
         val activeBinding = binding()
-        val activeScopes = coreState.scopes + SearchScope.Local
-        val request = generation.begin(coreState.query, activeScopes, activeBinding?.serverProfileId?.value)
+        val activeScopes = automaticSearchScopes(activeBinding?.serverProfileId?.value)
+        coreState.scopes = activeScopes
+        val request = generation.begin(coreState.query, activeScopes, activeBinding.searchOwnerContextKey(), coreState.searchKind)
         state.setSessionId(LocalId.random().value)
         resultStore.start(request)
         vaultResultStore.start(request)
@@ -427,7 +442,7 @@ internal fun buildSearchCommandActions(
         state.setVaultResults(emptyList())
         state.setVaultSearched(false)
         scope.launch {
-            runCatching { searchRepository.search(request.normalizedQuery, activeBinding?.serverProfileId?.value) }
+            runCatching { searchRepository.search(request.normalizedQuery, activeBinding?.serverProfileId?.value, kind = request.kind) }
                 .onSuccess {
                     if (generation.accepts(request) && resultStore.accept(request, it)) {
                         state.setResults(resultStore.results)
@@ -437,6 +452,7 @@ internal fun buildSearchCommandActions(
                     }
                 }
                 .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
                     if (generation.accepts(request)) {
                         state.setCompleted(true)
                         state.setLoading(false)
@@ -448,7 +464,7 @@ internal fun buildSearchCommandActions(
         if (SearchScope.Vault in activeScopes && activeBinding != null) {
             scope.launch {
                 runCatching {
-                    AutPlayRuntime.serverFeatures(context, activeBinding).searchLibrary(request.normalizedQuery, limit = 100)
+                    AutPlayRuntime.serverFeatures(context, activeBinding).searchLibrary(request.normalizedQuery, limit = 100, kind = request.kind)
                 }.mapCatching { rows ->
                     vaultProjector.project(activeBinding.serverProfileId.value, rows)
                 }.onSuccess { rows ->
@@ -458,6 +474,7 @@ internal fun buildSearchCommandActions(
                         state.setVaultLoading(false)
                     }
                 }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
                     if (generation.accepts(request)) {
                         state.setVaultLoading(false)
                         state.setVaultError(true)
@@ -470,6 +487,7 @@ internal fun buildSearchCommandActions(
 
     return SearchCommandActions(
         submit = ::submit,
+        changeKind = { kind -> coreState.searchKind = kind; reset() },
         reset = ::reset,
         changeQuery = { value ->
             coreState.query = value.take(200)
