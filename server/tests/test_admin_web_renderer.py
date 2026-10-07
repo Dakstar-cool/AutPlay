@@ -100,5 +100,6 @@ def test_every_declared_static_asset_digest_matches_packaged_bytes() -> None:
 
     for name, expected in STATIC_ASSET_DIGESTS.items():
         payload = static_root.joinpath(name).read_bytes()
+        assert b"\r\n" not in payload, f"{name} must use LF line endings for a portable digest"
         assert hashlib.sha256(payload).hexdigest() == expected
         assert read_static_asset(name) == (payload, expected)
