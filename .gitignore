@@ -56,9 +56,7 @@ test-results/
 *.tmp
 tmp/
 
-# Local AI/development orchestration (kept on developer machines, not in Git)
-/AGENTS.md
-/START_HERE.md
+# Local AI/development orchestration (shared guidance is tracked in Git)
 /.agents/
 /.codex/agents/
 /.codex/config.toml
