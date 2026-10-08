@@ -19,7 +19,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -28,20 +30,28 @@ import app.autplay.R
 internal val LocalDeveloperMode = staticCompositionLocalOf { false }
 
 @Composable
+internal fun PreferenceSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = AutPlayTokens.colors.glassSurface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
+        content = content,
+    )
+}
+
+@Composable
 internal fun PreferenceSection(
     title: String,
     icon: AutPlayIcon,
     summary: String? = null,
+    initiallyExpanded: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    var expanded by rememberSaveable(title) { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
     val sectionState = stringResource(if (expanded) R.string.section_expanded else R.string.section_collapsed)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = AutPlayTokens.colors.glassSurface,
-        border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
-    ) {
+    PreferenceSurface {
         Column {
             Surface(
                 onClick = { expanded = !expanded },
@@ -55,10 +65,10 @@ internal fun PreferenceSection(
                 ) {
                     AutPlayPlatformIcon(icon, null, Modifier.size(24.dp), MaterialTheme.colorScheme.primary)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(title, style = MaterialTheme.typography.titleMedium)
+                        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
                         summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AutPlayTokens.colors.mutedText) }
                     }
-                    Text(if (expanded) "−" else "+", style = MaterialTheme.typography.titleLarge)
+                    AutPlayPlatformIcon(AutPlayIcon.ChevronDown, null, Modifier.size(20.dp).rotate(if (expanded) 180f else 0f), AutPlayTokens.colors.mutedText)
                 }
             }
             if (expanded) Column(

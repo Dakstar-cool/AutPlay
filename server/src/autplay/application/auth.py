@@ -8,6 +8,7 @@ from uuid import UUID
 
 from autplay.domain.auth import (
     AccessTokenClaims,
+    AccountReauthenticationRequiredError,
     AccountRole,
     DeviceDescription,
     InvalidAccessTokenError,
@@ -259,6 +260,8 @@ class AuthService:
 
         now = _aware(self.clock.now())
         with self.unit_of_work_factory() as unit_of_work:
+            if unit_of_work.auth.requires_account_reauthentication(principal.user_id):
+                raise AccountReauthenticationRequiredError
             unit_of_work.auth.revoke_session(principal.session_id, revoked_at=now)
             unit_of_work.auth.add_audit_event(
                 _principal_audit(
@@ -277,6 +280,8 @@ class AuthService:
 
         with self.unit_of_work_factory() as unit_of_work:
             repository = unit_of_work.auth
+            if repository.requires_account_reauthentication(principal.user_id):
+                raise AccountReauthenticationRequiredError
             now = self._lock_actor(repository, principal)
             revoked = unit_of_work.auth.revoke_active_sessions_for_user(
                 principal.user_id, revoked_at=now
@@ -305,6 +310,8 @@ class AuthService:
 
         with self.unit_of_work_factory() as unit_of_work:
             repository = unit_of_work.auth
+            if repository.requires_account_reauthentication(principal.user_id):
+                raise AccountReauthenticationRequiredError
             now = self._lock_actor(repository, principal)
             if not repository.lock_owned_device(principal.user_id, device_id):
                 raise OwnedObjectNotFoundError

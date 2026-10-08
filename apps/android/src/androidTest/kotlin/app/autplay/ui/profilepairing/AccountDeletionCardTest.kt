@@ -96,7 +96,7 @@ class AccountDeletionCardTest {
         compose.setContent {
             CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config,
                 LocalResources provides localized.resources) {
-                MaterialTheme(colorScheme = darkColorScheme()) {
+                app.autplay.ui.AutPlayTheme {
                     Surface(Modifier.fillMaxSize()) {
                         Column(Modifier.verticalScroll(rememberScrollState())) { AccountDeletionCard(state, actions) }
                     }

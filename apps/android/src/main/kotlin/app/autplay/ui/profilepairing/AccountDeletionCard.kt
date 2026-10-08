@@ -1,14 +1,14 @@
 package app.autplay.ui.profilepairing
 
+import app.autplay.ui.AutPlayDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,8 +38,7 @@ internal fun AccountDeletionCard(state: AccountDeletionUiState, actions: Account
     var confirm by remember { mutableStateOf(false) }
     var account by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    if (state.canManage || state.source != AccountDeletionSourceState.Idle) Surface(
-        shape = MaterialTheme.shapes.large, tonalElevation = 1.dp) {
+    if (state.canManage || state.source != AccountDeletionSourceState.Idle) app.autplay.ui.PreferenceSurface {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.deletion_title), style = MaterialTheme.typography.titleMedium)
             when (val source = state.source) {
@@ -74,7 +73,7 @@ internal fun AccountDeletionCard(state: AccountDeletionUiState, actions: Account
         }
     }
     AccountRecoveryCard(state.cancellation, actions.cancellation)
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false; account = ""; code = "" },
+    if (confirm) AutPlayDialog(onDismissRequest = { confirm = false; account = ""; code = "" },
         title = { Text(stringResource(R.string.deletion_request)) }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.deletion_warning))

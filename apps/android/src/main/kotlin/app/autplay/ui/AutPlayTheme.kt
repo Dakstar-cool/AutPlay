@@ -3,7 +3,6 @@ package app.autplay.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -24,7 +23,6 @@ import androidx.core.view.WindowCompat
 
 /** User-selectable appearance values that can be persisted by the settings layer. */
 public enum class AutPlayThemeMode {
-    System,
     Light,
     Dark,
 }
@@ -63,7 +61,7 @@ public data class AutPlaySemanticColors(
 @Immutable
 public data class AutPlayDimensions(
     public val screenPadding: androidx.compose.ui.unit.Dp = 20.dp,
-    public val sectionSpacing: androidx.compose.ui.unit.Dp = 28.dp,
+    public val sectionSpacing: androidx.compose.ui.unit.Dp = 20.dp,
     public val cardRadius: androidx.compose.ui.unit.Dp = 18.dp,
     public val compactRadius: androidx.compose.ui.unit.Dp = 14.dp,
     public val minimumTouchTarget: androidx.compose.ui.unit.Dp = 48.dp,
@@ -90,7 +88,6 @@ public fun AutPlayTheme(
     content: @Composable () -> Unit,
 ) {
     val dark = when (appearance.mode) {
-        AutPlayThemeMode.System -> isSystemInDarkTheme()
         AutPlayThemeMode.Light -> false
         AutPlayThemeMode.Dark -> true
     }
@@ -170,7 +167,10 @@ private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorSchem
         onPrimary = Color.White,
         primaryContainer = accent.lightContainer,
         onPrimaryContainer = Color.Black,
-        secondary = Color(0xFF6B56A6),
+        secondary = Color(0xFF706D68),
+        onSecondary = Color.White,
+        secondaryContainer = Color(0xFFEAE6DE),
+        onSecondaryContainer = Color(0xFF181818),
         tertiary = Color(0xFF247447),
         background = Color(0xFFF6F3ED),
         onBackground = Color(0xFF181818),
@@ -185,6 +185,7 @@ private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorSchem
         surfaceContainerHighest = Color(0xFFE2DED6),
         surfaceTint = Color.Transparent,
         outline = Color(0xFF817D76),
+        outlineVariant = Color(0xFFE5E0D8),
         error = Color(0xFFB3261E),
     )
 }

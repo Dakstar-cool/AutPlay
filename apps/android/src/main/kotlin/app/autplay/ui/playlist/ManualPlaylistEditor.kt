@@ -1,5 +1,7 @@
 package app.autplay.ui.playlist
 
+import app.autplay.ui.AutPlayDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -152,7 +153,7 @@ public fun ManualPlaylistEditor(
         )
     }
     if (deleteDialog) {
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { deleteDialog = false },
             text = { Text(text.confirmDelete) },
             confirmButton = { Button(onClick = { actions.delete(playlist.playlistId); deleteDialog = false }) { Text(text.delete) } },
@@ -171,7 +172,7 @@ public fun AddTrackToPlaylistDialog(
     text: ManualPlaylistText = ManualPlaylistText(),
 ) {
     var selectedId by remember(playlists) { mutableStateOf<String?>(null) }
-    AlertDialog(
+    AutPlayDialog(
         onDismissRequest = onDismiss,
         title = { Text(text.selectPlaylist) },
         text = {
@@ -269,7 +270,7 @@ private fun PlaylistMetadataDialog(
     var name by remember(initialName) { mutableStateOf(initialName) }
     var description by remember(initialDescription) { mutableStateOf(initialDescription.orEmpty()) }
     val metadata = normalizeManualPlaylistMetadata(name, description)
-    AlertDialog(
+    AutPlayDialog(
         onDismissRequest = onDismiss,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

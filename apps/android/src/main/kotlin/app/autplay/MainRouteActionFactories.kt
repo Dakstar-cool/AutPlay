@@ -551,6 +551,8 @@ internal fun buildLegacySecondaryRouteActions(
     manualPlaylists: ManualPlaylistActions,
     openPlaylist: (String) -> Unit,
     selfPairingActions: SelfPairingActions = SelfPairingActions(),
+    portableAccountActions: app.autplay.ui.profilepairing.PortableAccountActions = app.autplay.ui.profilepairing.PortableAccountActions(),
+    confirmProfileAction: suspend (ProfileRemoteAction, String, CharArray) -> Boolean = { _, _, password -> password.fill('\u0000'); false },
     accountRecoveryActions: AccountRecoveryActions = AccountRecoveryActions(),
     accountDeletionActions: AccountDeletionActions = AccountDeletionActions(),
     refreshOwnerStatistics: () -> Unit = {},
@@ -636,17 +638,11 @@ internal fun buildLegacySecondaryRouteActions(
         }
     },
     disconnectLocally = {
-        val profileId = settings.activeServerProfileId
-        if (profileId != null) scope.launch {
-            BindingAuthorityWriteGate.serialized {
-                OfflineRecommendationRepository(AutPlayRuntime.database(context))
-                    .purgeLocalRecommendationContext(profileId.value)
-                AndroidKeystoreCredentialStore(context.applicationContext).clear(profileId)
-                settingsStore.mutate(::deactivateServerBinding)
-            }
-        }
+        reportError("ACCOUNT_REAUTHENTICATION_REQUIRED")
     },
     profilePairing = ProfilePairingActions(
+        portableAccount = portableAccountActions,
+        confirmRemoteAction = confirmProfileAction,
         selfPairing = selfPairingActions,
         accountRecovery = accountRecoveryActions,
         accountDeletion = accountDeletionActions,

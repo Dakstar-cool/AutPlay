@@ -523,6 +523,125 @@ class SocialService:
             row = s.get(ProfileStatisticsSettingsRow, principal.user_id)
             return self._profile_statistics_settings_view(row)
 
+    def owner_profile_statistics(self, principal: Principal, now: datetime) -> dict[str, object]:
+        """Read the authenticated account's retained history across all of its devices."""
+        with self._sessions.begin() as s:
+            self._lock_profile_statistics_accounts(s, principal, principal.user_id, now)
+            self._rate(s, "PROFILE_STATISTICS_SETTINGS_READ", str(principal.user_id), 60, now)
+            params = {
+                "user_id": principal.user_id,
+                "through": now,
+                "maximum": 9_223_372_036_854_775_807,
+            }
+            device = s.get(DeviceRow, principal.device_id)
+            if (
+                device is None
+                or device.user_id != principal.user_id
+                or device.revoked_at is not None
+            ):
+                raise SocialError("auth_attention_required")
+            # Raw facts remain immutable. A portable row names the logical event across aliases.
+            logical = """
+                WITH represented AS (
+                    SELECT coalesce(p.record_id,e.listening_event_id) AS logical_id,
+                           coalesce(p.document->>'track_key',u.recording_id::text,
+                                    e.recording_id::text,e.user_track_ref_id::text) AS identity_key,
+                           left(nullif(btrim(coalesce(p.document->>'title',
+                               m.document#>>'{fields,title}',u.raw_title)),''),2000) AS title,
+                           left(nullif(btrim(coalesce(p.document->>'artist',
+                               m.document#>>'{fields,artist}',u.raw_artist)),''),2000) AS artist_name,
+                           coalesce((p.document->>'played_ms')::bigint,e.played_ms) AS played_ms,
+                           coalesce(nullif(p.document->'genres','[]'::jsonb),m.document#>'{fields,genres}',
+                                    '[]'::jsonb) AS genres,
+                           row_number() OVER (
+                               PARTITION BY coalesce(p.record_id,e.listening_event_id)
+                               ORDER BY e.listening_event_id
+                           ) AS alias_rank
+                    FROM library.listening_event e
+                    JOIN library.user_track_ref u
+                      ON u.user_track_ref_id=e.user_track_ref_id AND u.user_id=e.user_id
+                    LEFT JOIN library.track_metadata m ON m.user_track_ref_id=u.user_track_ref_id
+                    LEFT JOIN LATERAL (
+                        SELECT record_id,document FROM account.portable_record
+                        WHERE user_id=:user_id AND kind='LISTENING'
+                          AND (document->'event_ids') ? e.listening_event_id::text
+                        ORDER BY record_id LIMIT 1
+                    ) p ON true
+                    WHERE e.user_id=:user_id AND e.started_at<=:through AND e.played_ms>0
+                      AND (p.record_id IS NULL OR
+                           (p.document->>'started_at_ms')::numeric<=:through_ms)
+                ), facts AS (SELECT * FROM represented WHERE alias_rank=1)
+            """
+            params["through_ms"] = int(now.timestamp() * 1000)
+            total = s.scalar(
+                text(
+                    logical + "SELECT least(coalesce(sum(played_ms),0),:maximum)::bigint FROM facts"
+                ),
+                params,
+            )
+            tracks = (
+                s.execute(
+                    text(
+                        logical
+                        + """
+                SELECT identity_key,max(title) AS title,max(artist_name) AS artist_name,
+                       count(*) AS play_session_count,least(sum(played_ms),:maximum)::bigint AS listened_ms
+                FROM facts GROUP BY identity_key
+                ORDER BY listened_ms DESC,play_session_count DESC,identity_key ASC LIMIT 5
+            """
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            )
+            artists = (
+                s.execute(
+                    text(
+                        logical
+                        + """
+                SELECT artist_name,count(*) AS play_session_count,
+                       least(sum(played_ms),:maximum)::bigint AS listened_ms
+                FROM facts GROUP BY artist_name
+                ORDER BY listened_ms DESC,play_session_count DESC,artist_name ASC NULLS LAST LIMIT 5
+            """
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            )
+            genres = (
+                s.execute(
+                    text(
+                        logical
+                        + """
+                SELECT genre,least(sum(played_ms),:maximum)::bigint AS listened_ms
+                FROM facts CROSS JOIN LATERAL (
+                    SELECT DISTINCT btrim(value#>>'{}') AS genre
+                    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(genres)='array'
+                         THEN genres ELSE '[]'::jsonb END) AS item(value)
+                    WHERE jsonb_typeof(value)='string'
+                      AND length(btrim(value#>>'{}')) BETWEEN 1 AND 100
+                ) AS genre_values GROUP BY genre
+                ORDER BY listened_ms DESC,genre ASC LIMIT 5
+            """
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            )
+            return {
+                "schema_version": 1,
+                "account_id": str(principal.user_id),
+                "through_ms": int(now.timestamp() * 1000),
+                "listened_ms": int(total or 0),
+                "top_tracks": [dict(row) for row in tracks],
+                "top_artists": [dict(row) for row in artists],
+                "top_genres": [dict(row) for row in genres],
+            }
+
     def set_profile_statistics_settings(
         self, principal: Principal, body: dict[str, object], now: datetime
     ) -> dict[str, object]:

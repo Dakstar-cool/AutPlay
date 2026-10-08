@@ -252,6 +252,10 @@ def create_social_router(
     def profile_statistics_settings_get(request: Request) -> object:
         return call(lambda: service.get_profile_statistics_settings(p(request), n()))
 
+    @statistics_router.get("/profile-statistics/owner")
+    def owner_profile_statistics(request: Request) -> object:
+        return call(lambda: service.owner_profile_statistics(p(request), n()))
+
     @statistics_router.put("/profile-statistics/settings")
     def profile_statistics_settings_put(
         request: Request, body: ProfileStatisticsSettingsBody

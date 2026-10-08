@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_my_wave_random">Random playback from your music. Tap again to reshuffle.</string>
+    <string name="home_my_wave_locked">Wait for the player to be ready or leave Listen together.</string>
+    <string name="home_my_wave_empty">No playable music right now. Add a local track, download music, or connect to your server.</string>
+</resources>

@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -32,6 +33,12 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TrainingConsentCardTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun modalChoicesAreVisibleWithoutExpandingASettingsSection() {
+        render(TrainingConsentUi(TrainingConsentState(TrainingConsentPolicy(ID, "UNKNOWN", 0)), true), "en", inDialog = true)
+        compose.onNodeWithText("Allow").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Refuse").performScrollTo().assertIsDisplayed()
+    }
 
     @Test fun unknownPolicyOffersEqualRussianChoicesWithoutOptimisticConfirmation() {
         val choices = mutableListOf<String>()
@@ -74,14 +81,19 @@ class TrainingConsentCardTest {
         compose.runOnIdle { assertEquals(1, retries); assertEquals(listOf("WITHDRAWN"), choices) }
     }
 
-    private fun render(ui: TrainingConsentUi, locale: String) {
+    private fun render(ui: TrainingConsentUi, locale: String, inDialog: Boolean = false) {
         val config = Configuration(compose.activity.resources.configuration).apply { setLocale(Locale.forLanguageTag(locale)) }
         val localized = compose.activity.createConfigurationContext(config)
         compose.setContent {
             CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config,
                 LocalResources provides localized.resources) {
-                MaterialTheme(colorScheme = darkColorScheme()) {
-                    Surface(Modifier.fillMaxSize()) {
+                app.autplay.ui.AutPlayTheme {
+                    if (inDialog) app.autplay.ui.AutPlayDialog(
+                        onDismissRequest = {},
+                        title = { Text(localized.getString(app.autplay.R.string.training_consent_title)) },
+                        text = { TrainingConsentCard(ui, inDialog = true) },
+                        confirmButton = {},
+                    ) else Surface(Modifier.fillMaxSize()) {
                         Column(Modifier.verticalScroll(rememberScrollState())) { TrainingConsentCard(ui) }
                     }
                 }
@@ -89,6 +101,7 @@ class TrainingConsentCardTest {
         }
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
+        if (!inDialog) compose.onNodeWithText(localized.getString(app.autplay.R.string.training_consent_title)).performClick()
     }
     private fun capture(name: String) {
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()

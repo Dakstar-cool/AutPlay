@@ -12,6 +12,36 @@ import kotlinx.coroutines.runBlocking
 class PlaybackPresentationPolicyTest {
     private val ordinary = ActiveQueueContext.Loaded("queue", "entry-1", "USER")
 
+    @Test fun dismissalPausesEvenWhenNotPlayingAndRemainsFailClosedForWave() {
+        val port = FakePlaybackCommandPort(sourceAvailable = false)
+        assertTrue(PlaybackCommandGate.evaluate(ordinary, port.mediaId, true,
+            sourceAvailable = false) is PlaybackControlGate.Locked)
+        assertTrue(PlaybackCommandGate.evaluateDismissal(ordinary, port.mediaId, true)
+            is PlaybackControlGate.Allowed)
+        assertTrue(PlaybackCommandBoundary.pauseForDismissal(port, ordinary))
+        assertEquals(1, port.pauseCalls)
+        assertEquals(0, port.playCalls)
+        assertFalse(PlaybackCommandBoundary.pauseForDismissal(
+            port, ActiveQueueContext.Loaded("wave", "entry-1", "WAVE")))
+        assertFalse(PlaybackCommandBoundary.pauseForDismissal(port, ActiveQueueContext.Loading))
+        assertFalse(PlaybackCommandBoundary.pauseForDismissal(
+            port, ActiveQueueContext.Loaded("unknown", "entry-1", "FUTURE")))
+        assertFalse(PlaybackCommandBoundary.pauseForDismissal(
+            port, ordinary.copy(currentEntryId = "other")))
+        assertTrue(PlaybackCommandGate.evaluateDismissal(ordinary, port.mediaId, false)
+            is PlaybackControlGate.Locked)
+        assertEquals(1, port.totalLocalCalls)
+    }
+
+    @Test fun dismissedSurfaceReturnsOnlyForUserPlayIntent() {
+        assertFalse(shouldRestoreDismissedMiniPlayer(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST))
+        assertFalse(shouldRestoreDismissedMiniPlayer(true, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS))
+        assertTrue(shouldRestoreDismissedMiniPlayer(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST))
+        assertTrue(shouldRestoreDismissedMiniPlayer(true, Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE))
+        val dismissed = PlaybackPresentationState(mediaId = "entry-1", miniPlayerDismissed = true)
+        assertTrue(dismissed.copy(positionMs = 40_000, isPlaying = true).miniPlayerDismissed)
+    }
+
     @Test
     fun ordinaryProjectionAllowsOnlyMatchingEntryAndPreservesAbsoluteBuffer() {
         val state = PlaybackPresentationState(

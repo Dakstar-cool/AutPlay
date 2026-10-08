@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_invitation_qr_description">Enrollment invitation QR code</string>
+    <string name="profile_join_server">Join an AutPlay server</string>
+    <string name="profile_account_invite_hint">Scan the invitation QR or open an .autplayinvite file. The secret is kept only for this registration.</string>
+    <string name="profile_account_invite_document">Account invitation document</string>
+    <string name="profile_account_invite_manual_hint">Manual entry is volatile and is not saved.</string>
+    <string name="profile_account_scan_qr">Scan QR</string>
+    <string name="profile_account_open_file">Open file</string>
+    <string name="profile_account_check_invite">Check invitation</string>
+    <string name="profile_account_verify_server">Verify this server before sending the invitation secret.</string>
+    <string name="profile_account_create_connect">Create account and connect</string>
+    <string name="profile_owner_invite_friends">Invite friends</string>
+    <string name="profile_owner_friend_name">Friend account name</string>
+    <string name="profile_owner_create_invite">Create 30-minute invitation</string>
+    <string name="profile_owner_disable_account">Disable</string>
+    <string name="profile_owner_invite_once">Shown once. Share directly or let your friend scan this QR; do not copy it into a URL.</string>
+    <string name="profile_owner_share_invite">Share invitation</string>
+    <string name="profile_reenroll_device">Re-enroll trusted device</string>
+    <string name="profile_trust_fingerprint">Identity fingerprint: %1$s</string>
+    <string name="profile_trust_api_origin">API address: %1$s</string>
+    <string name="profile_trust_stream_origin">Stream address: %1$s</string>
+    <string name="profile_account_role_user">Role: User</string>
+    <string name="profile_account_invite_expires">Invitation expires: %1$s</string>
+    <string name="profile_account_create_confirm">Create account “%1$s” and connect this phone as its first device?</string>
+    <string name="profile_invitation_secret_description">One-time invitation secret</string>
+    <string name="admission_approved_account">Approved for %1$s (%2$s). Confirm this account before connecting.</string>
+    <string name="admission_confirm_account">Confirm account</string>
+    <string name="admission_connecting_device">Connecting approved device…</string>
+    <string name="admission_connected">Connected</string>
+    <string name="admission_retry">Try again</string>
+    <string name="admission_rejected">Approval was rejected.</string>
+    <string name="admission_blocked">This device key is blocked.</string>
+    <string name="admission_expired">Approval request expired.</string>
+    <string name="admission_cancelled">Approval request cancelled.</string>
+    <string name="admission_unavailable">Approval service is unavailable. Local music remains available.</string>
+    <string name="admission_identity_changed">Server identity changed. Recheck trust before trying again.</string>
+    <string name="training_consent_summary">Choose whether to help improve recommendations</string>
+    <string name="profile_share_contact_title">Share AutPlay contact card</string>
+    <string name="profile_share_account_title">Share AutPlay account invitation</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_switch_to_light">Switch to light theme</string>
+    <string name="settings_switch_to_dark">Switch to dark theme</string>
+</resources>

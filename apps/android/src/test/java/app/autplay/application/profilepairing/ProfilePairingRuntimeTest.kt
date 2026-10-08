@@ -45,10 +45,77 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProfilePairingRuntimeTest {
+    @Test fun encryptedRootWithoutMarkersGuardsQrAndEveryLocalExitUntilScopedRotationDetach() = runBlocking {
+        val fixture = Fixture()
+        val password = "portable guard fixture phrase".toCharArray()
+        val created = try {
+            app.autplay.application.portableaccount.PortableAccountCrypto.create("guard_user", password, USER.value)
+        } finally { password.fill('\u0000') }
+        created.use {
+            val document = it.document.encode()
+            val savedRoot = try { SessionCredentialEnvelopeCodec.encode(SessionCredentialEnvelope(
+                "portable-account", null, 0, portableAccountDocument = document.toString(Charsets.UTF_8),
+            )) } finally { document.fill(0) }
+            try {
+                fixture.credentials.write(CredentialJournalSlots.portableAccount, savedRoot)
+                assertNull(fixture.settings.value.portableAccountId)
+                fixture.runtime.startDiscovery(API_ORIGIN).join()
+                fixture.runtime.confirmTrust()
+                assertEquals(1, fixture.port.discoveryCalls)
+                fixture.runtime.exchangeInvitation(invitation().replace(USER.value, "c87746b0-2d32-420b-b20e-ec8052a6579f")).join()
+                assertEquals(0, fixture.port.exchangeCalls)
+                fixture.runtime.startDiscovery(API_ORIGIN).join()
+                fixture.runtime.confirmTrust()
+                fixture.runtime.exchangeInvitation(invitation()).join()
+                fixture.runtime.chooseLocalData(review = false).join()
+                val connected = fixture.runtime.state.value.pairing as PairingState.Connected
+                assertEquals(1, fixture.port.exchangeCalls)
+                val binding = requireNotNull(fixture.settings.value.m5Binding)
+                for (action in RuntimeLifecycleAction.entries) {
+                    assertFalse(fixture.runtime.performConfirmedLifecycle(action, null, null))
+                    assertEquals(binding, fixture.settings.value.m5Binding)
+                }
+                fixture.runtime.cancelFirstBinding().join()
+                assertEquals(binding, fixture.settings.value.m5Binding)
+                assertFalse(fixture.runtime.detachAfterPortableRootRotation(USER.value, connected.snapshot.serverProfileId, "stale-commit"))
+                assertEquals(binding, fixture.settings.value.m5Binding)
+                assertTrue(fixture.runtime.detachAfterPortableRootRotation(USER.value, connected.snapshot.serverProfileId, binding.bindingCommitId))
+                assertTrue(fixture.runtime.detachAfterPortableRootRotation(USER.value, connected.snapshot.serverProfileId, binding.bindingCommitId))
+                assertNull(fixture.settings.value.m5Binding)
+                val retained = requireNotNull(fixture.credentials.read(CredentialJournalSlots.portableAccount))
+                try {
+                    val envelope = SessionCredentialEnvelopeCodec.decode(retained)
+                    val retainedDocument = app.autplay.application.portableaccount.PortableAccountDocument.parse(
+                        requireNotNull(envelope.portableAccountDocument).toByteArray(Charsets.UTF_8))
+                    assertEquals(created.document.keyThumbprint, retainedDocument.keyThumbprint)
+                    assertEquals(created.document.accountId, retainedDocument.accountId)
+                    assertNotNull(envelope.portableAccountLineage)
+                } finally { retained.fill(0) }
+            } finally { savedRoot.fill(0) }
+        }
+    }
+
+    @Test fun encryptedPortablePendingBlocksDiscoveryAndCannotReleaseUntilJournalRemoved() = runBlocking {
+        val fixture = Fixture()
+        val pending = "opaque-pending-even-if-corrupted".toByteArray()
+        fixture.credentials.write(CredentialJournalSlots.portableEnrollment, pending)
+        fixture.runtime.startDiscovery(API_ORIGIN).join()
+        assertEquals(0, fixture.port.discoveryCalls)
+        assertArrayEquals(pending, fixture.credentials.read(CredentialJournalSlots.portableEnrollment))
+        assertTrue(fixture.firstBindGate.reserve(FirstBindCeremonyOwner.PORTABLE_ACCOUNT))
+        assertTrue(runCatching { fixture.runtime.releaseExpiredPortableEnrollment(publicSnapshot()) }.isFailure)
+        assertTrue(fixture.firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT))
+        fixture.credentials.clear(CredentialJournalSlots.portableEnrollment)
+        assertTrue(fixture.runtime.releaseExpiredPortableEnrollment(publicSnapshot()))
+        fixture.runtime.startDiscovery(API_ORIGIN).join()
+        assertEquals(1, fixture.port.discoveryCalls)
+    }
+
     @Test fun staleActiveBindingDeactivatesWithoutErasingReservedJournal() = runBlocking {
         for (slot in CredentialJournalSlots.all + listOf(CredentialJournalSlots.trainingConsentProfile(PROFILE, USER.value, API_ORIGIN), ServerProfileId("ad5c0e5e-0000-8000-8000-000000000001"))) {
             val fixture = Fixture(initialSettings = NonSecretSettings(

@@ -75,6 +75,11 @@ import kotlinx.coroutines.Dispatchers
 
 @Database(
     entities = [
+        PortableAccountScopeEntity::class,
+        PortableAccountRecordEntity::class,
+        PortableListeningAliasEntity::class,
+        PortableAccountCursorEntity::class,
+        PortableAccountStatisticsEntity::class,
         app.autplay.data.local.entity.TrackMetadataEntity::class,
         app.autplay.data.local.entity.MetadataArtworkEntity::class,
         RecordingProjectionEntity::class,
@@ -127,10 +132,11 @@ import kotlinx.coroutines.Dispatchers
         GuestWavePreflightEntity::class,
         GuestWaveQueueProjectionEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
+    abstract fun portableAccountDao(): PortableAccountDao
     abstract fun trackMetadataDao(): app.autplay.data.local.dao.TrackMetadataDao
     abstract fun catalogProjectionDao(): CatalogProjectionDao
 
@@ -162,6 +168,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
 
         val MIGRATION_15_16: Migration = SearchProjectionRepairMigration
         val MIGRATION_16_17: Migration = TrackMetadataMigration
+        val MIGRATION_17_18: Migration = PortableAccountDataMigration
 
         /** Opens the non-destructive database with bundled SQLite, WAL, and all migrations. */
         fun open(context: Context, name: String = DATABASE_NAME): AutPlayDatabase =
@@ -171,7 +178,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
             ).setDriver(BundledSQLiteDriver())
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */

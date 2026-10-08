@@ -1,8 +1,6 @@
 package app.autplay.ui.settings
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +8,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -22,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -53,34 +53,40 @@ internal fun SettingsProductScreen(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(AutPlayTokens.dimensions.sectionSpacing),
     ) {
         SettingsSection(icon = AutPlayIcon.Settings, titleRes = R.string.settings_appearance) {
+            val dark = settings.appearanceMode != "LIGHT"
+            val currentTheme = stringResource(if (dark) R.string.settings_theme_dark else R.string.settings_theme_light)
+            val switchTheme = stringResource(if (dark) R.string.settings_switch_to_light else R.string.settings_switch_to_dark)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.labelLarge)
+                    Text(currentTheme, style = MaterialTheme.typography.bodyMedium, color = AutPlayTokens.colors.mutedText)
+                }
+                FilledTonalIconButton(
+                    onClick = { onUpdate { it.copy(appearanceMode = if (it.appearanceMode == "LIGHT") "DARK" else "LIGHT") } },
+                    modifier = Modifier.size(56.dp).testTag("settings-theme-toggle").semantics {
+                        contentDescription = switchTheme
+                        stateDescription = currentTheme
+                    },
+                ) {
+                    AutPlayPlatformIcon(if (dark) AutPlayIcon.Sun else AutPlayIcon.Moon, null, Modifier.size(26.dp))
+                }
+            }
+            HorizontalDivider(color = AutPlayTokens.colors.border)
             Text(stringResource(R.string.settings_language), style = MaterialTheme.typography.labelLarge)
-            ChoiceRow {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AppLanguage.entries.forEach { language ->
                     FilterChip(
                         selected = AppLanguage.fromStoredValue(settings.appLanguage) == language,
                         onClick = { onAppLanguageChange(language) },
                         label = { Text(stringResource(language.labelRes)) },
-                    )
-                }
-            }
-            ChoiceRow {
-                listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-                    FilterChip(
-                        selected = settings.appearanceMode == mode,
-                        onClick = { onUpdate { current -> current.copy(appearanceMode = mode) } },
-                        label = { Text(settingsAppearanceLabel(mode)) },
-                    )
-                }
-            }
-            ChoiceRow {
-                listOf("CORAL", "VIOLET", "GREEN", "BLUE").forEach { palette ->
-                    FilterChip(
-                        selected = settings.accentPalette == palette,
-                        onClick = { onUpdate { current -> current.copy(accentPalette = palette) } },
-                        label = { Text(settingsAccentLabel(palette)) },
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("settings-language-${language.storedValue}"),
                     )
                 }
             }
@@ -94,7 +100,6 @@ internal fun SettingsProductScreen(
                     onUpdate { current -> current.copy(smoothTrackTransitions = enabled) }
                 },
             )
-            Text(stringResource(R.string.settings_smooth_track_transitions_body), color = AutPlayTokens.colors.mutedText)
         }
 
         SettingsSection(icon = AutPlayIcon.Library, titleRes = R.string.settings_library_access) {
@@ -127,7 +132,6 @@ internal fun SettingsProductScreen(
                 color = if (settings.activeServerProfileId == null) AutPlayTokens.colors.mutedText
                 else MaterialTheme.colorScheme.primary,
             )
-            Text(stringResource(R.string.settings_personal_server_body), color = AutPlayTokens.colors.mutedText)
             Button(
                 onClick = { onNavigate(UiDestination.Profile) },
                 modifier = Modifier.fillMaxWidth(),
@@ -141,7 +145,6 @@ internal fun SettingsProductScreen(
         }
 
         SettingsSection(icon = AutPlayIcon.Download, titleRes = R.string.nav_downloads) {
-            Text(stringResource(R.string.settings_download_network_body), color = AutPlayTokens.colors.mutedText)
             SettingsSwitchRow(
                 label = stringResource(R.string.settings_metered_downloads),
                 checked = settings.downloadOnMeteredNetwork,
@@ -287,28 +290,13 @@ private fun SettingsSection(
     app.autplay.ui.PreferenceSection(
         title = stringResource(titleRes),
         icon = icon,
-        summary = stringResource(when (titleRes) {
-            R.string.settings_appearance -> R.string.settings_appearance_summary
-            R.string.settings_library_access -> R.string.settings_library_summary
-            R.string.settings_playback -> R.string.settings_playback_summary
-            R.string.settings_network -> R.string.settings_connection_summary
-            R.string.nav_downloads -> R.string.settings_download_network_summary
-            R.string.nav_wave_rooms -> R.string.settings_wave_summary
-            R.string.settings_statistics_privacy -> R.string.settings_privacy_summary
-            R.string.settings_transfer -> R.string.settings_transfer_summary
-            R.string.settings_music_navigation -> R.string.settings_music_summary
-            else -> R.string.settings_about_summary
-        }),
+        summary = if (titleRes == R.string.settings_statistics_privacy) {
+            stringResource(R.string.settings_privacy_summary)
+        } else {
+            null
+        },
+        initiallyExpanded = titleRes == R.string.settings_appearance,
         content = content,
-    )
-}
-
-@Composable
-private fun ChoiceRow(content: @Composable () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        content = { content() },
     )
 }
 
@@ -346,25 +334,6 @@ private fun SettingsSwitchRow(
         )
     }
 }
-
-@Composable
-private fun settingsAppearanceLabel(mode: String): String = stringResource(
-    when (mode) {
-        "LIGHT" -> R.string.settings_theme_light
-        "DARK" -> R.string.settings_theme_dark
-        else -> R.string.settings_theme_system
-    },
-)
-
-@Composable
-private fun settingsAccentLabel(palette: String): String = stringResource(
-    when (palette) {
-        "VIOLET" -> R.string.settings_accent_violet
-        "GREEN" -> R.string.settings_accent_green
-        "BLUE" -> R.string.settings_accent_blue
-        else -> R.string.settings_accent_coral
-    },
-)
 
 @Composable
 private fun settingsWavePrefetchLabel(mode: String): String = stringResource(

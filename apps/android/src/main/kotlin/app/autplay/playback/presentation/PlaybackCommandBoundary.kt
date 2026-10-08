@@ -80,6 +80,14 @@ internal object PlaybackCommandBoundary {
         return true
     }
 
+    /** Pause unconditionally, including while buffering; never toggle a dismissed player on. */
+    fun pauseForDismissal(port: PlaybackCommandPort, context: ActiveQueueContext): Boolean {
+        if (PlaybackCommandGate.evaluateDismissal(context, port.mediaId,
+                port.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) !is PlaybackControlGate.Allowed) return false
+        port.pause()
+        return true
+    }
+
     fun toggleShuffle(port: PlaybackCommandPort, context: ActiveQueueContext): Boolean {
         if (!isAllowed(port, context, Player.COMMAND_SET_SHUFFLE_MODE)) return false
         port.shuffleModeEnabled = !port.shuffleModeEnabled

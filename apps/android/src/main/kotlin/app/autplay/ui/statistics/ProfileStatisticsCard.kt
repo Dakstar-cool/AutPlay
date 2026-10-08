@@ -1,6 +1,5 @@
 package app.autplay.ui.statistics
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -51,7 +50,7 @@ fun OwnerProfileStatisticsCard(
                 Text(stringResource(R.string.profile_stats_refresh))
             }
         }
-        Text(stringResource(R.string.profile_stats_saved_history), color = AutPlayTokens.colors.mutedText,
+        Text(stringResource(if (state.accountBased) R.string.account_statistics_description else R.string.profile_stats_saved_history), color = AutPlayTokens.colors.mutedText,
             style = MaterialTheme.typography.bodySmall)
         if (state.loading) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -222,13 +221,7 @@ private fun StatisticsSurface(
     modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = AutPlayTokens.colors.glassSurface,
-        border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
-        tonalElevation = 1.dp,
-    ) {
+    app.autplay.ui.PreferenceSurface(modifier) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(AutPlayTokens.dimensions.screenPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp),

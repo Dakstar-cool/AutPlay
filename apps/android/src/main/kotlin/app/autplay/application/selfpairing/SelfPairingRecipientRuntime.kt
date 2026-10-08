@@ -6,6 +6,8 @@ import app.autplay.application.profilepairing.FirstBindCeremonyGate
 import app.autplay.application.profilepairing.FirstBindCeremonyOwner
 import app.autplay.application.profilepairing.PairingNetworkResult
 import app.autplay.application.profilepairing.ProfilePairingPort
+import app.autplay.application.profilepairing.requirePortableAccountCompatible
+import app.autplay.application.profilepairing.markPortableServerEnrollmentAttempt
 import app.autplay.application.publicaccess.ActiveProfileGate
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.isReservedCredentialProfile
@@ -177,6 +179,7 @@ class SelfPairingRecipientRuntime(
         require(pending.text("stage") == "WAITING")
         validatePending(pending)
         requireUnbound()
+        credentials.requirePortableAccountCompatible(accountId)
         val claim = claim(pending)
         require(visible.status.claimHash == claim.text("request_sha256"))
         val refresh = SelfPairingProof.secret()
@@ -235,6 +238,9 @@ class SelfPairingRecipientRuntime(
 
     private suspend fun exchangePending(pending: JsonObject) {
         if (finishIfDurable(pending)) return
+        requireUnbound()
+        credentials.requirePortableAccountCompatible(intent(pending).confirmedAccountId)
+        credentials.markPortableServerEnrollmentAttempt(intent(pending).confirmedAccountId)
         mutable.value = SelfPairingRecipientState.Working
         val document = try { recipient(pending, "exchange", "poll_secret", "exchange_request_b64") }
         catch (failure: SelfPairingRemoteFailure) {
@@ -261,6 +267,8 @@ class SelfPairingRecipientRuntime(
 
     private suspend fun reconcileExchange(pending: JsonObject): Boolean {
         if (finishIfDurable(pending)) return true
+        requireUnbound()
+        credentials.requirePortableAccountCompatible(intent(pending).confirmedAccountId)
         if (lastPoll?.plusSeconds(2)?.isAfter(now()) == true) return false
         lastPoll = now()
         val claim = claim(pending)
@@ -286,6 +294,7 @@ class SelfPairingRecipientRuntime(
     }
 
     private suspend fun requireUnbound() {
+        credentials.requirePortableAccountCompatible(allowUnknownAccount = true)
         require(!activeProfile.hasActiveProfile() && !credentials.hasPublicAccessPendingRegistration() && !credentials.hasAccountRecoveryPendingRecipient()) { "SELF_PAIRING_ACTIVE_PROFILE_FORBIDDEN" }
     }
 
@@ -361,7 +370,7 @@ class SelfPairingRecipientRuntime(
     private companion object {
         val OWNER = FirstBindCeremonyOwner.SELF_DEVICE_PAIRING
         val ROLE = SelfPairingRole.RECIPIENT
-        val SAFE_ERRORS = setOf("FIRST_BIND_CEREMONY_BUSY", "SELF_PAIRING_RESUME_REQUIRED", "SELF_PAIRING_ACTIVE_PROFILE_FORBIDDEN", "SELF_PAIRING_DISCOVERY_REQUIRED", "SELF_PAIRING_IDENTITY_CHANGED", "SELF_PAIRING_EXPIRED", "SELF_PAIRING_KEY_LOST", "SELF_PAIRING_BINDING_PENDING", "SELF_PAIRING_SOURCE_CANCEL_REQUIRED")
+        val SAFE_ERRORS = setOf("ACCOUNT_CONNECTION_OUTCOME_PENDING", "ACCOUNT_IDENTITY_CONFLICT", "FIRST_BIND_CEREMONY_BUSY", "SELF_PAIRING_RESUME_REQUIRED", "SELF_PAIRING_ACTIVE_PROFILE_FORBIDDEN", "SELF_PAIRING_DISCOVERY_REQUIRED", "SELF_PAIRING_IDENTITY_CHANGED", "SELF_PAIRING_EXPIRED", "SELF_PAIRING_KEY_LOST", "SELF_PAIRING_BINDING_PENDING", "SELF_PAIRING_SOURCE_CANCEL_REQUIRED")
         fun b64(value: ByteArray): String = Base64.getEncoder().encodeToString(value)
     }
 }

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from psycopg import Connection
+
 from .conftest import REFERENCE_DDL_PATH, DatabaseHarness
 from .schema_contract import (
     EXPECTED_EXPLICIT_INDEX_COUNT,
@@ -11,6 +15,25 @@ from .schema_contract import (
     parse_reference_names,
     snapshot_schema,
 )
+
+PORTABLE_TABLES = frozenset(
+    {
+        ("account", "portable_identity"),
+        ("account", "portable_challenge"),
+        ("account", "portable_record"),
+        ("library", "portable_taste_signal"),
+    }
+)
+PORTABLE_INDEXES = frozenset(
+    {
+        "portable_challenge_source_time",
+        "portable_challenge_expiry",
+        "portable_record_account_cursor",
+        "portable_record_listening_aliases",
+        "portable_taste_signal_account_cursor",
+    }
+)
+PORTABLE_TRIGGERS = frozenset({"erase_portable_challenges"})
 
 A1B_TABLES = frozenset(
     {
@@ -428,6 +451,7 @@ def test_migrated_database_has_exact_named_inventory(
         | PA2_TABLES
         | R1B_TABLES
         | POST_0030_TABLES
+        | PORTABLE_TABLES
     )
     assert index_names == (
         expected.indexes
@@ -439,6 +463,7 @@ def test_migrated_database_has_exact_named_inventory(
         | PA2_INDEXES
         | R1B_INDEXES
         | POST_0030_INDEXES
+        | PORTABLE_INDEXES
     )
     assert function_names == (
         expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS | POST_0030_FUNCTIONS
@@ -450,6 +475,7 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_TRIGGERS
         | R1B_TRIGGERS
         | POST_0030_TRIGGERS
+        | PORTABLE_TRIGGERS
     )
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0
@@ -470,3 +496,41 @@ def test_migration_schema_has_no_unexplained_reference_ddl_drift(
         reference = snapshot_schema(reference_connection)
 
     assert migrated == reference
+
+
+def _portable_reference_sql() -> str:
+    ddl = REFERENCE_DDL_PATH.read_text(encoding="utf-8")
+    block = ddl.split("-- BEGIN PORTABLE ACCOUNT 0066 REFERENCE\n", 1)[1].split(
+        "-- END PORTABLE ACCOUNT 0066 REFERENCE", 1
+    )[0]
+    return "\n".join(
+        line.removeprefix("-- | ") for line in block.splitlines() if line.startswith("-- | ")
+    )
+
+
+def _portable_privacy_definitions(connection: Connection[Any]) -> tuple[tuple[Any, ...], ...]:
+    return tuple(
+        connection.execute(
+            """
+            SELECT pg_get_functiondef(name::regprocedure) FROM unnest(ARRAY[
+              'account.erase_portable_challenges()', 'account.purge_account(uuid,uuid)'
+            ]) name ORDER BY name
+            """
+        ).fetchall()
+    )
+
+
+def test_portable_additive_reference_matches_migrated_schema_and_privacy_functions(
+    database_harness: DatabaseHarness,
+    database_name: str,
+    empty_database_name: str,
+) -> None:
+    """Check the independently stored 0066 reference without changing the historic 0019 baseline."""
+    database_harness.upgrade(empty_database_name, "0065_internet_catalogue_context")
+    with database_harness.connect(empty_database_name) as connection:
+        connection.execute(_portable_reference_sql(), prepare=False)
+        reference = snapshot_schema(connection)
+        reference_privacy = _portable_privacy_definitions(connection)
+    with database_harness.connect(database_name) as connection:
+        assert snapshot_schema(connection) == reference
+        assert _portable_privacy_definitions(connection) == reference_privacy

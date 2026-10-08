@@ -244,15 +244,15 @@ class ProfilePairingScreenTest {
         compose.onNodeWithText(context.getString(R.string.profile_create_invitation))
             .performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(10, createdExpiry.get()) }
-        compose.onNodeWithContentDescription(QR_CONTENT_DESCRIPTION).assertIsDisplayed()
-        compose.onNodeWithContentDescription("One-time invitation secret").assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_qr_description)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_secret_description)).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.profile_show_manual_invitation))
             .assertIsDisplayed().performClick()
-        compose.onNodeWithContentDescription("One-time invitation secret").assertIsDisplayed()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_secret_description)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_cancel_invitation))
             .assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, cancelled.get()) }
-        compose.onNodeWithContentDescription("One-time invitation secret").assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_secret_description)).assertDoesNotExist()
     }
 
     @Test
@@ -270,8 +270,8 @@ class ProfilePairingScreenTest {
             ),
         )
 
-        val qr = compose.onNodeWithContentDescription(QR_CONTENT_DESCRIPTION).fetchSemanticsNode()
-        assertEquals(listOf(QR_CONTENT_DESCRIPTION), qr.config[SemanticsProperties.ContentDescription])
+        val qr = compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_qr_description)).fetchSemanticsNode()
+        assertEquals(listOf(context.getString(R.string.profile_invitation_qr_description)), qr.config[SemanticsProperties.ContentDescription])
     }
 
     private fun render(state: ProfilePairingUiState, actions: ProfilePairingActions = ProfilePairingActions()) =

@@ -3,7 +3,6 @@ package app.autplay.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
@@ -15,6 +14,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -23,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.R
@@ -37,19 +39,20 @@ class PlayerCollapseShellTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun phonePanelReachesTheRealMiniPlayerBeforeNavigation() = verifyAlignment(390)
-    @Test fun tabletPanelReachesTheRealMiniPlayerBeforeNavigation() = verifyAlignment(900)
+    @Test fun phonePanelReachesTheRealMiniPlayerBeforeNavigation() = verifyAlignment(390, UiWidthClass.Compact)
+    @Test fun tabletPanelReachesTheRealMiniPlayerBeforeNavigation() = verifyAlignment(900, UiWidthClass.Expanded)
 
-    private fun verifyAlignment(widthDp: Int) {
+    private fun verifyAlignment(widthDp: Int, expectedWidthClass: UiWidthClass) {
         var miniTopPx = Float.NaN
         var density = 1f
         var current: UiDestination = UiDestination.NowPlaying
+        var currentWidthClass: UiWidthClass? = null
         compose.setContent {
-            val pixels = LocalDensity.current
-            density = pixels.density
             var selected by remember { mutableStateOf<UiDestination>(UiDestination.NowPlaying) }
             current = selected
-            Box(Modifier.requiredSize(widthDp.dp, 600.dp)) {
+            // ForcedSize fits the full layout on a phone; requiredSize centers/clips an oversized child.
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(widthDp.dp, 600.dp))) {
+                density = LocalDensity.current.density
                 AutPlayTheme {
                     AutPlayAdaptiveShell(
                         selectedDestination = selected,
@@ -59,7 +62,8 @@ class PlayerCollapseShellTest {
                                 miniTopPx = it.positionInRoot().y
                             }) { Text("mini-target") }
                         },
-                    ) { destination, padding, _ ->
+                    ) { destination, padding, widthClass ->
+                        currentWidthClass = widthClass
                         if (destination == UiDestination.NowPlaying) {
                             NowPlayingScreen(
                                 state = PlaybackPresentationState(mediaId = "fixture", title = "Fixture track"),
@@ -74,7 +78,10 @@ class PlayerCollapseShellTest {
             }
         }
         compose.waitForIdle()
-        val stationaryTop = compose.onNodeWithTag("now-playing-panel").getUnclippedBoundsInRoot().top.value * density
+        val stationaryBounds = compose.onNodeWithTag("now-playing-panel").getUnclippedBoundsInRoot()
+        assertEquals(widthDp.toFloat(), stationaryBounds.right.value - stationaryBounds.left.value, 1f)
+        compose.runOnIdle { assertEquals(expectedWidthClass, currentWidthClass) }
+        val stationaryTop = stationaryBounds.top.value * density
         val expectedMiniTop = miniTopPx
         assertTrue(expectedMiniTop > stationaryTop)
         compose.onNodeWithTag("player-collapse-header").performTouchInput {
@@ -88,10 +95,11 @@ class PlayerCollapseShellTest {
         saveScreenshot("player-shell-held-$widthDp.png")
         compose.onNodeWithTag("player-collapse-header").performTouchInput { cancel() }
         compose.waitForIdle()
-        compose.onNodeWithContentDescription(context.getString(R.string.player_collapse)).performClick()
+        compose.onNodeWithContentDescription(context.getString(R.string.player_collapse)).assertIsDisplayed().performClick()
         compose.onNodeWithText("collapsed").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals(UiDestination.Home, current)
+            assertEquals(expectedWidthClass, currentWidthClass)
             assertEquals(expectedMiniTop, miniTopPx, 2f)
         }
     }

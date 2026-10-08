@@ -21,7 +21,7 @@ REV39: Final = "0039_internet_ingest_lineage"
 REV40: Final = "0040_provider_staging"
 REV41: Final = "0041_provider_scratch"
 REV42: Final = "0042_provider_maintenance"
-HEAD65: Final = "0065_internet_catalogue_context"
+CURRENT_HEAD: Final = "0066_portable_local_account"
 PAYLOAD = b"historical-provider-source-bytes-v1"
 HistoricalRevision = Literal[
     "0039_internet_ingest_lineage",
@@ -317,7 +317,10 @@ def assert_current_context_refusal(
     """
 
     def snapshot(connection: Connection[Any]) -> tuple[object, ...]:
-        assert revision(connection) == HEAD65
+        purge_definition = connection.execute(
+            "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
+        ).fetchone()
+        assert purge_definition is not None
         receipt = connection.execute(
             "SELECT to_jsonb(s),to_jsonb(c),to_jsonb(a),to_jsonb(d) "
             "FROM discovery.internet_acquisition a "
@@ -342,9 +345,11 @@ def assert_current_context_refusal(
                 "WHERE p.acquisition_id=%s ORDER BY m.execution_id",
             )
         )
-        return (receipt, *related)
+        return (purge_definition, receipt, *related)
 
     with harness.connect(database_name) as connection:
+        starting_head = revision(connection)
+        assert starting_head == CURRENT_HEAD
         before = snapshot(connection)
     assert_exact_refusal(
         harness,
@@ -353,6 +358,7 @@ def assert_current_context_refusal(
         "refusing to discard catalogue context or search request receipts",
     )
     with harness.connect(database_name) as connection:
+        assert revision(connection) == starting_head
         assert snapshot(connection) == before
 
 

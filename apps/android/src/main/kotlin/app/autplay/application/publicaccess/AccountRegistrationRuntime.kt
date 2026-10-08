@@ -12,6 +12,7 @@ import app.autplay.data.security.M5DeviceKeyStore
 import app.autplay.application.profilepairing.PairingFlowSnapshot
 import app.autplay.application.profilepairing.FirstBindCeremonyGate
 import app.autplay.application.profilepairing.FirstBindCeremonyOwner
+import app.autplay.application.profilepairing.requirePortableAccountCompatible
 import app.autplay.domain.ServerProfileId
 import java.util.Base64
 import java.security.MessageDigest
@@ -62,6 +63,9 @@ class AccountRegistrationRuntime(
     private val discoveryGate: AccountRegistrationDiscoveryGate,
     private val firstBindGate: FirstBindCeremonyGate = FirstBindCeremonyGate(),
 ) {
+    /** Called before discovery and again before redemption; no non-secret marker is authoritative. */
+    suspend fun requirePortableCompatibility(): Unit = credentials.requirePortableAccountCompatible()
+
     /**
      * A re-imported exact invitation can recover an uncertain registration without a non-secret
      * pointer: `null` means no pending exchange, `true` exact match, and `false` fail-closed conflict.
@@ -109,6 +113,14 @@ class AccountRegistrationRuntime(
         if (!firstBindGate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS)) {
             signed.close()
             return Result.failure(IllegalStateException("FIRST_BIND_CEREMONY_BUSY"))
+        }
+        try {
+            requirePortableCompatibility()
+        } catch (failure: Exception) {
+            firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
+            signed.close()
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            return Result.failure(failure)
         }
         if (activeProfileGate.hasActiveProfile() || credentials.hasSelfDevicePairingPendingRecipient() || credentials.hasAccountRecoveryPendingRecipient()) {
             firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)

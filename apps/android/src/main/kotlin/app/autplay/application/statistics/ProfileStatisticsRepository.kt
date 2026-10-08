@@ -105,6 +105,8 @@ data class OwnerProfileStatistics(
     val topGenres: List<OwnerTopGenre>,
     val topTracks: List<OwnerTopTrack>,
     val topArtists: List<OwnerTopArtist>,
+    /** Null for standalone device history; present only for a checked server account response. */
+    val accountId: String? = null,
 ) {
     init {
         require(listenedMs >= 0)

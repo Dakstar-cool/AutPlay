@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0066_portable_local_account", "0065_internet_catalogue_context"),
     ("0065_internet_catalogue_context", "0064_metadata_catalog_gate"),
     ("0064_metadata_catalog_gate", "0063_social_public_id"),
     ("0063_social_public_id", "0062_cpu_worker_health"),
@@ -175,6 +176,8 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 ) -> None:
     """A downgrade is executable only while every P12-owned data surface is empty."""
 
+    head_before = _current_revision(database_harness, database_name)
+    assert head_before == REVISION_PAIRS[0][0]
     with database_harness.connect(database_name) as connection:
         connection.execute(
             """
@@ -194,17 +197,31 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
             """,
             (b"m" * 32, b"w" * 32, b"p" * 32),
         )
+        model_before = connection.execute(
+            "SELECT * FROM ml.embedding_model WHERE model_key='downgrade-guard'"
+        ).fetchall()
+        purge_before = _purge_definition(connection)
         connection.commit()
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == ("0065_internet_catalogue_context")
+    assert _current_revision(database_harness, database_name) == head_before
+    with database_harness.connect(database_name) as connection:
+        assert _purge_definition(connection) == purge_before
+        assert (
+            connection.execute(
+                "SELECT * FROM ml.embedding_model WHERE model_key='downgrade-guard'"
+            ).fetchall()
+            == model_before
+        )
 
 
 def test_local_bridge_downgrade_refuses_durable_admission(
     database_harness: DatabaseHarness, empty_database_name: str
 ) -> None:
     database_harness.upgrade(empty_database_name)
+    head_before = _current_revision(database_harness, empty_database_name)
+    assert head_before == REVISION_PAIRS[0][0]
     with database_harness.connect(empty_database_name) as connection:
         owner = connection.execute(
             "INSERT INTO account.user_account (display_name,role) "
@@ -232,13 +249,23 @@ def test_local_bridge_downgrade_refuses_durable_admission(
             """,
             (owner[0], device[0], b"b" * 32),
         )
+        admission_before = connection.execute(
+            "SELECT * FROM account.resource_admission WHERE authority_kind='LOCAL_BRIDGE'"
+        ).fetchall()
+        purge_before = _purge_definition(connection)
         connection.commit()
 
     with pytest.raises(DBAPIError, match="refusing local bridge authority downgrade"):
         database_harness.downgrade(empty_database_name, "0059_training_publication_seal")
-    assert _current_revision(database_harness, empty_database_name) == (
-        "0065_internet_catalogue_context"
-    )
+    assert _current_revision(database_harness, empty_database_name) == head_before
+    with database_harness.connect(empty_database_name) as connection:
+        assert _purge_definition(connection) == purge_before
+        assert (
+            connection.execute(
+                "SELECT * FROM account.resource_admission WHERE authority_kind='LOCAL_BRIDGE'"
+            ).fetchall()
+            == admission_before
+        )
 
 
 def test_p12_downgrade_refuses_after_blocking_legacy_active_model(
@@ -277,6 +304,14 @@ def test_p12_downgrade_refuses_after_blocking_legacy_active_model(
         assert _current_revision(database_harness, database_name) == "0014_gpu_enrichment"
     finally:
         database_harness.drop_database(database_name)
+
+
+def _purge_definition(connection: Connection[Any]) -> str:
+    row = connection.execute(
+        "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
+    ).fetchone()
+    assert row is not None and isinstance(row[0], str)
+    return row[0]
 
 
 def _current_revision(database_harness: DatabaseHarness, database_name: str) -> str | None:

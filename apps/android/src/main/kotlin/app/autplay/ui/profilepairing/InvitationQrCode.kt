@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import app.autplay.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -53,10 +55,11 @@ internal object InvitationQrEncoder {
 @Composable
 internal fun InvitationQrCode(envelope: String, modifier: Modifier = Modifier) {
     val matrix = remember(envelope) { InvitationQrEncoder.encode(envelope) }
+    val description = stringResource(R.string.profile_invitation_qr_description)
     Canvas(
         modifier = modifier
             .size(224.dp)
-            .clearAndSetSemantics { contentDescription = QR_CONTENT_DESCRIPTION },
+            .clearAndSetSemantics { contentDescription = description },
     ) {
         // Light modules must stay white even when the surrounding Material surface is gray.
         // Keeping the full matrix opaque also preserves the QR quiet zone for camera decoders.
@@ -75,5 +78,3 @@ internal fun InvitationQrCode(envelope: String, modifier: Modifier = Modifier) {
         }
     }
 }
-
-internal const val QR_CONTENT_DESCRIPTION = "Enrollment invitation QR code"

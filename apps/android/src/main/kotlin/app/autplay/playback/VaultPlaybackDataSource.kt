@@ -104,7 +104,9 @@ class VaultPlaybackDataSource(
                 mapOf("Authorization" to "Bearer ${authorization.accessToken}"))
             .build()
         return try {
-            source.open(request).also { openedUri = authorization.streamUri }
+            // CacheDataSource persists getUri() as redirect metadata. Keep the authenticated
+            // origin runtime-only, and expose the same stable identity on cache hits and misses.
+            source.open(request).also { openedUri = original.uri }
         } catch (error: HttpDataSource.InvalidResponseCodeException) {
             source.close()
             delegate = null

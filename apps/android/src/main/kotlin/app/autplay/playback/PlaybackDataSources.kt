@@ -9,7 +9,10 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.Cache
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import app.autplay.download.MediaDownloadComponents
 
 /** Delegates only stable Vault URIs to auth-aware HTTP; local content stays in Android providers. */
@@ -74,17 +77,43 @@ object PlaybackMediaSourceFactory {
         onTimeline: ((androidx.media3.common.MediaItem, PlaybackSourceTimeline) -> Unit)? = null,
     ): androidx.media3.exoplayer.source.MediaSource.Factory {
         val components = MediaDownloadComponents.get(context.applicationContext)
-        val routing = RoutingPlaybackDataSource.Factory(context)
-        val streamCache = CacheDataSource.Factory()
-            .setCache(components.streamCache)
-            .setUpstreamDataSourceFactory(routing)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        val downloadCache = CacheDataSource.Factory()
-            .setCache(components.downloadCache)
-            .setUpstreamDataSourceFactory(streamCache)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        val delegate = DefaultMediaSourceFactory(downloadCache)
+        val http = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(false)
+            .setConnectTimeoutMs(10_000)
+            .setReadTimeoutMs(15_000)
+        val cachedVault = cachedVaultDataSourceFactory(
+            components.downloadCache, components.streamCache,
+            VaultPlaybackDataSource.productionFactory(context, http),
+        )
+        val routing = DataSource.Factory {
+            // Local content already has durable storage; copying it into both caches delays reads.
+            RoutingPlaybackDataSource(DefaultDataSource.Factory(context, http), cachedVault)
+        }
+        val delegate = DefaultMediaSourceFactory(routing, playbackExtractorsFactory())
         val reporting = onTimeline?.let { PlaybackSourceTimelineFactory(delegate, it) } ?: delegate
         return ResolvingMediaSourceFactory(reporting)
     }
 }
+
+@UnstableApi
+internal fun cachedVaultDataSourceFactory(
+    downloadCache: Cache,
+    streamCache: Cache,
+    upstream: DataSource.Factory,
+): DataSource.Factory {
+    val streaming = CacheDataSource.Factory()
+        .setCache(streamCache)
+        .setUpstreamDataSourceFactory(upstream)
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    return CacheDataSource.Factory()
+        .setCache(downloadCache)
+        .setUpstreamDataSourceFactory(streaming)
+        // Only DownloadManager may write durable bytes. Playback misses belong to the LRU.
+        .setCacheWriteDataSinkFactory(null)
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+}
+
+/** Keep native CBR/Xing/VBRI seeking; index only MP3 files whose seek table is missing. */
+@UnstableApi
+internal fun playbackExtractorsFactory(): DefaultExtractorsFactory = DefaultExtractorsFactory()
+    .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)

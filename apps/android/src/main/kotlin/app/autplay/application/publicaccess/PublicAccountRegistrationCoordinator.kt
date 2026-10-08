@@ -45,6 +45,16 @@ class PublicAccountRegistrationCoordinator(
                     mutable.value = PublicAccountRegistrationState.Blocked("FIRST_BIND_CEREMONY_BUSY")
                     return@launch
                 }
+                try {
+                    runtime.requirePortableCompatibility()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
+                    throw cancelled
+                } catch (_: Exception) {
+                    firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
+                    mutable.value = PublicAccountRegistrationState.Blocked("ACCOUNT_REGISTRATION_ACTIVE_PROFILE_FORBIDDEN")
+                    return@launch
+                }
                 if (activeProfileGate.hasActiveProfile()) {
                     firstBindGate.release(FirstBindCeremonyOwner.PUBLIC_ACCESS)
                     mutable.value = PublicAccountRegistrationState.Blocked(

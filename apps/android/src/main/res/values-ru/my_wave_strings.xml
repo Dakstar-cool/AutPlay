@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_my_wave_random">Случайное воспроизведение из вашей музыки. Нажмите снова, чтобы перемешать.</string>
+    <string name="home_my_wave_locked">Дождитесь готовности плеера или выйдите из совместного прослушивания.</string>
+    <string name="home_my_wave_empty">Сейчас нет доступной музыки. Добавьте локальный трек, скачайте музыку или подключитесь к серверу.</string>
+</resources>

@@ -31,7 +31,7 @@ data class ManagedInvitation(val invitationId: String, val expiresAt: String, va
 }
 data class DeviceSummary(val deviceId: DeviceId, val label: String, val current: Boolean)
 data class SessionSummary(val sessionId: String, val deviceId: DeviceId, val generation: Long, val current: Boolean)
-data class LifecycleCommand(val action: LifecycleAction, val operationId: String, val targetDeviceId: DeviceId? = null, val reasonCode: String? = null) {
+data class LifecycleCommand(val action: LifecycleAction, val operationId: String, val targetDeviceId: DeviceId? = null, val reasonCode: String? = null, val portableAuthorization: String? = null) {
     init { requireCanonicalUuid(operationId); if (action == LifecycleAction.REVOKE_DEVICE) requireNotNull(targetDeviceId) else require(targetDeviceId == null); reasonCode?.let { require(Regex("^[a-z][a-z0-9_]{0,63}$").matches(it)) } }
 }
 enum class LifecycleAction { LOGOUT_CURRENT, LOGOUT_ALL, REVOKE_DEVICE }

@@ -19,6 +19,8 @@ data class PlaybackPresentationState(
     val source: PlaybackSourcePresentation = PlaybackSourcePresentation.Unknown,
     val context: ActiveQueueContext = ActiveQueueContext.Loading,
     val controls: PlaybackControlGate = PlaybackControlGate.Locked(PlaybackControlLockReason.CONTEXT_LOADING),
+    /** Safe pause needs a matching ordinary queue and command, even while its source is unresolved. */
+    val dismissEnabled: Boolean = false,
     val seekEnabled: Boolean = false,
     val shuffleEnabled: Boolean = false,
     val repeatEnabled: Boolean = false,
@@ -29,6 +31,8 @@ data class PlaybackPresentationState(
     val previousMediaId: String? = null,
     val nextMediaId: String? = null,
     val localTrackRefId: String? = null,
+    /** Explicit dismissal survives queue/status refresh until a new user play request. */
+    val miniPlayerDismissed: Boolean = false,
 )
 
 val PlaybackPresentationState.canSeek: Boolean
@@ -61,6 +65,12 @@ enum class PlaybackControlLockReason {
 /** Pure fail-closed policy shared by every direct Media3 control. */
 object PlaybackCommandGate {
     private val ordinaryQueueTypes = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
+
+    fun evaluateDismissal(
+        context: ActiveQueueContext,
+        mediaId: String?,
+        commandAvailable: Boolean,
+    ): PlaybackControlGate = evaluate(context, mediaId, commandAvailable, sourceAvailable = true)
 
     fun evaluate(
         context: ActiveQueueContext,

@@ -93,10 +93,12 @@ class TrustedReenrollmentRuntime(
     private val port: AdmissionPort,
     private val persistEnrollment: suspend (AdmissionCheckpoint, AdmissionAccount, String, EnrollmentSession) -> Boolean,
     private val keyAlias: (ServerProfileId) -> String = { "autplay.m5.${it.value}" },
+    private val authorizeAccount: suspend (UserId?) -> Boolean,
 ) {
     private val stateFlow = MutableStateFlow<TrustedReenrollmentState>(TrustedReenrollmentState.Idle)
     val state: StateFlow<TrustedReenrollmentState> = stateFlow.asStateFlow()
     fun reenroll(checkpoint: AdmissionCheckpoint, account: AdmissionAccount) = scope.launch {
+        if (!authorizeAccount(account.userId)) { stateFlow.value = TrustedReenrollmentState.Unavailable; return@launch }
         val alias = keyAlias(checkpoint.serverProfileId); keys.ensure(alias)
         if (keys.publicKeyThumbprintSha256(alias) != checkpoint.deviceKeyThumbprintSha256) { stateFlow.value = TrustedReenrollmentState.Unavailable; return@launch }
         stateFlow.value = TrustedReenrollmentState.RequestingChallenge
@@ -115,6 +117,7 @@ class TrustedReenrollmentRuntime(
         )
         val commit = UUID.randomUUID().toString()
         try {
+            if (!authorizeAccount(account.userId)) { stateFlow.value = TrustedReenrollmentState.Unavailable; return@launch }
             stateFlow.value = TrustedReenrollmentState.Exchanging
             val exchange = AdmissionProof.signedJson(keys, alias, AdmissionProof.REENROLLMENT_DOMAIN, mapOf(
                 "challenge_id" to JsonPrimitive(challenge.challengeId), "challenge" to JsonPrimitive(challenge.challenge.toString(Charsets.US_ASCII)),
@@ -149,6 +152,7 @@ class AdmissionRuntime(
     private val keyAlias: (ServerProfileId) -> String = { "autplay.m5.${it.value}" },
     private val appVersion: String = "0.1.0",
     private val deviceName: String = "Android device",
+    private val authorizeAccount: suspend (UserId?) -> Boolean,
 ) {
     private val stateFlow = MutableStateFlow<AdmissionState>(AdmissionState.RequestReady)
     val state: StateFlow<AdmissionState> = stateFlow.asStateFlow()
@@ -157,9 +161,10 @@ class AdmissionRuntime(
     private var lastForegroundPollAtMs: Long? = null
     private var foregroundPollInFlight = false
     private var recoveryCheckpoint: AdmissionCheckpoint? = null
-    private val trustedRuntime = TrustedReenrollmentRuntime(scope, keys, port, persistTrustedReenrollment, keyAlias)
+    private val trustedRuntime = TrustedReenrollmentRuntime(scope, keys, port, persistTrustedReenrollment, keyAlias, authorizeAccount)
 
     fun request(snapshot: PairingFlowSnapshot) = scope.launch {
+        if (!authorizeAccount(null)) { stateFlow.value = AdmissionState.Unavailable; return@launch }
         val alias = keyAlias(snapshot.serverProfileId); keys.ensure(alias)
         val checkpoint = AdmissionCheckpoint(
             requestId = UUID.randomUUID().toString(), requestSha256 = "0".repeat(64),
@@ -182,6 +187,7 @@ class AdmissionRuntime(
         recoveryCheckpoint = exact
         // Store only non-secret recovery evidence before the one-time response can be lost.
         persistCheckpoint(exact)
+        if (!authorizeAccount(null)) { stateFlow.value = AdmissionState.Unavailable; return@launch }
         stateFlow.value = AdmissionState.RequestReady
         when (val result = port.request(AdmissionRequest(exact, signed.json))) {
             is PairingNetworkResult.Success -> if (activeGenerationId == exact.generationId && stateFlow.value is AdmissionState.RequestReady) {
@@ -195,6 +201,7 @@ class AdmissionRuntime(
     fun confirmComparison() { val current = stateFlow.value as? AdmissionState.AwaitingComparison ?: return; stateFlow.value = AdmissionState.Pending(current.checkpoint) }
     fun poll() = scope.launch {
         val current = stateFlow.value as? AdmissionState.Pending ?: return@launch
+        if (!authorizeAccount(null)) { stateFlow.value = AdmissionState.Unavailable; return@launch }
         if (foregroundPollInFlight) return@launch
         val now = System.currentTimeMillis()
         if (lastForegroundPollAtMs?.let { now - it < 2_000L } == true) return@launch
@@ -224,6 +231,7 @@ class AdmissionRuntime(
     }
     fun confirmAccount() = scope.launch {
         val current = stateFlow.value as? AdmissionState.Approved ?: return@launch
+        if (!authorizeAccount(current.account.userId)) { stateFlow.value = AdmissionState.Blocked(current.checkpoint); return@launch }
         val bearer = pollBearer?.copyOf() ?: run { recover(current.checkpoint); return@launch }
         val alias = keyAlias(current.checkpoint.serverProfileId)
         val refresh = Base64.getUrlEncoder().withoutPadding().encode(
@@ -263,6 +271,7 @@ class AdmissionRuntime(
         } finally { bearer.fill(0); refresh.fill(0) }
     }
     fun recover(checkpoint: AdmissionCheckpoint) = scope.launch {
+        if (!authorizeAccount(null)) { stateFlow.value = AdmissionState.Unavailable; return@launch }
         recoveryCheckpoint = checkpoint
         activeGenerationId = checkpoint.generationId
         val request = signed(checkpoint, AdmissionProof.RECOVERY_DOMAIN, mapOf(

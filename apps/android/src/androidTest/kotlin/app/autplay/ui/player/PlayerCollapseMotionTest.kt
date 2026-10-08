@@ -18,6 +18,8 @@ import org.junit.Test
 class PlayerCollapseMotionTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var motion: PlayerCollapseMotion
+    // At travel=600px and density=1, the 18% threshold is capped at 96px.
+    private val cancellationOffset = 80f
 
     private fun render(onCollapse: (() -> Unit)? = null) {
         compose.setContent {
@@ -96,12 +98,12 @@ class PlayerCollapseMotionTest {
         var calls = 0
         compose.runOnIdle {
             assertTrue(motion.begin())
-            motion.drag(140f)
+            motion.drag(cancellationOffset)
             motion.release(0f, 1f, true) { calls++ }
         }
         compose.mainClock.advanceTimeBy(64)
         compose.runOnIdle {
-            assertTrue(motion.offset > 0f && motion.offset < 140f)
+            assertTrue(motion.offset > 0f && motion.offset < cancellationOffset)
             val returningOffset = motion.offset
             assertTrue(motion.begin())
             motion.drag(40f)
@@ -117,7 +119,7 @@ class PlayerCollapseMotionTest {
         var calls = 0
         compose.runOnIdle {
             motion.begin()
-            motion.drag(140f)
+            motion.drag(cancellationOffset)
             motion.release(0f, 1f, false) { calls++ }
         }
         compose.runOnIdle { assertEquals(0f, motion.offset, 0.01f); assertEquals(0, calls) }

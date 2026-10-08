@@ -264,24 +264,25 @@ class PlaybackServiceLifecycleTest {
 
     @Test fun lateResolvedSuccessorUsesItsRealHeadBeforePlaybackStarts() = runBlocking {
         for (source in listOf("readable", "short")) {
-            val fixture = Fixture()
+            val fixture = Fixture(entryCount = 4)
             try {
-                fixture.start(listOf("readable", "readable", source), smooth = true)
+                fixture.start(listOf("readable", "readable", "readable", source), smooth = true)
                 fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
                 val firstPlayingSourcePosition = java.util.concurrent.atomic.AtomicLong(-1)
                 fixture.main {
                     val controller = checkNotNull(fixture.controller)
                     controller.pause()
-                    assertEquals("autplay-unresolved", controller.getMediaItemAt(2).localConfiguration?.uri?.scheme)
+                    // The fourth entry is outside current + two-successor URI preflight.
+                    assertEquals("autplay-unresolved", controller.getMediaItemAt(3).localConfiguration?.uri?.scheme)
                     controller.addListener(object : Player.Listener {
                         override fun onIsPlayingChanged(isPlaying: Boolean) {
-                            if (isPlaying && controller.currentMediaItem?.mediaId == fixture.entries[2].value) {
+                            if (isPlaying && controller.currentMediaItem?.mediaId == fixture.entries[3].value) {
                                 firstPlayingSourcePosition.compareAndSet(-1,
                                     controller.currentPosition + (controller.currentMediaItem?.clippingConfiguration?.startPositionMs ?: 0))
                             }
                         }
                     })
-                    controller.seekToDefaultPosition(2)
+                    controller.seekToDefaultPosition(3)
                     controller.play()
                 }
                 fixture.await { firstPlayingSourcePosition.get() >= 0 }
@@ -514,7 +515,7 @@ class PlaybackServiceLifecycleTest {
         } finally { releaseWriter.complete(Unit); writerScope.cancel(); fixture.close() }
     }
 
-    private class Fixture {
+    internal class Fixture(entryCount: Int = 3) {
         private val instrumentation = InstrumentationRegistry.getInstrumentation()
         private val context = instrumentation.targetContext
         private val testPackage = instrumentation.context.packageName
@@ -523,9 +524,9 @@ class PlaybackServiceLifecycleTest {
         private val settings = applicationNonSecretSettingsStore(context)
         private var original: NonSecretSettings? = null
         private val ids = List(15) { UUID.randomUUID().toString() }
-        val entries = (0..2).map { LocalId(ids[it]) }.toMutableList()
-        val audioIds = ids.slice(3..5)
-        val tracks = ids.slice(6..8)
+        val entries = MutableList(entryCount) { LocalId.random() }
+        val audioIds = List(entryCount) { UUID.randomUUID().toString() }
+        val tracks = List(entryCount) { UUID.randomUUID().toString() }
         private val snapshots = mutableListOf<String>()
         private val profile = ServerProfileId(ids[10])
         private val slowUri = Uri.parse("content://$testPackage.slow/audio/${ids[11]}")
@@ -563,14 +564,19 @@ class PlaybackServiceLifecycleTest {
                 database.libraryDao().upsertTrackRef(UserTrackRefEntity(tracks[index], if (source == "remote") ids[9] else null,
                     null, null, "UNRESOLVED", "Lifecycle fixture", "Fixture", null, 40_000, null,
                     "LOCAL_ONLY", null, 0, 1, 1, null))
-                if (source in listOf("slow", "readable", "short")) {
+                if (source in listOf("slow", "readable", "short", "xing", "xing-short")) {
                     val uri = when (source) {
                         "slow" -> slowUri.toString()
                         "short" -> "content://$testPackage.readable/audio/short"
+                        "xing" -> "content://$testPackage.xing/audio/${audioIds[index]}"
+                        "xing-short" -> "content://$testPackage.xing/short/${audioIds[index]}"
                         else -> "content://$testPackage.readable/audio/${audioIds[index]}"
                     }
                     database.localAudioDao().upsertState(LocalAudioStateEntity(audioIds[index], tracks[index], null, null,
-                        uri, false, null, null, null, null, "pcm_s16le", "wav", 128_000, 8_000, 1, 40_000,
+                        uri, false, null, null, null, null,
+                        if (source.startsWith("xing")) "mp3" else "pcm_s16le",
+                        if (source.startsWith("xing")) "mp3" else "wav", 128_000,
+                        if (source.startsWith("xing")) 44_100 else 8_000, if (source.startsWith("xing")) 2 else 1, 40_000,
                         "AVAILABLE", "USER_IMPORT", 640_044, null, null, 1, 1))
                 }
             }

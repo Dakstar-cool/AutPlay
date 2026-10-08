@@ -33,6 +33,33 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SelfPairingRecipientRuntimeTest {
+    @Test fun portablePendingBlocksQrDiscoveryAndRootConflictBlocksExchangeWithJournalIntact() = runBlocking {
+        val h = Harness()
+        val pending = "opaque-portable-pending".toByteArray()
+        h.store.write(CredentialJournalSlots.portableEnrollment, pending)
+        h.runtime().inspectQr(h.qr())
+        assertEquals(0, h.discoveryCalls)
+        assertEquals(0, h.calls)
+        assertArrayEquals(pending, h.store.read(CredentialJournalSlots.portableEnrollment))
+        h.store.clear(CredentialJournalSlots.portableEnrollment)
+        val password = "portable root guard fixture".toCharArray()
+        val created = try { app.autplay.application.portableaccount.PortableAccountCrypto.create("guard_user", password) }
+            finally { password.fill('\u0000') }
+        created.use {
+            val document = it.document.encode()
+            val root = try { SessionCredentialEnvelopeCodec.encode(app.autplay.data.security.SessionCredentialEnvelope(
+                "portable-account", null, 0, portableAccountDocument = document.toString(Charsets.UTF_8),
+            )) } finally { document.fill(0) }
+            try { h.store.write(CredentialJournalSlots.portableAccount, root) } finally { root.fill(0) }
+            val runtime = h.ready()
+            val exactJournal = h.store.read(SelfPairingRole.RECIPIENT.slot)
+            runtime.confirmAccount(USER)
+            assertTrue(runtime.state.value is SelfPairingRecipientState.Blocked)
+            assertTrue(h.exchanges.isEmpty())
+            assertArrayEquals(exactJournal, h.store.read(SelfPairingRole.RECIPIENT.slot))
+        }
+    }
+
     @Test fun committedSettingsFailureRetainsCredentialsAndRestartFinishesWithoutReplay() = runBlocking {
         assertUncertainBindingFinishesLocally(this, IOException("settings committed before failure"))
     }

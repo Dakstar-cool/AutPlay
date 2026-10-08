@@ -34,12 +34,14 @@ import app.autplay.ui.core.automaticSearchScopes
 import app.autplay.ui.core.SingleFlightActionGate
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 internal data class CoreCommandActions(
     val recordRecommendationVisibility: (String) -> Unit,
     val recordHomeFeedback: (String, String) -> Unit,
     val startTrack: (String, String, String, String?) -> Unit,
+    val startMyWave: () -> Unit,
     val startSearchTrack: (String) -> Unit,
     val startVaultSearchTrack: (String) -> Unit,
     val startPlaylistEntry: (String) -> Unit,
@@ -75,6 +77,10 @@ internal fun buildCoreCommandActions(
     bindingContextKey: () -> String,
     setLoadedDetailContextKey: (String) -> Unit,
     downloadRepository: DownloadIntentRepository,
+    myWaveVaultAvailable: () -> Boolean,
+    myWaveAllowed: () -> Boolean,
+    myWaveCurrentBinding: () -> ClientEventBinding?,
+    myWaveScope: CoroutineScope,
 ): CoreCommandActions {
     fun recommendationFor(key: String): Pair<String, HomeRecommendationItem>? {
         val feed = activeHomeFeed() ?: return null
@@ -170,6 +176,57 @@ internal fun buildCoreCommandActions(
                         )
                         playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
                     }.onFailure { reportError("PLAYBACK_UNAVAILABLE") }
+                } finally {
+                    actionGate.complete(actionKey)
+                }
+            }
+        },
+        startMyWave = myWave@{
+            if (!myWaveAllowed()) return@myWave
+            val actionKey = "play:my-wave"
+            if (!actionGate.begin(actionKey)) return@myWave
+            val ownerBinding = myWaveCurrentBinding()
+            val profileId = ownerBinding?.serverProfileId?.value
+            myWaveScope.launch {
+                try {
+                    runCatching {
+                        val entries = coreProductRepository.randomPlaybackCandidates(
+                            profileId, myWaveVaultAvailable(),
+                        ).map { id ->
+                            NewPlaybackQueueEntry(
+                                queueEntryId = LocalId.random(),
+                                trackRefId = LocalId(id),
+                                sourceOrigin = "HOME",
+                                sourceAudioPolicy = "LOCAL_THEN_VAULT",
+                            )
+                        }
+                        if (myWaveCurrentBinding() != ownerBinding || !myWaveAllowed()) return@runCatching
+                        if (entries.isEmpty()) {
+                            reportError("MY_WAVE_EMPTY")
+                            return@runCatching
+                        }
+                        // Recheck after suspension: a room/profile may have changed since the tap.
+                        val replacementGuard = coreProductRepository.ordinaryPlaybackReplacementGuard(profileId)
+                            ?: return@runCatching
+                        if (!myWaveAllowed() || myWaveCurrentBinding() != ownerBinding) return@runCatching
+                        val snapshotId = LocalId.random()
+                        playbackRepository.activateQueue(
+                            snapshotId = snapshotId,
+                            entries = entries,
+                            queueType = "USER",
+                            sourceContextId = "MY_WAVE_RANDOM",
+                            serverProfileId = profileId,
+                            listeningContext = "GENERAL",
+                            nowMs = System.currentTimeMillis(),
+                            ordinaryReplacementGuard = replacementGuard,
+                        )
+                        if (myWaveCurrentBinding() == ownerBinding && myWaveAllowed()) {
+                            playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
+                        }
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        if (myWaveCurrentBinding() == ownerBinding) reportError("PLAYBACK_UNAVAILABLE")
+                    }
                 } finally {
                     actionGate.complete(actionKey)
                 }

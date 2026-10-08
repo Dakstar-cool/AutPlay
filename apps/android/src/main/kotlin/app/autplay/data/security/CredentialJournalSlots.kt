@@ -10,8 +10,10 @@ object CredentialJournalSlots {
     val recoveryRecipient = ServerProfileId("b623bd90-e84b-4621-9c83-a3bd69ba8db1")
     val deletionSource = ServerProfileId("3ca064af-046e-4fd7-af6d-b47ec651a7c7")
     val deletionRecipient = ServerProfileId("bf7d0f66-35dd-409b-8330-49d582507daf")
+    val portableAccount = ServerProfileId("65f4db6b-65f2-48e1-afdd-e1c637f5b79a")
+    val portableEnrollment = ServerProfileId("f04799aa-e226-4361-9a83-9fe1f6a4b60b")
     val all: Set<ServerProfileId> = setOf(selfPairingSource, selfPairingRecipient, recoverySource,
-        recoveryRecipient, deletionSource, deletionRecipient)
+        recoveryRecipient, deletionSource, deletionRecipient, portableAccount, portableEnrollment)
 
     /** UUIDv8 ad5c0e5e namespace is reserved for account-scoped encrypted consent journals. */
     fun trainingConsentProfile(server: ServerProfileId, account: String, origin: String): ServerProfileId {

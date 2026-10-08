@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
@@ -106,12 +107,22 @@ public fun PlaybackMiniPlayer(
     liked: Boolean = false,
     likeEnabled: Boolean = false,
     onLike: () -> Unit = {},
+    onDismiss: (() -> Unit)? = null,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
         onDispose { onObservingChanged(false) }
     }
-    Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+    val dismissMotion = rememberPlayerCollapseMotion()
+    val animations = rememberSystemAnimationsEnabled()
+    val dismiss = onDismiss.takeIf { state.dismissEnabled }
+    Box(
+        Modifier.fillMaxWidth()
+            .onSizeChanged { dismissMotion.travel = it.height.toFloat() }
+            .graphicsLayer { translationY = dismissMotion.offset }
+            .playerCollapseGesture(dismiss, dismissMotion, animations)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
         Surface(
             color = AutPlayTokens.colors.miniPlayerSurface,
             contentColor = AutPlayTokens.colors.onMiniPlayer,
@@ -252,7 +263,13 @@ public fun NowPlayingScreen(
     var showQueue by rememberSaveable { mutableStateOf(false) }
     val queueSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     if (showQueue) {
-        ModalBottomSheet(onDismissRequest = { showQueue = false }, sheetState = queueSheetState) {
+        ModalBottomSheet(
+            onDismissRequest = { showQueue = false },
+            sheetState = queueSheetState,
+            containerColor = AutPlayTokens.colors.raisedSurface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+        ) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
                 QueueEditorPanel(queueState, queueActions)
             }
@@ -263,6 +280,9 @@ public fun NowPlayingScreen(
         ModalBottomSheet(
             onDismissRequest = { showSleepTimer = false },
             sheetState = sleepTimerSheetState,
+            containerColor = AutPlayTokens.colors.raisedSurface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
         ) {
             SleepTimerSheet(
                 remainingMinutes = sleepTimerRemainingMinutes,

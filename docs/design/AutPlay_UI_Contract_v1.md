@@ -3,9 +3,9 @@
 | Field | Value |
 | --- | --- |
 | Status | Accepted baseline |
-| Version | 1.0 |
-| Date | 2026-08-18 |
-| Accepted by | User design-review approval on 2026-08-18 |
+| Version | 1.1 |
+| Date | 2026-10-07 |
+| Accepted by | User design review on 2026-08-18; appearance and language update requested on 2026-10-07 |
 | Primary client | Android |
 | Scope | Product UI, interaction behavior, adaptive presentation, personal-server connection and administrative UI boundary |
 | Phase effect | None; this document does not create P15 or mark any product behavior implemented |
@@ -167,8 +167,8 @@ meet contrast, dynamic-color or display requirements while preserving the relati
 | Soft accent | `#ffe2d7` | `#3c211b` |
 | Mini-player surface | `#24211f` | `#f1eee8` |
 
-Supported user accent families are Coral, Violet, Green and Blue. Accent color MUST NOT be the
-only indicator of selection, failure, playback state or destructive risk.
+The product uses a fixed Coral accent; user accent selection is unavailable. Accent color MUST NOT
+be the only indicator of selection, failure, playback state or destructive risk.
 
 ### 5.3. Shape, density and hierarchy
 
@@ -258,6 +258,13 @@ user input. Width-class changes MUST NOT create a new player session or trigger 
 ### 7.1. Home
 
 Home prioritizes useful local content and then enriches it when the server is available.
+
+Interim My Wave exposes a separate Home button that starts ordinary random playback from the
+owner's available library. Its copy identifies random playback; each new tap reshuffles and starts
+a fresh queue. It does not claim personalized recommendations. Local audio and completed downloads
+remain eligible offline; connected Vault candidates are resolved lazily by Media3. Active Listen
+together authority disables the button. This temporary behavior precedes the recommendation hero
+described below.
 
 Recommended order:
 
@@ -357,7 +364,7 @@ recovery policy, API contract and migrations exist.
 
 Settings groups SHOULD include:
 
-- appearance and accent;
+- appearance and application language;
 - library access and rescan;
 - storage, offline quota and audio quality;
 - personal-server connection;
@@ -365,6 +372,12 @@ Settings groups SHOULD include:
 - recommendations and taste contexts;
 - Wave policy;
 - privacy, export and diagnostics.
+
+Appearance MUST offer only light and dark themes, switched through a sun/moon button. Application
+language MUST offer only Russian and English. Switching language MUST update app-owned text,
+dialogs and the QR scanner together without leaving text from the previous language. Settings and
+Profile MUST share card shapes, spacing and surface treatments; app-owned dialogs MUST follow the
+same theme.
 
 Android folder selection MUST use SAF/MediaStore. The UI MAY display a friendly folder label but
 MUST NOT treat `/storage/...` or another raw path as the persisted identity of user media.
@@ -376,7 +389,10 @@ from ordinary settings export.
 
 ## 8. Persistent mini-player
 
-The mini-player is present whenever a current or resumable queue item exists.
+The mini-player is present whenever a current or resumable queue item exists, unless the user
+explicitly dismisses it with a downward swipe. Dismissal MUST pause Media3 playback and retain the
+queue and current position. Queue/status refresh alone MUST NOT restore the dismissed surface;
+a new explicit play request restores it. Collapsing Now Playing MUST preserve playback.
 
 It MUST show:
 

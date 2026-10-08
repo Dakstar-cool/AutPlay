@@ -464,17 +464,11 @@
     <string name="profile_confirm_disconnect_body">This only removes the local connection. It does not claim that a remote session was signed out.</string>
 
     <string name="settings_language">Application language</string>
-    <string name="settings_language_system">System language</string>
     <string name="settings_language_russian">Russian</string>
     <string name="settings_language_english">English</string>
     <string name="settings_appearance">Appearance</string>
-    <string name="settings_theme_system">Use device theme</string>
     <string name="settings_theme_light">Light theme</string>
     <string name="settings_theme_dark">Dark theme</string>
-    <string name="settings_accent_coral">Coral accent</string>
-    <string name="settings_accent_violet">Violet accent</string>
-    <string name="settings_accent_green">Green accent</string>
-    <string name="settings_accent_blue">Blue accent</string>
     <string name="settings_library_access">Music folder</string>
     <string name="settings_folder_not_selected">No music folder selected</string>
     <string name="settings_folder_selected">Music folder selected</string>
@@ -482,15 +476,10 @@
     <string name="settings_scan_folder">Scan folder again</string>
     <string name="settings_folder_privacy">This folder is used for library updates. Searching the phone requests separate access to audio files. You can revoke permissions in Android settings.</string>
     <string name="settings_network">Personal server and shared listening</string>
-    <string name="settings_personal_server_body">Connect and manage your personal server from one trusted connection flow.</string>
     <string name="settings_open_personal_server">Open personal server</string>
     <string name="settings_metered_downloads">Download tracks using mobile data</string>
-    <string name="settings_download_network_summary">Save tracks for offline listening</string>
     <string name="settings_playback">Playback</string>
-    <string name="settings_playback_summary">Transitions between tracks</string>
     <string name="settings_smooth_track_transitions">Smooth track transitions</string>
-    <string name="settings_smooth_track_transitions_body">Joins tracks by skipping the last 3 seconds of the current track and the first 3 seconds of the next. Volume stays unchanged. Short tracks stay whole; the final track keeps its full ending.</string>
-    <string name="settings_download_network_body">Applies only to saving tracks for offline listening. Your library and metadata sync over any available connection.</string>
     <string name="settings_wave_prefetch_off">Do not prepare tracks in advance</string>
     <string name="settings_wave_prefetch_next">Prepare the next track</string>
     <string name="settings_wave_prefetch_three">Prepare the next three tracks</string>

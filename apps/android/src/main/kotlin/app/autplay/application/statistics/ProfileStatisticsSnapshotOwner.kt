@@ -12,15 +12,17 @@ data class OwnerProfileStatisticsState(
     val snapshot: OwnerProfileStatistics? = null,
     val loading: Boolean = false,
     val refreshFailed: Boolean = false,
+    val accountBased: Boolean = false,
 )
 
 /** Remember one owner per profile identity; only opening the profile and explicit refresh read Room. */
 class ProfileStatisticsSnapshotOwner(
     private val scope: CoroutineScope,
     private val profileId: String?,
+    private val accountBased: Boolean = false,
     private val load: suspend (String?) -> OwnerProfileStatistics,
 ) {
-    private val mutableState = MutableStateFlow(OwnerProfileStatisticsState())
+    private val mutableState = MutableStateFlow(OwnerProfileStatisticsState(accountBased = accountBased))
     val state: StateFlow<OwnerProfileStatisticsState> = mutableState.asStateFlow()
     private var attemptedInitialLoad = false
     private var refreshJob: Job? = null
@@ -31,20 +33,23 @@ class ProfileStatisticsSnapshotOwner(
     }
 
     /** UI commands are serialized on its scope; repeated taps while loading coalesce into one read. */
-    fun refresh() {
+    fun refresh() = refreshWith { load(profileId) }
+
+    /** Account cache invalidation can refresh without causing another synchronous server request. */
+    fun refreshWith(readSnapshot: suspend () -> OwnerProfileStatistics) {
         if (mutableState.value.loading) return
         attemptedInitialLoad = true
         val previous = mutableState.value.snapshot
-        mutableState.value = OwnerProfileStatisticsState(snapshot = previous, loading = true)
+        mutableState.value = OwnerProfileStatisticsState(snapshot = previous, loading = true, accountBased = accountBased)
         refreshJob = scope.launch {
             try {
-                mutableState.value = OwnerProfileStatisticsState(snapshot = load(profileId))
+                mutableState.value = OwnerProfileStatisticsState(snapshot = readSnapshot(), accountBased = accountBased)
             } catch (cancelled: CancellationException) {
                 attemptedInitialLoad = previous != null
-                mutableState.value = OwnerProfileStatisticsState(snapshot = previous)
+                mutableState.value = OwnerProfileStatisticsState(snapshot = previous, accountBased = accountBased)
                 throw cancelled
             } catch (_: Exception) {
-                mutableState.value = OwnerProfileStatisticsState(snapshot = previous, refreshFailed = true)
+                mutableState.value = OwnerProfileStatisticsState(snapshot = previous, refreshFailed = true, accountBased = accountBased)
             }
         }
     }

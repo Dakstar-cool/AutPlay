@@ -46,17 +46,17 @@ internal fun AdmissionPanel(state: AdmissionUiState, actions: AdmissionActions) 
                 Text(stringResource(R.string.admission_waiting_for_admin))
             }
             is AdmissionState.Pending -> { Text(stringResource(R.string.admission_waiting_for_admin)); Button(onClick = actions.poll) { Text(stringResource(R.string.admission_check_status)) }; OutlinedButton(onClick = actions.cancel) { Text(stringResource(R.string.admission_cancel)) } }
-            is AdmissionState.Approved -> { Text("Approved for ${value.account.label} (${value.account.userId.value}). Confirm this account before connecting."); Button(onClick = actions.confirmAccount) { Text("Confirm account") }; OutlinedButton(onClick = actions.cancel) { Text("Cancel") } }
-            is AdmissionState.Exchanging -> Text("Connecting approved device…")
-            AdmissionState.Connected -> Text("Connected")
-            is AdmissionState.Rejected -> Terminal("Approval was rejected.", actions)
-            is AdmissionState.Blocked -> Terminal("This device key is blocked.", actions)
-            is AdmissionState.Expired -> Terminal("Approval request expired.", actions)
-            AdmissionState.Cancelled -> Terminal("Approval request cancelled.", actions)
-            AdmissionState.Unavailable -> Terminal("Approval service is unavailable. Local music remains available.", actions)
-            AdmissionState.IdentityChanged -> Terminal("Server identity changed. Recheck trust before trying again.", actions)
+            is AdmissionState.Approved -> { Text(stringResource(R.string.admission_approved_account, value.account.label, value.account.userId.value)); Button(onClick = actions.confirmAccount) { Text(stringResource(R.string.admission_confirm_account)) }; OutlinedButton(onClick = actions.cancel) { Text(stringResource(R.string.admission_cancel)) } }
+            is AdmissionState.Exchanging -> Text(stringResource(R.string.admission_connecting_device))
+            AdmissionState.Connected -> Text(stringResource(R.string.admission_connected))
+            is AdmissionState.Rejected -> Terminal(stringResource(R.string.admission_rejected), actions)
+            is AdmissionState.Blocked -> Terminal(stringResource(R.string.admission_blocked), actions)
+            is AdmissionState.Expired -> Terminal(stringResource(R.string.admission_expired), actions)
+            AdmissionState.Cancelled -> Terminal(stringResource(R.string.admission_cancelled), actions)
+            AdmissionState.Unavailable -> Terminal(stringResource(R.string.admission_unavailable), actions)
+            AdmissionState.IdentityChanged -> Terminal(stringResource(R.string.admission_identity_changed), actions)
         }
     }
 }
 
-@Composable private fun Terminal(copy: String, actions: AdmissionActions) { Text(copy); Button(onClick = actions.retry) { Text("Try again") } }
+@Composable private fun Terminal(copy: String, actions: AdmissionActions) { Text(copy); Button(onClick = actions.retry) { Text(stringResource(R.string.admission_retry)) } }

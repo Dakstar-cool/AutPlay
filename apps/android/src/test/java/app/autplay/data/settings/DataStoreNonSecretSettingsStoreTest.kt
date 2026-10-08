@@ -6,9 +6,13 @@ import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.media3.common.Player
+import app.autplay.application.settings.SettingsTransferCodec
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
+import app.autplay.playback.presentation.MiniPlayerDismissalCheckpoint
+import app.autplay.playback.presentation.shouldRestoreDismissedMiniPlayer
 import java.io.File
 import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
@@ -34,23 +38,46 @@ class DataStoreNonSecretSettingsStoreTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
-    fun smoothTransitionsPersistAcrossRecreationAndUnrelatedSettingsEdits() = runBlocking {
+    fun playbackPreferencesSurviveRecreationAndDismissalResetsOnlyOnNewPlay() = runBlocking {
         val file = temporaryFolder.root.resolve("playback.preferences_pb")
         val firstScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         try {
             val store = hostPreferenceStore(firstScope, file)
             assertFalse(store.settings.first().smoothTrackTransitions)
+            val checkpoint = MiniPlayerDismissalCheckpoint(store)
+            assertFalse(checkpoint.restore())
+            checkpoint.persist(true)
             store.mutate { it.copy(smoothTrackTransitions = true) }
             store.mutate { it.copy(accentPalette = "BLUE") }
         } finally { firstScope.coroutineContext[Job]?.cancelAndJoin() }
         val secondScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         try {
             val store = hostPreferenceStore(secondScope, file)
+            val checkpoint = MiniPlayerDismissalCheckpoint(store)
+            assertTrue(checkpoint.restore())
             assertTrue(store.settings.first().smoothTrackTransitions)
             assertEquals("BLUE", store.settings.first().accentPalette)
             store.mutate { it.copy(smoothTrackTransitions = false) }
             assertFalse(store.settings.first().smoothTrackTransitions)
+            val transferred = SettingsTransferCodec.encode(NonSecretSettings(miniPlayerDismissed = true))
+            assertFalse("mini_player_dismissed" in transferred.decodeToString())
+            val importWithDeviceMarker = (transferred.decodeToString().dropLast(1) +
+                ",\"mini_player_dismissed\":false}").encodeToByteArray()
+            store.mutate { SettingsTransferCodec.decode(importWithDeviceMarker, it) }
+            assertTrue(checkpoint.restore())
+            if (shouldRestoreDismissedMiniPlayer(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)) {
+                checkpoint.persist(false)
+            }
+            assertFalse(store.settings.first().miniPlayerDismissed)
         } finally { secondScope.coroutineContext[Job]?.cancelAndJoin() }
+        val thirdScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(thirdScope, file)
+            assertFalse(MiniPlayerDismissalCheckpoint(store).restore())
+            // Saved Activity state still covers recreation before its earlier write completed.
+            assertTrue(MiniPlayerDismissalCheckpoint(store, initialDismissed = true).restore())
+            assertTrue(store.settings.first().miniPlayerDismissed)
+        } finally { thirdScope.coroutineContext[Job]?.cancelAndJoin() }
     }
 
     @Test

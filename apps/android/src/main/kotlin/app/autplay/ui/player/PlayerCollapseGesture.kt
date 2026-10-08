@@ -1,8 +1,7 @@
 package app.autplay.ui.player
 
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
@@ -33,7 +32,8 @@ internal val LocalPlayerCollapseTargetTop = staticCompositionLocalOf<Dp?> { null
 
 internal fun shouldCompletePlayerCollapse(offset: Float, travel: Float, velocity: Float, density: Float): Boolean =
     travel > 0f && velocity > -1000f * density &&
-        (offset >= travel * 0.4f || (offset >= 72f * density && velocity >= 1000f * density))
+        (offset >= (travel * 0.18f).coerceIn(56f * density, 96f * density) ||
+            (offset >= 40f * density && velocity >= 800f * density))
 
 /** Drag writes directly to the graphics layer; only release uses a settling animation. */
 @Stable
@@ -86,7 +86,7 @@ internal class PlayerCollapseMotion(private val scope: CoroutineScope) {
             initialValue = offset,
             targetValue = target,
             initialVelocity = velocity,
-            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+            animationSpec = tween(durationMillis = if (target > 0f) 160 else 180),
         ) { value, _ -> offset = value.coerceIn(0f, travel) }
     }
 

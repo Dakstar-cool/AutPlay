@@ -57,6 +57,33 @@ steps against real data as part of P14 evidence.
 6. Let backups expire under the declared retention schedule; do not mutate historical verified
    generations in place.
 
+## Portable account data (local implementation)
+
+The [portable account feature](PORTABLE_ACCOUNTS.md) has no ordinary owner archive HTTP endpoint.
+Its internal `PortableAccountOwnerExportService.page` supplements the operator-assisted procedure
+above with session-revalidated, owner-scoped pages of at most 32 portable records or typed taste
+signals. Use separate cursors for its `records` and `taste` sources and a quiesced isolated copy.
+It is not a full-library/Vault export and does not replace the archive manifest or approved transfer.
+
+Ordinary exports must omit `account.portable_identity.document` entirely: password/recovery
+ciphertexts, nonces, salts and any future private passport fields are credential material even
+when encrypted. The helper selects only explicit public identity fields and validates the exact
+data-document allowlist before returning records. Exclude every `account.portable_challenge`
+document/receipt, session grant and recovery document. A requested recovery-file export belongs to
+the secure account-recovery flow and must never be bundled into an ordinary data archive.
+
+Migration 0066 integrates portable data into accepted privacy purge. Owner identity and records
+have cascades, while typed taste rows are explicitly deleted before their RESTRICT track references.
+Pre-registration challenges have no owner FK; purge removes account/device/session references and
+nested UUID references in challenge/receipt JSON before retiring devices/sessions. The existing
+`account.verify_owner_absent` catalog scan remains a final assertion against residual identifiers;
+it does not automatically authorize new tables for ordinary export. Direct deletion involving
+portable data requires accepted privacy authority. Other owners' unrelated data remains intact.
+
+Empty-only development downgrade restores the prior purge function. Any retained portable
+identity/challenge/record/taste row blocks rollback. This guidance is not evidence of production
+erasure, schema deployment or completed release acceptance.
+
 ## Disaster recovery and incident handling
 
 Use [BACKUP_RESTORE.md](BACKUP_RESTORE.md) for generation, isolated restore, checksum,

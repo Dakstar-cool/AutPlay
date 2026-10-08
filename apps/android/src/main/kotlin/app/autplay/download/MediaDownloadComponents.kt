@@ -82,6 +82,7 @@ object MediaDownloadComponents {
         val downloadExecutor: ExecutorService,
     )
 
-    private const val MAX_PARALLEL_DOWNLOADS = 2
+    // Leave bandwidth for foreground playback and its single Media3 successor preload.
+    private const val MAX_PARALLEL_DOWNLOADS = 1
     private const val STREAM_CACHE_BYTES = 128L * 1024 * 1024
 }

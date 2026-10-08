@@ -10,16 +10,9 @@
     <string name="profile_account_devices_summary">Connection, devices and account security</string>
     <string name="profile_connect_optional">Connect a personal server</string>
     <string name="profile_connect_optional_summary">Optional: sync your collection and listen with friends</string>
-    <string name="settings_appearance_summary">Language, theme and accent colour</string>
-    <string name="settings_library_summary">Music folder and library scanning</string>
-    <string name="settings_connection_summary">Personal server, sync and mobile data</string>
-    <string name="settings_wave_summary">Listen together and prepare upcoming tracks</string>
     <string name="settings_privacy_summary">Who can see your listening statistics</string>
-    <string name="settings_transfer_summary">Save or restore your preferences</string>
     <string name="settings_music_navigation">Music and history</string>
-    <string name="settings_music_summary">Playlists, downloads, history and import</string>
     <string name="settings_about">About the app</string>
-    <string name="settings_about_summary">Version and developer mode</string>
     <string name="settings_app_version">AutPlay %1$s</string>
     <string name="settings_developer_mode">Developer mode</string>
     <string name="settings_developer_description">Permission is controlled for this exact device from Admin Web → Trusted devices.</string>

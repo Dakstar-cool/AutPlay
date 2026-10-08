@@ -29,7 +29,9 @@ class VaultPlaybackDataSourceTest {
         assertEquals(listOf<Long?>(null, 1), provider.rejectedGenerations)
         assertEquals(2, factory.sources.size)
         assertEquals("Bearer fresh-secret", factory.sources.last().requestHeaders["Authorization"])
-        assertEquals("https://vault.test/api/v1/stream/audio-variants/${provider.variantId}", source.uri.toString())
+        assertEquals(stableUri, source.uri)
+        assertEquals("https://vault.test/api/v1/stream/audio-variants/${provider.variantId}",
+            factory.sources.last().uri.toString())
         assertFalse(source.uri.toString().contains("secret"))
         source.close()
     }

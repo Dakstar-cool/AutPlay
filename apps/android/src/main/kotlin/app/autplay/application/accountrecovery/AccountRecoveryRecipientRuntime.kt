@@ -5,6 +5,8 @@ import app.autplay.application.profilepairing.FirstBindCeremonyOwner
 import app.autplay.application.profilepairing.OriginNormalizer
 import app.autplay.application.profilepairing.PairingNetworkResult
 import app.autplay.application.profilepairing.ProfilePairingPort
+import app.autplay.application.profilepairing.requirePortableAccountCompatible
+import app.autplay.application.profilepairing.markPortableServerEnrollmentAttempt
 import app.autplay.application.profilepairing.requireCanonicalUuid
 import app.autplay.application.publicaccess.ActiveProfileGate
 import app.autplay.application.selfpairing.SelfPairingIdentity
@@ -66,7 +68,10 @@ class AccountRecoveryRecipientRuntime(
     suspend fun importDocument(raw: ByteArray) = operation {
         reserveNew()
         val document = AccountRecoveryDocument.parse(raw, allowDevelopmentHttp)
-        try { requireUsableIdentity(document.identity) }
+        try {
+            requireUsableIdentity(document.identity)
+            credentials.requirePortableAccountCompatible(document.accountId)
+        }
         catch (failure: Exception) { document.close(); throw failure }
         proposal?.close(); proposal = document
         mutable.value = AccountRecoveryRecipientState.ConfirmServer(document.identity, document.accountId, document.label)
@@ -76,6 +81,7 @@ class AccountRecoveryRecipientRuntime(
     suspend fun inspectManual(origin: String, accountId: String, codeText: String) = operation {
         reserveNew()
         requireCanonicalUuid(accountId)
+        credentials.requirePortableAccountCompatible(accountId)
         val code = AccountRecoveryProof.normalize(codeText)
         try {
             val api = OriginNormalizer.normalize(origin, allowDevelopmentHttp)
@@ -98,6 +104,7 @@ class AccountRecoveryRecipientRuntime(
     suspend fun confirmServer() = operation {
         val current = requireNotNull(proposal) { "recovery_server_confirmation_required" }
         require(firstBind.isReservedBy(OWNER)); requireUnbound()
+        credentials.requirePortableAccountCompatible(current.accountId)
         require(store.read(SLOT) == null) { "recovery_resume_required" }
         mutable.value = AccountRecoveryRecipientState.Working
         val found = discovery.discovery(current.identity.apiOrigin)
@@ -178,6 +185,7 @@ class AccountRecoveryRecipientRuntime(
     }
 
     private suspend fun preview(pending: JsonObject) {
+        credentials.requirePortableAccountCompatible(pending.text("account_id"))
         mutable.value = AccountRecoveryRecipientState.Working
         val request = signedRequest("preview", identity(pending), pending.text("account_id"),
             AccountRecoveryProof.device(keys, pending.text("key_alias"), deviceName, appVersion), pending.text("key_alias"))
@@ -191,6 +199,9 @@ class AccountRecoveryRecipientRuntime(
     }
     private suspend fun commit(pending: JsonObject) {
         if (finishIfDurable(pending)) return
+        requireUnbound()
+        credentials.requirePortableAccountCompatible(pending.text("account_id"))
+        credentials.markPortableServerEnrollmentAttempt(pending.text("account_id"))
         mutable.value = AccountRecoveryRecipientState.Working
         val request = Base64.getDecoder().decode(pending.text("request_b64"))
         val code = AccountRecoveryProof.normalize(pending.text("old_code"))
@@ -246,6 +257,7 @@ class AccountRecoveryRecipientRuntime(
         requireUnbound()
     }
     private suspend fun requireUnbound() {
+        credentials.requirePortableAccountCompatible(allowUnknownAccount = true)
         val other = if (SLOT == AccountRecoverySlot.RECIPIENT) AccountRecoverySlot.DELETION_RECIPIENT else AccountRecoverySlot.RECIPIENT
         require(!activeProfile.hasActiveProfile() && !credentials.hasPublicAccessPendingRegistration() &&
             !credentials.hasSelfDevicePairingPendingRecipient() && store.read(other) == null &&

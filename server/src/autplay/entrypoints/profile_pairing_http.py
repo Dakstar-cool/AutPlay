@@ -75,6 +75,7 @@ class LifecycleCommand(BaseModel):
     schema_version: int = 1
     operation_id: UUID
     reason_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    portable_authorization: dict[str, object] | None = Field(default=None, repr=False)
 
 
 def create_profile_pairing_router(
@@ -186,7 +187,11 @@ def create_profile_pairing_router(
             return JSONResponse(retry, headers=_NO_STORE)
         try:
             result = service.logout_current(
-                _principal(request), body.operation_id, body.reason_code, _access_token_id(request)
+                _principal(request),
+                body.operation_id,
+                body.reason_code,
+                _access_token_id(request),
+                body.portable_authorization,
             )
         except ProfilePairingError as error:
             raise _profile_error(error) from error
@@ -210,7 +215,11 @@ def create_profile_pairing_router(
             return JSONResponse(retry, headers=_NO_STORE)
         try:
             result = service.logout_all(
-                _principal(request), body.operation_id, body.reason_code, _access_token_id(request)
+                _principal(request),
+                body.operation_id,
+                body.reason_code,
+                _access_token_id(request),
+                body.portable_authorization,
             )
         except ProfilePairingError as error:
             raise _profile_error(error) from error
@@ -239,6 +248,7 @@ def create_profile_pairing_router(
                 body.operation_id,
                 body.reason_code,
                 _access_token_id(request),
+                body.portable_authorization,
             )
         except ProfilePairingError as error:
             raise _profile_error(error) from error

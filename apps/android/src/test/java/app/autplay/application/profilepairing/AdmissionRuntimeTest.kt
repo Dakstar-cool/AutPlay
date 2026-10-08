@@ -16,6 +16,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdmissionRuntimeTest {
+    @Test fun pendingAuthorityDeniesRequestAndWrongApprovedAccountNeverMintsGrant() = runBlocking {
+        val port = FakePort()
+        var mayDiscover = false
+        val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, {},
+            authorizeAccount = { account -> mayDiscover && account == null })
+        runtime.request(snapshot()).join()
+        assertEquals(0, port.requestCalls)
+        mayDiscover = true
+        runtime.request(snapshot()).join()
+        runtime.poll().join()
+        assertTrue(runtime.state.value is AdmissionState.Approved)
+        runtime.confirmAccount().join()
+        assertEquals(0, port.exchangeCalls)
+        assertTrue(runtime.state.value is AdmissionState.Blocked)
+    }
+
     @Test fun sasMatchesTheSharedRfc8785Vector() {
         val checkpoint = AdmissionCheckpoint(
             "77777777-7777-4777-8777-777777777777", "b".repeat(64),
@@ -28,7 +44,7 @@ class AdmissionRuntimeTest {
 
     @Test fun pollBearerIsNotIncludedInCheckpointAndApprovalNeedsConfirmation() = runBlocking {
         val port = FakePort(); val persisted = MutableStateFlow<AdmissionCheckpoint?>(null)
-        val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, { persisted.value = it })
+        val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, { persisted.value = it }, authorizeAccount = { true })
         runtime.request(snapshot()).join()
         assertTrue(runtime.state.value is AdmissionState.Pending)
         assertFalse(AdmissionCheckpointCodec.encode(requireNotNull(persisted.value)).contains("poll-secret"))
@@ -46,21 +62,21 @@ class AdmissionRuntimeTest {
     }
 
     @Test fun stalePollCannotOverwriteCancelledState() = runBlocking {
-        val port = FakePort(); val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, {})
+        val port = FakePort(); val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, {}, authorizeAccount = { true })
         runtime.request(snapshot()).join(); runtime.cancel().join(); runtime.poll().join()
         assertEquals(AdmissionState.Cancelled, runtime.state.value)
     }
 
     @Test fun trustedReenrollmentUsesSameKeyAndTwoStepExchange() = runBlocking {
         val checkpoint = AdmissionCheckpoint("77777777-7777-4777-8777-777777777777", "a".repeat(64), ServerProfileId("22222222-2222-4222-8222-222222222222"), "33333333-3333-4333-8333-333333333333", 1, "a".repeat(64), "b".repeat(64), "88888888-8888-4888-8888-888888888888", "https://example.test", "https://stream.example.test")
-        val runtime = TrustedReenrollmentRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, FakePort(), { _, _, _, _ -> true })
+        val runtime = TrustedReenrollmentRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, FakePort(), { _, _, _, _ -> true }, authorizeAccount = { true })
         runtime.reenroll(checkpoint, AdmissionAccount(UserId("44444444-4444-4444-8444-444444444444"), "Account")).join()
         assertEquals(TrustedReenrollmentState.Connected, runtime.state.value)
     }
 
     @Test fun processRecoveryUsesExactM5AliasAndDoesNotPersistNewBearer() = runBlocking {
         val port = FakePort(); var persisted: AdmissionCheckpoint? = null
-        val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, { persisted = it })
+        val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, { persisted = it }, authorizeAccount = { true })
         runtime.request(snapshot()).join(); val checkpoint = requireNotNull(persisted)
         runtime.cancel().join(); runtime.recover(checkpoint).join()
         assertTrue(runtime.state.value is AdmissionState.Pending)
@@ -77,6 +93,7 @@ class AdmissionRuntimeTest {
             FakeKeys,
             port,
             { persisted = it },
+            authorizeAccount = { true },
         )
         val stale = checkpoint()
 
@@ -97,6 +114,7 @@ class AdmissionRuntimeTest {
             port,
             {},
             deviceName = "SM-A556E",
+            authorizeAccount = { true },
         )
 
         runtime.request(snapshot()).join()
@@ -128,7 +146,7 @@ class AdmissionRuntimeTest {
     }
 
     @Test fun stalePollAndExchangeFailuresCannotOverwriteANewerGeneration() = runBlocking {
-        val port = FakePort(); val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, {})
+        val port = FakePort(); val runtime = AdmissionRuntime(CoroutineScope(Dispatchers.Unconfined), FakeKeys, port, {}, authorizeAccount = { true })
         runtime.request(snapshot()).join(); runtime.confirmComparison()
         port.pollGate = CompletableDeferred(); port.pollFailure = "server_identity_changed"
         val stalePoll = runtime.poll()

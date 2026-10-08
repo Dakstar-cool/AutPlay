@@ -432,12 +432,27 @@ def test_migration_preserves_old_snapshot_and_refuses_receipt_loss(
             "VALUES(%s,%s,%s)",
             (search_id, owner, b"r" * 32),
         )
+        head_before = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        assert head_before == ("0066_portable_local_account",)
+        purge_before = conn.execute(
+            "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
+        ).fetchone()
+        receipts_before = conn.execute("SELECT * FROM discovery.internet_search_context").fetchall()
         conn.commit()
     with pytest.raises(DBAPIError, match="refusing to discard catalogue context"):
         database_harness.downgrade(empty_database_name, "0064_metadata_catalog_gate")
     with database_harness.connect(empty_database_name) as conn:
-        assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0065_internet_catalogue_context",
+        # The 0065 refusal rolls back the preceding empty 0066 downgrade in the same transaction.
+        assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == head_before
+        assert (
+            conn.execute(
+                "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
+            ).fetchone()
+            == purge_before
+        )
+        assert (
+            conn.execute("SELECT * FROM discovery.internet_search_context").fetchall()
+            == receipts_before
         )
         assert conn.execute("SELECT * FROM discovery.internet_search").fetchall() == before
         assert conn.execute(

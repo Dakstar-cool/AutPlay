@@ -40,14 +40,21 @@ public fun WelcomeOnboardingScreen(
     onComplete: suspend (UiDestination, String) -> Boolean,
     modifier: Modifier = Modifier,
     initialPublicId: String? = null,
+    createAccount: (suspend (String, CharArray) -> Boolean)? = null,
+    existingAccount: (suspend (String) -> Boolean)? = null,
 ) {
     var step by rememberSaveable { mutableIntStateOf(0) }
     var saving by remember { mutableStateOf(false) }
     var saveFailed by rememberSaveable { mutableStateOf(false) }
     var publicIdInput by rememberSaveable { mutableStateOf(initialPublicId.orEmpty()) }
+    var password by remember { mutableStateOf("") }
+    var passwordConfirmation by remember { mutableStateOf("") }
+    SecureAccountWindow(createAccount != null)
+    val passwordReady = createAccount == null || (password == passwordConfirmation &&
+        app.autplay.application.portableaccount.PortableAccountCrypto.validPassword(password.toCharArray()))
     val publicId = normalizeSocialPublicId(publicIdInput)
     LaunchedEffect(publicId) {
-        if (publicId == null && step > 0) step = 0
+        if ((publicId == null || !passwordReady) && step > 0) step = 0
     }
     val scope = rememberCoroutineScope()
     val title = when (step) {
@@ -94,6 +101,22 @@ public fun WelcomeOnboardingScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (createAccount != null) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = password, onValueChange = { password = it.take(256) }, singleLine = true,
+                    label = { Text(stringResource(R.string.portable_account_password)) }, modifier = Modifier.fillMaxWidth(),
+                    supportingText = { Text(stringResource(R.string.portable_account_password_rules)) },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password))
+                OutlinedTextField(value = passwordConfirmation, onValueChange = { passwordConfirmation = it.take(256) }, singleLine = true,
+                    label = { Text(stringResource(R.string.portable_account_password_repeat)) }, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password))
+                if (existingAccount != null) OutlinedButton(enabled = !saving && publicId != null, onClick = {
+                    saving = true
+                    scope.launch { try { saveFailed = !existingAccount(requireNotNull(publicId)) } finally { saving = false } }
+                }) { Text(stringResource(R.string.portable_account_existing)) }
+            }
             Spacer(Modifier.height(12.dp))
             Text(
                 text = stringResource(R.string.ui_friends_refresh_onboarding_pending),
@@ -106,7 +129,7 @@ public fun WelcomeOnboardingScreen(
         if (step < 2) {
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = step != 0 || publicId != null,
+                enabled = step != 0 || (publicId != null && passwordReady),
                 onClick = { step += 1 },
             ) { Text(stringResource(R.string.onboarding_next)) }
         } else {
@@ -117,7 +140,12 @@ public fun WelcomeOnboardingScreen(
                     saving = true
                     saveFailed = false
                     scope.launch {
-                        if (!onComplete(UiDestination.Home, requireNotNull(publicId))) saveFailed = true
+                        val material = password.toCharArray()
+                        try {
+                            val created = createAccount?.invoke(requireNotNull(publicId), material) ?: true
+                            if (!created || !onComplete(UiDestination.Home, requireNotNull(publicId))) saveFailed = true
+                            else { password = ""; passwordConfirmation = "" }
+                        } finally { material.fill('\u0000') }
                         saving = false
                     }
                 },
@@ -130,7 +158,12 @@ public fun WelcomeOnboardingScreen(
                     saving = true
                     saveFailed = false
                     scope.launch {
-                        if (!onComplete(UiDestination.Profile, requireNotNull(publicId))) saveFailed = true
+                        val material = password.toCharArray()
+                        try {
+                            val created = createAccount?.invoke(requireNotNull(publicId), material) ?: true
+                            if (!created || !onComplete(UiDestination.Profile, requireNotNull(publicId))) saveFailed = true
+                            else { password = ""; passwordConfirmation = "" }
+                        } finally { material.fill('\u0000') }
                         saving = false
                     }
                 },

@@ -1,5 +1,7 @@
 package app.autplay.ui.profilepairing
 
+import app.autplay.ui.AutPlayDialog
+
 import app.autplay.R
 import app.autplay.application.accountrecovery.AccountRecoveryRecipientState
 import app.autplay.application.accountrecovery.AccountRecoverySourceState
@@ -8,12 +10,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,7 +57,7 @@ internal fun AccountRecoveryCard(state: AccountRecoveryUiState, actions: Account
     val localExport = (state.source as? AccountRecoverySourceState.Ready)?.canExport == true
     val deletion = state.purpose == AccountRestorationPurpose.DELETE_CANCEL
     if (!state.canManage && !state.canRecover && !localExport && !state.setupRequired && state.recipient == AccountRecoveryRecipientState.Idle) return
-    Surface(shape = MaterialTheme.shapes.large, tonalElevation = 1.dp) {
+    app.autplay.ui.PreferenceSurface {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(if (deletion) R.string.deletion_cancel_title else R.string.recovery_title), style = MaterialTheme.typography.titleMedium)
             if (state.setupRequired) Text(stringResource(R.string.recovery_new_account_incomplete))
@@ -125,7 +125,7 @@ internal fun AccountRecoveryCard(state: AccountRecoveryUiState, actions: Account
             state.fileNotice?.let { Text(stringResource(if (it == "saved") R.string.recovery_saved else R.string.recovery_file_failed)) }
         }
     }
-    if (confirmRotation) AlertDialog(onDismissRequest = { confirmRotation = false },
+    if (confirmRotation) AutPlayDialog(onDismissRequest = { confirmRotation = false },
         title = { Text(stringResource(R.string.recovery_rotate)) }, text = { Text(stringResource(R.string.recovery_rotation_warning)) },
         confirmButton = { Button(onClick = { confirmRotation = false; actions.configure(true) }) { Text(stringResource(R.string.recovery_rotate)) } },
         dismissButton = { TextButton(onClick = { confirmRotation = false }) { Text(stringResource(R.string.recovery_cancel)) } })

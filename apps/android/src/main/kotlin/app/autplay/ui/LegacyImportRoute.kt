@@ -1,7 +1,8 @@
 package app.autplay.ui
 
+import app.autplay.ui.AutPlayDialog
+
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,7 +50,7 @@ internal fun LegacyImportRoute(
 ) {
     var confirmCancel by remember(state.job?.importJobId) { mutableStateOf(false) }
     if (confirmCancel) {
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { confirmCancel = false },
             title = { Text(stringResource(R.string.import_cancel_title)) },
             text = {

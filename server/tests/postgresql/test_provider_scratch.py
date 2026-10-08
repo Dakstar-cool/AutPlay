@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .conftest import DatabaseHarness
 from .historical_guard_support import (
-    HEAD65,
+    CURRENT_HEAD,
     assert_current_context_refusal,
     internet_acquisition_for_execution,
 )
@@ -256,7 +256,9 @@ def test_current_head_receipt_refusal_preserves_handoff_and_claim(
     )
     assert repository.claim(owned.execution_id) == claim
     with database_harness.connect(database_name) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD65,)
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            CURRENT_HEAD,
+        )
 
 
 def test_current_head_receipt_refusal_preserves_unclaimed_handoff_and_bytes(

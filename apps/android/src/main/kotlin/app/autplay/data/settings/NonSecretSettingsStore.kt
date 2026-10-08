@@ -53,7 +53,7 @@ data class NonSecretSettings(
     /** Stream service origin. It may differ from the API origin in local deployments. */
     val streamBaseUrl: String? = null,
     val downloadOnMeteredNetwork: Boolean = false,
-    val appLanguage: String = "SYSTEM",
+    val appLanguage: String = "EN",
     val appearanceMode: String = "DARK",
     val accentPalette: String = "CORAL",
     /** Device-local presentation preference; never exported or synced. */
@@ -61,10 +61,15 @@ data class NonSecretSettings(
     val libraryRootTreeUri: String? = null,
     val wavePrefetchMode: String = "NEXT",
     val smoothTrackTransitions: Boolean = false,
+    /** Device-local playback dismissal checkpoint; never exported or synced. */
+    val miniPlayerDismissed: Boolean = false,
     /** Versioned first-run education checkpoint. It is device-local and is never transferred. */
     val onboardingRevision: Int = 0,
     /** Device-local requested public ID. Only the active server can confirm its uniqueness. */
     val pendingPublicId: String? = null,
+    /** Stable local account identity, independent of the active server binding. No secrets. */
+    val portableAccountId: String? = null,
+    val portableAccountKeyThumbprint: String? = null,
     /** M5 non-secret checkpoint. A matching secret marker is required before remote use. */
     val m5Binding: M5BindingCheckpoint? = null,
     /** Signed public identity/capability evidence needed to fail closed across process restart. */
@@ -181,12 +186,17 @@ class DataStoreNonSecretSettingsStore(
         preferences[APPEARANCE_MODE] = settings.appearanceMode
         preferences[ACCENT_PALETTE] = settings.accentPalette
         preferences[SMOOTH_TRACK_TRANSITIONS] = settings.smoothTrackTransitions
+        preferences[MINI_PLAYER_DISMISSED] = settings.miniPlayerDismissed
         settings.libraryRootTreeUri?.let { preferences[LIBRARY_ROOT_TREE_URI] = it }
                 ?: preferences.remove(LIBRARY_ROOT_TREE_URI)
         preferences[WAVE_PREFETCH_MODE] = settings.wavePrefetchMode
         preferences[ONBOARDING_REVISION_KEY] = settings.onboardingRevision
         settings.pendingPublicId?.let { preferences[PENDING_PUBLIC_ID] = it }
             ?: preferences.remove(PENDING_PUBLIC_ID)
+        settings.portableAccountId?.let { preferences[PORTABLE_ACCOUNT_ID] = it }
+            ?: preferences.remove(PORTABLE_ACCOUNT_ID)
+        settings.portableAccountKeyThumbprint?.let { preferences[PORTABLE_ACCOUNT_KEY_THUMBPRINT] = it }
+            ?: preferences.remove(PORTABLE_ACCOUNT_KEY_THUMBPRINT)
         settings.m5Binding?.let { binding ->
             preferences[M5_BINDING_COMMIT_ID] = binding.bindingCommitId
             preferences[M5_SERVER_INSTANCE_ID] = binding.serverInstanceId
@@ -242,15 +252,18 @@ class DataStoreNonSecretSettingsStore(
         streamBaseUrl = preferences[STREAM_SERVICE_BASE_URL] ?: legacyOrigin ?: apiOrigin,
         downloadOnMeteredNetwork = preferences[DOWNLOAD_ON_METERED_NETWORK]
             ?: preferences[LEGACY_SYNC_ON_METERED_NETWORK] ?: false,
-        appLanguage = preferences[APP_LANGUAGE] ?: "SYSTEM",
+        appLanguage = preferences[APP_LANGUAGE] ?: "EN",
         developerMode = preferences[DEVELOPER_MODE] ?: false,
         appearanceMode = preferences[APPEARANCE_MODE] ?: "DARK",
         accentPalette = preferences[ACCENT_PALETTE] ?: "CORAL",
         smoothTrackTransitions = preferences[SMOOTH_TRACK_TRANSITIONS] ?: false,
+        miniPlayerDismissed = preferences[MINI_PLAYER_DISMISSED] ?: false,
         libraryRootTreeUri = preferences[LIBRARY_ROOT_TREE_URI],
         wavePrefetchMode = preferences[WAVE_PREFETCH_MODE] ?: "NEXT",
         onboardingRevision = preferences[ONBOARDING_REVISION_KEY] ?: 0,
         pendingPublicId = preferences[PENDING_PUBLIC_ID],
+        portableAccountId = preferences[PORTABLE_ACCOUNT_ID],
+        portableAccountKeyThumbprint = preferences[PORTABLE_ACCOUNT_KEY_THUMBPRINT],
         m5Binding = m5Binding(preferences),
         m5TrustEvidence = m5TrustEvidence(preferences),
         m5LocalDataDecision = preferences[M5_LOCAL_DATA_DECISION],
@@ -302,6 +315,9 @@ class DataStoreNonSecretSettingsStore(
     }
 
     private fun validate(settings: NonSecretSettings) {
+        require((settings.portableAccountId == null) == (settings.portableAccountKeyThumbprint == null))
+        settings.portableAccountId?.let { app.autplay.application.profilepairing.requireCanonicalUuid(it) }
+        settings.portableAccountKeyThumbprint?.let { require(Regex("^[0-9a-f]{64}$").matches(it)) }
         require(settings.pendingPublicId == null || Regex("^[a-z0-9_]{3,24}$").matches(settings.pendingPublicId)) {
             "PUBLIC_ID_INVALID"
         }
@@ -353,6 +369,8 @@ class DataStoreNonSecretSettingsStore(
 
     private companion object {
         val PENDING_PUBLIC_ID = stringPreferencesKey("pending_public_id")
+        val PORTABLE_ACCOUNT_ID = stringPreferencesKey("portable_account_id")
+        val PORTABLE_ACCOUNT_KEY_THUMBPRINT = stringPreferencesKey("portable_account_key_thumbprint")
         val ACTIVE_SERVER_PROFILE_ID = stringPreferencesKey("active_server_profile_id")
         val ACTIVE_USER_ID = stringPreferencesKey("active_user_id")
         val DEVICE_ID = stringPreferencesKey("device_id")
@@ -366,6 +384,7 @@ class DataStoreNonSecretSettingsStore(
         val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
         val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
         val SMOOTH_TRACK_TRANSITIONS = booleanPreferencesKey("smooth_track_transitions")
+        val MINI_PLAYER_DISMISSED = booleanPreferencesKey("mini_player_dismissed")
         val LIBRARY_ROOT_TREE_URI = stringPreferencesKey("library_root_tree_uri")
         val WAVE_PREFETCH_MODE = stringPreferencesKey("wave_prefetch_mode")
         val M5_BINDING_COMMIT_ID = stringPreferencesKey("m5_binding_commit_id")

@@ -5,6 +5,7 @@ import app.autplay.application.accountrecovery.hasAccountDeletionPendingRecipien
 import app.autplay.application.accountrecovery.hasOrdinaryAccountRecoveryPendingRecipient
 
 import app.autplay.application.selfpairing.hasSelfDevicePairingPendingRecipient
+import app.autplay.application.portableaccount.hasPortableAccountPendingEnrollment
 
 import app.autplay.application.profilebinding.LocalDataBindingDecision
 import app.autplay.application.profilebinding.M5BindingMaterializationCoordinator
@@ -257,6 +258,17 @@ class ProfilePairingRuntime(
         val invitation = runCatching { parseInvitation(rawEnvelope) }.getOrElse {
             blocked(PairingFailure.AUTH_ATTENTION_REQUIRED); return@launch
         }
+        try {
+            credentials.requirePortableAccountCompatible(invitation.userId.value)
+        } catch (cancelled: CancellationException) {
+            invitation.secret.fill(0)
+            throw cancelled
+        } catch (_: Exception) {
+            invitation.secret.fill(0)
+            reportSafeError("ACCOUNT_IDENTITY_CONFLICT")
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return@launch
+        }
         val prior = awaiting.snapshot
         if (invitation.apiOrigin != prior.apiOrigin || invitation.streamOrigin != prior.streamOrigin ||
             invitation.instanceId != prior.expectedServerInstanceId || invitation.identityEpoch != prior.expectedIdentityEpoch ||
@@ -291,6 +303,16 @@ class ProfilePairingRuntime(
         val pending = pendingEnrollment ?: return
         val confirmation = mutableState.value.pairing as? PairingState.AwaitingConfirmation ?: return
         if (confirmation.snapshot != pending.snapshot) return
+        try {
+            credentials.requirePortableAccountCompatible(pending.snapshot.expectedUserId?.value)
+            credentials.markPortableServerEnrollmentAttempt(requireNotNull(pending.snapshot.expectedUserId).value)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            reportSafeError("ACCOUNT_IDENTITY_CONFLICT")
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return
+        }
         val snapshot = pending.snapshot.copy(
             localDataDecision = localDecision,
             selectedLocalChangeIds = selectedLocalChangeIds,
@@ -465,8 +487,13 @@ class ProfilePairingRuntime(
         when (val pairing = mutableState.value.pairing) {
             is PairingState.AwaitingConfirmation -> cancel()
             is PairingState.Connected -> {
-                val checkpoint = settings.settings.first().m5Binding
-                clearLocal(pairing.snapshot.serverProfileId)
+                val current = settings.settings.first()
+                if (current.portableAccountId != null || credentials.encryptedPortableAccountDocument() != null) {
+                    reportSafeError("ACCOUNT_REAUTHENTICATION_REQUIRED")
+                    return@launch
+                }
+                val checkpoint = current.m5Binding
+                if (!clearLocal(pairing.snapshot.serverProfileId, checkpoint?.bindingCommitId)) return@launch
                 checkpoint?.deviceKeyAlias?.let { alias -> runCatching { deviceKeys.delete(alias) } }
                 mutableState.value = ProfilePairingRuntimeState(pairing = PairingState.Cancelled)
             }
@@ -512,12 +539,37 @@ class ProfilePairingRuntime(
         }
     }
 
-    fun performLifecycle(action: RuntimeLifecycleAction) = scope.launch {
-        val connected = mutableState.value.pairing as? PairingState.Connected ?: return@launch
+    fun performLifecycle(action: RuntimeLifecycleAction) = scope.launch { performConfirmedLifecycle(action, null, null) }
+
+    suspend fun performConfirmedLifecycle(action: RuntimeLifecycleAction, operationId: String?, authorization: String?): Boolean {
+        if (firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) {
+            reportSafeError("ACCOUNT_CONNECTION_OUTCOME_PENDING")
+            return false
+        }
+        val connected = mutableState.value.pairing as? PairingState.Connected ?: return false
+        val current = settings.settings.first()
+        val capturedCommit = current.m5Binding?.bindingCommitId
+        if (current.activeServerProfileId != connected.snapshot.serverProfileId || capturedCommit != connected.snapshot.bindingCommitId) return false
+        val root = try { credentials.encryptedPortableAccountDocument() } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            reportSafeError("ACCOUNT_REAUTHENTICATION_REQUIRED")
+            return false
+        }
+        if (current.portableAccountId != null || root != null) {
+            if (authorization == null || operationId == null) { reportSafeError("ACCOUNT_REAUTHENTICATION_REQUIRED"); return false }
+            val document = root ?: return false
+            try {
+                app.autplay.application.portableaccount.verifyLifecycleAuthorization(document, current, action, operationId, authorization)
+            } catch (_: Exception) {
+                reportSafeError("ACCOUNT_REAUTHENTICATION_REQUIRED")
+                return false
+            }
+        }
         if (action == RuntimeLifecycleAction.DISCONNECT_LOCAL) {
-            clearLocal(connected.snapshot.serverProfileId)
+            if (!clearLocal(connected.snapshot.serverProfileId, capturedCommit, root?.keyThumbprint)) return false
             mutableState.value = ProfilePairingRuntimeState()
-            return@launch
+            return true
         }
         mutableState.value = mutableState.value.copy(pendingLifecycle = action)
         val requestedAction = when (action) {
@@ -526,22 +578,24 @@ class ProfilePairingRuntime(
                 RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE -> LifecycleAction.REVOKE_DEVICE
                 RuntimeLifecycleAction.DISCONNECT_LOCAL -> error("unreachable")
             }
-        val command = mutableState.value.lastUnknownLifecycle
+        val command = (mutableState.value.lastUnknownLifecycle
             ?.takeIf { it.action == requestedAction }
             ?: LifecycleCommand(
                 action = requestedAction,
-                operationId = uuid(),
+                operationId = operationId ?: uuid(),
                 targetDeviceId = if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) connected.snapshot.expectedDeviceId else null,
-            )
+            )).let { if (authorization != null) it.copy(portableAuthorization = authorization) else it }
         when (val result = port.lifecycle(connected.snapshot.serverProfileId, command)) {
             is PairingNetworkResult.Success -> {
-                clearLocal(connected.snapshot.serverProfileId)
+                if (!clearLocal(connected.snapshot.serverProfileId, capturedCommit, root?.keyThumbprint)) return false
                 mutableState.value = ProfilePairingRuntimeState()
+                return true
             }
             is PairingNetworkResult.Failure -> {
                 mutableState.value = mutableState.value.copy(pendingLifecycle = null, lastUnknownLifecycle = command)
                 // Timeout/network ambiguity must remain visible as ambiguity, not a local logout.
                 reportSafeError(if (result.code == "server_unavailable") "REMOTE_OUTCOME_UNKNOWN" else result.code.uppercase())
+                return false
             }
         }
     }
@@ -584,6 +638,10 @@ class ProfilePairingRuntime(
     }
 
     fun cancel() {
+        if (firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) {
+            reportSafeError("ACCOUNT_CONNECTION_OUTCOME_PENDING")
+            return
+        }
         firstBindGate.release(FirstBindCeremonyOwner.M5)
         val priorState = mutableState.value
         val cancellingSnapshot = when (val pairing = priorState.pairing) {
@@ -686,6 +744,142 @@ class ProfilePairingRuntime(
         return stored
     }
 
+    /** S1B uses this before contacting the server and again before minting the approved grant. */
+    suspend fun authorizeAdmissionAccount(account: UserId?): Boolean = try {
+        credentials.requirePortableAccountCompatible(account?.value, allowUnknownAccount = account == null)
+        val allowed = !credentials.hasPublicAccessPendingRegistration() && !credentials.hasSelfDevicePairingPendingRecipient() &&
+            !credentials.hasAccountRecoveryPendingRecipient() &&
+            !firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT) &&
+            (firstBindGate.isReservedBy(FirstBindCeremonyOwner.M5) ||
+                (account != null && settings.settings.first().activeUserId == account))
+        if (allowed && account != null) credentials.markPortableServerEnrollmentAttempt(account.value)
+        allowed
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { false }
+
+    /** A rotation journal may exist, but no unrelated first-bind ceremony may own the session. */
+    suspend fun preparePortableRotation(accountId: String, recovering: Boolean = false): Boolean {
+        val root = credentials.encryptedPortableAccountDocument()
+        if ((root != null && root.accountId != accountId) || credentials.hasPublicAccessPendingRegistration() ||
+            credentials.hasSelfDevicePairingPendingRecipient() || credentials.hasAccountRecoveryPendingRecipient()) return false
+        val current = settings.settings.first()
+        if ((current.portableAccountId != null && current.portableAccountId != accountId) ||
+            (current.activeUserId != null && current.activeUserId.value != accountId)) return false
+        if (current.m5PendingExchangeCheckpoint != null || current.m5AdmissionCheckpoint != null) return false
+        if (current.m5Binding != null) {
+            if (current.activeUserId?.value != accountId || current.activeServerProfileId == null) return false
+            return firstBindGate.reserve(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        }
+        if (recovering) {
+            if (!credentials.hasPortableAccountPendingEnrollment()) return false
+            return firstBindGate.reserve(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        }
+        val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return false
+        if (!mutableState.value.trustConfirmed || awaiting.snapshot.expectedUserId?.value?.let { it != accountId } == true) return false
+        return firstBindGate.transfer(FirstBindCeremonyOwner.M5, FirstBindCeremonyOwner.PORTABLE_ACCOUNT) ||
+            firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+    }
+
+    /** Only the caller's authoritative expired outcome permits deleting its rotation journal. */
+    suspend fun releaseExpiredPortableRotation(accountId: String): Boolean = BindingAuthorityWriteGate.serialized {
+        credentials.requireNoPortableEnrollment()
+        val root = credentials.encryptedPortableAccountDocument()
+        val current = settings.settings.first()
+        if ((root != null && root.accountId != accountId) ||
+            (current.portableAccountId != null && current.portableAccountId != accountId) ||
+            (current.activeUserId != null && current.activeUserId.value != accountId)) return@serialized false
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) return@serialized false
+        firstBindGate.release(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        if (current.m5Binding == null) mutableState.value = ProfilePairingRuntimeState()
+        true
+    }
+
+    /** Finish a confirmed rotation or an unsent journal write, retaining only live trusted discovery. */
+    suspend fun finishPortableRotationGate(accountId: String): Boolean = BindingAuthorityWriteGate.serialized {
+        credentials.requireNoPortableEnrollment()
+        val root = credentials.encryptedPortableAccountDocument()
+        val current = settings.settings.first()
+        if ((root != null && root.accountId != accountId) ||
+            (current.portableAccountId != null && current.portableAccountId != accountId) ||
+            (current.activeUserId != null && current.activeUserId.value != accountId)) return@serialized false
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) return@serialized false
+        val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust
+        if (current.m5Binding == null && awaiting != null && mutableState.value.trustConfirmed &&
+            (awaiting.snapshot.expectedUserId == null || awaiting.snapshot.expectedUserId.value == accountId)) {
+            return@serialized firstBindGate.transfer(FirstBindCeremonyOwner.PORTABLE_ACCOUNT, FirstBindCeremonyOwner.M5)
+        }
+        firstBindGate.release(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        if (current.m5Binding == null) mutableState.value = ProfilePairingRuntimeState()
+        true
+    }
+
+    /** A verified, encrypted portable enrollment journal owns this ordinary binding commit. */
+    suspend fun preparePortableEnrollment(snapshot: PairingFlowSnapshot, identitySpki: ByteArray, recovering: Boolean): Boolean {
+        val current = settings.settings.first()
+        if (current.m5PendingExchangeCheckpoint != null || current.m5AdmissionCheckpoint != null ||
+            credentials.hasPublicAccessPendingRegistration() || credentials.hasSelfDevicePairingPendingRecipient() ||
+            credentials.hasAccountRecoveryPendingRecipient()) return false
+        if (current.m5Binding != null && current.m5Binding.bindingCommitId != snapshot.bindingCommitId) return false
+        val root = credentials.encryptedPortableAccountDocument() ?: return false
+        if (root.accountId != snapshot.expectedUserId?.value ||
+            (current.portableAccountId != null && current.portableAccountId != root.accountId)) return false
+        if (!recovering) {
+            val awaiting = mutableState.value.pairing as? PairingState.AwaitingTrust ?: return false
+            if (!mutableState.value.trustConfirmed || awaiting.snapshot.generationId != snapshot.generationId) return false
+            if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT) &&
+                !firstBindGate.transfer(FirstBindCeremonyOwner.M5, FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) return false
+        }
+        if (!firstBindGate.reserve(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) return false
+        port.seedTrustedIdentity(TrustedServerIdentity(snapshot.expectedServerInstanceId, snapshot.expectedIdentityEpoch,
+            snapshot.expectedIdentityThumbprintSha256), identitySpki.copyOf())
+        registerOrigin(snapshot.serverProfileId, snapshot.apiOrigin)
+        mutableState.value = mutableState.value.copy(pairing = PairingState.ExchangingInvitation(snapshot), identityPublicKeySpki = identitySpki.copyOf())
+        return true
+    }
+
+    /** Caller erased the exact journal only after a pinned server declared its outcome expired. */
+    suspend fun releaseExpiredPortableEnrollment(snapshot: PairingFlowSnapshot): Boolean = BindingAuthorityWriteGate.serialized {
+        credentials.requireNoPortableEnrollment()
+        if (settings.settings.first().m5Binding != null) return@serialized false
+        val exchanging = mutableState.value.pairing as? PairingState.ExchangingInvitation
+        if (exchanging != null && (exchanging.snapshot.generationId != snapshot.generationId ||
+                exchanging.snapshot.bindingCommitId != snapshot.bindingCommitId)) return@serialized false
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) return@serialized false
+        firstBindGate.release(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        mutableState.value.identityPublicKeySpki?.fill(0)
+        mutableState.value = ProfilePairingRuntimeState()
+        true
+    }
+
+    /** Successful server root rotation retires the captured old session, keeping account and data. */
+    suspend fun detachAfterPortableRootRotation(
+        accountId: String,
+        expectedProfile: ServerProfileId,
+        expectedCommit: String,
+    ): Boolean = BindingAuthorityWriteGate.serialized {
+        val root = credentials.encryptedPortableAccountDocument() ?: return@serialized false
+        if (root.accountId != accountId) return@serialized false
+        val current = settings.settings.first()
+        if (current.m5Binding == null && current.activeServerProfileId == null && current.activeUserId == null) {
+            firstBindGate.release(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+            mutableState.value = ProfilePairingRuntimeState()
+            return@serialized true
+        }
+        if (current.activeUserId?.value != accountId) return@serialized false
+        if (!clearLocalLocked(expectedProfile, expectedCommit)) return@serialized false
+        firstBindGate.release(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        mutableState.value = ProfilePairingRuntimeState()
+        true
+    }
+
+    suspend fun completePortableEnrollment(snapshot: PairingFlowSnapshot, alias: String, session: EnrollmentSession, identitySpki: ByteArray): Boolean {
+        if (!firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) return false
+        mutableState.value = mutableState.value.copy(pairing = PairingState.ExchangingInvitation(snapshot))
+        val stored = persistBinding(snapshot, alias, session, identitySpki, "KEEP_LOCAL", externalCeremony = FirstBindCeremonyOwner.PORTABLE_ACCOUNT)
+        if (stored) refreshCapabilities(snapshot, session.sessionId, false)
+        return stored
+    }
+
     suspend fun completeAccountRecovery(
         snapshot: PairingFlowSnapshot, keyAlias: String, session: EnrollmentSession,
         verifiedIdentitySpki: ByteArray,
@@ -751,12 +945,21 @@ class ProfilePairingRuntime(
                     current.m5PendingExchangeCheckpoint == null && current.m5AdmissionCheckpoint == null
                 if (!empty && !sameBinding) return false
                 val pending = when (externalCeremony) {
+                    FirstBindCeremonyOwner.PORTABLE_ACCOUNT -> credentials.hasPortableAccountPendingEnrollment()
                     FirstBindCeremonyOwner.SELF_DEVICE_PAIRING -> credentials.hasSelfDevicePairingPendingRecipient()
                     FirstBindCeremonyOwner.ACCOUNT_RECOVERY -> credentials.hasOrdinaryAccountRecoveryPendingRecipient()
                     FirstBindCeremonyOwner.ACCOUNT_DELETE_CANCEL -> credentials.hasAccountDeletionPendingRecipient()
                     else -> false
                 }
                 if (!pending) return false
+            }
+            val before = settings.settings.first()
+            if (externalCeremony != FirstBindCeremonyOwner.PORTABLE_ACCOUNT) credentials.requireNoPortableEnrollment()
+            val root = credentials.encryptedPortableAccountDocument()
+            if ((root != null && root.accountId != snapshot.expectedUserId?.value) ||
+                (before.portableAccountId != null && before.portableAccountId != snapshot.expectedUserId?.value)) {
+                reportSafeError("ACCOUNT_IDENTITY_CONFLICT")
+                return false
             }
             val publicPending = if (preservePublicRegistration) {
                 val encrypted = requireNotNull(credentials.read(snapshot.serverProfileId)) {
@@ -966,7 +1169,8 @@ class ProfilePairingRuntime(
     private suspend fun reserveM5FirstBind(): Boolean {
         if (!firstBindGate.reserve(FirstBindCeremonyOwner.M5)) return false
         val publicPending = runCatching {
-            credentials.hasPublicAccessPendingRegistration() || credentials.hasSelfDevicePairingPendingRecipient() || credentials.hasAccountRecoveryPendingRecipient()
+            credentials.requirePortableAccountCompatible(allowUnknownAccount = true)
+            credentials.hasPublicAccessPendingRegistration() || credentials.hasSelfDevicePairingPendingRecipient() || credentials.hasAccountRecoveryPendingRecipient() || credentials.hasPortableAccountPendingEnrollment()
         }.getOrElse {
             firstBindGate.release(FirstBindCeremonyOwner.M5)
             blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
@@ -1098,28 +1302,40 @@ class ProfilePairingRuntime(
         val sessionId: String,
     )
 
-    private suspend fun clearLocal(profile: ServerProfileId) {
+    private suspend fun clearLocal(
+        profile: ServerProfileId,
+        expectedCommit: String? = null,
+        verifiedRootThumbprint: String? = null,
+    ): Boolean =
         BindingAuthorityWriteGate.serialized {
-            // Purge while the old binding is still known. The shared gate prevents an in-flight
-            // pack fetch from committing until settings have become inactive below.
-            purgeRecommendationContext(profile)
-            clearProfileCredentials(profile)
-            settings.mutate { current ->
-                if (current.activeServerProfileId == profile) {
-                    current.copy(
-                        activeServerProfileId = null,
-                        activeUserId = null,
-                        deviceId = null,
-                        m5Binding = null,
-                        m5TrustEvidence = null,
-                        m5LocalDataDecision = null,
-                        m5PendingExchangeCheckpoint = null,
-                    )
-                } else {
-                    current.copy(m5PendingExchangeCheckpoint = null)
-                }
+            // A root created/rotated while a lifecycle response was in flight needs a fresh proof.
+            if (credentials.encryptedPortableAccountDocument()?.keyThumbprint != verifiedRootThumbprint) return@serialized false
+            clearLocalLocked(profile, expectedCommit)
+        }
+
+    private suspend fun clearLocalLocked(profile: ServerProfileId, expectedCommit: String?): Boolean {
+        val captured = settings.settings.first()
+        if (expectedCommit != null && (captured.activeServerProfileId != profile || captured.m5Binding?.bindingCommitId != expectedCommit)) return false
+        // Purge while the old binding is still known. The shared gate prevents an in-flight
+        // pack fetch from committing until settings have become inactive below.
+        purgeRecommendationContext(profile)
+        clearProfileCredentials(profile)
+        settings.mutate { current ->
+            if (current.activeServerProfileId == profile) {
+                current.copy(
+                    activeServerProfileId = null,
+                    activeUserId = null,
+                    deviceId = null,
+                    m5Binding = null,
+                    m5TrustEvidence = null,
+                    m5LocalDataDecision = null,
+                    m5PendingExchangeCheckpoint = null,
+                )
+            } else {
+                current.copy(m5PendingExchangeCheckpoint = null)
             }
         }
+        return true
     }
 
     private suspend fun persistPendingExchange(
@@ -1240,6 +1456,16 @@ class ProfilePairingRuntime(
             selectedLocalChangeIds = selected,
         )
         val alias = p[9]; require(deviceKeys.publicKeyThumbprintSha256(alias).isNotBlank())
+        try {
+            credentials.requirePortableAccountCompatible(snapshot.expectedUserId?.value)
+            credentials.markPortableServerEnrollmentAttempt(requireNotNull(snapshot.expectedUserId).value)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Preserve the exact uncertain exchange on an authority conflict; never silently enroll anew.
+            blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
+            return true
+        }
         require(value("binding_commit_id") == p[10] && value("exchange_id") == p[11])
         val evidence = requireNotNull(current.m5TrustEvidence)
         val identitySpki = Base64.getDecoder().decode(evidence.identityPublicKeySpkiB64)

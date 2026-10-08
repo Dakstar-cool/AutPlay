@@ -38,9 +38,16 @@ class _Web:
 
 
 def _free_loopback_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    # Explicitly use dynamic/private ports: an OS-assigned port can be on
+    # Chromium's restricted-port list (for example, H.323 port 1720).
+    for port in range(49152, 65536):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("no browser-safe loopback port is available")
 
 
 def _wait_until_started(server: uvicorn.Server) -> None:
