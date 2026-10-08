@@ -16,15 +16,50 @@ import android.provider.OpenableColumns;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /** Seekable MP3 with staged reads to expose separate header and EOF timelines. */
 public final class XingAudioProvider extends ContentProvider {
     public static final int AUDIO_FRAMES = 384;
     private final byte[] audio = bytes();
     private final byte[] shortAudio = bytes(230);
-    private final AtomicInteger readOpens = new AtomicInteger();
-    private final AtomicInteger tailReads = new AtomicInteger();
+    private static final int MAX_DESCRIPTORS = 64;
+    private static final int MAX_EVENTS = 256;
+    private final Object evidenceLock = new Object();
+    private final Map<String, Integer> sourceOrdinals = new HashMap<>();
+    private final List<ReadGeneration> reads = new ArrayList<>();
+    private final ArrayList<String> events = new ArrayList<>();
+    private int resetGeneration;
+    private int readOpens;
+    private int tailReads;
+    private boolean evidenceOverflow;
+
+    private static final class ReadGeneration {
+        final int reset;
+        final int descriptor;
+        final int source;
+        long firstOffset = -1;
+        int firstReadSequence;
+        boolean tailDelivered;
+        boolean eofRequested;
+        boolean released;
+
+        ReadGeneration(int reset, int descriptor, int source) {
+            this.reset = reset;
+            this.descriptor = descriptor;
+            this.source = source;
+        }
+    }
+
+    private void event(ReadGeneration read, String kind, long offset) {
+        if (events.size() == MAX_EVENTS) { evidenceOverflow = true; return; }
+        events.add("reset=" + read.reset + " source=" + read.source + " descriptor=" +
+            read.descriptor + " event=" + kind + " offset=" + offset +
+            " elapsedMs=" + SystemClock.elapsedRealtime());
+    }
 
     /** Valid silent MPEG1 Layer III frames; Xing has a duration but no TOC, one frame short. */
     public static byte[] bytes() {
@@ -44,33 +79,67 @@ public final class XingAudioProvider extends ContentProvider {
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         final byte[] audio = selected(uri);
+        final ReadGeneration read;
+        synchronized (evidenceLock) {
+            Integer ordinal = sourceOrdinals.get(uri.getLastPathSegment());
+            if (ordinal == null || reads.size() == MAX_DESCRIPTORS) {
+                evidenceOverflow = true;
+                throw new FileNotFoundException("TEST_XING_EVIDENCE_BOUNDARY");
+            }
+            read = new ReadGeneration(resetGeneration, reads.size() + 1, ordinal);
+            reads.add(read);
+        }
         HandlerThread thread = new HandlerThread("XingFixtureReads");
         thread.start();
         try {
             return getContext().getSystemService(StorageManager.class).openProxyFileDescriptor(
                 ParcelFileDescriptor.MODE_READ_ONLY, new ProxyFileDescriptorCallback() {
-                    private boolean started;
                     private boolean delayed;
-                    private boolean reachedTail;
                     @Override public long onGetSize() { return audio.length; }
                     @Override public int onRead(long offset, int size, byte[] data) {
-                        if (!started) { started = true; readOpens.incrementAndGet(); }
+                        synchronized (evidenceLock) {
+                            if (read.reset == resetGeneration && read.firstOffset < 0) {
+                                read.firstOffset = offset;
+                                readOpens++;
+                                read.firstReadSequence = readOpens;
+                                event(read, "first-read", offset);
+                            }
+                        }
                         if (offset >= 4096 && !delayed) {
                             delayed = true;
                             // Give the service time to install the header-derived clipping item.
                             // Every reprepare gets the same header -> EOF sequence.
                             SystemClock.sleep(250);
                         }
-                        if (offset >= audio.length) return 0;
+                        if (offset >= audio.length) {
+                            synchronized (evidenceLock) {
+                                if (read.reset == resetGeneration && !read.eofRequested) {
+                                    read.eofRequested = true;
+                                    event(read, "eof-request", offset);
+                                }
+                            }
+                            return 0;
+                        }
                         int count = Math.min(size, audio.length - (int) offset);
                         System.arraycopy(audio, (int) offset, data, 0, count);
-                        if (offset + count == audio.length && !reachedTail) {
-                            reachedTail = true;
-                            tailReads.incrementAndGet();
+                        synchronized (evidenceLock) {
+                            if (read.reset == resetGeneration && offset + count == audio.length && !read.tailDelivered) {
+                                read.tailDelivered = true;
+                                tailReads++;
+                                event(read, "tail-delivered", offset + count);
+                            }
                         }
                         return count;
                     }
-                    @Override public void onRelease() { thread.quitSafely(); }
+                    @Override public void onRelease() {
+                        synchronized (evidenceLock) {
+                            if (read.reset == resetGeneration) {
+                                read.released = true;
+                                event(read, "release", -1);
+                            }
+                        }
+                        thread.quitSafely();
+                    }
                 }, new Handler(thread.getLooper()));
         } catch (IOException error) {
             thread.quitSafely();
@@ -81,11 +150,45 @@ public final class XingAudioProvider extends ContentProvider {
     }
 
     @Override public Bundle call(String method, String arg, Bundle extras) {
-        if ("reset".equals(method)) { readOpens.set(0); tailReads.set(0); }
-        Bundle result = new Bundle();
-        result.putInt("readOpens", readOpens.get());
-        result.putInt("tailReads", tailReads.get());
-        return result;
+        synchronized (evidenceLock) {
+            if ("reset".equals(method)) {
+                resetGeneration++;
+                readOpens = 0;
+                tailReads = 0;
+                evidenceOverflow = false;
+                reads.clear();
+                events.clear();
+                sourceOrdinals.clear();
+                ArrayList<String> ids = extras == null ? null : extras.getStringArrayList("fixtureIds");
+                if (ids != null && ids.size() == 3) {
+                    for (int i = 0; i < ids.size(); i++) sourceOrdinals.put(ids.get(i), i + 1);
+                }
+            }
+            Bundle result = new Bundle();
+            result.putInt("resetGeneration", resetGeneration);
+            result.putInt("readOpens", readOpens);
+            result.putInt("tailReads", tailReads);
+            result.putBoolean("evidenceOverflow", evidenceOverflow);
+            result.putStringArrayList("events", new ArrayList<>(events));
+            Integer ordinal = sourceOrdinals.get(arg);
+            int sourceReads = 0;
+            ReadGeneration latest = null;
+            if (ordinal != null) {
+                for (ReadGeneration read : reads) {
+                    if (read.source == ordinal && read.firstOffset >= 0) {
+                        sourceReads++;
+                        if (latest == null || read.firstReadSequence > latest.firstReadSequence) latest = read;
+                    }
+                }
+            }
+            result.putInt("sourceReads", sourceReads);
+            result.putInt("latestDescriptor", latest == null ? 0 : latest.descriptor);
+            result.putLong("firstReadOffset", latest == null ? -1 : latest.firstOffset);
+            result.putBoolean("tailDelivered", latest != null && latest.tailDelivered);
+            result.putBoolean("eofRequested", latest != null && latest.eofRequested);
+            result.putBoolean("released", latest != null && latest.released);
+            return result;
+        }
     }
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sortOrder) {
         MatrixCursor cursor = new MatrixCursor(new String[] {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE});

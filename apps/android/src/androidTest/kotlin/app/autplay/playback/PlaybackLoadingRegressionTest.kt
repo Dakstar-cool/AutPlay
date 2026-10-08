@@ -1,7 +1,7 @@
 package app.autplay.playback
 
 import android.net.Uri
-import android.os.SystemClock
+import android.os.Bundle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -38,6 +38,8 @@ import org.junit.runner.RunWith
 @UnstableApi
 @RunWith(AndroidJUnit4::class)
 class PlaybackLoadingRegressionTest {
+    private data class CompletedRead(val reset: Int, val count: Int, val descriptor: Int)
+
     @Test fun xingWithoutTocDurationCorrectionDoesNotReprepareSmoothQueueForever() = runBlocking {
         // Same end-to-end regression on both sides of the short-source eligibility boundary.
         for (audioFrames in listOf(XingAudioProvider.AUDIO_FRAMES, 230)) {
@@ -97,14 +99,75 @@ class PlaybackLoadingRegressionTest {
 
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val provider = Uri.parse("content://${instrumentation.context.packageName}.xing")
-        fun status(key: String): Int = checkNotNull(instrumentation.targetContext.contentResolver
-            .call(provider, "status", null, null)).getInt(key)
-        instrumentation.targetContext.contentResolver.call(provider, "reset", null, null)
         val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val reset = checkNotNull(instrumentation.targetContext.contentResolver.call(provider, "reset", null,
+            Bundle().apply { putStringArrayList("fixtureIds", ArrayList(fixture.audioIds)) })).getInt("resetGeneration")
+        fun providerStatus(index: Int? = null): Bundle = checkNotNull(instrumentation.targetContext.contentResolver
+            .call(provider, "status", index?.let { fixture.audioIds[it] }, null))
+        fun status(key: String): Int = providerStatus().let {
+            assertFalse("Bounded Xing evidence overflow", it.getBoolean("evidenceOverflow"))
+            assertEquals("Fixture reset must not change", reset, it.getInt("resetGeneration"))
+            it.getInt(key)
+        }
+        fun completedRead(index: Int): CompletedRead? = providerStatus(index).let {
+            // ContentDataSource knows the byte length and can close without requesting
+            // a read beyond EOF. Tail delivery plus release proves this actual load ended.
+            if (it.getInt("resetGeneration") != reset || it.getInt("sourceReads") == 0 ||
+                !it.getBoolean("tailDelivered") || !it.getBoolean("released")) null
+            else CompletedRead(it.getInt("resetGeneration"), it.getInt("sourceReads"), it.getInt("latestDescriptor"))
+        }
+        val frozenReads = mutableMapOf<Int, CompletedRead>()
+        val preparationFailures = mutableListOf<String>()
+        fun preparationFailure(message: String) {
+            if (preparationFailures.size < 32) preparationFailures += message
+        }
+        // Called only on main: provider descriptor IDs identify actual source reads;
+        // MediaController's remote timeline does not expose source/period UIDs.
+        fun observeFrozenReads(player: Player) {
+            for ((index, completed) in frozenReads) {
+                val reads = providerStatus(index)
+                if (reads.getBoolean("evidenceOverflow") || reads.getInt("resetGeneration") != completed.reset ||
+                    completed.count != reads.getInt("sourceReads") || completed.descriptor != reads.getInt("latestDescriptor")) {
+                    preparationFailure("Source ${index + 1} reopened/reset: expected count=${completed.count} descriptor=${completed.descriptor}, " +
+                        "actual count=${reads.getInt("sourceReads")} descriptor=${reads.getInt("latestDescriptor")}")
+                }
+                // The service may update a departed item's preservation policy.
+                // Its retained read count must still stay fixed, but its old cut
+                // no longer describes the current/future playback occurrence.
+                if (index < player.currentMediaItemIndex) continue
+                if (player.currentTimeline.windowCount != 3) {
+                    preparationFailure("Prepared queue lost its windows")
+                    continue
+                }
+                val item = player.getMediaItemAt(index)
+                val window = player.currentTimeline.getWindow(index, Timeline.Window())
+                val start = if (index == 0) 0L else expectedHeadMs
+                val end = if (index == 2) C.TIME_END_OF_SOURCE else expectedEndMs
+                if (window.isPlaceholder || item.clippingConfiguration.startPositionMs != start ||
+                    item.clippingConfiguration.endPositionMs != end ||
+                    item.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS) != durationsUs.first() / 1_000) {
+                    preparationFailure("Source ${index + 1} changed final timeline: placeholder=${window.isPlaceholder} " +
+                        "start=${item.clippingConfiguration.startPositionMs} end=${item.clippingConfiguration.endPositionMs} " +
+                        "anchored=${item.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS)} currentSource=${player.currentMediaItemIndex + 1}")
+                }
+            }
+        }
+        fun assertFrozenReads(player: Player) {
+            observeFrozenReads(player)
+            assertTrue("Prepared sources must remain stable: $preparationFailures", preparationFailures.isEmpty())
+        }
+        var observeFinalSource: ((Player) -> Unit)? = null
+        val preparationListener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                observeFrozenReads(player)
+                observeFinalSource?.invoke(player)
+            }
+        }
         try {
             // Real service-owned ExoPlayer, source factory, resolver, settings and queue.
             val sourceName = if (shortSource) "xing-short" else "xing"
             fixture.start(listOf(sourceName, sourceName, sourceName), smooth = true)
+            fixture.main { fixture.controller!!.addListener(preparationListener) }
             fixture.await("first MP3 ready with stable eligibility ($audioFrames frames)") { fixture.main {
                 val player = checkNotNull(fixture.controller)
                 assertEquals(null, player.playerError)
@@ -129,33 +192,60 @@ class PlaybackLoadingRegressionTest {
                     (!shortSource || fixture.controller!!.duration == exactDurationMs) &&
                     fixture.controller!!.playbackState == Player.STATE_READY
             } }
-            // A clipped timeline can advertise its anchored end before the replacement
-            // source finishes the provider's 250ms staged read. Establish buffer readiness
-            // before asserting that playback itself causes no further preparation.
-            var lastReads = status("readOpens") to status("tailReads")
-            var readsChangedAtMs = SystemClock.elapsedRealtime()
-            fixture.await("staged MP3 reads settle before transition observation") {
-                val reads = status("readOpens") to status("tailReads")
-                assertTrue("Repeated source preparation", reads.first <= 18)
-                if (reads != lastReads) {
-                    lastReads = reads
-                    readsChangedAtMs = SystemClock.elapsedRealtime()
-                }
-                SystemClock.elapsedRealtime() - readsChangedAtMs >= 750
+            // A visible clipping bound is not a completed load. Freeze only the
+            // first/middle descriptors that actually delivered their tail and closed.
+            // The third source may begin its first preparation on a later Media3 tick.
+            fixture.await("first and middle final read generations complete") { fixture.main {
+                assertTrue("Repeated source preparation", status("readOpens") <= 18)
+                val player = checkNotNull(fixture.controller)
+                val first = completedRead(0)
+                val middle = completedRead(1)
+                if (first != null && middle != null && player.currentTimeline.windowCount == 3 &&
+                    !(0..1).any { player.currentTimeline.getWindow(it, Timeline.Window()).isPlaceholder } &&
+                    player.getMediaItemAt(0).clippingConfiguration.endPositionMs == expectedEndMs &&
+                    player.getMediaItemAt(1).clippingConfiguration.startPositionMs == expectedHeadMs &&
+                    player.getMediaItemAt(1).clippingConfiguration.endPositionMs == expectedEndMs &&
+                    player.playbackState == Player.STATE_READY) {
+                    frozenReads[0] = first
+                    frozenReads[1] = middle
+                    assertFrozenReads(player)
+                    true
+                } else false
+            } }
+            // Freeze the third source independently as soon as its final load exists.
+            // It receives the same exact no-reopen assertion, never a blanket extra open.
+            fun freezeFinalSource(player: Player): Boolean {
+                observeFrozenReads(player)
+                if (2 in frozenReads) return true
+                val completed = completedRead(2) ?: return false
+                if (player.currentTimeline.windowCount != 3) return false
+                val finalWindow = player.currentTimeline.getWindow(2, Timeline.Window())
+                val finalItem = player.getMediaItemAt(2)
+                if (finalWindow.isPlaceholder || finalWindow.durationMs != exactDurationMs - expectedHeadMs ||
+                    finalItem.clippingConfiguration.startPositionMs != expectedHeadMs ||
+                    finalItem.clippingConfiguration.endPositionMs != C.TIME_END_OF_SOURCE) return false
+                frozenReads[2] = completed
+                observeFrozenReads(player)
+                return true
+            }
+            fixture.main {
+                observeFinalSource = { freezeFinalSource(it) }
+                freezeFinalSource(fixture.controller!!)
             }
             val installedEnd = fixture.main { fixture.controller!!.currentMediaItem!!.clippingConfiguration.endPositionMs }
-            val settledOpens = status("readOpens")
             // Several possible header/EOF cycles fit in this interval. A paused player
             // must remain prepared, with the same cut and no new source reads.
             repeat(20) {
                 delay(50)
                 fixture.main {
+                    freezeFinalSource(fixture.controller!!)
+                    assertFrozenReads(fixture.controller!!)
                     assertEquals(Player.STATE_READY, fixture.controller!!.playbackState)
                     assertEquals(installedEnd, fixture.controller!!.currentMediaItem!!.clippingConfiguration.endPositionMs)
                     assertEquals(0L, fixture.controller!!.currentMediaItem!!.clippingConfiguration.startPositionMs)
                 }
             }
-            assertEquals("EOF jitter must not reopen the sources", settledOpens, status("readOpens"))
+            fixture.main { assertFrozenReads(fixture.controller!!) }
             fixture.await("initial listening event") {
                 fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId != null
             }
@@ -237,7 +327,8 @@ class PlaybackLoadingRegressionTest {
             }
             fixture.await("final entry keeps original tail") { fixture.main {
                 fixture.controller!!.currentMediaItem!!.clippingConfiguration.startPositionMs == expectedHeadMs &&
-                    fixture.controller!!.duration == exactDurationMs - expectedHeadMs
+                    fixture.controller!!.duration == exactDurationMs - expectedHeadMs &&
+                    freezeFinalSource(fixture.controller!!)
             } }
             fixture.main {
                 assertEquals(C.TIME_END_OF_SOURCE, fixture.controller!!.currentMediaItem!!.clippingConfiguration.endPositionMs)
@@ -249,7 +340,14 @@ class PlaybackLoadingRegressionTest {
                 fixture.controller!!.playbackState == Player.STATE_ENDED
             } }
             assertTrue("Bounded source reads for the whole queue", status("readOpens") <= 18)
-        } finally { fixture.close() }
+            fixture.main { assertFrozenReads(fixture.controller!!) }
+        } catch (failure: AssertionError) {
+            val evidence = checkNotNull(instrumentation.targetContext.contentResolver.call(provider, "status", null, null))
+            throw AssertionError("Xing frames=$audioFrames: ${failure.message}; events=${evidence.getStringArrayList("events")}", failure)
+        } finally {
+            fixture.main { fixture.controller?.removeListener(preparationListener) }
+            fixture.close()
+        }
     }
 
     @Test fun playbackMissWritesOnlyStreamCacheAndReplaysWithoutUpstream() {

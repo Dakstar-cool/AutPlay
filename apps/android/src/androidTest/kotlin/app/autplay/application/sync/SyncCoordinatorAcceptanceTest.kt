@@ -22,6 +22,7 @@ import app.autplay.application.artist.ArtistKey
 import app.autplay.application.artist.ArtistCreditId
 import app.autplay.application.artist.RoomArtistCatalogPort
 import app.autplay.application.search.LocalTrackSearchRepository
+import app.autplay.application.search.SafeFtsQueryBuilder
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
@@ -687,7 +688,11 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals(null, updated.rawAlbum)
         assertEquals(0, search.search("Before", profile.value).size)
         assertEquals(1, search.search("After", profile.value).size)
-        assertEquals(1, search.search("Nickname", profile.value).size)
+        val aliasQuery = requireNotNull(SafeFtsQueryBuilder().build("Nickname"))
+        assertEquals(listOf(track.localUserTrackRefId), db.searchDao().searchForProfile(aliasQuery, profile.value, 50))
+        val preservedContent = db.searchDao().contentForTrack(track.localUserTrackRefId)!!
+        assertEquals("Nickname", preservedContent.aliases)
+        assertEquals("Alias", preservedContent.transliterations)
         assertEquals(content.rowId, db.searchDao().contentForTrack(track.localUserTrackRefId)?.rowId)
         apply("""{"title":null,"artist":null,"album":"null"}""")
         val cleared = db.libraryDao().trackRef(track.localUserTrackRefId)!!
@@ -695,7 +700,7 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals(null, cleared.rawArtist)
         assertEquals("null", cleared.rawAlbum)
         apply("{}", "AGGREGATE_DELETED", "DELETE")
-        assertEquals(0, search.search("Nickname", profile.value).size)
+        assertEquals(emptyList<String>(), db.searchDao().searchForProfile(aliasQuery, profile.value, 50))
     }
 
     @Test fun authoritativeBootstrapRepairsOldNullTextAndPreservesLiteralText() = runBlocking {

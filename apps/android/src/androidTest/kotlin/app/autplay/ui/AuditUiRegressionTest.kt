@@ -49,9 +49,17 @@ class AuditUiRegressionTest {
             LibraryProductScreen(LibraryScreenUiState(true, listOf(CoreTrackUiItem("track", "Title", "Artist", selected = true, loved = loved.value))),
                 PaddingValues(0.dp), {}, {}, {}, { assertEquals("track", it); calls++; loved.value = !loved.value })
         } }
-        compose.onNode(hasText(context.getString(R.string.action_liked)) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithText(context.getString(R.string.action_like)).assertIsEnabled().performClick()
-        assertEquals(2, calls)
+        compose.onNodeWithTag("library-product-list").performScrollToKey("library-track:track")
+        val likeButton = compose.onNodeWithTag("library-like-track")
+        val buttonRole = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)
+        likeButton.assert(buttonRole).assertContentDescriptionEquals(context.getString(R.string.action_liked))
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, calls) }
+        likeButton.assert(buttonRole).assertContentDescriptionEquals(context.getString(R.string.action_like))
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(2, calls) }
+        likeButton.assert(buttonRole).assertContentDescriptionEquals(context.getString(R.string.action_liked))
+            .assertIsDisplayed().assertIsEnabled()
     }
     @Test fun detailLikedTrackCanBeUnlikedAndLikedAgain() {
         val loved = mutableStateOf(true)
