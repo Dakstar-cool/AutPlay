@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 data class OwnerProfileStatisticsState(
     val snapshot: OwnerProfileStatistics? = null,
@@ -26,6 +28,7 @@ class ProfileStatisticsSnapshotOwner(
     val state: StateFlow<OwnerProfileStatisticsState> = mutableState.asStateFlow()
     private var attemptedInitialLoad = false
     private var refreshJob: Job? = null
+    private var closed = false
 
     fun loadIfNeeded() {
         if (attemptedInitialLoad) return
@@ -37,25 +40,29 @@ class ProfileStatisticsSnapshotOwner(
 
     /** Account cache invalidation can refresh without causing another synchronous server request. */
     fun refreshWith(readSnapshot: suspend () -> OwnerProfileStatistics) {
-        if (mutableState.value.loading) return
+        if (closed || mutableState.value.loading) return
         attemptedInitialLoad = true
         val previous = mutableState.value.snapshot
-        mutableState.value = OwnerProfileStatisticsState(snapshot = previous, loading = true, accountBased = accountBased)
+        mutableState.value = OwnerProfileStatisticsState(snapshot = previous, loading = true,
+            accountBased = previous?.accountId != null)
         refreshJob = scope.launch {
             try {
-                mutableState.value = OwnerProfileStatisticsState(snapshot = readSnapshot(), accountBased = accountBased)
+                val snapshot = readSnapshot()
+                coroutineContext.ensureActive()
+                if (!closed) mutableState.value = OwnerProfileStatisticsState(snapshot = snapshot, accountBased = snapshot.accountId != null)
             } catch (cancelled: CancellationException) {
                 attemptedInitialLoad = previous != null
-                mutableState.value = OwnerProfileStatisticsState(snapshot = previous, accountBased = accountBased)
+                if (!closed) mutableState.value = OwnerProfileStatisticsState(snapshot = previous, accountBased = previous?.accountId != null)
                 throw cancelled
             } catch (_: Exception) {
-                mutableState.value = OwnerProfileStatisticsState(snapshot = previous, refreshFailed = true, accountBased = accountBased)
+                if (!closed) mutableState.value = OwnerProfileStatisticsState(snapshot = previous, refreshFailed = true, accountBased = previous?.accountId != null)
             }
         }
     }
 
     /** Dispose when the owning profile changes so a late old-profile result cannot be displayed. */
     fun close() {
+        closed = true
         refreshJob?.cancel()
     }
 }

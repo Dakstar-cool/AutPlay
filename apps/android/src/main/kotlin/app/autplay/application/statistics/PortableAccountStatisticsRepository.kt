@@ -21,6 +21,13 @@ class PortableAccountStatisticsRepository(
     private val clock: Clock = Clock.systemUTC(),
 ) {
     suspend fun refresh(accountId: String, profile: ServerProfileId?, remote: AccountStatisticsPort?): OwnerProfileStatistics {
+        return refreshAvailable(accountId, profile, remote) ?: OwnerProfileStatistics(
+            clock.millis(), 0, emptyList(), emptyList(), emptyList(), accountId,
+        )
+    }
+
+    /** Null means no checked account snapshot exists; a real zero snapshot remains available. */
+    suspend fun refreshAvailable(accountId: String, profile: ServerProfileId?, remote: AccountStatisticsPort?): OwnerProfileStatistics? {
         require(UUID.fromString(accountId).toString() == accountId)
         var authenticated: OwnerProfileStatistics? = null
         if (profile != null && remote != null) {
@@ -38,15 +45,15 @@ class PortableAccountStatisticsRepository(
             catch (_: Exception) { /* The account-owned Room cache survives connectivity failures. */ }
         }
         val local = normalizedSnapshot(accountId)
-        if (authenticated != null) return if (local.listenedMs > authenticated.listenedMs) local else authenticated
+        if (authenticated != null) return if (local != null && local.listenedMs > authenticated.listenedMs) local else authenticated
         val saved = database.portableAccountDao().allStatistics(accountId).mapNotNull { row ->
             runCatching { decodeAccountStatistics(row.documentJson.toByteArray(Charsets.UTF_8), accountId) }
                 .getOrNull()?.takeIf { it.throughMs <= clock.millis() + 60_000L }
         }.maxWithOrNull(compareBy<OwnerProfileStatistics> { it.listenedMs }.thenBy { it.throughMs })
-        return if (saved != null && saved.listenedMs > local.listenedMs) saved else local
+        return if (saved != null && (local == null || saved.listenedMs > local.listenedMs)) saved else local
     }
 
-    private suspend fun normalizedSnapshot(accountId: String): OwnerProfileStatistics = database.withReadTransaction {
+    private suspend fun normalizedSnapshot(accountId: String): OwnerProfileStatistics? = database.withReadTransaction {
         val builder = PortableStatisticsAccumulator(accountId, clock.millis())
         var after = ""
         var count = 0
@@ -57,7 +64,7 @@ class PortableAccountStatisticsRepository(
             page.forEach { builder.add(it.documentJson) }
             page.lastOrNull()?.let { after = it.recordId }
         } while (page.size == 128)
-        builder.snapshot()
+        if (count == 0) null else builder.snapshot()
     }
 }
 

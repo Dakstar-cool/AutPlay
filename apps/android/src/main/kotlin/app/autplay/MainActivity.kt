@@ -978,23 +978,40 @@ private fun OfflineLibraryScreen(
         app.autplay.application.statistics.PortableAccountStatisticsRepository(AutPlayRuntime.database(context))
     }
     val statisticsAccountId = binding?.userId?.value ?: settings.portableAccountId
-    val statisticsOwner = remember(profileStatisticsRepository, portableStatisticsRepository, activeProfileId,
-        statisticsAccountId, accountStatisticsPort) {
-        ProfileStatisticsSnapshotOwner(scope, activeProfileId, load = { profile ->
-            val accountId = statisticsAccountId
+    val statisticsIdentity = app.autplay.application.statistics.StatisticsIdentity(activeProfileId,
+        statisticsAccountId, binding?.deviceId?.value, settings.m5Binding?.bindingCommitId)
+    val statisticsSelector = remember(profileStatisticsRepository, portableStatisticsRepository, statisticsIdentity,
+        settings.serverBaseUrl, portableAccountUi.runtime) {
+        app.autplay.application.statistics.StatisticsSourceSelector(portableStatisticsRepository, profileStatisticsRepository) { captured ->
+            val current = settingsStore.settings.first()
+            val boundAccount = captured.accountId.takeIf { captured.profileId != null }
+            check(current.activeServerProfileId?.value == captured.profileId &&
+                current.activeUserId?.value == boundAccount && current.deviceId?.value == captured.deviceId &&
+                current.m5Binding?.bindingCommitId == captured.bindingCommitId && current.serverBaseUrl == settings.serverBaseUrl) {
+                "ACCOUNT_CONTEXT_CHANGED"
+            }
+            if (captured.accountId != null && captured.profileId == null) {
+                check(portableAccountUi.runtime.store.ownership()?.accountId == captured.accountId) { "ACCOUNT_CONTEXT_CHANGED" }
+            }
+        }
+    }
+    val statisticsOwner = remember(statisticsSelector, statisticsIdentity, accountStatisticsPort) {
+        ProfileStatisticsSnapshotOwner(scope, activeProfileId, load = {
+            statisticsSelector.verify(statisticsIdentity)
+            val accountId = statisticsIdentity.accountId
             if (accountId != null) {
                 val owner = portableAccountUi.runtime.store.ownership()
-                check(binding?.userId?.value == accountId || owner?.accountId == accountId) { "ACCOUNT_CONTEXT_CHANGED" }
                 if (owner?.accountId == accountId) {
                     app.autplay.application.portableaccount.PortableAccountDataRepository(AutPlayRuntime.database(context))
                         .captureLocal(accountId)
+                    statisticsSelector.verify(statisticsIdentity)
                     app.autplay.work.PortableAccountWork.enqueueLocal(context, accountId)
                 }
-                portableStatisticsRepository.refresh(accountId, binding?.serverProfileId, accountStatisticsPort)
-            } else profileStatisticsRepository.refresh(profile)
-        }, accountBased = statisticsAccountId != null)
+            }
+            statisticsSelector.load(statisticsIdentity, accountStatisticsPort).snapshot
+        })
     }
-    val ownerStatisticsState by statisticsOwner.state.collectAsState()
+    val ownerStatisticsState by key(statisticsOwner) { statisticsOwner.state.collectAsState() }
     DisposableEffect(statisticsOwner) {
         onDispose { statisticsOwner.close() }
     }
@@ -1041,7 +1058,7 @@ private fun OfflineLibraryScreen(
         if (destination != UiDestination.Profile) return@LaunchedEffect
         AutPlayRuntime.database(context).portableAccountDao().observeRevision(account).collectLatest {
             delay(750L)
-            statisticsOwner.refreshWith { portableStatisticsRepository.refresh(account, null, null) }
+            statisticsOwner.refreshWith { statisticsSelector.load(statisticsIdentity).snapshot }
         }
     }
     LaunchedEffect(destination, statisticsOwner) {
