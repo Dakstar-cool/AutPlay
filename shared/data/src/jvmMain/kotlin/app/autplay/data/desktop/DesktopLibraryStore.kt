@@ -150,6 +150,7 @@ private class PersistentDesktopLibraryStore(
     override suspend fun saveQueue(queue: DesktopQueue, event: DesktopListeningEvent?): Unit {
         val copy = queue.copy(entries = queue.entries.toList(), shuffleOrder = queue.shuffleOrder.toList())
         mutate {
+            val startedAt = copy.sessionStartedAtMs
             validId(copy.id)
             requireCode(copy.entries.size <= MAX_QUEUE_ENTRIES, "desktop_queue_limit")
             copy.entries.forEach { validId(it.id); validId(it.trackId) }
@@ -160,8 +161,8 @@ private class PersistentDesktopLibraryStore(
                 copy.repeatMode.isNotBlank() && copy.repeatMode.length <= MAX_TEXT_LENGTH &&
                 copy.queueType.none { it == '\u0000' } && copy.repeatMode.none { it == '\u0000' } &&
                 copy.positionMs >= 0 && copy.playedMs >= 0 &&
-                (copy.sessionStartedAtMs == null || copy.sessionStartedAtMs >= 0) &&
-                (copy.sessionId == null) == (copy.sessionStartedAtMs == null), "desktop_queue_invalid")
+                (startedAt == null || startedAt >= 0) &&
+                (copy.sessionId == null) == (startedAt == null), "desktop_queue_invalid")
             copy.sessionId?.let(::validId)
             event?.let {
                 validId(it.id); validId(it.queueEntryId); validId(it.trackId)
@@ -171,7 +172,7 @@ private class PersistentDesktopLibraryStore(
             val rows = copy.entries.mapIndexed { index, entry -> QueueEntryRow(entry.id, entry.trackId, index, shuffled.getValue(entry.id)) }
             dao.saveQueue(QueueRow(id = copy.id, currentEntryId = copy.currentEntryId, queueType = copy.queueType,
                 positionMs = copy.positionMs, shuffleEnabled = copy.shuffleEnabled, repeatMode = copy.repeatMode,
-                sessionId = copy.sessionId, sessionStartedAtMs = copy.sessionStartedAtMs, playedMs = copy.playedMs), rows,
+                sessionId = copy.sessionId, sessionStartedAtMs = startedAt, playedMs = copy.playedMs), rows,
                 event?.let { ListeningRow(it.id, it.queueEntryId, it.trackId, it.startedAtMs, it.playedMs, it.positionMs, it.finalized) })
         }
     }
