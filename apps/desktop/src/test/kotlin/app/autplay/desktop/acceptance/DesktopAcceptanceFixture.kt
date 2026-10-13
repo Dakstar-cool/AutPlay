@@ -97,7 +97,8 @@ internal class DesktopAcceptanceFixture {
             // Close all traversal handles BEFORE deletion, especially on Windows. No symlinks followed.
             val ownedPaths = Files.walk(sandbox).use { paths -> paths.sorted(Comparator.reverseOrder()).toList() }
             check(ownedPaths.all { it.toAbsolutePath().normalize().startsWith(sandbox) }) { "Unsafe fixture entry" }
-            ownedPaths.forEach(Files::delete)
+            // SQLite can remove a transient sidecar after the snapshot. Other IO errors still fail.
+            ownedPaths.forEach { Files.deleteIfExists(it) }
             check(!Files.exists(sandbox)) { "Fixture cleanup did not remove owned root" }
         }
         cleanupFailure?.let { failure ->
