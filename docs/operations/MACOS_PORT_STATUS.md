@@ -18,10 +18,11 @@ Gradle execution are owned by the coordinator.
 | --- | --- | --- |
 | Common domain and application | high | Existing policies, presentation state and playback boundary extracted once |
 | Desktop shell | medium | Compose window, library/playlist/settings shell, RU/EN and light/dark themes |
-| Audio and native spike | xhigh | Engine comparison and executable Mac probe; real native results still required |
+| Audio and native spike | xhigh | Engine comparison and executable AVFoundation/HTTP probe on ARM64 macOS |
 | Feature and contract inventory | medium | 63 feature rows and current persistence/device compatibility blockers |
 | Independent foundation review | high | Build, policy and automatic regression gate review |
 | Gradle resolution diagnostics | high | Confirmed repository timeout and PowerShell argument parsing fixes |
+| Native cancellation diagnosis and review | high | Explicit transport stop, terminal acknowledgement and incomplete-transfer checks |
 
 ## Foundation scope
 
@@ -30,7 +31,8 @@ Gradle execution are owned by the coordinator.
 describe the source and proposed scope; allocations remain proposals rather than a parity claim.
 The [desktop shell](MACOS_DESKTOP_SHELL.md) describes the implemented presentation block.
 The [native spike](MACOS_NATIVE_SPIKE.md) contains the engine comparison and bounded executable
-AVFoundation probe; nine real socket fixture scenarios passed on Windows.
+AVFoundation probe; ten real socket fixture checks passed on Windows, including
+delivery of a delayed incomplete body before cancellation.
 
 The foundation adds shared modules and a desktop entry point, rather than completed local media
 storage or audible playback. Real media execution, persistent imports/queues, Room desktop storage,
@@ -42,8 +44,16 @@ protocol or database migration is changed in this block. AutPlay Face remains ex
 - Source snapshot: 314 existing contract/release tests passed on pinned CPython 3.14.7.
 - Source snapshot: Android lintDebug, testDebugUnitTest and assembleDebug passed with the pinned
   JDK and strict dependency verification; the full baseline run took 21m 41s.
-- Workstream checks: 18 shared policy tests and 3 desktop control/copy tests passed via isolated
-  Kotlin/JVM compilation. These do not replace the integration Gradle gate.
+- Integrated shared/desktop gate: 18 domain/application and 3 desktop control/copy tests passed
+  with strict Gradle dependency verification. Compose UI and desktop JVM sources compiled.
+- Android regression gate after extraction: 506 Android unit tests, all 21 shared tests, lintDebug,
+  and debug, trusted-LAN and release APK builds (including R8) passed in 19m 23s.
+- Android instrumentation APK compiled; instrumentation tests were not executed on a device.
+- The final release-script checks passed: 127 tests on pinned CPython 3.14.7.
+- All 1,058 baseline SHA-256 verification pins remain unchanged. Added platform/build artifacts
+  have explicit checksums; strict verification remains enabled. Google Maven timeouts on the
+  Windows host were handled using an isolated cache seeded by an official-repository CI run,
+  rather than changing pinned tools or bypassing verification.
 - Independent review identified that extracted tests must stay in the automatic Android host gate;
   the canonical check scripts now include shared policy tests.
 - `scripts/check-desktop.ps1` and `scripts/check-desktop.sh` provide a focused strict-verification
@@ -56,6 +66,33 @@ protocol or database migration is changed in this block. AutPlay Face remains ex
 - The same Mac workflow compiles and runs the synthetic WAV AVFoundation probe, including its
   local auth/Range/redirect/drop/cancel scenarios. The other audio formats and JVM/native bridge
   remain part of the later engine qualification matrix.
+
+First measured ARM64 Mac package run:
+[38441068870](https://github.com/Dakstar-cool/AutPlay/actions/runs/38441068870),
+source `f71da9b09cdd3c899e886033ca5a2eefbc43eb16`. Both `.app` and `.dmg` packaged
+successfully on macOS 15.7.9 with the pinned Microsoft JDK. Six native WAV scenarios
+passed; the slow cancellation case exposed an active HTTP task after item replacement.
+The follow-up fix explicitly cancels owned tasks and waits for URLSession's terminal
+acknowledgement.
+
+Final ARM64 Mac gate: **PASS** in 5m 37s,
+[38443531031](https://github.com/Dakstar-cool/AutPlay/actions/runs/38443531031),
+source `ae9d5256726928a14144deb4a4da825c0dd3b85f`.
+All 21 shared tests, desktop compilation and `.app`/`.dmg` packaging passed.
+The packaged executable opened its window, advanced Compose frames and exited cleanly
+using its bundled JVM. All seven synthetic WAV native scenarios passed: local playback,
+authenticated Range playback, same-origin redirect, rejected 401/cross-origin redirect,
+truncated body and cancellation. The cancellation report records one accepted incomplete
+transfer cancelled, one terminal acknowledgement and zero remaining active tasks.
+Audible sound and the missing MP3/AAC/M4A/FLAC/Opus matrix remain unverified. This transport
+scenario does not qualify every native lifecycle/teardown path or the future JVM bridge.
+
+[Development installer and evidence](https://github.com/Dakstar-cool/AutPlay/actions/runs/38443531031/artifacts/11837907936)
+are retained by CI for seven days. `AutPlay-1.0.0.dmg` is an unsigned foundation package,
+98,920,029 bytes. Its SHA-256 is
+`de5ebe3cb260d45f7da0bff3e8038bb982a4fd3b89ebb86003df4c8274ce8587`.
+The positive package version satisfies the JDK macOS bundler; it does not denote a
+completed product release.
 
 ## Next dependencies
 
