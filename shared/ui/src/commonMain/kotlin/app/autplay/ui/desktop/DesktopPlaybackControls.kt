@@ -3,6 +3,7 @@ package app.autplay.ui.desktop
 import app.autplay.playback.presentation.PlaybackConnectionState
 import app.autplay.playback.presentation.PlaybackControlGate
 import app.autplay.playback.presentation.PlaybackPresentationState
+import app.autplay.playback.presentation.PlaybackStatus
 import app.autplay.playback.presentation.canSeek
 
 /** A renderer cannot enable commands until both the adapter and application gate are ready. */
@@ -19,7 +20,8 @@ public data class DesktopPlaybackControls(
                 state.controls == PlaybackControlGate.Allowed && state.mediaId != null
             return DesktopPlaybackControls(
                 playPause = allowed,
-                previous = allowed && state.previousMediaId != null,
+                previous = allowed && (state.previousMediaId != null ||
+                    (state.canSeek && state.positionMs > 3_000 && state.playbackStatus != PlaybackStatus.Ended)),
                 next = allowed && state.nextMediaId != null,
                 seek = allowed && state.canSeek && (state.durationMs ?: 0) > 0,
             )

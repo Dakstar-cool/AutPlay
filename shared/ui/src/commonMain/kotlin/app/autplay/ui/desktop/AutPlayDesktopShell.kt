@@ -14,11 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -28,6 +26,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,6 +39,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.autplay.application.desktop.DesktopImportResult
+import app.autplay.application.desktop.DesktopLibrarySnapshot
 import app.autplay.playback.presentation.PlaybackConnectionState
 import app.autplay.playback.presentation.PlaybackPresentationState
 
@@ -53,6 +57,11 @@ public fun AutPlayDesktopShell(
     onThemeChange: (DesktopThemeMode) -> Unit,
     playbackCallbacks: DesktopPlaybackCallbacks,
     modifier: Modifier = Modifier,
+    library: DesktopLibrarySnapshot? = null,
+    libraryCallbacks: DesktopLibraryCallbacks = DesktopLibraryCallbacks(),
+    importing: Boolean = false,
+    importResult: DesktopImportResult? = null,
+    errorCode: String? = null,
 ) {
     AutPlayDesktopTheme(themeMode) {
         Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -60,12 +69,14 @@ public fun AutPlayDesktopShell(
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     Sidebar(section, language, onSectionChange)
                     Column(
-                        Modifier.weight(1f).fillMaxHeight()
-                            .verticalScroll(rememberScrollState()).padding(32.dp),
+                        Modifier.weight(1f).fillMaxHeight().padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp),
                     ) {
                         Text(section.label(language), style = MaterialTheme.typography.headlineLarge)
-                        when (section) {
+                        if (library != null && section != DesktopSection.Settings) {
+                            DesktopLibraryContent(section, library, language, importing, importResult,
+                                errorCode, libraryCallbacks, Modifier.weight(1f).fillMaxWidth())
+                        } else when (section) {
                             DesktopSection.Library -> {
                                 MutedText(DesktopText.LibrarySubtitle.inLanguage(language))
                                 EmptyCollection(
@@ -77,6 +88,8 @@ public fun AutPlayDesktopShell(
                                 language, DesktopText.EmptyPlaylists, DesktopText.EmptyPlaylistsBody,
                                 DesktopText.CreatePlaylist,
                             )
+                            DesktopSection.Queue -> MutedText(DesktopText.EmptyQueue.inLanguage(language))
+                            DesktopSection.History -> MutedText(DesktopText.EmptyHistory.inLanguage(language))
                             DesktopSection.Settings -> {
                                 MutedText(DesktopText.SettingsSubtitle.inLanguage(language))
                                 Settings(language, themeMode, onLanguageChange, onThemeChange)
@@ -211,6 +224,7 @@ private fun PlaybackBar(
     val controls = DesktopPlaybackControls.from(state, adapterAvailable)
     val duration = state.durationMs?.takeIf { it > 0 }
     val position = state.positionMs.coerceAtLeast(0).let { if (duration != null) it.coerceAtMost(duration) else it }
+    var seekPreview by remember(state.mediaId) { mutableStateOf<Float?>(null) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -245,9 +259,16 @@ private fun PlaybackBar(
                     style = MaterialTheme.typography.labelMedium,
                 )
                 Slider(
-                    value = if (duration != null) (position.toDouble() / duration).toFloat() else 0f,
+                    value = seekPreview ?: if (duration != null) (position.toDouble() / duration).toFloat() else 0f,
                     onValueChange = { fraction ->
-                        if (controls.seek && duration != null) callbacks.onSeek((fraction.toDouble() * duration).toLong().coerceIn(0, duration))
+                        if (controls.seek) seekPreview = fraction
+                    },
+                    onValueChangeFinished = {
+                        val fraction = seekPreview
+                        if (controls.seek && duration != null && fraction != null) {
+                            callbacks.onSeek((fraction.toDouble() * duration).toLong().coerceIn(0, duration))
+                        }
+                        seekPreview = null
                     },
                     enabled = controls.seek,
                     modifier = Modifier.weight(1f).semantics { contentDescription = DesktopText.Seek.inLanguage(language) },
