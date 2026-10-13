@@ -207,6 +207,49 @@ def run(helper: Path) -> dict[str, object]:
     return report
 
 
+def interpret(report: dict[str, object]) -> tuple[str, bool]:
+    """Classify diagnostic controls and the known negative without claiming an engine gate."""
+    checks = report.get("checks")
+    if report.get("closed") is not True or "errorCode" in report or not isinstance(checks, list) or len(checks) != 4:
+        return "INCOMPLETE_DIAGNOSIS", False
+    indexed: dict[tuple[str, str], dict[str, object]] = {}
+    for check in checks:
+        if not isinstance(check, dict):
+            return "INCOMPLETE_DIAGNOSIS", False
+        label, suffix = check.get("fixture"), check.get("suffix")
+        if not isinstance(label, str) or not isinstance(suffix, str):
+            return "INCOMPLETE_DIAGNOSIS", False
+        key = (label, suffix)
+        if key in indexed or key not in {(label, suffix) for label in ("pcm16_mono", "pcm48_stereo")
+                                         for suffix in ("wav", "media")}:
+            return "INCOMPLETE_DIAGNOSIS", False
+        indexed[key] = check
+    negatives = 0
+    for label in ("pcm16_mono", "pcm48_stereo"):
+        positive, neutral = indexed[(label, "wav")], indexed[(label, "media")]
+        digest = positive.get("sha256")
+        if (digest != neutral.get("sha256") or not isinstance(digest, str) or
+                len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
+            return "FIXTURE_BYTES_MISMATCH", False
+        if positive.get("result") != "READY" or "errorCode" in positive or "diagnostic" in positive:
+            return "WAV_CONTROL_FAILED", False
+        if neutral.get("result") == "READY":
+            if "errorCode" in neutral or "diagnostic" in neutral:
+                return "UNEXPECTED_NEUTRAL_SUFFIX_FAILURE", False
+            continue
+        failure = neutral.get("diagnostic")
+        if (neutral.get("result") != "ERROR" or neutral.get("errorCode") != "NATIVE_UNSUPPORTED_MEDIA" or
+                not isinstance(failure, dict) or failure.get("stage") != "ASSET_PROTECTED" or
+                failure.get("errorCode") != "NATIVE_UNSUPPORTED_MEDIA" or
+                failure.get("cause0Domain") != "AVFOUNDATION" or failure.get("cause0Code") != -11828 or
+                failure.get("cause1Domain") != "OSSTATUS" or failure.get("cause1Code") != -12847):
+            return "UNEXPECTED_NEUTRAL_SUFFIX_FAILURE", False
+        negatives += 1
+    outcome = ("BOTH_SUFFIXES_READY" if negatives == 0 else
+               "WAV_READY_MEDIA_FORMAT_REJECTED" if negatives == 2 else "MIXED_NEUTRAL_SUFFIX_RESULTS")
+    return outcome, True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--helper", type=Path)
@@ -236,6 +279,27 @@ def main() -> int:
                 assert failure.code == "PROBE_PROTOCOL_ERROR"
             else:
                 raise AssertionError("Unsanitized or invalid diagnostic accepted")
+        checks: list[dict[str, object]] = []
+        for label in ("pcm16_mono", "pcm48_stereo"):
+            digest = hashlib.sha256(label.encode("ascii")).hexdigest()
+            checks.append({"fixture": label, "suffix": "wav", "sha256": digest, "result": "READY"})
+            checks.append({"fixture": label, "suffix": "media", "sha256": digest, "result": "ERROR",
+                           "errorCode": "NATIVE_UNSUPPORTED_MEDIA", "diagnostic": {
+                               "stage": "ASSET_PROTECTED", "errorCode": "NATIVE_UNSUPPORTED_MEDIA",
+                               "cause0Domain": "AVFOUNDATION", "cause0Code": -11828,
+                               "cause1Domain": "OSSTATUS", "cause1Code": -12847}})
+        report = {"closed": True, "checks": checks}
+        assert interpret(report) == ("WAV_READY_MEDIA_FORMAT_REJECTED", True)
+        checks[0]["result"] = "ERROR"
+        assert interpret(report) == ("WAV_CONTROL_FAILED", False)
+        checks[0]["result"] = "READY"
+        checks[1]["errorCode"] = "NATIVE_OPEN_TIMEOUT"
+        assert interpret(report) == ("UNEXPECTED_NEUTRAL_SUFFIX_FAILURE", False)
+        for index in (1, 3):
+            checks[index]["result"] = "READY"
+            checks[index].pop("errorCode")
+            checks[index].pop("diagnostic")
+        assert interpret(report) == ("BOTH_SUFFIXES_READY", True)
         print(json.dumps({"selfCheck": "PASS", "nativePlayback": "NOT_RUN"}))
         return 0
     if sys.platform != "darwin" or args.helper is None:
@@ -248,10 +312,11 @@ def main() -> int:
         report = run(helper)
     except Exception:
         report = {"errorCode": "PROBE_HELPER_UNAVAILABLE", "closed": False, "checks": []}
+    outcome, diagnostic_complete = interpret(report)
+    report["diagnosticOutcome"] = outcome
+    report["engineAcceptance"] = "NOT_RUN"
     print(json.dumps(report, sort_keys=True))
-    return 0 if (report.get("closed") is True and len(report["checks"]) == 4 and
-                 all(check.get("result") == "READY" for check in report["checks"]) and
-                 "errorCode" not in report) else 1
+    return 0 if diagnostic_complete else 1
 
 
 if __name__ == "__main__":

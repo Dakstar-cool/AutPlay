@@ -132,9 +132,12 @@ explicit subsequent command changes the generation or stops/closes execution.
 | Position / duration | At most 604,800,000 ms (7 days), prototype-only bound |
 | JVM close | Bounded graceful command then process wait/termination and reader join; at most 12 seconds from caller |
 
-Managed copies use neutral `<sha256>.media` filenames; the helper does not reject
-or select codecs based on the basename suffix. AVURLAsset must inspect the actual
-local content. The helper checks asset playability, protected-content status and an audio track;
+The selected storage correction preserves a verified media-format suffix in the
+managed filename; WAV is now measured with `.wav`. Legacy `<sha256>.media` copies
+need data-owner repair on selected playback, preserving the bytes and SHA-256.
+The helper has no basename admission filter, but the native framework also uses
+URL format information: content sniffing alone did not make the tested neutral
+names playable. The helper checks asset playability, protected-content status and an audio track;
 unsupported media fails closed without transcoding. Local containers also use
 `AVURLAssetReferenceRestrictionsKey` with `forbidAll` to prevent external media
 references. See [Apple's reference restriction API](https://developer.apple.com/documentation/avfoundation/avurlassetreferencerestrictionskey).
@@ -159,15 +162,18 @@ does not release it merely when references are dropped.
 
 ## Verification boundary
 
-This source was implemented on Windows. Standalone compilation against cached
-pinned Kotlin 2.4.10, JDK 17 and the shared desktop contract checks JVM syntax
-without running Gradle. Windows fail-closed lifecycle is checked independently.
-The native helper cannot be compiled or played on this host. Coordinator-owned
-Gradle and actual ARM64 Mac/JVM acceptance are still required for this exact
-source and packaged helper.
+This source was implemented on Windows. Early standalone compilation placed the
+shared contract in the same compilation unit and therefore missed a Kotlin
+cross-module nullable-property smart-cast failure in the added diagnostic code.
+The coordinator fixed it using an immutable local error-code snapshot and ran
+the actual module compilation. Future standalone checks must consume a separately
+compiled shared/application JAR. Windows fail-closed lifecycle is independent
+host evidence. Native compilation/startup evidence is recorded below; actual
+ARM64 Mac/JVM acceptance of the corrected managed filenames remains required.
 
-The focused Mac acceptance should prove a synthetic WAV in a neutral `.media`
-managed filename can open, then exercise actual timeline
+The focused Mac acceptance should prove a synthetic WAV in its verified `.wav`
+managed filename can open, including safe selected-play repair of a legacy
+`.media` copy, then exercise actual timeline
 advance, pause drift, zero/middle/near-end seek, EOF once, replacement and stale
 generation rejection, teardown while opening/seeking, helper death and a Unicode
 managed path. Include a failed/missing native close acknowledgement and confirm
@@ -187,8 +193,8 @@ helper and passed packaged helper/app startup. Its native JVM acceptance failed
 while opening a byte-identical managed `.media` copy of an eight-second 16 kHz
 mono PCM WAV. The supplied XML records only controller `AUDIO_ERROR`, after the
 controller invalidated the item and sent stop. It does not establish a native
-code, failing asset property, content-type issue or codec failure. These new
-diagnostics do not claim that the media-open defect is fixed.
+code, failing asset property, content-type issue or codec failure. The subsequent
+direct-helper result below establishes the suffix boundary for both PCM layouts.
 
 The bounded [direct helper probe](../../apps/desktop/src/native/probe_local_audio.py)
 now compares the same synthetic bytes under `.wav` and `.media` names, for both
@@ -196,7 +202,13 @@ the failed 16 kHz mono layout and the earlier spike's 48 kHz stereo layout. It
 retains a failure's stage and numeric causes before stop, keeps the same
 `forbidAll` policy, and never exports temporary media paths. Each open has an
 18-second deadline; handshake/ack have five seconds and teardown kills and waits
-under a deadline. A failed case produces a nonzero exit rather than a pass.
+under a deadline. The report retains each `.media` rejection as `result: ERROR`.
+Its `diagnosticOutcome` distinguishes the known negative from failed WAV controls,
+unexpected errors or incomplete diagnosis, and `engineAcceptance: NOT_RUN`
+prevents interpreting diagnostic completion as the engine acceptance gate.
+Both WAV controls must be READY and suffix pairs must have matching SHA-256.
+The exact known `.media` error is an interpretable negative; unexpected failures,
+control failures and incomplete teardown still produce a nonzero exit.
 
 On the Mac CI runner, use the actual packaged executable and pinned Python:
 
@@ -211,14 +223,38 @@ the JVM acceptance failure message; it contains only sanitized typed facts.
 This probe diagnoses opening and actual native transport state; it is not the
 queue/seek/EOF acceptance gate and cannot replace that gate.
 
-The researched candidate fixes are conditional on those observations:
+## Repeated suffix failure: evidence and selected correction
 
-| Candidate | Evidence needed before changing behavior |
+Mac diagnostic run [38456726576](https://github.com/Dakstar-cool/AutPlay/actions/runs/38456726576),
+source `144715ec6dd72e84f5671154c4fa178e5f48a3ee`, returned both `.wav` controls
+READY with duration 8,000 ms and both byte-identical `.media` copies ERROR. The
+helper closed cleanly. Every failing row records `NATIVE_UNSUPPORTED_MEDIA`,
+stage `ASSET_PROTECTED`, cause `AVFOUNDATION / -11828`, underlying cause
+`OSSTATUS / -12847`. The stage records the property-load operation that threw;
+it is not evidence that the synthetic WAV contains DRM/protected media.
+
+| PCM layout | SHA-256 shared by `.wav` and `.media` | `.wav` | `.media` |
+| --- | --- | --- | --- |
+| 16 kHz mono / 16 bit | `190415015d40eef0cd797e1b59ffe00846b01873050b12d44b3a216de3faa2a9` | READY | Format rejected during protection-property loading |
+| 48 kHz stereo / 16 bit | `46ea71da247c66a543a722efb94bc0008c5448bc6b03da650b8d818627c196ac` | READY | Same native error and stage |
+
+The evidence isolates the filename/format-recognition boundary for these exact
+WAV bytes and this Mac run. It does not qualify other codecs, HTTP, audible
+output or the complete JVM queue lifecycle. The repeated error triggered the
+required primary-source comparison of compatible correction paths:
+
+| Researched correction | Compatibility and decision |
 | --- | --- |
-| Give AVURLAsset a verified content-type hint | `.wav` succeeds and identical `.media` fails during format/property loading. Apple's [AVURLAssetOverrideMIMETypeKey](https://developer.apple.com/documentation/avfoundation/avurlassetoverridemimetypekey) changes parser selection regardless of extension; Apple's symbol metadata marks it macOS 14+, so the macOS 13 fallback still needs an explicit supported design. No override is introduced here. |
-| Correct a failing asset-property boundary | Diagnostic `ASSET_PLAYABLE/PROTECTED/DURATION/TRACKS` and the NSError chain identify the exact operation. [Apple asynchronous property loading](https://developer.apple.com/documentation/avfoundation/avpartialasyncproperty/isplayable-45h5v) distinguishes loaded facts; do not weaken existing playability/protection/audio-track/duration checks. |
-| Correct an actual file-capability validation mismatch | `FILE_VALIDATION/FILE_ATTRIBUTES` identifies failure before AVFoundation; compare the canonical regular/readable file against [Foundation URL resource values](https://developer.apple.com/documentation/foundation/urlresourcevalues). Preserve the managed-copy and symlink boundaries. |
-| Correct item readiness/decoder handling | `ITEM_READY` or native playback failure, plus comparison of both PCM layouts, identifies the player/decoder boundary. Apple's [fileFormatNotRecognized](https://developer.apple.com/documentation/avfoundation/averror-swift.struct/code/fileformatnotrecognized) and numeric cause chain distinguish format rejection from generic open failure. No transcoding or fixture substitution is selected here. |
+| Preserve a verified format suffix in the managed copy | Selected: both `.wav` controls passed without altering native options. Works within macOS 13 and the existing direct local-file adapter. The data owner implements known-format naming and safe repair of selected legacy `.media` copies, preserving SHA-256, collection identity and the original source. [JDK Files.copy/move](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/nio/file/Files.html) provides the file-operation boundary; identity, crash consistency and repair tests remain repository requirements. |
+| Supply a verified MIME override where available, with a macOS 13 fallback | [AVURLAssetOverrideMIMETypeKey](https://developer.apple.com/documentation/avfoundation/avurlassetoverridemimetypekey) explicitly overrides extension/server format hints. Apple's symbol metadata marks it macOS 14+; it cannot be the sole macOS 13 solution. An availability branch plus the selected suffix fallback is possible but adds no needed fix for the measured WAV case. No blind MIME override is added. |
+| Supply local bytes and their format UTI through a resource-loader delegate | [AVAssetResourceLoadingContentInformationRequest](https://developer.apple.com/documentation/avfoundation/avassetresourceloadingcontentinformationrequest) exposes contentType, length and range support and predates macOS 13. This needs a local-only loader, correct UTI, bounded reads/ranges and cancellation acceptance. It is a more complex compatible alternative; no HTTP source or loader replacement is introduced. |
+| Use a bounded private alias with the verified suffix | [FileManager.linkItem](https://developer.apple.com/documentation/foundation/filemanager/linkitem%28at%3Ato%3A%29) creates a same-filesystem hard link; a verified copy is another possible alias. A canonical regular-file alias could satisfy the existing native guard, while a symlink cannot. It adds generation-scoped alias ownership, byte/disk bounds, cancellation and cleanup obligations; stable managed naming is the simpler selected solution. No alias is created by this helper. |
+
+Raising the minimum OS to 14 solely to use MIME override is rejected: macOS 13
+remains fixed. No native format patch, transcoding, playability/protection-check
+relaxation or codec-gate change is selected. The `.media` probe rows remain a
+documented negative. Actual JVM acceptance with the corrected `.wav` managed
+source and legacy repair is pending the coordinator's Mac run.
 
 [Apple forbidAll](https://developer.apple.com/documentation/avfoundation/avassetreferencerestrictions/forbidall)
 allows references only within the container. A self-contained WAV does not by
