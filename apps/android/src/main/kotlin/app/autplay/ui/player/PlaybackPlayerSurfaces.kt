@@ -230,7 +230,8 @@ public fun NowPlayingScreen(
         onDispose { onObservingChanged(false) }
     }
     val collapse = LocalPlayerCollapse.current
-    if (state.mediaId == null) {
+    val mediaId = state.mediaId
+    if (mediaId == null) {
         Box(modifier.fillMaxSize()) {
             Column(
                 Modifier
@@ -335,7 +336,7 @@ public fun NowPlayingScreen(
                 }
                 Box(Modifier.width(artworkWidth).then(collapseGesture).testTag("player-cover")) {
                     NowPlayingArtworkCarousel(
-                        mediaId = state.mediaId,
+                        mediaId = mediaId,
                         title = state.title ?: stringResource(R.string.player_nothing_playing),
                         trackId = state.localTrackRefId,
                         targets = swipeTargets,

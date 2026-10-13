@@ -15,9 +15,11 @@ object TimelineSeekGesture {
     data class Commit(val mediaId: String, val positionMs: Long)
     data class Result(val state: State, val commit: Commit? = null)
 
-    fun begin(state: PlaybackPresentationState, targetMs: Long): State =
-        if (!state.canSeek || state.mediaId == null || state.durationMs == null) Idle
-        else Dragging(state.mediaId, state.durationMs, clamp(targetMs, state.durationMs))
+    fun begin(state: PlaybackPresentationState, targetMs: Long): State {
+        val mediaId = state.mediaId ?: return Idle
+        val durationMs = state.durationMs ?: return Idle
+        return if (!state.canSeek) Idle else Dragging(mediaId, durationMs, clamp(targetMs, durationMs))
+    }
 
     fun drag(state: State, targetMs: Long): State = when (state) {
         Idle -> Idle

@@ -26,7 +26,11 @@ dependencies {
 
 // Resolves the full native runtime for checksum review on a different development host.
 tasks.register<Sync>("prepareDesktopRuntime") {
-    from(configurations.runtimeClasspath)
+    from(configurations.runtimeClasspath) {
+        // Transitional Compose coordinates can publish distinct JARs with the same name.
+        // Keep their cache identities instead of flattening and losing one artifact.
+        eachFile { path = "${file.parentFile.name}/$name" }
+    }
     into(layout.buildDirectory.dir("resolved-runtime"))
 }
 
