@@ -208,8 +208,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if not self.server.record(event):
             self.empty(429)
             return
-        if route == "slow" and self.server.stop_event.wait(3):
-            return
         self.send_response(status)
         self.send_header("Content-Type", MIME[fixture.extension])
         self.send_header("Accept-Ranges", "bytes")
@@ -221,6 +219,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         if head:
+            return
+        # Publish authenticated response headers before delaying its body, so the native
+        # cancellation case can prove that an actual server request is in flight.
+        if route == "slow" and self.server.stop_event.wait(3):
             return
         try:
             body = fixture.data[start : end + 1]

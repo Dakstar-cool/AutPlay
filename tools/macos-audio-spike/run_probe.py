@@ -97,7 +97,13 @@ def case(binary: Path, fixture: Fixture, local: Path, route: str) -> dict[str, A
             )
         elif route == "slow":
             passed = (
-                native.get("status") == "passed" and loader.get("cancelled", 0) > 0 and not sink
+                native.get("status") == "passed"
+                and loader.get("cancelled", 0) > 0
+                and any(
+                    event["route"] == "slow" and event["status"] == 206 and event["authenticated"]
+                    for event in events
+                )
+                and not sink
             )
         elif route == "local":
             passed = native.get("status") == "passed" and not events

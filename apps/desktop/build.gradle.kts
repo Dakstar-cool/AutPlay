@@ -13,8 +13,21 @@ kotlin {
 
 dependencies {
     implementation(project(":shared:ui"))
-    implementation(compose.desktop.currentOs)
+    val desktopRuntime = providers.gradleProperty("autplay.desktopRuntime").orNull
+    implementation(
+        when (desktopRuntime) {
+            null -> compose.desktop.currentOs
+            "macos-arm64" -> compose.desktop.macos_arm64
+            else -> throw GradleException("Unsupported autplay.desktopRuntime: $desktopRuntime")
+        },
+    )
     implementation(compose.material3)
+}
+
+// Resolves the full native runtime for checksum review on a different development host.
+tasks.register<Sync>("prepareDesktopRuntime") {
+    from(configurations.runtimeClasspath)
+    into(layout.buildDirectory.dir("resolved-runtime"))
 }
 
 compose.desktop {

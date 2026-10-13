@@ -1,6 +1,15 @@
 buildscript {
     repositories {
-        google()
+        google {
+            content {
+                includeGroupByRegex("androidx(\\..*)?")
+                includeGroupByRegex("com\\.android(\\..*)?")
+                includeGroupByRegex("com\\.google\\.android(\\..*)?")
+                includeGroupByRegex("com\\.google\\.firebase(\\..*)?")
+                includeGroupByRegex("com\\.google\\.testing(\\..*)?")
+                includeGroup("com.google.gms")
+            }
+        }
         mavenCentral()
     }
     dependencies {

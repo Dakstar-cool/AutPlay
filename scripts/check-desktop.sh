@@ -4,7 +4,9 @@ set -euo pipefail
 task_project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${JAVA_HOME:?JAVA_HOME must select Microsoft OpenJDK 17.0.20+8-LTS}"
 task_java_version="$("$JAVA_HOME/bin/java" -version 2>&1)"
-if [[ "$task_java_version" != *'17.0.20'* || "$task_java_version" != *'Microsoft'* ]]; then
+if [[ "$task_java_version" != *'version "17.0.20"'* ||
+      "$task_java_version" != *'build 17.0.20+8-LTS'* ||
+      "$task_java_version" != *'Microsoft'* ]]; then
   echo 'Desktop gate requires the pinned Microsoft OpenJDK 17.0.20+8-LTS' >&2
   exit 1
 fi

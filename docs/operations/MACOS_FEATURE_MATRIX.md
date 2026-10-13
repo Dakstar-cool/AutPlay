@@ -153,7 +153,7 @@ Minimum macOS version and Intel/x64 support are not established by this document
 [temporal]: ../../apps/android/src/main/kotlin/app/autplay/application/recommendation/OfflineTemporalDelta.kt
 [server-ui]: ../../apps/android/src/main/kotlin/app/autplay/ui/ServerFeaturesScreen.kt
 [wave]: ../../apps/android/src/main/kotlin/app/autplay/application/wave/WaveCoordinator.kt
-[wave-core]: ../../apps/android/src/main/kotlin/app/autplay/domain/wave/WaveCore.kt
+[wave-core]: ../../shared/domain/src/commonMain/kotlin/app/autplay/domain/wave/WaveCore.kt
 [guest]: ../../apps/android/src/main/kotlin/app/autplay/ui/guestroom/GuestRoomScreen.kt
 [guest-runtime]: ../../apps/android/src/main/kotlin/app/autplay/application/guestroom/GuestRoomRuntime.kt
 [social]: ../../apps/android/src/main/kotlin/app/autplay/ui/social/SocialPanel.kt

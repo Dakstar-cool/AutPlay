@@ -176,8 +176,8 @@ private final class Fetch: NSObject, URLSessionDataDelegate {
         let bounds = pieces.first?.split(separator: "-") ?? []
         guard pieces.count == 2, bounds.count == 2, let begin = Int64(bounds[0]),
               let end = Int64(bounds[1]), let total = Int64(pieces[1]),
-              begin == startOffset, end >= begin, end <= endOffset, end < total,
-              total > 0, total <= maximumBytes, http.expectedContentLength == end - begin + 1,
+              begin == startOffset, end >= begin, total > 0, total <= maximumBytes,
+              end == min(endOffset, total - 1), http.expectedContentLength == end - begin + 1,
               http.value(forHTTPHeaderField: "Content-Encoding") == nil else {
             completionHandler(.cancel)
             owner.finish(key, error: failure(4))
@@ -276,7 +276,7 @@ private final class Probe {
         if input.action == "cancel" {
             stage = "cancel"
             player.play()
-            try wait({ (loaders.last?.statistics()["started", default: 0] ?? 0) > 0 })
+            try wait({ (loaders.last?.statistics()["range_validated", default: 0] ?? 0) > 0 })
             player.pause()
             player.replaceCurrentItem(with: nil)
             try wait({ (loaders.last?.statistics()["cancelled", default: 0] ?? 0) > 0 }, seconds: 2)
@@ -336,20 +336,24 @@ private func emit(_ result: [String: Any], exitCode: Int32) -> Never {
     exit(exitCode)
 }
 
-guard CommandLine.arguments.count == 1 else {
-    emit(["status": "failed", "code": "STDIN_ONLY"], exitCode: 2)
+private func runProbe() {
+    guard CommandLine.arguments.count == 1 else {
+        emit(["status": "failed", "code": "STDIN_ONLY"], exitCode: 2)
+    }
+    let bytes = FileHandle.standardInput.readData(ofLength: 65537)
+    guard bytes.count <= 65536, let input = try? JSONDecoder().decode(Input.self, from: bytes),
+          ["playback", "cancel"].contains(input.action) else {
+        emit(["status": "failed", "code": "INVALID_INPUT"], exitCode: 2)
+    }
+    let probe = Probe(input: input)
+    do {
+        try probe.run()
+        emit(probe.output(status: "passed", code: "OK"), exitCode: 0)
+    } catch let error as ProbeError {
+        emit(probe.output(status: "failed", code: error.code), exitCode: 1)
+    } catch {
+        emit(probe.output(status: "failed", code: "NATIVE_FAILURE"), exitCode: 1)
+    }
 }
-let bytes = FileHandle.standardInput.readData(ofLength: 65537)
-guard bytes.count <= 65536, let input = try? JSONDecoder().decode(Input.self, from: bytes),
-      ["playback", "cancel"].contains(input.action) else {
-    emit(["status": "failed", "code": "INVALID_INPUT"], exitCode: 2)
-}
-let probe = Probe(input: input)
-do {
-    try probe.run()
-    emit(probe.output(status: "passed", code: "OK"), exitCode: 0)
-} catch let error as ProbeError {
-    emit(probe.output(status: "failed", code: error.code), exitCode: 1)
-} catch {
-    emit(probe.output(status: "failed", code: "NATIVE_FAILURE"), exitCode: 1)
-}
+
+runProbe()

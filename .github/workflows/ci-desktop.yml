@@ -1,6 +1,19 @@
 name: CI / macOS desktop foundation
 
 on:
+  push:
+    branches:
+      - codex/macos-port-*
+    paths:
+      - shared/**
+      - apps/desktop/**
+      - tools/macos-audio-spike/**
+      - gradle/**
+      - build.gradle.kts
+      - settings.gradle.kts
+      - gradle.properties
+      - scripts/check-desktop.*
+      - .github/workflows/ci-desktop.yml
   workflow_dispatch:
 
 permissions:
@@ -40,6 +53,16 @@ jobs:
           architecture: aarch64
       - name: Check shared policies and package development app
         run: bash scripts/check-desktop.sh --package-macos
+      - name: Install pinned probe Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+      - name: Compile and exercise bounded native WAV probe
+        run: |
+          mkdir -p build/macos-audio-spike
+          "$(uv python find 3.14.7)" tools/macos-audio-spike/run_probe.py --run \
+            --output build/macos-audio-spike/native-wav.json
       - name: Retain foundation evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -49,4 +72,6 @@ jobs:
           path: |
             shared/domain/build/test-results/jvmTest/
             shared/application/build/test-results/jvmTest/
+            shared/ui/build/test-results/jvmTest/
             apps/desktop/build/compose/binaries/main/dmg/
+            build/macos-audio-spike/native-wav.json

@@ -139,6 +139,7 @@ if [[ $server_only -eq 0 ]]; then
 
   ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
     --max-workers=1 --dependency-verification=strict \
+    :shared:domain:jvmTest :shared:application:jvmTest :shared:ui:jvmTest \
     lintDebug testDebugUnitTest assembleDebug assembleTrustedLan assembleRelease
 fi
 
