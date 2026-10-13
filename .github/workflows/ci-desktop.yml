@@ -71,10 +71,13 @@ jobs:
           import json
           import pathlib
           import subprocess
+          import tempfile
           app = pathlib.Path("apps/desktop/build/compose/binaries/main/app/AutPlay.app")
           executable = app / "Contents/MacOS/AutPlay"
-          result = subprocess.run([str(executable.resolve()), "--smoke-test"],
-                                  capture_output=True, text=True, timeout=30, check=False)
+          with tempfile.TemporaryDirectory(prefix="autplay-startup-", dir=pathlib.Path("${{ runner.temp }}").resolve()) as storage:
+              result = subprocess.run([str(executable.resolve()), "--smoke-test",
+                                       "--test-data-root=" + str(pathlib.Path(storage).resolve())],
+                                      capture_output=True, text=True, timeout=30, check=False)
           ready = "AUTPLAY_DESKTOP_SMOKE_READY java=17.0.20 bundled=true" in result.stdout.splitlines()
           report = {"kind": "packaged_desktop_startup", "exit_code": result.returncode,
                     "window_and_frames": ready, "bundled_runtime": ready,
@@ -88,6 +91,14 @@ jobs:
               raise SystemExit("Packaged desktop startup failed")
           print(json.dumps(report))
           PY
+      - name: Exercise persistent library and packaged native JVM adapter
+        run: |
+          native_helper="${PWD}/apps/desktop/build/compose/binaries/main/app/AutPlay.app/Contents/app/resources/native/AutPlayAudioHelper"
+          test -x "$native_helper"
+          test "$(lipo -archs "$native_helper")" = arm64
+          bash ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
+            --max-workers=1 --dependency-verification=strict -Pautplay.desktopOnly=true \
+            "-Pautplay.nativeTestHelper=$native_helper" :apps:desktop:test
       - name: Compile and exercise bounded native WAV probe
         run: |
           mkdir -p build/macos-audio-spike
@@ -102,7 +113,10 @@ jobs:
           path: |
             shared/domain/build/test-results/jvmTest/
             shared/application/build/test-results/jvmTest/
+            shared/data/build/test-results/jvmTest/
             shared/ui/build/test-results/jvmTest/
+            shared/data/schemas/
+            apps/desktop/build/test-results/test/
             apps/desktop/build/compose/binaries/main/dmg/
             apps/desktop/build/compose/logs/
             build/macos-audio-spike/native-wav.json

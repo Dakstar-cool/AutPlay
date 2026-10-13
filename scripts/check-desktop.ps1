@@ -15,8 +15,8 @@ Push-Location $taskProjectRoot
 try {
     & .\gradlew.bat "-Dorg.gradle.java.home=$env:JAVA_HOME" --no-daemon --console=plain `
         --max-workers=1 --dependency-verification=strict "-Pautplay.desktopOnly=true" `
-        :shared:domain:jvmTest :shared:application:jvmTest :shared:ui:jvmTest `
-        :apps:desktop:classes :apps:desktop:jar
+        :shared:domain:jvmTest :shared:application:jvmTest :shared:data:jvmTest :shared:ui:jvmTest `
+        :apps:desktop:classes :apps:desktop:jar :apps:desktop:test
     if ($LASTEXITCODE -ne 0) { throw 'Shared/desktop compilation and policy gate failed' }
 } finally {
     Pop-Location

@@ -12,7 +12,7 @@ if [[ "$task_java_version" != *'version "17.0.20"'* ||
 fi
 cd "$task_project_root"
 task_gradle_tasks=(
-  :shared:domain:jvmTest :shared:application:jvmTest :shared:ui:jvmTest
+  :shared:domain:jvmTest :shared:application:jvmTest :shared:data:jvmTest :shared:ui:jvmTest
   :apps:desktop:classes :apps:desktop:jar
 )
 if [[ "${1:-}" == '--package-macos' ]]; then
@@ -24,6 +24,8 @@ if [[ "${1:-}" == '--package-macos' ]]; then
 elif [[ $# -ne 0 ]]; then
   echo 'Usage: check-desktop.sh [--package-macos]' >&2
   exit 1
+else
+  task_gradle_tasks+=(:apps:desktop:test)
 fi
 bash ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
   --max-workers=1 --dependency-verification=strict -Pautplay.desktopOnly=true \
