@@ -317,6 +317,18 @@ private func mediaFailure(_ error: Error?, fallback: String) -> String {
     return fallback
 }
 
+private func diagnosticDomain(_ domain: String) -> String {
+    switch domain {
+    case AVFoundationErrorDomain: return "AVFOUNDATION"
+    case NSOSStatusErrorDomain: return "OSSTATUS"
+    case NSCocoaErrorDomain: return "COCOA"
+    case NSPOSIXErrorDomain: return "POSIX"
+    case NSURLErrorDomain: return "URL"
+    case NSMachErrorDomain: return "MACH"
+    default: return "OTHER"
+    }
+}
+
 private final class LocalAudioOwner {
     private let pipe: FramedPipe
     private let player: AVPlayer = AVPlayer()
@@ -452,21 +464,21 @@ private final class LocalAudioOwner {
         emit(force: true)
         let path = command.managedPath!
         guard path.hasPrefix("/"), !path.contains("\0"), path.utf8.count <= 4096 else {
-            fail("NATIVE_INVALID_PATH"); return
+            fail("NATIVE_INVALID_PATH", stage: "FILE_VALIDATION"); return
         }
         let url = URL(fileURLWithPath: path, isDirectory: false).standardizedFileURL
         // Managed copies have a neutral .media suffix. AVFoundation must inspect
         // actual media; extension admission neither proves nor rejects a codec.
-        guard url.isFileURL else { fail("NATIVE_INVALID_PATH"); return }
+        guard url.isFileURL else { fail("NATIVE_INVALID_PATH", stage: "FILE_VALIDATION"); return }
         do {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
             guard values.isRegularFile == true, values.isSymbolicLink != true,
                   let size = values.fileSize, size > 0,
                   FileManager.default.isReadableFile(atPath: url.path),
                   url.resolvingSymlinksInPath().path == url.path else {
-                fail("NATIVE_FILE_UNAVAILABLE"); return
+                fail("NATIVE_FILE_UNAVAILABLE", stage: "FILE_ATTRIBUTES"); return
             }
-        } catch { fail("NATIVE_FILE_UNAVAILABLE"); return }
+        } catch { fail("NATIVE_FILE_UNAVAILABLE", stage: "FILE_ATTRIBUTES", error: error); return }
         let newAsset = AVURLAsset(url: url, options: [
             AVURLAssetPreferPreciseDurationAndTimingKey: true,
             AVURLAssetReferenceRestrictionsKey: NSNumber(value: AVAssetReferenceRestrictions.forbidAll.rawValue)
@@ -475,22 +487,34 @@ private final class LocalAudioOwner {
         let token = itemToken
         loadTask = Task { @MainActor [weak self] in
             guard !Task.isCancelled else { return }
+            var stage: String = "ASSET_PLAYABLE"
             do {
                 let playable = try await newAsset.load(.isPlayable)
+                stage = "ASSET_PROTECTED"
                 let protected = try await newAsset.load(.hasProtectedContent)
+                stage = "ASSET_DURATION"
                 let duration = try await newAsset.load(.duration)
+                stage = "ASSET_TRACKS"
                 let tracks = try await newAsset.loadTracks(withMediaType: .audio)
                 guard !Task.isCancelled, let self = self, self.matches(token) else { return }
                 let seconds = CMTimeGetSeconds(duration)
-                guard playable, !protected, !tracks.isEmpty, seconds.isFinite, seconds >= 0.001,
-                      seconds <= Double(maximumPositionMs) / 1000 else {
-                    self.fail("NATIVE_UNSUPPORTED_MEDIA"); return
+                guard playable else {
+                    self.fail("NATIVE_UNSUPPORTED_MEDIA", stage: "ASSET_PLAYABLE"); return
+                }
+                guard !protected else {
+                    self.fail("NATIVE_UNSUPPORTED_MEDIA", stage: "ASSET_PROTECTED"); return
+                }
+                guard !tracks.isEmpty else {
+                    self.fail("NATIVE_UNSUPPORTED_MEDIA", stage: "ASSET_TRACKS"); return
+                }
+                guard seconds.isFinite, seconds >= 0.001, seconds <= Double(maximumPositionMs) / 1000 else {
+                    self.fail("NATIVE_UNSUPPORTED_MEDIA", stage: "ASSET_DURATION"); return
                 }
                 self.durationMs = Int64(seconds * 1000)
                 self.installItem(newAsset, token: token)
             } catch {
                 guard !Task.isCancelled, let self = self, self.matches(token) else { return }
-                self.fail(mediaFailure(error, fallback: "NATIVE_OPEN_FAILED"))
+                self.fail(mediaFailure(error, fallback: "NATIVE_OPEN_FAILED"), stage: stage, error: error)
             }
         }
         trackTask(loadTask!)
@@ -504,7 +528,8 @@ private final class LocalAudioOwner {
                 guard let self = self, self.matches(token), self.item === newItem else { return }
                 if newItem.status == .failed {
                     self.fail(mediaFailure(newItem.error,
-                                           fallback: self.loading ? "NATIVE_OPEN_FAILED" : "NATIVE_PLAYBACK_FAILED"))
+                                           fallback: self.loading ? "NATIVE_OPEN_FAILED" : "NATIVE_PLAYBACK_FAILED"),
+                              stage: self.loading ? "ITEM_READY" : nil, error: newItem.error)
                 }
                 else if newItem.status == .readyToPlay && self.loading && !self.seekInFlight {
                     self.performSeek()
@@ -519,7 +544,7 @@ private final class LocalAudioOwner {
         notificationObservers.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime,
                                                         object: newItem, queue: .main) { [weak self] _ in
             guard let self = self, self.matches(token), self.item === newItem else { return }
-            self.fail(mediaFailure(newItem.error, fallback: "NATIVE_PLAYBACK_FAILED"))
+            self.fail(mediaFailure(newItem.error, fallback: "NATIVE_PLAYBACK_FAILED"), error: newItem.error)
         })
         player.replaceCurrentItem(with: newItem)
         loadTask = nil
@@ -584,7 +609,9 @@ private final class LocalAudioOwner {
                       self.item === current, self.seekInFlight else { return }
                 self.seekInFlight = false
                 self.seekDeadline = nil
-                guard finished, self.position() != nil else { self.fail("NATIVE_SEEK_FAILED"); return }
+                guard finished, self.position() != nil else {
+                    self.fail("NATIVE_SEEK_FAILED", error: current.error); return
+                }
                 self.loading = false
                 self.openDeadline = nil
                 self.status = "READY"
@@ -643,7 +670,7 @@ private final class LocalAudioOwner {
         if let deadline = playDeadline, now >= deadline { fail("NATIVE_PLAYBACK_FAILED"); return }
         guard item != nil, !loading, !seekInFlight, errorCode == nil else { return }
         if item?.status == .failed {
-            fail(mediaFailure(item?.error, fallback: "NATIVE_PLAYBACK_FAILED")); return
+            fail(mediaFailure(item?.error, fallback: "NATIVE_PLAYBACK_FAILED"), error: item?.error); return
         }
         if wantsPlaying {
             let actual = position() ?? lastProgressMs
@@ -689,13 +716,31 @@ private final class LocalAudioOwner {
         if force || encoded != lastEvent { lastEvent = encoded; pipe.send(event) }
     }
 
-    private func fail(_ code: String) {
+    private func fail(_ code: String, stage: String? = nil, error: Error? = nil) {
         guard !closing, errorCode == nil else { return }
         let finalPosition = position() ?? 0
+        emitDiagnostic(code, stage: stage ?? code, error: error)
         releaseItem()
         errorCode = code
         status = "ERROR"
         emit(force: true, fixedPosition: finalPosition)
+    }
+
+    private func emitDiagnostic(_ code: String, stage: String, error: Error?) {
+        guard let generation = generation else { return }
+        var diagnostic: [String: Any] = ["v": protocolVersion, "type": "diagnostic",
+                                         "generation": generation, "errorCode": code, "stage": stage]
+        var current: NSError? = error as NSError?
+        // Export only a fixed domain label and an Int32 code. userInfo is read
+        // solely to traverse NSUnderlyingErrorKey; no descriptions or paths leave.
+        for index in 0..<3 {
+            guard let native = current else { break }
+            guard let nativeCode = Int32(exactly: native.code) else { break }
+            diagnostic["cause\(index)Domain"] = diagnosticDomain(native.domain)
+            diagnostic["cause\(index)Code"] = Int(nativeCode)
+            current = native.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        pipe.send(diagnostic)
     }
 
     @discardableResult

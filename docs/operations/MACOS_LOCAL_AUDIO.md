@@ -69,6 +69,14 @@ command members, and the JVM validates exact event members and fixed codes.
 5. Events contain `v`, `type:"event"`, `generation`, `status`, `positionMs`,
    `isPlaying`; optional `durationMs`, `errorCode`, `title`, `artist` may be absent
    or null. There are no source/path/native-error-description event fields.
+6. Before a native ERROR the helper sends a flat `type:"diagnostic"` frame with
+   `v`, `generation`, `errorCode`, `stage` and up to three consecutive
+   `cause0Domain/cause0Code` through `cause2Domain/cause2Code` pairs. Codes are
+   signed Int32. Domains are fixed labels `AVFOUNDATION`, `OSSTATUS`, `COCOA`,
+   `POSIX`, `URL`, `MACH`, `OTHER`; arbitrary domain strings, descriptions and
+   userInfo never leave the helper. Diagnostic details are retained in
+   `MacAudioEngine.lastFailure` across stop/teardown so error invalidation cannot
+   erase the original cause. A newer normal open clears old diagnostics.
 
 | Status | Meaning |
 | --- | --- |
@@ -170,3 +178,51 @@ stdout/log evidence contains no managed path, and verify no helper survives exit
 Audible output needs hardware evidence; advancing time alone does not establish
 sound reaching speakers. The complete MP3/AAC/M4A/FLAC/Opus matrix, authenticated
 HTTP, Keychain, system media controls and release qualification remain separate.
+
+## First integrated native failure: diagnostic follow-up
+
+Mac CI [38451520017](https://github.com/Dakstar-cool/AutPlay/actions/runs/38451520017),
+source `66df540d5ebab231f3bfe9544a1317a6030fface`, compiled the original Swift
+helper and passed packaged helper/app startup. Its native JVM acceptance failed
+while opening a byte-identical managed `.media` copy of an eight-second 16 kHz
+mono PCM WAV. The supplied XML records only controller `AUDIO_ERROR`, after the
+controller invalidated the item and sent stop. It does not establish a native
+code, failing asset property, content-type issue or codec failure. These new
+diagnostics do not claim that the media-open defect is fixed.
+
+The bounded [direct helper probe](../../apps/desktop/src/native/probe_local_audio.py)
+now compares the same synthetic bytes under `.wav` and `.media` names, for both
+the failed 16 kHz mono layout and the earlier spike's 48 kHz stereo layout. It
+retains a failure's stage and numeric causes before stop, keeps the same
+`forbidAll` policy, and never exports temporary media paths. Each open has an
+18-second deadline; handshake/ack have five seconds and teardown kills and waits
+under a deadline. A failed case produces a nonzero exit rather than a pass.
+
+On the Mac CI runner, use the actual packaged executable and pinned Python:
+
+```bash
+spike_python="$(uv python find 3.14.7)"
+"$spike_python" apps/desktop/src/native/probe_local_audio.py \
+  --helper "$PACKAGED_HELPER" > local-audio-diagnostic.json
+```
+
+Retain that JSON even when the command fails. Add `engine.lastFailure.value` to
+the JVM acceptance failure message; it contains only sanitized typed facts.
+This probe diagnoses opening and actual native transport state; it is not the
+queue/seek/EOF acceptance gate and cannot replace that gate.
+
+The researched candidate fixes are conditional on those observations:
+
+| Candidate | Evidence needed before changing behavior |
+| --- | --- |
+| Give AVURLAsset a verified content-type hint | `.wav` succeeds and identical `.media` fails during format/property loading. Apple's [AVURLAssetOverrideMIMETypeKey](https://developer.apple.com/documentation/avfoundation/avurlassetoverridemimetypekey) changes parser selection regardless of extension; Apple's symbol metadata marks it macOS 14+, so the macOS 13 fallback still needs an explicit supported design. No override is introduced here. |
+| Correct a failing asset-property boundary | Diagnostic `ASSET_PLAYABLE/PROTECTED/DURATION/TRACKS` and the NSError chain identify the exact operation. [Apple asynchronous property loading](https://developer.apple.com/documentation/avfoundation/avpartialasyncproperty/isplayable-45h5v) distinguishes loaded facts; do not weaken existing playability/protection/audio-track/duration checks. |
+| Correct an actual file-capability validation mismatch | `FILE_VALIDATION/FILE_ATTRIBUTES` identifies failure before AVFoundation; compare the canonical regular/readable file against [Foundation URL resource values](https://developer.apple.com/documentation/foundation/urlresourcevalues). Preserve the managed-copy and symlink boundaries. |
+| Correct item readiness/decoder handling | `ITEM_READY` or native playback failure, plus comparison of both PCM layouts, identifies the player/decoder boundary. Apple's [fileFormatNotRecognized](https://developer.apple.com/documentation/avfoundation/averror-swift.struct/code/fileformatnotrecognized) and numeric cause chain distinguish format rejection from generic open failure. No transcoding or fixture substitution is selected here. |
+
+[Apple forbidAll](https://developer.apple.com/documentation/avfoundation/avassetreferencerestrictions/forbidall)
+allows references only within the container. A self-contained WAV does not by
+itself justify removing this protection; that setting remains fixed in all
+probe comparisons. Diagnostics export only the domain and numeric cause concept
+described by [NSError](https://developer.apple.com/documentation/foundation/nserror),
+with bounded traversal of the underlying error chain.

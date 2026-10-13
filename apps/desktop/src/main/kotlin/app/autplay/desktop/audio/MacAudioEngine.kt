@@ -29,6 +29,16 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+/** Sanitized failure facts retained after stop; no native descriptions, paths or arbitrary domains. */
+public data class MacAudioFailure(
+    val generation: Long,
+    val errorCode: String,
+    val stage: String,
+    val causes: List<MacAudioCause> = emptyList(),
+)
+
+public data class MacAudioCause(val domain: String, val code: Int)
+
 /**
  * Local prototype execution adapter. The caller supplies the bundled executable and a verified
  * managed-file capability from DesktopLibraryStore; neither media paths nor native errors are logged.
@@ -42,6 +52,8 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
     private val mutableState: MutableStateFlow<DesktopAudioEvent> =
         MutableStateFlow(DesktopAudioEvent(generation = 0, status = "IDLE"))
     override val state: StateFlow<DesktopAudioEvent> = mutableState.asStateFlow()
+    private val mutableFailure: MutableStateFlow<MacAudioFailure?> = MutableStateFlow(null)
+    public val lastFailure: StateFlow<MacAudioFailure?> = mutableFailure.asStateFlow()
     private val nativeHello: CompletableFuture<Unit> = CompletableFuture()
     private val handshake: CompletableFuture<Unit> = CompletableFuture()
     private val completion: CompletableFuture<Unit> = CompletableFuture()
@@ -78,9 +90,11 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
             this.generation = generation
             terminalError?.let { code ->
                 // Resolve the selected generation's pending state without restarting a failed owner.
+                mutableFailure.value = mutableFailure.value?.copy(generation = generation)
                 mutableState.value = DesktopAudioEvent(generation, "UNAVAILABLE", errorCode = code)
                 return
             }
+            mutableFailure.value = null
             lastEventAt = System.nanoTime()
             // Gate incoming old callbacks immediately, before the owner writes the replacement command.
             mutableState.value = DesktopAudioEvent(generation, "BUFFERING")
@@ -216,6 +230,7 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 process = null
                 if (!ended || inputThread?.isAlive == true) {
                     terminalError = "AUDIO_TEARDOWN_TIMEOUT"
+                    mutableFailure.value = MacAudioFailure(generation.coerceAtLeast(0), "AUDIO_TEARDOWN_TIMEOUT", "AUDIO_TEARDOWN_TIMEOUT")
                     mutableState.value = unavailable("AUDIO_TEARDOWN_TIMEOUT")
                 } else if (closing && terminalError == null) {
                     mutableState.value = mutableState.value.copy(status = "CLOSED", isPlaying = false)
@@ -318,7 +333,18 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 if (!closing && terminalError == null && event.generation == generation) {
                     // StateFlow consumers may conflate frames; the native owner emits EOF exactly once.
                     lastEventAt = System.nanoTime()
+                    if (event.status == "ERROR" && event.errorCode != null &&
+                        (mutableFailure.value?.generation != generation || mutableFailure.value?.errorCode != event.errorCode)) {
+                        mutableFailure.value = MacAudioFailure(generation, event.errorCode, event.errorCode)
+                    }
                     mutableState.value = event
+                }
+            }
+            "diagnostic" -> {
+                if (!readyReceived) throw ProtocolFailure()
+                val failure = frame.diagnostic()
+                if (!closing && terminalError == null && failure.generation == generation) {
+                    mutableFailure.value = failure
                 }
             }
             else -> throw ProtocolFailure()
@@ -329,6 +355,7 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         val child = synchronized(lock) {
             if (terminalError != null || (closing && !duringClose)) return
             terminalError = code
+            mutableFailure.value = MacAudioFailure(generation.coerceAtLeast(0), code, code)
             mutableState.value = unavailable(code)
             commands.clear()
             nativeHello.completeExceptionally(ProtocolFailure())
@@ -388,6 +415,8 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         val OWNER_LEASE: AtomicBoolean = AtomicBoolean(false)
         val STATUSES: Set<String> = setOf("IDLE", "BUFFERING", "READY", "ENDED", "ERROR", "CLOSED")
         val NATIVE_ERRORS: Set<String> = setOf("NATIVE_INVALID_PATH", "NATIVE_FILE_UNAVAILABLE", "NATIVE_UNSUPPORTED_MEDIA", "NATIVE_OPEN_FAILED", "NATIVE_OPEN_TIMEOUT", "NATIVE_PLAYBACK_FAILED", "NATIVE_SEEK_FAILED", "NATIVE_SEEK_TIMEOUT")
+        val FAILURE_STAGES: Set<String> = NATIVE_ERRORS + setOf("FILE_VALIDATION", "FILE_ATTRIBUTES", "ASSET_PLAYABLE", "ASSET_PROTECTED", "ASSET_DURATION", "ASSET_TRACKS", "ITEM_READY")
+        val FAILURE_DOMAINS: Set<String> = setOf("AVFOUNDATION", "OSSTATUS", "COCOA", "POSIX", "URL", "MACH", "OTHER")
 
         fun validPath(path: String): Boolean = path.length in 1..4096 && path.startsWith('/') && '\u0000' !in path &&
             path.toByteArray(StandardCharsets.UTF_8).size in 1..4096
@@ -437,6 +466,30 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
             val artist = optionalString("artist")
             if (!validMetadata(title) || !validMetadata(artist)) throw ProtocolFailure()
             return DesktopAudioEvent(long("generation"), status, position, duration, isPlaying, error, title, artist)
+        }
+
+        fun JsonObject.diagnostic(): MacAudioFailure {
+            only("v", "type", "generation", "errorCode", "stage", "cause0Domain", "cause0Code", "cause1Domain", "cause1Code", "cause2Domain", "cause2Code")
+            val code = string("errorCode")
+            val stage = string("stage")
+            if (code !in NATIVE_ERRORS || stage !in FAILURE_STAGES) throw ProtocolFailure()
+            val causes = ArrayList<MacAudioCause>(3)
+            var missing = false
+            for (index in 0..2) {
+                val domainKey = "cause${index}Domain"
+                val codeKey = "cause${index}Code"
+                if (this[domainKey] == null && this[codeKey] == null) {
+                    missing = true
+                    continue
+                }
+                if (missing || this[domainKey] == null || this[codeKey] == null) throw ProtocolFailure()
+                val domain = string(domainKey)
+                val number = this[codeKey] as? JsonPrimitive ?: throw ProtocolFailure()
+                if (domain !in FAILURE_DOMAINS || number.isString || number.content == "-0" ||
+                    !number.content.matches(Regex("-?(0|[1-9][0-9]{0,9})"))) throw ProtocolFailure()
+                causes.add(MacAudioCause(domain, number.content.toIntOrNull() ?: throw ProtocolFailure()))
+            }
+            return MacAudioFailure(long("generation"), code, stage, causes.toList())
         }
 
         fun validMetadata(value: String?): Boolean = value == null ||
