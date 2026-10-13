@@ -7,6 +7,7 @@ import app.autplay.application.desktop.DesktopImportedTrack
 import app.autplay.application.desktop.DesktopLibrarySnapshot
 import app.autplay.application.desktop.DesktopLibraryStore
 import app.autplay.application.desktop.DesktopListeningEvent
+import app.autplay.application.desktop.DesktopLocalLimits
 import app.autplay.application.desktop.DesktopPlaylist
 import app.autplay.application.desktop.DesktopPlaylistEntry
 import app.autplay.application.desktop.DesktopQueue
@@ -152,7 +153,7 @@ private class PersistentDesktopLibraryStore(
         mutate {
             val startedAt = copy.sessionStartedAtMs
             validId(copy.id)
-            requireCode(copy.entries.size <= MAX_QUEUE_ENTRIES, "desktop_queue_limit")
+            requireCode(copy.entries.size <= DesktopLocalLimits.MAX_QUEUE_ENTRIES, "desktop_queue_limit")
             copy.entries.forEach { validId(it.id); validId(it.trackId) }
             val ids = copy.entries.map { it.id }.toSet()
             requireCode(ids.size == copy.entries.size && (copy.currentEntryId == null || copy.currentEntryId in ids) &&
@@ -256,7 +257,6 @@ private class PersistentDesktopLibraryStore(
 }
 
 private const val MAX_TEXT_LENGTH: Int = 4096
-private const val MAX_QUEUE_ENTRIES: Int = 1_000
 private const val MAX_TRACK_BYTES: Long = 2L * 1024 * 1024 * 1024
 
 private fun rejectSymlinkAncestors(path: Path): Unit {

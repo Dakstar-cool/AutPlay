@@ -4,6 +4,7 @@ import app.autplay.application.desktop.DesktopImportPort
 import app.autplay.application.desktop.DesktopImportResult
 import app.autplay.application.desktop.DesktopImportedTrack
 import app.autplay.application.desktop.DesktopLibraryStore
+import app.autplay.application.desktop.DesktopLocalLimits
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -48,7 +49,7 @@ class DesktopFileImporter(
 
     override suspend fun importSelected(paths: List<String>): DesktopImportResult = withContext(Dispatchers.IO) {
         val report = Report()
-        if (paths.size > MAX_SELECTIONS) {
+        if (paths.size > DesktopLocalLimits.MAX_SELECTION_ROOTS) {
             return@withContext DesktopImportResult(0, 0, 1, "import_selection_limit")
         }
         if (paths.isEmpty()) return@withContext report.result()
@@ -386,7 +387,6 @@ class DesktopFileImporter(
 
     private companion object {
         val publicationMutex: Mutex = Mutex()
-        const val MAX_SELECTIONS: Int = 256
         const val MAX_SELECTION_CHARS: Int = 4_096
         const val MAX_FILES: Int = 2_048
         const val MAX_ENTRIES: Int = 10_000
