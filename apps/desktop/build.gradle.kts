@@ -3,6 +3,7 @@ import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
+import java.time.Duration
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -50,14 +51,27 @@ val compileMacAudioHelper = tasks.register<Exec>("compileMacAudioHelper") {
     val binary = audioHelper.get().asFile
     inputs.file(source)
     inputs.property("swiftMode", "5")
-    inputs.property("deploymentTarget", "arm64-apple-macos13.0")
+    inputs.property("deploymentTarget", "arm64-apple-macosx13.0")
     outputs.file(binary)
+    timeout.set(Duration.ofMinutes(2))
     doFirst { binary.parentFile.mkdirs() }
     commandLine(
-        "xcrun", "swiftc", "-swift-version", "5", "-O", "-target", "arm64-apple-macos13.0",
+        "xcrun", "swiftc", "-swift-version", "5", "-O", "-target", "arm64-apple-macosx13.0",
         "-framework", "Foundation", "-framework", "AVFoundation",
-        "-framework", "UniformTypeIdentifiers", source.asFile.absolutePath, "-o", binary.absolutePath,
+        "-framework", "CoreMedia", source.asFile.absolutePath, "-o", binary.absolutePath,
     )
+}
+
+tasks.withType<Test>().configureEach {
+    maxParallelForks = 1
+    if (hostIsMacArm64) {
+        dependsOn(compileMacAudioHelper)
+        systemProperty(
+            "autplay.nativeTestHelper",
+            providers.gradleProperty("autplay.nativeTestHelper").orElse(audioHelper.map { it.asFile.absolutePath }).get(),
+        )
+        systemProperty("autplay.requireNativeTest", "true")
+    }
 }
 
 tasks.withType<Sync>().configureEach {

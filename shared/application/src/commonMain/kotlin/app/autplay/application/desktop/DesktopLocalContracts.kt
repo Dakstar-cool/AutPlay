@@ -2,6 +2,11 @@ package app.autplay.application.desktop
 
 import kotlinx.coroutines.flow.StateFlow
 
+object DesktopLocalLimits {
+    const val MAX_QUEUE_ENTRIES: Int = 1_000
+    const val MAX_SELECTION_ROOTS: Int = 256
+}
+
 /** Local collection identity; file capabilities never appear in the UI projection. */
 data class DesktopTrack(
     val id: String,
