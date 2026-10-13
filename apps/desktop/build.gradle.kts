@@ -1,5 +1,8 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -37,10 +40,50 @@ tasks.register<Sync>("prepareDesktopRuntime") {
     into(layout.buildDirectory.dir("resolved-runtime"))
 }
 
+val hostIsMacArm64 = System.getProperty("os.name").startsWith("Mac") &&
+    System.getProperty("os.arch") in setOf("aarch64", "arm64")
+val nativeResourcesRoot = layout.buildDirectory.dir("native-resources")
+val audioHelper = nativeResourcesRoot.map { it.file("macos-arm64/native/AutPlayAudioHelper") }
+val compileMacAudioHelper = tasks.register<Exec>("compileMacAudioHelper") {
+    onlyIf { hostIsMacArm64 }
+    val source = layout.projectDirectory.file("src/native/AutPlayAudioHelper.swift")
+    val binary = audioHelper.get().asFile
+    inputs.file(source)
+    inputs.property("swiftMode", "5")
+    inputs.property("deploymentTarget", "arm64-apple-macos13.0")
+    outputs.file(binary)
+    doFirst { binary.parentFile.mkdirs() }
+    commandLine(
+        "xcrun", "swiftc", "-swift-version", "5", "-O", "-target", "arm64-apple-macos13.0",
+        "-framework", "Foundation", "-framework", "AVFoundation",
+        "-framework", "UniformTypeIdentifiers", source.asFile.absolutePath, "-o", binary.absolutePath,
+    )
+}
+
+tasks.withType<Sync>().configureEach {
+    if (name == "prepareAppResources") dependsOn(compileMacAudioHelper)
+}
+
+// Compose's internal resource copy drops Unix modes. Restore the helper in the completed
+// development app image before DMG creation; final release signing follows all bundle mutations.
+tasks.withType<AbstractJPackageTask>().configureEach {
+    if (hostIsMacArm64 && targetFormat == TargetFormat.AppImage) {
+        doLast {
+            val helper = destinationDir.get().asFile.resolve(
+                "${packageName.get()}.app/Contents/app/resources/native/AutPlayAudioHelper",
+            )
+            check(helper.isFile) { "Native audio helper is missing" }
+            Files.setPosixFilePermissions(helper.toPath(), PosixFilePermissions.fromString("rwxr-xr-x"))
+            check(helper.canExecute()) { "Native audio helper is not executable" }
+        }
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "app.autplay.desktop.MainKt"
         nativeDistributions {
+            appResourcesRootDir.set(nativeResourcesRoot)
             targetFormats(TargetFormat.Dmg)
             packageName = "AutPlay"
             // JDK 17's macOS bundler requires a positive first version component.
