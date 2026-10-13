@@ -55,7 +55,7 @@ class MacNativePlaybackAcceptanceTest {
                 controller.playTracks(listOf(trackId, trackId))
                 suspend fun awaitNative(description: String, predicate: () -> Boolean): Unit = eventually(description) {
                     assertTrue("Native helper failed while $description", engine.state.value.status !in setOf("ERROR", "UNAVAILABLE", "CLOSED"))
-                    assertNull("Controller failed while $description", controller.error.value)
+                    assertNull("Controller failed while $description; native=${engine.lastFailure.value}", controller.error.value)
                     predicate()
                 }
                 awaitNative("opening copied WAV") {

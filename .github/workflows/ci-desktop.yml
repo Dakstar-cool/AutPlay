@@ -99,6 +99,15 @@ jobs:
           bash ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
             --max-workers=1 --dependency-verification=strict -Pautplay.desktopOnly=true \
             "-Pautplay.nativeTestHelper=$native_helper" :apps:desktop:test
+      - name: Capture native file-open diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          native_helper="${PWD}/apps/desktop/build/compose/binaries/main/app/AutPlay.app/Contents/app/resources/native/AutPlayAudioHelper"
+          if test -x "$native_helper" && command -v uv >/dev/null 2>&1; then
+            "$(uv python find 3.14.7)" apps/desktop/src/native/probe_local_audio.py \
+              --helper "$native_helper" > build/macos-audio-spike/local-audio-diagnostic.json
+          fi
       - name: Compile and exercise bounded native WAV probe
         run: |
           mkdir -p build/macos-audio-spike
@@ -121,3 +130,4 @@ jobs:
             apps/desktop/build/compose/logs/
             build/macos-audio-spike/native-wav.json
             build/macos-audio-spike/desktop-startup.json
+            build/macos-audio-spike/local-audio-diagnostic.json
