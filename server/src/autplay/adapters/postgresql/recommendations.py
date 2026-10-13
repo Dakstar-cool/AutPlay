@@ -621,7 +621,22 @@ def _canonical_bytes(value: dict[str, JsonValue]) -> bytes:
 
 
 _SNAPSHOT_SQL = """
-WITH history AS (
+WITH portable_preferences AS (
+    SELECT DISTINCT ON (ref.recording_id)
+           ref.recording_id, signal.updated_at,
+           CASE WHEN signal.interaction IN ('LIKE','COMPLETE') AND signal.weight>0 THEN 'LIKED'
+                WHEN signal.interaction IN ('DISLIKE','SKIP') AND signal.weight<0 THEN 'DISLIKED'
+                ELSE 'NEUTRAL' END AS preference,
+           signal.interaction='EXCLUDE' AS excluded
+    FROM library.portable_taste_signal signal
+    JOIN library.user_track_ref ref ON ref.user_track_ref_id=signal.user_track_ref_id
+                                  AND ref.user_id=signal.user_id
+    WHERE signal.user_id=:user_id AND ref.recording_id IS NOT NULL
+      AND ref.resolution_status='RESOLVED' AND ref.deleted_at IS NULL
+      AND signal.occurred_at_ms<=floor(extract(epoch FROM now())*1000)::bigint
+      AND signal.updated_at<=now()
+    ORDER BY ref.recording_id,signal.occurred_at_ms DESC,signal.record_id ASC
+), history AS (
     SELECT recording_id,
            count(*) FILTER (WHERE NOT excluded_from_taste) AS play_count,
            count(*) FILTER (
@@ -654,8 +669,12 @@ WITH history AS (
            entry.availability_status AS availability,
            true AS authorized,
            recording.identity_status,
-           coalesce(preference.preference, 'NEUTRAL') AS preference,
-           coalesce(preference.excluded_from_taste, false) AS excluded,
+           CASE WHEN portable.updated_at>coalesce(preference.updated_at,'epoch'::timestamptz)
+                THEN portable.preference
+                ELSE coalesce(preference.preference,'NEUTRAL') END AS preference,
+           CASE WHEN portable.updated_at>coalesce(preference.updated_at,'epoch'::timestamptz)
+                THEN portable.excluded
+                ELSE coalesce(preference.excluded_from_taste,false) END AS excluded,
            coalesce(history.play_count, 0)::bigint AS play_count,
            coalesce(history.organic_play_count, 0)::bigint AS organic_play_count,
            coalesce(history.recommended_play_count, 0)::bigint AS recommended_play_count,
@@ -672,6 +691,7 @@ WITH history AS (
     JOIN catalog.recording recording ON recording.recording_id = ref.recording_id
     LEFT JOIN library.user_track_preference preference
         ON preference.user_track_ref_id = ref.user_track_ref_id
+    LEFT JOIN portable_preferences portable ON portable.recording_id=recording.recording_id
     LEFT JOIN history ON history.recording_id = recording.recording_id
     LEFT JOIN release_metadata release ON release.recording_id = recording.recording_id
     WHERE entry.user_id = :user_id
@@ -690,8 +710,13 @@ WITH history AS (
            'VAULT'::text AS availability,
            true AS authorized,
            recording.identity_status,
-           coalesce(owned_ref.preference, 'NEUTRAL') AS preference,
-           coalesce(owned_ref.excluded, false) AS excluded,
+           CASE WHEN portable.updated_at>
+                     coalesce(owned_ref.preference_updated_at,'epoch'::timestamptz)
+                THEN portable.preference
+                ELSE coalesce(owned_ref.preference,'NEUTRAL') END AS preference,
+           CASE WHEN portable.updated_at>
+                     coalesce(owned_ref.preference_updated_at,'epoch'::timestamptz)
+                THEN portable.excluded ELSE coalesce(owned_ref.excluded,false) END AS excluded,
            coalesce(history.play_count, 0)::bigint AS play_count,
            coalesce(history.organic_play_count, 0)::bigint AS organic_play_count,
            coalesce(history.recommended_play_count, 0)::bigint AS recommended_play_count,
@@ -711,7 +736,8 @@ WITH history AS (
     LEFT JOIN release_metadata release ON release.recording_id = recording.recording_id
     LEFT JOIN LATERAL (
         SELECT ref.user_track_ref_id, preference.preference,
-               preference.excluded_from_taste AS excluded
+               preference.excluded_from_taste AS excluded,
+               preference.updated_at AS preference_updated_at
         FROM library.user_track_ref ref
         LEFT JOIN library.user_track_preference preference
             ON preference.user_track_ref_id = ref.user_track_ref_id
@@ -721,6 +747,7 @@ WITH history AS (
         ORDER BY ref.updated_at DESC, ref.user_track_ref_id
         LIMIT 1
     ) owned_ref ON true
+    LEFT JOIN portable_preferences portable ON portable.recording_id=recording.recording_id
     WHERE acquisition.authorized_by_user_id = :user_id
       AND variant.validation_status = 'VALID'
       AND variant.deleted_at IS NULL

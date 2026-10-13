@@ -1,0 +1,36 @@
+<resources>
+    <string name="account_statistics_description">История прослушиваний аккаунта со всех подключённых устройств. Обновляется при открытии профиля или по кнопке «Обновить».</string>
+    <string name="portable_account_title">Аккаунт</string>
+    <string name="portable_account_summary">ID, история и предпочтения принадлежат аккаунту. Его можно создать без сервера и подключать к разным серверам.</string>
+    <string name="portable_account_login">Логин / ID</string>
+    <string name="portable_account_password">Пароль</string>
+    <string name="portable_account_password_repeat">Повторите пароль</string>
+    <string name="portable_account_password_rules">Используйте пароль или фразу из 15–128 символов.</string>
+    <string name="portable_account_existing">У меня уже есть аккаунт</string>
+    <string name="portable_account_create">Создать аккаунт</string>
+    <string name="portable_account_connect">Подключить этот аккаунт</string>
+    <string name="portable_account_sign_in">Войти в существующий аккаунт</string>
+    <string name="portable_account_copy_to_server">Сохранить аккаунт на сервере</string>
+    <string name="portable_account_save_recovery">Сохранить файл восстановления</string>
+    <string name="portable_account_recovery_unsaved">Сохраните файл или код восстановления отдельно от телефона. Файл также сохраняет доступ к серверам, на которых ещё действует прежний ключ аккаунта.</string>
+    <string name="portable_account_show_code">Показать код восстановления</string>
+    <string name="portable_account_code_notice">Сохраните все 43 символа в надёжном месте. Код даёт доступ к аккаунту: не передавайте его другим. Для него нужен документ аккаунта на этом телефоне или доверенном сервере. После сброса сохраните и файл: он содержит прежние ключи для других серверов.</string>
+    <string name="portable_account_code_saved">Я сохранил код</string>
+    <string name="portable_account_recover">Забыл пароль / восстановить аккаунт</string>
+    <string name="portable_account_cancel_recovery">Отменить восстановление</string>
+    <string name="portable_account_import_file">Выбрать файл восстановления</string>
+    <string name="portable_account_file_ready">Файл проверен — выбрать другой</string>
+    <string name="portable_account_recovery_code">Код восстановления</string>
+    <string name="portable_account_new_password">Новый пароль (15–128 символов)</string>
+    <string name="portable_account_reset">Сбросить пароль и отозвать старый доступ</string>
+    <string name="portable_account_recovery_scope">Выберите файл восстановления или введите ID и код. Восстановление сохраняет UUID и создаёт новый ключ. Сброс через сервер завершает все сеансы на выбранном сервере. Подключайтесь к другим серверам с текущим паролем, чтобы обновить их прежние ключи. Сохраняйте новый файл после каждого сброса.</string>
+    <string name="portable_account_recovery_local">Будет восстановлен локальный доступ. Серверные копии не отзываются без подключения. При входе с текущим паролем приложение сможет обновить сервер, где ещё действует сохранённый прежний ключ.</string>
+    <string name="portable_account_restore_local">Восстановить локальный аккаунт</string>
+    <string name="portable_account_history_full">В истории восстановления уже восемь прежних ключей. Сброс остановлен, ключи не удалены. Сохраните текущий файл восстановления.</string>
+    <string name="portable_account_transition_unavailable">Сервер использует ключ, которого нет в этой истории восстановления. Нужен файл с этим ключом; уже отозванный ключ не может вернуть доступ к серверу.</string>
+    <string name="portable_account_recovery_trust">Откройте подключение к серверу и подтвердите доверенный сервер перед восстановлением.</string>
+    <string name="portable_account_expired">Предыдущее подключение истекло и закрыто. Выберите доверенный сервер и войдите заново.</string>
+    <string name="portable_account_pending">Нужно проверить результат подключения. Повторная попытка восстановит тот же сеанс.</string>
+    <string name="portable_account_auth_failed">Проверьте ID и пароль. Если пароль ещё не задан, сначала настройте его в разделе «Аккаунт».</string>
+    <string name="portable_account_operation_failed">Не удалось завершить операцию. Проверьте ID, пароль и подключение к серверу. Нельзя привязать аккаунт с другой идентичностью.</string>
+</resources>

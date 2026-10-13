@@ -46,6 +46,7 @@ from autplay.adapters.postgresql.resource_limits import (
     terminate_resource_authority,
     terminate_retired_session,
 )
+from autplay.application.portable_account import require_portable_reauthentication
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.profile_pairing import (
     ProfilePairingError,
@@ -93,6 +94,7 @@ class ProfilePairingService:
         account_recovery_enabled: bool = False,
         account_deletion_enabled: bool = False,
         shared_training_consent_enabled: bool = False,
+        portable_accounts_enabled: bool = False,
     ) -> None:
         self._sessions, self._key, self._label, self._api, self._stream = (
             sessions,
@@ -106,6 +108,7 @@ class ProfilePairingService:
         self._account_recovery_enabled = account_recovery_enabled
         self._account_deletion_enabled = account_deletion_enabled
         self._shared_training_consent_enabled = shared_training_consent_enabled
+        self._portable_accounts_enabled = portable_accounts_enabled
 
     def discovery(self) -> dict[str, object]:
         now = _now()
@@ -158,7 +161,8 @@ class ProfilePairingService:
                 + (["self_device_pairing"] if self._self_device_pairing_enabled else [])
                 + (["account_recovery"] if self._account_recovery_enabled else [])
                 + (["account_deletion"] if self._account_deletion_enabled else [])
-                + (["shared_training_consent"] if self._shared_training_consent_enabled else []),
+                + (["shared_training_consent"] if self._shared_training_consent_enabled else [])
+                + (["portable_accounts"] if self._portable_accounts_enabled else []),
                 "limits": {
                     "device_list_max": 100,
                     "session_list_max": 200,
@@ -412,6 +416,7 @@ class ProfilePairingService:
         operation_id: UUID,
         reason_code: str | None = None,
         access_token_id: UUID | None = None,
+        portable_authorization: dict[str, object] | None = None,
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
@@ -442,6 +447,9 @@ class ProfilePairingService:
             )
             if existing is not None:
                 return existing
+            require_portable_reauthentication(
+                s, principal, "LOGOUT_CURRENT", operation_id, portable_authorization
+            )
             terminal_at = row.revoked_at or now
             if not already_terminal:
                 row.revoked_at = now
@@ -477,6 +485,7 @@ class ProfilePairingService:
         operation_id: UUID,
         reason_code: str | None = None,
         access_token_id: UUID | None = None,
+        portable_authorization: dict[str, object] | None = None,
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
@@ -512,6 +521,9 @@ class ProfilePairingService:
             if existing is not None:
                 return existing
             self._require_application_actor(s, principal)
+            require_portable_reauthentication(
+                s, principal, "LOGOUT_ALL", operation_id, portable_authorization
+            )
             for row in rows:
                 row.revoked_at = now
             terminate_resource_authority(s, principal.user_id, now, device_sessions_only=True)
@@ -546,6 +558,7 @@ class ProfilePairingService:
         operation_id: UUID,
         reason_code: str | None = None,
         access_token_id: UUID | None = None,
+        portable_authorization: dict[str, object] | None = None,
     ) -> dict[str, object]:
         now = _now()
         with self._sessions.begin() as s:
@@ -581,6 +594,14 @@ class ProfilePairingService:
             if existing is not None:
                 return existing
             self._require_application_actor(s, principal)
+            require_portable_reauthentication(
+                s,
+                principal,
+                "REVOKE_DEVICE",
+                operation_id,
+                portable_authorization,
+                target_device_id=device_id,
+            )
             terminal_at = device.revoked_at or now
             if not already_terminal:
                 device.revoked_at = now

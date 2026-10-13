@@ -476,17 +476,11 @@
     <string name="profile_confirm_disconnect_body">Это удалит только локальное подключение и не означает, что удалённый сеанс завершён.</string>
 
     <string name="settings_language">Язык приложения</string>
-    <string name="settings_language_system">Системный язык</string>
     <string name="settings_language_russian">Русский</string>
-    <string name="settings_language_english">English</string>
+    <string name="settings_language_english">Английский</string>
     <string name="settings_appearance">Оформление</string>
-    <string name="settings_theme_system">Как на устройстве</string>
     <string name="settings_theme_light">Светлая тема</string>
     <string name="settings_theme_dark">Тёмная тема</string>
-    <string name="settings_accent_coral">Коралловый акцент</string>
-    <string name="settings_accent_violet">Фиолетовый акцент</string>
-    <string name="settings_accent_green">Зелёный акцент</string>
-    <string name="settings_accent_blue">Синий акцент</string>
     <string name="settings_library_access">Папка с музыкой</string>
     <string name="settings_folder_not_selected">Папка с музыкой не выбрана</string>
     <string name="settings_folder_selected">Папка с музыкой выбрана</string>
@@ -494,15 +488,10 @@
     <string name="settings_scan_folder">Просканировать папку снова</string>
     <string name="settings_folder_privacy">Папка используется для обновления медиатеки. Поиск музыки на телефоне запрашивает отдельный доступ к аудиофайлам. Разрешения можно отозвать в настройках Android.</string>
     <string name="settings_network">Личный сервер и совместное прослушивание</string>
-    <string name="settings_personal_server_body">Подключайте и управляйте личным сервером в едином доверенном сценарии подключения.</string>
     <string name="settings_open_personal_server">Открыть личный сервер</string>
     <string name="settings_metered_downloads">Скачивать треки через мобильный интернет</string>
-    <string name="settings_download_network_summary">Сохранение треков для офлайн-прослушивания</string>
     <string name="settings_playback">Воспроизведение</string>
-    <string name="settings_playback_summary">Переключение между треками</string>
     <string name="settings_smooth_track_transitions">Плавное переключение треков</string>
-    <string name="settings_smooth_track_transitions_body">Для склейки пропускаются последние 3 секунды текущего трека и первые 3 секунды следующего. Громкость сохраняется. Короткие треки звучат целиком; последний трек доигрывает до конца.</string>
-    <string name="settings_download_network_body">Только для сохранения треков на устройстве. Библиотека и метаданные синхронизируются при любом доступном подключении.</string>
     <string name="settings_wave_prefetch_off">Не подготавливать треки заранее</string>
     <string name="settings_wave_prefetch_next">Подготовить следующий трек</string>
     <string name="settings_wave_prefetch_three">Подготовить три следующих трека</string>

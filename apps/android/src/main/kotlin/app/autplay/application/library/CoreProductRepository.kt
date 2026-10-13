@@ -1,6 +1,7 @@
 package app.autplay.application.library
 
 import app.autplay.data.local.AutPlayDatabase
+import app.autplay.application.playback.OrdinaryQueueReplacementGuard
 import app.autplay.data.local.entity.RecordingProjectionEntity
 import app.autplay.data.local.entity.ReleaseTrackProjectionEntity
 import app.autplay.domain.ServerId
@@ -95,6 +96,20 @@ class CoreProductRepository(
     fun historyCount(profileId: String?, limit: Int = 2_000): Flow<Int> {
         require(limit in 1..5_000)
         return database.historyDao().recentForProfile(effectiveProfile(profileId), limit).map { it.size }
+    }
+
+    /** A new personal queue cannot take authority from a group or an unknown queue type. */
+    suspend fun ordinaryPlaybackReplacementGuard(profileId: String?): OrdinaryQueueReplacementGuard? {
+        val snapshot = database.queueDao().activeSnapshotOnce()
+        if (snapshot != null && (snapshot.serverProfileId != profileId ||
+            snapshot.queueType !in setOf("USER", "LIBRARY", "SEARCH", "PLAYLIST"))) return null
+        return OrdinaryQueueReplacementGuard(snapshot?.queueSnapshotId, snapshot?.queueType, profileId)
+    }
+
+    /** Sample the entire owner's library, independently of the bounded, sorted UI projection. */
+    suspend fun randomPlaybackCandidates(profileId: String?, vaultAvailable: Boolean, limit: Int = 200): List<String> {
+        require(limit in 1..200)
+        return database.libraryDao().randomPlaybackCandidates(effectiveProfile(profileId), vaultAvailable, limit)
     }
 
     fun activeQueue(profileId: String?): Flow<CoreResumeQueueSummary?> =

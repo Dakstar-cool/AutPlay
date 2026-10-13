@@ -24,7 +24,7 @@ class LanguageRegressionTest {
     }
     @After fun finish(): Unit = runBlocking {
         activity?.close()
-        InstrumentationRegistry.getInstrumentation().runOnMainSync { synchronizeFrameworkAppLanguage(context, AppLanguage.System) }
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { synchronizeFrameworkAppLanguage(context, AppLanguage.English) }
         applicationNonSecretSettingsStore(context).update(NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "language_fixture"))
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
@@ -32,14 +32,14 @@ class LanguageRegressionTest {
     }
     @Test fun languageSwitchRecreationAndColdActivityLaunchRetainAllOwners() {
         activity = ActivityScenario.launch(MainActivity::class.java)
-        for (language in listOf(AppLanguage.English, AppLanguage.Russian, AppLanguage.System)) {
+        for (language in listOf(AppLanguage.English, AppLanguage.Russian, AppLanguage.English)) {
             runBlocking {
                 applicationNonSecretSettingsStore(context).update(NonSecretSettings(appLanguage = language.storedValue, onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "language_fixture"))
             }
             InstrumentationRegistry.getInstrumentation().runOnMainSync { synchronizeFrameworkAppLanguage(context, language) }
             awaitNavigation(language)
-            if (android.os.Build.VERSION.SDK_INT >= 33 && language == AppLanguage.System) {
-                org.junit.Assert.assertTrue(context.getSystemService(android.app.LocaleManager::class.java).applicationLocales.isEmpty)
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                org.junit.Assert.assertEquals(language.languageTag, context.getSystemService(android.app.LocaleManager::class.java).applicationLocales.toLanguageTags())
             }
             activity!!.recreate()
             awaitNavigation(language)
@@ -52,5 +52,8 @@ class LanguageRegressionTest {
         val text = localizedAppContext(context, language).getString(R.string.nav_library)
         compose.waitUntil(15_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
         compose.waitForIdle()
+        val opposite = if (language == AppLanguage.Russian) AppLanguage.English else AppLanguage.Russian
+        val oppositeText = localizedAppContext(context, opposite).getString(R.string.nav_library)
+        org.junit.Assert.assertTrue(compose.onAllNodesWithText(oppositeText).fetchSemanticsNodes().isEmpty())
     }
 }

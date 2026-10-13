@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -180,3 +181,33 @@ def test_stream_disconnect_stops_iteration_and_closes_reader() -> None:
 
     assert asyncio.run(consume()) == []
     assert reader.closed
+
+
+def test_stream_file_reads_and_close_do_not_block_the_event_loop() -> None:
+    threads: list[int] = []
+
+    class ThreadRecordingReader(Reader):
+        def __iter__(self) -> Iterator[bytes]:
+            threads.append(threading.get_ident())
+            yield self.payload
+
+        def close(self) -> None:
+            threads.append(threading.get_ident())
+            super().close()
+
+    class ConnectedRequest:
+        async def is_disconnected(self) -> bool:
+            return False
+
+    async def consume() -> None:
+        loop_thread = threading.get_ident()
+        reader = ThreadRecordingReader(BYTES)
+        stream = _stream(reader, cast(Request, ConnectedRequest()))
+        assert await anext(stream) == BYTES
+        # Early consumer cancellation must release the descriptor off the event loop too.
+        await stream.aclose()
+        assert reader.closed
+        assert len(threads) == 2
+        assert all(worker != loop_thread for worker in threads)
+
+    asyncio.run(consume())

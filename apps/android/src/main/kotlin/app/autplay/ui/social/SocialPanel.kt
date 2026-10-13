@@ -1,5 +1,7 @@
 package app.autplay.ui.social
 
+import app.autplay.ui.AutPlayDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -7,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -228,7 +229,7 @@ private fun FriendRow(friend: FriendSummary, actions: SocialActions, enabled: Bo
         }
     }
     confirmation?.let { selected ->
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { confirmation = null },
             title = { Text(stringResource(if (selected == FriendshipConfirmation.Remove) R.string.ui_friends_refresh_remove_title else R.string.ui_friends_refresh_block_title)) },
             text = { Text(stringResource(if (selected == FriendshipConfirmation.Remove) R.string.ui_friends_refresh_remove_body else R.string.ui_friends_refresh_block_body)) },
@@ -272,7 +273,7 @@ private fun ContactCardTools(state: SocialRuntimeState, actions: SocialActions) 
         }
     }
     preview?.let { card ->
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { preview = null },
             title = { Text(stringResource(R.string.ui_friends_refresh_card_preview, card.displayNameHint)) },
             text = { Text(stringResource(R.string.ui_friends_refresh_mutual_only)) },

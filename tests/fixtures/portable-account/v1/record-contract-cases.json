@@ -1,0 +1,271 @@
+{
+  "valid": [
+    {
+      "record_id": "00000000-0000-0000-0000-000000000001",
+      "kind": "LISTENING",
+      "document": {
+        "version": 1,
+        "updated_at_ms": 1000,
+        "event_ids": [
+          "00000000-0000-0000-0000-000000000001"
+        ],
+        "track_key": "00000000-0000-0000-0000-000000000002",
+        "title": "Fixture track",
+        "artist": "Fixture artist",
+        "genres": [
+          "Rock"
+        ],
+        "started_at_ms": 1000,
+        "played_ms": 5000,
+        "duration_ms": 10000,
+        "excluded_from_taste": false,
+        "event_origin": "ORGANIC",
+        "context": "GENERAL"
+      }
+    },
+    {
+      "record_id": "00000000-0000-0000-0000-000000000001",
+      "kind": "PREFERENCE",
+      "document": {
+        "version": 1,
+        "updated_at_ms": 1000,
+        "track_key": "00000000-0000-0000-0000-000000000002",
+        "title": null,
+        "artist": null,
+        "preference": "LIKED",
+        "rating": 5,
+        "excluded_from_taste": false
+      }
+    },
+    {
+      "record_id": "00000000-0000-0000-0000-000000000001",
+      "kind": "PLAYLIST",
+      "document": {
+        "version": 1,
+        "updated_at_ms": 1000,
+        "name": "Fixture playlist",
+        "description": null,
+        "deleted": false
+      }
+    },
+    {
+      "record_id": "00000000-0000-0000-0000-000000000001",
+      "kind": "PLAYLIST_ENTRY",
+      "document": {
+        "version": 1,
+        "updated_at_ms": 1000,
+        "playlist_id": "00000000-0000-0000-0000-000000000002",
+        "track_key": "00000000-0000-0000-0000-000000000002",
+        "title": null,
+        "artist": null,
+        "position_key": "a",
+        "deleted": false
+      }
+    },
+    {
+      "record_id": "00000000-0000-0000-0000-000000000001",
+      "kind": "TASTE",
+      "document": {
+        "version": 1,
+        "updated_at_ms": 1000,
+        "track_key": "00000000-0000-0000-0000-000000000002",
+        "interaction": "LIKE",
+        "weight": 100
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "case": "private passport field",
+      "record": {
+        "record_id": "00000000-0000-0000-0000-000000000001",
+        "kind": "LISTENING",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "event_ids": [
+            "00000000-0000-0000-0000-000000000001"
+          ],
+          "track_key": "00000000-0000-0000-0000-000000000002",
+          "title": "Fixture track",
+          "artist": "Fixture artist",
+          "genres": [
+            "Rock"
+          ],
+          "started_at_ms": 1000,
+          "played_ms": 5000,
+          "duration_ms": 10000,
+          "excluded_from_taste": false,
+          "event_origin": "ORGANIC",
+          "context": "GENERAL",
+          "private_passport": "synthetic-forbidden-field"
+        }
+      }
+    },
+    {
+      "case": "foreign server authority",
+      "record": {
+        "record_id": "00000000-0000-0000-0000-000000000001",
+        "kind": "PLAYLIST",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "name": "Fixture playlist",
+          "description": null,
+          "deleted": false
+        },
+        "vault_grant": "synthetic-forbidden-field"
+      }
+    },
+    {
+      "case": "alias overflow",
+      "record": {
+        "record_id": "00000000-0000-0000-0000-000000000001",
+        "kind": "LISTENING",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "event_ids": [
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+            "00000000-0000-0000-0000-000000000003",
+            "00000000-0000-0000-0000-000000000004",
+            "00000000-0000-0000-0000-000000000005",
+            "00000000-0000-0000-0000-000000000006",
+            "00000000-0000-0000-0000-000000000007",
+            "00000000-0000-0000-0000-000000000008",
+            "00000000-0000-0000-0000-000000000009",
+            "00000000-0000-0000-0000-00000000000a",
+            "00000000-0000-0000-0000-00000000000b",
+            "00000000-0000-0000-0000-00000000000c",
+            "00000000-0000-0000-0000-00000000000d",
+            "00000000-0000-0000-0000-00000000000e",
+            "00000000-0000-0000-0000-00000000000f",
+            "00000000-0000-0000-0000-000000000010",
+            "00000000-0000-0000-0000-000000000011",
+            "00000000-0000-0000-0000-000000000012",
+            "00000000-0000-0000-0000-000000000013",
+            "00000000-0000-0000-0000-000000000014",
+            "00000000-0000-0000-0000-000000000015",
+            "00000000-0000-0000-0000-000000000016",
+            "00000000-0000-0000-0000-000000000017",
+            "00000000-0000-0000-0000-000000000018",
+            "00000000-0000-0000-0000-000000000019",
+            "00000000-0000-0000-0000-00000000001a",
+            "00000000-0000-0000-0000-00000000001b",
+            "00000000-0000-0000-0000-00000000001c",
+            "00000000-0000-0000-0000-00000000001d",
+            "00000000-0000-0000-0000-00000000001e",
+            "00000000-0000-0000-0000-00000000001f",
+            "00000000-0000-0000-0000-000000000020",
+            "00000000-0000-0000-0000-000000000021"
+          ],
+          "track_key": "00000000-0000-0000-0000-000000000002",
+          "title": "Fixture track",
+          "artist": "Fixture artist",
+          "genres": [
+            "Rock"
+          ],
+          "started_at_ms": 1000,
+          "played_ms": 5000,
+          "duration_ms": 10000,
+          "excluded_from_taste": false,
+          "event_origin": "ORGANIC",
+          "context": "GENERAL"
+        }
+      }
+    },
+    {
+      "case": "control character metadata",
+      "record": {
+        "record_id": "00000000-0000-0000-0000-000000000001",
+        "kind": "LISTENING",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "event_ids": [
+            "00000000-0000-0000-0000-000000000001"
+          ],
+          "track_key": "00000000-0000-0000-0000-000000000002",
+          "title": "bad\nmetadata",
+          "artist": "Fixture artist",
+          "genres": [
+            "Rock"
+          ],
+          "started_at_ms": 1000,
+          "played_ms": 5000,
+          "duration_ms": 10000,
+          "excluded_from_taste": false,
+          "event_origin": "ORGANIC",
+          "context": "GENERAL"
+        }
+      }
+    },
+    {
+      "case": "noncanonical uuid",
+      "record": {
+        "record_id": "00000000000000000000000000000001",
+        "kind": "LISTENING",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "event_ids": [
+            "00000000-0000-0000-0000-000000000001"
+          ],
+          "track_key": "00000000-0000-0000-0000-000000000002",
+          "title": "Fixture track",
+          "artist": "Fixture artist",
+          "genres": [
+            "Rock"
+          ],
+          "started_at_ms": 1000,
+          "played_ms": 5000,
+          "duration_ms": 10000,
+          "excluded_from_taste": false,
+          "event_origin": "ORGANIC",
+          "context": "GENERAL"
+        }
+      }
+    },
+    {
+      "case": "taste bounds",
+      "record": {
+        "record_id": "00000000-0000-0000-0000-000000000001",
+        "kind": "TASTE",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "track_key": "00000000-0000-0000-0000-000000000002",
+          "interaction": "LIKE",
+          "weight": 1001
+        }
+      }
+    },
+    {
+      "case": "trailing control character",
+      "record": {
+        "record_id": "00000000-0000-0000-0000-000000000001",
+        "kind": "LISTENING",
+        "document": {
+          "version": 1,
+          "updated_at_ms": 1000,
+          "event_ids": [
+            "00000000-0000-0000-0000-000000000001"
+          ],
+          "track_key": "00000000-0000-0000-0000-000000000002",
+          "title": "Fixture track",
+          "artist": "Fixture artist",
+          "genres": [
+            "Rock"
+          ],
+          "started_at_ms": 1000,
+          "played_ms": 5000,
+          "duration_ms": 10000,
+          "excluded_from_taste": false,
+          "event_origin": "ORGANIC\n",
+          "context": "GENERAL"
+        }
+      }
+    }
+  ]
+}

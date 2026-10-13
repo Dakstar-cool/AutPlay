@@ -1,5 +1,7 @@
 package app.autplay.ui
 
+import app.autplay.ui.AutPlayDialog
+
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -116,7 +118,7 @@ internal fun TrackMetadataPanel(detail: CoreTrackDetail) {
             "release_date", "original_release_date", "recording_date" -> app.autplay.application.library.validMetadataDate(value)
             else -> true
         }) }
-        AlertDialog(onDismissRequest = { editing = false }, title = { Text(stringResource(R.string.metadata_edit)) },
+        AutPlayDialog(onDismissRequest = { editing = false }, title = { Text(stringResource(R.string.metadata_edit)) },
             text = { Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.metadata_edit_hint))
                 if (saveState == WorkInfo.State.FAILED) Text(stringResource(R.string.metadata_command_failed), color = MaterialTheme.colorScheme.error)

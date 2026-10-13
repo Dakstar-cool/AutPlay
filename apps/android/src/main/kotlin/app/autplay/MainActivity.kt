@@ -1,5 +1,7 @@
 package app.autplay
 
+import app.autplay.ui.AutPlayDialog
+
 import android.app.Activity
 import android.app.LocaleManager
 import android.content.Context
@@ -24,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -40,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -154,7 +156,6 @@ import app.autplay.work.DeferredWorkScheduler
 import app.autplay.work.RecommendationPackWorkScheduler
 import app.autplay.work.RemoteImportWorkScheduler
 import app.autplay.work.shouldScheduleRemoteImport
-import app.autplay.ui.AutPlayAccent
 import app.autplay.ui.AutPlayAppearance
 import app.autplay.ui.AutPlayTheme
 import app.autplay.ui.AutPlayThemeMode
@@ -211,11 +212,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
+import app.autplay.application.portableaccount.hasPortableAccountPendingEnrollment
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import java.util.concurrent.ConcurrentHashMap
 
 internal const val BOOTSTRAP_LABEL = "AutPlay"
@@ -352,7 +355,7 @@ internal fun AutPlayBootstrap(
     if (settingsStore == null || searchRepository == null || sliceRepository == null ||
         playbackRepository == null || playbackOwner == null || downloadRepository == null || syncStatusRepository == null || syncScheduler == null || importRepository == null || recommendationRepository == null
     ) {
-        MaterialTheme {
+        AutPlayTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(text = BOOTSTRAP_LABEL)
@@ -450,6 +453,56 @@ internal fun AutPlayBootstrap(
                 )
             }
             val pairingRuntimeState by pairingRuntime.state.collectAsState()
+            val portableAccountData = remember(context) {
+                app.autplay.application.portableaccount.PortableAccountDataRepository(AutPlayRuntime.database(context))
+            }
+            val portableAccountRuntime = remember(settingsStore, pairingCredentialStore, pairingDeviceKeys, pairingRuntime, pairingPort) {
+                app.autplay.application.portableaccount.PortableAccountRuntime(
+                    app.autplay.application.portableaccount.PortableAccountStore(pairingCredentialStore, settingsStore),
+                    settingsStore, pairingCredentialStore, pairingDeviceKeys, pairingRuntime, pairingPort, firstBindCeremonyGate,
+                    { origin -> AutPlayRuntime.portableAccountPort(context, origin) }, android.os.Build.MODEL.ifBlank { "Android device" }, BuildConfig.VERSION_NAME,
+                    beforeDisconnect = { profile, owner ->
+                        val captured = settingsStore.settings.first()
+                        check(captured.activeServerProfileId == profile && captured.activeUserId?.value == owner.accountId) {
+                            "ACCOUNT_CONTEXT_CHANGED"
+                        }
+                        portableAccountData.persistOwnership(owner.accountId, profile.value, 0)
+                        portableAccountData.persistOwnership(owner.accountId, null, owner.standaloneSinceMs)
+                    })
+            }
+            val portableAccountUi = rememberPortableAccountUi(portableAccountRuntime, settings, pairingRuntimeState) { pairingSafeError = it }
+            val selfPairingTransport = remember(context, pairingCredentialStore, allowUnsafePairingHttp) {
+                AutPlayRuntime.selfPairingTransport(context, pairingCredentialStore, allowUnsafePairingHttp)
+            }
+            val selfPairingSource = remember(settingsStore, pairingCredentialStore, selfPairingTransport) {
+                app.autplay.application.selfpairing.SelfPairingSourceRuntime(
+                    pairingCredentialStore,
+                    app.autplay.application.selfpairing.SettingsSelfPairingSourceContext(settingsStore, pairingCredentialStore),
+                    selfPairingTransport,
+                )
+            }
+            val selfPairingRecipient = remember(settingsStore, pairingRuntime, pairingPort, selfPairingTransport) {
+                app.autplay.application.selfpairing.SelfPairingRecipientRuntime(
+                    credentials = pairingCredentialStore,
+                    keys = pairingDeviceKeys,
+                    transport = selfPairingTransport,
+                    discovery = pairingPort,
+                    binding = app.autplay.application.selfpairing.ProfilePairingSelfBindingCommitter(
+                        pairingRuntime, pairingPort, settingsStore, pairingCredentialStore, pairingDeviceKeys,
+                    ),
+                    activeProfile = ActiveProfileGate {
+                        settingsStore.settings.first().let { current ->
+                            current.activeServerProfileId != null || current.activeUserId != null ||
+                                current.deviceId != null || current.m5Binding != null ||
+                                current.m5PendingExchangeCheckpoint != null || current.m5AdmissionCheckpoint != null
+                        }
+                    },
+                    firstBind = firstBindCeremonyGate,
+                    deviceName = android.os.Build.MODEL.ifBlank { "Android device" },
+                    appVersion = BuildConfig.VERSION_NAME,
+                    allowDevelopmentHttp = allowUnsafePairingHttp,
+                )
+            }
             val publicApprovalGate = remember { ApprovedRegistrationContextGate() }
             val publicRegistrationCoordinator = remember(
                 pairingScope,
@@ -528,6 +581,7 @@ internal fun AutPlayBootstrap(
                     },
                     appVersion = BuildConfig.VERSION_NAME,
                     deviceName = android.os.Build.MODEL.ifBlank { "Android device" },
+                    authorizeAccount = pairingRuntime::authorizeAdmissionAccount,
                 )
             }
             val admissionState by admissionRuntime.state.collectAsState()
@@ -538,6 +592,10 @@ internal fun AutPlayBootstrap(
                 )
             }
             val onboardingComplete = hasCompletedOnboarding(settings)
+            val selfPairingUi = rememberSelfPairingUi(
+                selfPairingSource, selfPairingRecipient, pairingRuntimeState.pairing,
+                publicRegistrationState, binding != null, onboardingComplete,
+            )
             LaunchedEffect(
                 admissionRuntime,
                 pairingRuntime,
@@ -545,6 +603,11 @@ internal fun AutPlayBootstrap(
                 onboardingComplete,
             ) {
                 if (!onboardingComplete) return@LaunchedEffect
+                portableAccountRuntime.store.recoverIdentity()
+                if (portableAccountUi.state.status.pendingEnrollment || pairingCredentialStore.hasPortableAccountPendingEnrollment()) {
+                    portableAccountRuntime.resume()
+                    return@LaunchedEffect
+                }
                 val restoredBinding = admissionRecoveryBootstrap.restoreExistingBindingIfPresent(
                     pairingRuntime,
                 ) {
@@ -564,6 +627,24 @@ internal fun AutPlayBootstrap(
                     }
                 }
             }
+            LaunchedEffect(portableAccountRuntime, settings.m5Binding?.bindingCommitId, onboardingComplete) {
+                if (onboardingComplete) portableAccountRuntime.refresh()
+            }
+            LaunchedEffect(portableAccountRuntime, settings.portableAccountId, settings.activeServerProfileId,
+                settings.activeUserId, settings.m5Binding?.bindingCommitId, onboardingComplete) {
+                if (!onboardingComplete) return@LaunchedEffect
+                val owner = portableAccountRuntime.store.ownership() ?: return@LaunchedEffect
+                try {
+                    portableAccountData.persistOwnership(owner.accountId, null, owner.standaloneSinceMs)
+                    app.autplay.work.PortableAccountWork.enqueueLocal(context, owner.accountId)
+                    if (settings.activeUserId?.value == owner.accountId && settings.m5Binding != null) {
+                        val profile = requireNotNull(settings.activeServerProfileId)
+                        portableAccountData.persistOwnership(owner.accountId, profile.value, 0)
+                        app.autplay.work.PortableAccountWork.enqueue(context, owner.accountId, profile.value)
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { pairingSafeError = "ACCOUNT_SCOPE_IDENTITY_CONFLICT" }
+            }
             var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
             LaunchedEffect(binding, onboardingComplete) {
                 waveCoordinator?.close()
@@ -580,6 +661,12 @@ internal fun AutPlayBootstrap(
                     if (!onboardingComplete) {
                         WelcomeOnboardingScreen(
                             initialPublicId = settings.pendingPublicId,
+                            createAccount = portableAccountRuntime::create,
+                            existingAccount = { publicId ->
+                                completeOnboarding(settingsStore, publicId).also { completed ->
+                                    if (completed) onboardingCompletionRoute = UiDestination.Profile.route
+                                }
+                            },
                             onComplete = { destination, publicId ->
                                 completeOnboarding(settingsStore, publicId).also { completed ->
                                     if (completed) onboardingCompletionRoute = destination.route
@@ -611,6 +698,8 @@ internal fun AutPlayBootstrap(
                                 admissionState,
                                 publicRegistrationCoordinator,
                                 publicRegistrationState,
+                                selfPairingUi,
+                                portableAccountUi,
                                 pairingSafeError,
                                 initialDestination = initialDestination,
                                 pendingPlaybackOpen = pendingPlaybackOpen,
@@ -625,18 +714,15 @@ internal fun AutPlayBootstrap(
 }
 
 @Composable
-private fun AppLanguageProvider(
+internal fun AppLanguageProvider(
     storedLanguage: String,
     content: @Composable () -> Unit,
 ) {
     val baseContext = LocalContext.current
     val baseConfiguration = LocalConfiguration.current
-    val knownLanguage = AppLanguage.knownFromStoredValue(storedLanguage)
-    val language = knownLanguage ?: AppLanguage.System
-    LaunchedEffect(baseContext, knownLanguage) {
-        if (knownLanguage != null && knownLanguage != AppLanguage.System) {
-            synchronizeFrameworkAppLanguage(baseContext, knownLanguage)
-        }
+    val language = AppLanguage.fromStoredValue(storedLanguage)
+    LaunchedEffect(baseContext, language) {
+        synchronizeFrameworkAppLanguage(baseContext, language)
     }
     val localizedContext = remember(baseContext, baseConfiguration, language) {
         localizedAppContext(baseContext, language)
@@ -655,9 +741,7 @@ private fun AppLanguageProvider(
 
 internal fun synchronizeFrameworkAppLanguage(context: Context, language: AppLanguage) {
     if (Build.VERSION.SDK_INT < 33) return
-    val desiredLocales = language.languageTag
-        ?.let(LocaleList::forLanguageTags)
-        ?: LocaleList.getEmptyLocaleList()
+    val desiredLocales = LocaleList.forLanguageTags(language.languageTag)
     val localeManager = context.getSystemService(LocaleManager::class.java)
     if (localeManager.applicationLocales.toLanguageTags() != desiredLocales.toLanguageTags()) {
         localeManager.applicationLocales = desiredLocales
@@ -665,8 +749,7 @@ internal fun synchronizeFrameworkAppLanguage(context: Context, language: AppLang
 }
 
 internal fun localizedAppContext(baseContext: Context, language: AppLanguage): Context {
-    val languageTag = language.languageTag ?: return baseContext
-    val locale = Locale.forLanguageTag(languageTag)
+    val locale = Locale.forLanguageTag(language.languageTag)
     val configuration = Configuration(baseContext.resources.configuration).apply {
         setLocales(LocaleList(locale))
     }
@@ -698,6 +781,8 @@ private fun OfflineLibraryScreen(
     admissionState: app.autplay.application.profilepairing.AdmissionState,
     publicRegistrationCoordinator: PublicAccountRegistrationCoordinator,
     publicRegistrationState: PublicAccountRegistrationState,
+    selfPairingUi: MainSelfPairingUi,
+    portableAccountUi: MainPortableAccountUi,
     pairingSafeError: String?,
     initialDestination: UiDestination = UiDestination.Home,
     pendingPlaybackOpen: MutableStateFlow<Boolean>? = null,
@@ -706,6 +791,8 @@ private fun OfflineLibraryScreen(
     val activeProfileId = binding?.serverProfileId?.value
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val shareContactTitle = stringResource(R.string.profile_share_contact_title)
+    val shareAccountTitle = stringResource(R.string.profile_share_account_title)
     val trainingConsent = rememberTrainingConsentUi(settings, pairingRuntimeState.pairing)
     var verifiedDeveloperMode by remember(
         binding?.serverProfileId,
@@ -828,6 +915,10 @@ private fun OfflineLibraryScreen(
                         app.autplay.work.DeferredWorkSubject.Device(active.deviceId),
                         active.serverProfileId,
                     ))
+                    val owner = portableAccountUi.runtime.store.ownership()
+                    if (owner?.accountId == active.userId.value) {
+                        app.autplay.work.PortableAccountWork.enqueue(context, owner.accountId, active.serverProfileId.value)
+                    }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
@@ -880,10 +971,47 @@ private fun OfflineLibraryScreen(
     val profileStatisticsRepository = remember(context) {
         ProfileStatisticsRepository(AutPlayRuntime.database(context))
     }
-    val statisticsOwner = remember(profileStatisticsRepository, activeProfileId, binding?.userId) {
-        ProfileStatisticsSnapshotOwner(scope, activeProfileId, profileStatisticsRepository::refresh)
+    val accountStatisticsPort = remember(context, settings.serverBaseUrl) {
+        settings.serverBaseUrl?.let { AutPlayRuntime.accountStatisticsPort(context, it) }
     }
-    val ownerStatisticsState by statisticsOwner.state.collectAsState()
+    val portableStatisticsRepository = remember(context) {
+        app.autplay.application.statistics.PortableAccountStatisticsRepository(AutPlayRuntime.database(context))
+    }
+    val statisticsAccountId = binding?.userId?.value ?: settings.portableAccountId
+    val statisticsIdentity = app.autplay.application.statistics.StatisticsIdentity(activeProfileId,
+        statisticsAccountId, binding?.deviceId?.value, settings.m5Binding?.bindingCommitId)
+    val statisticsSelector = remember(profileStatisticsRepository, portableStatisticsRepository, statisticsIdentity,
+        settings.serverBaseUrl, portableAccountUi.runtime) {
+        app.autplay.application.statistics.StatisticsSourceSelector(portableStatisticsRepository, profileStatisticsRepository) { captured ->
+            val current = settingsStore.settings.first()
+            val boundAccount = captured.accountId.takeIf { captured.profileId != null }
+            check(current.activeServerProfileId?.value == captured.profileId &&
+                current.activeUserId?.value == boundAccount && current.deviceId?.value == captured.deviceId &&
+                current.m5Binding?.bindingCommitId == captured.bindingCommitId && current.serverBaseUrl == settings.serverBaseUrl) {
+                "ACCOUNT_CONTEXT_CHANGED"
+            }
+            if (captured.accountId != null && captured.profileId == null) {
+                check(portableAccountUi.runtime.store.ownership()?.accountId == captured.accountId) { "ACCOUNT_CONTEXT_CHANGED" }
+            }
+        }
+    }
+    val statisticsOwner = remember(statisticsSelector, statisticsIdentity, accountStatisticsPort) {
+        ProfileStatisticsSnapshotOwner(scope, activeProfileId, load = {
+            statisticsSelector.verify(statisticsIdentity)
+            val accountId = statisticsIdentity.accountId
+            if (accountId != null) {
+                val owner = portableAccountUi.runtime.store.ownership()
+                if (owner?.accountId == accountId) {
+                    app.autplay.application.portableaccount.PortableAccountDataRepository(AutPlayRuntime.database(context))
+                        .captureLocal(accountId)
+                    statisticsSelector.verify(statisticsIdentity)
+                    app.autplay.work.PortableAccountWork.enqueueLocal(context, accountId)
+                }
+            }
+            statisticsSelector.load(statisticsIdentity, accountStatisticsPort).snapshot
+        })
+    }
+    val ownerStatisticsState by key(statisticsOwner) { statisticsOwner.state.collectAsState() }
     DisposableEffect(statisticsOwner) {
         onDispose { statisticsOwner.close() }
     }
@@ -894,8 +1022,13 @@ private fun OfflineLibraryScreen(
     val activeQueueContextRepository = remember(context, scope) {
         ActiveQueueContextRepository.fromDatabase(AutPlayRuntime.database(context), scope)
     }
+    var miniPlayerDismissed by rememberSaveable { mutableStateOf(false) }
     val playerAdapter = remember(context, lifecycleOwner, activeQueueContextRepository) {
-        PlaybackPresentationAdapter(context, lifecycleOwner.lifecycle, activeQueueContextRepository)
+        PlaybackPresentationAdapter(
+            context, lifecycleOwner.lifecycle, activeQueueContextRepository,
+            initialMiniPlayerDismissed = miniPlayerDismissed,
+            onMiniPlayerDismissedChanged = { miniPlayerDismissed = it },
+        )
     }
     val playbackActions = remember(playerAdapter, waveCoordinator) {
         PlaybackInteractionRouter(
@@ -920,6 +1053,14 @@ private fun OfflineLibraryScreen(
         }
     }
     val destination = navigation.current
+    LaunchedEffect(statisticsOwner, statisticsAccountId, destination) {
+        val account = statisticsAccountId ?: return@LaunchedEffect
+        if (destination != UiDestination.Profile) return@LaunchedEffect
+        AutPlayRuntime.database(context).portableAccountDao().observeRevision(account).collectLatest {
+            delay(750L)
+            statisticsOwner.refreshWith { statisticsSelector.load(statisticsIdentity).snapshot }
+        }
+    }
     LaunchedEffect(destination, statisticsOwner) {
         if (destination == UiDestination.Profile) statisticsOwner.loadIfNeeded()
     }
@@ -1266,6 +1407,16 @@ private fun OfflineLibraryScreen(
             CoreReleaseSummary(release.localReleaseId, release.title, release.artist)
         }
     ).distinctBy(CoreReleaseSummary::stableId)
+    val personalWaveRoomState by (waveCoordinator?.uiState ?: flowOf(app.autplay.application.wave.WaveUiState()))
+        .collectAsState(initial = app.autplay.application.wave.WaveUiState())
+    fun myWaveAllowed(): Boolean = canStartMyWave(
+        playerState.context,
+        personalWaveRoomState.roomId != null &&
+            personalWaveRoomState.state != app.autplay.domain.wave.WaveRuntimeState.CLOSED,
+    )
+    val currentMyWaveBinding by rememberUpdatedState(binding)
+    val currentMyWaveAllowed by rememberUpdatedState(::myWaveAllowed)
+    val myWaveScope = key(binding, personalWaveRoomState.roomId) { rememberCoroutineScope() }
     val coreCommandActions = buildCoreCommandActions(
         scope = scope,
         binding = { binding },
@@ -1292,6 +1443,10 @@ private fun OfflineLibraryScreen(
         bindingContextKey = { detailContextKey },
         setLoadedDetailContextKey = { coreDetailState.loadedContextKey = it },
         downloadRepository = downloadRepository,
+        myWaveVaultAvailable = { currentMyWaveBinding != null && myWaveNetworkAvailable(context) },
+        myWaveAllowed = { currentMyWaveAllowed() },
+        myWaveCurrentBinding = { currentMyWaveBinding },
+        myWaveScope = myWaveScope,
     )
     val manualPlaylistActions = playlistMutationActions.copy(
         playEntry = coreCommandActions.startPlaylistEntry,
@@ -1508,6 +1663,8 @@ private fun OfflineLibraryScreen(
         dislikeRecommendation = { coreCommandActions.recordHomeFeedback(it, "DISLIKED") },
         retryHome = { homeRetryNonce = !homeRetryNonce },
         resumeHomeQueue = ::resumeHomeQueue,
+        startMyWave = coreCommandActions.startMyWave,
+        myWaveAllowed = myWaveAllowed(),
         openHomePlaylist = ::openHomePlaylist,
         openOffline = ::openOfflineLibrary,
         openProblems = ::openHomeProblems,
@@ -1714,7 +1871,7 @@ private fun OfflineLibraryScreen(
                 type = "application/json"
                 putExtra(Intent.EXTRA_TEXT, card.asJson().toString())
             }
-            context.startActivity(Intent.createChooser(share, "Share AutPlay contact card"))
+            context.startActivity(Intent.createChooser(share, shareContactTitle))
         },
         importContactCard = { socialRuntime?.importContactCard(it) },
         acceptFriend = { socialRuntime?.acceptFriend(it) },
@@ -1769,6 +1926,8 @@ private fun OfflineLibraryScreen(
         trainingConsent = trainingConsent,
         profilePairing = ProfilePairingUiState(
             pairing = pairingRuntimeState.pairing,
+            selfPairing = selfPairingUi.state,
+            portableAccount = portableAccountUi.state,
             publicAccountRegistration = publicRegistrationState.takeIf { binding == null },
             ownerProvisioning = ownerProvisioningState.takeIf { ownerProvisioningCoordinator != null },
             canReenrollTrustedDevice = pairingRuntimeState.canReenrollTrustedDevice,
@@ -1834,6 +1993,11 @@ private fun OfflineLibraryScreen(
         settingsStore = settingsStore,
         context = context,
         profilePairingRuntime = pairingRuntime,
+        selfPairingActions = selfPairingUi.actions,
+        portableAccountActions = portableAccountUi.actions,
+        confirmProfileAction = { action, login, password ->
+            portableAccountUi.runtime.confirmLifecycle(app.autplay.application.profilepairing.RuntimeLifecycleAction.valueOf(action.name), login, password)
+        },
         publicRegistrationCoordinator = publicRegistrationCoordinator,
         ownerProvisioningCoordinator = ownerProvisioningCoordinator,
         pickPublicAccountInvitation = {
@@ -1855,7 +2019,7 @@ private fun OfflineLibraryScreen(
                 type = app.autplay.application.publicaccess.AccountInvitationParser.MIME_TYPE
                 putExtra(Intent.EXTRA_TEXT, invitation.toDocumentJson())
             }
-            context.startActivity(Intent.createChooser(share, "Share AutPlay account invitation"))
+            context.startActivity(Intent.createChooser(share, shareAccountTitle))
         },
         admissionRuntime = admissionRuntime,
         admissionSnapshot = when (val pairing = pairingRuntimeState.pairing) {
@@ -1934,6 +2098,7 @@ private fun OfflineLibraryScreen(
             navigateBack = navigation::navigateBack,
             closeCoreDetail = ::closeCoreDetail,
             togglePlayPause = playbackActions::toggleDirectPlayPause,
+            dismissMiniPlayer = playerAdapter::dismissMiniPlayer,
             skipHomeTrack = { forward ->
                 if (playerState.mediaId == null || playerState.controls is app.autplay.playback.presentation.PlaybackControlGate.Allowed) {
                     val target = if (forward) homeSwipeTargets.next else homeSwipeTargets.previous
@@ -2002,7 +2167,7 @@ private fun rememberOfflineActivityLaunchers(
             runCatching {
                 val now = System.currentTimeMillis()
                 val inspection = inspector.inspectWithDigest(uri.toString())
-                val title = inspection.displayName?.takeIf(String::isNotBlank) ?: "Imported track"
+                val title = inspection.displayName?.takeIf(String::isNotBlank) ?: context.getString(R.string.track_untitled)
                 sliceRepository.importUri(
                     binding = binding,
                     trackRefId = trackRefId,
@@ -2310,7 +2475,7 @@ internal fun WaveHostTransferControls(
     }
     var pending by remember(state.roomId) { mutableStateOf(false) }
     selected?.let { target ->
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { if (!pending) selected = null },
             title = { Text(stringResource(R.string.wave_transfer_title)) },
             text = { Text(stringResource(R.string.wave_transfer_confirm, target.deviceName)) },
@@ -2350,7 +2515,8 @@ internal fun WaveHostTransferControls(
 internal fun ProfileFrontendScreen(
     state: app.autplay.ui.profilepairing.ProfilePairingUiState,
     actions: app.autplay.ui.profilepairing.ProfilePairingActions,
-) = app.autplay.ui.profilepairing.ProfilePairingScreen(state, actions)
+    showHero: Boolean = true,
+) = app.autplay.ui.profilepairing.ProfilePairingScreen(state, actions, showHero = showHero)
 
 @Composable
 internal fun SettingsFrontendScreen(
@@ -2433,11 +2599,8 @@ private fun legacyView(destination: UiDestination): String = when (destination) 
     UiDestination.Settings, UiDestination.PrivacyAndData -> "Settings"
 }
 
-private fun appearanceFrom(settings: NonSecretSettings): AutPlayAppearance = AutPlayAppearance(
-    mode = runCatching { AutPlayThemeMode.valueOf(settings.appearanceMode.lowercase().replaceFirstChar(Char::uppercase)) }
-        .getOrDefault(AutPlayThemeMode.System),
-    accent = runCatching { AutPlayAccent.valueOf(settings.accentPalette.lowercase().replaceFirstChar(Char::uppercase)) }
-        .getOrDefault(AutPlayAccent.Coral),
+internal fun appearanceFrom(settings: NonSecretSettings): AutPlayAppearance = AutPlayAppearance(
+    mode = if (settings.appearanceMode == "LIGHT") AutPlayThemeMode.Light else AutPlayThemeMode.Dark,
 )
 
 internal suspend fun updateFrontendSettings(
@@ -2566,7 +2729,7 @@ private fun VisibleRecommendation(
         },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("${item.displayPosition}. ${item.title} вЂ” ${item.artist}")
+        Text("${item.displayPosition}. ${item.title} — ${item.artist}")
         Text(stringResource(R.string.recommendation_for_you))
     }
 }

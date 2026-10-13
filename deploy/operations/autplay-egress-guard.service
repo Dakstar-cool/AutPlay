@@ -1,0 +1,14 @@
+[Unit]
+Description=AutPlay container egress boundary
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /usr/local/lib/autplay/autplay-egress-guard.py apply
+ExecReload=/usr/bin/python3 /usr/local/lib/autplay/autplay-egress-guard.py apply
+
+[Install]
+WantedBy=multi-user.target

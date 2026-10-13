@@ -28,6 +28,10 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
     ]
 )
 EXPECTED_TABLE_KEYS: tuple[str, ...] = (
+    "account.portable_identity",
+    "account.portable_challenge",
+    "account.portable_record",
+    "library.portable_taste_signal",
     "jobs.worker_health",
     "social.public_id_registration",
     "ml.training_checkpoint",
@@ -205,6 +209,10 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.guest_rate_window",
 )
 EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
+    "account.portable_identity": 7,
+    "account.portable_challenge": 12,
+    "account.portable_record": 7,
+    "library.portable_taste_signal": 8,
     "jobs.worker_health": 9,
     "social.public_id_registration": 3,
     "ml.training_run": 16,
@@ -383,6 +391,11 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
 }
 EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
     {
+        "portable_challenge_source_time",
+        "portable_challenge_expiry",
+        "portable_record_account_cursor",
+        "portable_record_listening_aliases",
+        "portable_taste_signal_account_cursor",
         "ix_training_participant_owner",
         "uq_training_execution_run_open",
         "ix_deletion_request_deadline",
@@ -542,7 +555,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 1964
+EXPECTED_COLUMN_COUNT = 1998
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

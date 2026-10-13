@@ -1,11 +1,12 @@
 package app.autplay.ui
 
+import app.autplay.ui.AutPlayDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -218,7 +219,7 @@ fun DiscoveryAutomationPanel(
     }
 
     if (confirmAutoImport) {
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { confirmAutoImport = false },
             title = { Text(stringResource(R.string.discovery_automation_auto_import_title)) },
             text = { Text(stringResource(R.string.discovery_automation_auto_import_consequence)) },

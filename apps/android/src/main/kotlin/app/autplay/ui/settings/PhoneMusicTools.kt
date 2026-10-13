@@ -1,5 +1,7 @@
 package app.autplay.ui.settings
 
+import app.autplay.ui.AutPlayDialog
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -93,7 +95,7 @@ internal fun PhoneMusicTools(settings: NonSecretSettings) {
             uploads.count { it.state == androidx.work.WorkInfo.State.SUCCEEDED },
             uploads.count { !it.state.isFinished }, uploads.count { it.state == androidx.work.WorkInfo.State.FAILED }))
     }
-    if (open) AlertDialog(
+    if (open) AutPlayDialog(
         onDismissRequest = { open = false },
         title = { Text(stringResource(if (upload) R.string.music_upload_title else R.string.music_phone_title)) },
         text = {

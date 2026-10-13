@@ -4,14 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -20,6 +17,33 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import app.autplay.data.settings.applicationNonSecretSettingsStore
+import app.autplay.ui.AutPlayTheme
+import app.autplay.ui.AutPlayTokens
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
@@ -32,35 +56,30 @@ class EnrollmentQrScannerActivity : ComponentActivity() {
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val returned = AtomicBoolean(false)
     private var cameraProvider: ProcessCameraProvider? = null
-    private lateinit var hint: TextView
+    private var hintRes by mutableIntStateOf(R.string.qr_scan_hint)
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startCamera() else hint.setText(R.string.qr_scan_camera_permission_required)
+        if (granted) startCamera() else hintRes = R.string.qr_scan_camera_permission_required
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        val previewView = PreviewView(this)
-        hint = TextView(this).apply {
-            setText(R.string.qr_scan_hint)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0xCC000000.toInt())
-            setPadding(16.dp, 16.dp, 16.dp, 16.dp)
+        previewView = PreviewView(this)
+        val settingsStore = applicationNonSecretSettingsStore(applicationContext)
+        setContent {
+            val loadedSettings by settingsStore.settings.collectAsState(initial = null)
+            val settings = loadedSettings
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                if (settings != null) AppLanguageProvider(settings.appLanguage) {
+                    AutPlayTheme(appearanceFrom(settings)) {
+                        QrScannerOverlay(hintRes, onCancel = { finish() })
+                    }
+                }
+            }
         }
-        val cancel = Button(this).apply {
-            setText(R.string.qr_scan_cancel)
-            setOnClickListener { finish() }
-        }
-        setContentView(FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            addView(previewView, FrameLayout.LayoutParams(-1, -1))
-            addView(hint, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-            addView(cancel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                bottomMargin = 24.dp
-            })
-        })
-        this.previewView = previewView
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
         } else {
@@ -83,7 +102,7 @@ class EnrollmentQrScannerActivity : ComponentActivity() {
                     .build()
                 analysis.setAnalyzer(cameraExecutor) { image -> analyze(image) }
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
-            }.onFailure { hint.setText(R.string.qr_scan_camera_unavailable) }
+            }.onFailure { hintRes = R.string.qr_scan_camera_unavailable }
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -107,11 +126,34 @@ class EnrollmentQrScannerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
-
     companion object {
         const val EXTRA_PAYLOAD = "app.autplay.QR_PAYLOAD"
         private const val MAX_QR_PAYLOAD_CHARS = 16_384
+    }
+}
+
+@Composable
+internal fun QrScannerOverlay(hintRes: Int, onCancel: () -> Unit) {
+    app.autplay.ui.AutPlaySystemBarIconAppearance(
+        useDarkStatusBarIcons = false,
+        useDarkNavigationBarIcons = false,
+    )
+    Column(
+        Modifier.fillMaxSize().systemBarsPadding().padding(AutPlayTokens.dimensions.screenPadding),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = AutPlayTokens.colors.glassSurface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, AutPlayTokens.colors.glassBorder),
+        ) {
+            Text(stringResource(hintRes), Modifier.padding(20.dp), style = MaterialTheme.typography.bodyLarge)
+        }
+        FilledTonalButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+            Text(stringResource(R.string.qr_scan_cancel))
+        }
     }
 }
 

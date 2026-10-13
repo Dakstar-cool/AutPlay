@@ -146,7 +146,11 @@ class OkHttpProfilePairingPort(
     override suspend fun lifecycle(profileId: ServerProfileId, command: LifecycleCommand): PairingNetworkResult<Unit> {
         val path = when (command.action) { LifecycleAction.LOGOUT_CURRENT -> "/account/sessions/current/logout"; LifecycleAction.LOGOUT_ALL -> "/account/sessions/logout-all"; LifecycleAction.REVOKE_DEVICE -> "/account/devices/${requireNotNull(command.targetDeviceId).value}/revoke" }
         val reason = command.reasonCode?.let { ",\"reason_code\":\"$it\"" }.orEmpty()
-        return authenticated(profileId, path, "{\"contract_version\":\"v1\",\"schema_version\":1,\"operation_id\":\"${command.operationId}\"$reason}", MAX_LIFECYCLE_BYTES) { }
+        val authorization = command.portableAuthorization?.let {
+            require(it.length <= 16_384)
+            ",\"portable_authorization\":" + Json.parseToJsonElement(it).jsonObject.toString()
+        }.orEmpty()
+        return authenticated(profileId, path, "{\"contract_version\":\"v1\",\"schema_version\":1,\"operation_id\":\"${command.operationId}\"$reason$authorization}", MAX_LIFECYCLE_BYTES) { }
     }
 
     private suspend fun <T> requestPublic(origin: String, path: String, limit: Long, parse: (JsonObject) -> T): PairingNetworkResult<T> = execute(OriginNormalizer.normalize(origin, allowUnsafeDevelopmentHttp), path, null, limit, false, parse)

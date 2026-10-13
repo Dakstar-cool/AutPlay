@@ -24,6 +24,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class NewPlaybackQueueEntry(
     val queueEntryId: LocalId,
@@ -31,6 +33,13 @@ data class NewPlaybackQueueEntry(
     val sourceOrigin: String,
     val sourceAudioPolicy: String,
     val recommendationAttributionJson: String? = null,
+)
+
+/** Opt-in compare-and-replace boundary for a new personal queue. */
+data class OrdinaryQueueReplacementGuard(
+    val snapshotId: String?,
+    val queueType: String?,
+    val serverProfileId: String?,
 )
 
 data class RestoredPlaybackQueue(
@@ -64,6 +73,7 @@ class PlaybackPersistenceRepository(
         listeningContext: String,
         nowMs: Long,
         startEntryId: LocalId? = null,
+        ordinaryReplacementGuard: OrdinaryQueueReplacementGuard? = null,
     ) {
         require(entries.isNotEmpty() && entries.size <= MAX_QUEUE_ENTRIES)
         require(entries.map { it.queueEntryId }.distinct().size == entries.size)
@@ -87,6 +97,16 @@ class PlaybackPersistenceRepository(
         val currentEntryId = startEntryId?.value ?: rows.first().queueEntryId
         require(rows.any { it.queueEntryId == currentEntryId })
         database.withWriteTransaction {
+            ordinaryReplacementGuard?.let { expected ->
+                val previous = database.queueDao().activeSnapshotOnce()
+                check(
+                    expected.serverProfileId == serverProfileId &&
+                        previous?.queueSnapshotId == expected.snapshotId &&
+                        previous?.queueType == expected.queueType &&
+                        (previous == null || (previous.serverProfileId == expected.serverProfileId &&
+                            previous.queueType in setOf("USER", "LIBRARY", "SEARCH", "PLAYLIST"))),
+                ) { "ORDINARY_QUEUE_AUTHORITY_CHANGED" }
+            }
             database.queueDao().deactivateOtherSnapshots(snapshotId.value, nowMs)
             database.queueDao().insertSnapshot(
                 QueueSnapshotEntity(
@@ -121,13 +141,17 @@ class PlaybackPersistenceRepository(
         val snapshot = database.queueDao().activeSnapshotOnce() ?: return null
         val entries = database.queueDao().entries(snapshot.queueSnapshotId, MAX_QUEUE_ENTRIES)
         if (entries.isEmpty()) return null
-        val core = PlaybackQueueSnapshot(
-            snapshotId = LocalId(snapshot.queueSnapshotId),
-            entries = entries.map(::toCore),
-            currentEntryId = snapshot.currentEntryId?.let(::LocalId),
-            currentPositionMs = snapshot.currentPositionMs,
-        )
-        return RestoredPlaybackQueue(snapshot, entries, QueueMediaItemMapper.restore(core))
+        // Room suspends its queries, but mapping/validating a full library queue is CPU work.
+        val media = withContext(Dispatchers.Default) {
+            val core = PlaybackQueueSnapshot(
+                snapshotId = LocalId(snapshot.queueSnapshotId),
+                entries = entries.map(::toCore),
+                currentEntryId = snapshot.currentEntryId?.let(::LocalId),
+                currentPositionMs = snapshot.currentPositionMs,
+            )
+            QueueMediaItemMapper.restore(core)
+        }
+        return RestoredPlaybackQueue(snapshot, entries, media)
     }
 
     suspend fun startSession(

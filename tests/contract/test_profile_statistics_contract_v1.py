@@ -20,6 +20,7 @@ EXPECTED_SCHEMAS = {
     "settings-receipt.schema.json",
     "settings-view.schema.json",
 }
+OWNER_SCHEMA = "owner-profile-statistics.schema.json"
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -28,11 +29,14 @@ def load(path: Path) -> dict[str, Any]:
 
 def test_s2_schemas_and_examples_are_strict() -> None:
     paths = list(SCHEMAS.glob("*.schema.json"))
-    assert {path.name for path in paths} == EXPECTED_SCHEMAS
+    assert {path.name for path in paths} == EXPECTED_SCHEMAS | {OWNER_SCHEMA}
     examples = load(FIXTURES / "examples.json")["examples"]
     assert {item["schema"] for item in examples} == EXPECTED_SCHEMAS
     for path in paths:
         schema = load(path)
+        if path.name == OWNER_SCHEMA:
+            Draft202012Validator.check_schema(schema)
+            continue
         assert schema["$id"] == (
             f"https://autplay.local/contracts/profile-statistics/v1/{path.name}"
         )
@@ -43,6 +47,24 @@ def test_s2_schemas_and_examples_are_strict() -> None:
             load(SCHEMAS / item["schema"]), format_checker=FormatChecker()
         )
         assert not list(validator.iter_errors(item["instance"])), item["schema"]
+
+
+def test_authenticated_owner_statistics_are_bounded_and_contain_no_authority() -> None:
+    validator = Draft202012Validator(load(SCHEMAS / OWNER_SCHEMA), format_checker=FormatChecker())
+    example: dict[str, Any] = {
+        "schema_version": 1,
+        "account_id": "01234567-1234-4321-8234-012345678901",
+        "through_ms": 1000,
+        "listened_ms": 30000,
+        "top_genres": [{"genre": "Rock", "listened_ms": 30000}],
+        "top_tracks": [],
+        "top_artists": [],
+    }
+    validator.validate(example)
+    for field in ("device_id", "session_id", "password", "vault_object_id"):
+        assert not validator.is_valid(example | {field: "private"})
+    assert not validator.is_valid(example | {"listened_ms": -1})
+    assert not validator.is_valid(example | {"top_genres": example["top_genres"] * 6})
 
 
 def test_profile_statistics_rejects_extra_media_or_activity_fields_and_wrong_windows() -> None:

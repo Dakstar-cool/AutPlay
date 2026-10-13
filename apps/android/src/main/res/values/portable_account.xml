@@ -1,0 +1,36 @@
+<resources>
+    <string name="account_statistics_description">Account listening history from all connected devices. Refreshes when you open your profile or tap Refresh.</string>
+    <string name="portable_account_title">Account</string>
+    <string name="portable_account_summary">Your ID, listening history and preferences belong to this account. Create it offline and connect it to different servers.</string>
+    <string name="portable_account_login">Login / ID</string>
+    <string name="portable_account_password">Password</string>
+    <string name="portable_account_password_repeat">Repeat password</string>
+    <string name="portable_account_password_rules">Use a passphrase of 15–128 characters.</string>
+    <string name="portable_account_existing">I already have an account</string>
+    <string name="portable_account_create">Create account</string>
+    <string name="portable_account_connect">Connect this account</string>
+    <string name="portable_account_sign_in">Sign in to existing account</string>
+    <string name="portable_account_copy_to_server">Save account to server</string>
+    <string name="portable_account_save_recovery">Save recovery file</string>
+    <string name="portable_account_recovery_unsaved">Keep a recovery file or code separately from this phone. The file also preserves access to servers that still use a previous account key.</string>
+    <string name="portable_account_show_code">Show recovery code</string>
+    <string name="portable_account_code_notice">Store all 43 characters safely. This code grants account access; do not share it. It needs the account document on this phone or a trusted server. After a reset, save the recovery file too: it retains previous keys for other servers.</string>
+    <string name="portable_account_code_saved">I saved the code</string>
+    <string name="portable_account_recover">Forgot password / recover account</string>
+    <string name="portable_account_cancel_recovery">Cancel recovery</string>
+    <string name="portable_account_import_file">Choose recovery file</string>
+    <string name="portable_account_file_ready">Recovery file checked — choose another</string>
+    <string name="portable_account_recovery_code">Recovery code</string>
+    <string name="portable_account_new_password">New password (15–128 characters)</string>
+    <string name="portable_account_reset">Reset password and revoke old access</string>
+    <string name="portable_account_recovery_scope">Choose a recovery file, or enter your ID and recovery code. Recovery keeps the account UUID and creates a new key. An online reset signs out all devices on the selected server. Connect to other servers using the current password to update their old keys. Save the new recovery file after each reset.</string>
+    <string name="portable_account_recovery_local">This restores local access. Server copies are not revoked offline. When you connect with the current password, the app can update a server that still uses a retained previous key.</string>
+    <string name="portable_account_restore_local">Restore local account</string>
+    <string name="portable_account_history_full">The recovery history already contains eight previous keys. No key was removed and the reset was stopped. Keep your current recovery file.</string>
+    <string name="portable_account_transition_unavailable">This server uses a key missing from this recovery history. Use the recovery file that includes that key; an already revoked key cannot regain server access.</string>
+    <string name="portable_account_recovery_trust">Open the server connection screen and confirm the trusted server before recovery.</string>
+    <string name="portable_account_expired">The previous connection expired and was released. Select and trust the server, then sign in again.</string>
+    <string name="portable_account_pending">The connection result needs verification. Retry to restore the same session.</string>
+    <string name="portable_account_auth_failed">Check your account ID and password. If no password has been set, configure it in Account first.</string>
+    <string name="portable_account_operation_failed">Account operation could not be completed. Check your ID, password and server connection. An account with a different identity cannot be linked.</string>
+</resources>

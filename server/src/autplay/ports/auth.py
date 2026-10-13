@@ -129,6 +129,10 @@ class AuthRepository(Protocol):
 
         ...
 
+    def requires_account_reauthentication(self, user_id: UUID) -> bool:
+        """Reload account proof policy under the account authority lock."""
+        ...
+
     def any_account_exists(self) -> bool:
         """Return whether the one-time bootstrap has already been consumed."""
 

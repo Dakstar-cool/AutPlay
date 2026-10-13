@@ -78,6 +78,7 @@ internal data class MainAdaptiveShellActions(
     val repairAccess: () -> Unit,
     val openReview: () -> Unit,
     val openDetail: (DetailTarget) -> Unit,
+    val dismissMiniPlayer: () -> Unit,
 )
 
 @Composable
@@ -102,10 +103,10 @@ internal fun MainAdaptiveShell(
         },
         nowPlayingAvailable = shouldShowPersistentPlayerChrome(
             destination = state.destination,
-            hasMedia = state.playerState.mediaId != null,
+            hasMedia = state.playerState.mediaId != null && !state.playerState.miniPlayerDismissed,
         ),
         nowPlayingBar = {
-            if (state.playerState.mediaId != null) {
+            if (state.playerState.mediaId != null && !state.playerState.miniPlayerDismissed) {
                 PlaybackMiniPlayer(
                     state = state.playerState,
                     onOpen = { actions.navigate(UiDestination.NowPlaying) },
@@ -114,6 +115,7 @@ internal fun MainAdaptiveShell(
                     liked = state.currentTrackLiked,
                     likeEnabled = state.currentTrackRefId != null,
                     onLike = { state.currentTrackRefId?.let(actions.likeTrack) },
+                    onDismiss = actions.dismissMiniPlayer,
                 )
             }
         },

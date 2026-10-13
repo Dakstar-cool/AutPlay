@@ -41,6 +41,7 @@ from autplay.application.guest_room import GuestRoomService
 from autplay.application.imports import ImportService
 from autplay.application.library import LibraryService
 from autplay.application.manual_discovery import ManualDiscoveryService
+from autplay.application.portable_account import PortableAccountService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
 from autplay.application.recommendations import (
@@ -121,6 +122,7 @@ def build_profile_pairing_service(
         account_recovery_enabled=settings.account_recovery_enabled,
         account_deletion_enabled=settings.account_deletion_enabled,
         shared_training_consent_enabled=settings.shared_training_consent_enabled,
+        portable_accounts_enabled=settings.portable_accounts_enabled,
     )
 
 
@@ -138,6 +140,25 @@ def build_public_access_service(settings: ApiSettings, engine: Engine) -> Public
         source_hmac_secret=settings.public_access_source_hmac_secret.get_secret_value().encode(
             "utf-8"
         ),
+    )
+
+
+def build_portable_account_service(
+    settings: ApiSettings, engine: Engine
+) -> PortableAccountService | None:
+    if not settings.portable_accounts_enabled:
+        return None
+    ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    return PortableAccountService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=ttl,
+        ),
+        ttl,
+        settings.public_access_source_hmac_secret.get_secret_value().encode(),
     )
 
 

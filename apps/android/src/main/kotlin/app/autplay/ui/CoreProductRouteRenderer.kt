@@ -49,6 +49,8 @@ internal data class CoreProductRouteActions(
     val manualPlaylists: List<ManualPlaylistUi> = emptyList(),
     val manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
     val changeSearchKind: (LibrarySearchKind) -> Unit = {},
+    val startMyWave: () -> Unit = {},
+    val myWaveAllowed: Boolean = true,
 )
 
 @Composable
@@ -83,6 +85,8 @@ internal fun CoreProductRouteRenderer(
             onDislike = actions.dislikeRecommendation,
             onRetry = actions.retryHome,
             onPlayTrack = actions.resumeHomeQueue,
+            onStartMyWave = actions.startMyWave,
+            myWaveAllowed = actions.myWaveAllowed,
             onOpenPlaylist = actions.openHomePlaylist,
             onOpenOffline = actions.openOffline,
             onOpenProblems = actions.openProblems,

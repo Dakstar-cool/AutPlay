@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
@@ -48,6 +49,9 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SelfPairingCardTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private val qrDescription: String
+        get() = app.autplay.localizedAppContext(compose.activity, app.autplay.ui.AppLanguage.Russian)
+            .getString(app.autplay.R.string.profile_invitation_qr_description)
 
     @Test
     fun darkRussianQrFitsCompactScreenAndKeepsSecretOutOfSemantics() {
@@ -57,10 +61,10 @@ class SelfPairingCardTest {
         val payload = qr.encode().toString(Charsets.UTF_8)
         try {
             render(SelfPairingUiState(source = SelfPairingSourceState.Ready(status("OPEN"), payload)))
-            val node = compose.onNodeWithContentDescription(QR_CONTENT_DESCRIPTION)
+            val node = compose.onNodeWithContentDescription(qrDescription)
             node.performScrollTo().assertIsDisplayed()
             val semantics = node.fetchSemanticsNode()
-            assertEquals(listOf(QR_CONTENT_DESCRIPTION), semantics.config[SemanticsProperties.ContentDescription])
+            assertEquals(listOf(qrDescription), semantics.config[SemanticsProperties.ContentDescription])
             assertTrue(semantics.boundsInRoot.left >= 0f)
             assertTrue(semantics.boundsInRoot.right <= compose.onRoot().fetchSemanticsNode().boundsInRoot.right)
             compose.onNodeWithText(payload).assertDoesNotExist()
@@ -156,8 +160,8 @@ class SelfPairingCardTest {
                 setLocale(Locale.forLanguageTag(localeTag()))
             }
             val localized = compose.activity.createConfigurationContext(config)
-            CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config) {
-                MaterialTheme(colorScheme = darkColorScheme()) {
+            CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config, LocalResources provides localized.resources) {
+                app.autplay.ui.AutPlayTheme {
                     Surface(Modifier.fillMaxSize()) {
                         Column(Modifier.verticalScroll(rememberScrollState())) { SelfPairingCard(state, actions) }
                     }

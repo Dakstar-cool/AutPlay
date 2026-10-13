@@ -47,6 +47,38 @@ interface CatalogProjectionDao {
 
 @Dao
 interface LibraryDao {
+    @Query(
+        """
+        SELECT u.local_user_track_ref_id
+        FROM user_track_ref u
+        WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+          AND EXISTS (
+              SELECT 1 FROM library_entry l
+              WHERE l.local_user_track_ref_id = u.local_user_track_ref_id
+                AND l.server_profile_id = :profileId AND l.removed_at_ms IS NULL
+          )
+          AND (
+              EXISTS (
+                  SELECT 1 FROM local_audio_state a
+                  WHERE a.local_user_track_ref_id = u.local_user_track_ref_id
+                    AND a.status = 'AVAILABLE'
+                    AND (a.persisted_uri_permission = 1 OR a.content_uri LIKE 'content://media/%')
+              )
+              OR EXISTS (
+                  SELECT 1 FROM download_intent d
+                  WHERE d.local_user_track_ref_id = u.local_user_track_ref_id
+                    AND (d.server_profile_id = :profileId OR (:profileId = 'legacy-unscoped' AND d.server_profile_id IS NULL))
+                    AND d.state = 'COMPLETED'
+              )
+              OR (:vaultAvailable = 1 AND u.server_user_track_ref_id IS NOT NULL
+                  AND u.server_recording_id IS NOT NULL AND u.resolution_status = 'RESOLVED')
+          )
+        ORDER BY RANDOM()
+        LIMIT :limit
+        """,
+    )
+    suspend fun randomPlaybackCandidates(profileId: String, vaultAvailable: Boolean, limit: Int): List<String>
+
     @Upsert suspend fun upsertTrackRef(row: UserTrackRefEntity)
     @Upsert suspend fun upsertTrackRefs(rows: List<UserTrackRefEntity>)
     @Upsert suspend fun upsertEntry(row: LibraryEntryEntity)

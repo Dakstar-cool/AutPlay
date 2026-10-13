@@ -206,6 +206,8 @@ public fun HomeProductScreen(
     onPreviousTrack: () -> Unit = {},
     onNextTrack: () -> Unit = {},
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
+    onStartMyWave: () -> Unit = {},
+    myWaveAllowed: Boolean = true,
 ) {
     val heroState = buildHomePlaybackHeroUiState(
         homeState = state,
@@ -243,6 +245,20 @@ public fun HomeProductScreen(
                     swipeTargets = swipeTargets,
                     onPrevious = onPreviousTrack,
                     onNext = onNextTrack,
+                )
+            }
+        }
+        item(key = "home:my-wave") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onStartMyWave,
+                    enabled = myWaveAllowed,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("home-my-wave"),
+                ) { Text(stringResource(R.string.home_my_wave)) }
+                Text(
+                    stringResource(if (myWaveAllowed) R.string.home_my_wave_random else R.string.home_my_wave_locked),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AutPlayTokens.colors.mutedText,
                 )
             }
         }

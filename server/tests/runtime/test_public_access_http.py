@@ -9,7 +9,9 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
-from autplay.domain.auth import AccountRole, Principal
+from autplay.application.public_access import PublicAccessError
+from autplay.domain.auth import AccountRole, InvalidAccessTokenError, Principal
+from autplay.entrypoints.auth_http import bearer_authentication
 from autplay.entrypoints.public_access_http import (
     build_exact_proxy_source_resolver,
     create_public_access_router,
@@ -73,6 +75,57 @@ def client() -> TestClient:
         create_public_access_router(cast(Any, _Service()), authenticated=_authenticated)
     )
     return TestClient(app)
+
+
+@pytest.mark.parametrize("path", ("accounts", "account-invitations"))
+@pytest.mark.parametrize(
+    ("credential", "expected_status"),
+    (("owner", 200), ("user", 403), ("invalid", 401), (None, 401)),
+)
+def test_account_management_uses_the_real_bearer_dependency(
+    path: str, credential: str | None, expected_status: int
+) -> None:
+    owner = _authenticated(cast(Any, None))
+    user = Principal(owner.user_id, owner.device_id, owner.session_id, AccountRole.USER)
+    calls: list[Principal] = []
+
+    class Authentication:
+        def authenticate_access(self, token: str) -> Principal:
+            if token == "owner":
+                return owner
+            if token == "user":
+                return user
+            raise InvalidAccessTokenError()
+
+    class OwnerService(_Service):
+        def list_accounts(
+            self, principal: Principal, limit: int, cursor: str | None
+        ) -> dict[str, object]:
+            calls.append(principal)
+            if principal.role is not AccountRole.OWNER:
+                raise PublicAccessError("unauthorized")
+            return super().list_accounts(principal, limit, cursor)
+
+        def list_invitations(
+            self, principal: Principal, limit: int, cursor: str | None
+        ) -> dict[str, object]:
+            return self.list_accounts(principal, limit, cursor)
+
+    app = FastAPI()
+    install_error_handlers(app)
+    app.include_router(
+        create_public_access_router(
+            cast(Any, OwnerService()),
+            authenticated=bearer_authentication(cast(Any, Authentication())),
+        )
+    )
+    headers = {} if credential is None else {"Authorization": f"Bearer {credential}"}
+
+    response = TestClient(app).get(f"/public-access/{path}", headers=headers)
+
+    assert response.status_code == expected_status
+    assert response.headers["cache-control"] == "no-store"
+    assert calls == ([owner] if credential == "owner" else [user] if credential == "user" else [])
 
 
 def test_six_operations_are_no_store_and_keep_invitation_secret_out_of_replay(

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from typing import Protocol
 from uuid import UUID
 
+from anyio import CancelScope
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
@@ -111,7 +112,8 @@ def create_stream_router(
                 )
             if storage is None:
                 raise RuntimeError("stream storage dependency is missing")
-            reader = storage.open_range(
+            reader = await run_in_threadpool(
+                storage.open_range,
                 authorized.storage_key,
                 ByteRange(start=selected.start, end=selected.end),
                 expected_size=authorized.byte_size,
@@ -138,14 +140,19 @@ def create_stream_router(
     return router
 
 
-async def _stream(reader: RangeReader, request: Request) -> AsyncIterator[bytes]:
+async def _stream(reader: RangeReader, request: Request) -> AsyncGenerator[bytes]:
     try:
-        for payload in reader:
-            if await request.is_disconnected():
+        iterator = await run_in_threadpool(iter, reader)
+        while not await request.is_disconnected():
+            # Storage can be a slow disk/NAS. Keep one demand-pulled block in flight and
+            # never block other stream/HEAD/auth requests on its synchronous read.
+            payload = await run_in_threadpool(next, iterator, None)
+            if payload is None:
                 break
             yield payload
     finally:
-        reader.close()
+        with CancelScope(shield=True):
+            await run_in_threadpool(reader.close)
 
 
 def _principal(request: Request) -> Principal:

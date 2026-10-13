@@ -1,5 +1,7 @@
 package app.autplay.ui.profilepairing
 
+import app.autplay.ui.AutPlayDialog
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -22,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -51,6 +52,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 /** Presentation-only state. Commands are delegated to the application layer through [ProfilePairingActions]. */
 internal data class ProfilePairingUiState(
@@ -79,6 +81,7 @@ internal data class ProfilePairingUiState(
     /** Exact S1B checkpoint availability; PA2 USER first-bind creates no trusted-key recovery path. */
     val canReenrollTrustedDevice: Boolean = false,
     val selfPairing: SelfPairingUiState? = null,
+    val portableAccount: PortableAccountUiState? = null,
     val accountRecovery: AccountRecoveryUiState? = null,
     val accountDeletion: AccountDeletionUiState? = null,
 )
@@ -155,6 +158,7 @@ internal enum class ProfileRemoteAction { LOGOUT_CURRENT, LOGOUT_ALL, REVOKE_CUR
 
 /** UI callbacks only; they may start application-owned work but Compose never performs I/O itself. */
 internal data class ProfilePairingActions(
+    val portableAccount: PortableAccountActions = PortableAccountActions(),
     val startDiscovery: (String) -> Unit = {},
     val scanServerQr: () -> Unit = {},
     val confirmTrust: () -> Unit = {},
@@ -171,6 +175,7 @@ internal data class ProfilePairingActions(
     val retry: () -> Unit = {},
     val openSync: () -> Unit = {},
     val performRemoteAction: (ProfileRemoteAction) -> Unit = {},
+    val confirmRemoteAction: suspend (ProfileRemoteAction, String, CharArray) -> Boolean = { _, _, password -> password.fill('\u0000'); false },
     val reenrollTrustedDevice: () -> Unit = {},
     val redeemPublicAccountInvitation: (String) -> Unit = {},
     val pickPublicAccountInvitation: () -> Unit = {},
@@ -195,40 +200,42 @@ internal fun ProfilePairingScreen(
     state: ProfilePairingUiState,
     actions: ProfilePairingActions,
     modifier: Modifier = Modifier,
+    showHero: Boolean = true,
 ) {
     var origin by rememberSaveable { mutableStateOf("") }
     // An enrollment bearer is deliberately not saveable: process recreation must require a fresh entry.
     var invitation by remember { mutableStateOf("") }
     var publicInvitationDocument by remember { mutableStateOf("") }
-    var pendingConfirmation by rememberSaveable { mutableStateOf<ProfileRemoteAction?>(null) }
+    var pendingConfirmation by remember(state.accountLabel, state.deviceLabel, state.pairing) { mutableStateOf<ProfileRemoteAction?>(null) }
     val publicFirstBindReserved = publicRegistrationBlocksOrdinaryFirstBind(
         state.publicAccountRegistration,
     ) || selfPairingBlocksFirstBind(state.selfPairing) || accountRecoveryBlocksFirstBind(state.accountRecovery) ||
         accountDeletionBlocksFirstBind(state.accountDeletion)
 
     SecureWindowWhileVisible(
-        enabled = requiresSecureProfileWindow(state, publicInvitationDocument.isNotBlank()),
+        enabled = pendingConfirmation != null || requiresSecureProfileWindow(state, publicInvitationDocument.isNotBlank()),
     )
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        PersonalServerHero(state)
+        if (showHero) PersonalServerHero(state)
+        state.portableAccount?.let { PortableAccountCard(it, actions.portableAccount) }
         state.selfPairing?.let { SelfPairingCard(it, actions.selfPairing) }
         state.accountRecovery?.let { AccountRecoveryCard(it, actions.accountRecovery) }
         state.accountDeletion?.let { AccountDeletionCard(it, actions.accountDeletion) }
-        if (!selfPairingBlocksFirstBind(state.selfPairing) && !accountRecoveryBlocksFirstBind(state.accountRecovery) &&
-            !accountDeletionBlocksFirstBind(state.accountDeletion)) when (val pairing = state.pairing) {
-            PairingState.NotConnected, PairingState.Cancelled -> {
-                if (!publicFirstBindReserved) Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    color = AutPlayTokens.colors.raisedSurface,
-                    tonalElevation = 1.dp,
-                ) {
+        if (!publicFirstBindReserved) app.autplay.ui.PreferenceSection(
+            title = stringResource(if (state.pairing is PairingState.Connected) R.string.profile_account_devices else R.string.profile_connect_optional),
+            icon = AutPlayIcon.Server,
+            summary = stringResource(if (state.pairing is PairingState.Connected) R.string.profile_account_devices_summary else R.string.profile_connect_optional_summary),
+            initiallyExpanded = showHero || state.pairing !in listOf(PairingState.NotConnected, PairingState.Cancelled),
+        ) {
+            if (!selfPairingBlocksFirstBind(state.selfPairing) && !accountRecoveryBlocksFirstBind(state.accountRecovery) &&
+                !accountDeletionBlocksFirstBind(state.accountDeletion)) when (val pairing = state.pairing) {
+                PairingState.NotConnected, PairingState.Cancelled -> {
                     Column(
-                        modifier = Modifier.padding(18.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(
@@ -266,69 +273,69 @@ internal fun ProfilePairingScreen(
                         )
                     }
                 }
-            }
-            is PairingState.CheckingDiscovery -> PairingProgress(R.string.profile_connection_checking, actions.cancelPairing)
-            is PairingState.AwaitingTrust -> {
-                Text(stringResource(R.string.profile_connection_trust), style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.profile_trust_explanation))
-                state.serverLabel?.let { Text(stringResource(R.string.profile_server_named, it)) }
-                TrustEvidence(pairing.snapshot)
-                Button(onClick = actions.confirmTrust) { Text(stringResource(R.string.profile_trust_server)) }
-                OutlinedButton(onClick = { invitation = ""; actions.cancelPairing() }) { Text(stringResource(R.string.profile_cancel)) }
-            }
-            is PairingState.AwaitingConfirmation -> {
-                Text(
-                    stringResource(R.string.profile_connection_confirm),
-                    style = MaterialTheme.typography.titleMedium,
+                is PairingState.CheckingDiscovery -> PairingProgress(R.string.profile_connection_checking, actions.cancelPairing)
+                is PairingState.AwaitingTrust -> {
+                    Text(stringResource(R.string.profile_connection_trust), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.profile_trust_explanation))
+                    state.serverLabel?.let { Text(stringResource(R.string.profile_server_named, it)) }
+                    TrustEvidence(pairing.snapshot)
+                    Button(onClick = actions.confirmTrust) { Text(stringResource(R.string.profile_trust_server)) }
+                    OutlinedButton(onClick = { invitation = ""; actions.cancelPairing() }) { Text(stringResource(R.string.profile_cancel)) }
+                }
+                is PairingState.AwaitingConfirmation -> {
+                    Text(
+                        stringResource(R.string.profile_connection_confirm),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    state.serverLabel?.let { Text(stringResource(R.string.profile_server_named, it)) }
+                    TrustEvidence(pairing.snapshot)
+                    state.accountLabel?.let { Text(stringResource(R.string.profile_account_named, it)) }
+                    state.deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
+                    Text(stringResource(R.string.profile_confirm_before_exchange))
+                    OutlinedButton(onClick = actions.cancelPairing) {
+                        Text(stringResource(R.string.profile_cancel))
+                    }
+                }
+                is PairingState.ExchangingInvitation -> PairingProgress(R.string.profile_connection_exchanging, actions.cancelPairing)
+                is PairingState.Connected -> ConnectedProfile(
+                    state = state,
+                    actions = actions,
+                    remoteActionPending = state.pendingRemoteAction,
+                    requestConfirmation = { pendingConfirmation = it },
                 )
-                state.serverLabel?.let { Text(stringResource(R.string.profile_server_named, it)) }
-                TrustEvidence(pairing.snapshot)
-                state.accountLabel?.let { Text(stringResource(R.string.profile_account_named, it)) }
-                state.deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
-                Text(stringResource(R.string.profile_confirm_before_exchange))
-                OutlinedButton(onClick = actions.cancelPairing) {
-                    Text(stringResource(R.string.profile_cancel))
+                is PairingState.Blocked -> {
+                    Text(stringResource(R.string.profile_connection_attention), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(pairing.code.failureStringRes()))
+                    Text(stringResource(R.string.profile_local_data_preserved))
+                    Button(onClick = actions.retry) { Text(stringResource(R.string.profile_retry)) }
+                    OutlinedButton(onClick = actions.cancelPairing) { Text(stringResource(R.string.profile_cancel)) }
                 }
             }
-            is PairingState.ExchangingInvitation -> PairingProgress(R.string.profile_connection_exchanging, actions.cancelPairing)
-            is PairingState.Connected -> ConnectedProfile(
-                state = state,
-                actions = actions,
-                remoteActionPending = state.pendingRemoteAction,
-                requestConfirmation = { pendingConfirmation = it },
-            )
-            is PairingState.Blocked -> {
-                Text(stringResource(R.string.profile_connection_attention), style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(pairing.code.failureStringRes()))
-                Text(stringResource(R.string.profile_local_data_preserved))
-                Button(onClick = actions.retry) { Text(stringResource(R.string.profile_retry)) }
-                OutlinedButton(onClick = actions.cancelPairing) { Text(stringResource(R.string.profile_cancel)) }
+            if (!publicFirstBindReserved) {
+                state.admission?.let { AdmissionPanel(it, actions.admission) }
             }
-        }
-        if (!publicFirstBindReserved) {
-            state.admission?.let { AdmissionPanel(it, actions.admission) }
-        }
 
-        if (!publicFirstBindReserved && state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
-            Button(onClick = actions.scanEnrollmentInvitation) {
-                Text(stringResource(R.string.profile_scan_invitation_qr))
-            }
-            OutlinedTextField(
-                value = invitation,
-                onValueChange = { invitation = it.take(4096) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.profile_enrollment_invitation)) },
-                supportingText = { Text(stringResource(R.string.profile_invitation_hint)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            )
-            Text(stringResource(R.string.profile_invitation_sensitive_warning))
-            Button(enabled = invitation.isNotBlank(), onClick = {
-                actions.exchangeInvitation(invitation)
-                invitation = ""
-            }) {
-                Text(stringResource(R.string.profile_connect_device))
+            if (!publicFirstBindReserved && state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) {
+                Button(onClick = actions.scanEnrollmentInvitation) {
+                    Text(stringResource(R.string.profile_scan_invitation_qr))
+                }
+                OutlinedTextField(
+                    value = invitation,
+                    onValueChange = { invitation = it.take(4096) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.profile_enrollment_invitation)) },
+                    supportingText = { Text(stringResource(R.string.profile_invitation_hint)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                Text(stringResource(R.string.profile_invitation_sensitive_warning))
+                Button(enabled = invitation.isNotBlank(), onClick = {
+                    actions.exchangeInvitation(invitation)
+                    invitation = ""
+                }) {
+                    Text(stringResource(R.string.profile_connect_device))
+                }
             }
         }
         state.publicAccountRegistration?.takeIf { state.pairing is PairingState.NotConnected &&
@@ -387,9 +394,10 @@ internal fun ProfilePairingScreen(
             accountLabel = state.accountLabel,
             deviceLabel = state.deviceLabel,
             onDismiss = { pendingConfirmation = null },
-            onConfirm = {
-                pendingConfirmation = null
-                actions.performRemoteAction(action)
+            onConfirm = { login, password ->
+                actions.confirmRemoteAction(action, login, password).also { done ->
+                    if (done) pendingConfirmation = null
+                }
             },
         )
     }
@@ -437,44 +445,39 @@ private fun PublicAccountRegistrationPanel(
     onConfirmRegistration: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = AutPlayTokens.colors.raisedSurface,
-        tonalElevation = 1.dp,
-    ) {
+    app.autplay.ui.PreferenceSurface {
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Join an AutPlay server", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.profile_join_server), style = MaterialTheme.typography.titleMedium)
             when (state) {
                 PublicAccountRegistrationState.Idle,
                 is PublicAccountRegistrationState.Blocked,
                 -> {
                     if (state is PublicAccountRegistrationState.Blocked) {
                         Text(stringResource(R.string.profile_registration_failed), color = MaterialTheme.colorScheme.error)
-                        if (app.autplay.ui.LocalDeveloperMode.current) Text(state.code.toString())
+                        if (app.autplay.ui.LocalDeveloperMode.current) Text(state.code)
                     }
-                    Text("Scan the invitation QR or open an .autplayinvite file. The secret is kept only for this registration.")
+                    Text(stringResource(R.string.profile_account_invite_hint))
                     OutlinedTextField(
                         value = invitationDocument,
                         onValueChange = onInvitationDocumentChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Account invitation document") },
-                        supportingText = { Text("Manual entry is volatile and is not saved.") },
+                        label = { Text(stringResource(R.string.profile_account_invite_document)) },
+                        supportingText = { Text(stringResource(R.string.profile_account_invite_manual_hint)) },
                         visualTransformation = PasswordVisualTransformation(),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(onClick = onScanQr) { Text("Scan QR") }
-                        OutlinedButton(onClick = onPickDocument) { Text("Open file") }
+                        OutlinedButton(onClick = onScanQr) { Text(stringResource(R.string.profile_account_scan_qr)) }
+                        OutlinedButton(onClick = onPickDocument) { Text(stringResource(R.string.profile_account_open_file)) }
                     }
                     Button(
                         enabled = invitationDocument.isNotBlank(),
                         onClick = onImport,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Check invitation")
+                        Text(stringResource(R.string.profile_account_check_invite))
                     }
                 }
                 PublicAccountRegistrationState.Importing,
@@ -482,22 +485,22 @@ private fun PublicAccountRegistrationPanel(
                 -> PairingProgress(R.string.profile_connection_checking, onCancel)
                 is PublicAccountRegistrationState.AwaitingTrust -> {
                     val trust = publicAccountTrustPresentation(state)
-                    Text("Verify this server before sending the invitation secret.")
-                    Text("Server: ${trust.serverLabel}")
-                    Text("Identity fingerprint: ${trust.fingerprint}")
-                    Text("API origin: ${trust.apiOrigin}")
-                    Text("Stream origin: ${trust.streamOrigin}")
-                    Text("Account: ${trust.accountDisplayName}")
-                    Text("Role: ${trust.accountRole}")
-                    Text("Invitation expires: ${trust.expiresAt}")
-                    Button(onClick = onConfirmTrust) { Text("Trust this server") }
-                    OutlinedButton(onClick = onCancel) { Text("Cancel") }
+                    Text(stringResource(R.string.profile_account_verify_server))
+                    Text(stringResource(R.string.profile_server_named, trust.serverLabel))
+                    Text(stringResource(R.string.profile_trust_fingerprint, trust.fingerprint))
+                    Text(stringResource(R.string.profile_trust_api_origin, trust.apiOrigin))
+                    Text(stringResource(R.string.profile_trust_stream_origin, trust.streamOrigin))
+                    Text(stringResource(R.string.profile_account_named, trust.accountDisplayName))
+                    Text(stringResource(R.string.profile_account_role_user))
+                    Text(stringResource(R.string.profile_account_invite_expires, trust.expiresAt))
+                    Button(onClick = onConfirmTrust) { Text(stringResource(R.string.profile_trust_server)) }
+                    OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.profile_cancel)) }
                 }
                 is PublicAccountRegistrationState.AwaitingConfirmation -> {
-                    Text("Create account “${state.invitation.accountDisplayName}” and bind this phone as its first device?")
+                    Text(stringResource(R.string.profile_account_create_confirm, state.invitation.accountDisplayName))
                     Text(stringResource(R.string.profile_first_device_note))
-                    Button(onClick = onConfirmRegistration) { Text("Create account and connect") }
-                    OutlinedButton(onClick = onCancel) { Text("Cancel") }
+                    Button(onClick = onConfirmRegistration) { Text(stringResource(R.string.profile_account_create_connect)) }
+                    OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.profile_cancel)) }
                 }
                 PublicAccountRegistrationState.Redeeming -> {
                     Text(stringResource(R.string.profile_connection_exchanging), style = MaterialTheme.typography.titleMedium)
@@ -515,17 +518,12 @@ private fun OwnerProvisioningPanel(
     actions: ProfilePairingActions,
 ) {
     var displayName by rememberSaveable { mutableStateOf("") }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = AutPlayTokens.colors.raisedSurface,
-        tonalElevation = 1.dp,
-    ) {
+    app.autplay.ui.PreferenceSurface {
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Invite friends", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.profile_owner_invite_friends), style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.profile_invite_friend_note))
             state.errorCode?.let {
                 Text(stringResource(R.string.action_failed_friendly), color = MaterialTheme.colorScheme.error)
@@ -535,7 +533,7 @@ private fun OwnerProvisioningPanel(
                 value = displayName,
                 onValueChange = { displayName = it.take(120) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Friend account name") },
+                label = { Text(stringResource(R.string.profile_owner_friend_name)) },
                 singleLine = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -545,9 +543,9 @@ private fun OwnerProvisioningPanel(
                         actions.createOwnerAccountInvitation(displayName, 1_800)
                         displayName = ""
                     },
-                ) { Text("Create 30-minute invitation") }
+                ) { Text(stringResource(R.string.profile_owner_create_invite)) }
                 OutlinedButton(enabled = !state.busy, onClick = actions.refreshOwnerProvisioning) {
-                    Text("Refresh")
+                    Text(stringResource(R.string.profile_stats_refresh))
                 }
             }
             state.invitations.forEach { invitation ->
@@ -561,7 +559,7 @@ private fun OwnerProvisioningPanel(
                         OutlinedButton(
                             enabled = !state.busy,
                             onClick = { actions.cancelOwnerAccountInvitation(invitation.invitationId) },
-                        ) { Text("Cancel") }
+                        ) { Text(stringResource(R.string.profile_cancel)) }
                     }
                 }
             }
@@ -576,17 +574,17 @@ private fun OwnerProvisioningPanel(
                         OutlinedButton(
                             enabled = !state.busy,
                             onClick = { actions.disableProvisionedAccount(account.userId) },
-                        ) { Text("Disable") }
+                        ) { Text(stringResource(R.string.profile_owner_disable_account)) }
                     }
                 }
             }
             state.shownInvitation?.let { invitation ->
                 val document = remember(invitation.invitationId) { invitation.toDocumentJson() }
-                Text("Shown once. Share directly or let your friend scan this QR; do not copy it into a URL.")
+                Text(stringResource(R.string.profile_owner_invite_once))
                 InvitationQrCode(document)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { actions.shareOwnerAccountInvitation(invitation) }) { Text("Share invitation") }
-                    OutlinedButton(onClick = actions.dismissOwnerAccountInvitation) { Text("Done") }
+                    Button(onClick = { actions.shareOwnerAccountInvitation(invitation) }) { Text(stringResource(R.string.profile_owner_share_invite)) }
+                    OutlinedButton(onClick = actions.dismissOwnerAccountInvitation) { Text(stringResource(R.string.profile_done)) }
                 }
             }
         }
@@ -658,20 +656,7 @@ private fun TrustEvidence(snapshot: app.autplay.application.profilepairing.Pairi
  */
 @Composable
 private fun SecureWindowWhileVisible(enabled: Boolean) {
-    val window = LocalContext.current.findActivity()?.window
-    DisposableEffect(window, enabled) {
-        if (!enabled || window == null) return@DisposableEffect onDispose {}
-        val flag = WindowManager.LayoutParams.FLAG_SECURE
-        val alreadySecure = window.attributes.flags and flag != 0
-        window.addFlags(flag)
-        onDispose { if (!alreadySecure) window.clearFlags(flag) }
-    }
-}
-
-private fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
+    app.autplay.ui.SecureAccountWindow(enabled)
 }
 
 @Composable
@@ -679,7 +664,7 @@ private fun ExistingLocalDataChoiceDialog(
     onChoice: (ExistingLocalDataChoice) -> Unit,
     onReview: () -> Unit,
 ) {
-    AlertDialog(
+    AutPlayDialog(
         onDismissRequest = { onChoice(ExistingLocalDataChoice.CANCEL) },
         title = { Text(stringResource(R.string.profile_local_data_choice_title)) },
         text = { Text(stringResource(R.string.profile_local_data_choice_body)) },
@@ -722,7 +707,7 @@ private fun LocalDataReviewDialog(
     }
     val applying = review.applying || applyRequested
 
-    AlertDialog(
+    AutPlayDialog(
         onDismissRequest = { if (!applying) onCancel() },
         title = { Text(stringResource(R.string.profile_local_data_review_title)) },
         text = {
@@ -763,7 +748,7 @@ private fun LocalDataReviewDialog(
     )
 
     confirmationSelection?.let { selection ->
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { if (!applying) confirmationSelection = null },
             title = { Text(stringResource(R.string.profile_apply_local_data_title)) },
             text = {
@@ -808,27 +793,29 @@ private fun InvitationManagement(
     val validExpiry = expiry?.takeIf { it in state.minExpiryMinutes..state.maxExpiryMinutes }
     val busy = state.creating || state.cancelling
 
-    Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.profile_invitation_management_title), style = MaterialTheme.typography.titleMedium)
-        Text(stringResource(R.string.profile_invitation_management_body))
-        OutlinedTextField(
-            value = expiryInput,
-            onValueChange = { expiryInput = it.filter(Char::isDigit).take(6) },
-            label = { Text(stringResource(R.string.profile_invitation_expiry_minutes)) },
-            supportingText = {
-                Text(stringResource(R.string.profile_invitation_expiry_bounds, state.minExpiryMinutes, state.maxExpiryMinutes))
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        )
-        Button(enabled = validExpiry != null && !busy, onClick = { onCreate(requireNotNull(validExpiry)) }) {
-            Text(stringResource(R.string.profile_create_invitation))
+    app.autplay.ui.PreferenceSurface {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.profile_invitation_management_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.profile_invitation_management_body))
+            OutlinedTextField(
+                value = expiryInput,
+                onValueChange = { expiryInput = it.filter(Char::isDigit).take(6) },
+                label = { Text(stringResource(R.string.profile_invitation_expiry_minutes)) },
+                supportingText = {
+                    Text(stringResource(R.string.profile_invitation_expiry_bounds, state.minExpiryMinutes, state.maxExpiryMinutes))
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            Button(enabled = validExpiry != null && !busy, onClick = { onCreate(requireNotNull(validExpiry)) }) {
+                Text(stringResource(R.string.profile_create_invitation))
+            }
         }
     }
 
     state.createdSecret?.let { secret ->
         var showManualSecret by remember(secret) { mutableStateOf(false) }
-        AlertDialog(
+        AutPlayDialog(
             onDismissRequest = { if (!busy) onDismissCreated() },
             title = { Text(stringResource(R.string.profile_invitation_created_title)) },
             text = {
@@ -839,11 +826,12 @@ private fun InvitationManagement(
                         Text(stringResource(if (showManualSecret) R.string.profile_hide_manual_invitation else R.string.profile_show_manual_invitation))
                     }
                     if (showManualSecret) {
+                        val secretDescription = stringResource(R.string.profile_invitation_secret_description)
                         // The fallback is non-selectable; enrollment bearers must not enter the clipboard.
                         Text(
                             text = secret,
                             modifier = Modifier.clearAndSetSemantics {
-                                contentDescription = CREATED_INVITATION_SECRET_DESCRIPTION
+                                contentDescription = secretDescription
                             },
                         )
                     }
@@ -864,7 +852,6 @@ private fun InvitationManagement(
     }
 }
 
-private const val CREATED_INVITATION_SECRET_DESCRIPTION = "One-time invitation secret"
 
 @Composable
 private fun PairingProgress(message: Int, onCancel: () -> Unit) {
@@ -906,7 +893,7 @@ private fun ConnectedProfile(
         OutlinedButton(
             enabled = remoteActionPending == null,
             onClick = actions.reenrollTrustedDevice,
-        ) { Text("Re-enroll trusted device") }
+        ) { Text(stringResource(R.string.profile_reenroll_device)) }
     }
     ProfileActionButton(ProfileRemoteAction.LOGOUT_CURRENT, remoteActionPending, requestConfirmation)
     ProfileActionButton(ProfileRemoteAction.LOGOUT_ALL, remoteActionPending, requestConfirmation)
@@ -927,10 +914,15 @@ private fun ProfileActionConfirmation(
     accountLabel: String?,
     deviceLabel: String?,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
+    onConfirm: suspend (String, CharArray) -> Boolean,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
+    var login by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    AutPlayDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
         title = { Text(stringResource(action.confirmTitleRes())) },
         text = {
             Column {
@@ -938,10 +930,23 @@ private fun ProfileActionConfirmation(
                 accountLabel?.let { Text(stringResource(R.string.profile_account_named, it)) }
                 deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
                 Text(stringResource(R.string.profile_local_data_preserved))
+                OutlinedTextField(value = login, onValueChange = { login = it.take(24) }, singleLine = true,
+                    label = { Text(stringResource(R.string.portable_account_login)) }, enabled = !busy)
+                OutlinedTextField(value = password, onValueChange = { password = it.take(256) }, singleLine = true,
+                    label = { Text(stringResource(R.string.portable_account_password)) }, enabled = !busy,
+                    visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                if (failed) Text(stringResource(R.string.portable_account_auth_failed), color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { Button(onClick = onConfirm) { Text(stringResource(R.string.profile_confirm)) } },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text(stringResource(R.string.profile_cancel)) } },
+        confirmButton = { Button(enabled = !busy && login.isNotBlank() && password.isNotEmpty(), onClick = {
+            busy = true
+            val material = password.toCharArray()
+            password = ""
+            scope.launch {
+                try { failed = !onConfirm(login, material) } finally { material.fill('\u0000'); busy = false }
+            }
+        }) { Text(stringResource(R.string.profile_confirm)) } },
+        dismissButton = { OutlinedButton(enabled = !busy, onClick = onDismiss) { Text(stringResource(R.string.profile_cancel)) } },
     )
 }
 

@@ -71,8 +71,30 @@ data class SessionCredentialEnvelope(
     val selfDevicePairingPending: String? = null,
     val accountRecoveryRole: String? = null,
     val accountRecoveryPending: String? = null,
+    /** Password-encrypted account key, additionally protected by the device Keystore. */
+    val portableAccountDocument: String? = null,
+    /** An unsaved recovery file stays encrypted until explicit export and verification. */
+    val portableAccountRecoveryDocument: String? = null,
+    val portableAccountStandaloneSinceMs: Long? = null,
+    val portableAccountPendingCommand: String? = null,
+    /** Bounded recovery ancestry and conservative enrollment history, encrypted with the root. */
+    val portableAccountLineage: String? = null,
 ) {
     init {
+        if (portableAccountDocument != null) {
+            require(portableAccountDocument.length in 2..4096)
+            require(portableAccountRecoveryDocument == null || boundedUtf8(portableAccountRecoveryDocument, 65_536))
+            require(portableAccountLineage == null || boundedUtf8(portableAccountLineage, 49_152))
+            require(refreshToken == null && !refreshPending && generation == 0L)
+            require(bindingCommitId == null && selfDevicePairingRole == null && accountRecoveryRole == null &&
+                publicAccessPendingRegistrationId == null && m5PendingRotationId == null && m5PendingExchangeId == null)
+            require(portableAccountStandaloneSinceMs == null || portableAccountStandaloneSinceMs >= 0)
+        } else require(portableAccountRecoveryDocument == null && portableAccountStandaloneSinceMs == null && portableAccountLineage == null)
+        portableAccountPendingCommand?.let {
+            require(boundedUtf8(it, 98_304) && portableAccountDocument == null && refreshToken == null && generation == 0L)
+            require(bindingCommitId == null && selfDevicePairingRole == null && accountRecoveryRole == null &&
+                publicAccessPendingRegistrationId == null && m5PendingRotationId == null && m5PendingExchangeId == null)
+        }
         require(accessToken.isNotBlank() && accessToken.length <= MAX_TOKEN_CHARS)
         require(refreshToken == null || (refreshToken.isNotBlank() && refreshToken.length <= MAX_TOKEN_CHARS))
         require(generation >= 0)
@@ -117,7 +139,13 @@ data class SessionCredentialEnvelope(
     private companion object {
         const val MAX_TOKEN_CHARS = 4_096
         const val MAX_MATERIALIZATION_CHARS = 8_192
+        fun boundedUtf8(value: String, maximum: Int): Boolean {
+            if (value.length !in 2..maximum) return false
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            return try { bytes.size <= maximum } finally { bytes.fill(0) }
+        }
     }
+    override fun toString(): String = "SessionCredentialEnvelope(redacted)"
 }
 
 /** Keeps old raw access-token values readable while new profiles retain their refresh credential. */
@@ -151,6 +179,11 @@ object SessionCredentialEnvelopeCodec {
             selfDevicePairingPending = value["self_device_pairing_pending"]?.jsonPrimitive?.content,
             accountRecoveryRole = value["account_recovery_role"]?.jsonPrimitive?.content,
             accountRecoveryPending = value["account_recovery_pending"]?.jsonPrimitive?.content,
+            portableAccountDocument = value["portable_account_document"]?.jsonPrimitive?.content,
+            portableAccountRecoveryDocument = value["portable_account_recovery_document"]?.jsonPrimitive?.content,
+            portableAccountStandaloneSinceMs = value["portable_account_standalone_since_ms"]?.jsonPrimitive?.content?.toLongOrNull(),
+            portableAccountPendingCommand = value["portable_account_pending_command"]?.jsonPrimitive?.content,
+            portableAccountLineage = value["portable_account_lineage"]?.jsonPrimitive?.content,
         )
     }
 
@@ -177,6 +210,11 @@ object SessionCredentialEnvelopeCodec {
         value.selfDevicePairingPending?.let { put("self_device_pairing_pending", it) }
         value.accountRecoveryRole?.let { put("account_recovery_role", it) }
         value.accountRecoveryPending?.let { put("account_recovery_pending", it) }
+        value.portableAccountDocument?.let { put("portable_account_document", it) }
+        value.portableAccountRecoveryDocument?.let { put("portable_account_recovery_document", it) }
+        value.portableAccountStandaloneSinceMs?.let { put("portable_account_standalone_since_ms", it) }
+        value.portableAccountPendingCommand?.let { put("portable_account_pending_command", it) }
+        value.portableAccountLineage?.let { put("portable_account_lineage", it) }
     }.toString().toByteArray(StandardCharsets.UTF_8)
 
     private fun JsonObject.requiredString(name: String): String =

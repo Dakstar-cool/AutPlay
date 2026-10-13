@@ -56,6 +56,31 @@ class PlaybackPlayerSurfacesTest {
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun miniPlayerDownwardSwipeDismissesWithoutOpeningOrTogglingPlayback() {
+        var dismissCalls = 0
+        var openCalls = 0
+        var toggleCalls = 0
+        composeRule.setContent { AutPlayTheme {
+            PlaybackMiniPlayer(ordinaryState().copy(
+                playbackStatus = PlaybackStatus.Buffering,
+                source = PlaybackSourcePresentation.Unknown,
+                controls = PlaybackControlGate.Locked(PlaybackControlLockReason.SOURCE_UNAVAILABLE),
+                dismissEnabled = true,
+            ), { openCalls++ }, { toggleCalls++ }, {},
+                onDismiss = { dismissCalls++ })
+        } }
+        val dragDistance = 100f * context.resources.displayMetrics.density
+        composeRule.onNodeWithTag("persistent-mini-player").performTouchInput {
+            swipeDown(startY = centerY, endY = centerY + dragDistance, durationMillis = 300L)
+        }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(1, dismissCalls)
+            assertEquals(0, openCalls)
+            assertEquals(0, toggleCalls)
+        }
+    }
+
     @Test fun fullPlayerUsesActualNeighboursEvenAtLinearQueueBoundary() {
         val state = androidx.compose.runtime.mutableStateOf(ordinaryState().copy(previousMediaId = "last", nextMediaId = "first"))
         var previousCalls = 0
@@ -366,7 +391,7 @@ class PlaybackPlayerSurfacesTest {
                 }
             }
         }
-        val collapseDistance = composeRule.onNodeWithTag("now-playing-panel").fetchSemanticsNode().boundsInRoot.height * 0.55f
+        val collapseDistance = 130f * context.resources.displayMetrics.density
         composeRule.onNodeWithTag("player-cover").performTouchInput {
             swipeDown(startY = height * 0.1f, endY = height * 0.1f + collapseDistance, durationMillis = 500L)
         }

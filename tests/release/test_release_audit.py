@@ -21,6 +21,31 @@ def _load_release_audit() -> ModuleType:
 p14_release_audit = _load_release_audit()
 
 
+def test_cuda_metapackage_license_evidence_retains_gpu_publication_review() -> None:
+    row: dict[str, object] = {
+        "license_expression": None,
+        "license": None,
+        "classifiers": [],
+    }
+    evidence = p14_release_audit._python_license_evidence(
+        row,
+        name="cuda-toolkit",
+        version="13.0.3.0",
+    )
+
+    assert evidence == [
+        "Proprietary NVIDIA CUDA Toolkit terms (dependency-only meta-package; "
+        "source-verified at https://docs.nvidia.com/cuda/archive/13.0.3/eula/index.html; "
+        "wheel SHA256 d693caaa261214ddd7dbb60d68e71cbed884e68c2be7509778f3051da0b91c3f)"
+    ]
+    assert p14_release_audit._license_review(evidence) == (
+        "PROPRIETARY_GPU_DISTRIBUTION_REVIEW_REQUIRED"
+    )
+    for name, version in (("cuda-toolkit", "13.0.4.0"), ("unreviewed-toolkit", "13.0.3.0")):
+        with pytest.raises(RuntimeError, match="license metadata is missing"):
+            p14_release_audit._python_license_evidence(row, name=name, version=version)
+
+
 def test_python_license_override_is_pinned_to_the_reviewed_source_version() -> None:
     row: dict[str, object] = {
         "license_expression": None,

@@ -47,14 +47,13 @@ internal fun profileRequiresConnectionAttention(profile: ProfilePairingUiState):
 internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: LegacySecondaryRouteActions) {
     val profile = state.profilePairing
     val connected = profile.pairing is PairingState.Connected
-    val activeFlow = profileRequiresConnectionAttention(profile)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(AutPlayTokens.dimensions.sectionSpacing)) {
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = AutPlayTokens.colors.raisedSurface) {
+        app.autplay.ui.PreferenceSurface {
             Row(Modifier.fillMaxWidth().padding(AutPlayTokens.dimensions.screenPadding), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Surface(shape = CircleShape, color = AutPlayTokens.colors.softAccent, contentColor = MaterialTheme.colorScheme.primary) {
                     AutPlayPlatformIcon(AutPlayIcon.Profile, null, Modifier.padding(16.dp).size(30.dp))
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(profile.accountLabel ?: stringResource(R.string.profile_my_music), style = MaterialTheme.typography.headlineSmall)
                     Text(
                         if (connected) profile.serverLabel ?: stringResource(R.string.profile_connection_connected)
@@ -65,7 +64,7 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
                 }
             }
         }
-        if (activeFlow) ProfileFrontendScreen(profile, actions.profilePairing)
+        ProfileFrontendScreen(profile, actions.profilePairing, showHero = false)
         OwnerProfileStatisticsCard(state.ownerStatisticsState, actions.refreshOwnerStatistics)
         if (!state.socialAvailable) {
             SocialPublicIdPanel(state.social, actions.social, serverAvailable = false)
@@ -73,13 +72,6 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
         PreferenceSection(stringResource(R.string.profile_friends), AutPlayIcon.Wave, stringResource(R.string.profile_friends_summary)) {
             if (state.socialAvailable) SocialPanel(state.social, actions.social)
             else Text(stringResource(R.string.profile_friends_local), color = AutPlayTokens.colors.mutedText)
-        }
-        if (!activeFlow) PreferenceSection(
-            stringResource(if (connected) R.string.profile_account_devices else R.string.profile_connect_optional),
-            AutPlayIcon.Server,
-            stringResource(if (connected) R.string.profile_account_devices_summary else R.string.profile_connect_optional_summary),
-        ) {
-            ProfileFrontendScreen(profile, actions.profilePairing)
         }
     }
 }

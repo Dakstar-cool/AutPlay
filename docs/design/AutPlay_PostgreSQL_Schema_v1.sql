@@ -3476,3 +3476,117 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA sync FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_private FROM PUBLIC;
 
 COMMIT;
+
+-- BEGIN PORTABLE ACCOUNT 0066 REFERENCE
+-- Non-executing additive reference: unprefix '-- | ' only in a disposable database at 0065.
+-- The executable baseline above remains 0019; Alembic remains the production migration path.
+-- Identity.document contains private encrypted envelopes: never include it in ordinary owner exports.
+-- Challenges have no owner FK because registration precedes account creation; purge removes nested refs.
+-- | CREATE TABLE account.portable_identity (
+-- |  user_id UUID PRIMARY KEY REFERENCES account.user_account(user_id) ON DELETE CASCADE,
+-- |  public_key BYTEA NOT NULL, key_thumbprint BYTEA NOT NULL, document JSONB NOT NULL,
+-- |  revision BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+-- |  CONSTRAINT portable_identity_key_check
+-- |   CHECK(octet_length(public_key)=91 AND octet_length(key_thumbprint)=32),
+-- |  CONSTRAINT portable_identity_document_check
+-- |   CHECK(revision>=1 AND jsonb_typeof(document)='object' AND octet_length(document::text)<=4096)
+-- | );
+-- | CREATE TABLE account.portable_challenge (
+-- |  challenge_id UUID PRIMARY KEY, purpose TEXT NOT NULL, source_key BYTEA NOT NULL,
+-- |  account_id UUID NOT NULL, actor_device_id UUID, actor_session_id UUID,
+-- |  document JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
+-- |  request_hash BYTEA, receipt JSONB, receipt_expires_at TIMESTAMPTZ,
+-- |  CONSTRAINT portable_challenge_purpose_check
+-- |   CHECK(purpose IN ('REGISTER','LOGIN','CLAIM','REAUTH','BACKUP','PASSWORD_CHANGE','ROTATE')),
+-- |  CONSTRAINT portable_challenge_hash_check
+-- |   CHECK(octet_length(source_key)=32 AND (request_hash IS NULL OR octet_length(request_hash)=32)),
+-- |  CONSTRAINT portable_challenge_expiry_check
+-- |   CHECK(expires_at>created_at AND expires_at<=created_at+interval '5 minutes'),
+-- |  CONSTRAINT portable_challenge_document_check
+-- |   CHECK(jsonb_typeof(document)='object' AND octet_length(document::text)<=16384)
+-- | );
+-- | CREATE INDEX portable_challenge_source_time ON account.portable_challenge(source_key,created_at);
+-- | CREATE INDEX portable_challenge_expiry ON account.portable_challenge(expires_at);
+-- | CREATE TABLE account.portable_record (
+-- |  user_id UUID NOT NULL REFERENCES account.user_account(user_id) ON DELETE CASCADE,
+-- |  record_id UUID NOT NULL, kind TEXT NOT NULL, document JSONB NOT NULL, content_hash BYTEA NOT NULL,
+-- |  created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(user_id,record_id),
+-- |  CONSTRAINT portable_record_kind_check
+-- |   CHECK(kind IN ('LISTENING','PREFERENCE','PLAYLIST','PLAYLIST_ENTRY','TASTE')),
+-- |  CONSTRAINT portable_record_document_check CHECK(octet_length(content_hash)=32
+-- |   AND jsonb_typeof(document)='object' AND octet_length(document::text)<=16384)
+-- | );
+-- | CREATE INDEX portable_record_account_cursor
+-- |  ON account.portable_record(user_id,updated_at,record_id);
+-- | CREATE INDEX portable_record_listening_aliases
+-- |  ON account.portable_record USING gin ((document->'event_ids'));
+-- | CREATE TABLE library.portable_taste_signal (
+-- |  user_id UUID NOT NULL REFERENCES account.user_account(user_id) ON DELETE RESTRICT,
+-- |  record_id UUID NOT NULL,
+-- |  user_track_ref_id UUID NOT NULL
+-- |   REFERENCES library.user_track_ref(user_track_ref_id) ON DELETE RESTRICT,
+-- |  interaction TEXT NOT NULL, weight SMALLINT NOT NULL, occurred_at_ms BIGINT NOT NULL,
+-- |  updated_at TIMESTAMPTZ NOT NULL, row_version BIGINT NOT NULL DEFAULT 1,
+-- |  PRIMARY KEY(user_id,record_id),
+-- |  CONSTRAINT portable_taste_signal_interaction_check
+-- |   CHECK(interaction IN ('LIKE','DISLIKE','SKIP','COMPLETE','EXCLUDE')),
+-- |  CONSTRAINT portable_taste_signal_weight_check CHECK(weight BETWEEN -1000 AND 1000),
+-- |  CONSTRAINT portable_taste_signal_revision_check
+-- |   CHECK(occurred_at_ms BETWEEN 0 AND 8640000000000000 AND row_version>=1)
+-- | );
+-- | CREATE INDEX portable_taste_signal_account_cursor
+-- |  ON library.portable_taste_signal(user_id,updated_at,record_id);
+-- | CREATE FUNCTION account.erase_portable_challenges() RETURNS trigger
+-- |  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+-- | DECLARE owner_ids UUID[]; challenge_ids UUID[];
+-- | BEGIN
+-- |  SELECT array_agg(identifier) INTO owner_ids FROM (
+-- |   SELECT OLD.user_id AS identifier
+-- |   UNION SELECT device_id FROM account.device WHERE user_id=OLD.user_id
+-- |   UNION SELECT session_id FROM account.user_session WHERE user_id=OLD.user_id
+-- |  ) owned;
+-- |  SELECT array_agg(c.challenge_id) INTO challenge_ids FROM account.portable_challenge c
+-- |  WHERE c.account_id=OLD.user_id OR c.actor_device_id=ANY(owner_ids)
+-- |  OR c.actor_session_id=ANY(owner_ids)
+-- |  OR EXISTS(SELECT 1 FROM unnest(owner_ids) identifier WHERE
+-- |   strpos(replace(lower(c.document::text),'-',''),replace(identifier::text,'-',''))>0
+-- |   OR strpos(replace(lower(c.receipt::text),'-',''),replace(identifier::text,'-',''))>0);
+-- |  -- Keep the prior legacy deletion contract when no portable authority/data is involved.
+-- |  IF NOT app_private.privacy_owner_allowed(OLD.user_id) AND (
+-- |   coalesce(cardinality(challenge_ids),0)>0
+-- |   OR EXISTS(SELECT 1 FROM account.portable_identity WHERE user_id=OLD.user_id)
+-- |   OR EXISTS(SELECT 1 FROM account.portable_record WHERE user_id=OLD.user_id)
+-- |   OR EXISTS(SELECT 1 FROM library.portable_taste_signal WHERE user_id=OLD.user_id)
+-- |  ) THEN
+-- |   RAISE EXCEPTION 'portable_account_erasure_requires_privacy_authority' USING ERRCODE='55000';
+-- |  END IF;
+-- |  DELETE FROM account.portable_challenge WHERE challenge_id=ANY(challenge_ids);
+-- |  RETURN OLD;
+-- | END $$;
+-- | CREATE TRIGGER erase_portable_challenges BEFORE DELETE ON account.user_account
+-- |  FOR EACH ROW EXECUTE FUNCTION account.erase_portable_challenges();
+-- |
+-- | -- Preserve the same guarded prior purge definition for an empty development downgrade.
+-- | DO $reference_portable_upgrade$
+-- | DECLARE original TEXT;
+-- | BEGIN
+-- |  SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure) INTO original;
+-- |  IF original IS NULL OR (length(original)-length(replace(original,'FOREACH step IN ARRAY ARRAY[','')))
+-- |     /length('FOREACH step IN ARRAY ARRAY[')<>1 THEN
+-- |   RAISE EXCEPTION 'unexpected portable account privacy definition';
+-- |  END IF;
+-- |  INSERT INTO app_private.privacy_prior_definition(name,definition)
+-- |  VALUES('0066:account.purge_account(uuid,uuid)',original);
+-- |  EXECUTE replace(original,'FOREACH step IN ARRAY ARRAY[',
+-- |   'FOREACH step IN ARRAY ARRAY[' || $portable_purge_insert$
+-- |  $q$DELETE FROM account.portable_challenge c WHERE c.account_id=$1
+-- |  OR c.actor_device_id=ANY($2) OR c.actor_session_id=ANY($2)
+-- |  OR EXISTS(SELECT 1 FROM unnest(array_prepend($1,$2)) identifier WHERE
+-- |  strpos(replace(lower(c.document::text),'-',''),replace(identifier::text,'-',''))>0
+-- |  OR strpos(replace(lower(c.receipt::text),'-',''),replace(identifier::text,'-',''))>0)$q$,
+-- |  $q$DELETE FROM library.portable_taste_signal WHERE user_id=$1$q$,
+-- |  $q$DELETE FROM account.portable_record WHERE user_id=$1$q$,
+-- |  $q$DELETE FROM account.portable_identity WHERE user_id=$1$q$,
+-- | $portable_purge_insert$);
+-- | END $reference_portable_upgrade$;
+-- END PORTABLE ACCOUNT 0066 REFERENCE

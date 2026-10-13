@@ -8,13 +8,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -32,6 +37,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -133,7 +142,11 @@ class ProfilePairingScreenTest {
 
     @Test
     fun connectedLogoutAllRequiresConfirmationAndSuppressesDuplicateAction() {
-        val performed = AtomicReference<ProfileRemoteAction?>(null)
+        val calls = AtomicInteger(0)
+        val capturedPassword = AtomicReference<CharArray?>(null)
+        val confirmation = CompletableDeferred<Boolean>()
+        val login = "fixture_user"
+        val password = "fixture-password"
         render(
             state = ProfilePairingUiState(
                 pairing = connectedState(),
@@ -141,14 +154,57 @@ class ProfilePairingScreenTest {
                 deviceLabel = "Phone",
                 pendingSyncCount = 2,
             ),
-            actions = ProfilePairingActions(performRemoteAction = performed::set),
+            actions = ProfilePairingActions(
+                performRemoteAction = { error("Logout must use protected confirmation") },
+                confirmRemoteAction = { action, suppliedLogin, suppliedPassword ->
+                    assertEquals(ProfileRemoteAction.LOGOUT_ALL, action)
+                    assertEquals(login, suppliedLogin)
+                    assertArrayEquals(password.toCharArray(), suppliedPassword)
+                    capturedPassword.set(suppliedPassword)
+                    calls.incrementAndGet()
+                    confirmation.await()
+                },
+            ),
         )
 
         compose.onNodeWithText(context.getString(R.string.profile_connection_sync_pending)).assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, calls.get()) }
         compose.onNodeWithText(context.getString(R.string.profile_logout_all)).performClick()
-        compose.onNodeWithText(context.getString(R.string.profile_confirm_logout_all_title)).assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.profile_confirm)).performClick()
-        compose.runOnIdle { assert(performed.get() == ProfileRemoteAction.LOGOUT_ALL) }
+        val title = context.getString(R.string.profile_confirm_logout_all_title)
+        val confirm = compose.onNodeWithText(context.getString(R.string.profile_confirm))
+        val loginField = compose.onNodeWithText(context.getString(R.string.portable_account_login))
+        val passwordField = compose.onNodeWithText(context.getString(R.string.portable_account_password))
+        compose.onNodeWithText(title).assertIsDisplayed()
+        confirm.assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, calls.get()) }
+        loginField.performTextInput(login)
+        confirm.assertIsNotEnabled()
+        passwordField.performTextInput(password)
+        compose.runOnIdle { assertEquals(0, calls.get()) }
+        try {
+            confirm.assertIsEnabled().performClick()
+            compose.waitUntil(5_000L) { calls.get() == 1 }
+            confirm.assertIsDisplayed().assertIsNotEnabled().performTouchInput { click() }
+            compose.onNodeWithText(context.getString(R.string.profile_cancel)).assertIsNotEnabled()
+            loginField.assertIsNotEnabled()
+            passwordField.assertIsNotEnabled()
+            compose.runOnIdle {
+                assertEquals(1, calls.get())
+                confirmation.complete(true)
+            }
+            compose.waitUntil(5_000L) {
+                compose.onAllNodesWithText(title).fetchSemanticsNodes().isEmpty()
+            }
+            compose.onNodeWithText(title).assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(1, calls.get())
+                val material = capturedPassword.get()
+                assertNotNull(material)
+                assertTrue("Confirmation must wipe the supplied password", material!!.all { it == '\u0000' })
+            }
+        } finally {
+            confirmation.complete(false)
+        }
     }
 
     @Test
@@ -244,15 +300,15 @@ class ProfilePairingScreenTest {
         compose.onNodeWithText(context.getString(R.string.profile_create_invitation))
             .performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(10, createdExpiry.get()) }
-        compose.onNodeWithContentDescription(QR_CONTENT_DESCRIPTION).assertIsDisplayed()
-        compose.onNodeWithContentDescription("One-time invitation secret").assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_qr_description)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_secret_description)).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.profile_show_manual_invitation))
             .assertIsDisplayed().performClick()
-        compose.onNodeWithContentDescription("One-time invitation secret").assertIsDisplayed()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_secret_description)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_cancel_invitation))
             .assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, cancelled.get()) }
-        compose.onNodeWithContentDescription("One-time invitation secret").assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_secret_description)).assertDoesNotExist()
     }
 
     @Test
@@ -270,8 +326,8 @@ class ProfilePairingScreenTest {
             ),
         )
 
-        val qr = compose.onNodeWithContentDescription(QR_CONTENT_DESCRIPTION).fetchSemanticsNode()
-        assertEquals(listOf(QR_CONTENT_DESCRIPTION), qr.config[SemanticsProperties.ContentDescription])
+        val qr = compose.onNodeWithContentDescription(context.getString(R.string.profile_invitation_qr_description)).fetchSemanticsNode()
+        assertEquals(listOf(context.getString(R.string.profile_invitation_qr_description)), qr.config[SemanticsProperties.ContentDescription])
     }
 
     private fun render(state: ProfilePairingUiState, actions: ProfilePairingActions = ProfilePairingActions()) =

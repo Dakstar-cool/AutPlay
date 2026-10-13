@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -109,8 +110,8 @@ class AccountRecoveryCardTest {
         val config = Configuration(compose.activity.resources.configuration).apply { setLocale(Locale.forLanguageTag(locale)) }
         val localized = compose.activity.createConfigurationContext(config)
         compose.setContent {
-            CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config) {
-                MaterialTheme(colorScheme = darkColorScheme()) {
+            CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides config, LocalResources provides localized.resources) {
+                app.autplay.ui.AutPlayTheme {
                     Surface(Modifier.fillMaxSize()) {
                         Column(Modifier.verticalScroll(rememberScrollState())) { AccountRecoveryCard(state, actions) }
                     }

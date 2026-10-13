@@ -70,6 +70,13 @@ INTERNAL_PACKAGES = {
     "autplay-sona-training",
 }
 PYTHON_LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, ...]] = {
+    # NVIDIA's pinned dependency-only wheel has no license metadata or license file.
+    # Record its versioned publisher terms; GPU publication still requires review.
+    ("cuda-toolkit", "13.0.3.0"): (
+        "Proprietary NVIDIA CUDA Toolkit terms (dependency-only meta-package; "
+        "source-verified at https://docs.nvidia.com/cuda/archive/13.0.3/eula/index.html; "
+        "wheel SHA256 d693caaa261214ddd7dbb60d68e71cbed884e68c2be7509778f3051da0b91c3f)",
+    ),
     (
         "yandex-music-downloader",
         "3.5.5",

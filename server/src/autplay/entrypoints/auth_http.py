@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse, Response
 
 from autplay.application.auth import AuthService
 from autplay.domain.auth import (
+    AccountReauthenticationRequiredError,
     InvalidAccessTokenError,
     InvalidRefreshTokenError,
     OwnedObjectNotFoundError,
@@ -68,7 +69,10 @@ def create_auth_router(service: AuthService) -> APIRouter:
     @router.post("/auth/logout", status_code=204, dependencies=authenticated)
     def logout(request: Request) -> Response:
         principal = _principal(request)
-        service.logout(principal, request_id=_request_id(request))
+        try:
+            service.logout(principal, request_id=_request_id(request))
+        except AccountReauthenticationRequiredError as error:
+            raise _reauth_error() from error
         return Response(status_code=204, headers=_NO_STORE_HEADERS)
 
     @router.post("/auth/logout-all", status_code=204, dependencies=authenticated)
@@ -76,6 +80,8 @@ def create_auth_router(service: AuthService) -> APIRouter:
         principal = _principal(request)
         try:
             service.logout_all(principal, request_id=_request_id(request))
+        except AccountReauthenticationRequiredError as error:
+            raise _reauth_error() from error
         except InvalidAccessTokenError as error:
             raise _access_error() from error
         return Response(status_code=204, headers=_NO_STORE_HEADERS)
@@ -96,6 +102,8 @@ def create_auth_router(service: AuthService) -> APIRouter:
                 device_id,
                 request_id=_request_id(request),
             )
+        except AccountReauthenticationRequiredError as error:
+            raise _reauth_error() from error
         except InvalidAccessTokenError as error:
             raise _access_error() from error
         except OwnedObjectNotFoundError as error:
@@ -138,6 +146,15 @@ def _access_error() -> ApiError:
         message="Authentication is required.",
         status_code=401,
         headers={**_NO_STORE_HEADERS, "WWW-Authenticate": "Bearer"},
+    )
+
+
+def _reauth_error() -> ApiError:
+    return ApiError(
+        code="account_reauthentication_required",
+        status_code=403,
+        message="Confirm account credentials before leaving this account.",
+        headers=dict(_NO_STORE_HEADERS),
     )
 
 

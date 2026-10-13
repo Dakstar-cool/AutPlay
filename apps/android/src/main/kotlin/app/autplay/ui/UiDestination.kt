@@ -101,6 +101,9 @@ public enum class AutPlayIcon {
     ThumbUp,
     ThumbDown,
     Timer,
+    Sun,
+    Moon,
+    ChevronDown,
 }
 
 /** Width categories based on the Android adaptive-layout guidance breakpoints. */

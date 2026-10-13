@@ -37,6 +37,47 @@ class PlaybackPersistenceRepositoryTest {
         context.deleteDatabase(databaseName)
     }
 
+    @Test fun myWaveReplacementRejectsChangedAuthorityWithoutWritingAndAcceptsOrdinaryQueues() = runBlocking {
+        val repository = PlaybackPersistenceRepository(database)
+        database.libraryDao().upsertTrackRef(track(id(401), uuid(402)))
+        fun entries(seed: Int) = listOf(NewPlaybackQueueEntry(id(seed), id(401), "HOME", "LOCAL_THEN_VAULT"))
+        repository.activateQueue(id(403), entries(404), "USER", "MY_WAVE_RANDOM", null, "GENERAL", 1,
+            ordinaryReplacementGuard = OrdinaryQueueReplacementGuard(null, null, null))
+        val original = requireNotNull(database.queueDao().activeSnapshotOnce())
+        val expected = OrdinaryQueueReplacementGuard(original.queueSnapshotId, "USER", null)
+        // A room, future mode, profile change or replacement can win after the UI's earlier read.
+        val competitors = listOf(
+            original.copy(queueType = "WAVE"), original.copy(queueType = "GUEST_WAVE"),
+            original.copy(queueType = "FUTURE"), original.copy(serverProfileId = uuid(405)),
+            original.copy(queueType = "PLAYLIST"),
+        )
+        for (competitor in competitors) {
+            database.queueDao().upsertSnapshot(competitor)
+            val failure = runCatching {
+                repository.activateQueue(id(406), entries(407), "USER", "MY_WAVE_RANDOM", null, "GENERAL", 2,
+                    ordinaryReplacementGuard = expected)
+            }.exceptionOrNull()
+            assertEquals("ORDINARY_QUEUE_AUTHORITY_CHANGED", failure?.message)
+            assertEquals(competitor, database.queueDao().activeSnapshotOnce())
+            assertNull(database.queueDao().snapshot(id(406).value))
+            assertNull(database.queueDao().entry(id(407).value))
+        }
+        database.queueDao().upsertSnapshot(original)
+        repository.activateQueue(id(408), entries(409), "USER", "MY_WAVE_RANDOM", null, "GENERAL", 3,
+            ordinaryReplacementGuard = expected)
+        val replacement = requireNotNull(repository.restoreActive())
+        assertEquals(id(408).value, replacement.snapshot.queueSnapshotId)
+        assertEquals("MY_WAVE_RANDOM", replacement.snapshot.sourceContextId)
+        assertNull(replacement.entries.single().recommendationAttributionJson)
+        val staleFailure = runCatching {
+            repository.activateQueue(id(410), entries(411), "USER", "MY_WAVE_RANDOM", null, "GENERAL", 4,
+                ordinaryReplacementGuard = expected)
+        }.exceptionOrNull()
+        assertEquals("ORDINARY_QUEUE_AUTHORITY_CHANGED", staleFailure?.message)
+        assertEquals(replacement.snapshot, database.queueDao().activeSnapshotOnce())
+        assertNull(database.queueDao().snapshot(id(410).value))
+    }
+
     @Test fun libraryContinuationPersistsTappedEntryAndItsSuccessor() = runBlocking {
         val repository = PlaybackPersistenceRepository(database)
         val trackIds = listOf(id(201), id(202), id(203))

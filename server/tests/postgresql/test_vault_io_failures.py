@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from autplay.adapters.filesystem.vault_process import RetainedVaultProcess
+from autplay.adapters.postgresql.resource_admission import SqlAlchemyResourceAdmissionRepository
 from autplay.application.resource_admission import ResourceAdmissionService
 from autplay.domain.resource_admission import ActivationFence, IoPermit, ResourceAdmissionError
 from autplay.domain.resource_execution import (
@@ -20,6 +21,7 @@ from autplay.domain.resource_execution import (
     ProcessExitEvidence,
     ProcessIdentity,
 )
+from autplay.runtime import vault_io as vault_io_runtime
 from autplay.runtime.resource_io_deadline import IoStopped, ResourceIoDeadline
 from autplay.runtime.vault_io import VaultIoCoordinator
 
@@ -116,6 +118,19 @@ def test_lost_cleanup_reply_reconciles_exact_commit_without_releasing_early(
     admission: AdmissionHarness, monkeypatch: pytest.MonkeyPatch, phase: str
 ) -> None:
     coordinator, actor, active, upload_id = setup(admission)
+    # This gate tests committed cleanup replies, not startup latency or lease
+    # expiry. Keep logical permission clocks fixed while retaining real SQL and
+    # child-process ownership; the startup-deadline gate above uses real time.
+    with admission.sessions() as session:
+        permission_time = SqlAlchemyResourceAdmissionRepository(session).current_time()
+    monkeypatch.setattr(
+        SqlAlchemyResourceAdmissionRepository, "current_time", lambda repo: permission_time
+    )
+    monkeypatch.setattr(
+        vault_io_runtime,
+        "ResourceIoDeadline",
+        lambda started: ResourceIoDeadline(started, clock=lambda: started),
+    )
     original_confirm = ResourceAdmissionService.confirm_execution_exit
     original_close = ResourceAdmissionService.close_io
     lost = False
@@ -126,6 +141,9 @@ def test_lost_cleanup_reply_reconciles_exact_commit_without_releasing_early(
         nonlocal lost
         result = original_confirm(service, ticket, proof)
         if not lost:
+            assert len(coordinator.pending()) == 1
+            assert coordinator.pending()[0].child.ticket == ticket
+            assert coordinator.supervisor.snapshot()
             lost = True
             raise ConnectionError("synthetic lost confirm reply")
         return result
@@ -134,6 +152,9 @@ def test_lost_cleanup_reply_reconciles_exact_commit_without_releasing_early(
         nonlocal lost
         original_close(service, permit)
         if not lost:
+            assert len(coordinator.pending()) == 1
+            assert coordinator.pending()[0].child.ticket.permit == permit
+            assert coordinator.supervisor.snapshot()
             lost = True
             raise ConnectionError("synthetic lost close reply")
 

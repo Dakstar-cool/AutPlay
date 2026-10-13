@@ -2,6 +2,7 @@ package app.autplay.ui.social
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Button
@@ -21,7 +22,6 @@ import app.autplay.application.social.PublicIdRegistrationState
 import app.autplay.application.social.SocialRuntimeState
 import app.autplay.application.social.normalizeSocialPublicId
 import app.autplay.application.social.publicIdOrNull
-import app.autplay.ui.AutPlayCard
 import app.autplay.ui.AutPlayTokens
 
 /** Also usable without a server, with a locally persisted Pending state supplied by the profile. */
@@ -36,8 +36,8 @@ fun SocialPublicIdPanel(
     val initial = registration.publicIdOrNull().orEmpty()
     var input by rememberSaveable(initial) { mutableStateOf(initial) }
     val normalized = normalizeSocialPublicId(input)
-    AutPlayCard(modifier) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    app.autplay.ui.PreferenceSurface(modifier) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.ui_friends_refresh_my_id), style = MaterialTheme.typography.titleMedium)
             if (registration is PublicIdRegistrationState.Confirmed) {
                 Text("@${registration.publicId}", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)

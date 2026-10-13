@@ -104,6 +104,12 @@ from .playlist import (
     PlaylistRow,
     SmartPlaylistRuleRow,
 )
+from .portable_account import (
+    PortableAccountChallengeRow,
+    PortableAccountRecordRow,
+    PortableAccountRow,
+)
+from .portable_taste import PortableTasteSignalRow
 from .profile_pairing import (
     DeviceAdmissionExchangeReceiptRow,
     DeviceAdmissionNonceRow,
@@ -208,6 +214,10 @@ from .web_passkeys import WebPasskeyCeremonyRow, WebPasskeyRevocationRow, WebPas
 from .worker_health import WorkerHealthRow
 
 MAPPED_ROWS: tuple[type[Base], ...] = (
+    PortableAccountRow,
+    PortableAccountChallengeRow,
+    PortableAccountRecordRow,
+    PortableTasteSignalRow,
     WorkerHealthRow,
     TrainingRunRow,
     TrainingParticipantRow,
@@ -473,6 +483,10 @@ __all__ = (
     "OrphanObjectClaimRow",
     "PlaylistEntryRow",
     "PlaylistRow",
+    "PortableAccountChallengeRow",
+    "PortableAccountRecordRow",
+    "PortableAccountRow",
+    "PortableTasteSignalRow",
     "PresenceHeartbeatRow",
     "PresenceSettingsRow",
     "ProfileLifecycleCommandRow",

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -86,7 +85,7 @@ internal fun SelfPairingCard(state: SelfPairingUiState, actions: SelfPairingActi
         }
     }
     if (!state.canAddPhone && !state.canScan && state.source == SelfPairingSourceState.Idle && state.recipient == SelfPairingRecipientState.Idle) return
-    Surface(shape = MaterialTheme.shapes.large, tonalElevation = 1.dp) {
+    app.autplay.ui.PreferenceSurface {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.self_pairing_title), style = MaterialTheme.typography.titleMedium)
             when (val source = state.source) {

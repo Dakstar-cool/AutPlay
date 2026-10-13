@@ -86,12 +86,28 @@ def test_edited_policy_blocks_downgrade_even_with_no_admissions(
     database_harness.upgrade(empty_database_name)
     with database_harness.connect(empty_database_name) as connection:
         connection.execute("UPDATE account.resource_quota_policy SET revision=2,default_devices=3")
+        head_before = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        assert head_before == ("0066_portable_local_account",)
+        purge_before = connection.execute(
+            "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
+        ).fetchone()
+        policy_before = connection.execute("SELECT * FROM account.resource_quota_policy").fetchall()
         connection.commit()
     with pytest.raises(DBAPIError, match="Refusing to discard resource quota"):
         database_harness.downgrade(empty_database_name, "0034_self_device_pairing")
     with database_harness.connect(empty_database_name) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0065_internet_catalogue_context",
+        assert (
+            connection.execute("SELECT version_num FROM alembic_version").fetchone() == head_before
+        )
+        assert (
+            connection.execute(
+                "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
+            ).fetchone()
+            == purge_before
+        )
+        assert (
+            connection.execute("SELECT * FROM account.resource_quota_policy").fetchall()
+            == policy_before
         )
         assert connection.execute(
             "SELECT default_devices FROM account.resource_quota_policy"

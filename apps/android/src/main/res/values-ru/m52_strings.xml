@@ -10,16 +10,9 @@
     <string name="profile_account_devices_summary">Подключение, устройства и безопасность аккаунта</string>
     <string name="profile_connect_optional">Подключить личный сервер</string>
     <string name="profile_connect_optional_summary">По желанию: синхронизация коллекции и музыка с друзьями</string>
-    <string name="settings_appearance_summary">Язык, тема и цвет оформления</string>
-    <string name="settings_library_summary">Папка с музыкой и обновление медиатеки</string>
-    <string name="settings_connection_summary">Личный сервер, синхронизация и мобильная сеть</string>
-    <string name="settings_wave_summary">Совместное прослушивание и загрузка следующих треков</string>
     <string name="settings_privacy_summary">Кто видит статистику ваших прослушиваний</string>
-    <string name="settings_transfer_summary">Сохранение и восстановление ваших настроек</string>
     <string name="settings_music_navigation">Музыка и история</string>
-    <string name="settings_music_summary">Плейлисты, загрузки, история и импорт</string>
     <string name="settings_about">О приложении</string>
-    <string name="settings_about_summary">Версия и режим разработчика</string>
     <string name="settings_app_version">AutPlay %1$s</string>
     <string name="settings_developer_mode">Режим разработчика</string>
     <string name="settings_developer_description">Разрешение для этого устройства выдаётся в админ-вебе → «Доверенные устройства».</string>

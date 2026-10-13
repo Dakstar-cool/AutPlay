@@ -2,15 +2,18 @@
 
 ## Current state
 
-AutPlay has reproducible local runtime Compose files, GitHub Actions for CI plus restricted
-release-candidate bundles, and a locally qualified PA3 production-edge candidate. Historical
-off-host restore and Android signer-custody/update gates have evidence, but the current `v0.4.0`
-distribution is still development-signed and not production-deployed. Live production remains
-blocked on exact-release qualification on a physical Android device, Admin/account target Gates A-D,
-reviewed real worker budgets, and PA3 certificate/external-scan/renewal/rollback/real-mobile evidence. The normal runtime
-and trusted-LAN files remain development evidence and must not be exposed to the public Internet or
-pointed at personal/production data. See `PRODUCTION_READINESS_PLAN.md` for the active sequence and
-`PUBLIC_EDGE_PA3.md` for the exact edge procedure.
+Android 1.0.8 is distributed as the exact production-signed `app.autplay` APK qualified on a
+physical Samsung M52. The compatible CPU server image remains 1.0.7 with Alembic
+`0066_portable_local_account`. A controlled existing target has verified rollout, owner-data
+preservation, backup/isolated restore and 13 running processes. The
+[1.0.8 release notes](../release/RELEASE_NOTES_1.0.8.md) bind that accepted scope to the artifacts.
+
+These results do not configure or qualify a different operator's server. Each new target still
+requires its own decisions, data-preserving migration, resource review and network/backup checks
+below. The normal runtime and trusted-LAN Compose files remain development examples and must not
+be exposed to the public Internet or pointed at personal/production data. See
+`PRODUCTION_READINESS_PLAN.md` for remaining cross-project work and `PUBLIC_EDGE_PA3.md` for the
+public-edge procedure. The historical 0.4.0 installer is not the current portable-account server.
 
 No checked-in workflow currently deploys, pushes an OCI image, creates a GitHub Release, signs an
 APK with a production key or runs a migration against a persistent target. This is an intentional

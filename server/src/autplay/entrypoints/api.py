@@ -64,6 +64,7 @@ from autplay.entrypoints.composition import (
     build_import_service,
     build_library_service,
     build_manual_discovery_service,
+    build_portable_account_service,
     build_profile_pairing_service,
     build_public_access_service,
     build_recommendation_service,
@@ -94,6 +95,7 @@ from autplay.entrypoints.metadata_http import create_metadata_router
 from autplay.entrypoints.music_catalogue_context_http import create_catalogue_context_router
 from autplay.entrypoints.music_discovery_http import create_music_discovery_router
 from autplay.entrypoints.music_http import create_music_router
+from autplay.entrypoints.portable_account_http import create_portable_account_router
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.entrypoints.public_access_http import (
     build_exact_proxy_source_resolver,
@@ -269,6 +271,15 @@ def create_app(
     app.add_middleware(RequestRuntimeMiddleware, metrics=runtime_metrics)
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
+    api_router.include_router(
+        create_portable_account_router(
+            build_portable_account_service(resolved_settings, engine),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=build_exact_proxy_source_resolver(
+                resolved_settings.public_access_trusted_proxy_ip
+            ),
+        )
+    )
     api_router.include_router(
         create_metadata_router(
             TrackMetadataService(sessionmaker(engine, class_=Session, expire_on_commit=False)),

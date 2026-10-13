@@ -82,6 +82,8 @@ def create_public_access_router(
     def _principal(request: Request) -> Principal:
         principal = authenticated(request)
         if principal is None:
+            principal = getattr(request.state, "principal", None)
+        if not isinstance(principal, Principal):
             raise _error("authentication_required", 401)
         return principal
 

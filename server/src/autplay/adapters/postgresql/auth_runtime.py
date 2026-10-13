@@ -20,7 +20,7 @@ from autplay.ports.auth import (
     NewSession,
 )
 
-from .models import AuditEventRow, DeviceRow, UserAccountRow, UserSessionRow
+from .models import AuditEventRow, DeviceRow, PortableAccountRow, UserAccountRow, UserSessionRow
 from .models.types import JsonValue
 from .resource_limits import (
     lock_resource_admission,
@@ -39,6 +39,11 @@ class SqlAlchemyAuthRepository:
 
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def requires_account_reauthentication(self, user_id: UUID) -> bool:
+        lock_resource_admission(self._session)
+        self._session.get(UserAccountRow, user_id, with_for_update=True)
+        return self._session.get(PortableAccountRow, user_id) is not None
 
     def acquire_owner_bootstrap_lock(self) -> None:
         """Acquire a transaction-scoped lock before checking the empty account table."""

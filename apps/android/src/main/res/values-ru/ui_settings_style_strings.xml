@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_invitation_qr_description">QR-код приглашения для подключения</string>
+    <string name="profile_join_server">Подключиться к серверу AutPlay</string>
+    <string name="profile_account_invite_hint">Отсканируйте QR-код приглашения или откройте файл .autplayinvite. Секрет хранится только до завершения регистрации.</string>
+    <string name="profile_account_invite_document">Документ приглашения в аккаунт</string>
+    <string name="profile_account_invite_manual_hint">Введённое приглашение не сохраняется.</string>
+    <string name="profile_account_scan_qr">Сканировать QR-код</string>
+    <string name="profile_account_open_file">Открыть файл</string>
+    <string name="profile_account_check_invite">Проверить приглашение</string>
+    <string name="profile_account_verify_server">Проверьте сервер перед отправкой секрета приглашения.</string>
+    <string name="profile_account_create_connect">Создать аккаунт и подключиться</string>
+    <string name="profile_owner_invite_friends">Пригласить друзей</string>
+    <string name="profile_owner_friend_name">Имя аккаунта друга</string>
+    <string name="profile_owner_create_invite">Пригласить на 30 минут</string>
+    <string name="profile_owner_disable_account">Отключить</string>
+    <string name="profile_owner_invite_once">Приглашение показано один раз. Отправьте его другу или предложите отсканировать QR-код. Не добавляйте секрет в ссылку.</string>
+    <string name="profile_owner_share_invite">Отправить приглашение</string>
+    <string name="profile_reenroll_device">Подключить доверенное устройство заново</string>
+    <string name="profile_trust_fingerprint">Отпечаток ключа: %1$s</string>
+    <string name="profile_trust_api_origin">Адрес API: %1$s</string>
+    <string name="profile_trust_stream_origin">Адрес аудиопотока: %1$s</string>
+    <string name="profile_account_role_user">Роль: пользователь</string>
+    <string name="profile_account_invite_expires">Приглашение действует до: %1$s</string>
+    <string name="profile_account_create_confirm">Создать аккаунт «%1$s» и подключить этот телефон как первое устройство?</string>
+    <string name="profile_invitation_secret_description">Секрет одноразового приглашения</string>
+    <string name="admission_approved_account">Подключение к аккаунту %1$s (%2$s) одобрено. Подтвердите аккаунт перед подключением.</string>
+    <string name="admission_confirm_account">Подтвердить аккаунт</string>
+    <string name="admission_connecting_device">Подключаем одобренное устройство…</string>
+    <string name="admission_connected">Подключено</string>
+    <string name="admission_retry">Повторить</string>
+    <string name="admission_rejected">Запрос на подключение отклонён.</string>
+    <string name="admission_blocked">Ключ этого устройства заблокирован.</string>
+    <string name="admission_expired">Срок действия запроса на подключение истёк.</string>
+    <string name="admission_cancelled">Запрос на подключение отменён.</string>
+    <string name="admission_unavailable">Сервис подтверждения недоступен. Локальную музыку можно слушать.</string>
+    <string name="admission_identity_changed">Ключ сервера изменился. Проверьте сервер перед повторной попыткой.</string>
+    <string name="training_consent_summary">Участие в улучшении рекомендаций</string>
+    <string name="profile_share_contact_title">Отправить карточку контакта AutPlay</string>
+    <string name="profile_share_account_title">Отправить приглашение AutPlay</string>
+    <string name="settings_theme">Тема</string>
+    <string name="settings_switch_to_light">Включить светлую тему</string>
+    <string name="settings_switch_to_dark">Включить тёмную тему</string>
+</resources>

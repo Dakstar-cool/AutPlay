@@ -137,6 +137,12 @@ class InvalidAccessTokenError(AuthenticationError):
     code = "invalid_access_token"
 
 
+class AccountReauthenticationRequiredError(AuthenticationError):
+    """Portable identities use the action-bound proof lifecycle instead of legacy logout."""
+
+    code = "account_reauthentication_required"
+
+
 class InvalidRefreshTokenError(AuthenticationError):
     """The refresh token is invalid, expired, or no longer usable."""
 
@@ -163,6 +169,7 @@ class OwnedObjectNotFoundError(AuthenticationError):
 
 __all__ = (
     "AccessTokenClaims",
+    "AccountReauthenticationRequiredError",
     "AccountRole",
     "AuthSessionState",
     "AuthenticationError",

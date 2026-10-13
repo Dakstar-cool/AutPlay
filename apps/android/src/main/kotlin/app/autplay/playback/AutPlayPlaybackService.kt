@@ -15,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -48,7 +49,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 
-/** Background player/session owner with bounded Room checkpoints and lazy current/next preflight. */
+/** Background player/session owner with bounded Room checkpoints and lazy source preflight. */
 @UnstableApi
 class AutPlayPlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -71,12 +72,14 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var queueGeneration = 0L
     private val resolutionJobs = mutableMapOf<String, Job>()
     private val resolvedQueueEntryIds = mutableSetOf<String>()
+    private var queueEntryIndices: Map<String, Int> = emptyMap()
     private var lastPlayerMetrics: PlayerMetricsSnapshot? = null
     private var pendingTransitionMetrics: PlayerMetricsSnapshot? = null
     private val metadataTrack = MutableStateFlow<String?>(null)
     private val notificationTarget = MutableStateFlow<Pair<String?, String?>>(null to null)
     private var smoothTrackTransitions = false
     private val sourceTimelines = mutableMapOf<String, PlaybackSourceTimeline>()
+    private val cutDurationMs = mutableMapOf<String, Long>()
     private var preservedHeadEntryId: String? = null
     private var preservedTailEntryId: String? = null
     private var applyingTransitionCuts = false
@@ -105,6 +108,9 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(PlaybackMediaSourceFactory.create(this, ::onSourceTimeline))
+            .setLoadControl(DefaultLoadControl.Builder()
+                .setBufferDurationsMs(15_000, 50_000, 1_000, 2_000)
+                .build())
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -114,7 +120,12 @@ class AutPlayPlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
-            .also { it.addListener(PlayerListener()) }
+            .also {
+                // Media3 schedules one successor only after the current item is buffered.
+                // This is a bounded sample preload, never a full-file download before play.
+                it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(8_000_000L))
+                it.addListener(PlayerListener())
+            }
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(PlaybackNotification.sessionActivity(this))
             .setMediaButtonPreferences(PlaybackNotification.buttons(this, null, null, false))
@@ -381,9 +392,12 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             logicalSession = if (replacingQueue) persistence.recoverSession() else logicalSession ?: persistence.recoverSession()
             val generation = beginQueueGeneration()
-            val placeholders = queue.entries.map { entry -> placeholder(entry.queueEntryId) }
+            val placeholders = withContext(Dispatchers.Default) {
+                queue.entries.map { entry -> placeholder(entry.queueEntryId) }
+            }
             val index = queue.media.currentIndex.coerceIn(placeholders.indices)
             sourceTimelines.clear()
+            cutDurationMs.clear()
             preservedHeadEntryId = placeholders[index].mediaId.takeIf { queue.media.currentPositionMs < PlaybackTransitionCuts.CUT_MS }
             preservedTailEntryId = placeholders[index].mediaId
             player.setMediaItems(placeholders, index, queue.media.currentPositionMs)
@@ -397,11 +411,10 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             player.shuffleModeEnabled = queue.snapshot.shuffleMode != "OFF"
             publishRuntimeState(unavailableReason = currentUnavailableReason())
-            QueueResolutionPlan(queue, generation, index)
+            QueueResolutionPlan(queue, generation)
         }
         plan ?: return
-        scheduleResolveIndex(plan.queue, plan.currentIndex, plan.generation)
-        scheduleResolveIndex(plan.queue, player.nextMediaItemIndex, plan.generation)
+        scheduleQueueResolution(plan.queue, plan.generation)
     }
 
     /** Reloads a committed ordinary queue while preserving the active stable entry and player mode. */
@@ -426,6 +439,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             val generation = beginQueueGeneration()
             val retainedIds = queue.entries.map { it.queueEntryId }.toSet()
             sourceTimelines.keys.retainAll(retainedIds)
+            cutDurationMs.keys.retainAll(retainedIds)
             resolvedQueueEntryIds += retainedResolved.intersect(retainedIds)
             val index = queue.entries.indexOfFirst { it.queueEntryId == currentId }
             if (index < 0) return@withLock null
@@ -451,11 +465,10 @@ class AutPlayPlaybackService : MediaSessionService() {
             player.shuffleModeEnabled = preservedShuffleEnabled
             updateTransitionCuts()
             publishRuntimeState(unavailableReason = currentUnavailableReason())
-            QueueResolutionPlan(queue, generation, index)
+            QueueResolutionPlan(queue, generation)
         }
         plan ?: return
-        scheduleResolveIndex(plan.queue, plan.currentIndex, plan.generation)
-        scheduleResolveIndex(plan.queue, player.nextMediaItemIndex, plan.generation)
+        scheduleQueueResolution(plan.queue, plan.generation)
     }
 
     /** Wave movement is room-authoritative; only ordinary queues may invoke local navigation. */
@@ -498,14 +511,24 @@ class AutPlayPlaybackService : MediaSessionService() {
     private fun onSourceTimeline(item: MediaItem, timeline: PlaybackSourceTimeline) {
         scope.launch {
             stateMutex.withLock {
-                val index = (0 until player.mediaItemCount).firstOrNull {
-                    val active = player.getMediaItemAt(it)
-                    active.mediaId == item.mediaId && active.localConfiguration?.uri == item.localConfiguration?.uri &&
-                        active.mediaMetadata.extras?.getString("queue_snapshot_id") ==
-                        item.mediaMetadata.extras?.getString("queue_snapshot_id")
-                } ?: return@withLock
+                val index = queueEntryIndices[item.mediaId]?.takeIf { it < player.mediaItemCount }
+                    ?: return@withLock
+                val active = player.getMediaItemAt(index)
+                if (active.mediaId != item.mediaId || active.localConfiguration?.uri != item.localConfiguration?.uri ||
+                    active.mediaMetadata.extras?.getString("queue_snapshot_id") !=
+                    item.mediaMetadata.extras?.getString("queue_snapshot_id")) return@withLock
                 if (sourceTimelines[item.mediaId] == timeline) return@withLock
                 sourceTimelines[player.getMediaItemAt(index).mediaId] = timeline
+                // Anchor cut eligibility as well as its tail across frame-sized header/EOF
+                // refinements. Raw sourceTimelines remains authoritative for metrics.
+                val duration = timeline.durationMs
+                val previousDuration = cutDurationMs[item.mediaId]
+                if (duration == null) cutDurationMs.remove(item.mediaId)
+                else if (previousDuration == null ||
+                    kotlin.math.abs(duration - previousDuration) > CUT_DURATION_TOLERANCE_MS
+                ) cutDurationMs[item.mediaId] = duration
+                if (app.autplay.BuildConfig.DEBUG) android.util.Log.d("AutPlayPlayback",
+                    "source_timeline durationMs=${timeline.durationMs} seekable=${timeline.seekable}")
                 updateTransitionCuts()
             }
         }
@@ -518,29 +541,35 @@ class AutPlayPlaybackService : MediaSessionService() {
         try {
             val currentIndex = player.currentMediaItemIndex
             val positionMs = sourcePositionMs()
-            val changes = (0 until player.mediaItemCount).mapNotNull { index ->
+            // Only resolved sources can have cuts. A 5,000-entry queue must not cause
+            // thousands of Player/Bundle reads on every position/timeline callback.
+            val changes = resolvedQueueEntryIds.mapNotNull { id ->
+                val index = queueEntryIndices[id]?.takeIf { it < player.mediaItemCount } ?: return@mapNotNull null
                 val item = player.getMediaItemAt(index)
                 if (!item.isResolvedPlaybackSource()) return@mapNotNull null
                 val info = sourceTimelines[item.mediaId]
+                val durationForCuts = cutDurationMs[item.mediaId]
                 val nextIndex = if (player.repeatMode == Player.REPEAT_MODE_ONE) index
                     else player.currentTimeline.takeUnless { it.isEmpty }
                         ?.getNextWindowIndex(index, player.repeatMode, player.shuffleModeEnabled) ?: C.INDEX_UNSET
                 val bounds = PlaybackTransitionCuts.bounds(
                     enabled = smoothTrackTransitions,
                     queueType = restored?.snapshot?.queueType,
-                    durationMs = info?.durationMs,
+                    durationMs = durationForCuts,
                     seekable = info?.seekable == true,
                     preserveHead = item.mediaId == preservedHeadEntryId,
                     hasPlayableSuccessor = nextIndex in 0 until player.mediaItemCount &&
                         player.getMediaItemAt(nextIndex).isResolvedPlaybackSource(),
                     stopAfterItem = item.mediaId == stopAfterQueueEntryId,
                     preserveTail = item.mediaId == preservedTailEntryId && index == currentIndex &&
-                        info?.durationMs?.let { positionMs > it - PlaybackTransitionCuts.CUT_MS } == true,
+                        durationForCuts?.let { positionMs > it - PlaybackTransitionCuts.CUT_MS } == true,
                 )
                 val defaultStart = if (item.mediaId == preservedHeadEntryId && info == null) 0L
                     else PlaybackTransitionCuts.defaultStartMs(smoothTrackTransitions, restored?.snapshot?.queueType)
                 if (bounds == item.cutBounds() &&
-                    (item.mediaMetadata.extras?.getLong(CUT_DEFAULT_POSITION_MS, 0) ?: 0) == defaultStart) null
+                    (item.mediaMetadata.extras?.getLong(CUT_DEFAULT_POSITION_MS, 0) ?: 0) == defaultStart &&
+                    (item.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS, C.TIME_UNSET) ?: C.TIME_UNSET) ==
+                        (durationForCuts ?: C.TIME_UNSET)) null
                 else Triple(index, item, bounds to defaultStart)
             }
             for ((index, item, cut) in changes) {
@@ -551,6 +580,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     .build()
                 val extras = Bundle(item.mediaMetadata.extras ?: Bundle()).apply {
                     putLong(CUT_DEFAULT_POSITION_MS, defaultStart)
+                    putLong(CUT_SOURCE_DURATION_MS, cutDurationMs[item.mediaId] ?: C.TIME_UNSET)
                 }
                 player.replaceMediaItem(index, item.buildUpon().setClippingConfiguration(clipping)
                     .setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build())
@@ -565,11 +595,33 @@ class AutPlayPlaybackService : MediaSessionService() {
         queueGeneration += 1
         cancelResolutionJobs(resolutionJobs)
         resolvedQueueEntryIds.clear()
+        queueEntryIndices = restored?.entries?.mapIndexed { index, entry -> entry.queueEntryId to index }?.toMap()
+            ?: emptyMap()
         pendingTransitionMetrics = null
         return queueGeneration
     }
 
-    /** Resolves current and next independently; a slow remote next lookup cannot gate local play. */
+    /** Bound speculative work even when a user skips repeatedly through a large queue. */
+    private fun scheduleQueueResolution(queue: RestoredPlaybackQueue, generation: Long) {
+        if (generation != queueGeneration) return
+        val timeline = player.currentTimeline
+        val indices = mutableListOf<Int>()
+        var index = player.currentMediaItemIndex
+        // The preloaded next item's tail depends on its own successor. Resolve that
+        // source before next starts, so its arrival does not replace a playing clip.
+        // This is URI preflight only; Media3 still owns the single-successor preload.
+        while (indices.size < 3 && index in queue.entries.indices && index !in indices) {
+            indices += index
+            index = if (index in 0 until timeline.windowCount) {
+                timeline.getNextWindowIndex(index, player.repeatMode, player.shuffleModeEnabled)
+            } else C.INDEX_UNSET
+        }
+        val wanted = indices.map { queue.entries[it].queueEntryId }.toSet()
+        resolutionJobs.filterKeys { it !in wanted }.values.toList().forEach { it.cancel() }
+        indices.forEach { scheduleResolveIndex(queue, it, generation) }
+    }
+
+    /** Resolves each candidate independently; a slow remote lookup cannot gate local play. */
     private fun scheduleResolveIndex(
         queue: RestoredPlaybackQueue,
         index: Int,
@@ -584,7 +636,10 @@ class AutPlayPlaybackService : MediaSessionService() {
         if (resolutionJobs[entry.queueEntryId]?.isActive == true) return
         val job = scope.launch {
             try {
+                val startedAt = SystemClock.elapsedRealtime()
                 val resolution = resolveQueueItem(queue, index)
+                if (app.autplay.BuildConfig.DEBUG) android.util.Log.d("AutPlayPlayback",
+                    "source_resolved elapsedMs=${SystemClock.elapsedRealtime() - startedAt} source=${resolution.source}")
                 stateMutex.withLock {
                     if (generation != queueGeneration ||
                         restored?.snapshot?.queueSnapshotId != queue.snapshot.queueSnapshotId ||
@@ -717,7 +772,6 @@ class AutPlayPlaybackService : MediaSessionService() {
     private data class QueueResolutionPlan(
         val queue: RestoredPlaybackQueue,
         val generation: Long,
-        val currentIndex: Int,
     )
 
     private data class PlayerMetricsSnapshot(
@@ -1098,13 +1152,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     }
                     if (current != null && !isSameRestore) finalizeCurrentLocked(transitionMetrics)
                     val queue = restored ?: return@withLock
-                    val index = player.currentMediaItemIndex
-                    scheduleResolveIndex(
-                        queue,
-                        index,
-                        queueGeneration,
-                    )
-                    scheduleResolveIndex(queue, player.nextMediaItemIndex, queueGeneration)
+                    scheduleQueueResolution(queue, queueGeneration)
                     if (player.isPlaying) {
                         if (ensureSession() != null) observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
                     } else if (!isSameRestore && mediaItem != null) {
@@ -1171,7 +1219,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                         player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(size, requireNotNull(shuffleSeed)))
                     }
                     checkpointPlayerStateLocked()
-                    restored?.let { scheduleResolveIndex(it, player.nextMediaItemIndex, queueGeneration) }
+                    restored?.let { scheduleQueueResolution(it, queueGeneration) }
                     updateTransitionCuts()
                     publishRuntimeState()
                 }
@@ -1182,7 +1230,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             scope.launch {
                 stateMutex.withLock {
                     checkpointPlayerStateLocked()
-                    restored?.let { scheduleResolveIndex(it, player.nextMediaItemIndex, queueGeneration) }
+                    restored?.let { scheduleQueueResolution(it, queueGeneration) }
                     updateTransitionCuts()
                     publishRuntimeState()
                 }
@@ -1290,6 +1338,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_SET_SESSION_TASTE_EXCLUDED,
         )
         private const val PERIODIC_CHECKPOINT_MS = 15_000L
+        private const val CUT_DURATION_TOLERANCE_MS = 100L
         private const val TRANSITION_VOLUME_UPDATE_MS = 50L
         private const val MAX_CHECKPOINT_DELTA_MS = 300_000L
         private val ORDINARY_QUEUE_TYPES = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")

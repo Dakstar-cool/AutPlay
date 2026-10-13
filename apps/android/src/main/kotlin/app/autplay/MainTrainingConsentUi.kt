@@ -1,5 +1,7 @@
 package app.autplay
 
+import app.autplay.ui.AutPlayDialog
+
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import app.autplay.application.profilepairing.PairingState
@@ -10,7 +12,6 @@ import app.autplay.data.settings.NonSecretSettings
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.data.security.CredentialJournalSlots
 import app.autplay.ui.settings.TrainingConsentCard
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.flow.first
@@ -57,8 +58,8 @@ internal fun rememberTrainingConsentUi(settings: NonSecretSettings, pairing: Pai
     var dismissed by remember(key) { mutableStateOf(false) }
     val title = stringResource(R.string.training_consent_title)
     if (runtime != null && state.confirmed?.decision == "UNKNOWN" && !state.busy && !state.pending && !dismissed) {
-        AlertDialog(onDismissRequest = { dismissed = true }, title = { Text(title) },
-            text = { TrainingConsentCard(ui) }, confirmButton = {})
+        AutPlayDialog(onDismissRequest = { dismissed = true }, title = { Text(title) },
+            text = { TrainingConsentCard(ui, inDialog = true) }, confirmButton = {})
     }
     return ui
 }

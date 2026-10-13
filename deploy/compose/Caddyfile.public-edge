@@ -4,6 +4,7 @@
 	email {$AUTPLAY_ACME_EMAIL}
 	servers {
 		protocols h1 h2
+		strict_sni_host on
 	}
 }
 

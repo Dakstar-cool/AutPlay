@@ -12,6 +12,8 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import app.autplay.application.playback.ActiveQueueContext
 import app.autplay.application.playback.ActiveQueueContextRepository
+import app.autplay.data.settings.NonSecretSettingsStore
+import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.playback.AutPlayPlaybackService
 import app.autplay.playback.isResolvedPlaybackSource
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -34,10 +37,15 @@ class PlaybackPresentationAdapter(
     context: Context,
     lifecycle: Lifecycle,
     private val queueContextRepository: ActiveQueueContextRepository,
+    initialMiniPlayerDismissed: Boolean = false,
+    private val onMiniPlayerDismissedChanged: (Boolean) -> Unit = {},
+    settingsStore: NonSecretSettingsStore = applicationNonSecretSettingsStore(context.applicationContext),
 ) : DefaultLifecycleObserver, AutoCloseable {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val _state = MutableStateFlow(PlaybackPresentationState())
+    private val dismissalCheckpoint = MiniPlayerDismissalCheckpoint(settingsStore, initialMiniPlayerDismissed)
+    private var dismissalRestored = false
+    private val _state = MutableStateFlow(PlaybackPresentationState(miniPlayerDismissed = initialMiniPlayerDismissed))
     val state: StateFlow<PlaybackPresentationState> = _state.asStateFlow()
 
     private var controller: MediaController? = null
@@ -48,10 +56,21 @@ class PlaybackPresentationAdapter(
     private var gesture: TimelineSeekGesture.State = TimelineSeekGesture.Idle
 
     private val listener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (shouldRestoreDismissedMiniPlayer(playWhenReady, reason)) setMiniPlayerDismissed(false)
+        }
         override fun onEvents(player: Player, events: Player.Events) = publishFromController()
     }
 
     init {
+        scope.launch {
+            val dismissed = dismissalCheckpoint.restore()
+            _state.value = _state.value.copy(miniPlayerDismissed = dismissed)
+            onMiniPlayerDismissedChanged(dismissed)
+            dismissalRestored = true
+            connect()
+            publishFromController()
+        }
         lifecycle.addObserver(this)
         scope.launch {
             queueContextRepository.context.collect {
@@ -115,6 +134,25 @@ class PlaybackPresentationAdapter(
         publishFromController()
     }
 
+    /** Keep Media3's queue and position; only stop audible playback and hide its compact surface. */
+    fun dismissMiniPlayer() {
+        val current = controller ?: return
+        if (PlaybackCommandBoundary.pauseForDismissal(
+                MediaControllerCommandPort(current), queueContextRepository.context.value,
+            )) {
+            setMiniPlayerDismissed(true)
+            publishFromController()
+        }
+    }
+
+    private fun setMiniPlayerDismissed(dismissed: Boolean) {
+        if (_state.value.miniPlayerDismissed == dismissed) return
+        _state.value = _state.value.copy(miniPlayerDismissed = dismissed)
+        onMiniPlayerDismissedChanged(dismissed)
+        // Activity teardown must not cancel a preference write already requested by the user.
+        dismissalPersistenceScope.launch { dismissalCheckpoint.persist(dismissed) }
+    }
+
     fun toggleShuffle() {
         val current = controller ?: return
         PlaybackCommandBoundary.toggleShuffle(
@@ -134,7 +172,7 @@ class PlaybackPresentationAdapter(
     }
 
     private fun connect() {
-        if (!foreground || controller != null || connecting) return
+        if (!foreground || !dismissalRestored || controller != null || connecting) return
         connecting = true
         val token = SessionToken(appContext, ComponentName(appContext, AutPlayPlaybackService::class.java))
         val future = MediaController.Builder(appContext, token).buildAsync()
@@ -143,7 +181,12 @@ class PlaybackPresentationAdapter(
                 val resolved = runCatching { future.get() }.getOrNull()
                 connecting = false
                 if (foreground) {
-                    controller = resolved?.also { it.addListener(listener) }
+                    controller = resolved?.also {
+                        it.addListener(listener)
+                        // A play request can arrive from system controls while this Activity is stopped.
+                        // Dismissal paused the retained session, so a new play intent restores its surface.
+                        if (it.playWhenReady) setMiniPlayerDismissed(false)
+                    }
                 } else {
                     resolved?.release()
                 }
@@ -154,6 +197,7 @@ class PlaybackPresentationAdapter(
     }
 
     private fun publishFromController() {
+        if (!dismissalRestored) return
         val current = controller
         val context = queueContextRepository.context.value
         val mediaId = current?.currentMediaItem?.mediaId
@@ -166,6 +210,7 @@ class PlaybackPresentationAdapter(
             gateFor(it, context, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, seekable = seekable) is PlaybackControlGate.Allowed
         } == true
         val next = PlaybackPresentationState(
+            miniPlayerDismissed = _state.value.miniPlayerDismissed,
             mediaId = mediaId,
             title = current?.mediaMetadata?.title?.toString(),
             artist = current?.mediaMetadata?.artist?.toString(),
@@ -191,6 +236,10 @@ class PlaybackPresentationAdapter(
             },
             context = context,
             controls = gate,
+            dismissEnabled = current?.let {
+                PlaybackCommandGate.evaluateDismissal(context, mediaId,
+                    it.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) is PlaybackControlGate.Allowed
+            } == true,
             previousMediaId = current?.let { adjacentMediaId(it, context, forward = false) },
             nextMediaId = current?.let { adjacentMediaId(it, context, forward = true) },
             seekEnabled = seekEnabled,
@@ -278,6 +327,7 @@ class PlaybackPresentationAdapter(
         _state.value = _state.value.copy(
             connection = PlaybackConnectionState.Disconnected,
             controls = PlaybackControlGate.Locked(PlaybackControlLockReason.COMMAND_UNAVAILABLE),
+            dismissEnabled = false,
             seekEnabled = false,
             shuffleEnabled = false,
             repeatEnabled = false,
@@ -287,8 +337,32 @@ class PlaybackPresentationAdapter(
         )
     }
 
-    companion object { const val PRESENTATION_TICK_MS = PlaybackPresentationCadence.intervalMs }
+    companion object {
+        const val PRESENTATION_TICK_MS = PlaybackPresentationCadence.intervalMs
+        private val dismissalPersistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    }
 }
+
+/** Device checkpoint is loaded before connecting, so a retained paused queue cannot flash on launch. */
+internal class MiniPlayerDismissalCheckpoint(
+    private val settingsStore: NonSecretSettingsStore,
+    private val initialDismissed: Boolean = false,
+) {
+    suspend fun restore(): Boolean {
+        val persisted = settingsStore.settings.first().miniPlayerDismissed
+        val dismissed = initialDismissed || persisted
+        if (dismissed != persisted) persist(dismissed)
+        return dismissed
+    }
+
+    suspend fun persist(dismissed: Boolean) {
+        settingsStore.mutate { it.copy(miniPlayerDismissed = dismissed) }
+    }
+}
+
+internal fun shouldRestoreDismissedMiniPlayer(playWhenReady: Boolean, reason: Int): Boolean =
+    playWhenReady && (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ||
+        reason == Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
 
 /** Pure cadence gate keeps lifecycle policy independently testable. */
 object PlaybackPresentationCadence {

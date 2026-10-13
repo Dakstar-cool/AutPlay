@@ -63,6 +63,7 @@ _API_ENV_FIELDS: Final = {
     "access_token_ttl_seconds": "ACCESS_TOKEN_TTL_SECONDS",
     "refresh_token_ttl_seconds": "REFRESH_TOKEN_TTL_SECONDS",
     "password_login_enabled": "PASSWORD_LOGIN_ENABLED",
+    "portable_accounts_enabled": "PORTABLE_ACCOUNTS_ENABLED",
     "profile_identity_private_key_pem": "PROFILE_IDENTITY_PRIVATE_KEY_PEM",
     "profile_label_hint": "PROFILE_LABEL_HINT",
     "profile_api_origin": "PROFILE_API_ORIGIN",
@@ -314,6 +315,7 @@ class ApiSettings(_ExplicitSettings):
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=900)
     refresh_token_ttl_seconds: int = Field(default=2_592_000, ge=3_600, le=7_776_000)
     password_login_enabled: bool = False
+    portable_accounts_enabled: bool = False
     profile_identity_private_key_pem: SecretStr | None = Field(
         default=None, repr=False, max_length=16_384
     )
@@ -394,6 +396,8 @@ class ApiSettings(_ExplicitSettings):
 
     @model_validator(mode="after")
     def _validate_auth_contract(self) -> Self:
+        if self.portable_accounts_enabled and self.profile_identity_private_key_pem is None:
+            raise ValueError("portable accounts require a persistent profile identity")
         if self.shared_training_consent_enabled and self.training_consent_ledger_path is None:
             raise ValueError("shared training requires independent consent evidence")
         if self.account_deletion_enabled and not self.account_recovery_enabled:

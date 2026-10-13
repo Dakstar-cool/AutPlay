@@ -336,6 +336,7 @@ def test_caddy_adapt_preserves_private_route_before_api_proxy() -> None:
     result = _run_caddy("adapt")
     assert result.returncode == 0, result.stderr
     config = json.loads(result.stdout)
+    assert config["apps"]["http"]["servers"]["srv0"]["strict_sni_host"] is True
 
     api_routes = _site_group_routes(config, "api.autplay.win")
     assert api_routes[0]["match"][0]["path"] == [

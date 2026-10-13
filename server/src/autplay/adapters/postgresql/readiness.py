@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0065_internet_catalogue_context"
+EXPECTED_MIGRATION_HEAD: Final = "0066_portable_local_account"
 
 
 @dataclass(frozen=True, slots=True)
