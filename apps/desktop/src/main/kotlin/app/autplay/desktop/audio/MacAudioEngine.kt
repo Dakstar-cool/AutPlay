@@ -333,9 +333,10 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 if (!closing && terminalError == null && event.generation == generation) {
                     // StateFlow consumers may conflate frames; the native owner emits EOF exactly once.
                     lastEventAt = System.nanoTime()
-                    if (event.status == "ERROR" && event.errorCode != null &&
-                        (mutableFailure.value?.generation != generation || mutableFailure.value?.errorCode != event.errorCode)) {
-                        mutableFailure.value = MacAudioFailure(generation, event.errorCode, event.errorCode)
+                    val code = event.errorCode
+                    if (event.status == "ERROR" && code != null &&
+                        (mutableFailure.value?.generation != generation || mutableFailure.value?.errorCode != code)) {
+                        mutableFailure.value = MacAudioFailure(generation, code, code)
                     }
                     mutableState.value = event
                 }
