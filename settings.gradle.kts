@@ -16,4 +16,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "AutPlay"
 
-include(":apps:android")
+if (providers.gradleProperty("autplay.desktopOnly").orNull != "true") {
+    include(":apps:android")
+}
+include(":shared:domain", ":shared:application", ":shared:ui", ":apps:desktop")

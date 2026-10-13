@@ -1,0 +1,52 @@
+name: CI / macOS desktop foundation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-arm64:
+    name: Shared / desktop / unsigned macOS package
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      MICROSOFT_JDK_URL: https://aka.ms/download-jdk/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
+      MICROSOFT_JDK_SHA256: 13f45a64a3d3a1f2eec490527bf3e42913ac0ca3f95af2c5471446a2da8e5a22
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify Apple Silicon and pinned JDK archive
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          jdk_archive="${RUNNER_TEMP}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-delay 2 --output "$jdk_archive" "$MICROSOFT_JDK_URL"
+          printf '%s  %s\n' "$MICROSOFT_JDK_SHA256" "$jdk_archive" | shasum -a 256 --check
+      - name: Install pinned Microsoft JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: jdkfile
+          jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
+          java-version: "17.0.20"
+          architecture: aarch64
+      - name: Check shared policies and package development app
+        run: bash scripts/check-desktop.sh --package-macos
+      - name: Retain foundation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-arm64-foundation-${{ github.sha }}
+          retention-days: 7
+          path: |
+            shared/domain/build/test-results/jvmTest/
+            shared/application/build/test-results/jvmTest/
+            apps/desktop/build/compose/binaries/main/dmg/

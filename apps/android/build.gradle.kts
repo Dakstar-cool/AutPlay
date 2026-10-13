@@ -134,6 +134,8 @@ room3 {
 }
 
 dependencies {
+    implementation(project(":shared:domain"))
+    implementation(project(":shared:application"))
     val composeBom = platform(libs.androidx.compose.bom)
 
     implementation(composeBom)
