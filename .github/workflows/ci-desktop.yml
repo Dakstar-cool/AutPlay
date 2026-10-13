@@ -65,6 +65,29 @@ jobs:
         with:
           version: "0.12.3"
           python-version: "3.14.7"
+      - name: Launch packaged desktop shell with bundled runtime
+        run: |
+          "$(uv python find 3.14.7)" - <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          app = pathlib.Path("apps/desktop/build/compose/binaries/main/app/AutPlay.app")
+          executable = app / "Contents/MacOS/AutPlay"
+          result = subprocess.run([str(executable.resolve()), "--smoke-test"],
+                                  capture_output=True, text=True, timeout=30, check=False)
+          ready = "AUTPLAY_DESKTOP_SMOKE_READY java=17.0.20 bundled=true" in result.stdout.splitlines()
+          report = {"kind": "packaged_desktop_startup", "exit_code": result.returncode,
+                    "window_and_frames": ready, "bundled_runtime": ready,
+                    "status": "passed" if result.returncode == 0 and ready else "failed"}
+          output = pathlib.Path("build/macos-audio-spike/desktop-startup.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+          if report["status"] != "passed":
+              print(result.stdout)
+              print(result.stderr)
+              raise SystemExit("Packaged desktop startup failed")
+          print(json.dumps(report))
+          PY
       - name: Compile and exercise bounded native WAV probe
         run: |
           mkdir -p build/macos-audio-spike
@@ -83,3 +106,4 @@ jobs:
             apps/desktop/build/compose/binaries/main/dmg/
             apps/desktop/build/compose/logs/
             build/macos-audio-spike/native-wav.json
+            build/macos-audio-spike/desktop-startup.json

@@ -11,7 +11,7 @@ The JVM entry point is `app.autplay.desktop.MainKt`, in
 It opens an AutPlay window at 1080 x 740 dp with a minimum AWT size of 860 x 600.
 Closing the window exits the application. Normal system window decorations are retained.
 
-The coordinator owns all Gradle configuration. The expected module setup is:
+The integrated module setup is:
 
 | Module | Source sets and dependencies |
 | --- | --- |
@@ -20,10 +20,10 @@ The coordinator owns all Gradle configuration. The expected module setup is:
 | `apps/desktop` | JVM `src/main/kotlin`; `shared/ui`, `shared/application`, Compose runtime/UI/desktop `currentOs`, coroutines core |
 
 Use the agreed Kotlin 2.4.10, JDK 17 and Compose Multiplatform 1.12.1 toolchain.
-The desktop `mainClass` must be `app.autplay.desktop.MainKt`. No icons, generated Compose
+The desktop `mainClass` is `app.autplay.desktop.MainKt`. No icons, generated Compose
 resources, Android libraries or additional native media libraries are required by this UI.
 
-The shell expects these contracts to be extracted without changing packages:
+The shell uses these extracted contracts with their original packages:
 
 - `app.autplay.playback.presentation.PlaybackPresentationState` and its control/connection enums.
 - `app.autplay.application.playback.ActiveQueueContext`.
@@ -67,24 +67,22 @@ claim successful import, persistent storage, audible playback or macOS release q
 Three focused JVM tests in
 [`DesktopShellPolicyTest.kt`](../../shared/ui/src/jvmTest/kotlin/app/autplay/ui/desktop/DesktopShellPolicyTest.kt)
 cover fail-closed controls (including every lock reason), navigation/seek availability and RU/EN
-copy completeness. The local foundation check compiled these tests with cached Kotlin 2.4.10
-and ran JUnit 4.13.2 on JDK 17, using the baseline Android presentation source and the exact
-`ActiveQueueContext` declaration extracted from its Android repository source. All three passed.
-This checks the policy against the agreed API; it does not verify the later extracted module.
+copy completeness. The integration Gradle gate runs these alongside 18 domain/application
+tests on the extracted modules with strict dependency verification. Compose UI and the
+desktop entry point compile on both the Windows development host and ARM64 macOS CI.
 
-Source review checks the shared UI platform/storage boundary, product palette, owned file paths
-and whitespace. No Gradle invocation, GUI launch, server access or production operation was
-performed by this workstream. Compilation of Compose sources and dependency integration remain
-the coordinator's sequential build gate.
+ARM64 macOS CI packages a development `.app` and `.dmg` with its own JVM. A bounded
+`--smoke-test` startup check uses the packaged executable, awaits two Compose frames,
+checks the visible window and bundled runtime, then closes the process. Current measured
+results and source revision are recorded in [port status](MACOS_PORT_STATUS.md).
 
-After integrating contracts and module configuration, the coordinator should compile desktop
-and shared UI and run the three JVM tests. Then open the actual window and verify:
+Interactive review on a Mac is still required for:
 
 1. All three sections, both themes and both languages, including resize at the minimum size.
 2. Tab/Shift+Tab and activation of navigation/theme/language controls, plus accessibility labels.
 3. Disabled import, playlist creation, playback and seek with no adapter; no file or DB writes.
 4. Fresh process resets session preferences and retains the honest empty state.
 
-Native packaging, screen-reader behavior and real playback require later macOS evidence.
+Clean installation, screen-reader behavior and real playback require later macOS evidence.
 See the official [Compose window documentation](https://kotlinlang.org/docs/multiplatform/compose-desktop-top-level-windows-management.html)
 for the window host API.

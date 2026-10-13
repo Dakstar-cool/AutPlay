@@ -28,8 +28,11 @@ private final class ResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
     let origin: URL
     let token: String
     private var active: [ObjectIdentifier: Fetch] = [:]
+    private var stopped: Bool = false
     private var counts: [String: Int] = ["started": 0, "cancelled": 0, "redirect_rejected": 0,
-                                       "range_validated": 0, "completed": 0, "failed": 0]
+                                       "range_validated": 0, "completed": 0, "failed": 0,
+                                       "cancel_requested": 0, "cancel_failed": 0,
+                                       "cancelled_inflight": 0, "av_cancelled": 0]
 
     init(origin: URL, token: String) {
         self.origin = origin
@@ -39,6 +42,10 @@ private final class ResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
                         shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
         let key = ObjectIdentifier(loadingRequest)
+        guard !stopped else {
+            loadingRequest.finishLoading(with: NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled))
+            return true
+        }
         guard active.count < 8, counts["started", default: 0] < 128 else {
             loadingRequest.finishLoading(with: failure(1))
             return true
@@ -66,14 +73,33 @@ private final class ResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
                         didCancel loadingRequest: AVAssetResourceLoadingRequest) {
         let key = ObjectIdentifier(loadingRequest)
-        if let fetch = active.removeValue(forKey: key) {
-            counts["cancelled", default: 0] += 1
-            fetch.cancel()
-        }
+        counts["av_cancelled", default: 0] += 1
+        requestCancellation(key)
     }
 
     func contains(_ key: ObjectIdentifier) -> Bool { return active[key] != nil }
     func increment(_ name: String) { counts[name, default: 0] += 1 }
+
+    private func requestCancellation(_ key: ObjectIdentifier) {
+        guard let fetch = active[key], !fetch.cancellationRequested else { return }
+        counts["cancel_requested", default: 0] += 1
+        fetch.requestCancellation()
+    }
+
+    func cancellationFinished(_ key: ObjectIdentifier, error: Error?) {
+        guard let fetch = active.removeValue(forKey: key) else { return }
+        let nativeError = error as NSError?
+        if nativeError?.domain == NSURLErrorDomain, nativeError?.code == NSURLErrorCancelled {
+            counts["cancelled", default: 0] += 1
+            if fetch.cancelledInFlight { counts["cancelled_inflight", default: 0] += 1 }
+        } else {
+            counts["cancel_failed", default: 0] += 1
+        }
+        if !fetch.loading.isCancelled, !fetch.loading.isFinished {
+            fetch.loading.finishLoading(with: nativeError ?? failure(7))
+        }
+        fetch.close()
+    }
 
     func finish(_ key: ObjectIdentifier, error: NSError?) {
         guard let fetch = active.removeValue(forKey: key) else { return }
@@ -91,14 +117,15 @@ private final class ResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
         return queue.sync {
             var result = counts
             result["active"] = active.count
+            result["cancellable_inflight"] = active.values.filter { $0.isCancellableInFlight }.count
             return result
         }
     }
 
     func close() {
         queue.sync {
-            for fetch in active.values { fetch.cancel() }
-            active.removeAll()
+            stopped = true
+            for key in Array(active.keys) { requestCancellation(key) }
         }
     }
 }
@@ -115,6 +142,12 @@ private final class Fetch: NSObject, URLSessionDataDelegate {
     private var received: Int64 = 0
     private var redirects: Int = 0
     private var accepted: Bool = false
+    private(set) var cancellationRequested: Bool = false
+    private(set) var cancelledInFlight: Bool = false
+
+    var isCancellableInFlight: Bool {
+        return !cancellationRequested && accepted && received > 0 && received < expected && expected > 2
+    }
 
     init(owner: ResourceLoader, key: ObjectIdentifier, loading: AVAssetResourceLoadingRequest,
          start: Int64, end: Int64) {
@@ -145,9 +178,17 @@ private final class Fetch: NSObject, URLSessionDataDelegate {
     func cancel() { task?.cancel(); session?.invalidateAndCancel() }
     func close() { session?.finishTasksAndInvalidate() }
 
+    func requestCancellation() {
+        cancelledInFlight = isCancellableInFlight
+        cancellationRequested = true
+        // Keep the Fetch registered until URLSession acknowledges transport cancellation.
+        task?.cancel()
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
+        guard !cancellationRequested else { completionHandler(nil); return }
         guard let owner = owner, owner.contains(key), let target = request.url,
               target.scheme == owner.origin.scheme, target.host == owner.origin.host,
               target.port == owner.origin.port, target.user == nil, target.password == nil,
@@ -165,6 +206,7 @@ private final class Fetch: NSObject, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                     didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard !cancellationRequested else { completionHandler(.cancel); return }
         guard let owner = owner, owner.contains(key), let http = response as? HTTPURLResponse,
               http.statusCode == 206, let raw = http.value(forHTTPHeaderField: "Content-Range"),
               raw.hasPrefix("bytes ") else {
@@ -195,7 +237,7 @@ private final class Fetch: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let owner = owner, owner.contains(key), accepted else { return }
+        guard !cancellationRequested, let owner = owner, owner.contains(key), accepted else { return }
         received += Int64(data.count)
         if received > expected {
             cancel()
@@ -207,6 +249,10 @@ private final class Fetch: NSObject, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let owner = owner, owner.contains(key) else { return }
+        if cancellationRequested {
+            owner.cancellationFinished(key, error: error)
+            return
+        }
         owner.finish(key, error: error == nil && accepted && received == expected ? nil : failure(6))
     }
 }
@@ -276,11 +322,18 @@ private final class Probe {
         if input.action == "cancel" {
             stage = "cancel"
             player.play()
-            try wait({ (loaders.last?.statistics()["range_validated", default: 0] ?? 0) > 0 })
+            try wait({ (loaders.last?.statistics()["cancellable_inflight", default: 0] ?? 0) > 0 })
             player.pause()
             player.replaceCurrentItem(with: nil)
-            try wait({ (loaders.last?.statistics()["cancelled", default: 0] ?? 0) > 0 }, seconds: 2)
-            guard loaders.last?.statistics()["active"] == 0 else { throw ProbeError(code: "CANCEL_ACTIVE_REQUEST") }
+            loaders.last?.close()
+            try wait({ loaders.last?.statistics()["active"] == 0 }, seconds: 2)
+            let statistics = loaders.last?.statistics() ?? [:]
+            guard statistics["cancel_requested", default: 0] > 0,
+                  statistics["cancelled"] == statistics["cancel_requested"],
+                  statistics["cancel_failed"] == 0,
+                  statistics["cancelled_inflight", default: 0] > 0 else {
+                throw ProbeError(code: "CANCEL_NOT_ACKNOWLEDGED")
+            }
             return
         }
         try wait({ player.currentItem?.status == .readyToPlay })

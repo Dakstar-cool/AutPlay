@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 MAX_BYTES = 32 * 1024 * 1024
+SLOW_PREFIX_BYTES = 4096
 MIME = {
     ".wav": "audio/wav",
     ".mp3": "audio/mpeg",
@@ -205,6 +206,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 return
             status = 206
         event.update(status=status, start=start, end=end)
+        if route == "slow":
+            event["body_delayed"] = not head and end - start + 1 > SLOW_PREFIX_BYTES
         if not self.server.record(event):
             self.empty(429)
             return
@@ -220,12 +223,16 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         if head:
             return
-        # Publish authenticated response headers before delaying its body, so the native
-        # cancellation case can prove that an actual server request is in flight.
-        if route == "slow" and self.server.stop_event.wait(3):
-            return
         try:
             body = fixture.data[start : end + 1]
+            if route == "slow" and len(body) > SLOW_PREFIX_BYTES:
+                # Complete tiny metadata ranges immediately. Deliver a bounded prefix
+                # of larger ranges so the native owner can observe an incomplete body.
+                self.wfile.write(body[:SLOW_PREFIX_BYTES])
+                self.wfile.flush()
+                if self.server.stop_event.wait(3):
+                    return
+                body = body[SLOW_PREFIX_BYTES:]
             if route == "drop":
                 self.wfile.write(body[: max(1, len(body) // 2)])
                 self.wfile.flush()
@@ -313,6 +320,29 @@ def verify_http() -> dict[str, Any]:
         checks.append("invalid_range_416")
         assert request("media", method="HEAD")[2] == b""
         checks.append("head_no_body")
+        assert request("slow", range_value="bytes=0-1")[2] == fixture.data[:2]
+        import time
+
+        slow_connection = HTTPConnection("127.0.0.1", service.primary.server_port, timeout=2)
+        slow_started = time.monotonic()
+        try:
+            slow_connection.request(
+                "GET",
+                f"/slow/{fixture.identifier}",
+                headers={"Authorization": "Bearer " + service.token, "Range": "bytes=0-"},
+            )
+            slow_response = slow_connection.getresponse()
+            assert slow_response.status == 206
+            assert slow_response.read(SLOW_PREFIX_BYTES) == fixture.data[:SLOW_PREFIX_BYTES]
+            assert time.monotonic() - slow_started < 2
+            assert slow_response.length == len(fixture.data) - SLOW_PREFIX_BYTES
+            assert any(
+                event["route"] == "slow" and event.get("body_delayed")
+                for event in service.primary.snapshot()
+            )
+        finally:
+            slow_connection.close()
+        checks.append("slow_metadata_and_incomplete_prefix")
         assert request("redirect")[1]["Location"] == service.url("media", fixture)
         assert f":{service.sink.server_port}/sink" in request("cross")[1]["Location"]
         checks.append("same_and_cross_origin_redirect_targets")

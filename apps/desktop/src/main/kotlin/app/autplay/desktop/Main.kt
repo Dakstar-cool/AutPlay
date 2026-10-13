@@ -1,12 +1,14 @@
 package app.autplay.desktop
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -27,7 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** No media adapter is installed by the foundation entry point. */
-public fun main(): Unit = application {
+public fun main(args: Array<String>): Unit = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "AutPlay",
@@ -35,6 +37,20 @@ public fun main(): Unit = application {
     ) {
         SideEffect { window.minimumSize = Dimension(860, 600) }
         DesktopApp()
+        if (args.contentEquals(arrayOf("--smoke-test"))) {
+            LaunchedEffect(Unit) {
+                // Exercise the packaged JVM and native renderer before acknowledging startup.
+                withFrameNanos { }
+                withFrameNanos { }
+                check(window.isDisplayable && window.isShowing)
+                val bundledRuntime = System.getProperty("java.home")
+                    .replace('\\', '/')
+                    .contains("/AutPlay.app/Contents/")
+                check(bundledRuntime)
+                println("AUTPLAY_DESKTOP_SMOKE_READY java=${System.getProperty("java.version")} bundled=true")
+                exitApplication()
+            }
+        }
     }
 }
 

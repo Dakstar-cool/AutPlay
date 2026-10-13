@@ -99,8 +99,15 @@ def case(binary: Path, fixture: Fixture, local: Path, route: str) -> dict[str, A
             passed = (
                 native.get("status") == "passed"
                 and loader.get("cancelled", 0) > 0
+                and loader.get("cancel_requested", 0) == loader.get("cancelled")
+                and loader.get("cancel_failed") == 0
+                and loader.get("cancelled_inflight", 0) > 0
+                and loader.get("active") == 0
                 and any(
-                    event["route"] == "slow" and event["status"] == 206 and event["authenticated"]
+                    event["route"] == "slow"
+                    and event["status"] == 206
+                    and event["authenticated"]
+                    and event.get("body_delayed")
                     for event in events
                 )
                 and not sink

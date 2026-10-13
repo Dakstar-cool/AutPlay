@@ -1,7 +1,7 @@
 # macOS native/audio spike: evidence and next Mac run
 
 Date: 2026-10-13. Baseline: `102380418421f87679732406f8052150e8226da8`.
-Branch: `codex/macos-native-20261013`. This is stage 1 preparation for the
+Integrated branch: `codex/macos-port-20261013`. This is stage 1 preparation for the
 [macOS draft](../design/explorations/AutPlay_macOS_Port_Plan_Draft_v1.md), not a
 production engine decision or a completed stage 1 gate.
 
@@ -9,11 +9,13 @@ production engine decision or a completed stage 1 gate.
 
 Investigate AVFoundation first with the executable
 [probe](../../tools/macos-audio-spike/README.md). Keep stable vlcj/LibVLC as the
-comparison candidate. Neither is accepted for production. No Mac is connected to
-this Windows host: Swift compilation, decoding, audible sound, JVM callbacks,
-Keychain, `.app` and `.dmg` are **NOT RUN** here. Windows evidence proves only the
-disposable HTTP fixture contract and Python checks. A native CLI pass will still
-leave JVM integration, actual sound, lifecycle and packaged launch unverified.
+comparison candidate. Neither is accepted for production. Windows evidence proves
+the disposable HTTP fixture contract and Python checks. Hosted ARM64 macOS CI now
+compiles the Swift probe, exercises the native WAV scenarios, and packages the
+desktop `.app` and `.dmg` with a bundled JVM. See the measured results and source
+revision in [port status](MACOS_PORT_STATUS.md). Audible output, the full codec
+matrix, JVM/native callbacks and Keychain remain unverified; a native CLI pass does
+not close the production engine gate.
 
 Do not add build dependencies from this experiment. The candidate coordinates,
 observed from primary sources on this date, are `uk.co.caprica:vlcj:4.12.1`, its
@@ -193,9 +195,10 @@ interface PlaybackPort {
 }
 ```
 
-This is a proposed shape, not a new compiled declaration. The coordinator should
-freeze error/command semantics, negative seek clamping, flow scope, disposal and
-session ownership before implementing it. Shared presentation/state and queue
+This shape is now compiled in shared/application as the foundation's
+[PlaybackPort](../../shared/application/src/commonMain/kotlin/app/autplay/platform/PlaybackPort.kt).
+Concrete adapter error/command semantics, negative seek clamping, flow scope,
+disposal and session ownership still need qualification. Shared presentation/state and queue
 policy stay common; exactly one platform media execution owner emits their facts.
 Android Media3 and WorkManager remain their execution owners under
 [ADR-021](../adr/ADR-021-p08-media3-room-playback-download-ownership.md).
@@ -255,8 +258,15 @@ Each fixture runs local playback; auth/Range playback; same-origin redirect;
 401; blocked cross-origin redirect; network truncation; native cancellation while
 a response is delayed. Positive cases include pause, three seeks and replacement/
 return. Negative cases require an actual item failure plus transport observations;
-a timeout is never a pass. The cancel case requires AVFoundation's didCancel
-callback, rather than crediting the runner's cleanup. Bounds: 25 seconds native
+a timeout is never a pass. The cancel case first requires an accepted active
+transfer with a partial body, then explicitly stops the application's byte owner.
+Only URLSession's terminal cancellation acknowledgement counts as cancellation;
+the owner must drain all active and pending tasks within two seconds. AVFoundation's
+optional didCancel callback is recorded separately. Cleanup invocation alone cannot
+pass the case. `pause()`/item replacement do not guarantee cancellation of the
+application-owned URLSession transport; its
+[task cancellation completion](https://developer.apple.com/documentation/foundation/urlsessiontask/cancel())
+is the measured boundary. Bounds: 25 seconds native
 case, 30 seconds outer child timeout, five-second request/ten-second resource
 timeout, eight active requests, 128 requests per native owner, 512 server events,
 three redirects, 60-second compiler timeout. All files/sockets are disposable.
