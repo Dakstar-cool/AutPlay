@@ -97,6 +97,7 @@ internal fun wave(durationMs: Int): ByteArray {
 internal class PolicyEngine : DesktopAudioEngine {
     data class Open(val generation: Long, val positionMs: Long, val autoplay: Boolean)
     val opens: MutableList<Open> = CopyOnWriteArrayList()
+    val stops: MutableList<Long> = CopyOnWriteArrayList()
     private val facts = MutableStateFlow(DesktopAudioEvent(0, "IDLE"))
     override val state: StateFlow<DesktopAudioEvent> = facts
     fun emit(event: DesktopAudioEvent): Unit { facts.value = event }
@@ -107,6 +108,6 @@ internal class PolicyEngine : DesktopAudioEngine {
     override fun play(generation: Long): Unit { emit(facts.value.copy(generation = generation, isPlaying = true)) }
     override fun pause(generation: Long): Unit { emit(facts.value.copy(generation = generation, isPlaying = false)) }
     override fun seek(generation: Long, positionMs: Long): Unit { emit(facts.value.copy(generation = generation, positionMs = positionMs)) }
-    override fun stop(generation: Long): Unit = Unit
+    override fun stop(generation: Long): Unit { stops.add(generation) }
     override suspend fun close(): Unit { emit(facts.value.copy(status = "CLOSED", isPlaying = false)) }
 }

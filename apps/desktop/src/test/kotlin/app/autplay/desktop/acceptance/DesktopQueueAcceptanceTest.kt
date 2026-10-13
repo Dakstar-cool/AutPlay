@@ -21,17 +21,29 @@ class DesktopQueueAcceptanceTest {
                 val trackId = fixture.importWav(durationMs = 250)
                 val engine = PolicyEngine()
                 val controller = fixture.start(engine)
-                // The controller and store share the same durable queue limit.
-                controller.playTracks(List(1_001) { trackId })
-                eventually("oversized selection is bounded to the persistent queue limit") {
-                    assertNull(controller.error.value)
-                    controller.state.value.isPlaying && fixture.store.state.value.queue?.entries?.size == 1_000
+                controller.playTracks(listOf(trackId, trackId))
+                eventually("valid queue opens before limit rejection") {
+                    controller.state.value.isPlaying && fixture.store.state.value.queue?.entries?.size == 2
                 }
-                val cappedQueueId = fixture.store.state.value.queue?.id
+                val originalQueue = checkNotNull(fixture.store.state.value.queue)
+                val originalGeneration = engine.state.value.generation
+                val originalOpenCount = engine.opens.size
+                val originalStops = engine.stops.toList()
+                // Reject an oversized request before changing or stopping the live queue.
+                controller.playTracks(List(1_001) { trackId })
+                eventually("oversized selection reports queue limit") { controller.error.value == "QUEUE_LIMIT" }
+                assertEquals(originalQueue, fixture.store.state.value.queue)
+                assertEquals(originalQueue.currentEntryId, controller.state.value.mediaId)
+                assertEquals(originalGeneration, engine.state.value.generation)
+                assertEquals(originalOpenCount, engine.opens.size)
+                assertEquals(originalStops, engine.stops.toList())
+                assertTrue(engine.state.value.isPlaying)
+                assertTrue(controller.state.value.isPlaying)
                 controller.playTracks(listOf(trackId, trackId, trackId))
-                eventually("duplicate queue opens") {
-                    controller.state.value.isPlaying && fixture.store.state.value.queue?.entries?.size == 3 &&
-                        fixture.store.state.value.queue?.id != cappedQueueId
+                eventually("valid duplicate queue recovers and clears limit error") {
+                    controller.error.value == null && controller.state.value.isPlaying &&
+                        fixture.store.state.value.queue?.entries?.size == 3 &&
+                        fixture.store.state.value.queue?.id != originalQueue.id
                 }
                 val entries = checkNotNull(fixture.store.state.value.queue).entries
                 assertEquals(3, entries.map { it.id }.distinct().size)
