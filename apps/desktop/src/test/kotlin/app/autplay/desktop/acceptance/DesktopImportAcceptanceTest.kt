@@ -16,8 +16,7 @@ class DesktopImportAcceptanceTest {
 
     @Test fun explicitImportPreservesOriginalDeduplicatesExactBytesAndRejectsMissingOrCorruptCopies(): Unit = runBlocking {
         withTimeout(30_000) {
-            val fixture = DesktopAcceptanceFixture()
-            try {
+            DesktopAcceptanceFixture().use { fixture ->
                 fixture.openStore()
                 val bytes = wave(250)
                 val source = Files.write(fixture.sources.resolve("Original.wav"), bytes)
@@ -63,14 +62,13 @@ class DesktopImportAcceptanceTest {
                 assertArrayEquals(bytes, Files.readAllBytes(source))
                 assertEquals(1, fixture.store.state.value.tracks.size)
                 Files.list(managed.parent).use { files -> assertTrue(files.noneMatch { it.fileName.toString().endsWith(".part") }) }
-            } finally { fixture.close() }
+            }
         }
     }
 
     @Test fun symlinkSelectionsAndManagedCapabilitiesAreRejectedWithoutTouchingOriginal(): Unit = runBlocking {
         withTimeout(30_000) {
-            val fixture = DesktopAcceptanceFixture()
-            try {
+            DesktopAcceptanceFixture().use { fixture ->
                 fixture.openStore()
                 val trackId = fixture.importWav(durationMs = 250)
                 val source = fixture.sources.resolve("Synthetic tone.wav")
@@ -93,7 +91,7 @@ class DesktopImportAcceptanceTest {
                 assertEquals("import_symlink_rejected", reimport.errorCode)
                 assertTrue(Files.isSymbolicLink(managed))
                 assertArrayEquals(bytes, Files.readAllBytes(source))
-            } finally { fixture.close() }
+            }
         }
     }
 }

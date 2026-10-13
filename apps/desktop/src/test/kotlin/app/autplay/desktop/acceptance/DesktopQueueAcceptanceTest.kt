@@ -15,8 +15,7 @@ class DesktopQueueAcceptanceTest {
 
     @Test fun realQueueKeepsDuplicateEntriesRepeatShuffleAndRestartSessionWhileRejectingStaleEof(): Unit = runBlocking {
         withTimeout(75_000) {
-            val fixture = DesktopAcceptanceFixture()
-            try {
+            DesktopAcceptanceFixture().use { fixture ->
                 fixture.openStore()
                 val trackId = fixture.importWav(durationMs = 250)
                 val engine = PolicyEngine()
@@ -131,7 +130,7 @@ class DesktopQueueAcceptanceTest {
                 fixture.stopController()
                 assertEquals(1, fixture.store.state.value.history.count { it.id == checkpoint.sessionId })
                 assertEquals(fixture.store.state.value.history.size, fixture.store.state.value.history.map { it.id }.distinct().size)
-            } finally { fixture.close() }
+            }
         }
     }
 }

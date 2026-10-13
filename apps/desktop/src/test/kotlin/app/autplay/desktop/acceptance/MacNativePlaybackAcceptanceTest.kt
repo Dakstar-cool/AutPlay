@@ -29,8 +29,7 @@ class MacNativePlaybackAcceptanceTest {
         assertTrue("Packaged native helper must be an executable file", Files.isRegularFile(helper) && Files.isExecutable(helper))
 
         withTimeout(120_000) {
-            val fixture = DesktopAcceptanceFixture()
-            try {
+            DesktopAcceptanceFixture().use { fixture ->
                 fixture.openStore()
                 val trackId = fixture.importWav()
                 val source = fixture.sources.resolve("Synthetic tone.wav")
@@ -148,7 +147,7 @@ class MacNativePlaybackAcceptanceTest {
                 assertFalse(restarted.state.value.isPlaying)
                 assertNull(fixture.store.resolveManagedFile(trackId))
                 assertArrayEquals(original, Files.readAllBytes(source))
-            } finally { fixture.close() }
+            }
         }
     }
 }

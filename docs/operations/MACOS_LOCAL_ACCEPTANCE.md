@@ -63,8 +63,11 @@ The required native case must appear as **passed**, never skipped, in the test X
 Fixtures canonicalize their created temporary roots with `toRealPath()` before opening the
 store/importer. This handles macOS `/var` -> `/private/var` without weakening production
 symlink checks. The synthetic source files and managed copies belong to the same fixture.
-Cleanup closes the controller/engine and store before deleting only that owned fixture tree,
-without following symlinks. Every coroutine wait has a timeout, and JUnit adds an outer deadline;
+Cleanup closes the controller/engine, cancels and joins the fixture scope, and closes the store
+before deleting only that owned fixture tree, without following symlinks. It collects owned paths
+and closes the traversal stream before deletion. Failed resource release retains the fixture and
+fails the test; cleanup errors are attached as suppressed exceptions if the test already failed.
+No cleanup errors are ignored and deletion is not retried. Every coroutine wait has a timeout, and JUnit adds an outer deadline;
 there is no unbounded sleep or retry.
 
 The future-version case resets `user_version` only in its synthetic database, after asserting

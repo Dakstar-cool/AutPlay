@@ -17,7 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +40,8 @@ internal class DesktopAcceptanceFixture {
     val sandbox: Path = Files.createTempDirectory("autplay-desktop-acceptance-").toRealPath()
     val data: Path = Files.createDirectory(sandbox.resolve("data"))
     val sources: Path = Files.createDirectory(sandbox.resolve("sources"))
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scopeJob = SupervisorJob()
+    private val scope: CoroutineScope = CoroutineScope(scopeJob + Dispatchers.Default)
     private var opened: DesktopLibraryStore? = null
     private var engine: DesktopAudioEngine? = null
     private var controller: DesktopPlaybackController? = null
@@ -66,14 +67,42 @@ internal class DesktopAcceptanceFixture {
         assertEquals(0, report.failed)
         return store.state.value.tracks.single().id
     }
-    suspend fun close(): Unit = withContext(NonCancellable) {
-        try { stopController() } finally {
-            scope.cancel()
-            try { opened?.close() } finally {
-                opened = null
-                // Files.walk does not follow symlinks; only this created root is removed.
-                Files.walk(sandbox).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
+    suspend fun <T> use(block: suspend (DesktopAcceptanceFixture) -> T): T {
+        var originalFailure: Throwable? = null
+        try {
+            return block(this)
+        } catch (failure: Throwable) {
+            originalFailure = failure
+            throw failure
+        } finally {
+            close(originalFailure)
+        }
+    }
+
+    private suspend fun close(originalFailure: Throwable?): Unit = withContext(NonCancellable) {
+        var cleanupFailure: Throwable? = null
+        suspend fun release(action: suspend () -> Unit): Unit {
+            try { action() } catch (failure: Throwable) {
+                val previous = cleanupFailure
+                if (previous == null) cleanupFailure = failure else previous.addSuppressed(failure)
             }
+        }
+        release { stopController() }
+        release { withTimeout(5_000) { scopeJob.cancelAndJoin() } }
+        release { opened?.close() }
+        opened = null
+        // Failed release must retain the fixture for evidence rather than delete a live database.
+        if (cleanupFailure == null) release {
+            check(!Files.isSymbolicLink(sandbox) && sandbox.toRealPath() == sandbox) { "Unsafe fixture root" }
+            // Close all traversal handles BEFORE deletion, especially on Windows. No symlinks followed.
+            val ownedPaths = Files.walk(sandbox).use { paths -> paths.sorted(Comparator.reverseOrder()).toList() }
+            check(ownedPaths.all { it.toAbsolutePath().normalize().startsWith(sandbox) }) { "Unsafe fixture entry" }
+            ownedPaths.forEach(Files::delete)
+            check(!Files.exists(sandbox)) { "Fixture cleanup did not remove owned root" }
+        }
+        cleanupFailure?.let { failure ->
+            if (originalFailure == null) throw failure
+            originalFailure.addSuppressed(failure)
         }
     }
 }
