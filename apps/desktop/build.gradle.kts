@@ -13,6 +13,9 @@ kotlin {
 
 dependencies {
     implementation(project(":shared:ui"))
+    implementation(project(":shared:data"))
+    implementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.junit4)
     val desktopRuntime = providers.gradleProperty("autplay.desktopRuntime").orNull
     implementation(
         when (desktopRuntime) {

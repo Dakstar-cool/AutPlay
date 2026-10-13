@@ -54,4 +54,4 @@ rootProject.name = "AutPlay"
 if (providers.gradleProperty("autplay.desktopOnly").orNull != "true") {
     include(":apps:android")
 }
-include(":shared:domain", ":shared:application", ":shared:ui", ":apps:desktop")
+include(":shared:domain", ":shared:application", ":shared:data", ":shared:ui", ":apps:desktop")
