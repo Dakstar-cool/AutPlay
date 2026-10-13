@@ -1,12 +1,23 @@
 package app.autplay.desktop.acceptance
 
+import app.autplay.application.desktop.DesktopAudioEvent
 import app.autplay.desktop.audio.MacAudioEngine
 import app.autplay.playback.presentation.PlaybackStatus
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.ArrayDeque
 import kotlin.math.abs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -28,7 +39,8 @@ class MacNativePlaybackAcceptanceTest {
         val helper = Path.of(checkNotNull(configured)).toRealPath()
         assertTrue("Packaged native helper must be an executable file", Files.isRegularFile(helper) && Files.isExecutable(helper))
 
-        withTimeout(120_000) {
+        val trace = NativeEventTrace()
+        trace.captureFailure {
             DesktopAcceptanceFixture().use { fixture ->
                 fixture.openStore()
                 val trackId = fixture.importWav()
@@ -38,6 +50,7 @@ class MacNativePlaybackAcceptanceTest {
                 assertTrue(managed.fileName.toString().endsWith(".media"))
                 assertArrayEquals(original, Files.readAllBytes(managed))
                 val engine = MacAudioEngine(helper)
+                trace.observe(engine)
                 val controller = fixture.start(engine)
                 controller.playTracks(listOf(trackId, trackId))
                 suspend fun awaitNative(description: String, predicate: () -> Boolean): Unit = eventually(description) {
@@ -125,6 +138,7 @@ class MacNativePlaybackAcceptanceTest {
                 assertNotNull(checkpoint.sessionId)
                 fixture.reopenStore()
                 val restartedEngine = MacAudioEngine(helper)
+                trace.observe(restartedEngine)
                 val restarted = fixture.start(restartedEngine)
                 eventually("actual native reopen paused") {
                     assertTrue("Reopened helper failed", restartedEngine.state.value.status !in setOf("ERROR", "UNAVAILABLE"))
@@ -148,6 +162,55 @@ class MacNativePlaybackAcceptanceTest {
                 assertNull(fixture.store.resolveManagedFile(trackId))
                 assertArrayEquals(original, Files.readAllBytes(source))
             }
+        }
+    }
+
+    /** Observe before the controller can replace an ERROR with stop/IDLE; retain only safe facts. */
+    private class NativeEventTrace {
+        private data class Fact(val generation: Long, val status: String, val errorCode: String?, val positionMs: Long)
+        private val entries = ArrayDeque<Fact>()
+        private var latestFailure: Fact? = null
+        private val job = SupervisorJob()
+        private val scope = CoroutineScope(job + Dispatchers.Unconfined)
+
+        suspend fun captureFailure(block: suspend () -> Unit): Unit {
+            var originalFailure: Throwable? = null
+            try {
+                withTimeout(120_000) { block() }
+            } catch (failure: Throwable) {
+                val diagnostic = AssertionError("Native playback acceptance failed; ${describe()}", failure)
+                originalFailure = diagnostic
+                throw diagnostic
+            } finally {
+                try { close() } catch (cleanupFailure: Throwable) {
+                    val failure = originalFailure
+                    if (failure == null) throw cleanupFailure else failure.addSuppressed(cleanupFailure)
+                }
+            }
+        }
+
+        fun observe(engine: MacAudioEngine): Unit {
+            // No dispatch or suspension in the callback: capture transient StateFlow errors promptly.
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.state.collect { event -> remember(event) }
+            }
+        }
+
+        private fun remember(event: DesktopAudioEvent): Unit = synchronized(entries) {
+            val status = event.status.takeIf { it in setOf("IDLE", "BUFFERING", "READY", "ENDED", "ERROR", "CLOSED", "UNAVAILABLE") } ?: "REDACTED"
+            val error = event.errorCode?.let { it.takeIf { value -> value.matches(Regex("(?:NATIVE|AUDIO)_[A-Z0-9_]{1,64}")) } ?: "REDACTED" }
+            val fact = Fact(event.generation, status, error, event.positionMs)
+            if (entries.size == 64) entries.removeFirst()
+            entries.addLast(fact)
+            if (error != null || status in setOf("ERROR", "UNAVAILABLE")) latestFailure = fact
+        }
+
+        private fun describe(): String = synchronized(entries) {
+            "latestNativeFailure=$latestFailure; nativeFacts=${entries.toList()}"
+        }
+
+        private suspend fun close(): Unit = withContext(NonCancellable) {
+            withTimeout(5_000) { job.cancelAndJoin() }
         }
     }
 }
