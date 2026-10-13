@@ -20,6 +20,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -123,6 +125,10 @@ class OfflineLibraryScreenTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         openLibrary()
         assertSingleTrackVisible()
+        // The list extends behind bottom navigation; reveal the row before tapping its center.
+        composeRule.onNodeWithTag("library-product-list").performTouchInput {
+            swipeUp(startY = center.y)
+        }
         composeRule.onNodeWithTag("library-track-$TRACK").performClick()
 
         composeRule.waitUntil(timeoutMillis = 10_000) {
