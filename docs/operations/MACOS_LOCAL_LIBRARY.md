@@ -53,15 +53,38 @@ The schema keeps:
   session ID/start and played time. Unknown stored mode strings survive projection unchanged.
 - Listening history independent of current queue membership. A checkpoint updates the same
   event ID monotonically in observed played time; finalized history cannot be rewritten.
-- Append-only local outbox markers with change ID, version, mutation kind, aggregate local ID
-  and occurrence time. Every domain write and its marker commit in the same Room transaction;
-  queue and listening checkpoint markers commit together. Exact duplicate import and no-op
+- Append-only local outbox intent with change ID, version, mutation kind, aggregate local ID,
+  occurrence time and immutable `payloadJson`. Every domain write and its intent commit in the
+  same Room transaction; queue and listening checkpoint intents commit together. Exact duplicate import and no-op
   metadata/entry removal do not invent a new domain mutation.
 
-These desktop markers are local facts, **not replayable authenticated Journal payloads**. They
-contain no media locator, raw path, credential, title or artist payload. No transport,
-materialization, invented server binding or modification of existing server event bytes exists.
-Future authenticated sync needs a reviewed payload/materialization contract and explicit consent.
+The v1 local JSON envelope is `version`, `mutation` and `snapshot`. Object keys are sorted
+recursively and JSON is compact. Domain integer values are lossless decimal **strings**, including
+timestamps, durations, byte sizes and ordinals; the envelope's bounded version is the integer 1.
+Booleans and nullable fields retain JSON boolean/null types. The typed writers capture:
+
+| Mutation | Immutable snapshot |
+| --- | --- |
+| Track import / metadata update | Track ID, exact title/artist/duration, SHA-256 and byte size at that mutation |
+| Managed copy repair | Existing track ID, SHA-256 and byte size; no device capability |
+| Playlist creation | Playlist ID and original name |
+| Playlist append / removal | Entry ID, playlist ID, track ID and actual ordinal; removal captures the row before deletion |
+| Queue checkpoint | Queue ID/type, ordered entry IDs/track IDs/ordinals/shuffle ordinals, current entry, position, repeat/shuffle modes and session fields |
+| Listening checkpoint | Event/entry/track IDs, start, played time, position and finalized state |
+
+Each payload is bounded to **262,144 UTF-8 bytes**. Typed writers are the mutation allowlist;
+recursive safe-property and Unicode validation reject forbidden keys and lone surrogates.
+`desktop_outbox_payload_too_large` or `desktop_outbox_payload_invalid` aborts the transaction
+before its domain writes. Later metadata, playlist, queue or history changes never rewrite prior
+intent bytes and future materialization must use the retained snapshot, not current mutable rows.
+
+These desktop snapshots are local intent, **not authenticated Journal events**. They contain no
+media locator, original path, credential, private URL or authenticated placeholder. Metadata is
+private local data and is never put into routine logs. No transport, materialization, invented
+server binding or modification of existing server event bytes exists. Future authenticated sync
+needs a reviewed payload mapping/revalidation contract and explicit consent; it cannot assume
+that the local encoding is an existing signed server wire format. These definitions amend the
+initial unreleased desktop schema v1; they do not migrate an Android database.
 
 Missing, inaccessible or unsafe media returns no runtime capability and never removes library,
 playlist, queue or history rows. An explicit import of the same bytes preserves the existing
@@ -75,7 +98,9 @@ query, limit)` in `app.autplay.data.desktop` filters track title/artist using `L
 the query to 256 characters and returns at most 1,000 results (default 200). It is suitable for
 small collections. UI callers can use the same snapshot filter. It has no FTS/ranking,
 pagination or large-library performance claim; snapshot refresh includes all retained history.
-Queue writes are bounded to 10,000 entries. Large-library/search work requires a measured
+Queue writes are bounded to 1,000 entries and the serialized intent's byte limit; unusually long
+IDs or mode strings can exceed that byte limit below the entry cap and fail atomically.
+Large-library/search work requires a measured
 indexed/paged read contract, rather than pretending this implementation already scales.
 
 ## Import safety and limits
@@ -125,8 +150,9 @@ SQLite runtime verification was run in this implementation checkout. The coordin
 sequentially with the repository's worker/heap settings and strict dependency verification.
 
 Before claiming persistence acceptance, run disposable real bundled-SQLite restart/transaction
-tests for tracks, duplicate playlist entries, queue/shuffle/repeat/session/history; outbox failure
-rollback; future schema rejection with retained data; missing/symlink media; duplicate/concurrent
+tests for tracks, duplicate playlist entries, queue/shuffle/repeat/session/history; immutable
+outbox snapshots across subsequent mutations, byte-limit rejection and outbox failure rollback;
+future schema rejection with retained data; missing/symlink media; duplicate/concurrent
 imports; cancellation/space bounds; and source preservation. Export and retain the generated
 desktop v1 schema. On macOS, verify directory force, real imports and native decoding separately.
 Windows source compilation cannot establish audible Mac playback or power-loss durability.

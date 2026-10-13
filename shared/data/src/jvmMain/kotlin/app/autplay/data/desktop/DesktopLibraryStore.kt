@@ -115,7 +115,7 @@ private class PersistentDesktopLibraryStore(
         val file = managedFile(track.managedFileName) ?: throw DesktopStorageException("desktop_media_unavailable")
         verifyBytes(file, track.sha256, track.byteSize)
         dao.addTrack(TrackRow(track.id, track.title, track.artist, track.durationMs, track.sha256, track.byteSize),
-            LocatorRow(track.id, track.managedFileName), fact("TRACK_IMPORTED", track.id)).toDomain()
+            LocatorRow(track.id, track.managedFileName)).toDomain()
     }
 
     override suspend fun updateTrackMetadata(trackId: String, title: String, artist: String, durationMs: Long?): Unit = mutate {
@@ -123,14 +123,14 @@ private class PersistentDesktopLibraryStore(
         validMetadata(title, artist, durationMs)
         val row = dao.track(trackId) ?: throw DesktopStorageException("desktop_track_missing")
         if (row.title != title || row.artist != artist || row.durationMs != durationMs) {
-            dao.updateMetadata(row.copy(title = title, artist = artist, durationMs = durationMs), fact("TRACK_METADATA_UPDATED", trackId))
+            dao.updateMetadata(row.copy(title = title, artist = artist, durationMs = durationMs))
         }
     }
 
     override suspend fun createPlaylist(name: String): DesktopPlaylist = mutate {
         requireCode(name.isNotBlank() && name.length <= MAX_TEXT_LENGTH && name.none { it == '\u0000' }, "desktop_playlist_name_invalid")
         val row = PlaylistRow(newId(), name)
-        dao.addPlaylist(row, fact("PLAYLIST_CREATED", row.id))
+        dao.addPlaylist(row)
         DesktopPlaylist(row.id, row.name, emptyList())
     }
 
@@ -138,13 +138,13 @@ private class PersistentDesktopLibraryStore(
         validId(playlistId)
         validId(trackId)
         val entry = PlaylistEntryRow(newId(), playlistId, trackId, 0)
-        dao.appendEntry(entry, fact("PLAYLIST_ENTRY_APPENDED", entry.id))
+        dao.appendEntry(entry)
     }
 
     override suspend fun removePlaylistEntry(playlistId: String, entryId: String): Unit = mutate {
         validId(playlistId)
         validId(entryId)
-        dao.removeEntry(playlistId, entryId, fact("PLAYLIST_ENTRY_REMOVED", entryId))
+        dao.removeEntry(playlistId, entryId)
     }
 
     override suspend fun saveQueue(queue: DesktopQueue, event: DesktopListeningEvent?): Unit {
@@ -172,8 +172,7 @@ private class PersistentDesktopLibraryStore(
             dao.saveQueue(QueueRow(id = copy.id, currentEntryId = copy.currentEntryId, queueType = copy.queueType,
                 positionMs = copy.positionMs, shuffleEnabled = copy.shuffleEnabled, repeatMode = copy.repeatMode,
                 sessionId = copy.sessionId, sessionStartedAtMs = copy.sessionStartedAtMs, playedMs = copy.playedMs), rows,
-                event?.let { ListeningRow(it.id, it.queueEntryId, it.trackId, it.startedAtMs, it.playedMs, it.positionMs, it.finalized) },
-                fact("QUEUE_CHECKPOINT_SAVED", copy.id), event?.let { fact("LISTENING_CHECKPOINT_SAVED", it.id) })
+                event?.let { ListeningRow(it.id, it.queueEntryId, it.trackId, it.startedAtMs, it.playedMs, it.positionMs, it.finalized) })
         }
     }
 
@@ -256,7 +255,7 @@ private class PersistentDesktopLibraryStore(
 }
 
 private const val MAX_TEXT_LENGTH: Int = 4096
-private const val MAX_QUEUE_ENTRIES: Int = 10_000
+private const val MAX_QUEUE_ENTRIES: Int = 1_000
 private const val MAX_TRACK_BYTES: Long = 2L * 1024 * 1024 * 1024
 
 private fun rejectSymlinkAncestors(path: Path): Unit {
@@ -281,7 +280,6 @@ private fun createPrivateFile(path: Path): Unit {
     }
 }
 private fun newId(): String = UUID.randomUUID().toString()
-private fun fact(kind: String, id: String): LocalFactRow = LocalFactRow(newId(), kind, id, System.currentTimeMillis())
 private fun requireCode(condition: Boolean, code: String): Unit { if (!condition) throw DesktopStorageException(code) }
 private fun validId(id: String): Unit = requireCode(id.matches(Regex("[A-Za-z0-9_-]{1,128}")), "desktop_identity_invalid")
 private fun validMetadata(title: String, artist: String, duration: Long?): Unit = requireCode(
