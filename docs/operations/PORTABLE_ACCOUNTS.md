@@ -1,8 +1,11 @@
-# Portable account feature configuration (implementation draft)
+# Portable account feature configuration
 
-This describes implemented local routes and storage, not a production rollout or a verified release.
+Portable accounts ship in Android 1.0.8 with the compatible 0066 server. The
+[release notes](../release/RELEASE_NOTES_1.0.8.md) describe the exact artifacts and accepted
+verification scope; [getting started](GET_STARTED_1.0.8.md) covers the user flows.
 The portability [design draft](../design/explorations/AutPlay_Portable_Local_Account_Contract_Draft_v1.md)
 and [privacy runbook](PRIVACY_DELETE_EXPORT.md) describe data/credential boundaries.
+Feature flags remain opt-in on each independently configured server.
 
 ## Configuration
 

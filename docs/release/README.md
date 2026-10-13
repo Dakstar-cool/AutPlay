@@ -5,7 +5,9 @@ name. A newer date does not automatically make a report authoritative for a diff
 
 ## Current entry points
 
-- [`RELEASE_NOTES_1.0.0.md`](RELEASE_NOTES_1.0.0.md) defines the exact first-production candidate
+- [`RELEASE_NOTES_1.0.8.md`](RELEASE_NOTES_1.0.8.md) describes the public Android 1.0.8 release,
+  compatible 0066 server image, exact signed artifact and physical M52 acceptance scope.
+- [`RELEASE_NOTES_1.0.0.md`](RELEASE_NOTES_1.0.0.md) records the historical first-production candidate
   boundary. It does not claim publication or deployment without the generated release manifest and
   target evidence.
 - [`RELEASE_NOTES_0.4.0.md`](RELEASE_NOTES_0.4.0.md) describes the published development release.
