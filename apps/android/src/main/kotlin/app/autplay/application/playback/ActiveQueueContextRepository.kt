@@ -37,15 +37,3 @@ class ActiveQueueContextRepository(
             ActiveQueueContextRepository(database.queueDao(), scope)
     }
 }
-
-sealed interface ActiveQueueContext {
-    data object Loading : ActiveQueueContext
-    data object Absent : ActiveQueueContext
-    data object Unavailable : ActiveQueueContext
-
-    data class Loaded(
-        val snapshotId: String,
-        val currentEntryId: String?,
-        val queueType: String,
-    ) : ActiveQueueContext
-}

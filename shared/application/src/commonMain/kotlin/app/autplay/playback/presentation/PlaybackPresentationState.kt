@@ -2,13 +2,13 @@ package app.autplay.playback.presentation
 
 import app.autplay.application.playback.ActiveQueueContext
 
-/** UI-safe projection: neither Player nor MediaController escapes this package. */
+/** UI-safe projection with no native player handles or resolved source credentials. */
 data class PlaybackPresentationState(
     val mediaId: String? = null,
     val title: String? = null,
     val artist: String? = null,
     val positionMs: Long = 0,
-    /** Absolute Media3 buffered position; this intentionally differs from legacy bufferedMs. */
+    /** Absolute buffered position; this intentionally differs from legacy bufferedMs. */
     val bufferedPositionMs: Long = 0,
     val durationMs: Long? = null,
     val isLive: Boolean = false,
@@ -62,7 +62,7 @@ enum class PlaybackControlLockReason {
     NOT_SEEKABLE,
 }
 
-/** Pure fail-closed policy shared by every direct Media3 control. */
+/** Pure fail-closed policy shared by direct platform playback controls. */
 object PlaybackCommandGate {
     private val ordinaryQueueTypes = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
 
