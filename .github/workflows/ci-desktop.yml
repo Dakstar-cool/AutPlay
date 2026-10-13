@@ -53,6 +53,13 @@ jobs:
           architecture: aarch64
       - name: Check shared policies and package development app
         run: bash scripts/check-desktop.sh --package-macos
+      - name: Show native packaging diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          if test -d apps/desktop/build/compose/logs; then
+            find apps/desktop/build/compose/logs -name '*-err.txt' -type f -exec cat {} \;
+          fi
       - name: Install pinned probe Python
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -74,4 +81,5 @@ jobs:
             shared/application/build/test-results/jvmTest/
             shared/ui/build/test-results/jvmTest/
             apps/desktop/build/compose/binaries/main/dmg/
+            apps/desktop/build/compose/logs/
             build/macos-audio-spike/native-wav.json
