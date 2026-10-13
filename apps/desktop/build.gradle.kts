@@ -40,7 +40,9 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)
             packageName = "AutPlay"
-            packageVersion = "0.1.0"
+            // JDK 17's macOS bundler requires a positive first version component.
+            // This installer remains an unsigned development foundation.
+            packageVersion = "1.0.0"
             description = "AutPlay macOS development prototype"
             vendor = "AutPlay"
             includeAllModules = true
