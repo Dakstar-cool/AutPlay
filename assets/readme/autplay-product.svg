@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">AutPlay — ваша музыка всегда с вами</title>
+  <desc id="desc">Название плеера, оранжевый знак воспроизведения и слоган на тёплом светлом фоне. Цвета взяты из интерфейса AutPlay.</desc>
+  <rect width="1200" height="360" rx="28" fill="#F5F1E9"/>
+  <g id="play-mark" transform="translate(69 65)">
+    <rect width="130" height="130" rx="38" fill="#FF7854"/>
+    <path d="M52 36L96 65L52 94Z" fill="#17191D"/>
+  </g>
+  <g id="product-name" font-family="'Segoe UI', Arial, sans-serif" fill="#17191D">
+    <text x="234" y="190" font-size="154" font-weight="750" letter-spacing="-7">AutPlay</text>
+    <text x="69" y="284" font-size="54" font-weight="600" letter-spacing="-1">Ваша музыка всегда с вами.</text>
+  </g>
+  <g id="audio-rhythm" stroke="#FF7854" stroke-width="16" stroke-linecap="round">
+    <path d="M934 99V159M970 77V181M1006 59V199M1042 87V171M1078 110V148"/>
+  </g>
+</svg>
