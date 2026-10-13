@@ -29,7 +29,7 @@ import org.junit.rules.Timeout
 class MacNativePlaybackAcceptanceTest {
     @get:Rule val deadline: Timeout = Timeout.seconds(150)
 
-    @Test fun actualNativeTimelineQueueAndPausedRestartUseManagedNeutralExtension(): Unit = runBlocking {
+    @Test fun actualNativeTimelineQueueAndPausedRestartUseManagedWav(): Unit = runBlocking {
         val mac = System.getProperty("os.name") == "Mac OS X"
         val required = System.getProperty("autplay.requireNativeTest", "false").toBoolean()
         assertTrue("Required native acceptance needs macOS", !required || mac)
@@ -47,7 +47,7 @@ class MacNativePlaybackAcceptanceTest {
                 val source = fixture.sources.resolve("Synthetic tone.wav")
                 val original = Files.readAllBytes(source)
                 val managed = Path.of(checkNotNull(fixture.store.resolveManagedFile(trackId)))
-                assertTrue(managed.fileName.toString().endsWith(".media"))
+                assertEquals("${fixture.store.state.value.tracks.single().sha256}.wav", managed.fileName.toString())
                 assertArrayEquals(original, Files.readAllBytes(managed))
                 val engine = MacAudioEngine(helper)
                 trace.observe(engine)
@@ -103,7 +103,7 @@ class MacNativePlaybackAcceptanceTest {
                 }
                 val activeGeneration = engine.state.value.generation
                 // An obsolete open that would fail on the native owner cannot replace the live generation.
-                engine.open(fixture.data.resolve("missing.media").toString(), firstGeneration, 0, true)
+                engine.open(fixture.data.resolve("missing.wav").toString(), firstGeneration, 0, true)
                 engine.seek(firstGeneration, 7_999)
                 engine.play(firstGeneration)
                 delay(300)
