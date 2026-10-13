@@ -46,7 +46,8 @@ val hostIsMacArm64 = System.getProperty("os.name").startsWith("Mac") &&
 val nativeResourcesRoot = layout.buildDirectory.dir("native-resources")
 val audioHelper = nativeResourcesRoot.map { it.file("macos-arm64/native/AutPlayAudioHelper") }
 val compileMacAudioHelper = tasks.register<Exec>("compileMacAudioHelper") {
-    onlyIf { hostIsMacArm64 }
+    val supportedHost = hostIsMacArm64
+    onlyIf { supportedHost }
     val source = layout.projectDirectory.file("src/native/AutPlayAudioHelper.swift")
     val binary = audioHelper.get().asFile
     inputs.file(source)
