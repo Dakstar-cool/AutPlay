@@ -4,6 +4,7 @@ import app.autplay.application.desktop.DesktopAudioEngine
 import app.autplay.application.desktop.DesktopAudioEvent
 import app.autplay.application.desktop.DesktopLibraryStore
 import app.autplay.application.desktop.DesktopListeningEvent
+import app.autplay.application.desktop.DesktopLocalLimits
 import app.autplay.application.desktop.DesktopQueue
 import app.autplay.application.desktop.DesktopQueueEntry
 import app.autplay.application.playback.ActiveQueueContext
@@ -142,8 +143,12 @@ public class DesktopPlaybackController(
 
     public fun playTracks(trackIds: List<String>, queueType: String = "LIBRARY"): Unit = dispatch {
         if (queueType !in ORDINARY_TYPES) return@dispatch
+        if (trackIds.size > DesktopLocalLimits.MAX_QUEUE_ENTRIES) {
+            mutableError.value = "QUEUE_LIMIT"
+            return@dispatch
+        }
         val known = store.state.value.tracks.map { it.id }.toHashSet()
-        val entries = trackIds.take(MAX_QUEUE_SIZE).filter { it in known }.map { DesktopQueueEntry(newId(), it) }
+        val entries = trackIds.filter { it in known }.map { DesktopQueueEntry(newId(), it) }
         if (entries.isEmpty()) return@dispatch
         accumulate()
         val previousEvent = listeningEvent(finalized = true)
@@ -165,12 +170,12 @@ public class DesktopPlaybackController(
             startSession()
             checkpoint()
             openCurrent(autoplay = false)
-        } else if (validModes() && current.entries.size < MAX_QUEUE_SIZE) {
+        } else if (validModes() && current.entries.size < DesktopLocalLimits.MAX_QUEUE_ENTRIES) {
             accumulate()
             queue = current.copy(entries = current.entries + entry, shuffleOrder = order() + entry.id,
                 playedMs = queue?.playedMs ?: current.playedMs)
             checkpoint()
-        } else mutableError.value = "QUEUE_LIMIT_OR_MODE"
+        } else mutableError.value = if (validModes()) "QUEUE_LIMIT" else "UNSUPPORTED_QUEUE_MODE"
     }
 
     public fun selectEntry(entryId: String): Unit = dispatch {
@@ -279,11 +284,14 @@ public class DesktopPlaybackController(
         // Do not let a repeated EOF or an out-of-order callback resurrect a finished generation.
         if (endedGeneration == event.generation) return
         accumulate()
+        val wasOpening = facts.status.uppercase() in setOf("BUFFERING", "OPENING")
+        val terminal = isTerminalFailure(event)
         facts = if (event.status.uppercase() in setOf("EOF", "ENDED")) event.copy(status = "ENDED", isPlaying = false) else event
-        queue = queue?.copy(positionMs = event.positionMs.coerceAtLeast(0))
-        if (event.status.uppercase() in setOf("ERROR", "CLOSED", "UNAVAILABLE") || event.errorCode != null) {
+        if (!terminal || !wasOpening) queue = queue?.copy(positionMs = event.positionMs.coerceAtLeast(0))
+        if (terminal) {
             invalidateEngine()
-            facts = event.copy(generation = generation, status = "ERROR", isPlaying = false)
+            facts = event.copy(generation = generation,
+                status = if (event.status.uppercase() == "UNAVAILABLE") "UNAVAILABLE" else "ERROR", isPlaying = false)
             mutableError.value = if (event.status.uppercase() == "UNAVAILABLE") "AUDIO_UNAVAILABLE" else "AUDIO_ERROR"
             checkpoint()
             return
@@ -347,6 +355,9 @@ public class DesktopPlaybackController(
         mutableError.value = null
         sourceAvailable = true
         nativeCommand { engine.open(path, generation, queue?.positionMs ?: 0, autoplay) }
+        // A terminal adapter can reject open synchronously; do not leave the projection buffering.
+        val opened = engine.state.value
+        if (opened.generation == generation && isTerminalFailure(opened)) accept(opened)
         project()
     }
 
@@ -419,7 +430,7 @@ public class DesktopPlaybackController(
 
     private fun validModes(): Boolean = queue?.let {
         it.queueType in ORDINARY_TYPES && it.repeatMode in REPEAT_MODES &&
-            it.entries.size <= MAX_QUEUE_SIZE && it.entries.map { entry -> entry.id }.distinct().size == it.entries.size &&
+            it.entries.size <= DesktopLocalLimits.MAX_QUEUE_ENTRIES && it.entries.map { entry -> entry.id }.distinct().size == it.entries.size &&
             (!it.shuffleEnabled || (it.shuffleOrder.size == it.entries.size && it.shuffleOrder.toSet() == it.entries.map { entry -> entry.id }.toSet()))
     } ?: false
 
@@ -484,10 +495,11 @@ public class DesktopPlaybackController(
 
     private companion object {
         const val CHECKPOINT_NANOS: Long = 15_000_000_000
-        const val MAX_QUEUE_SIZE: Int = 10_000
         val ORDINARY_TYPES: Set<String> = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
         val REPEAT_MODES: Set<String> = setOf("OFF", "ONE", "ALL")
         val COMMAND_STATUSES: Set<String> = setOf("READY", "PLAYING", "PAUSED", "ENDED")
+        fun isTerminalFailure(event: DesktopAudioEvent): Boolean =
+            event.status.uppercase() in setOf("ERROR", "CLOSED", "UNAVAILABLE") || event.errorCode != null
         fun newId(): String = UUID.randomUUID().toString()
     }
 }

@@ -60,6 +60,8 @@ internal enum class DesktopText(public val russian: String, public val english: 
     Duplicates("Уже в библиотеке", "Duplicates"),
     Failed("Не удалось", "Failed"),
     OperationFailed("Операция не выполнена. Попробуйте ещё раз.", "Operation failed. Try again."),
+    ImportSelectionLimit("Выберите не более {limit} файлов или папок за один импорт. Ничего не импортировано.", "Choose at most {limit} files or folders per import. Nothing was imported."),
+    QueueLimit("В очереди может быть не более {limit} записей. Уменьшите выбор или удалите записи из очереди.", "A queue can contain at most {limit} entries. Reduce your selection or remove queue entries."),
     SourceMissing("Файл недоступен. Запись сохранена в библиотеке; выберите другой трек.", "File unavailable. Library entry preserved; choose another track."),
     AudioError("Аудиодвижок не смог воспроизвести файл. Выберите другой трек или повторите попытку.", "Audio engine could not play the file. Choose another track or retry."),
     UnsupportedMode("Сохранённый режим очереди не поддерживается. Создайте новую очередь из библиотеки.", "Saved queue mode unsupported. Start a new queue from the library."),

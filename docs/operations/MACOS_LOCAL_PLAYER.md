@@ -61,8 +61,11 @@ managed file capabilities remain inside desktop adapters.
   failed queue entry explicitly retries resolution/open; choosing another entry remains available.
 
 Lists are lazy and display at most 10,000 items per view; library search can narrow the result.
-Queues accept at most 10,000 entries. Playlist chips are bounded to 1,000. The chooser passes at
-most 1,000 selected roots; traversal/media bounds are enforced by the import adapter. The actor
+Queues accept at most 1,000 entries. Playlist chips are bounded to 1,000. The chooser accepts at
+most 256 selected roots. Queue and selection caps come from shared `DesktopLocalLimits`.
+An oversized selection is rejected as one explicit batch-limit failure before import, without
+truncating it or changing the library; an oversized queue request preserves the existing queue.
+Traversal/media bounds are enforced by the import adapter. The actor
 accepts at most 64 pending commands/events and reports an overloaded user-command request as a
 failure rather than silently claiming completion. The native engine owns its bounded protocol.
 

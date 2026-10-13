@@ -29,6 +29,7 @@ import app.autplay.application.desktop.DesktopAudioEngine
 import app.autplay.application.desktop.DesktopImportPort
 import app.autplay.application.desktop.DesktopImportResult
 import app.autplay.application.desktop.DesktopLibraryStore
+import app.autplay.application.desktop.DesktopLocalLimits
 import app.autplay.data.desktop.openDesktopLibraryStore
 import app.autplay.desktop.audio.MacAudioEngine
 import app.autplay.desktop.library.DesktopFileImporter
@@ -173,9 +174,12 @@ public class DesktopRuntime private constructor(
         scope.launch {
             try {
                 val selected = chooseSources(owner)
-                if (selected.isNotEmpty()) {
+                if (selected.limitExceeded) {
                     mutableError.value = null
-                    mutableImportResult.value = importer.importSelected(selected)
+                    mutableImportResult.value = DesktopImportResult(0, 0, 1, "import_selection_limit")
+                } else if (selected.paths.isNotEmpty()) {
+                    mutableError.value = null
+                    mutableImportResult.value = importer.importSelected(selected.paths)
                 }
             } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
@@ -242,7 +246,9 @@ public class DesktopRuntime private constructor(
     }
 }
 
-private suspend fun chooseSources(owner: Component?): List<String> = suspendCancellableCoroutine { continuation ->
+private data class DesktopSourceSelection(val paths: List<String> = emptyList(), val limitExceeded: Boolean = false)
+
+private suspend fun chooseSources(owner: Component?): DesktopSourceSelection = suspendCancellableCoroutine { continuation ->
     EventQueue.invokeLater {
         if (!continuation.isActive) return@invokeLater
         try {
@@ -252,10 +258,13 @@ private suspend fun chooseSources(owner: Component?): List<String> = suspendCanc
                 dialogTitle = "AutPlay — выберите файлы или папки / Choose files or folders"
             }
             continuation.invokeOnCancellation { EventQueue.invokeLater { chooser.cancelSelection() } }
-            val paths = if (chooser.showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
-                chooser.selectedFiles.take(1_000).map { it.toPath().toAbsolutePath().toString() }
-            } else emptyList()
-            if (continuation.isActive) continuation.resume(paths)
+            val selection = if (chooser.showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
+                val selectedFiles = chooser.selectedFiles
+                if (selectedFiles.size > DesktopLocalLimits.MAX_SELECTION_ROOTS) {
+                    DesktopSourceSelection(limitExceeded = true)
+                } else DesktopSourceSelection(selectedFiles.map { it.toPath().toAbsolutePath().toString() })
+            } else DesktopSourceSelection()
+            if (continuation.isActive) continuation.resume(selection)
         } catch (failure: Exception) {
             if (continuation.isActive) continuation.resumeWith(Result.failure(failure))
         }

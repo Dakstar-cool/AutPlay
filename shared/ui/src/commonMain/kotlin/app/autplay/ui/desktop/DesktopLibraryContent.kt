@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.application.desktop.DesktopImportResult
 import app.autplay.application.desktop.DesktopLibrarySnapshot
+import app.autplay.application.desktop.DesktopLocalLimits
 import app.autplay.application.desktop.DesktopTrack
 
 /** Commands carry stable IDs, never filesystem capabilities. Selection and search are view state. */
@@ -62,13 +63,7 @@ internal fun DesktopLibraryContent(
     val tracksById = remember(library.tracks) { library.tracks.associateBy { it.id } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         errorCode?.let {
-            Text(when (it) {
-                "SOURCE_UNAVAILABLE" -> DesktopText.SourceMissing
-                "AUDIO_ERROR" -> DesktopText.AudioError
-                "AUDIO_UNAVAILABLE" -> DesktopText.PlaybackUnavailable
-                "UNSUPPORTED_QUEUE_MODE", "QUEUE_LIMIT_OR_MODE" -> DesktopText.UnsupportedMode
-                else -> DesktopText.OperationFailed
-            }.inLanguage(language), color = MaterialTheme.colorScheme.error)
+            Text(desktopErrorMessage(it, language), color = MaterialTheme.colorScheme.error)
         }
         if (section == DesktopSection.Library) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -79,7 +74,7 @@ internal fun DesktopLibraryContent(
             }
             importResult?.let {
                 Text("${DesktopText.Imported.inLanguage(language)}: ${it.imported} · ${DesktopText.Duplicates.inLanguage(language)}: ${it.duplicates} · ${DesktopText.Failed.inLanguage(language)}: ${it.failed}")
-                if (it.errorCode != null) Text(DesktopText.OperationFailed.inLanguage(language), color = MaterialTheme.colorScheme.error)
+                it.errorCode?.let { code -> Text(desktopErrorMessage(code, language), color = MaterialTheme.colorScheme.error) }
             }
             if (library.tracks.isEmpty()) Text(DesktopText.EmptyLibraryBody.inLanguage(language))
             OutlinedTextField(value = search, onValueChange = { search = it.take(256) }, singleLine = true,
@@ -210,3 +205,13 @@ private fun TrackRow(track: DesktopTrack, onPlay: () -> Unit, actions: @Composab
 }
 
 private const val LIST_LIMIT: Int = 10_000
+
+private fun desktopErrorMessage(code: String, language: DesktopLanguage): String = when (code) {
+    "SOURCE_UNAVAILABLE" -> DesktopText.SourceMissing.inLanguage(language)
+    "AUDIO_ERROR" -> DesktopText.AudioError.inLanguage(language)
+    "AUDIO_UNAVAILABLE" -> DesktopText.PlaybackUnavailable.inLanguage(language)
+    "UNSUPPORTED_QUEUE_MODE", "QUEUE_LIMIT_OR_MODE" -> DesktopText.UnsupportedMode.inLanguage(language)
+    "QUEUE_LIMIT" -> DesktopText.QueueLimit.inLanguage(language).replace("{limit}", DesktopLocalLimits.MAX_QUEUE_ENTRIES.toString())
+    "import_selection_limit" -> DesktopText.ImportSelectionLimit.inLanguage(language).replace("{limit}", DesktopLocalLimits.MAX_SELECTION_ROOTS.toString())
+    else -> DesktopText.OperationFailed.inLanguage(language)
+}
