@@ -40,6 +40,7 @@ public class DesktopPlaybackController(
     private val scope: CoroutineScope,
 ) : PlaybackPort {
     private val mutex: Mutex = Mutex()
+    private val closeMutex: Mutex = Mutex()
     private val commands: Channel<suspend () -> Unit> = Channel(64)
     private val mutableState: MutableStateFlow<PlaybackPresentationState> = MutableStateFlow(PlaybackPresentationState())
     override val state: StateFlow<PlaybackPresentationState> = mutableState.asStateFlow()
@@ -51,7 +52,7 @@ public class DesktopPlaybackController(
     private var facts: DesktopAudioEvent = DesktopAudioEvent(0, "IDLE")
     private var sourceAvailable: Boolean = false
     private var endAdvanceAllowed: Boolean = false
-    private var closed: Boolean = false
+    @Volatile private var closed: Boolean = false
     private var lastElapsedNanos: Long = System.nanoTime()
     private var lastCheckpointNanos: Long = lastElapsedNanos
     private val jobs: MutableList<Job> = mutableListOf()
@@ -224,12 +225,10 @@ public class DesktopPlaybackController(
     }
 
     /** Orderly close checkpoints the active session without finalizing it or losing restart identity. */
-    public suspend fun close(): Unit {
-        var shouldClose = false
+    public suspend fun close(): Unit = closeMutex.withLock {
+        if (closed) return@withLock
         try {
             mutex.withLock {
-                if (closed) return
-                shouldClose = true
                 try {
                     accumulate()
                     // Checkpoint still runs if the native process disappeared before pause.
@@ -240,15 +239,15 @@ public class DesktopPlaybackController(
                 }
             }
         } finally {
-            if (shouldClose) {
-                withContext(NonCancellable) {
-                    jobs.forEach { it.cancel() }
-                    commands.close()
-                    try {
-                        withTimeout(5_000) { jobs.joinAll() }
-                    } finally {
-                        withTimeout(5_000) { engine.close() }
-                    }
+            // This also runs if cancellation happened while waiting for the command mutex.
+            withContext(NonCancellable) {
+                closed = true
+                jobs.forEach { it.cancel() }
+                commands.close()
+                try {
+                    withTimeout(5_000) { jobs.joinAll() }
+                } finally {
+                    withTimeout(5_000) { engine.close() }
                 }
             }
         }
