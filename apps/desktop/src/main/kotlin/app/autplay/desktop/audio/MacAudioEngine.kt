@@ -74,8 +74,13 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
 
     override fun open(managedPath: String, generation: Long, positionMs: Long, autoplay: Boolean): Unit {
         synchronized(lock) {
-            if (closing || terminalError != null || generation < 0 || generation <= this.generation) return
+            if (closing || generation < 0 || generation <= this.generation) return
             this.generation = generation
+            terminalError?.let { code ->
+                // Resolve the selected generation's pending state without restarting a failed owner.
+                mutableState.value = DesktopAudioEvent(generation, "UNAVAILABLE", errorCode = code)
+                return
+            }
             lastEventAt = System.nanoTime()
             // Gate incoming old callbacks immediately, before the owner writes the replacement command.
             mutableState.value = DesktopAudioEvent(generation, "BUFFERING")
