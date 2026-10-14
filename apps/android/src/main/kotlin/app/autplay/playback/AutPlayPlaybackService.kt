@@ -29,6 +29,10 @@ import app.autplay.application.playback.PlaybackPersistenceRepository
 import app.autplay.application.playback.RestoredPlaybackQueue
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
+import app.autplay.application.wave.WavePlaybackAnchor
+import app.autplay.domain.wave.DriftAction
+import app.autplay.domain.wave.WaveDriftDecision
+import app.autplay.domain.wave.WaveDriftMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +69,10 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var uncommittedPlaybackDeltaMs = 0L
     private var shuffleSeed: Long? = null
     private var scheduledPlayJob: kotlinx.coroutines.Job? = null
+    private var waveDriftJob: Job? = null
+    private var waveSpeedResetJob: Job? = null
+    private var waveAnchor: WavePlaybackAnchor? = null
+    private var waveSynchronizationDegraded = false
     private var sleepTimerJob: kotlinx.coroutines.Job? = null
     private var sleepTimerDeadlineElapsedRealtimeMs: Long? = null
     private var stopAfterQueueEntryId: String? = null
@@ -279,8 +287,16 @@ class AutPlayPlaybackService : MediaSessionService() {
             )
             ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
             ACTION_RESUME -> player.play()
-            ACTION_PAUSE -> player.pause()
+            ACTION_PAUSE -> {
+                cancelWaveSynchronization()
+                scheduledPlayJob?.cancel()
+                scheduledPlayJob = null
+                player.pause()
+            }
             ACTION_STOP -> scope.launch {
+                cancelWaveSynchronization()
+                scheduledPlayJob?.cancel()
+                scheduledPlayJob = null
                 stateMutex.withLock {
                     finalizeCurrentLocked(capturePlayerMetrics())
                     player.stop()
@@ -291,14 +307,19 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE_ENABLED, false)
             ACTION_SET_REPEAT -> player.repeatMode = intent.getStringExtra(EXTRA_REPEAT_MODE).orEmpty().toMedia3RepeatMode()
             ACTION_SCHEDULED_PLAY -> {
+                cancelWaveSynchronization()
                 scheduledPlayJob?.cancel()
                 // Wave timing is monotonic: wall-clock changes must not shift an accepted start.
                 val delayMs = (intent.getLongExtra(EXTRA_SCHEDULED_AT_MS, 0) - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+                val scheduledGeneration = queueGeneration
+                val scheduledEntryId = player.currentMediaItem?.mediaId
                 scheduledPlayJob = scope.launch {
                     delay(delayMs)
-                    if (player.currentMediaItem.isResolvedPlaybackSource()) player.play()
+                    if (scheduledGeneration == queueGeneration && scheduledEntryId == player.currentMediaItem?.mediaId &&
+                        player.currentMediaItem.isResolvedPlaybackSource()) player.play()
                 }
             }
+            ACTION_SYNCHRONIZE_WAVE -> synchronizeWavePlayback(intent)
             ACTION_SCHEDULE_SLEEP_TIMER -> scheduleSleepTimer(
                 intent.getLongExtra(EXTRA_SLEEP_TIMER_DURATION_MS, 0),
             )
@@ -348,6 +369,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         resolvedQueueEntryIds.clear()
         mediaSession.release()
         scheduledPlayJob?.cancel()
+        cancelWaveSynchronization()
         sleepTimerJob?.cancel()
         sleepTimerJob = null
         ++sleepTimerGeneration
@@ -592,6 +614,9 @@ class AutPlayPlaybackService : MediaSessionService() {
     }
 
     private fun beginQueueGeneration(): Long {
+        cancelWaveSynchronization()
+        scheduledPlayJob?.cancel()
+        scheduledPlayJob = null
         queueGeneration += 1
         cancelResolutionJobs(resolutionJobs)
         resolvedQueueEntryIds.clear()
@@ -1000,6 +1025,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                 positionMs = sourcePositionMs(),
                 isPlaying = player.isPlaying,
                 isPrepared = player.playbackState == Player.STATE_READY,
+                waveSynchronizationDegraded = waveSynchronizationDegraded,
                 bufferedMs = (player.bufferedPosition - player.currentPosition).coerceAtLeast(0),
                 shuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = player.repeatMode.fromMedia3RepeatMode(),
@@ -1014,6 +1040,102 @@ class AutPlayPlaybackService : MediaSessionService() {
             ),
         )
     }
+
+    private fun cancelWaveSynchronization(degraded: Boolean = false) {
+        val wasWave = waveAnchor != null
+        waveDriftJob?.cancel(); waveDriftJob = null
+        waveSpeedResetJob?.cancel(); waveSpeedResetJob = null
+        waveAnchor = null
+        waveSynchronizationDegraded = degraded
+        if (wasWave) player.playbackParameters = PlaybackParameters(1f)
+    }
+
+    /** Player reads and corrections stay on its application looper and are fenced by queue generation. */
+    private fun synchronizeWavePlayback(intent: Intent) {
+        val anchor = runCatching { WavePlaybackAnchor(
+            intent.getStringExtra(EXTRA_QUEUE_SNAPSHOT_ID).orEmpty(),
+            intent.getStringExtra(EXTRA_EXPECTED_QUEUE_ENTRY_ID).orEmpty(),
+            intent.getLongExtra(EXTRA_WAVE_SEQUENCE, 0),
+            intent.getLongExtra(EXTRA_SCHEDULED_AT_MS, 0),
+            intent.getLongExtra(EXTRA_WAVE_VALID_UNTIL_MS, 0),
+        ) }.getOrNull() ?: return
+        if (!anchor.owns(restored?.snapshot?.queueType, restored?.snapshot?.queueSnapshotId, player.currentMediaItem?.mediaId) ||
+            anchor.validUntilElapsedRealtimeMs <= SystemClock.elapsedRealtime() || !player.currentMediaItem.isResolvedPlaybackSource()) return
+        val previous = waveAnchor
+        if (previous?.queueSnapshotId == anchor.queueSnapshotId && previous.queueEntryId == anchor.queueEntryId &&
+            previous.commandSequence == anchor.commandSequence && waveDriftJob?.isActive == true) {
+            waveAnchor = previous.renewLease(anchor)
+            return
+        }
+        if (!intent.getBooleanExtra(EXTRA_WAVE_START_PLAYBACK, false)) return
+        cancelWaveSynchronization()
+        scheduledPlayJob?.cancel()
+        waveAnchor = anchor
+        val expectedGeneration = queueGeneration
+        val monitor = WaveDriftMonitor()
+        waveDriftJob = scope.launch {
+            delay((anchor.startElapsedRealtimeMs - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            stateMutex.withLock {
+                if (!ownsWaveAnchor(anchor, expectedGeneration)) return@withLock
+                if (SystemClock.elapsedRealtime() >= anchor.validUntilElapsedRealtimeMs ||
+                    player.playbackState != Player.STATE_READY) {
+                    cancelWaveSynchronization(degraded = true)
+                    player.pause()
+                    publishRuntimeState()
+                    return@withLock
+                }
+                player.playbackParameters = PlaybackParameters(1f)
+                player.seekTo(currentCutBounds().playerPosition((SystemClock.elapsedRealtime() - anchor.startElapsedRealtimeMs).coerceAtLeast(0)))
+                player.play()
+            }
+            while (isActive) {
+                delay(2_000)
+                stateMutex.withLock {
+                    val current = waveAnchor ?: return@withLock
+                    if (!ownsWaveAnchor(current, expectedGeneration)) {
+                        cancelWaveSynchronization()
+                        return@withLock
+                    }
+                    when (val decision = monitor.sample(
+                        SystemClock.elapsedRealtime(), current.startElapsedRealtimeMs, current.validUntilElapsedRealtimeMs,
+                        sourcePositionMs(), player.isPlaying, player.playbackState == Player.STATE_BUFFERING,
+                    )) {
+                        WaveDriftDecision.Wait -> Unit
+                        WaveDriftDecision.Degraded -> {
+                            cancelWaveSynchronization(degraded = true)
+                            player.pause()
+                        }
+                        is WaveDriftDecision.Correct -> when (val action = decision.action) {
+                            DriftAction.None -> Unit
+                            is DriftAction.Seek -> {
+                                waveSpeedResetJob?.cancel(); waveSpeedResetJob = null
+                                player.playbackParameters = PlaybackParameters(1f)
+                                player.seekTo(currentCutBounds().playerPosition(action.positionMs))
+                            }
+                            is DriftAction.Speed -> {
+                                player.playbackParameters = PlaybackParameters(action.multiplier)
+                                if (action.multiplier == 1f) {
+                                    waveSpeedResetJob?.cancel(); waveSpeedResetJob = null
+                                } else if (waveSpeedResetJob?.isActive != true) {
+                                    waveSpeedResetJob = scope.launch {
+                                        delay(5_000)
+                                        stateMutex.withLock {
+                                            if (ownsWaveAnchor(current, expectedGeneration)) player.playbackParameters = PlaybackParameters(1f)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    publishRuntimeState()
+                }
+            }
+        }
+    }
+
+    private fun ownsWaveAnchor(anchor: WavePlaybackAnchor, expectedGeneration: Long): Boolean =
+        waveAnchor?.commandSequence == anchor.commandSequence && expectedGeneration == queueGeneration &&
+            anchor.owns(restored?.snapshot?.queueType, restored?.snapshot?.queueSnapshotId, player.currentMediaItem?.mediaId)
 
     /**
      * Service-owned, session-local timer. It intentionally has no persistence: after process
@@ -1300,6 +1422,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         const val ACTION_SET_SHUFFLE = "app.autplay.playback.SET_SHUFFLE"
         const val ACTION_SET_REPEAT = "app.autplay.playback.SET_REPEAT"
         const val ACTION_SCHEDULED_PLAY = "app.autplay.playback.SCHEDULED_PLAY"
+        const val ACTION_SYNCHRONIZE_WAVE = "app.autplay.playback.SYNCHRONIZE_WAVE"
         const val ACTION_SCHEDULE_SLEEP_TIMER = "app.autplay.playback.SCHEDULE_SLEEP_TIMER"
         const val ACTION_STOP_AFTER_CURRENT_ITEM = "app.autplay.playback.STOP_AFTER_CURRENT_ITEM"
         const val ACTION_CANCEL_SLEEP_TIMER = "app.autplay.playback.CANCEL_SLEEP_TIMER"
@@ -1311,6 +1434,9 @@ class AutPlayPlaybackService : MediaSessionService() {
         const val EXTRA_SHUFFLE_ENABLED = "shuffle_enabled"
         const val EXTRA_REPEAT_MODE = "repeat_mode"
         const val EXTRA_SCHEDULED_AT_MS = "scheduled_at_ms"
+        const val EXTRA_WAVE_SEQUENCE = "wave_sequence"
+        const val EXTRA_WAVE_VALID_UNTIL_MS = "wave_valid_until_ms"
+        const val EXTRA_WAVE_START_PLAYBACK = "wave_start_playback"
         const val EXTRA_SLEEP_TIMER_DURATION_MS = "sleep_timer_duration_ms"
         const val EXTRA_EXPECTED_QUEUE_ENTRY_ID = "expected_queue_entry_id"
         const val EXTRA_SPEED = "speed"
@@ -1330,6 +1456,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_SET_SHUFFLE,
             ACTION_SET_REPEAT,
             ACTION_SCHEDULED_PLAY,
+            ACTION_SYNCHRONIZE_WAVE,
             ACTION_SCHEDULE_SLEEP_TIMER,
             ACTION_STOP_AFTER_CURRENT_ITEM,
             ACTION_CANCEL_SLEEP_TIMER,

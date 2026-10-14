@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import SQLColumnExpression, and_, false, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from autplay.adapters.postgresql.models.account import DeviceRow, UserSessionRow
 from autplay.adapters.postgresql.models.audit import AuditEventRow
@@ -33,6 +35,7 @@ from autplay.domain.admin_views import (
     AdminJobItem,
     AdminPage,
     AdminReviewItem,
+    AdminSessionFilters,
     AdminSessionItem,
     AdminUnavailable,
     AdminVaultStatus,
@@ -221,10 +224,36 @@ class PostgreSqlAdminViews:
         )
         return AdminPage(items, str(rows[limit - 1].audit_event_id) if len(rows) > limit else None)
 
-    def sessions(self, actor: WebActor, *, limit: int, after: str | None = None) -> AdminPage:
+    def sessions(
+        self,
+        actor: WebActor,
+        *,
+        limit: int,
+        after: str | None = None,
+        filters: AdminSessionFilters | None = None,
+    ) -> AdminPage:
+        filters = filters or AdminSessionFilters()
+        now = self._session.scalar(select(func.statement_timestamp()))
+        assert now is not None
         cursor = _cursor(after) if after is not None else None
-        query = select(UserSessionRow).where(UserSessionRow.user_id == actor.user_id)
-        web_query = select(WebSessionRow).where(WebSessionRow.user_id == actor.user_id)
+        query = select(UserSessionRow).where(
+            UserSessionRow.user_id == actor.user_id,
+            *_session_conditions(
+                UserSessionRow.revoked_at, UserSessionRow.expires_at, false(), filters, now
+            ),
+        )
+        web_expiry = func.least(WebSessionRow.idle_expires_at, WebSessionRow.absolute_expires_at)
+        web_query = select(WebSessionRow).where(
+            WebSessionRow.user_id == actor.user_id,
+            WebSessionRow.server_instance_id == actor.server_instance_id,
+            *_session_conditions(
+                WebSessionRow.revoked_at,
+                web_expiry,
+                WebSessionRow.web_session_id == actor.web_session_id,
+                filters,
+                now,
+            ),
+        )
         if cursor is not None:
             query = query.where(UserSessionRow.session_id < cursor)
             web_query = web_query.where(WebSessionRow.web_session_id < cursor)
@@ -238,7 +267,7 @@ class PostgreSqlAdminViews:
             AdminSessionItem(
                 row.session_id,
                 f"ANDROID_{row.session_mode}",
-                "REVOKED" if row.revoked_at else "ACTIVE",
+                _session_state(row.revoked_at, row.expires_at, now),
                 row.issued_at,
                 row.expires_at,
                 False,
@@ -249,9 +278,11 @@ class PostgreSqlAdminViews:
             AdminSessionItem(
                 row.web_session_id,
                 "BROWSER",
-                "REVOKED" if row.revoked_at else "ACTIVE",
+                _session_state(
+                    row.revoked_at, min(row.idle_expires_at, row.absolute_expires_at), now
+                ),
                 row.issued_at,
-                row.absolute_expires_at,
+                min(row.idle_expires_at, row.absolute_expires_at),
                 row.web_session_id == actor.web_session_id,
             )
             for row in web_rows
@@ -401,6 +432,45 @@ class PostgreSqlAdminViews:
     def recovery(self, actor: WebActor) -> AdminUnavailable:
         del actor
         return AdminUnavailable("recovery_evidence_unavailable")
+
+
+def _session_conditions(
+    revoked_at: SQLColumnExpression[datetime | None],
+    expires_at: SQLColumnExpression[datetime],
+    current: SQLColumnExpression[bool],
+    filters: AdminSessionFilters,
+    now: datetime,
+) -> tuple[ColumnElement[bool], ...]:
+    # PostgreSQL LEAST ignores NULL revocations; expiry still ends an unrevoked session.
+    conditions = [func.least(revoked_at, expires_at) >= now - timedelta(days=7)]
+    active = and_(revoked_at.is_(None), expires_at > now)
+    if filters.state == "ACTIVE":
+        conditions.append(active)
+    elif filters.state == "REVOKED":
+        conditions.append(revoked_at.is_not(None))
+    elif filters.state == "EXPIRED":
+        conditions.append(and_(revoked_at.is_(None), expires_at <= now))
+    if filters.expires == "expired":
+        conditions.append(expires_at <= now)
+    elif filters.expires in {"24h", "7d"}:
+        horizon = timedelta(hours=24) if filters.expires == "24h" else timedelta(days=7)
+        conditions.append(and_(expires_at > now, expires_at <= now + horizon))
+    elif filters.expires == "later":
+        conditions.append(expires_at > now + timedelta(days=7))
+    if filters.current != "all":
+        conditions.append(current.is_(filters.current == "yes"))
+    can_revoke = and_(active, ~current)
+    if filters.action == "revoke":
+        conditions.append(can_revoke)
+    elif filters.action == "none":
+        conditions.append(~can_revoke)
+    return tuple(conditions)
+
+
+def _session_state(revoked_at: datetime | None, expires_at: datetime, now: datetime) -> str:
+    if revoked_at is not None:
+        return "REVOKED"
+    return "EXPIRED" if expires_at <= now else "ACTIVE"
 
 
 def _cursor(value: str) -> UUID:

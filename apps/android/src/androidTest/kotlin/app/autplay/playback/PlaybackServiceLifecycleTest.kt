@@ -54,6 +54,22 @@ import org.junit.runner.RunWith
 @UnstableApi
 @RunWith(AndroidJUnit4::class)
 class PlaybackServiceLifecycleTest {
+    @Test fun wavePauseCancelsScheduledStartAndAllowsANewExplicitStart() = runBlocking {
+        val fixture = Fixture()
+        try {
+            fixture.start(listOf("readable"), queueType = "WAVE")
+            fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+            fixture.owner.dispatch(PlaybackCommand.Pause)
+            fixture.await { fixture.main { fixture.controller?.playWhenReady == false } }
+            fixture.owner.dispatch(PlaybackCommand.ScheduledPlay(android.os.SystemClock.elapsedRealtime() + 500))
+            fixture.owner.dispatch(PlaybackCommand.Pause)
+            delay(800)
+            assertFalse(fixture.main { fixture.controller?.playWhenReady == true })
+            fixture.owner.dispatch(PlaybackCommand.ScheduledPlay(android.os.SystemClock.elapsedRealtime() + 100))
+            fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+        } finally { fixture.close() }
+    }
+
     @Test fun notificationExportsNativeFeedbackActionsAndRatesTheCapturedTrack() = runBlocking {
         val fixture = Fixture()
         try {

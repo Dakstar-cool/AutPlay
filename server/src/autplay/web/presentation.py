@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final
+from urllib.parse import urlencode
 
 from autplay.domain.admin_views import (
     AdminAuditItem,
@@ -14,6 +15,7 @@ from autplay.domain.admin_views import (
     AdminJobItem,
     AdminPage,
     AdminReviewItem,
+    AdminSessionFilters,
     AdminSessionItem,
     AdminUnavailable,
     AdminVaultStatus,
@@ -235,23 +237,80 @@ def dashboard_context(
     }
 
 
-def page_context(page: AdminPage, surface: str, *, locale: str) -> dict[str, object]:
+def page_context(
+    page: AdminPage,
+    surface: str,
+    *,
+    locale: str,
+    session_filters: AdminSessionFilters | None = None,
+) -> dict[str, object]:
+    session_filters = session_filters or AdminSessionFilters()
     columns = _columns(surface)
     rows = tuple(_row(item, surface, locale=locale) for item in page.items)
+    query = {"after": page.next_after, "lang": locale}
+    if surface == "sessions":
+        query.update(
+            state=session_filters.state,
+            expires=session_filters.expires,
+            current=session_filters.current,
+            action=session_filters.action,
+        )
     return {
         "page_title_key": f"{surface}_title",
         "page_intro_key": f"{surface}_intro",
         "notice_key": "no_secret_notice" if surface == "invitations" else None,
         "columns": columns,
         "rows": rows,
-        "actions": any(row["actions"] for row in rows),
+        "actions": surface == "sessions" or any(row["actions"] for row in rows),
+        "session_filters": _session_filter_controls(session_filters)
+        if surface == "sessions"
+        else (),
+        "reset_filters_url": f"/admin/sessions?lang={locale}",
         "previous_url": None,
         "next_url": (
-            f"/admin/{surface}?after={page.next_after}&lang={locale}"
-            if page.next_after is not None
-            else None
+            f"/admin/{surface}?{urlencode(query)}" if page.next_after is not None else None
         ),
     }
+
+
+def _session_filter_controls(filters: AdminSessionFilters) -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "name": "state",
+            "label": "status",
+            "value": filters.state,
+            "options": (
+                ("all", "filter_all"),
+                ("ACTIVE", "session_active"),
+                ("EXPIRED", "session_expired"),
+                ("REVOKED", "session_revoked"),
+            ),
+        },
+        {
+            "name": "expires",
+            "label": "expires",
+            "value": filters.expires,
+            "options": (
+                ("all", "filter_all"),
+                ("expired", "session_expired"),
+                ("24h", "expires_24h"),
+                ("7d", "expires_7d"),
+                ("later", "expires_later"),
+            ),
+        },
+        {
+            "name": "current",
+            "label": "current",
+            "value": filters.current,
+            "options": (("all", "filter_all"), ("yes", "filter_yes"), ("no", "filter_no")),
+        },
+        {
+            "name": "action",
+            "label": "action",
+            "value": filters.action,
+            "options": (("all", "filter_all"), ("revoke", "revoke"), ("none", "action_none")),
+        },
+    )
 
 
 def jobs_context(page: AdminPage, *, locale: str, live: bool = False) -> dict[str, object]:
@@ -392,15 +451,20 @@ def _row(item: object, surface: str, *, locale: str) -> dict[str, object]:
             "state": "TERMINAL" if item.terminal else "ACTIVE",
         }
     elif isinstance(item, AdminSessionItem):
-        if item.kind.startswith("ANDROID"):
+        if item.state == "ACTIVE" and item.kind.startswith("ANDROID"):
             actions = ({"href": f"/admin/confirm/session/{item.session_id}", "label": "revoke"},)
-        elif not item.current:
+        elif item.state == "ACTIVE" and item.kind == "BROWSER" and not item.current:
             actions = (
                 {"href": f"/admin/confirm/browser-session/{item.session_id}", "label": "revoke"},
             )
         values = {
             "kind": item.kind,
             "state": item.state,
+            "state_key": {
+                "ACTIVE": "session_active",
+                "EXPIRED": "session_expired",
+                "REVOKED": "session_revoked",
+            }.get(item.state),
             "expires": format_datetime(item.expires_at, locale),
             "current": "✓" if item.current else "—",
         }

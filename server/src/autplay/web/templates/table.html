@@ -2,12 +2,38 @@
 {% block content %}
 <header class="page-heading"><div><h1>{{ t(page_title_key) }}</h1><p class="page-summary">{{ t(page_intro_key) }}</p></div></header>
 {% if notice_key %}<p class="notice" role="note">{{ t(notice_key) }}</p>{% endif %}
+{% if session_filters %}
+<form method="get" action="/admin/sessions" class="session-filters" aria-label="{{ t('session_filters') }}">
+  <input type="hidden" name="lang" value="{{ locale }}">
+  {% for filter in session_filters %}
+  <div><label for="session-filter-{{ filter.name }}">{{ t(filter.label) }}</label>
+    <select id="session-filter-{{ filter.name }}" name="{{ filter.name }}">
+      {% for value, label in filter.options %}<option value="{{ value }}"{% if value == filter.value %} selected{% endif %}>{{ t(label) }}</option>{% endfor %}
+    </select>
+  </div>
+  {% endfor %}
+  <div class="session-filter-actions"><button type="submit">{{ t('apply_filters') }}</button><a class="button secondary" href="{{ reset_filters_url }}">{{ t('reset_filters') }}</a></div>
+</form>
+{% endif %}
 {% if rows %}
 <div class="table-scroll" tabindex="0" role="region" aria-label="{{ page_title }}">
 <table>
   <thead><tr>{% for column in columns %}<th scope="col">{{ t(column.label) }}</th>{% endfor %}{% if actions %}<th scope="col">{{ t("action") }}</th>{% endif %}</tr></thead>
   <tbody>
-  {% for row in rows %}<tr>{% for column in columns %}<td data-label="{{ t(column.label) }}">{{ row[column.key] }}</td>{% endfor %}{% if actions %}<td class="actions">{% for action in row.actions %}<a class="button secondary" href="{{ action.href }}?lang={{ locale }}">{{ t(action.label) }}</a>{% endfor %}</td>{% endif %}</tr>{% endfor %}
+  {% for row in rows %}
+  <tr>
+    {% for column in columns %}
+    <td data-label="{{ t(column.label) }}">
+      {% if column.key == 'state' and row.state_key is defined and row.state_key %}{{ t(row.state_key) }}{% else %}{{ row[column.key] }}{% endif %}
+    </td>
+    {% endfor %}
+    {% if actions %}
+    <td class="actions">
+      {% for action in row.actions %}<a class="button secondary" href="{{ action.href }}?lang={{ locale }}">{{ t(action.label) }}</a>{% else %}{% if session_filters %}—{% endif %}{% endfor %}
+    </td>
+    {% endif %}
+  </tr>
+  {% endfor %}
   </tbody>
 </table>
 </div>

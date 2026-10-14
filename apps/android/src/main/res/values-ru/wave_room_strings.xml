@@ -1,0 +1,22 @@
+<resources>
+    <string name="wave_room_track_pending">Проверим доступность перед воспроизведением</string>
+    <string name="wave_room_current_track">Текущий трек</string>
+    <string name="wave_room_next_track">Подготовить следующий трек</string>
+    <string name="wave_room_next_prepared">Подготавливаем следующий трек на всех устройствах. Нажмите начать, когда все будут готовы.</string>
+    <string name="wave_room_connect">Подключить сервер</string>
+    <string name="wave_room_access_help">Пригласите пользователей того же сервера или поделитесь гостевым приглашением после создания комнаты. Каждому устройству нужен собственный доступ к музыке.</string>
+    <string name="wave_room_invite_help">До 7 ID аккаунтов через запятую. Можно оставить пустым для своих устройств или гостевого приглашения.</string>
+    <string name="wave_room_queue_count">Очередь комнаты · %1$d</string>
+    <string name="wave_room_queue_empty">Добавьте музыку из медиатеки, чтобы начать слушать вместе.</string>
+    <string name="wave_room_choose_track">Добавить музыку</string>
+    <string name="wave_room_track_number">Трек %1$d</string>
+    <string name="wave_room_track_available">Доступен на этом устройстве</string>
+    <string name="wave_room_track_unavailable">Недоступен на этом устройстве. Сначала добавьте или загрузите этот трек.</string>
+    <string name="wave_room_library_empty">В медиатеке нет подходящих треков.</string>
+    <string name="wave_room_track_needs_sync">Синхронизируйте трек с сервером перед добавлением в комнату.</string>
+    <string name="wave_room_action_failed">Не удалось выполнить действие в комнате. Проверьте подключение и повторите попытку.</string>
+    <string name="wave_room_paused">Воспроизведение в комнате приостановлено</string>
+    <string name="wave_room_retry">Обновить комнату</string>
+    <string name="wave_room_working">Обновляем комнату…</string>
+    <string name="wave_room_confirm_close">Закрыть комнату для всех? Воспроизведение остановится на устройствах участников.</string>
+</resources>

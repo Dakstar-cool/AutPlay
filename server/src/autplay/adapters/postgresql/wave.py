@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.application.wave_timeline import playback_command
 from autplay.domain.auth import Principal
 from autplay.domain.wave import (
     Availability,
@@ -404,6 +405,7 @@ class SqlAlchemyWaveService:
                 raise WaveConflict()
             sequence = expected_sequence + 1
             version = expected_queue_version
+            document: dict[str, object] = {}
             if kind == "QUEUE" and recording_id is not None:
                 s.execute(
                     text(
@@ -419,17 +421,46 @@ class SqlAlchemyWaveService:
                 version += 1
             elif kind == "PLAY":
                 raise ValueError("PLAY requires strict Wave start")
+            elif kind in {"PAUSE", "SKIP"}:
+                current_payload = (room.playback_command or {}).get("payload")
+                current_entry_id = (
+                    current_payload.get("queue_entry_id")
+                    if isinstance(current_payload, dict)
+                    else None
+                )
+                current_index = next(
+                    (
+                        index
+                        for index, entry in enumerate(room.queue)
+                        if str(entry.queue_entry_id) == current_entry_id
+                    ),
+                    0,
+                )
+                if kind == "SKIP":
+                    if current_index + 1 >= len(room.queue):
+                        raise WaveConflict()
+                    entry = room.queue[current_index + 1]
+                elif room.queue:
+                    entry = room.queue[current_index]
+                else:
+                    entry = None
+                if entry is not None:
+                    document = {
+                        "queue_entry_id": str(entry.queue_entry_id),
+                        "recording_id": str(entry.recording_id),
+                    }
             elif kind not in {"PAUSE", "SEEK", "SKIP", "TRANSFER"}:
                 raise ValueError("unsupported Wave command")
             s.execute(
                 text(
-                    "UPDATE wave.room SET queue_version=:version,command_sequence=:sequence WHERE room_id=:room"
+                    "UPDATE wave.room SET queue_version=:version,command_sequence=:sequence,"
+                    "playback_state=CASE WHEN :kind IN ('PAUSE','SKIP') THEN 'PAUSED' ELSE playback_state END WHERE room_id=:room"
                 ),
-                {"version": version, "sequence": sequence, "room": room_id},
+                {"version": version, "sequence": sequence, "room": room_id, "kind": kind},
             )
             s.execute(
                 text(
-                    "INSERT INTO wave.command(room_id,command_sequence,actor_user_id,actor_device_id,idempotency_key,request_sha256,expected_queue_version,expected_sequence,command_kind,command_document,created_at) VALUES(:room,:sequence,:user,:device,:key,:hash,:version,:expected,:kind,'{}'::jsonb,:now)"
+                    "INSERT INTO wave.command(room_id,command_sequence,actor_user_id,actor_device_id,idempotency_key,request_sha256,expected_queue_version,expected_sequence,command_kind,command_document,created_at) VALUES(:room,:sequence,:user,:device,:key,:hash,:version,:expected,:kind,CAST(:document AS jsonb),:now)"
                 ),
                 {
                     "room": room_id,
@@ -441,6 +472,7 @@ class SqlAlchemyWaveService:
                     "version": expected_queue_version,
                     "expected": expected_sequence,
                     "kind": kind,
+                    "document": json.dumps(document),
                     "now": now,
                 },
             )
@@ -858,4 +890,5 @@ class SqlAlchemyWaveService:
             self_role=self_role,
             self_preflight=self_preflight,
             host_transfer_targets=transfer_targets,
+            playback_command=playback_command(s, room),
         )

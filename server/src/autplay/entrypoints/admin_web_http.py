@@ -19,6 +19,7 @@ from autplay.domain.admin_views import (
     AdminConfirmationTarget,
     AdminDashboard,
     AdminPage,
+    AdminSessionFilters,
     AdminVaultStatus,
 )
 from autplay.domain.auth import AccountRole
@@ -69,6 +70,7 @@ class AdminViewsHttp(Protocol):
         *,
         limit: int = 100,
         after: str | None = None,
+        session_filters: AdminSessionFilters | None = None,
     ) -> AdminPage: ...
     def status(self, actor: WebActor, surface: str) -> object: ...
 
@@ -1066,7 +1068,19 @@ def create_admin_web_router(
                 template = "status.html"
             else:
                 after = request.query_params.get("after")
-                page_value = views.page(actor, surface, after=after)
+                session_filters = AdminSessionFilters()
+                if surface == "sessions":
+                    session_filters = AdminSessionFilters(
+                        state=request.query_params.get("state", "all"),
+                        expires=request.query_params.get("expires", "all"),
+                        current=request.query_params.get("current", "all"),
+                        action=request.query_params.get("action", "all"),
+                    )
+                    page_value = views.page(
+                        actor, surface, after=after, session_filters=session_filters
+                    )
+                else:
+                    page_value = views.page(actor, surface, after=after)
                 if surface == "jobs":
                     context = jobs_context(
                         page_value,
@@ -1075,7 +1089,9 @@ def create_admin_web_router(
                     )
                     template = "jobs.html"
                 else:
-                    context = page_context(page_value, surface, locale=locale)
+                    context = page_context(
+                        page_value, surface, locale=locale, session_filters=session_filters
+                    )
                     template = "table.html"
         except ValueError, WebAdminError:
             return error("admin_surface_unavailable", 404)

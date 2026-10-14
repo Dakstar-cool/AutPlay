@@ -14,6 +14,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OkHttpWaveTransportTest {
+    @Test fun recoverySnapshotDecodesPlaybackIntentAndLocalAvailability() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody("{\"room_id\":\"$ROOM_ID\",\"sequence\":3,\"entries\":[],\"preflight\":{\"$ENTRY_ID\":\"LOCAL\"},\"playback_command\":{\"sequence\":3,\"kind\":\"PLAY\",\"payload\":{\"queue_entry_id\":\"$ENTRY_ID\",\"effective_at\":\"2026-10-13T12:00:00Z\"}}}"))
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.start()
+        val credentials = MutableCredentialStore("secret".toByteArray())
+        try {
+            val transport = OkHttpWaveTransport(server.url("/api").toString(), ServerProfileId(PROFILE), credentials)
+            val snapshot = transport.snapshot(ROOM_ID)
+            assertEquals(WaveAvailability.LOCAL_READABLE, snapshot.preflight[ENTRY_ID])
+            assertEquals(3L, snapshot.playbackCommand?.sequence)
+            assertTrue(snapshot.playbackCommand?.payload.orEmpty().contains(ENTRY_ID))
+            assertTrue(runCatching { transport.snapshot(ROOM_ID) }.exceptionOrNull() is WaveRoomUnavailableException)
+        } finally { server.shutdown() }
+    }
+
     @Test fun snapshotRefreshesRejectedAccessAndRetriesOnce() = runBlocking {
         val server = MockWebServer()
         server.enqueue(MockResponse().setResponseCode(401))

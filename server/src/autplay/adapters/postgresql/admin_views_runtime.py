@@ -14,6 +14,7 @@ from autplay.domain.admin_views import (
     AdminConfirmationTarget,
     AdminDashboard,
     AdminPage,
+    AdminSessionFilters,
     AdminUnavailable,
     AdminVaultStatus,
 )
@@ -52,10 +53,11 @@ class SqlAlchemyAdminViewService:
         *,
         limit: int = 100,
         after: str | None = None,
+        session_filters: AdminSessionFilters | None = None,
     ) -> AdminPage:
         with self._sessions() as session:
             return AdminViewService(PostgreSqlAdminViews(session)).page(
-                actor, surface, limit=limit, after=after
+                actor, surface, limit=limit, after=after, session_filters=session_filters
             )
 
     def status(self, actor: WebActor, surface: str) -> object:

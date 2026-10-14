@@ -344,6 +344,7 @@ def _room_view(value: WaveRoom) -> dict[str, object]:
         "room_epoch": str(value.room_epoch),
         "state": value.state,
         "playback_state": value.playback_state,
+        "playback_command": value.playback_command,
         "role": "GUEST",
         "queue_version": value.version,
         "latest_sequence": value.command_sequence,

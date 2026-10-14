@@ -349,7 +349,6 @@
     <string name="wave_share_code">Share code</string>
     <string name="wave_you_control">You control playback in this room</string>
     <string name="wave_host_controls">The room host controls playback</string>
-    <string name="wave_add_selected_track">Add selected track to the room</string>
     <string name="wave_start_scheduled">Playback will start on all ready devices.</string>
     <string name="wave_waiting_devices">Waiting for the other devices to become ready.</string>
     <string name="wave_start_playback">Start playback</string>

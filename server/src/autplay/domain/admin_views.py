@@ -82,6 +82,24 @@ class AdminSessionItem:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminSessionFilters:
+    state: str = "all"
+    expires: str = "all"
+    current: str = "all"
+    action: str = "all"
+
+    def __post_init__(self) -> None:
+        allowed = (
+            (self.state, {"all", "ACTIVE", "EXPIRED", "REVOKED"}),
+            (self.expires, {"all", "expired", "24h", "7d", "later"}),
+            (self.current, {"all", "yes", "no"}),
+            (self.action, {"all", "revoke", "none"}),
+        )
+        if any(value not in options for value, options in allowed):
+            raise ValueError("invalid admin session filter")
+
+
+@dataclass(frozen=True, slots=True)
 class AdminJobItem:
     job_id: UUID
     kind: str
@@ -168,6 +186,7 @@ __all__ = (
     "AdminPage",
     "AdminRecord",
     "AdminReviewItem",
+    "AdminSessionFilters",
     "AdminSessionItem",
     "AdminUnavailable",
     "AdminVaultIssue",

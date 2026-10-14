@@ -14,6 +14,7 @@ from autplay.domain.admin_views import (
     AdminDeviceItem,
     AdminJobItem,
     AdminPage,
+    AdminSessionFilters,
     AdminUnavailable,
 )
 from autplay.domain.auth import AccountRole
@@ -166,6 +167,8 @@ class _Web:
 
 
 class _Views:
+    session_filters = AdminSessionFilters()
+
     def dashboard(self, actor: WebActor) -> AdminDashboard:
         del actor
         return AdminDashboard("Test server", True, 3, True)
@@ -196,8 +199,12 @@ class _Views:
         *,
         limit: int = 100,
         after: str | None = None,
+        session_filters: AdminSessionFilters | None = None,
     ) -> AdminPage:
         del actor, limit, after
+        if surface == "sessions":
+            self.session_filters = session_filters or AdminSessionFilters()
+            return AdminPage((), None)
         if surface == "devices":
             return AdminPage(
                 (AdminDeviceItem(uuid4(), "Phone", "ANDROID", datetime.now(UTC)),), None
@@ -358,6 +365,38 @@ def _client(
 
 def _form(text: str) -> dict[str, str]:
     return dict(re.findall(r'name="([^\"]+)" value="([^\"]*)"', text))
+
+
+def test_session_http_filters_are_validated_and_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[AdminSessionFilters] = []
+
+    def sessions_page(
+        self: _Views,
+        actor: WebActor,
+        surface: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+        session_filters: AdminSessionFilters | None = None,
+    ) -> AdminPage:
+        assert surface == "sessions" and limit == 100 and after is None
+        seen.append(session_filters or AdminSessionFilters())
+        return AdminPage((), None)
+
+    monkeypatch.setattr(_Views, "page", sessions_page)
+    client, _web = _client(AdminTemplateRenderer())
+    path = "/admin/sessions?lang=ru&state=ACTIVE&expires=24h&current=no&action=revoke"
+    anonymous = client.get(path, follow_redirects=False)
+    assert anonymous.status_code == 303 and not seen
+    client.cookies.set("__Host-autplay_admin", "session")
+    response = client.get(path)
+    assert response.status_code == 200
+    assert seen == [AdminSessionFilters("ACTIVE", "24h", "no", "revoke")]
+    assert 'value="ACTIVE" selected' in response.text
+    assert "no-store" in response.headers["cache-control"]
+    for field in ("state", "expires", "current", "action"):
+        assert client.get(f"/admin/sessions?{field}=unknown").status_code == 404
+    assert len(seen) == 1
 
 
 @pytest.mark.parametrize("locale", ["en", "ru"])

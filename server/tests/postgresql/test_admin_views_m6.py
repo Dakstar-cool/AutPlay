@@ -20,7 +20,7 @@ from psycopg import Connection
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-NOW = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+NOW = datetime.now(UTC)
 
 
 def _user(connection: Connection[object], name: str) -> UUID:

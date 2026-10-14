@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import app.autplay.domain.LocalId
 import app.autplay.application.wave.WavePlaybackExecutor
 import app.autplay.application.wave.WavePreparation
+import app.autplay.application.wave.WavePlaybackAnchor
 import app.autplay.domain.wave.WaveAvailability
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,6 +63,13 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
                 .putExtra(AutPlayPlaybackService.EXTRA_REPEAT_MODE, command.mode)
             is PlaybackCommand.ScheduledPlay -> intent.setAction(AutPlayPlaybackService.ACTION_SCHEDULED_PLAY)
                 .putExtra(AutPlayPlaybackService.EXTRA_SCHEDULED_AT_MS, command.atMs)
+            is PlaybackCommand.SynchronizeWave -> intent.setAction(AutPlayPlaybackService.ACTION_SYNCHRONIZE_WAVE)
+                .putExtra(AutPlayPlaybackService.EXTRA_QUEUE_SNAPSHOT_ID, command.anchor.queueSnapshotId)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.anchor.queueEntryId)
+                .putExtra(AutPlayPlaybackService.EXTRA_WAVE_SEQUENCE, command.anchor.commandSequence)
+                .putExtra(AutPlayPlaybackService.EXTRA_SCHEDULED_AT_MS, command.anchor.startElapsedRealtimeMs)
+                .putExtra(AutPlayPlaybackService.EXTRA_WAVE_VALID_UNTIL_MS, command.anchor.validUntilElapsedRealtimeMs)
+                .putExtra(AutPlayPlaybackService.EXTRA_WAVE_START_PLAYBACK, command.startPlayback)
             is PlaybackCommand.ScheduleSleepTimer -> intent.setAction(AutPlayPlaybackService.ACTION_SCHEDULE_SLEEP_TIMER)
                 .putExtra(AutPlayPlaybackService.EXTRA_SLEEP_TIMER_DURATION_MS, command.durationMs)
             is PlaybackCommand.StopAfterCurrentItem -> intent
@@ -86,15 +94,28 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
     override suspend fun schedulePreparedPlayAtElapsedRealtime(targetElapsedRealtimeMs: Long) =
         dispatch(PlaybackCommand.ScheduledPlay(targetElapsedRealtimeMs))
 
+    override suspend fun synchronizePreparedPlayback(anchor: WavePlaybackAnchor, startPlayback: Boolean) =
+        dispatch(PlaybackCommand.SynchronizeWave(anchor, startPlayback))
+
+    override fun isWaveSynchronizationDegraded(): Boolean = PlaybackRuntimeState.state.value.waveSynchronizationDegraded
+
+    override suspend fun seekPreparedTo(positionMs: Long) = dispatch(PlaybackCommand.SeekTo(positionMs))
+
+    override suspend fun restoreQueueAfterRoom(snapshotId: String?) =
+        dispatch(if (snapshotId == null) PlaybackCommand.Stop else PlaybackCommand.PrepareQueue(LocalId(snapshotId)))
+
     override suspend fun prepareWaveQueue(
         queueSnapshotId: String,
         queueEntryId: String,
     ): WavePreparation {
-        dispatch(PlaybackCommand.PrepareQueue(LocalId(queueSnapshotId)))
+        val existing = PlaybackRuntimeState.state.value
+        if (existing.queueSnapshotId != queueSnapshotId || existing.queueEntryId != queueEntryId || !existing.isPrepared) {
+            dispatch(PlaybackCommand.PrepareQueue(LocalId(queueSnapshotId)))
+        }
         val state = withTimeoutOrNull(8_000) {
             PlaybackRuntimeState.state
                 .filter { value ->
-                    value.queueEntryId == queueEntryId &&
+                    value.queueSnapshotId == queueSnapshotId && value.queueEntryId == queueEntryId &&
                         (value.isPrepared || value.unavailableReason != null)
                 }
                 .first()
@@ -131,6 +152,7 @@ data class PlaybackUiState(
     val positionMs: Long = 0,
     val isPlaying: Boolean = false,
     val isPrepared: Boolean = false,
+    val waveSynchronizationDegraded: Boolean = false,
     val bufferedMs: Long = 0,
     val shuffleEnabled: Boolean = false,
     val repeatMode: String = "OFF",
@@ -189,6 +211,8 @@ sealed interface PlaybackCommand {
 
     /** Wave-only execution action; caller must cancel it when room authority is lost. */
     data class ScheduledPlay(val atMs: Long) : PlaybackCommand
+
+    data class SynchronizeWave(val anchor: WavePlaybackAnchor, val startPlayback: Boolean) : PlaybackCommand
 
     /** Stops active playback at the monotonic deadline without altering the persisted queue. */
     data class ScheduleSleepTimer(val durationMs: Long) : PlaybackCommand {

@@ -1,12 +1,8 @@
 # Разработка комнат совместного прослушивания
 
-Навигация по актуальной рабочей копии на **14 октября 2026 года**. Последние изменения
+Навигация по актуальным исходникам на **14 октября 2026 года**. Последние изменения
 комнат требуют согласованных обновлений Android-клиента и сервера; опубликованный APK
 1.0.8 имеет отдельный состав. Пользовательский сценарий описан в [README](../../README.md#rooms).
-
-Новые файлы комнат пока находятся в локальной рабочей копии и отмечены ниже как
-«локально». Их пути указаны для разработки согласованного обновления клиента и сервера;
-остальные ссылки ведут на опубликованные файлы репозитория.
 
 ## Последние изменения
 
@@ -26,13 +22,13 @@
 
 | Область | Точка входа |
 | --- | --- |
-| Экран, ввод кода, выбор треков и действия | `apps/android/src/main/kotlin/app/autplay/MainWaveUi.kt` (локально) |
+| Экран, ввод кода, выбор треков и действия | [MainWaveUi.kt](../../apps/android/src/main/kotlin/app/autplay/MainWaveUi.kt) |
 | Создание, вступление, очередь и восстановление | [WaveCoordinator.kt](../../apps/android/src/main/kotlin/app/autplay/application/wave/WaveCoordinator.kt) |
 | Авторизованный HTTP/WS transport | [OkHttpWaveTransport.kt](../../apps/android/src/main/kotlin/app/autplay/application/wave/OkHttpWaveTransport.kt) |
 | Подготовка Media3 и привязка к очереди | [WavePlaybackExecutor.kt](../../apps/android/src/main/kotlin/app/autplay/application/wave/WavePlaybackExecutor.kt), [WaveMediaAdapters.kt](../../apps/android/src/main/kotlin/app/autplay/playback/WaveMediaAdapters.kt) |
-| Часы и коррекция позиции | [WaveCore.kt](../../apps/android/src/main/kotlin/app/autplay/domain/wave/WaveCore.kt), `apps/android/src/main/kotlin/app/autplay/domain/wave/WaveDriftMonitor.kt` (локально) |
+| Часы и коррекция позиции | [WaveCore.kt](../../apps/android/src/main/kotlin/app/autplay/domain/wave/WaveCore.kt), [WaveDriftMonitor.kt](../../apps/android/src/main/kotlin/app/autplay/domain/wave/WaveDriftMonitor.kt) |
 | Гостевая сессия Android | [GuestRoomRuntime.kt](../../apps/android/src/main/kotlin/app/autplay/application/guestroom/GuestRoomRuntime.kt) |
-| Серверный runtime и сохранённая команда | [wave.py](../../server/src/autplay/adapters/postgresql/wave.py), `server/src/autplay/application/wave_timeline.py` (локально) |
+| Серверный runtime и сохранённая команда | [wave.py](../../server/src/autplay/adapters/postgresql/wave.py), [wave_timeline.py](../../server/src/autplay/application/wave_timeline.py) |
 | Обычный и гостевой HTTP/WS API | [wave_http.py](../../server/src/autplay/entrypoints/wave_http.py), [guest_room_http.py](../../server/src/autplay/entrypoints/guest_room_http.py) |
 
 ## Контракты и границы
@@ -142,21 +138,11 @@ Android gate для unit-тестов, lint и debug-сборки:
 
 | Что проверять | Тесты |
 | --- | --- |
-| Ввод кода, ID участников, transport и привязка коррекции | [OkHttpWaveTransportTest](../../apps/android/src/test/java/app/autplay/application/wave/OkHttpWaveTransportTest.kt); `WaveRoomInputTest`, `WavePlaybackAnchorTest`, `WaveDriftMonitorTest` (локально, пути ниже) |
-| Создание, выбор музыки, роли и подтверждение закрытия | `WaveRoomScreenTest` (локально, путь ниже) |
-| Старт и пауза на реальном Media3, следующий трек, переподключение и личная очередь | `WaveRoomLifecycleTest` (локально, путь ниже) |
+| Ввод кода, ID участников, transport и привязка коррекции | [WaveRoomInputTest](../../apps/android/src/test/java/app/autplay/WaveRoomInputTest.kt), [OkHttpWaveTransportTest](../../apps/android/src/test/java/app/autplay/application/wave/OkHttpWaveTransportTest.kt), [WavePlaybackAnchorTest](../../apps/android/src/test/java/app/autplay/application/wave/WavePlaybackAnchorTest.kt), [WaveDriftMonitorTest](../../apps/android/src/test/java/app/autplay/domain/wave/WaveDriftMonitorTest.kt) |
+| Создание, выбор музыки, роли и подтверждение закрытия | [WaveRoomScreenTest](../../apps/android/src/androidTest/kotlin/app/autplay/ui/WaveRoomScreenTest.kt) |
+| Старт и пауза на реальном Media3, следующий трек, переподключение и личная очередь | [WaveRoomLifecycleTest](../../apps/android/src/androidTest/kotlin/app/autplay/application/wave/WaveRoomLifecycleTest.kt) |
 | Модель трёх устройств, часы и порядок команд | [P13WaveRuntimeTest](../../apps/android/src/androidTest/kotlin/app/autplay/domain/wave/P13WaveRuntimeTest.kt) |
 | Снимок с `playback_command`, WS и гостевой доступ | [test_wave_http.py](../../server/tests/runtime/test_wave_http.py), [test_guest_room_http.py](../../server/tests/runtime/test_guest_room_http.py), [test_wave_contract_v1.py](../../tests/contract/test_wave_contract_v1.py) |
-
-Пути новых локальных тестов:
-
-```text
-apps/android/src/test/java/app/autplay/WaveRoomInputTest.kt
-apps/android/src/test/java/app/autplay/application/wave/WavePlaybackAnchorTest.kt
-apps/android/src/test/java/app/autplay/domain/wave/WaveDriftMonitorTest.kt
-apps/android/src/androidTest/kotlin/app/autplay/ui/WaveRoomScreenTest.kt
-apps/android/src/androidTest/kotlin/app/autplay/application/wave/WaveRoomLifecycleTest.kt
-```
 
 Результаты старых прогонов относятся к их исходникам и окружению. После изменения
 контракта, transport или исполнения проверяйте соответствующие сценарии заново.

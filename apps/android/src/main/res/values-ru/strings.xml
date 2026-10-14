@@ -357,7 +357,6 @@
     <string name="wave_share_code">Поделиться кодом</string>
     <string name="wave_you_control">Вы управляете воспроизведением в этой комнате</string>
     <string name="wave_host_controls">Воспроизведением управляет создатель комнаты</string>
-    <string name="wave_add_selected_track">Добавить выбранный трек в комнату</string>
     <string name="wave_start_scheduled">Музыка начнёт играть на всех готовых устройствах.</string>
     <string name="wave_waiting_devices">Ждём, пока остальные устройства будут готовы.</string>
     <string name="wave_start_playback">Начать воспроизведение</string>

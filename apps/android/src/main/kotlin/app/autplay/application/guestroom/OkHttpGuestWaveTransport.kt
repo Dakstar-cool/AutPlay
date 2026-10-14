@@ -1,6 +1,7 @@
 package app.autplay.application.guestroom
 
 import app.autplay.application.wave.WaveEvent
+import app.autplay.application.wave.decodeWavePlaybackCommand
 import app.autplay.application.wave.WaveClockSample
 import app.autplay.application.wave.WavePreflightReport
 import app.autplay.application.wave.WaveSnapshot
@@ -81,7 +82,7 @@ class OkHttpGuestWaveTransport private constructor(
                     ?: return
                 when (value["type"]?.jsonPrimitive?.contentOrNull) {
                     "snapshot_required", "invalidate", "guest_access_changed" -> {
-                        onFailure()
+                        onEvent(WaveEvent(roomEpoch))
                         return
                     }
                     "event" -> Unit
@@ -235,6 +236,7 @@ class OkHttpGuestWaveTransport private constructor(
             sequence = value["sequence"]?.jsonPrimitive?.longOrNull ?: 0,
             entries = entries,
             preflight = preflight,
+            playbackCommand = decodeWavePlaybackCommand(value),
         )
     }
 

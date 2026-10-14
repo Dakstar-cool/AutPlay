@@ -1,0 +1,22 @@
+<resources>
+    <string name="wave_room_track_pending">Availability will be checked before playback</string>
+    <string name="wave_room_current_track">Current track</string>
+    <string name="wave_room_next_track">Prepare next track</string>
+    <string name="wave_room_next_prepared">Preparing the next track on all devices. Press start when everyone is ready.</string>
+    <string name="wave_room_connect">Connect a server</string>
+    <string name="wave_room_access_help">Invite people on the same server, or share a guest invitation after creating the room. Each device needs its own access to the music.</string>
+    <string name="wave_room_invite_help">Up to 7 account IDs, separated by commas. Leave empty to listen on your devices or invite a guest.</string>
+    <string name="wave_room_queue_count">Room queue · %1$d</string>
+    <string name="wave_room_queue_empty">Add music from your library to start listening together.</string>
+    <string name="wave_room_choose_track">Add music</string>
+    <string name="wave_room_track_number">Track %1$d</string>
+    <string name="wave_room_track_available">Available on this device</string>
+    <string name="wave_room_track_unavailable">Unavailable on this device. Add or download this track first.</string>
+    <string name="wave_room_library_empty">No matching tracks in your library.</string>
+    <string name="wave_room_track_needs_sync">Sync this track with the server before adding it to the room.</string>
+    <string name="wave_room_action_failed">The room could not complete this action. Check the connection and try again.</string>
+    <string name="wave_room_paused">Room playback paused</string>
+    <string name="wave_room_retry">Refresh room</string>
+    <string name="wave_room_working">Updating room…</string>
+    <string name="wave_room_confirm_close">Close this room for everyone? Playback will stop on all participants’ devices.</string>
+</resources>

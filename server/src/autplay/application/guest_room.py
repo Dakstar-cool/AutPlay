@@ -23,6 +23,7 @@ from autplay.adapters.postgresql.models.social import (
     GuestRateWindowRow,
     GuestSessionRow,
 )
+from autplay.application.wave_timeline import playback_command
 from autplay.domain.auth import GuestPrincipal, Principal
 from autplay.domain.profile_pairing import canonical_sha256, iso8601
 from autplay.domain.wave import Availability, QueueEntry, WaveRoom
@@ -696,6 +697,7 @@ class GuestRoomService:
             playback_state=row.playback_state,
             self_role="GUEST",
             self_preflight=preflight,
+            playback_command=playback_command(session, principal.room_id),
         )
 
     def _host_room(
