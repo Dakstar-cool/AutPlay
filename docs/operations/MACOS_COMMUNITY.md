@@ -89,10 +89,10 @@ standard public-repository `macos-15` runner, pinned JDK/Python and strict Gradl
 dependency verification. It does not run on pull requests or use a paid larger
 runner. Private signing material is installed in an ephemeral signing keychain;
 synthetic account tests use a different disposable keychain. The CI-only
-`apple-tool:` grant belongs to the signing certificate, never to account items.
-Temporary keychains and admin trust changes are removed even on failure. The
-signing-only trust entry is also removed before acceptance launches, so runtime
-tests do not rely on recipients trusting the certificate globally.
+`apple-tool:,apple:` grant belongs to the signing certificate, never to account
+items. Temporary keychains are removed and the previous search/default keychain
+settings restored even on failure. Neither build nor runtime acceptance adds the
+certificate to global trust settings.
 
 The gate builds/tests the shared and desktop modules, signs the app, checks the
 real production JNI in a separately sealed probe app, starts the production GUI
@@ -129,3 +129,22 @@ after an update must preserve all existing keys and pending operations.
 
 Verification status and exact run/artifact identity must be taken from the current
 workflow evidence. Prior unsigned desktop successes do not qualify this provider.
+
+## Initial unattended-signing diagnosis
+
+The first hosted runs exposed interactive certificate trust-setting operations
+and a signing-identity lookup failure. Options reviewed were user trust settings,
+admin-domain trust through sudo, repairing PKCS#12/private-key identity lookup and
+the keychain search list, and using an independent signing implementation.
+The selected approach retains Apple's signing tool, follows GitHub's isolated
+keychain/search-list setup, identifies the certificate by its full SHA-1 locator,
+and performs a small signing check before Gradle. It makes no global trust changes.
+The runtime separately pins SHA-256, so the SHA-1 identity locator is not the
+project's certificate trust decision. See [Apple TN3161](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates),
+[Apple TN2206](https://developer.apple.com/library/archive/technotes/tn2206/) and
+[GitHub's runner signing guide](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
+
+The native launcher calls the pinned JDK's JLI in-process, retaining its macOS
+main-thread handoff. Its ABI and entry behavior were checked against OpenJDK's
+[JLI declaration](https://github.com/openjdk/jdk17u/blob/master/src/java.base/share/native/libjli/java.h)
+and [jpackage macOS launcher](https://github.com/openjdk/jdk17u/blob/master/src/jdk.jpackage/macosx/native/applauncher/MacLauncher.cpp).

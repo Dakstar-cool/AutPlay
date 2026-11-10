@@ -86,7 +86,9 @@ def prepare() -> None:
     # Fail before the expensive build if this PKCS#12 cannot sign. A pinned designated
     # requirement does not require introducing our root into the recipient's trust store.
     check_binary = TEMP / "signer-check"
-    shutil.copy2("/usr/bin/true", check_binary)
+    # Do not copy SIP's restricted file flags from the system executable.
+    shutil.copyfile("/usr/bin/true", check_binary)
+    check_binary.chmod(0o700)
     run("codesign", "--force", "--sign", values["sha1"], "--keychain", signing,
         "--options", "runtime", "--timestamp=none", check_binary)
     run("codesign", "--verify", "--strict", check_binary)
