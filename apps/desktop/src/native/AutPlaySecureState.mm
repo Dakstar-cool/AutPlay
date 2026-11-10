@@ -32,8 +32,14 @@ NSString *const kService = @"app.autplay.desktop.secure-state.v1";
 NSString *const kKeyLabel = @"app.autplay.desktop.device-key.v1";
 #endif
 NSString *const kBundle = @"app.autplay.desktop";
-struct Failure { const char *code; };
-void require(bool condition, const char *code = "CORRUPT") { if (!condition) throw Failure{code}; }
+struct Failure { const char *code; unsigned site = 0; };
+void require(bool condition, const char *code = "CORRUPT", unsigned site = __builtin_LINE()) { if (!condition) throw Failure{code, site}; }
+void auditFailure(const Failure &failure) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    // Fixed status plus source location only; never log paths, identities or item contents.
+    fprintf(stderr, "AUTPLAY_SECURE_STATE_CHECK_FAILED site=%u status=%s\n", failure.site, failure.code);
+#endif
+}
 void status(OSStatus code) {
     if (code == errSecSuccess) return;
 #ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
@@ -413,8 +419,8 @@ const char *const domains[] = {
 
 #define APJNI(name) Java_app_autplay_desktop_security_MacSecureStateJni_##name
 #define APBEGIN std::lock_guard<std::mutex> lock(gMutex); @autoreleasepool { @try { try {
-#define APEND(value) } catch (const Failure &failure) { throwJava(env, failure.code); } catch (...) { throwJava(env, "UNAVAILABLE"); } } @catch (NSException *) { throwJava(env, "CORRUPT"); } } return value;
-#define APENDVOID } catch (const Failure &failure) { throwJava(env, failure.code); } catch (...) { throwJava(env, "UNAVAILABLE"); } } @catch (NSException *) { throwJava(env, "CORRUPT"); } }
+#define APEND(value) } catch (const Failure &failure) { auditFailure(failure); throwJava(env, failure.code); } catch (...) { throwJava(env, "UNAVAILABLE"); } } @catch (NSException *) { throwJava(env, "CORRUPT"); } } return value;
+#define APENDVOID } catch (const Failure &failure) { auditFailure(failure); throwJava(env, failure.code); } catch (...) { throwJava(env, "UNAVAILABLE"); } } @catch (NSException *) { throwJava(env, "CORRUPT"); } }
 
 extern "C" JNIEXPORT jint JNICALL APJNI(abiVersion)(JNIEnv *, jobject) { return 1; }
 // Only the explicit UI reopen action calls this while the account graph is closed. macOS

@@ -185,7 +185,8 @@ def probe() -> None:
     if result.returncode == 0 or "AUTPLAY_COMMUNITY_PROBE_PASSED" in result.stdout:
         raise RuntimeError("Tampered package accepted")
     report = {"status": "passed", "source_commit": os.environ["GITHUB_SHA"], "signer_sha256": pin(),
-              "checks": passed + ["device-proof-verification", "private-key-export-rejected", "sealed-resource-tamper-rejected", "java-agent-environment-rejected"],
+              "checks": passed + ["device-proof-verification", "private-key-export-rejected", "sealed-resource-tamper-rejected",
+                                  "java-agent-environment-rejected", "remote-helper-signer-and-pid", "source-access-signer"],
               "scope": "real file-based Keychain and production JNI; synthetic account data; no production server"}
     (OUT / "keychain-acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
 
@@ -196,6 +197,7 @@ def package() -> None:
     (APP / "Contents/MacOS/AutPlay").unlink()
     jdk = Path(os.environ["JAVA_HOME"])
     run("xcrun", "clang++", "-std=c++17", "-O2", "-fobjc-arc", "-target", "arm64-apple-macosx13.0",
+        "-Wl,-exported_symbol,_main",
         '-DAUTPLAY_COMMUNITY_SIGNER_SHA256="' + pin() + '"',
         "-I" + str(jdk / "include"), "-I" + str(jdk / "include/darwin"),
         "-framework", "Foundation", "-framework", "Security",

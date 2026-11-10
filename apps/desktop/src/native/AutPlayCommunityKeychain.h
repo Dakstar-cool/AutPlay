@@ -9,7 +9,7 @@ void openCommunityKeychain(Owner &o) {
     NSURL *url = realURL([NSURL fileURLWithPath:[NSString stringWithUTF8String:path]]);
     struct passwd *pw = getpwuid(getuid());
     require(pw && pw->pw_dir, "IDENTITY_UNAVAILABLE");
-    NSString *root = [[NSString stringWithUTF8String:pw->pw_dir] stringByAppendingPathComponent:@"Library/Keychains/"];
+    NSString *root = [[[NSString stringWithUTF8String:pw->pw_dir] stringByAppendingPathComponent:@"Library/Keychains"] stringByAppendingString:@"/"];
     require([url.path hasPrefix:root], "IDENTITY_UNAVAILABLE");
     struct stat st = {};
     require(lstat(url.path.fileSystemRepresentation, &st) == 0 && S_ISREG(st.st_mode) &&

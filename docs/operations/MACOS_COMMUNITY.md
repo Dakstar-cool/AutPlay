@@ -7,6 +7,8 @@ macOS port to friends without paid Apple Developer membership, preserving the
 strongest practical protection compatible with that choice. It is separate from
 the existing Developer ID / provisioning-profile / Secure Enclave provider. A
 failed Developer ID check never silently selects community storage.
+The current package targets Apple Silicon (ARM64), with macOS 13 as its deployment
+target. Automated native acceptance runs on macOS 15; this is not an Intel build.
 
 `autplay.macCommunitySignerSha256` selects the provider at compilation. Its value
 is the SHA-256 of the DER certificate in
@@ -100,6 +102,8 @@ with its bundled JDK, then creates the DMG. The probe classes/native checks are
 never shipped in the production package. Keychain checks cover persistence after
 process restart, D1v2 signature verification, private-key export rejection,
 locked-Keychain refusal, foreign-program read denial and resource tampering.
+The same probe also opens, initializes and reopens the real Kotlin secure-state
+owner on a second empty keychain, and tests rejection of inherited Java agents.
 
 Successful DMGs are retained for one day; small reports for three days. Standard
 public runner compute is free, but artifact storage is metered separately. Download

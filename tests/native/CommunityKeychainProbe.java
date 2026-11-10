@@ -7,6 +7,8 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
+import app.autplay.desktop.media.MacRemoteMediaIdentityJni;
+import app.autplay.desktop.sourceaccess.SourceAccessJni;
 
 /** Runs only in a separately packaged CI app on a disposable macOS keychain. */
 public final class CommunityKeychainProbe {
@@ -28,6 +30,29 @@ public final class CommunityKeychainProbe {
         String pin = Files.readAllLines(nativeDir.resolve("AutPlaySignedIdentity")).get(1);
         System.load(nativeDir.resolve("libAutPlaySecureState.dylib").toString());
         System.load(nativeDir.resolve("libCommunityProbeChecks.dylib").toString());
+        if (args[0].equals("create")) {
+            String bundle = contents.getParent().toString();
+            Path helper = nativeDir.resolve("AutPlayRemoteMediaHelper");
+            var media = MacRemoteMediaIdentityJni.INSTANCE;
+            byte[] witness = media.staticWitness(bundle, helper.toString(), pin);
+            check(witness != null && witness.length >= 40);
+            check(media.staticWitness(bundle, helper.toString(), "0".repeat(64)) == null);
+            Process child = new ProcessBuilder(helper.toString()).start();
+            try {
+                check(media.runningMatches(bundle, helper.toString(), pin, child.pid(), witness));
+                check(!media.runningMatches(bundle, helper.toString(), pin, ProcessHandle.current().pid(), witness));
+            } finally {
+                child.getOutputStream().close();
+                if (!child.waitFor(5, TimeUnit.SECONDS)) {
+                    child.destroyForcibly(); check(child.waitFor(5, TimeUnit.SECONDS));
+                }
+            }
+            System.load(nativeDir.resolve("libAutPlaySourceAccess.dylib").toString());
+            Path managed = Files.createTempDirectory("autplay-community-source-").toRealPath();
+            var sources = SourceAccessJni.INSTANCE;
+            long source = sources.open(1, pin, managed.toString());
+            try { sources.verify(source); } finally { sources.close(source); Files.delete(managed); }
+        }
         if (args[0].startsWith("owner-")) {
             var owner = new DesktopSecureStateOwner(MacSecureStateApiKt.macSecureStateApi(
                 new MacSecureStateIdentity(pin, "community-keychain-1")), Instant::now);

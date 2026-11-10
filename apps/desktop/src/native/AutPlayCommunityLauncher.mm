@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
             for (auto &argument : arguments) pointers.push_back(argument.data());
             pointers.push_back(nullptr);
             NSString *jli = [url.path stringByAppendingPathComponent:@"Contents/runtime/Contents/Home/lib/libjli.dylib"];
-            void *library = dlopen(jli.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
+            void *library = dlopen(jli.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL);
             autplay_community::check(library != nullptr);
             launch = reinterpret_cast<Launch>(dlsym(library, "JLI_Launch"));
             autplay_community::check(launch != nullptr);
