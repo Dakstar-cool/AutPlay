@@ -375,15 +375,28 @@ SecKeyRef existingKey(Owner &o, NSString *tag, bool allowAbsent = false) {
     CF<CFTypeRef> result; OSStatus code = SecItemCopyMatching((__bridge CFDictionaryRef)query, result.out());
     if (code == errSecItemNotFound) { if (allowAbsent) return nullptr; throw Failure{"KEY_MISSING"}; } status(code);
     NSDictionary *attributes = (__bridge NSDictionary *)result.value;
+    require([attributes isKindOfClass:NSDictionary.class]);
+    SecKeyRef key = (__bridge SecKeyRef)attributes[(__bridge id)kSecValueRef];
+    require(key && CFGetTypeID(key) == SecKeyGetTypeID());
 #ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
     require([attributes isKindOfClass:NSDictionary.class] &&
         [attributes[(__bridge id)kSecAttrApplicationTag] isEqual:[tag dataUsingEncoding:NSASCIIStringEncoding]] &&
         [attributes[(__bridge id)kSecAttrKeyClass] isEqual:(__bridge id)kSecAttrKeyClassPrivate] &&
         [attributes[(__bridge id)kSecAttrKeyType] isEqual:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom] &&
         [attributes[(__bridge id)kSecAttrLabel] isEqual:kKeyLabel] &&
-        [attributes[(__bridge id)kSecAttrKeySizeInBits] intValue] == 256 &&
-        [attributes[(__bridge id)kSecAttrIsExtractable] isEqual:@NO] && [attributes[(__bridge id)kSecAttrIsSensitive] isEqual:@YES]);
-    communityACL((__bridge SecKeychainItemRef)attributes[(__bridge id)kSecValueRef], kSecACLAuthorizationSign);
+        [attributes[(__bridge id)kSecAttrKeySizeInBits] intValue] == 256);
+    // Legacy SecItem results omit sensitive/extractable. SecKeyCopyAttributes reads
+    // the actual key properties, including the provider's immutable export flags.
+    CF<CFDictionaryRef> properties(SecKeyCopyAttributes(key));
+    require(properties.value != nullptr);
+    NSDictionary *keyProperties = (__bridge NSDictionary *)properties.value;
+    require([keyProperties[(__bridge id)kSecAttrIsExtractable] isEqual:@NO]);
+    require([keyProperties[(__bridge id)kSecAttrIsSensitive] isEqual:@YES]);
+    require([keyProperties[(__bridge id)kSecAttrIsPermanent] isEqual:@YES]);
+    require([keyProperties[(__bridge id)kSecAttrCanSign] isEqual:@YES] &&
+        [keyProperties[(__bridge id)kSecAttrCanDerive] isEqual:@NO] &&
+        [keyProperties[(__bridge id)kSecAttrCanDecrypt] isEqual:@NO]);
+    communityACL((SecKeychainItemRef)key, kSecACLAuthorizationSign);
 #else
     require([attributes isKindOfClass:NSDictionary.class] && [attributes[(__bridge id)kSecAttrAccessGroup] isEqual:o.group] &&
         [attributes[(__bridge id)kSecAttrApplicationTag] isEqual:[tag dataUsingEncoding:NSASCIIStringEncoding]] &&
@@ -394,7 +407,6 @@ SecKeyRef existingKey(Owner &o, NSString *tag, bool allowAbsent = false) {
         [attributes[(__bridge id)kSecAttrAccessible] isEqual:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly] &&
         [attributes[(__bridge id)kSecAttrKeySizeInBits] intValue] == 256 && ![attributes[(__bridge id)kSecAttrSynchronizable] boolValue]);
 #endif
-    SecKeyRef key = (__bridge SecKeyRef)attributes[(__bridge id)kSecValueRef]; require(key && CFGetTypeID(key) == SecKeyGetTypeID());
     CFRetain(key); return key;
 }
 NSData *point(SecKeyRef privateKey) {

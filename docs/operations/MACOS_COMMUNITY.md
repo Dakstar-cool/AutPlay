@@ -18,7 +18,8 @@ this compiled pin. No environment variable or user file can change it at runtime
 
 The native bootstrap checks its certificate, designated requirement, Hardened
 Runtime flags and the complete sealed bundle before loading the bundled JVM.
-It removes inherited JVM injection options and `DYLD_*` variables. Java and its
+It removes inherited JVM injection options and `DYLD_*` variables, and disables
+HotSpot's external attach/agent-loading mechanism before starting Java. Java and its
 libraries are bundled and individually signed. Native account/source libraries
 and the remote-media helper retain their exact identifiers and signer checks;
 the helper still must pass PID, path and code-hash checks.
@@ -104,7 +105,8 @@ never shipped in the production package. Keychain checks cover persistence after
 process restart, D1v2 signature verification, private-key export rejection,
 locked-Keychain refusal, foreign-program read denial and resource tampering.
 The same probe also opens, initializes and reopens the real Kotlin secure-state
-owner on a second empty keychain, and tests rejection of inherited Java agents.
+owner on a second empty keychain, checks the production sealed-identity reader,
+and tests rejection of inherited Java agents and a real external `jcmd` attach.
 
 Successful DMGs are retained for one day; small reports for three days. Standard
 public runner compute is free, but artifact storage is metered separately. Download
@@ -173,3 +175,13 @@ encryption and [per-item ACL enforcement](https://developer.apple.com/documentat
 without modifying user system settings. CI tests the actual item boundary using
 an unrelated signer with a spoofed AutPlay identifier, rather than relying on
 directory read permissions to protect plaintext secrets.
+
+Run `42828384378` passed protected item creation/readback and reached key creation.
+Apple's legacy [SecItem attribute mapping](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_keychain/lib/SecItem.cpp)
+does not return sensitive/extractable attributes. The provider therefore obtains
+those flags through public `SecKeyCopyAttributes`, whose
+[legacy key implementation](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_keychain/lib/SecKey.cpp)
+exposes them. Non-exportability remains mandatory and is independently tested with
+three export APIs. The launcher also forces the documented
+[`DisableAttachMechanism` option](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html)
+to close HotSpot's same-user agent-loading channel.

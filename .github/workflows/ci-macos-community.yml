@@ -7,7 +7,14 @@ on:
       - shared/**
       - config/macos/**
       - scripts/macos_community.py
+      - scripts/macos_ci.py
       - tests/native/**
+      - build.gradle.kts
+      - settings.gradle.kts
+      - gradle/**
+      - gradle.properties
+      - gradlew
+      - gradlew.bat
       - .github/workflows/ci-macos-community.yml
   workflow_dispatch:
 permissions:

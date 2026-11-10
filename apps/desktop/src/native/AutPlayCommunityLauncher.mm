@@ -62,6 +62,9 @@ int main(int argc, char **argv) {
             arguments.emplace_back(bundle.executableURL.path.fileSystemRepresentation);
             arguments.emplace_back("-classpath"); arguments.emplace_back([classpath componentsJoinedByString:@":"].UTF8String);
             for (NSString *option in options) arguments.emplace_back(option.UTF8String);
+            // HotSpot's same-user attach socket can load agents without native debugging
+            // entitlements. Close it before any account-authorized Java code can run.
+            arguments.emplace_back("-XX:+DisableAttachMechanism");
             arguments.emplace_back(std::string("-Djpackage.app-path=") + bundle.executableURL.path.fileSystemRepresentation);
             arguments.emplace_back(mainClass.UTF8String);
             for (int index = 1; index < argc; ++index) {

@@ -28,6 +28,9 @@ public final class CommunityKeychainProbe {
         Path contents = Path.of(ProcessHandle.current().info().command().orElseThrow()).getParent().getParent();
         Path nativeDir = contents.resolve("app/resources/native");
         String pin = Files.readAllLines(nativeDir.resolve("AutPlaySignedIdentity")).get(1);
+        var signed = app.autplay.desktop.DesktopSignedBundleKt.readDesktopSignedBundle();
+        check(signed != null && signed.getIdentity() != null && signed.getIdentity().getCommunity() &&
+            signed.getIdentity().getDeveloperTeam().equals(pin));
         System.load(nativeDir.resolve("libAutPlaySecureState.dylib").toString());
         System.load(nativeDir.resolve("libCommunityProbeChecks.dylib").toString());
         if (args[0].equals("create")) {
@@ -108,6 +111,11 @@ public final class CommunityKeychainProbe {
                 catch (IllegalStateException expected) { check("SECURE_STATE_LOCKED".equals(expected.getMessage())); }
             }
         } finally { api.close(handle); }
+        if (args[0].equals("attach")) {
+            System.out.println("AUTPLAY_COMMUNITY_ATTACH_READY");
+            System.out.flush();
+            check(System.in.read() == '\n');
+        }
         System.out.println("AUTPLAY_COMMUNITY_PROBE_PASSED " + args[0]);
     }
 }

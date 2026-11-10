@@ -15,6 +15,8 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "apps/desktop/build/compose/binaries/main/app/AutPlay.app"
@@ -165,6 +167,33 @@ def probe() -> None:
         print("Keychain acceptance passed: " + phase)
     values = state()
     run("security", "unlock-keychain", "-p", values["account_password"], values["accounts"])
+    # Exercise the external HotSpot attach boundary while a real signed app is alive.
+    # Output contains synthetic data only and stays outside artifacts.
+    with tempfile.TemporaryFile() as log:
+        process = subprocess.Popen([str(executable), "attach"], stdin=subprocess.PIPE, stdout=log, stderr=log)
+        try:
+            deadline = time.monotonic() + 30
+            ready = False
+            while time.monotonic() < deadline and process.poll() is None:
+                log.seek(0)
+                if b"AUTPLAY_COMMUNITY_ATTACH_READY\n" in log.read(65536):
+                    ready = True
+                    break
+                time.sleep(0.1)
+            if not ready:
+                raise RuntimeError("Attach-rejection probe did not become ready")
+            attempt = run(jdk / "bin/jcmd", str(process.pid), "VM.version", timeout=30, check=False)
+            if attempt.returncode == 0 or "AttachNotSupportedException" not in attempt.stderr or process.poll() is not None:
+                raise RuntimeError("External JVM attach was not rejected")
+            process.communicate(input=b"\n", timeout=15)
+            log.seek(0)
+            if process.returncode or b"AUTPLAY_COMMUNITY_PROBE_PASSED attach\n" not in log.read(1048576):
+                raise RuntimeError("Signed process did not survive rejected JVM attach")
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+    passed.append("external-jvm-attach-rejected")
     foreign = TEMP / "foreign-reader"
     run("xcrun", "clang++", "-fobjc-arc", "-framework", "Foundation", "-framework", "Security",
         ROOT / "tests/native/CommunityForeignReader.mm", "-o", foreign)
@@ -193,6 +222,12 @@ def probe() -> None:
 
 
 def package() -> None:
+    from macos_ci import startup, test_reports
+    counts, problems = test_reports(ROOT)
+    if problems:
+        raise RuntimeError("Community test gate incomplete: " + "; ".join(problems))
+    (OUT / "test-summary.json").write_text(json.dumps({"status": "passed",
+        "source_commit": os.environ["GITHUB_SHA"], "tests": counts}, indent=2) + "\n")
     # Replace the jpackage executable. Keeping an account-authorized alternate launcher would
     # let an attacker skip the native seal/environment gate by invoking that executable.
     (APP / "Contents/MacOS/AutPlay").unlink()
@@ -205,8 +240,7 @@ def package() -> None:
         ROOT / "apps/desktop/src/native/AutPlayCommunityLauncher.mm", "-o", APP / "Contents/MacOS/AutPlay")
     sign(APP)
     probe()
-    # Production package keeps its original launcher and never contains the probe JNI/classes.
-    from macos_ci import startup
+    # Production package keeps its application entry point and never contains probe JNI/classes.
     if startup(ROOT):
         raise RuntimeError("Signed GUI/bundled JVM startup failed")
     dmg = OUT / "AutPlay-community-arm64.dmg"
