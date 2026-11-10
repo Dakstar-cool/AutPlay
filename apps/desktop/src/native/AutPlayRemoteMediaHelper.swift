@@ -1502,7 +1502,7 @@ private final class RemoteOwner {
     }
 }
 
-fileprivate extension RemoteOwner {
+extension RemoteOwner {
     func beginRenewal(_ source: Source, f: Fields, received: Instant) throws {
         guard source.purpose != nil, f.n("expectedPermitRevision") == source.revision,
               f.n("expectedCredentialGeneration") == source.credential, f.n("expectedSessionGeneration") == source.sessionGeneration,
