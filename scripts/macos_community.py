@@ -247,11 +247,31 @@ def package() -> None:
     dmg = OUT / "AutPlay-community-arm64.dmg"
     stage = TEMP / "dmg"
     stage.mkdir()
-    shutil.copytree(APP, stage / "AutPlay.app")
+    # A signed bundle seals symlink targets too. Dereferencing runtime links here
+    # would change the shipped bundle after its signature had been verified.
+    shutil.copytree(APP, stage / "AutPlay.app", symlinks=True)
+    run("codesign", "--verify", "--deep", "--strict", "--all-architectures", stage / "AutPlay.app")
     (stage / "Applications").symlink_to("/Applications", target_is_directory=True)
     run("hdiutil", "create", "-volname", "AutPlay Community", "-srcfolder", stage, "-format", "UDZO", dmg, timeout=180)
+    mounted = TEMP / "mounted"
+    mounted.mkdir()
+    run("hdiutil", "attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", mounted, dmg)
+    try:
+        shipped = mounted / "AutPlay.app"
+        run("codesign", "--verify", "--deep", "--strict", "--all-architectures", shipped)
+        if (shipped / "Contents/app/community-probe.jar").exists() or (shipped / "Contents/app/resources/native/libCommunityProbeChecks.dylib").exists():
+            raise RuntimeError("Test-only code leaked into production DMG")
+        with tempfile.TemporaryDirectory(prefix="dmg-startup-", dir=TEMP) as storage:
+            result = run(shipped / "Contents/MacOS/AutPlay", "--smoke-test", "--test-data-root=" + storage, timeout=60)
+        if "AUTPLAY_DESKTOP_SMOKE_READY java=17.0.20 bundled=true" not in result.stdout.splitlines():
+            raise RuntimeError("Mounted DMG did not start the production GUI")
+    finally:
+        run("hdiutil", "detach", mounted, timeout=30)
     with dmg.open("rb") as source:
         checksum = hashlib.file_digest(source, "sha256").hexdigest()
+    (OUT / "dmg-acceptance.json").write_text(json.dumps({"status": "passed",
+        "source_commit": os.environ["GITHUB_SHA"], "sha256": checksum,
+        "checks": ["staged-bundle-seal", "mounted-readonly-dmg-seal", "mounted-dmg-gui-startup", "no-test-code-in-dmg"]}, indent=2) + "\n")
     (OUT / "SHA256SUMS").write_text(checksum + "  " + dmg.name + "\n")
     shutil.copy2(ROOT / "config/macos/community-signer.pem", OUT)
     shutil.copy2(ROOT / "config/macos/community-signer.sha256", OUT)

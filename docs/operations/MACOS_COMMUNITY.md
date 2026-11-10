@@ -10,7 +10,7 @@ failed Developer ID check never silently selects community storage.
 The current package targets Apple Silicon (ARM64), with macOS 13 as its deployment
 target. Automated native acceptance runs on macOS 15; this is not an Intel build.
 
-## Verified build, 2026-11-10
+## Native acceptance milestone, 2026-11-10
 
 Source: `23d17a46406be95ab497c7cd2e1b9e4f1cdddbfe`.
 Both [community acceptance](https://github.com/Dakstar-cool/AutPlay/actions/runs/42834919924)
@@ -19,7 +19,7 @@ passed. Each ran 28 shared/desktop JUnit cases with zero failures or skips. Comm
 acceptance additionally passed 14 Keychain/identity checks and signed GUI startup;
 the foundation gate passed all seven native WAV scenarios on macOS 15.8.2 ARM64.
 
-Verified artifact: `AutPlay-community-arm64.dmg`, 113037635 bytes.
+Historical artifact: `AutPlay-community-arm64.dmg`, 113037635 bytes.
 Its downloaded copy was independently hashed on Windows and matched CI:
 
 ```text
@@ -35,6 +35,9 @@ The probe also rejected JVM attach, inherited Java agents and resource tampering
 This qualifies the community client storage/signing boundary. First-open Gatekeeper
 approval, interactive reauthorization after an actual update, audible output and
 end-to-end login/sync against a compatible server remain manual/integration gates.
+This first artifact predates the final mounted-DMG acceptance gate. It is retained
+as historical evidence, not the package to distribute; use a successful build that
+also contains `dmg-acceptance.json`.
 
 ## Build identity
 
@@ -128,7 +131,9 @@ certificate to global trust settings.
 
 The gate builds/tests the shared and desktop modules, signs the app, checks the
 real production JNI in a separately sealed probe app, starts the production GUI
-with its bundled JDK, then creates the DMG. The probe classes/native checks are
+with its bundled JDK, then creates the DMG while preserving signed symlinks. It
+mounts the final image read-only, verifies the shipped bundle's signature and
+starts its production GUI before accepting the artifact. The probe classes/native checks are
 never shipped in the production package. Keychain checks cover persistence after
 process restart, D1v2 signature verification, private-key export rejection,
 locked-Keychain refusal, foreign-program read/sign refusal and resource tampering.
