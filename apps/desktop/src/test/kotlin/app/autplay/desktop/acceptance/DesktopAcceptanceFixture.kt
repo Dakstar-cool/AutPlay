@@ -19,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -36,9 +37,9 @@ internal suspend fun eventually(description: String, predicate: () -> Boolean): 
 }
 
 /** Every byte, database and scope belongs to one disposable canonical root. */
-internal class DesktopAcceptanceFixture {
+internal class DesktopAcceptanceFixture(unicodeDataRoot: Boolean = false) {
     val sandbox: Path = Files.createTempDirectory("autplay-desktop-acceptance-").toRealPath()
-    val data: Path = Files.createDirectory(sandbox.resolve("data"))
+    val data: Path = Files.createDirectory(sandbox.resolve(if (unicodeDataRoot) "data-\u041C\u0443\u0437\u044B\u043A\u0430" else "data"))
     val sources: Path = Files.createDirectory(sandbox.resolve("sources"))
     private val scopeJob = SupervisorJob()
     private val scope: CoroutineScope = CoroutineScope(scopeJob + Dispatchers.Default)
@@ -49,10 +50,15 @@ internal class DesktopAcceptanceFixture {
 
     suspend fun openStore(): Unit { opened = openDesktopLibraryStore(data) }
     suspend fun reopenStore(): Unit { store.close(); opened = null; openStore() }
-    fun start(engine: DesktopAudioEngine): DesktopPlaybackController {
+    fun start(
+        engine: DesktopAudioEngine,
+        libraryStore: DesktopLibraryStore = store,
+        timerNowNanos: () -> Long = System::nanoTime,
+        periodicObservations: Flow<Unit>? = null,
+    ): DesktopPlaybackController {
         check(this.engine == null)
         this.engine = engine
-        return DesktopPlaybackController(store, engine, scope).also { controller = it }
+        return DesktopPlaybackController(libraryStore, engine, scope, timerNowNanos, periodicObservations).also { controller = it }
     }
     suspend fun stopController(): Unit {
         withTimeout(15_000) { controller?.close() ?: engine?.close() }
@@ -60,12 +66,13 @@ internal class DesktopAcceptanceFixture {
         engine = null
     }
     suspend fun importWav(name: String = "Synthetic tone.wav", durationMs: Int = 8_000): String {
+        val previousIds = store.state.value.tracks.map { it.id }.toSet()
         val source = sources.resolve(name)
         Files.write(source, wave(durationMs))
         val report = DesktopFileImporter(store, data).importSelected(listOf(source.toString()))
         assertEquals(1, report.imported)
         assertEquals(0, report.failed)
-        return store.state.value.tracks.single().id
+        return store.state.value.tracks.single { it.id !in previousIds }.id
     }
     suspend fun <T> use(block: suspend (DesktopAcceptanceFixture) -> T): T {
         var originalFailure: Throwable? = null
@@ -126,18 +133,26 @@ internal fun wave(durationMs: Int): ByteArray {
 /** Used solely to deliver deterministic generations/EOFs to the real application/store. */
 internal class PolicyEngine : DesktopAudioEngine {
     data class Open(val generation: Long, val positionMs: Long, val autoplay: Boolean)
+    data class Seek(val generation: Long, val positionMs: Long)
     val opens: MutableList<Open> = CopyOnWriteArrayList()
+    val seeks: MutableList<Seek> = CopyOnWriteArrayList()
     val stops: MutableList<Long> = CopyOnWriteArrayList()
+    @Volatile var deferOpen: Boolean = false
+    @Volatile var deferSeek: Boolean = false
     private val facts = MutableStateFlow(DesktopAudioEvent(0, "IDLE"))
     override val state: StateFlow<DesktopAudioEvent> = facts
     fun emit(event: DesktopAudioEvent): Unit { facts.value = event }
     override fun open(managedPath: String, generation: Long, positionMs: Long, autoplay: Boolean): Unit {
         opens.add(Open(generation, positionMs, autoplay))
-        emit(DesktopAudioEvent(generation, "READY", positionMs, 8_000, autoplay))
+        if (deferOpen) emit(DesktopAudioEvent(generation, "BUFFERING", positionMs))
+        else emit(DesktopAudioEvent(generation, "READY", positionMs, 8_000, autoplay))
     }
     override fun play(generation: Long): Unit { emit(facts.value.copy(generation = generation, isPlaying = true)) }
     override fun pause(generation: Long): Unit { emit(facts.value.copy(generation = generation, isPlaying = false)) }
-    override fun seek(generation: Long, positionMs: Long): Unit { emit(facts.value.copy(generation = generation, positionMs = positionMs)) }
+    override fun seek(generation: Long, positionMs: Long): Unit {
+        seeks.add(Seek(generation, positionMs))
+        if (!deferSeek) emit(facts.value.copy(generation = generation, positionMs = positionMs))
+    }
     override fun stop(generation: Long): Unit { stops.add(generation) }
     override suspend fun close(): Unit { emit(facts.value.copy(status = "CLOSED", isPlaying = false)) }
 }

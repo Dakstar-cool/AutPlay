@@ -11,6 +11,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -39,11 +40,35 @@ public data class MacAudioFailure(
 
 public data class MacAudioCause(val domain: String, val code: Int)
 
+public enum class MacAudioOwnerReleaseKind { DRAINED, FAILED_RETAINED }
+
+/** Internal owner evidence; DesktopAudioEngine and local-audio IPC1 stay unchanged. */
+public data class MacAudioOwnerRelease(
+    val kind: MacAudioOwnerReleaseKind,
+    val code: String?,
+    val processWasLaunched: Boolean,
+    val nativeCloseAcknowledged: Boolean,
+    val processExitConfirmed: Boolean,
+    val readerSettled: Boolean,
+    val writerSettled: Boolean,
+    val watchdogSettled: Boolean,
+    val pipesClosed: Boolean,
+) {
+    public val fullySettled: Boolean
+        get() = processExitConfirmed && readerSettled && writerSettled && watchdogSettled && pipesClosed
+
+    init {
+        require(kind != MacAudioOwnerReleaseKind.DRAINED ||
+            (code == null && fullySettled && (!processWasLaunched || nativeCloseAcknowledged)))
+    }
+}
+
 /**
  * Local prototype execution adapter. The caller supplies the bundled executable and a verified
  * managed-file capability from DesktopLibraryStore; neither media paths nor native errors are logged.
  * Construct one engine per application host and await close before replacing it.
  * Commands return after bounded enqueueing; state contains native facts, not optimistic playback.
+ * READY frames received before the latest admitted seek's exact ACK are withheld; ACK emits no state.
  */
 public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
     private val executable: Path = helperExecutable.toAbsolutePath().normalize()
@@ -56,14 +81,21 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
     public val lastFailure: StateFlow<MacAudioFailure?> = mutableFailure.asStateFlow()
     private val nativeHello: CompletableFuture<Unit> = CompletableFuture()
     private val handshake: CompletableFuture<Unit> = CompletableFuture()
-    private val completion: CompletableFuture<Unit> = CompletableFuture()
+    private val ownerRelease: CompletableFuture<MacAudioOwnerRelease> = CompletableFuture()
     private var process: Process? = null
     private var reader: Thread? = null
+    private var readerInput: DataInputStream? = null
+    private var writerOutput: DataOutputStream? = null
+    private var processWasLaunched: Boolean = false
+    private var pipesClosed: Boolean = false
     private var watchdog: ScheduledExecutorService? = null
     private var generation: Long = -1
     private var closing: Boolean = false
     private var terminalError: String? = null
-    private var pendingAck: Pair<Long, CompletableFuture<Unit>>? = null
+    private var pendingAck: PendingAck? = null
+    // The latest admitted seek, including time spent queued before its wire ID is assigned.
+    private var pendingSeek: Command? = null
+    private var closeAcknowledged: Boolean = false
     private var helloReceived: Boolean = false
     private var readyReceived: Boolean = false
     private val ownsLease: Boolean
@@ -73,14 +105,17 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         if (System.getProperty("os.name") != "Mac OS X") {
             ownsLease = false
             fail("AUDIO_UNSUPPORTED_PLATFORM")
-            completion.complete(Unit)
+            completeWithoutProcess()
         } else if (!OWNER_LEASE.compareAndSet(false, true)) {
             ownsLease = false
             fail("AUDIO_OWNER_ALREADY_ACTIVE")
-            completion.complete(Unit)
+            completeWithoutProcess()
         } else {
             ownsLease = true
-            Thread(::runOwner, "autplay-audio-owner").apply { isDaemon = true }.start()
+            val owner = Thread(::runOwner, "autplay-audio-owner").apply { isDaemon = true }
+            owner.start()
+            // This retained owner observes actual thread/process termination after caller timeout.
+            Thread({ awaitOwnerSettlement(owner) }, "autplay-audio-settlement").apply { isDaemon = true }.start()
         }
     }
 
@@ -88,9 +123,9 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         synchronized(lock) {
             if (closing || generation < 0 || generation <= this.generation) return
             this.generation = generation
+            pendingSeek = null
             terminalError?.let { code ->
                 // Resolve the selected generation's pending state without restarting a failed owner.
-                mutableFailure.value = mutableFailure.value?.copy(generation = generation)
                 mutableState.value = DesktopAudioEvent(generation, "UNAVAILABLE", errorCode = code)
                 return
             }
@@ -102,6 +137,8 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 fail("AUDIO_INVALID_ARGUMENT")
                 return
             }
+            // Superseded commands cannot execute for this selection and must not consume its slots.
+            commands.clear()
             enqueue(Command("open", generation, managedPath, positionMs, autoplay))
         }
     }
@@ -117,31 +154,51 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 fail("AUDIO_INVALID_ARGUMENT")
                 return
             }
-            enqueue(Command("seek", generation, positionMs = positionMs))
+            val command = Command("seek", generation, positionMs = positionMs)
+            // Admission and reader filtering share the lock; a rejected enqueue cannot leave a barrier.
+            if (enqueue(command)) pendingSeek = command
         }
     }
 
     /** Cancellation of the calling scope cannot leave an AVPlayer process running. */
     override suspend fun close(): Unit = withContext(NonCancellable + Dispatchers.IO) {
-        synchronized(lock) {
-            closing = true
-            commands.clear()
-        }
+        requestOwnerRelease()
         try {
-            completion.get(CLOSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            ownerRelease.get(CLOSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (_: Exception) {
             fail("AUDIO_TEARDOWN_TIMEOUT", duringClose = true)
         }
+    }
+
+    /** Fence synchronously; the shared result is published only after actual owner settlement. */
+    public fun requestOwnerRelease(): CompletionStage<MacAudioOwnerRelease> {
         synchronized(lock) {
-            if (completion.isDone && terminalError == null) {
-                mutableState.value = mutableState.value.copy(status = "CLOSED", isPlaying = false)
-            }
+            closing = true
+            commands.clear()
+            pendingSeek = null
         }
+        return ownerRelease.minimalCompletionStage()
+    }
+
+    /** Observe retained cleanup without requesting stop or exposing the mutable promise. */
+    public fun ownerReleaseResult(): CompletionStage<MacAudioOwnerRelease> = ownerRelease.minimalCompletionStage()
+
+    internal fun completedOwnerRelease(): MacAudioOwnerRelease? = ownerRelease.getNow(null)
+
+    /** A failed arbiter can settle selection UI without admitting any positive native command. */
+    internal fun reportUnavailableSelection(requestedGeneration: Long): Unit = synchronized(lock) {
+        if (terminalError == null || requestedGeneration < 0 || requestedGeneration <= generation) return@synchronized
+        generation = requestedGeneration
+        pendingSeek = null
+        mutableState.value = unavailable(checkNotNull(terminalError))
     }
 
     private fun submit(op: String, requestedGeneration: Long): Unit {
         synchronized(lock) {
-            if (accepts(requestedGeneration)) enqueue(Command(op, requestedGeneration))
+            if (accepts(requestedGeneration)) {
+                if (op == "stop") pendingSeek = null
+                enqueue(Command(op, requestedGeneration))
+            }
         }
     }
 
@@ -149,8 +206,10 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         !closing && terminalError == null && generation >= 0 && requestedGeneration == generation
 
     // Must be called with lock held; overflow fails closed so a pause/stop is never silently lost.
-    private fun enqueue(command: Command): Unit {
-        if (!commands.offer(command)) fail("AUDIO_COMMAND_QUEUE_FULL")
+    private fun enqueue(command: Command): Boolean {
+        if (commands.offer(command)) return true
+        fail("AUDIO_COMMAND_QUEUE_FULL")
+        return false
     }
 
     private fun runOwner(): Unit {
@@ -162,10 +221,15 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 Thread(runnable, "autplay-audio-watchdog").apply { isDaemon = true }
             }.apply { setRemoveOnCancelPolicy(true) }
             synchronized(lock) { watchdog = timer }
-            val startupDeadline = timer.schedule({ fail("AUDIO_HANDSHAKE_TIMEOUT") }, IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            val startupDeadline = timer.schedule({
+                synchronized(lock) {
+                    if (!handshake.isDone) fail("AUDIO_HANDSHAKE_TIMEOUT", duringClose = true)
+                }
+            }, IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             try {
+                if (synchronized(lock) { closing || terminalError != null }) return
                 if (!Files.isRegularFile(executable) || !Files.isExecutable(executable)) {
-                    fail("AUDIO_HELPER_UNAVAILABLE")
+                    fail("AUDIO_HELPER_UNAVAILABLE", duringClose = true)
                     return
                 }
                 // No shell or media-bearing arguments/environment; stderr never enters the event channel.
@@ -173,10 +237,13 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 child = launched
                 synchronized(lock) {
                     process = launched
+                    processWasLaunched = true
                     if (terminalError != null) launched.destroyForcibly()
                 }
                 output = DataOutputStream(launched.outputStream)
+                synchronized(lock) { writerOutput = output }
                 val input = DataInputStream(launched.inputStream)
+                synchronized(lock) { readerInput = input }
                 val inputThread = Thread({ readEvents(input) }, "autplay-audio-events").apply { isDaemon = true }
                 synchronized(lock) { reader = inputThread }
                 inputThread.start()
@@ -190,18 +257,19 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 })
                 handshake.get(IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             } catch (_: TimeoutException) {
-                fail("AUDIO_HANDSHAKE_TIMEOUT")
+                fail("AUDIO_HANDSHAKE_TIMEOUT", duringClose = true)
                 throw ProtocolFailure()
             } finally {
                 startupDeadline.cancel(false)
             }
             timer.scheduleAtFixedRate({
-                val timedOut = synchronized(lock) {
-                    !closing && terminalError == null &&
+                synchronized(lock) {
+                    if (!closing && terminalError == null &&
                         (mutableState.value.status == "BUFFERING" || mutableState.value.isPlaying) &&
-                        System.nanoTime() - lastEventAt >= TimeUnit.MILLISECONDS.toNanos(EVENT_TIMEOUT_MS)
+                        System.nanoTime() - lastEventAt >= TimeUnit.MILLISECONDS.toNanos(EVENT_TIMEOUT_MS)) {
+                        fail("AUDIO_EVENT_TIMEOUT")
+                    }
                 }
-                if (timedOut) fail("AUDIO_EVENT_TIMEOUT")
             }, 1, 1, TimeUnit.SECONDS)
             while (synchronized(lock) { !closing && terminalError == null }) {
                 val command = commands.poll(100, TimeUnit.MILLISECONDS) ?: continue
@@ -213,41 +281,110 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 send(output, Command("close", synchronized(lock) { generation.coerceAtLeast(0) }), nextId)
             }
         } catch (_: ProtocolFailure) {
-            fail("AUDIO_PROTOCOL_ERROR")
+            fail("AUDIO_PROTOCOL_ERROR", duringClose = true)
         } catch (_: Exception) {
-            if (synchronized(lock) { !closing && terminalError == null }) fail("AUDIO_PROCESS_FAILED")
+            fail("AUDIO_PROCESS_FAILED", duringClose = true)
         } finally {
             // Killing before closing pipe wrappers also releases a writer blocked in an OS pipe write.
             val ended = terminate(child)
-            runCatching { output?.close() }
-            runCatching { child?.inputStream?.close() }
+            val outputClosed = runCatching { (output ?: child?.outputStream)?.close() }.isSuccess
+            val inputClosed = runCatching { (synchronized(lock) { readerInput } ?: child?.inputStream)?.close() }.isSuccess
             val inputThread = synchronized(lock) { reader }
             runCatching { inputThread?.join(THREAD_JOIN_MS) }
             synchronized(lock) {
                 watchdog?.shutdownNow()
                 commands.clear()
                 pendingAck = null
-                process = null
-                if (!ended || inputThread?.isAlive == true) {
+                pendingSeek = null
+                pipesClosed = outputClosed && inputClosed
+                if (outputClosed) writerOutput = null
+                if (inputClosed) readerInput = null
+                // Retain a process/failed pipe reference until the settlement owner observes it.
+                if (!ended || inputThread?.isAlive == true || !pipesClosed) {
                     terminalError = "AUDIO_TEARDOWN_TIMEOUT"
-                    mutableFailure.value = MacAudioFailure(generation.coerceAtLeast(0), "AUDIO_TEARDOWN_TIMEOUT", "AUDIO_TEARDOWN_TIMEOUT")
+                    retainFailure("AUDIO_TEARDOWN_TIMEOUT")
                     mutableState.value = unavailable("AUDIO_TEARDOWN_TIMEOUT")
                 } else if (closing && terminalError == null) {
-                    mutableState.value = mutableState.value.copy(status = "CLOSED", isPlaying = false)
+                    if (child != null && !closeAcknowledged) {
+                        terminalError = "AUDIO_COMMAND_TIMEOUT"
+                        retainFailure("AUDIO_COMMAND_TIMEOUT")
+                        mutableState.value = unavailable("AUDIO_COMMAND_TIMEOUT")
+                    } else {
+                        mutableState.value = mutableState.value.copy(status = "CLOSED", isPlaying = false)
+                    }
                 }
             }
-            if (ownsLease && ended && inputThread?.isAlive != true) OWNER_LEASE.set(false)
-            completion.complete(Unit)
         }
+    }
+
+    private fun completeWithoutProcess(): Unit {
+        ownerRelease.complete(MacAudioOwnerRelease(
+            MacAudioOwnerReleaseKind.FAILED_RETAINED, synchronized(lock) { terminalError },
+            false, false, true, true, true, true, true,
+        ))
+    }
+
+    private fun awaitOwnerSettlement(owner: Thread): Unit {
+        var interrupted = false
+        fun awaitActual(action: () -> Unit): Unit {
+            while (true) {
+                try {
+                    action()
+                    return
+                } catch (_: InterruptedException) {
+                    // Caller cancellation cannot remove this process-lifetime cleanup obligation.
+                    interrupted = true
+                }
+            }
+        }
+        awaitActual { owner.join() }
+        val child = synchronized(lock) { process }
+        if (child != null) awaitActual { child.waitFor(); Unit }
+        val inputThread = synchronized(lock) { reader }
+        if (inputThread != null) awaitActual { inputThread.join() }
+        val timer = synchronized(lock) { watchdog }
+        if (timer != null) awaitActual {
+            while (!timer.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) { /* retain owner */ }
+        }
+        val result = synchronized(lock) {
+            val settled = pipesClosed && (child == null || !child.isAlive) &&
+                inputThread?.isAlive != true && !owner.isAlive && (timer == null || timer.isTerminated)
+            val graceful = settled && closing && terminalError == null &&
+                (!processWasLaunched || closeAcknowledged)
+            if (!graceful && terminalError == null) {
+                terminalError = "AUDIO_TEARDOWN_UNCONFIRMED"
+                retainFailure("AUDIO_TEARDOWN_UNCONFIRMED")
+                mutableState.value = unavailable("AUDIO_TEARDOWN_UNCONFIRMED")
+            }
+            if (settled) { process = null; reader = null; watchdog = null }
+            if (graceful) mutableState.value = mutableState.value.copy(status = "CLOSED", isPlaying = false)
+            MacAudioOwnerRelease(
+                if (graceful) MacAudioOwnerReleaseKind.DRAINED else MacAudioOwnerReleaseKind.FAILED_RETAINED,
+                if (graceful) null else terminalError, processWasLaunched, closeAcknowledged,
+                child == null || !child.isAlive, inputThread?.isAlive != true, !owner.isAlive,
+                timer == null || timer.isTerminated, pipesClosed,
+            )
+        }
+        // CompletableFuture may run a successor inline. Free the settled physical slot first;
+        // the shared audio arbiter must still retain any FAILED_RETAINED logical audio lease.
+        if (ownsLease && result.fullySettled) OWNER_LEASE.set(false)
+        ownerRelease.complete(result)
+        if (interrupted) Thread.currentThread().interrupt()
     }
 
     private fun send(output: DataOutputStream, command: Command, id: Long): Unit {
         val acknowledged = CompletableFuture<Unit>()
         val timer = synchronized(lock) {
-            pendingAck = id to acknowledged
+            pendingAck = PendingAck(id, command, acknowledged)
             checkNotNull(watchdog)
         }
-        val deadline = timer.schedule({ fail("AUDIO_COMMAND_TIMEOUT", duringClose = true) }, IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val deadline = timer.schedule({
+            synchronized(lock) {
+                if (pendingAck?.id == id && !acknowledged.isDone) {
+                    fail("AUDIO_COMMAND_TIMEOUT", duringClose = true)
+                }
+            }
+        }, IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         try {
             writeFrame(output, command.frame(id))
             acknowledged.get(IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -256,7 +393,11 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
             throw ProtocolFailure()
         } finally {
             deadline.cancel(false)
-            synchronized(lock) { if (pendingAck?.first == id) pendingAck = null }
+            synchronized(lock) {
+                if (pendingAck?.id == id) {
+                    pendingAck = null
+                }
+            }
         }
     }
 
@@ -274,7 +415,10 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 }
                 if (++frameCount > MAX_FRAMES_PER_SECOND) throw ProtocolFailure()
                 val timer = synchronized(lock) { checkNotNull(watchdog) }
-                val deadline = timer.schedule({ fail("AUDIO_FRAME_TIMEOUT", duringClose = true) }, IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                val reading = AtomicBoolean(true)
+                val deadline = timer.schedule({
+                    if (reading.compareAndSet(true, false)) fail("AUDIO_FRAME_TIMEOUT", duringClose = true)
+                }, IO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 try {
                     val remainingHeader = ByteArray(3)
                     input.readFully(remainingHeader)
@@ -283,6 +427,7 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                     if (size !in 1..MAX_FRAME_BYTES) throw ProtocolFailure()
                     val bytes = ByteArray(size)
                     input.readFully(bytes)
+                    reading.set(false)
                     val text = StandardCharsets.UTF_8.newDecoder()
                         .onMalformedInput(CodingErrorAction.REPORT)
                         .onUnmappableCharacter(CodingErrorAction.REPORT)
@@ -292,16 +437,22 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                     val frame = Json.parseToJsonElement(text) as? JsonObject ?: throw ProtocolFailure()
                     receive(frame)
                 } finally {
+                    reading.set(false)
                     deadline.cancel(false)
                 }
             }
         } catch (_: ProtocolFailure) {
-            fail("AUDIO_PROTOCOL_ERROR")
+            failReader("AUDIO_PROTOCOL_ERROR")
         } catch (_: java.io.EOFException) {
-            fail("AUDIO_PROCESS_EXITED")
+            failReader("AUDIO_PROCESS_EXITED")
         } catch (_: Exception) {
-            fail("AUDIO_PROTOCOL_ERROR")
+            failReader("AUDIO_PROTOCOL_ERROR")
         }
+    }
+
+    private fun failReader(code: String): Unit = synchronized(lock) {
+        // EOF is expected only after native cleanup was explicitly acknowledged.
+        if (!closing || !closeAcknowledged) fail(code, duringClose = true)
     }
 
     private fun receive(frame: JsonObject): Unit = synchronized(lock) {
@@ -324,8 +475,14 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
             "ack" -> {
                 frame.only("v", "type", "id")
                 val pending = pendingAck ?: throw ProtocolFailure()
-                if (!readyReceived || frame.long("id") != pending.first) throw ProtocolFailure()
-                pending.second.complete(Unit)
+                if (!readyReceived || frame.long("id") != pending.id || pending.acknowledged.isDone) throw ProtocolFailure()
+                if (pending.command.op == "close") closeAcknowledged = true
+                // Older seek/open ACKs still release the single writer, but cannot release a newer
+                // seek admission. Native FIFO puts earlier READY frames before this exact ACK.
+                if (pendingSeek === pending.command && pending.command.generation == generation) {
+                    pendingSeek = null
+                }
+                pending.acknowledged.complete(Unit)
             }
             "event" -> {
                 if (!readyReceived) throw ProtocolFailure()
@@ -333,6 +490,12 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
                 if (!closing && terminalError == null && event.generation == generation) {
                     // StateFlow consumers may conflate frames; the native owner emits EOF exactly once.
                     lastEventAt = System.nanoTime()
+                    // Parse and count all frames for protocol/liveness, but never replay a READY
+                    // that preceded dispatch of the latest admitted seek. ACK publishes no state.
+                    if (event.status == "READY" && pendingSeek != null) return@synchronized
+                    when (event.status) {
+                        "IDLE", "ERROR", "ENDED", "CLOSED" -> pendingSeek = null
+                    }
                     val code = event.errorCode
                     if (event.status == "ERROR" && code != null &&
                         (mutableFailure.value?.generation != generation || mutableFailure.value?.errorCode != code)) {
@@ -356,15 +519,23 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         val child = synchronized(lock) {
             if (terminalError != null || (closing && !duringClose)) return
             terminalError = code
-            mutableFailure.value = MacAudioFailure(generation.coerceAtLeast(0), code, code)
+            retainFailure(code)
             mutableState.value = unavailable(code)
             commands.clear()
+            pendingSeek = null
             nativeHello.completeExceptionally(ProtocolFailure())
             handshake.completeExceptionally(ProtocolFailure())
-            pendingAck?.second?.completeExceptionally(ProtocolFailure())
+            pendingAck?.acknowledged?.completeExceptionally(ProtocolFailure())
             process
         }
         runCatching { child?.destroyForcibly() }
+    }
+
+    // Called with lock held. Teardown failures cannot erase the selected item's original diagnosis.
+    private fun retainFailure(code: String): Unit {
+        if (mutableFailure.value == null) {
+            mutableFailure.value = MacAudioFailure(generation.coerceAtLeast(0), code, code)
+        }
     }
 
     private fun unavailable(code: String): DesktopAudioEvent = mutableState.value.copy(
@@ -379,6 +550,12 @@ public class MacAudioEngine(helperExecutable: Path) : DesktopAudioEngine {
         runCatching { child.destroyForcibly() }
         return runCatching { child.waitFor(PROCESS_WAIT_MS, TimeUnit.MILLISECONDS) }.getOrDefault(false)
     }
+
+    private class PendingAck(
+        val id: Long,
+        val command: Command,
+        val acknowledged: CompletableFuture<Unit>,
+    )
 
     private class Command(
         val op: String,

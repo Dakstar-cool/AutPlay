@@ -41,13 +41,14 @@ class MacNativePlaybackAcceptanceTest {
 
         val trace = NativeEventTrace()
         trace.captureFailure {
-            DesktopAcceptanceFixture().use { fixture ->
+            DesktopAcceptanceFixture(unicodeDataRoot = true).use { fixture ->
                 fixture.openStore()
                 val trackId = fixture.importWav()
                 val source = fixture.sources.resolve("Synthetic tone.wav")
                 val original = Files.readAllBytes(source)
                 val managed = Path.of(checkNotNull(fixture.store.resolveManagedFile(trackId)))
                 assertEquals("${fixture.store.state.value.tracks.single().sha256}.wav", managed.fileName.toString())
+                assertTrue("Native capability must exercise a Unicode directory", managed.toString().any { it.code > 127 })
                 assertArrayEquals(original, Files.readAllBytes(managed))
                 val engine = MacAudioEngine(helper)
                 trace.observe(engine)
@@ -84,6 +85,78 @@ class MacNativePlaybackAcceptanceTest {
                 awaitNative("seeking paused native execution") {
                     !engine.state.value.isPlaying && abs(engine.state.value.positionMs - 1_500) <= 150 &&
                         abs(controller.state.value.positionMs - 1_500) <= 150
+                }
+
+                // Queue edits keep the actual paused native item and restore the original duplicates.
+                val queueEditGeneration = engine.state.value.generation
+                val queueEditSession = fixture.store.state.value.queue?.sessionId
+                val nativeTimerQueue = checkNotNull(fixture.store.state.value.queue)
+                controller.stopAfterCurrent(nativeTimerQueue.id, checkNotNull(nativeTimerQueue.currentEntryId), checkNotNull(nativeTimerQueue.sessionId))
+                awaitNative("arming stop-after on the actual paused native session") {
+                    controller.sleepTimer.value.stopAfterEntryId == nativeTimerQueue.currentEntryId
+                }
+                assertNull(controller.sleepTimer.value.remainingMs)
+                val nativeTimerPlan = checkNotNull(controller.sleepTimer.value.planId)
+                controller.cancelSleepTimer(nativeTimerPlan)
+                awaitNative("cancelling the exact native stop-after plan") { controller.sleepTimer.value.planId == null }
+                assertEquals(queueEditGeneration, engine.state.value.generation)
+                assertEquals(queueEditSession, fixture.store.state.value.queue?.sessionId)
+                assertFalse(engine.state.value.isPlaying)
+                assertTrue(abs(engine.state.value.positionMs - 1_500) <= 150)
+                controller.playNext(trackId)
+                awaitNative("inserting next without replacing native item") { fixture.store.state.value.queue?.entries?.size == 3 }
+                val insertedNext = checkNotNull(fixture.store.state.value.queue).entries.single { candidate -> entries.none { it.id == candidate.id } }
+                controller.moveUpcoming(insertedNext.id, 1)
+                awaitNative("moving a future entry while native item stays paused") { fixture.store.state.value.queue?.entries?.lastOrNull()?.id == insertedNext.id }
+                controller.removeEntry(insertedNext.id)
+                awaitNative("restoring original duplicate entries") { fixture.store.state.value.queue?.entries == entries }
+                assertEquals(queueEditGeneration, engine.state.value.generation)
+                assertEquals("READY", engine.state.value.status)
+                assertFalse(engine.state.value.isPlaying)
+                assertTrue(abs(engine.state.value.positionMs - 1_500) <= 150)
+                assertEquals(queueEditSession, fixture.store.state.value.queue?.sessionId)
+
+                val pausedPlaylist = fixture.store.createPlaylist("Native paused duplicate batch")
+                repeat(3) { fixture.store.appendToPlaylist(pausedPlaylist.id, trackId) }
+                controller.setShuffle(true)
+                awaitNative("persisting shuffle before whole-playlist edits") { fixture.store.state.value.queue?.shuffleEnabled == true }
+                val nativeBatchBase = checkNotNull(fixture.store.state.value.queue)
+                controller.enqueuePlaylist(pausedPlaylist.id)
+                awaitNative("appending a whole playlist while native item stays paused") { fixture.store.state.value.queue?.entries?.size == 5 }
+                val nativeAppended = checkNotNull(fixture.store.state.value.queue).entries.takeLast(3)
+                assertEquals(nativeBatchBase.entries + nativeAppended, fixture.store.state.value.queue?.entries)
+                assertEquals(nativeBatchBase.shuffleOrder + nativeAppended.map { it.id }, fixture.store.state.value.queue?.shuffleOrder)
+                controller.playPlaylistNext(pausedPlaylist.id)
+                awaitNative("inserting a contiguous whole playlist after actual native current") { fixture.store.state.value.queue?.entries?.size == 8 }
+                val nativeBatchQueue = checkNotNull(fixture.store.state.value.queue)
+                val nativeNextBatch = nativeBatchQueue.entries.subList(1, 4)
+                assertEquals(nativeBatchBase.entries.take(1) + nativeNextBatch + nativeBatchBase.entries.drop(1) + nativeAppended, nativeBatchQueue.entries)
+                assertEquals(nativeBatchBase.shuffleOrder.take(1) + nativeNextBatch.map { it.id } + nativeBatchBase.shuffleOrder.drop(1) + nativeAppended.map { it.id }, nativeBatchQueue.shuffleOrder)
+                assertEquals(List(8) { trackId }, nativeBatchQueue.entries.map { it.trackId })
+                assertEquals(8, nativeBatchQueue.entries.map { it.id }.distinct().size)
+                assertEquals(nativeBatchBase.currentEntryId, controller.state.value.mediaId)
+                assertEquals(queueEditSession, nativeBatchQueue.sessionId)
+                assertEquals(nativeBatchBase.sessionStartedAtMs, nativeBatchQueue.sessionStartedAtMs)
+                assertEquals(nativeBatchBase.positionMs, nativeBatchQueue.positionMs)
+                assertEquals(queueEditGeneration, engine.state.value.generation)
+                assertEquals("READY", engine.state.value.status)
+                assertFalse(engine.state.value.isPlaying)
+                assertTrue(abs(engine.state.value.positionMs - 1_500) <= 150)
+                for (addition in nativeAppended + nativeNextBatch) controller.removeEntry(addition.id)
+                controller.setShuffle(false)
+                awaitNative("restoring native duplicate queue after playlist batches") {
+                    fixture.store.state.value.queue?.let { it.entries == entries && !it.shuffleEnabled } == true
+                }
+
+                // Multiple same-generation seeks still require the actual final native position.
+                // An ACK or the previous READY at 1,500 cannot satisfy this assertion.
+                val burstGeneration = engine.state.value.generation
+                engine.seek(burstGeneration, 0)
+                engine.seek(burstGeneration, 2_500)
+                awaitNative("latest native seek in a same-generation burst") {
+                    engine.state.value.status == "READY" && !engine.state.value.isPlaying &&
+                        abs(engine.state.value.positionMs - 2_500) <= 150 &&
+                        abs(controller.state.value.positionMs - 2_500) <= 150
                 }
 
                 val firstGeneration = engine.state.value.generation
@@ -161,6 +234,31 @@ class MacNativePlaybackAcceptanceTest {
                 assertFalse(restarted.state.value.isPlaying)
                 assertNull(fixture.store.resolveManagedFile(trackId))
                 assertArrayEquals(original, Files.readAllBytes(source))
+                fixture.stopController()
+                assertEquals("CLOSED", restartedEngine.state.value.status)
+
+                // After the positive timeline/restart gate, exercise a real native missing-file
+                // error separately; stop/close must preserve its original sanitized diagnosis.
+                val diagnosticEngine = MacAudioEngine(helper)
+                trace.observe(diagnosticEngine)
+                try {
+                    diagnosticEngine.open(fixture.data.resolve("missing.wav").toString(), 1, 0, false)
+                    eventually("native missing-file diagnostic") {
+                        assertNotEquals("UNAVAILABLE", diagnosticEngine.state.value.status)
+                        diagnosticEngine.state.value.status == "ERROR"
+                    }
+                    val nativeFailure = checkNotNull(diagnosticEngine.lastFailure.value)
+                    assertEquals("NATIVE_FILE_UNAVAILABLE", nativeFailure.errorCode)
+                    assertEquals("FILE_ATTRIBUTES", nativeFailure.stage)
+                    diagnosticEngine.stop(1)
+                    eventually("native stop after media error") { diagnosticEngine.state.value.status == "IDLE" }
+                    assertEquals(nativeFailure, diagnosticEngine.lastFailure.value)
+                    diagnosticEngine.close()
+                    assertEquals("CLOSED", diagnosticEngine.state.value.status)
+                    assertEquals(nativeFailure, diagnosticEngine.lastFailure.value)
+                } finally {
+                    withContext(NonCancellable) { withTimeout(15_000) { diagnosticEngine.close() } }
+                }
             }
         }
     }

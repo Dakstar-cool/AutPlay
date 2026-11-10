@@ -1,7 +1,9 @@
 package app.autplay.ui.desktop
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -13,18 +15,55 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-public enum class DesktopThemeMode { Light, Dark }
+public enum class DesktopThemeMode(public val settingsValue: String) {
+    Light("LIGHT"), Dark("DARK"), System("SYSTEM"),
+}
 
-/** Coral palette and typography from the product theme, with no Android window dependencies. */
+/** Product palette values copied from the Android theme without an Android dependency. */
+public enum class DesktopAccentPalette(
+    public val settingsValue: String,
+    internal val lightPrimary: Color,
+    internal val darkPrimary: Color,
+    internal val lightContainer: Color,
+    internal val darkContainer: Color,
+) {
+    Coral("CORAL", Color(0xFFB73819), Color(0xFFFF7854), Color(0xFFFFE2D7), Color(0xFF47271F)),
+    Violet("VIOLET", Color(0xFF6246A8), Color(0xFFDCCEFF), Color(0xFFE8DEFF), Color(0xFF4B3A73)),
+    Green("GREEN", Color(0xFF176B3A), Color(0xFF83F8A6), Color(0xFFC2F8D1), Color(0xFF19562D)),
+    Blue("BLUE", Color(0xFF00639B), Color(0xFFA8D8FF), Color(0xFFCDE5FF), Color(0xFF174A68)),
+}
+
+internal fun desktopUsesDarkTheme(mode: DesktopThemeMode, systemDark: Boolean): Boolean = when (mode) {
+    DesktopThemeMode.Light -> false
+    DesktopThemeMode.Dark -> true
+    DesktopThemeMode.System -> systemDark
+}
+
+internal fun desktopColorScheme(dark: Boolean, accent: DesktopAccentPalette): ColorScheme =
+    (if (dark) DesktopDarkColors else DesktopLightColors).copy(
+        primary = if (dark) accent.darkPrimary else accent.lightPrimary,
+        primaryContainer = if (dark) accent.darkContainer else accent.lightContainer,
+    )
+
+/** Product palette and typography, with no Android window dependencies. */
 @Composable
-public fun AutPlayDesktopTheme(mode: DesktopThemeMode, content: @Composable () -> Unit) {
+public fun AutPlayDesktopTheme(
+    mode: DesktopThemeMode,
+    accentPalette: DesktopAccentPalette = DesktopAccentPalette.Coral,
+    content: @Composable () -> Unit,
+): Unit {
     MaterialTheme(
-        colorScheme = if (mode == DesktopThemeMode.Dark) DesktopDarkColors else DesktopLightColors,
+        colorScheme = desktopColorScheme(desktopUsesDarkTheme(mode, isSystemInDarkTheme()), accentPalette),
         shapes = DesktopShapes,
         typography = DesktopTypography,
         content = content,
     )
 }
+
+/** Retains source compatibility for callers passing content as their second positional argument. */
+@Composable
+public fun AutPlayDesktopTheme(mode: DesktopThemeMode, content: @Composable () -> Unit): Unit =
+    AutPlayDesktopTheme(mode, DesktopAccentPalette.Coral, content)
 
 private val DesktopDarkColors = darkColorScheme(
     primary = Color(0xFFFF7854),

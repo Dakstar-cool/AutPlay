@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -14,6 +15,7 @@ kotlin {
             implementation(libs.androidx.room3.runtime)
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.java.json.canonicalization)
         }
         jvmTest.dependencies { implementation(libs.junit4) }
     }
@@ -21,3 +23,8 @@ kotlin {
 
 dependencies { add("kspJvm", libs.androidx.room3.compiler) }
 room3 { schemaDirectory("$projectDir/schemas") }
+
+// Artwork fixtures render offscreen and must not register a macOS GUI application.
+tasks.withType<Test>().configureEach {
+    systemProperty("java.awt.headless", "true")
+}

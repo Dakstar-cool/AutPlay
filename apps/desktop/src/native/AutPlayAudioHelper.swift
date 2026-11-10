@@ -348,6 +348,7 @@ private final class LocalAudioOwner {
     private var nextTaskID: UInt64 = 0
     private var itemObservation: NSKeyValueObservation?
     private var playerObservation: NSKeyValueObservation?
+    private var endObservation: NSObjectProtocol?
     private var notificationObservers: [NSObjectProtocol] = []
     private var clock: Timer?
     private var helloDeadline: Double = 0
@@ -381,9 +382,6 @@ private final class LocalAudioOwner {
         helloDeadline = now + 5
         pipe.send(["v": protocolVersion, "type": "hello", "protocol": protocolName,
                    "maxFrameBytes": maximumFrameBytes])
-        playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-            onMain { [weak self] in self?.observeTransport() }
-        }
         clock = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(clock!, forMode: .common)
         pipe.start()
@@ -409,7 +407,12 @@ private final class LocalAudioOwner {
         }
         lastCommandID = command.id
         if command.op == "close" { shutdown(id: command.id, code: 0); return }
+        // All event producers run on this main owner and stdout uses one serial FIFO.
+        // Earlier facts precede this dispatch ACK; seek effects/completion follow it.
+        // The JVM uses that boundary to discard pre-ACK READY, not to claim completion.
         pipe.send(["v": protocolVersion, "type": "ack", "id": command.id])
+        // send() may synchronously shut down on queue overflow or serialization failure.
+        guard !closing else { return }
         if command.op == "open" {
             if let previous = lastOpenedGeneration, command.generation <= previous { return }
             open(command)
@@ -462,13 +465,14 @@ private final class LocalAudioOwner {
         loading = true
         openDeadline = now + 10
         emit(force: true)
+        guard !closing else { return }
         let path = command.managedPath!
         guard path.hasPrefix("/"), !path.contains("\0"), path.utf8.count <= 4096 else {
             fail("NATIVE_INVALID_PATH", stage: "FILE_VALIDATION"); return
         }
         let url = URL(fileURLWithPath: path, isDirectory: false).standardizedFileURL
-        // Managed copies have a neutral .media suffix. AVFoundation must inspect
-        // actual media; extension admission neither proves nor rejects a codec.
+        // The data owner supplies a verified format suffix and repairs legacy names.
+        // Native admission still checks the actual asset; the suffix is not a codec guarantee.
         guard url.isFileURL else { fail("NATIVE_INVALID_PATH", stage: "FILE_VALIDATION"); return }
         do {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -490,10 +494,13 @@ private final class LocalAudioOwner {
             var stage: String = "ASSET_PLAYABLE"
             do {
                 let playable = try await newAsset.load(.isPlayable)
+                guard !Task.isCancelled, self?.matches(token) == true else { return }
                 stage = "ASSET_PROTECTED"
                 let protected = try await newAsset.load(.hasProtectedContent)
+                guard !Task.isCancelled, self?.matches(token) == true else { return }
                 stage = "ASSET_DURATION"
                 let duration = try await newAsset.load(.duration)
+                guard !Task.isCancelled, self?.matches(token) == true else { return }
                 stage = "ASSET_TRACKS"
                 let tracks = try await newAsset.loadTracks(withMediaType: .audio)
                 guard !Task.isCancelled, let self = self, self.matches(token) else { return }
@@ -525,7 +532,8 @@ private final class LocalAudioOwner {
         item = newItem
         itemObservation = newItem.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
             DispatchQueue.main.async { [weak self] in
-                guard let self = self, self.matches(token), self.item === newItem else { return }
+                guard let self = self, self.matches(token), self.item === newItem,
+                      self.player.currentItem === newItem, !self.endedEmitted else { return }
                 if newItem.status == .failed {
                     self.fail(mediaFailure(newItem.error,
                                            fallback: self.loading ? "NATIVE_OPEN_FAILED" : "NATIVE_PLAYBACK_FAILED"),
@@ -536,14 +544,18 @@ private final class LocalAudioOwner {
                 }
             }
         }
+        playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            onMain { [weak self] in
+                guard let self = self, self.matches(token), self.item === newItem,
+                      self.player.currentItem === newItem else { return }
+                self.observeTransport()
+            }
+        }
         let center = NotificationCenter.default
-        notificationObservers.append(center.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
-                                                        object: newItem, queue: .main) { [weak self] _ in
-            self?.didEnd(newItem, token: token)
-        })
         notificationObservers.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime,
                                                         object: newItem, queue: .main) { [weak self] _ in
-            guard let self = self, self.matches(token), self.item === newItem else { return }
+            guard let self = self, self.matches(token), self.item === newItem,
+                  self.player.currentItem === newItem, !self.endedEmitted else { return }
             self.fail(mediaFailure(newItem.error, fallback: "NATIVE_PLAYBACK_FAILED"), error: newItem.error)
         })
         player.replaceCurrentItem(with: newItem)
@@ -556,12 +568,14 @@ private final class LocalAudioOwner {
             guard !Task.isCancelled else { return }
             do {
                 let metadata = try await newAsset.load(.commonMetadata)
+                guard !Task.isCancelled, self?.matches(token) == true else { return }
                 let limited = Array(metadata.prefix(128))
                 let titleItem = AVMetadataItem.metadataItems(from: limited, filteredByIdentifier: .commonIdentifierTitle).first
                 let artistItem = AVMetadataItem.metadataItems(from: limited, filteredByIdentifier: .commonIdentifierArtist).first
                 var loadedTitle: String?
                 var loadedArtist: String?
                 if let titleItem = titleItem { loadedTitle = try await titleItem.load(.stringValue) }
+                guard !Task.isCancelled, self?.matches(token) == true else { return }
                 if let artistItem = artistItem { loadedArtist = try await artistItem.load(.stringValue) }
                 guard !Task.isCancelled, let self = self, self.matches(token) else { return }
                 self.title = metadataText(loadedTitle)
@@ -589,10 +603,12 @@ private final class LocalAudioOwner {
     }
 
     private func performSeek() {
-        guard let current = item, current.status == .readyToPlay, errorCode == nil else { return }
+        guard !closing, !endedEmitted, let current = item, player.currentItem === current,
+              current.status == .readyToPlay, errorCode == nil else { return }
         seekToken &+= 1
         let operation = seekToken
         let token = itemToken
+        removeEndObservation()
         seekInFlight = true
         current.cancelPendingSeeks()
         player.pause()
@@ -602,6 +618,8 @@ private final class LocalAudioOwner {
         let target = min(desiredPositionMs, durationMs ?? desiredPositionMs)
         status = "SEEKING"
         emit(force: true)
+        guard matches(token), seekToken == operation, item === current,
+              player.currentItem === current else { return }
         player.seek(to: CMTime(value: target, timescale: 1000),
                     toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             onMain { [weak self] in
@@ -615,6 +633,7 @@ private final class LocalAudioOwner {
                 self.loading = false
                 self.openDeadline = nil
                 self.status = "READY"
+                self.observeEnd(current, token: token, operation: operation)
                 self.emit(force: true)
                 if self.wantsPlaying { self.startPlaying() }
                 else { self.observeTransport() }
@@ -623,7 +642,8 @@ private final class LocalAudioOwner {
     }
 
     private func startPlaying() {
-        guard item?.status == .readyToPlay, errorCode == nil, !loading, !seekInFlight else { return }
+        guard !closing, !endedEmitted, let current = item, player.currentItem === current,
+              current.status == .readyToPlay, errorCode == nil, !loading, !seekInFlight else { return }
         wantsPlaying = true
         playDeadline = now + 5
         lastProgressAt = now
@@ -633,8 +653,8 @@ private final class LocalAudioOwner {
     }
 
     private func observeTransport() {
-        guard !closing, item != nil, !loading, !seekInFlight, errorCode == nil else { return }
-        if status == "ENDED" && !wantsPlaying { return }
+        guard !closing, !endedEmitted, let current = item, player.currentItem === current,
+              !loading, !seekInFlight, errorCode == nil else { return }
         if player.timeControlStatus == .playing && player.rate > 0 {
             status = "PLAYING"
             playedSinceOpen = true
@@ -647,8 +667,23 @@ private final class LocalAudioOwner {
         emit()
     }
 
-    private func didEnd(_ finishedItem: AVPlayerItem, token: UInt64) {
-        guard matches(token), item === finishedItem, !loading, !seekInFlight,
+    private func observeEnd(_ current: AVPlayerItem, token: UInt64, operation: UInt64) {
+        // Re-arm only after seek completion. A queued EOF from the previous seek epoch
+        // must not finalize a new position in the same AVPlayerItem.
+        endObservation = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
+                                                               object: current, queue: .main) { [weak self] _ in
+            self?.didEnd(current, token: token, operation: operation)
+        }
+    }
+
+    private func removeEndObservation() {
+        if let observer = endObservation { NotificationCenter.default.removeObserver(observer) }
+        endObservation = nil
+    }
+
+    private func didEnd(_ finishedItem: AVPlayerItem, token: UInt64, operation: UInt64) {
+        guard matches(token), seekToken == operation, item === finishedItem,
+              player.currentItem === finishedItem, !loading, !seekInFlight,
               !endedEmitted, errorCode == nil,
               let duration = durationMs, let actual = position(), actual >= max(0, duration - 250) else { return }
         endedEmitted = true
@@ -668,7 +703,7 @@ private final class LocalAudioOwner {
         if let deadline = openDeadline, now >= deadline { fail("NATIVE_OPEN_TIMEOUT"); return }
         if let deadline = seekDeadline, now >= deadline { fail("NATIVE_SEEK_TIMEOUT"); return }
         if let deadline = playDeadline, now >= deadline { fail("NATIVE_PLAYBACK_FAILED"); return }
-        guard item != nil, !loading, !seekInFlight, errorCode == nil else { return }
+        guard item != nil, !endedEmitted, !loading, !seekInFlight, errorCode == nil else { return }
         if item?.status == .failed {
             fail(mediaFailure(item?.error, fallback: "NATIVE_PLAYBACK_FAILED"), error: item?.error); return
         }
@@ -692,7 +727,8 @@ private final class LocalAudioOwner {
     private func emit(force: Bool = false, fixedPosition: Int64? = nil) {
         guard let generation = generation else { return }
         if status == "ENDED" && !force { return }
-        let actuallyPlaying = item != nil && player.timeControlStatus == .playing && player.rate > 0
+        let actuallyPlaying = item != nil && player.currentItem === item &&
+            player.timeControlStatus == .playing && player.rate > 0
         if status == "PLAYING" && !actuallyPlaying {
             status = player.timeControlStatus == .waitingToPlayAtSpecifiedRate ? "READY" : "PAUSED"
         }
@@ -717,9 +753,10 @@ private final class LocalAudioOwner {
     }
 
     private func fail(_ code: String, stage: String? = nil, error: Error? = nil) {
-        guard !closing, errorCode == nil else { return }
+        guard !closing, !endedEmitted, errorCode == nil else { return }
         let finalPosition = position() ?? 0
         emitDiagnostic(code, stage: stage ?? code, error: error)
+        guard !closing else { return }
         releaseItem()
         errorCode = code
         status = "ERROR"
@@ -751,6 +788,9 @@ private final class LocalAudioOwner {
         // Suppress synchronous transport observation while the current item is
         // being paused and removed; the caller emits the resulting terminal fact.
         seekInFlight = true
+        playerObservation?.invalidate()
+        playerObservation = nil
+        removeEndObservation()
         loadTask?.cancel()
         loadTask = nil
         metadataTask?.cancel()

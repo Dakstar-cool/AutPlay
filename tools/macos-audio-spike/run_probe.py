@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -173,6 +174,13 @@ def native_matrix(directory: Path | None, require_formats: bool) -> tuple[dict[s
         temporary_path = Path(temporary)
         binary = temporary_path / "audio-probe"
         source = ROOT / "AudioProbe.swift"
+        module_cache = temporary_path / "module-cache"
+        module_cache.mkdir(mode=0o700)
+        compiler_environment = {
+            **os.environ,
+            "CLANG_MODULE_CACHE_PATH": str(module_cache),
+            "SWIFT_MODULECACHE_PATH": str(module_cache),
+        }
         # Host SDK/architecture are recorded, not guessed. No Gradle or downloads.
         compiler = [
             "xcrun",
@@ -180,6 +188,10 @@ def native_matrix(directory: Path | None, require_formats: bool) -> tuple[dict[s
             "-swift-version",
             "5",
             "-O",
+            "-module-cache-path",
+            str(module_cache),
+            "-Xcc",
+            f"-fmodules-cache-path={module_cache}",
             "-framework",
             "AVFoundation",
             "-framework",
@@ -189,7 +201,9 @@ def native_matrix(directory: Path | None, require_formats: bool) -> tuple[dict[s
             str(binary),
         ]
         try:
-            build = subprocess.run(compiler, capture_output=True, timeout=60)
+            build = subprocess.run(
+                compiler, capture_output=True, timeout=60, env=compiler_environment
+            )
         except OSError, subprocess.SubprocessError:
             return {"status": "not_run", "code": "SWIFT_TOOLCHAIN_UNAVAILABLE"}, 2
         if build.returncode != 0:

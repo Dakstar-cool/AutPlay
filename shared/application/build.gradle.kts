@@ -13,6 +13,10 @@ kotlin {
             api(project(":shared:domain"))
             api(libs.kotlinx.coroutines.core)
         }
+        jvmMain.dependencies {
+            api(libs.kotlinx.serialization.json)
+            implementation(libs.java.json.canonicalization)
+        }
         jvmTest.dependencies {
             implementation(libs.junit4)
         }
