@@ -26,7 +26,8 @@ the helper still must pass PID, path and code-hash checks.
 ## Keychain behavior
 
 The community provider uses the user's default file-based Keychain, constrained
-to an owned, non-symlink, private file inside `~/Library/Keychains`. It does not
+to an owned, non-symlink encrypted file inside the private `~/Library/Keychains`
+directory, with writes denied to other Unix users. It does not
 use an entitlement access group, Data Protection Keychain, iCloud Keychain or
 the Secure Enclave. Service/key-label namespaces include the certificate pin;
 existing paid-provider items are neither read nor migrated.
@@ -152,3 +153,11 @@ The native launcher calls the pinned JDK's JLI in-process, retaining its macOS
 main-thread handoff. Its ABI and entry behavior were checked against OpenJDK's
 [JLI declaration](https://github.com/openjdk/jdk17u/blob/master/src/java.base/share/native/libjli/java.h)
 and [jpackage macOS launcher](https://github.com/openjdk/jdk17u/blob/master/src/jdk.jpackage/macosx/native/applauncher/MacLauncher.cpp).
+
+Keychain file validation accepts the platform's encrypted-database permissions
+only inside an owned private keychain directory, with no symlinks or other-user
+writes. Requiring a plaintext-secret file mode would reject normal macOS Keychains:
+Apple's [file database implementation](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_filedb/lib/AppleDatabase.cpp)
+defaults to mode `0666` before umask. Alternatives were changing the user's login
+Keychain mode or introducing another password-protected keychain; neither is needed
+to preserve the encrypted-store and item-ACL boundary.

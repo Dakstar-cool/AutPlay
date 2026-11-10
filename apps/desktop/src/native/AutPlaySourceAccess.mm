@@ -25,8 +25,8 @@
 #include <vector>
 
 namespace {
-struct Failure { const char *code; };
-void require(bool value, const char *code = "source_repair_required") { if(!value) throw Failure{code}; }
+struct Failure { const char *code; unsigned site = 0; };
+void require(bool value, const char *code = "source_repair_required", unsigned site = __builtin_LINE()) { if(!value) throw Failure{code, site}; }
 using Clock = std::chrono::steady_clock;
 constexpr int64_t kActiveMs = 900000, kFileBytes = 2147483648LL, kBatchBytes = 8589934592LL;
 std::mutex gate;
@@ -331,7 +331,12 @@ template<class F> auto call(JNIEnv *env,F fn) -> decltype(fn()) {
             if constexpr(std::is_void_v<T>) { fn(); require(uncertainDescriptors.empty(),"source_drain_pending"); return; }
             else { T result=fn(); require(uncertainDescriptors.empty(),"source_drain_pending"); return result; }
         }
-        catch(const Failure &f) { if(env->ExceptionCheck()) env->ExceptionClear(); env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),f.code); }
+        catch(const Failure &f) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+            fprintf(stderr,"AUTPLAY_SOURCE_CHECK_FAILED site=%u status=%s\n",f.site,f.code);
+#endif
+            if(env->ExceptionCheck()) env->ExceptionClear(); env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),f.code);
+        }
         catch(...) { if(env->ExceptionCheck()) env->ExceptionClear(); env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),"source_unavailable"); }
         if constexpr(!std::is_void_v<T>) return T{};
     }

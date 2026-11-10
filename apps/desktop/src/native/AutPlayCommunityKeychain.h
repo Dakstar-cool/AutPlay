@@ -9,11 +9,21 @@ void openCommunityKeychain(Owner &o) {
     NSURL *url = realURL([NSURL fileURLWithPath:[NSString stringWithUTF8String:path]]);
     struct passwd *pw = getpwuid(getuid());
     require(pw && pw->pw_dir, "IDENTITY_UNAVAILABLE");
-    NSString *root = [[[NSString stringWithUTF8String:pw->pw_dir] stringByAppendingPathComponent:@"Library/Keychains"] stringByAppendingString:@"/"];
-    require([url.path hasPrefix:root], "IDENTITY_UNAVAILABLE");
+    NSString *root = [[NSString stringWithUTF8String:pw->pw_dir] stringByAppendingPathComponent:@"Library/Keychains"];
+    require([url.path hasPrefix:[root stringByAppendingString:@"/"]], "IDENTITY_UNAVAILABLE");
+    realURL([NSURL fileURLWithPath:root isDirectory:YES]);
+    int directory = open(root.fileSystemRepresentation, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    require(directory >= 0, "IDENTITY_UNAVAILABLE");
+    struct stat parent = {};
+    bool privateDirectory = fstat(directory, &parent) == 0 && S_ISDIR(parent.st_mode) &&
+        parent.st_uid == getuid() && (parent.st_mode & 0077) == 0;
+    ::close(directory); require(privateDirectory, "IDENTITY_UNAVAILABLE");
     struct stat st = {};
+    // Apple's encrypted Keychain database may be 0644 (its file DB defaults to 0666
+    // before umask). Confidentiality comes from Keychain encryption and the private parent;
+    // require exclusive write ownership, rather than treating ciphertext as a plaintext key.
     require(lstat(url.path.fileSystemRepresentation, &st) == 0 && S_ISREG(st.st_mode) &&
-        st.st_uid == getuid() && (st.st_mode & 0077) == 0 && st.st_nlink == 1, "IDENTITY_UNAVAILABLE");
+        st.st_uid == getuid() && (st.st_mode & 0022) == 0 && st.st_nlink == 1, "IDENTITY_UNAVAILABLE");
     SecKeychainStatus flags = 0;
     status(SecKeychainGetStatus(o.keychain.value, &flags));
     require((flags & kSecUnlockStateStatus) != 0, "LOCKED");

@@ -48,7 +48,10 @@ public final class CommunityKeychainProbe {
                 }
             }
             System.load(nativeDir.resolve("libAutPlaySourceAccess.dylib").toString());
-            Path managed = Files.createTempDirectory("autplay-community-source-").toRealPath();
+            // Match production's user-library storage, avoiding macOS /var vs /private/var
+            // aliases that the source owner's no-follow policy intentionally rejects.
+            Path managed = Files.createTempDirectory(Path.of(System.getProperty("user.home"),
+                "Library/Application Support"), "autplay-community-source-").toRealPath();
             var sources = SourceAccessJni.INSTANCE;
             long source = sources.open(1, pin, managed.toString());
             try { sources.verify(source); } finally { sources.close(source); Files.delete(managed); }
