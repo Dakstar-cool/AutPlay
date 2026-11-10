@@ -391,6 +391,7 @@ SecKeyRef existingKey(Owner &o, NSString *tag, bool allowAbsent = false) {
     require(properties.value != nullptr);
     NSDictionary *keyProperties = (__bridge NSDictionary *)properties.value;
     require([keyProperties[(__bridge id)kSecAttrIsExtractable] isEqual:@NO]);
+    require([keyProperties[(__bridge id)kSecAttrIsSensitive] isEqual:@YES]);
     require([keyProperties[(__bridge id)kSecAttrIsPermanent] isEqual:@YES]);
     require([keyProperties[(__bridge id)kSecAttrCanSign] isEqual:@YES] &&
         [keyProperties[(__bridge id)kSecAttrCanDerive] isEqual:@NO] &&
@@ -545,19 +546,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL APJNI(createNewKey)(JNIEnv *env, jobject
     if (found.value) return output(env, point(found.value), 65);
     require([inventory(o)[@"keys"] count] < 32, "CAPACITY_REQUIRED");
 #ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
-    CF<CFErrorRef> error; CF<SecAccessRef> access(communityAccess());
-    NSDictionary *attributes = @{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
-        (__bridge id)kSecAttrKeySizeInBits:@256, (__bridge id)kSecUseKeychain:(__bridge id)o.keychain.value,
-        (__bridge id)kSecAttrAccess:(__bridge id)access.value,
-        // The file-based generator reads extractability from the top-level dictionary.
-        // Its public key remains exportable; the private key cannot be exported at all.
-        (__bridge id)kSecAttrIsExtractable:@NO,
-        (__bridge id)kSecPrivateKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@YES,
-            (__bridge id)kSecAttrApplicationTag:[tag dataUsingEncoding:NSASCIIStringEncoding],
-            (__bridge id)kSecAttrLabel:kKeyLabel, (__bridge id)kSecAttrCanSign:@YES,
-            (__bridge id)kSecAttrCanDerive:@NO, (__bridge id)kSecAttrCanDecrypt:@NO,
-            (__bridge id)kSecAttrCanUnwrap:@NO},
-        (__bridge id)kSecPublicKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@NO}};
+    CF<SecKeyRef> created(createCommunityKey(o, tag));
 #else
     CF<CFErrorRef> error; CF<SecAccessControlRef> access(SecAccessControlCreateWithFlags(kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, kSecAccessControlPrivateKeyUsage, error.out()));
     require(access.value != nullptr, "UNAVAILABLE");
@@ -568,8 +557,8 @@ extern "C" JNIEXPORT jbyteArray JNICALL APJNI(createNewKey)(JNIEnv *env, jobject
             (__bridge id)kSecAttrApplicationTag:[tag dataUsingEncoding:NSASCIIStringEncoding], (__bridge id)kSecAttrAccessGroup:o.group,
             (__bridge id)kSecAttrLabel:kKeyLabel, (__bridge id)kSecAttrAccessControl:(__bridge id)access.value},
         (__bridge id)kSecPublicKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@NO}};
-#endif
     CF<SecKeyRef> created(SecKeyCreateRandomKey((__bridge CFDictionaryRef)attributes, error.out()));
+#endif
     require(created.value != nullptr, "OUTCOME_PENDING");
     CF<SecKeyRef> verified(existingKey(o, tag));
     require([point(created.value) isEqualToData:point(verified.value)], "OUTCOME_PENDING"); return output(env, point(verified.value), 65);

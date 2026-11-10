@@ -40,7 +40,7 @@ enforces the designated requirement and partition ACL. Background operations
 cannot open a password prompt or automatically unlock the Keychain.
 
 Device keys are permanent P-256 keys generated inside Security.framework and made
-non-exportable at creation. Only public keys and domain-separated
+sensitive and non-exportable at creation. Only public keys and domain-separated
 signatures cross JNI. No private-key export method is exposed to Java. Existing
 bounded operation queues, writer lock, exact readback, revision checks, key intents
 and recovery rules remain in force. Locked/missing/denied items are errors, never
@@ -182,14 +182,25 @@ does not return sensitive/extractable attributes. The provider therefore obtains
 those flags through public `SecKeyCopyAttributes`, whose
 [legacy key implementation](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_keychain/lib/SecKey.cpp)
 exposes them. Non-exportability remains mandatory and is independently tested with
-three export APIs. The same source shows the legacy generator reads extractability
-only from the top-level dictionary and ignores `kSecAttrIsSensitive`. The provider
-sets the supported top-level non-exportable flag and checks it on every key read.
-Apple DTS confirms that non-exportable keys cannot be exported at all; the separate
-sensitive flag only restricts the form of an otherwise permitted export. Alternatives
-were low-level CSSM generation with extra persistent metadata steps, or a different
-keychain provider. The supported high-level API retains the existing recovery flow
-without exposing private bytes or accepting an exportable key.
+three export APIs. The same source shows the high-level legacy generator ignores
+`kSecAttrIsSensitive`. Run `42832892641` then demonstrated why checking only the
+non-exportable attribute is insufficient: wrapped/plain `SecItemExport` refused,
+but `SecKeyCopyExternalRepresentation` returned 97 private-key bytes. No such build
+was distributed; only synthetic disposable keys were involved.
+
+Alternatives reviewed against Apple's APIs were explicit flags through public
+[`SecKeyCreatePair`](https://developer.apple.com/documentation/security/seckeycreatepair),
+generating/importing raw private bytes with `SecItemImport`, removing export/decrypt
+permissions from key ACLs, or returning to the entitlement-based provider. The
+selected generator sets `PERMANENT | SENSITIVE` without `EXTRACTABLE`, with signing
+as its only private-key usage. Both immutable flags are verified on every read.
+It attaches the intent's label/tag through the public metadata API, as Apple's
+high-level generator does internally, and verifies exact public-key readback before
+returning. A metadata failure cleans up only the just-created unpublished key.
+No private key is imported/exported by production code, and all three adversarial
+export checks remain mandatory. Abrupt OS/process death between provider creation
+and metadata assignment can leave an unlabelled, never-published key; no account or
+server operation can have used it, and an existing bound key is never replaced.
 The launcher also forces the documented
 [`DisableAttachMechanism` option](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html)
 to close HotSpot's same-user agent-loading channel.

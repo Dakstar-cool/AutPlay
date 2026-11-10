@@ -36,6 +36,33 @@ SecAccessRef communityAccess() {
     status(SecAccessCreate((__bridge CFStringRef)kService, (__bridge CFArrayRef)@[(__bridge id)self.value], &access));
     return access;
 }
+SecKeyRef createCommunityKey(Owner &o, NSString *tag) {
+    CF<SecAccessRef> access(communityAccess());
+    CF<SecKeyRef> publicKey, privateKey;
+    // The high-level legacy generator ignores the sensitive flag. Set both immutable
+    // provider flags explicitly; no private bytes are generated in/exported to our process.
+    status(SecKeyCreatePair(o.keychain.value, CSSM_ALGID_ECDSA, 256, 0,
+        CSSM_KEYUSE_VERIFY, CSSM_KEYATTR_EXTRACTABLE,
+        CSSM_KEYUSE_SIGN, CSSM_KEYATTR_PERMANENT | CSSM_KEYATTR_SENSITIVE,
+        access.value, publicKey.out(), privateKey.out()));
+    require(publicKey.value && privateKey.value, "OUTCOME_PENDING");
+    NSData *label = [kKeyLabel dataUsingEncoding:NSUTF8StringEncoding];
+    NSData *tagBytes = [tag dataUsingEncoding:NSASCIIStringEncoding];
+    SecKeychainAttribute fields[] = {
+        {kSecKeyPrintName, (UInt32)label.length, const_cast<void *>(label.bytes)},
+        {kSecKeyApplicationTag, (UInt32)tagBytes.length, const_cast<void *>(tagBytes.bytes)}
+    };
+    SecKeychainAttributeList attributes = {2, fields};
+    // As in Apple's high-level generator, metadata follows creation. The durable CREATING
+    // intent already exists, and no public key/proof is returned before exact readback.
+    OSStatus tagged = SecKeychainItemModifyAttributesAndData((SecKeychainItemRef)privateKey.value, &attributes, 0, nullptr);
+    if (tagged != errSecSuccess) {
+        // Only this just-created, never-published reference is eligible for cleanup.
+        SecKeychainItemDelete((SecKeychainItemRef)privateKey.value);
+        throw Failure{"OUTCOME_PENDING"};
+    }
+    CFRetain(privateKey.value); return privateKey.value;
+}
 void communityACL(SecKeychainItemRef item, CFStringRef operation) {
     require(item != nullptr);
     CF<SecAccessRef> access; status(SecKeychainItemCopyAccess(item, access.out()));
