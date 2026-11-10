@@ -103,7 +103,7 @@ real production JNI in a separately sealed probe app, starts the production GUI
 with its bundled JDK, then creates the DMG. The probe classes/native checks are
 never shipped in the production package. Keychain checks cover persistence after
 process restart, D1v2 signature verification, private-key export rejection,
-locked-Keychain refusal, foreign-program read denial and resource tampering.
+locked-Keychain refusal, foreign-program read/sign refusal and resource tampering.
 The same probe also opens, initializes and reopens the real Kotlin secure-state
 owner on a second empty keychain, checks the production sealed-identity reader,
 and tests rejection of inherited Java agents and a real external `jcmd` attach.

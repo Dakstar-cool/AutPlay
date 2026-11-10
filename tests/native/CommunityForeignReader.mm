@@ -13,6 +13,23 @@ int main(int argc, char **argv) {
         OSStatus result = SecItemCopyMatching((__bridge CFDictionaryRef)query, &value);
         bool denied = !value && (result == errSecInteractionNotAllowed || result == errSecAuthFailed || result == errSecNoAccessForItem);
         if (value) CFRelease(value);
-        return denied ? 0 : 1;
+        if (!denied) return 1;
+        NSString *label = [@"app.autplay.desktop.community-key.v1." stringByAppendingString:[NSString stringWithUTF8String:argv[1]]];
+        NSDictionary *keyQuery = @{(__bridge id)kSecClass:(__bridge id)kSecClassKey,
+            (__bridge id)kSecAttrKeyClass:(__bridge id)kSecAttrKeyClassPrivate,
+            (__bridge id)kSecAttrLabel:label, (__bridge id)kSecReturnRef:@YES};
+        CFTypeRef key = nullptr;
+        OSStatus keyStatus = SecItemCopyMatching((__bridge CFDictionaryRef)keyQuery, &key);
+        if (keyStatus != errSecSuccess || !key || CFGetTypeID(key) != SecKeyGetTypeID()) {
+            if (key) CFRelease(key);
+            return 2;
+        }
+        NSData *message = [@"synthetic-foreign-signature-attempt" dataUsingEncoding:NSASCIIStringEncoding];
+        CFErrorRef error = nullptr;
+        CFDataRef signature = SecKeyCreateSignature((SecKeyRef)key, kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+            (__bridge CFDataRef)message, &error);
+        bool signDenied = signature == nullptr && error != nullptr;
+        if (signature) CFRelease(signature); if (error) CFRelease(error); CFRelease(key);
+        return signDenied ? 0 : 3;
     }
 }

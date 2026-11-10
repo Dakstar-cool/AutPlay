@@ -201,6 +201,7 @@ def probe() -> None:
     run("codesign", "--force", "--sign", "-", "--identifier", "app.autplay.desktop", foreign)
     run(foreign, pin(), timeout=30)
     passed.append("foreign-signer-same-id-keychain-read-denied")
+    passed.append("foreign-signer-device-signature-denied")
     run("security", "default-keychain", "-d", "user", "-s", values["owner_keychain"])
     for phase in ("owner-create", "owner-restart"):
         result = run(executable, phase, timeout=90)
