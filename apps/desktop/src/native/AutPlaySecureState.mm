@@ -391,11 +391,11 @@ SecKeyRef existingKey(Owner &o, NSString *tag, bool allowAbsent = false) {
     require(properties.value != nullptr);
     NSDictionary *keyProperties = (__bridge NSDictionary *)properties.value;
     require([keyProperties[(__bridge id)kSecAttrIsExtractable] isEqual:@NO]);
-    require([keyProperties[(__bridge id)kSecAttrIsSensitive] isEqual:@YES]);
     require([keyProperties[(__bridge id)kSecAttrIsPermanent] isEqual:@YES]);
     require([keyProperties[(__bridge id)kSecAttrCanSign] isEqual:@YES] &&
         [keyProperties[(__bridge id)kSecAttrCanDerive] isEqual:@NO] &&
-        [keyProperties[(__bridge id)kSecAttrCanDecrypt] isEqual:@NO]);
+        [keyProperties[(__bridge id)kSecAttrCanDecrypt] isEqual:@NO] &&
+        [keyProperties[(__bridge id)kSecAttrCanUnwrap] isEqual:@NO]);
     communityACL((SecKeychainItemRef)key, kSecACLAuthorizationSign);
 #else
     require([attributes isKindOfClass:NSDictionary.class] && [attributes[(__bridge id)kSecAttrAccessGroup] isEqual:o.group] &&
@@ -549,11 +549,14 @@ extern "C" JNIEXPORT jbyteArray JNICALL APJNI(createNewKey)(JNIEnv *env, jobject
     NSDictionary *attributes = @{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
         (__bridge id)kSecAttrKeySizeInBits:@256, (__bridge id)kSecUseKeychain:(__bridge id)o.keychain.value,
         (__bridge id)kSecAttrAccess:(__bridge id)access.value,
+        // The file-based generator reads extractability from the top-level dictionary.
+        // Its public key remains exportable; the private key cannot be exported at all.
+        (__bridge id)kSecAttrIsExtractable:@NO,
         (__bridge id)kSecPrivateKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@YES,
             (__bridge id)kSecAttrApplicationTag:[tag dataUsingEncoding:NSASCIIStringEncoding],
-            (__bridge id)kSecAttrLabel:kKeyLabel, (__bridge id)kSecAttrIsExtractable:@NO,
-            (__bridge id)kSecAttrIsSensitive:@YES, (__bridge id)kSecAttrCanSign:@YES,
-            (__bridge id)kSecAttrCanDerive:@NO, (__bridge id)kSecAttrCanDecrypt:@NO},
+            (__bridge id)kSecAttrLabel:kKeyLabel, (__bridge id)kSecAttrCanSign:@YES,
+            (__bridge id)kSecAttrCanDerive:@NO, (__bridge id)kSecAttrCanDecrypt:@NO,
+            (__bridge id)kSecAttrCanUnwrap:@NO},
         (__bridge id)kSecPublicKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@NO}};
 #else
     CF<CFErrorRef> error; CF<SecAccessControlRef> access(SecAccessControlCreateWithFlags(kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, kSecAccessControlPrivateKeyUsage, error.out()));
