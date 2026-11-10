@@ -9,6 +9,8 @@ import psycopg
 import pytest
 from psycopg import Connection, sql
 
+from autplay.adapters.postgresql.readiness import EXPECTED_MIGRATION_HEAD
+
 from .conftest import DatabaseHarness
 from .schema_contract import (
     EXPECTED_EXPLICIT_INDEX_COUNT,
@@ -77,7 +79,7 @@ def test_full_head_snapshot_is_restored_after_clean_downgrade_to_base(
     assert len(first_head.triggers) == EXPECTED_TRIGGER_COUNT
     assert first_schemas == APPLICATION_SCHEMAS
     assert first_extensions == {"pg_trgm": "1.6", "vector": "0.8.6"}
-    assert first_revision == "0064_face_artifact_activation"
+    assert first_revision == EXPECTED_MIGRATION_HEAD
 
     database_harness.downgrade(empty_database_name, "base")
     with database_harness.connect(empty_database_name) as connection:

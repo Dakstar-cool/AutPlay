@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from autplay.application.discovery_automation import DiscoveryAutomationError
 from autplay.application.identity_evidence import (
     candidate_aggregate_sha256,
     canonical_query_snapshot,
@@ -71,6 +72,7 @@ from .models import (
     VaultReplicaRow,
 )
 from .resource_limits import lock_resource_admission
+from .watch_auto_download_authority import is_watch_policy, require_watch_auto_authority
 
 JAMENDO_PROVIDER_ID = UUID("426dc183-ab26-5a6e-9350-3f8bb57cd575")
 DISCOVERY_ACQUIRE_JOB = JobKey("discovery.acquire", 1)
@@ -1598,6 +1600,23 @@ class PostgresBulkDiscoveryRepository:
     def _require_candidate_artist(self, candidate: DiscoveryCandidateRow) -> ArtistRow:
         if candidate.canonical_artist_id is None:
             raise BulkDiscoveryError("discovery_target_not_found")
+        # Watch-origin selection uses an effective watch rather than a preexisting
+        # owner-library track. Its immutable revision 1 survives owner confirmation
+        # and must keep fencing this path at later acquisition/Vault checkpoints.
+        if candidate.current_acquisition_attempt_id is not None:
+            attempt = self._session.get(
+                AcquisitionAttemptRow, candidate.current_acquisition_attempt_id
+            )
+            if attempt is not None and attempt.origin == "AUTOMATIC":
+                policy = self._session.get(ArtistPolicyRow, attempt.policy_id)
+                if policy is not None and is_watch_policy(self._session, policy):
+                    self._require_current_attempt(candidate)
+                    artist = self._session.get(
+                        ArtistRow, candidate.canonical_artist_id, populate_existing=True
+                    )
+                    if artist is None or artist.deleted_at is not None:
+                        raise BulkDiscoveryError("discovery_target_not_found")
+                    return artist
         reachable = self._session.scalar(
             select(ArtistRow.artist_id)
             .join(
@@ -1797,6 +1816,9 @@ class PostgresBulkDiscoveryRepository:
             )
             if (
                 policy is None
+                or policy.canonical_artist_id != candidate.canonical_artist_id
+                or policy.provider_id != candidate.provider_id
+                or policy.provider_artist_id != candidate.provider_artist_id
                 or policy.current_revision != attempt.policy_revision
                 or policy.discovery_mode != "SCHEDULED"
                 or policy.import_mode != "AUTO_IMPORT"
@@ -1807,6 +1829,10 @@ class PostgresBulkDiscoveryRepository:
                 or authorization.policy_reference != "ADR-042:a1c-auto-import:1"
             ):
                 raise BulkDiscoveryError("policy_revision_stale")
+            try:
+                require_watch_auto_authority(self._session, policy)
+            except DiscoveryAutomationError as error:
+                raise BulkDiscoveryError("policy_revision_stale") from error
         else:
             raise BulkDiscoveryError("source_authorization_unavailable")
         # Policy locks can wait after the source authorization lock. Check both

@@ -243,6 +243,20 @@ object AutPlayRuntime {
 
     private fun apiV1BaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api/v1"
 
+    internal fun releaseWatchPort(context: Context, serverBaseUrl: String): app.autplay.application.releasewatch.ReleaseWatchPort =
+        app.autplay.application.releasewatch.OkHttpReleaseWatchPort(
+            apiV1BaseUrl(serverBaseUrl),
+            AndroidKeystoreCredentialStore(context.applicationContext),
+            m5Rotation = m5Rotation(context),
+        )
+
+    internal fun releaseFeedPort(context: Context, serverBaseUrl: String): app.autplay.application.releasewatch.ReleaseFeedPort =
+        app.autplay.application.releasewatch.OkHttpReleaseFeedPort(
+            apiV1BaseUrl(serverBaseUrl),
+            AndroidKeystoreCredentialStore(context.applicationContext),
+            m5Rotation = m5Rotation(context),
+        )
+
     internal fun trainingConsentPort(context: Context, origin: String,
         profile: app.autplay.domain.ServerProfileId, credentials: app.autplay.data.security.CredentialStore)
         = app.autplay.application.trainingconsent.OkHttpTrainingConsentPort(

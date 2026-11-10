@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0064_face_artifact_activation"
+EXPECTED_MIGRATION_HEAD: Final = "0067a_release_watch_retry"
 
 
 @dataclass(frozen=True, slots=True)

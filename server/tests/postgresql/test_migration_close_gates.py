@@ -9,9 +9,15 @@ from alembic import command
 from psycopg import Connection
 from sqlalchemy.exc import DBAPIError
 
+from autplay.adapters.postgresql.readiness import EXPECTED_MIGRATION_HEAD
+
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0067a_release_watch_retry", "0067_release_watch_auto_download"),
+    ("0067_release_watch_auto_download", "0066_discovery_scan_schedule"),
+    ("0066_discovery_scan_schedule", "0065_release_watch_follows"),
+    ("0065_release_watch_follows", "0064_face_artifact_activation"),
     ("0064_face_artifact_activation", "0063_sona_capture_authority"),
     ("0063_sona_capture_authority", "0062_gpu_admission_authority"),
     ("0062_gpu_admission_authority", "0061_ml_artifact_authority"),
@@ -197,7 +203,7 @@ def test_p12_downgrade_refuses_to_destroy_registered_model(
 
     with pytest.raises(DBAPIError, match="refusing destructive P12 downgrade"):
         database_harness.downgrade(database_name, "0013_recommendation_runtime")
-    assert _current_revision(database_harness, database_name) == ("0064_face_artifact_activation")
+    assert _current_revision(database_harness, database_name) == EXPECTED_MIGRATION_HEAD
 
 
 def test_local_bridge_downgrade_refuses_durable_admission(
@@ -236,7 +242,7 @@ def test_local_bridge_downgrade_refuses_durable_admission(
     with pytest.raises(DBAPIError, match="refusing local bridge authority downgrade"):
         database_harness.downgrade(empty_database_name, "0059_training_publication_seal")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 

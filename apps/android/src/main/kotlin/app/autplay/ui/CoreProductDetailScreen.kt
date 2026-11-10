@@ -52,6 +52,7 @@ public data class CoreProductDetailUiState(
     public val release: CoreReleaseDetail? = null,
     public val playlist: CorePlaylistDetail? = null,
     public val artist: ArtistDetail? = null,
+    public val releaseWatch: ReleaseWatchUiState = ReleaseWatchUiState(),
     public val artistAppearances: List<ArtistAppearance> = emptyList(),
     public val subjectArtistCredits: List<ArtistCredit> = emptyList(),
 )
@@ -75,6 +76,8 @@ public fun CoreProductDetailScreen(
     onRepairAccess: () -> Unit = {},
     onOpenReview: () -> Unit = {},
     onOpenDetail: (DetailTarget) -> Unit = {},
+    onSetArtistFollow: (String, Boolean) -> Unit = { _, _ -> },
+    onRetryReleaseWatch: () -> Unit = {},
 ) {
     var addTrackToPlaylistId by remember { mutableStateOf<String?>(null) }
     val playlistText = ManualPlaylistText(
@@ -261,6 +264,13 @@ public fun CoreProductDetailScreen(
             state.artist != null -> {
                 val detail = state.artist
                 item { DetailHeading(detail.summary.name, detail.summary.disambiguation) }
+                item(key = "artist-follow:${detail.summary.key.artistId.value}") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ReleaseWatchStatusMessage(state.releaseWatch, onRetryReleaseWatch)
+                        ArtistFollowAction(detail.summary.key.artistId.value, state.releaseWatch, onSetArtistFollow)
+                        Text(stringResource(R.string.release_watch_monitor_only), color = AutPlayTokens.colors.mutedText)
+                    }
+                }
                 detail.summary.artistType?.let { value ->
                     item { DetailValue(stringResource(R.string.detail_artist_type), humanize(value)) }
                 }

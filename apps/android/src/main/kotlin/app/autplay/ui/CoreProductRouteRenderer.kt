@@ -17,6 +17,11 @@ internal data class CoreProductRouteActions(
     val likeRecommendation: (String) -> Unit,
     val dislikeRecommendation: (String) -> Unit,
     val retryHome: () -> Unit,
+    val playReleaseTrack: (String) -> Unit = {},
+    val openReleaseDiscovery: (String) -> Unit = {},
+    val openReleaseSync: () -> Unit = {},
+    val retryReleaseFeed: () -> Unit = {},
+    val loadMoreReleases: () -> Unit = {},
     val resumeHomeQueue: (String) -> Unit,
     val openHomePlaylist: (String) -> Unit,
     val openOffline: () -> Unit,
@@ -36,6 +41,9 @@ internal data class CoreProductRouteActions(
     val changeLibraryFilter: (LibraryFilter) -> Unit,
     val openCollection: (LibrarySection, String) -> Unit,
     val openDetail: (DetailTarget) -> Unit,
+    val setArtistFollow: (String, Boolean) -> Unit = { _, _ -> },
+    val setOwnerAutoDownload: (Boolean) -> Unit = {},
+    val retryReleaseWatch: () -> Unit = {},
     val openReview: () -> Unit,
     val changeLibraryAnchor: (ListAnchor) -> Unit,
     val playTrack: (String) -> Unit,
@@ -79,6 +87,11 @@ internal fun CoreProductRouteRenderer(
             onLike = actions.likeRecommendation,
             onDislike = actions.dislikeRecommendation,
             onRetry = actions.retryHome,
+            onReleasePlay = actions.playReleaseTrack,
+            onReleaseDiscovery = actions.openReleaseDiscovery,
+            onReleaseSync = actions.openReleaseSync,
+            onReleaseRetry = actions.retryReleaseFeed,
+            onReleaseMore = actions.loadMoreReleases,
             onPlayTrack = actions.resumeHomeQueue,
             onOpenPlaylist = actions.openHomePlaylist,
             onOpenOffline = actions.openOffline,
@@ -121,6 +134,8 @@ internal fun CoreProductRouteRenderer(
                 onRepairAccess = actions.repairAccess,
                 onOpenReview = actions.openReview,
                 onOpenDetail = actions.openDetail,
+                onSetArtistFollow = actions.setArtistFollow,
+                onRetryReleaseWatch = actions.retryReleaseWatch,
             )
         } else {
             LibraryProductScreen(
@@ -137,6 +152,9 @@ internal fun CoreProductRouteRenderer(
                 onOpenReview = actions.openReview,
                 listAnchor = libraryListAnchor,
                 onListAnchorChange = actions.changeLibraryAnchor,
+                onSetArtistFollow = actions.setArtistFollow,
+                onSetOwnerAutoDownload = actions.setOwnerAutoDownload,
+                onRetryReleaseWatch = actions.retryReleaseWatch,
             )
         }
         else -> error("CORE_PRODUCT_DESTINATION_REQUIRED")

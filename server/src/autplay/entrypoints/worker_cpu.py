@@ -64,6 +64,7 @@ from autplay.application.profile_pairing import (
     cleanup_expired_pairing_receipts,
 )
 from autplay.application.public_access import cleanup_expired_public_access
+from autplay.application.release_watch import ReleaseWatchService
 from autplay.application.social import SocialService
 from autplay.application.vault_ingest import VaultIngestHandler
 from autplay.domain.jobs import JobKey, RetryPolicy
@@ -412,6 +413,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             )
         automation_repository = SqlAlchemyDiscoveryAutomationRepository(sessions)
         automation = DiscoveryAutomationService(automation_repository)
+        release_watch = ReleaseWatchService(sessions, clock=lambda: datetime.now(UTC))
         if runtime_settings.discovery_automation_enabled:
             if release_provider is None:
                 raise RuntimeError("discovery automation provider is unavailable")
@@ -471,6 +473,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             def discovery_dispatch() -> int:
                 if not runtime_settings.discovery_automation_enabled:
                     return 0
+                release_watch.refresh_due_from_history(limit=20)
                 return automation.dispatch_due(now=datetime.now(UTC), limit=20)
 
             def stop_bytes() -> None:

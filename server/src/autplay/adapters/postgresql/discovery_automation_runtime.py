@@ -49,11 +49,18 @@ from .models import (
     JobRow,
     LibraryEntryRow,
     RecordingRow,
+    ScanScheduleRow,
     SourceAuthorizationRow,
     SourceProviderRow,
     UserTrackRefRow,
 )
+from .release_watch_dispatch import (
+    is_watch_policy,
+    reconcile_watch_policies,
+    require_effective_watch,
+)
 from .resource_limits import lock_resource_admission
+from .watch_auto_download_authority import require_watch_auto_authority
 
 DISCOVERY_SCAN_JOB = JobKey("discovery.scan", 1)
 DISCOVERY_ACQUIRE_JOB = JobKey("discovery.acquire", 1)
@@ -138,10 +145,19 @@ class PostgresDiscoveryAutomationRepository:
             raise DiscoveryAutomationError("policy_provider_binding_conflict")
         if advances_existing_policy and self._increases_policy_authority(policy, command):
             self._require_provider()
-            self._require_artist(owner_user_id, command.canonical_artist_id)
-            self._require_provider_artist_binding(
-                owner_user_id, command.canonical_artist_id, command.provider_artist_id
-            )
+            if is_watch_policy(self._session, policy):
+                require_effective_watch(
+                    self._session,
+                    owner_user_id,
+                    command.canonical_artist_id,
+                    command.provider_artist_id,
+                    provider_id=policy.provider_id,
+                )
+            else:
+                self._require_artist(owner_user_id, command.canonical_artist_id)
+                self._require_provider_artist_binding(
+                    owner_user_id, command.canonical_artist_id, command.provider_artist_id
+                )
         previous_discovery_mode = policy.discovery_mode
         previous_next_eligible_at = policy.next_eligible_at
         policy.discovery_mode = command.discovery_mode
@@ -350,6 +366,10 @@ class PostgresDiscoveryAutomationRepository:
 
     def dispatch_due(self, *, now: datetime, limit: int) -> int:
         lock_resource_admission(self._session)
+        schedule = self._watch_scan_schedule(for_update=True)
+        reconcile_watch_policies(
+            self._session, now=now, limit=limit, interval_hours=schedule.interval_hours
+        )
         self._reconcile_terminal_jobs(now)
         policies = tuple(
             self._session.scalars(
@@ -366,12 +386,20 @@ class PostgresDiscoveryAutomationRepository:
         )
         dispatched = 0
         for policy in policies:
+            active = self._session.scalar(
+                select(DiscoveryRunRow.run_id).where(
+                    DiscoveryRunRow.policy_id == policy.policy_id,
+                    DiscoveryRunRow.state.in_(("QUEUED", "RUNNING", "RETRY_WAIT")),
+                )
+            )
             try:
-                self._require_current_policy(policy, now)
+                self._require_current_policy(policy, now, for_new_run=active is None)
             except DiscoveryAutomationError as error:
                 if error.code not in {
                     "automation_not_active",
+                    "discovery_not_eligible",
                     "discovery_target_not_found",
+                    "identity_review_required",
                     "source_authorization_unavailable",
                 }:
                     raise
@@ -380,12 +408,6 @@ class PostgresDiscoveryAutomationRepository:
                 policy.updated_at = now
                 policy.row_version += 1
                 continue
-            active = self._session.scalar(
-                select(DiscoveryRunRow.run_id).where(
-                    DiscoveryRunRow.policy_id == policy.policy_id,
-                    DiscoveryRunRow.state.in_(("QUEUED", "RUNNING", "RETRY_WAIT")),
-                )
-            )
             if active is not None:
                 continue
             self._create_run(policy, now, None, None)
@@ -816,11 +838,37 @@ class PostgresDiscoveryAutomationRepository:
         if bound is None:
             raise DiscoveryAutomationError("policy_provider_binding_unconfirmed")
 
-    def _require_current_policy(self, policy: ArtistPolicyRow, now: datetime) -> None:
+    def _watch_scan_schedule(self, *, for_update: bool = False) -> ScanScheduleRow:
+        query = select(ScanScheduleRow).where(ScanScheduleRow.singleton_id == 1)
+        if for_update:
+            query = query.with_for_update()
+        row = self._session.scalar(query)
+        if row is None:
+            raise DiscoveryAutomationError("scan_schedule_unavailable")
+        return row
+
+    def _require_current_policy(
+        self, policy: ArtistPolicyRow, now: datetime, *, for_new_run: bool = True
+    ) -> datetime | None:
         self._require_provider()
-        self._require_artist(policy.user_id, policy.canonical_artist_id)
+        eligible_since = None
+        if is_watch_policy(self._session, policy):
+            eligible_since = require_effective_watch(
+                self._session,
+                policy.user_id,
+                policy.canonical_artist_id,
+                policy.provider_artist_id,
+                provider_id=policy.provider_id,
+            )
+            if for_new_run:
+                interval = self._watch_scan_schedule().interval_hours
+                if now < eligible_since + timedelta(hours=interval):
+                    raise DiscoveryAutomationError("automation_not_active")
+        else:
+            self._require_artist(policy.user_id, policy.canonical_artist_id)
         if not policy.automation_enabled or policy.discovery_mode != "SCHEDULED":
             raise DiscoveryAutomationError("automation_not_active")
+        return eligible_since
 
     def _require_run_current(self, run: DiscoveryRunRow, now: datetime) -> None:
         policy = self._session.get(ArtistPolicyRow, run.policy_id)
@@ -832,7 +880,9 @@ class PostgresDiscoveryAutomationRepository:
             or run.provider_artist_id != policy.provider_artist_id
         ):
             raise DiscoveryAutomationError("policy_revision_stale")
-        self._require_current_policy(policy, now)
+        eligible_since = self._require_current_policy(policy, now, for_new_run=False)
+        if eligible_since is not None and run.due_slot_at < eligible_since:
+            raise DiscoveryAutomationError("discovery_not_eligible")
 
     def _coalesce_candidate(
         self,
@@ -918,6 +968,17 @@ class PostgresDiscoveryAutomationRepository:
     ) -> bool:
         if candidate.disposition != "SELECTABLE" or candidate.acquisition_state != "NOT_REQUESTED":
             return False
+        if is_watch_policy(self._session, policy):
+            try:
+                require_watch_auto_authority(self._session, policy)
+            except DiscoveryAutomationError as error:
+                if error.code in {
+                    "watch_auto_download_not_authorized",
+                    "discovery_not_eligible",
+                    "identity_review_required",
+                }:
+                    return False
+                raise
         try:
             generation = acquisition_generation(self._session, policy.user_id)
         except ResourceAdmissionError as error:

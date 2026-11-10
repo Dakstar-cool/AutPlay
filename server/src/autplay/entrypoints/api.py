@@ -30,6 +30,8 @@ from autplay.application.guest_room import GuestRoomService
 from autplay.application.internet_music import InternetMusicService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
+from autplay.application.release_feed import ReleaseFeedService
+from autplay.application.release_watch import ReleaseWatchService
 from autplay.application.track_metadata import TrackMetadataService
 from autplay.application.training_consent import TrainingConsentService
 from autplay.application.web_admin import WebAdminService
@@ -58,6 +60,8 @@ from autplay.entrypoints.composition import (
     build_profile_pairing_service,
     build_public_access_service,
     build_recommendation_service,
+    build_release_feed_service,
+    build_release_watch_service,
     build_self_device_pairing_service,
     build_social_service,
     build_stream_lookup,
@@ -92,6 +96,8 @@ from autplay.entrypoints.recommendation_http import (
     RecommendationHttpService,
     create_recommendation_router,
 )
+from autplay.entrypoints.release_feed_api import create_release_feed_router
+from autplay.entrypoints.release_watch_api import create_release_watch_router
 from autplay.entrypoints.resource_admission_http import create_resource_admission_router
 from autplay.entrypoints.resource_composition import ResourceIoRuntime
 from autplay.entrypoints.self_device_pairing_http import create_self_device_pairing_router
@@ -143,6 +149,8 @@ def create_app(
     admin_renderer: Renderer | None = None,
     discovery_service: ManualDiscoveryHttp | None = None,
     discovery_automation_service: DiscoveryAutomationService | None = None,
+    release_feed_service: ReleaseFeedService | None = None,
+    release_watch_service: ReleaseWatchService | None = None,
     resource_io: VaultIoCoordinator | None = None,
     resource_runtime: ResourceIoRuntime | None = None,
 ) -> FastAPI:
@@ -334,6 +342,18 @@ def create_app(
         api_router.include_router(
             create_discovery_automation_api_router(
                 discovery_automation,
+                authenticated=bearer_authentication(authentication),
+            )
+        )
+        api_router.include_router(
+            create_release_watch_router(
+                release_watch_service or build_release_watch_service(engine),
+                authenticated=bearer_authentication(authentication),
+            )
+        )
+        api_router.include_router(
+            create_release_feed_router(
+                release_feed_service or build_release_feed_service(engine),
                 authenticated=bearer_authentication(authentication),
             )
         )

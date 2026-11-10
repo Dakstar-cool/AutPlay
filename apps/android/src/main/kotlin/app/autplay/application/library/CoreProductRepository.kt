@@ -31,6 +31,7 @@ class CoreProductRepository(
                 CoreLibraryEntrySummary(
                     localLibraryEntryId = entry.localLibraryEntryId,
                     localUserTrackRefId = entry.localUserTrackRefId,
+                    serverUserTrackRefId = track?.serverUserTrackRefId,
                     title = track?.rawTitle,
                     artistName = track?.rawArtist,
                     addedAtMs = entry.addedAtMs,
@@ -343,6 +344,7 @@ data class CoreLibraryEntrySummary(
     val availabilityStatus: String,
     val removed: Boolean,
     val serverPlaybackCandidate: Boolean,
+    val serverUserTrackRefId: String? = null,
 )
 data class CoreHomeTrackSummary(
     val stableId: String,

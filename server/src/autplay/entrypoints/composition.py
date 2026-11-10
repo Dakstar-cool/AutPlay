@@ -46,6 +46,8 @@ from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
 )
+from autplay.application.release_feed import ReleaseFeedService
+from autplay.application.release_watch import ReleaseWatchService
 from autplay.application.self_device_pairing import SelfDevicePairingService
 from autplay.application.social import SocialService
 from autplay.application.sync import SyncService
@@ -256,6 +258,24 @@ def build_discovery_automation_service(engine: Engine) -> DiscoveryAutomationSer
 
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
     return DiscoveryAutomationService(SqlAlchemyDiscoveryAutomationRepository(sessions))
+
+
+def build_release_watch_service(engine: Engine) -> ReleaseWatchService:
+    """Assemble owner-scoped follows without starting a provider scan."""
+
+    return ReleaseWatchService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        SystemClock().now,
+    )
+
+
+def build_release_feed_service(engine: Engine) -> ReleaseFeedService:
+    """Assemble a read-only owner-local Home feed over current discovery evidence."""
+
+    return ReleaseFeedService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        SystemClock().now,
+    )
 
 
 def build_admin_view_service(engine: Engine) -> SqlAlchemyAdminViewService:

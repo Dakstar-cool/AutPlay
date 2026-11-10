@@ -43,6 +43,7 @@ from .discovery import (
     DiscoveryRunRow,
     SourceAuthorizationRow,
 )
+from .discovery_scan_schedule import ScanScheduleRevisionRow, ScanScheduleRow
 from .face_activation import (
     FaceActivationCurrentRow,
     FaceAnalysisPolicyCurrentRow,
@@ -152,6 +153,12 @@ from .public_access import (
     AccountProvisioningRateWindowRow,
     AccountRegistrationReceiptRow,
 )
+from .release_watch import (
+    ArtistWatchChoiceRow,
+    FavoriteArtistProjectionRow,
+    FavoriteArtistRefreshRetryRow,
+    FavoriteArtistRefreshRow,
+)
 from .resource_admission import (
     AccountQuotaOverrideRow,
     QuotaOperationReceiptRow,
@@ -218,6 +225,11 @@ from .vault import (
     VaultObjectRow,
     VaultReplicaRow,
 )
+from .watch_auto_download import (
+    WatchAutoDownloadConsentRevisionRow,
+    WatchAutoDownloadConsentRow,
+    WatchAutoDownloadGateRow,
+)
 from .wave import (
     WaveCommandRow,
     WaveInvitationRow,
@@ -279,6 +291,15 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     TrackMetadataRow,
     InternetSearchRow,
     InternetAcquisitionRow,
+    ArtistWatchChoiceRow,
+    FavoriteArtistProjectionRow,
+    FavoriteArtistRefreshRetryRow,
+    FavoriteArtistRefreshRow,
+    ScanScheduleRevisionRow,
+    ScanScheduleRow,
+    WatchAutoDownloadConsentRevisionRow,
+    WatchAutoDownloadConsentRow,
+    WatchAutoDownloadGateRow,
     UserAccountRow,
     DeviceRow,
     UserSessionRow,
@@ -460,6 +481,7 @@ __all__ = (
     "ArtistPolicyRevisionRow",
     "ArtistPolicyRow",
     "ArtistRow",
+    "ArtistWatchChoiceRow",
     "AudioFingerprintRow",
     "AudioVariantRow",
     "AuditEventRow",
@@ -502,6 +524,9 @@ __all__ = (
     "FaceQualificationSetRow",
     "FaceSemanticInterpreterRow",
     "FaceTimelineActivationRow",
+    "FavoriteArtistProjectionRow",
+    "FavoriteArtistRefreshRetryRow",
+    "FavoriteArtistRefreshRow",
     "FriendRequestRow",
     "FriendRoomInvitationRow",
     "FriendshipRow",
@@ -568,6 +593,8 @@ __all__ = (
     "ResourceIoExecutionRow",
     "ResourceIoPermitRow",
     "ResourceQuotaPolicyRow",
+    "ScanScheduleRevisionRow",
+    "ScanScheduleRow",
     "SelfDevicePairingRow",
     "SelfPairingCommandRow",
     "SelfPairingRateRow",
@@ -615,6 +642,9 @@ __all__ = (
     "UserTrackRefRow",
     "VaultObjectRow",
     "VaultReplicaRow",
+    "WatchAutoDownloadConsentRevisionRow",
+    "WatchAutoDownloadConsentRow",
+    "WatchAutoDownloadGateRow",
     "WebImportOperationReceiptRow",
     "WebLoginChallengeRow",
     "WebLoginRateWindowRow",

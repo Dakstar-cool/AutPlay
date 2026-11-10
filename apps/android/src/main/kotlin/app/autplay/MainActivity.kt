@@ -191,6 +191,13 @@ import app.autplay.ui.ServerFeaturesUiState
 import app.autplay.ui.ServerFeaturesUiStateSaver
 import app.autplay.ui.CoreTrackUiItem
 import app.autplay.ui.ArtistBrowseUiState
+import app.autplay.ui.ReleaseWatchUiState
+import app.autplay.ui.ReleaseWatchUiStatus
+import app.autplay.ui.WatchedArtistUiItem
+import app.autplay.ui.OwnerAutoDownloadUiState
+import app.autplay.ui.HomeReleaseFeedUiItem
+import app.autplay.ui.HomeReleaseFeedUiState
+import app.autplay.ui.HomeReleaseFeedUiStatus
 import app.autplay.ui.CoreProductDetailUiState
 import app.autplay.ui.CoreProductRouteActions
 import app.autplay.ui.HomeRecommendationUiItem
@@ -829,6 +836,21 @@ private fun OfflineLibraryScreen(
             .map<OwnerProfileStatistics, OwnerProfileStatistics?> { it }
     }.collectAsState(initial = null)
     val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
+    val releaseWatchState = remember(binding?.serverProfileId, binding?.userId, binding?.deviceId, settings.serverBaseUrl) {
+        val origin = settings.serverBaseUrl
+        val profile = binding?.serverProfileId
+        ReleaseWatchState(profile, if (profile != null && origin != null) AutPlayRuntime.releaseWatchPort(context, origin) else null)
+    }
+    val releaseFeedState = remember(binding?.serverProfileId, binding?.userId, binding?.deviceId, settings.serverBaseUrl) {
+        val origin = settings.serverBaseUrl
+        val profile = binding?.serverProfileId
+        HomeReleaseFeedState(profile, if (profile != null && origin != null) AutPlayRuntime.releaseFeedPort(context, origin) else null)
+    }
+    LaunchedEffect(releaseWatchState, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            releaseWatchState.load()
+        }
+    }
     val libraryEntries by remember(coreProductRepository, activeProfileId) {
         coreProductRepository.libraryEntries(activeProfileId)
     }.collectAsState(initial = emptyList())
@@ -856,6 +878,12 @@ private fun OfflineLibraryScreen(
     }.collectAsState(initial = null)
     val navigation = rememberAutPlayNavigationState(initialDestination)
     val destination = navigation.current
+    LaunchedEffect(releaseFeedState, lifecycleOwner, destination) {
+        if (destination != UiDestination.Home) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            releaseFeedState.refresh()
+        }
+    }
     val historyRepository = remember(context) { HistoryRepository(AutPlayRuntime.database(context)) }
     var historyState by remember(activeProfileId) { mutableStateOf(HistoryUiState()) }
     var historyGeneration by remember(activeProfileId) { mutableIntStateOf(0) }
@@ -1198,6 +1226,47 @@ private fun OfflineLibraryScreen(
             CoreReleaseSummary(release.localReleaseId, release.title, release.artist)
         }
     ).distinctBy(CoreReleaseSummary::stableId)
+    val playableLocalByServerRef = libraryEntries.asSequence()
+        .filter { !it.removed && it.availabilityStatus == "VAULT" && it.serverPlaybackCandidate }
+        .mapNotNull { entry -> entry.serverUserTrackRefId?.let { it to entry.localUserTrackRefId } }
+        .toMap()
+    val releaseFeedUiState = HomeReleaseFeedUiState(
+        status = when (releaseFeedState.status) {
+            HomeReleaseFeedStatus.DISCONNECTED -> HomeReleaseFeedUiStatus.Disconnected
+            HomeReleaseFeedStatus.LOADING -> HomeReleaseFeedUiStatus.Loading
+            HomeReleaseFeedStatus.READY -> HomeReleaseFeedUiStatus.Ready
+            HomeReleaseFeedStatus.OFFLINE -> HomeReleaseFeedUiStatus.Offline
+            HomeReleaseFeedStatus.SESSION -> HomeReleaseFeedUiStatus.Session
+            HomeReleaseFeedStatus.UNAVAILABLE -> HomeReleaseFeedUiStatus.Unavailable
+            HomeReleaseFeedStatus.ERROR -> HomeReleaseFeedUiStatus.Error
+        },
+        items = releaseFeedState.items.map { item ->
+            HomeReleaseFeedUiItem(
+                candidateId = item.candidateId,
+                evidenceRunId = item.evidenceRunId,
+                title = item.title,
+                artistName = item.artistName,
+                releasedAt = item.releasedAt,
+                reason = item.reason,
+                state = item.state,
+                availableAction = item.availableAction,
+                playableLocalTrackId = item.userTrackRefId?.let(playableLocalByServerRef::get),
+            )
+        },
+        hasMore = releaseFeedState.nextCursor != null,
+        loadingMore = releaseFeedState.loadingMore,
+        pageFailure = releaseFeedState.pageFailure?.let { failure ->
+            when (failure) {
+                HomeReleaseFeedStatus.DISCONNECTED -> HomeReleaseFeedUiStatus.Disconnected
+                HomeReleaseFeedStatus.LOADING -> HomeReleaseFeedUiStatus.Loading
+                HomeReleaseFeedStatus.READY -> HomeReleaseFeedUiStatus.Ready
+                HomeReleaseFeedStatus.OFFLINE -> HomeReleaseFeedUiStatus.Offline
+                HomeReleaseFeedStatus.SESSION -> HomeReleaseFeedUiStatus.Session
+                HomeReleaseFeedStatus.UNAVAILABLE -> HomeReleaseFeedUiStatus.Unavailable
+                HomeReleaseFeedStatus.ERROR -> HomeReleaseFeedUiStatus.Error
+            }
+        },
+    )
     val coreCommandActions = buildCoreCommandActions(
         scope = scope,
         binding = { binding },
@@ -1348,6 +1417,44 @@ private fun OfflineLibraryScreen(
         problems = homeProblems,
         recommendationError = homeError,
         untitledTrack = untitledTrack,
+    ).copy(releaseFeed = releaseFeedUiState)
+    val artistNamesById = repositorySnapshot.artists.associate { it.key.artistId.value to it.name }
+    val releaseWatchUiState = ReleaseWatchUiState(
+        status = when (releaseWatchState.status) {
+            ReleaseWatchStatus.DISCONNECTED -> ReleaseWatchUiStatus.Disconnected
+            ReleaseWatchStatus.UNAVAILABLE -> ReleaseWatchUiStatus.Unavailable
+            ReleaseWatchStatus.LOADING -> ReleaseWatchUiStatus.Loading
+            ReleaseWatchStatus.READY -> ReleaseWatchUiStatus.Ready
+            ReleaseWatchStatus.OFFLINE -> ReleaseWatchUiStatus.Offline
+            ReleaseWatchStatus.SESSION -> ReleaseWatchUiStatus.Session
+            ReleaseWatchStatus.ERROR -> ReleaseWatchUiStatus.Error
+        },
+        artists = releaseWatchState.artists.map { watched ->
+            WatchedArtistUiItem(
+                watched.artistId,
+                artistNamesById[watched.artistId] ?: watched.artistId,
+                watched.reason,
+                watched.autoDownload,
+            )
+        },
+        excludedArtistIds = releaseWatchState.exclusions,
+        busyArtistId = releaseWatchState.busyArtistId,
+        autoDownload = OwnerAutoDownloadUiState(
+            status = when (releaseWatchState.autoStatus) {
+                ReleaseWatchStatus.DISCONNECTED -> ReleaseWatchUiStatus.Disconnected
+                ReleaseWatchStatus.UNAVAILABLE -> ReleaseWatchUiStatus.Unavailable
+                ReleaseWatchStatus.LOADING -> ReleaseWatchUiStatus.Loading
+                ReleaseWatchStatus.READY -> ReleaseWatchUiStatus.Ready
+                ReleaseWatchStatus.OFFLINE -> ReleaseWatchUiStatus.Offline
+                ReleaseWatchStatus.SESSION -> ReleaseWatchUiStatus.Session
+                ReleaseWatchStatus.ERROR -> ReleaseWatchUiStatus.Error
+            },
+            enabled = releaseWatchState.autoSettings?.enabled == true,
+            executionEnabled = releaseWatchState.autoSettings?.executionEnabled == true,
+            confirmationAvailable = !releaseWatchState.autoSettings?.consequenceConfirmation.isNullOrBlank(),
+            busy = releaseWatchState.autoBusy,
+            commandFailed = releaseWatchState.autoCommandFailure != null,
+        ),
     )
     val libraryScreenState = buildLibraryScreenUiState(
         localMode = binding == null,
@@ -1369,7 +1476,7 @@ private fun OfflineLibraryScreen(
         importingLocalTrack = libraryImportInProgress,
         lastImportedTitle = lastImportedTitle,
         error = libraryError,
-    )
+    ).copy(releaseWatch = releaseWatchUiState)
     val detailRequestIsCurrent = coreDetailState.matches(detailContextKey, coreProductState.selectedDetail)
     val presentedTrackDetail = coreDetailState.track.takeIf { detailRequestIsCurrent }
     val presentedReleaseDetail = coreDetailState.release.takeIf { detailRequestIsCurrent }
@@ -1418,6 +1525,7 @@ private fun OfflineLibraryScreen(
         release = presentedReleaseDetail,
         playlist = presentedPlaylistDetail,
         artist = presentedArtistDetail,
+        releaseWatch = releaseWatchUiState,
         artistAppearances = presentedArtistAppearances,
         subjectArtistCredits = presentedSubjectArtistCredits,
     )
@@ -1427,6 +1535,21 @@ private fun OfflineLibraryScreen(
         likeRecommendation = { coreCommandActions.recordHomeFeedback(it, "LIKED") },
         dislikeRecommendation = { coreCommandActions.recordHomeFeedback(it, "DISLIKED") },
         retryHome = { homeRetryNonce = !homeRetryNonce },
+        playReleaseTrack = { coreCommandActions.startTrack(it, "HOME", "USER", null) },
+        openReleaseDiscovery = { runId ->
+            navigation.navigate(UiDestination.ServerFeatures)
+            launchServerAction("DISCOVERY_AUTOMATION_CANDIDATES") { server ->
+                serverUiState = serverUiState.copy(
+                    discovery = serverUiState.discovery.copy(
+                        selectedRunId = runId,
+                        candidates = server.discoveryCandidates(runId),
+                    ),
+                )
+            }
+        },
+        openReleaseSync = { navigation.navigate(UiDestination.SyncStatus) },
+        retryReleaseFeed = { scope.launch { releaseFeedState.refresh() } },
+        loadMoreReleases = { scope.launch { releaseFeedState.loadMore() } },
         resumeHomeQueue = ::resumeHomeQueue,
         openHomePlaylist = ::openHomePlaylist,
         openOffline = ::openOfflineLibrary,
@@ -1446,6 +1569,9 @@ private fun OfflineLibraryScreen(
         changeLibraryFilter = { coreProductState.libraryFilter = it },
         openCollection = ::openCoreCollection,
         openDetail = ::openCoreDetail,
+        setArtistFollow = { id, follow -> scope.launch { releaseWatchState.setFollow(id, follow) } },
+        setOwnerAutoDownload = { enabled -> scope.launch { releaseWatchState.setAutoDownload(enabled) } },
+        retryReleaseWatch = { scope.launch { releaseWatchState.load() } },
         openReview = { navigation.navigate(UiDestination.ImportReview) },
         changeLibraryAnchor = { coreProductState.libraryListAnchor = it },
         playTrack = { coreCommandActions.startTrack(it, "LIBRARY", "LIBRARY", null) },
@@ -1834,6 +1960,8 @@ private fun OfflineLibraryScreen(
             repairAccess = { activityLaunchers.chooseLibraryRoot.launch(null) },
             openReview = { navigation.navigate(UiDestination.ImportReview) },
             openDetail = ::openCoreDetail,
+            setArtistFollow = { id, follow -> scope.launch { releaseWatchState.setFollow(id, follow) } },
+            retryReleaseWatch = { scope.launch { releaseWatchState.load() } },
         ),
     )
 }

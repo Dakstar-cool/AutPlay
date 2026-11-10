@@ -54,12 +54,11 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0064_face_artifact_activation"]
     assert heads == [EXPECTED_MIGRATION_HEAD]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 196
+    assert _object_count(database_harness, empty_database_name) == 205
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -67,7 +66,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 196
+    assert _object_count(database_harness, empty_database_name) == 205
 
 
 def test_upgrade_accepts_file_only_database_url(
@@ -85,7 +84,7 @@ def test_upgrade_accepts_file_only_database_url(
     command.upgrade(database_harness.alembic_config(empty_database_name), "head")
 
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 
@@ -179,6 +178,10 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0062_gpu_admission_authority",
         "0063_sona_capture_authority",
         "0064_face_artifact_activation",
+        "0065_release_watch_follows",
+        "0066_discovery_scan_schedule",
+        "0067_release_watch_auto_download",
+        "0067a_release_watch_retry",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 
@@ -208,7 +211,7 @@ def test_artist_sync_downgrade_refuses_durable_catalog_events(
     # Alembic executes the attempted multi-revision downgrade atomically; the
     # M5B contract remains present when the predecessor refuses its rollback.
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
     with database_harness.connect(empty_database_name) as connection:
@@ -243,7 +246,7 @@ def test_s1b_downgrade_refuses_durable_admission_evidence(
     with pytest.raises(DBAPIError, match="refusing S1B downgrade"):
         database_harness.downgrade(empty_database_name, "0020_a1b_discovery_runtime")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 
@@ -266,7 +269,7 @@ def test_s1b_downgrade_refuses_rate_only_evidence(
     with pytest.raises(DBAPIError, match="refusing S1B downgrade"):
         database_harness.downgrade(empty_database_name, "0020_a1b_discovery_runtime")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 
@@ -307,7 +310,7 @@ def test_s1c_downgrade_refuses_rate_only_evidence(
     with pytest.raises(DBAPIError, match="refusing S1C downgrade"):
         database_harness.downgrade(empty_database_name, "0021_s1b_device_admission")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 
@@ -366,7 +369,7 @@ def test_s2_downgrade_refuses_profile_statistics_policy(
     with pytest.raises(DBAPIError, match="refusing S2 downgrade"):
         database_harness.downgrade(empty_database_name, "0022_s1c_social_runtime")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 
@@ -396,7 +399,7 @@ def test_s1d_downgrade_refuses_rate_only_evidence(
     with pytest.raises(DBAPIError, match="refusing S1D downgrade"):
         database_harness.downgrade(empty_database_name, "0025_a1c_automation_runtime")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 
@@ -433,7 +436,7 @@ def test_pa2_downgrade_refuses_rate_only_evidence(
     with pytest.raises(DBAPIError, match="refusing PA2 downgrade"):
         database_harness.downgrade(empty_database_name, "0026_s1d_guest_room_access")
     assert _current_revision(database_harness, empty_database_name) == (
-        "0064_face_artifact_activation"
+        EXPECTED_MIGRATION_HEAD
     )
 
 

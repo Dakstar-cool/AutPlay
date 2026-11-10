@@ -78,6 +78,8 @@ internal data class MainAdaptiveShellActions(
     val repairAccess: () -> Unit,
     val openReview: () -> Unit,
     val openDetail: (DetailTarget) -> Unit,
+    val setArtistFollow: (String, Boolean) -> Unit = { _, _ -> },
+    val retryReleaseWatch: () -> Unit = {},
 )
 
 @Composable
@@ -133,6 +135,8 @@ internal fun MainAdaptiveShell(
                     onRepairAccess = actions.repairAccess,
                     onOpenReview = actions.openReview,
                     onOpenDetail = actions.openDetail,
+                    onSetArtistFollow = actions.setArtistFollow,
+                    onRetryReleaseWatch = actions.retryReleaseWatch,
                 )
             } else {
                 QueueEditorPanel(state.queueState, state.nowPlayingActions.queue)

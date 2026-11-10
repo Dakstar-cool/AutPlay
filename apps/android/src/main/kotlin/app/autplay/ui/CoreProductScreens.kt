@@ -40,10 +40,13 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.application.releasewatch.ReleaseFeedAction
+import app.autplay.application.releasewatch.ReleaseFeedState
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.ui.core.LibraryFilter
 import app.autplay.ui.core.LibrarySection
@@ -128,6 +131,7 @@ public data class HomeScreenUiState(
     public val problems: List<HomeProblemUiItem> = emptyList(),
     public val recommendationError: Boolean = false,
     public val likedTrackIds: Set<String> = emptySet(),
+    public val releaseFeed: HomeReleaseFeedUiState = HomeReleaseFeedUiState(),
 )
 
 public data class SearchScreenUiState(
@@ -162,6 +166,7 @@ public data class LibraryScreenUiState(
     public val albums: List<CoreCollectionUiItem> = emptyList(),
     public val artists: List<CoreArtistUiItem> = emptyList(),
     public val artistBrowseState: ArtistBrowseUiState = ArtistBrowseUiState.Unavailable,
+    public val releaseWatch: ReleaseWatchUiState = ReleaseWatchUiState(),
     public val playlists: List<CoreCollectionUiItem> = emptyList(),
     public val reviewCount: Int = 0,
     public val importingLocalTrack: Boolean = false,
@@ -183,6 +188,11 @@ public fun HomeProductScreen(
     onOpenPlaylist: (String) -> Unit = {},
     onOpenOffline: () -> Unit = {},
     onOpenProblems: () -> Unit = {},
+    onReleasePlay: (String) -> Unit = {},
+    onReleaseDiscovery: (String) -> Unit = {},
+    onReleaseSync: () -> Unit = {},
+    onReleaseRetry: () -> Unit = {},
+    onReleaseMore: () -> Unit = {},
     playerState: PlaybackPresentationState = PlaybackPresentationState(),
     currentTrackRefId: String? = null,
     currentTrackLiked: Boolean = false,
@@ -272,13 +282,44 @@ public fun HomeProductScreen(
         item(key = "home:new-releases-heading") {
             AutPlaySectionHeader(stringResource(R.string.home_new_releases))
         }
-        if (state.releases.isEmpty()) {
-            item(key = "home:new-releases-empty") {
+        if (state.localMode) {
+            if (state.releases.isEmpty()) item(key = "home:new-releases-empty") {
                 Text(stringResource(R.string.home_empty_releases), color = AutPlayTokens.colors.mutedText)
             }
-        } else {
-            items(state.releases, key = HomeReleaseUiItem::id) { release ->
+            items(state.releases, key = { "home:local-release:${it.id}" }) { release ->
                 TrackRow(release.title, release.artist, release.dateText)
+            }
+        } else {
+            when (state.releaseFeed.status) {
+                HomeReleaseFeedUiStatus.Ready -> {
+                    if (state.releaseFeed.items.isEmpty()) item(key = "home:release-feed-empty") {
+                        AutPlayStateSurface(AutPlayStateKind.Empty, stringResource(R.string.home_empty_releases))
+                    }
+                    items(state.releaseFeed.items, key = { "home:release-feed:${it.candidateId}" }) { release ->
+                        HomeReleaseFeedCard(
+                            release,
+                            actionsEnabled = state.releaseFeed.pageFailure == null,
+                            onPlay = onReleasePlay,
+                            onOpenDiscovery = onReleaseDiscovery,
+                            onOpenSync = onReleaseSync,
+                        )
+                    }
+                    state.releaseFeed.pageFailure?.let { failure -> item(key = "home:release-feed-page-error") {
+                        HomeReleaseFeedMessage(failure, onReleaseRetry)
+                    } }
+                    if (state.releaseFeed.hasMore && state.releaseFeed.pageFailure == null) item(key = "home:release-feed-more") {
+                        OutlinedButton(
+                            onClick = onReleaseMore,
+                            enabled = !state.releaseFeed.loadingMore,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
+                            Text(stringResource(if (state.releaseFeed.loadingMore) R.string.release_feed_loading_more else R.string.release_feed_more))
+                        }
+                    }
+                }
+                else -> item(key = "home:release-feed-state") {
+                    HomeReleaseFeedMessage(state.releaseFeed.status, onReleaseRetry)
+                }
             }
         }
         state.continueListening?.let { item ->
@@ -618,10 +659,14 @@ public fun LibraryProductScreen(
     onOpenReview: () -> Unit = {},
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
+    onSetArtistFollow: (String, Boolean) -> Unit = { _, _ -> },
+    onSetOwnerAutoDownload: (Boolean) -> Unit = {},
+    onRetryReleaseWatch: () -> Unit = {},
 ) {
     var controlsExpanded by rememberSaveable { mutableStateOf(false) }
-    val listContextKey = "library:${state.section}:${state.sort}:${state.filter}"
-    val listKeys = libraryListKeys(state)
+    var watchedExpanded by rememberSaveable { mutableStateOf(false) }
+    val listContextKey = "library:${state.section}:${state.sort}:${state.filter}:$watchedExpanded"
+    val listKeys = libraryListKeys(state, watchedExpanded)
     val listState = rememberStableAnchorListState(
         contextKey = listContextKey,
         persistedAnchor = listAnchor,
@@ -798,7 +843,53 @@ public fun LibraryProductScreen(
                     LibraryTrackCard(track, onSelect, onRemoveOrRestore, onLike)
                 }
             }
-            LibrarySection.Artists -> when (state.artistBrowseState) {
+            LibrarySection.Artists -> {
+                item(key = "library:watched-header") {
+                    val expansionState = stringResource(
+                        if (watchedExpanded) R.string.release_watch_expanded else R.string.release_watch_collapsed,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { watchedExpanded = !watchedExpanded },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+                                stateDescription = expansionState
+                            },
+                        ) {
+                            Text(stringResource(R.string.release_watch_list_title) + " (${state.releaseWatch.artists.size})")
+                        }
+                        ReleaseWatchStatusMessage(state.releaseWatch, onRetryReleaseWatch)
+                        OwnerAutoDownloadControls(state.releaseWatch.autoDownload, onSetOwnerAutoDownload, onRetryReleaseWatch)
+                    }
+                }
+                if (watchedExpanded && state.releaseWatch.status == ReleaseWatchUiStatus.Ready) {
+                    if (state.releaseWatch.artists.isEmpty()) item(key = "library:watched-empty") {
+                        Text(stringResource(R.string.release_watch_empty), color = AutPlayTokens.colors.mutedText)
+                    }
+                    items(state.releaseWatch.artists, key = { "watched:${it.id}" }) { artist ->
+                        AutPlayCard(modifier = Modifier.testTag("watched-artist-${artist.id}"), onClick = if (state.artists.any { it.id == artist.id }) {
+                            { onOpenCollection(LibrarySection.Artists, artist.id) }
+                        } else null) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(artist.name, style = MaterialTheme.typography.titleMedium)
+                                Text(stringResource(artist.reason.labelResource()), color = AutPlayTokens.colors.mutedText)
+                                ArtistAutoDownloadMessage(artist.autoDownload)
+                                ArtistFollowAction(artist.id, state.releaseWatch, onSetArtistFollow, showContext = false)
+                            }
+                        }
+                    }
+                    // Authenticated owner exclusions remain actionable even without an owned
+                    // local recording. Refollow uses the same canonical-ID API as other Follow UI.
+                    items(state.releaseWatch.excludedArtistIds.sorted(), key = { "$LIBRARY_EXCLUDED_PREFIX$it" }) { artistId ->
+                        AutPlayCard(modifier = Modifier.testTag("excluded-artist-$artistId")) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(state.artists.firstOrNull { it.id == artistId }?.name ?: artistId,
+                                    style = MaterialTheme.typography.titleMedium)
+                                ArtistFollowAction(artistId, state.releaseWatch, onSetArtistFollow)
+                            }
+                        }
+                    }
+                }
+                when (state.artistBrowseState) {
                 ArtistBrowseUiState.Unavailable -> item(key = "library:artists-unavailable") {
                     AutPlayStateSurface(
                         AutPlayStateKind.Empty,
@@ -835,9 +926,11 @@ public fun LibraryProductScreen(
                                 artist.subtitle?.let {
                                     Text(it, color = AutPlayTokens.colors.mutedText)
                                 }
+                                ArtistFollowMenu(artist.id, state.releaseWatch, onSetArtistFollow)
                             }
                         }
                     }
+                }
                 }
             }
             LibrarySection.Albums -> collectionItems(state.albums, LibrarySection.Albums, LIBRARY_ALBUM_PREFIX, onOpenCollection)
@@ -961,11 +1054,15 @@ private const val SEARCH_RESULT_PREFIX = "search-result:"
 private const val SEARCH_VAULT_RESULT_PREFIX = "search-vault-result:"
 private const val LIBRARY_TRACK_PREFIX = "library-track:"
 private const val LIBRARY_ARTIST_PREFIX = "library-artist:"
+private const val LIBRARY_WATCHED_PREFIX = "watched:"
+private const val LIBRARY_EXCLUDED_PREFIX = "excluded:"
 private const val LIBRARY_ALBUM_PREFIX = "library-album:"
 private const val LIBRARY_PLAYLIST_PREFIX = "library-playlist:"
 private val LIBRARY_CONTENT_PREFIXES = setOf(
     LIBRARY_TRACK_PREFIX,
     LIBRARY_ARTIST_PREFIX,
+    LIBRARY_WATCHED_PREFIX,
+    LIBRARY_EXCLUDED_PREFIX,
     LIBRARY_ALBUM_PREFIX,
     LIBRARY_PLAYLIST_PREFIX,
 )
@@ -992,7 +1089,7 @@ private fun searchListKeys(state: SearchScreenUiState): List<String> = buildList
     }
 }
 
-private fun libraryListKeys(state: LibraryScreenUiState): List<String> = buildList {
+private fun libraryListKeys(state: LibraryScreenUiState, watchedExpanded: Boolean): List<String> = buildList {
     add("library:heading")
     add("library:sections")
     val isTrackSection = state.section in setOf(
@@ -1012,13 +1109,21 @@ private fun libraryListKeys(state: LibraryScreenUiState): List<String> = buildLi
             if (state.tracks.isEmpty()) add("library:tracks-empty")
             state.tracks.forEach { add("$LIBRARY_TRACK_PREFIX${it.id}") }
         }
-        LibrarySection.Artists -> when (state.artistBrowseState) {
+        LibrarySection.Artists -> {
+            add("library:watched-header")
+            if (watchedExpanded && state.releaseWatch.status == ReleaseWatchUiStatus.Ready) {
+                if (state.releaseWatch.artists.isEmpty()) add("library:watched-empty")
+                state.releaseWatch.artists.forEach { add("$LIBRARY_WATCHED_PREFIX${it.id}") }
+                state.releaseWatch.excludedArtistIds.sorted().forEach { add("$LIBRARY_EXCLUDED_PREFIX$it") }
+            }
+            when (state.artistBrowseState) {
             ArtistBrowseUiState.Unavailable -> add("library:artists-unavailable")
             ArtistBrowseUiState.Loading -> add("library:artists-loading")
             ArtistBrowseUiState.Error -> add("library:artists-error")
             ArtistBrowseUiState.Ready -> {
                 if (state.artists.isEmpty()) add("library:artists-empty")
                 state.artists.forEach { add("$LIBRARY_ARTIST_PREFIX${it.id}") }
+            }
             }
         }
         LibrarySection.Albums -> {
@@ -1188,6 +1293,84 @@ private fun libraryFilterLabel(filter: LibraryFilter): String = stringResource(
         LibraryFilter.Unavailable -> R.string.library_filter_unavailable
     },
 )
+
+@Composable
+private fun HomeReleaseFeedMessage(status: HomeReleaseFeedUiStatus, onRetry: () -> Unit) {
+    val message = when (status) {
+        HomeReleaseFeedUiStatus.Disconnected -> R.string.release_feed_disconnected
+        HomeReleaseFeedUiStatus.Loading -> R.string.release_feed_loading
+        HomeReleaseFeedUiStatus.Offline -> R.string.release_feed_offline
+        HomeReleaseFeedUiStatus.Session -> R.string.release_feed_session
+        HomeReleaseFeedUiStatus.Unavailable -> R.string.release_feed_unavailable
+        HomeReleaseFeedUiStatus.Error -> R.string.release_feed_error
+        HomeReleaseFeedUiStatus.Ready -> return
+    }
+    AutPlayStateSurface(
+        kind = when (status) {
+            HomeReleaseFeedUiStatus.Loading -> AutPlayStateKind.Loading
+            HomeReleaseFeedUiStatus.Offline, HomeReleaseFeedUiStatus.Disconnected -> AutPlayStateKind.Offline
+            else -> AutPlayStateKind.Error
+        },
+        message = stringResource(message),
+        actionLabel = if (status == HomeReleaseFeedUiStatus.Loading || status == HomeReleaseFeedUiStatus.Disconnected) null else stringResource(R.string.action_retry),
+        onAction = if (status == HomeReleaseFeedUiStatus.Loading || status == HomeReleaseFeedUiStatus.Disconnected) null else onRetry,
+    )
+}
+
+@Composable
+private fun HomeReleaseFeedCard(
+    item: HomeReleaseFeedUiItem,
+    actionsEnabled: Boolean,
+    onPlay: (String) -> Unit,
+    onOpenDiscovery: (String) -> Unit,
+    onOpenSync: () -> Unit,
+) {
+    AutPlayCard {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            TrackRow(item.title, item.artistName, item.releasedAt.take(10))
+            Text(
+                stringResource(if (item.reason == app.autplay.application.releasewatch.WatchReason.MANUAL_FOLLOW) {
+                    R.string.release_feed_manual_reason
+                } else {
+                    R.string.release_feed_history_reason
+                }),
+                color = AutPlayTokens.colors.mutedText,
+            )
+            Text(stringResource(when (item.state) {
+                ReleaseFeedState.DISCOVERED -> R.string.release_feed_discovered
+                ReleaseFeedState.REVIEW_REQUIRED -> R.string.release_feed_review_required
+                ReleaseFeedState.ACQUIRING -> R.string.release_feed_acquiring
+                ReleaseFeedState.READY -> R.string.release_feed_ready
+                ReleaseFeedState.UNAVAILABLE -> R.string.release_feed_item_unavailable
+                ReleaseFeedState.FAILED -> R.string.release_feed_failed
+            }), color = AutPlayTokens.colors.mutedText)
+            when (item.availableAction) {
+                ReleaseFeedAction.PLAY -> {
+                    val localId = item.playableLocalTrackId
+                    OutlinedButton(
+                        onClick = if (localId != null) { { onPlay(localId) } } else onOpenSync,
+                        enabled = actionsEnabled,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text(stringResource(if (localId != null) R.string.action_play else R.string.release_feed_sync_to_play))
+                    }
+                }
+                ReleaseFeedAction.REVIEW, ReleaseFeedAction.OPEN_DISCOVERY -> OutlinedButton(
+                    onClick = { onOpenDiscovery(item.evidenceRunId) },
+                    enabled = actionsEnabled,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(if (item.availableAction == ReleaseFeedAction.REVIEW) {
+                        R.string.release_feed_open_review
+                    } else {
+                        R.string.release_feed_open_discovery
+                    }))
+                }
+                ReleaseFeedAction.NONE -> Unit
+            }
+        }
+    }
+}
 
 @Composable
 private fun TrackRow(title: String, artist: String, detail: String?, trackId: String? = null) {
