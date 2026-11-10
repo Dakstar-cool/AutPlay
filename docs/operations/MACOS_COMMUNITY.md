@@ -8,8 +8,36 @@ strongest practical protection compatible with that choice. It is separate from
 the existing Developer ID / provisioning-profile / Secure Enclave provider. A
 failed Developer ID check never silently selects community storage.
 The current package targets Apple Silicon (ARM64), with macOS 13 as its deployment
-target. Native acceptance passed on macOS 15; the final package gate also targets
-the standard macOS 26 ARM64 runner. This is not an Intel build.
+target. Native acceptance passed on macOS 15 and 26; the final package gate passed
+on the standard macOS 26 ARM64 runner. This is not an Intel build.
+
+## Verified final DMG, 2026-11-10
+
+Source: `177f6430c7b7b03c37fc18d55bb463b59ac15728`.
+The [final community run](https://github.com/Dakstar-cool/AutPlay/actions/runs/42842808249)
+passed on macOS 26.7.2, build `25G332`, image `macos-26-arm64`
+`20261102.0473.1`. It reran all 28 shared/desktop JUnit cases with zero failures or
+skips, all 14 real Keychain/identity checks, and production GUI startup with the
+bundled JDK.
+
+The final `dmg-acceptance.json` also confirms the staged bundle seal, the signature
+of the bundle mounted from the completed read-only DMG, production GUI startup
+from that mounted image, and absence of test-only code in the distributed bundle.
+The package artifact is `AutPlay-community-arm64-177f6430c7b7b03c37fc18d55bb463b59ac15728`
+(artifact ID `13778285973`). The downloaded DMG is 113018142 bytes; independent
+SHA-256 verification on Windows matched both `SHA256SUMS` and the DMG acceptance
+report. The downloaded public certificate and its pin also match the repository.
+The DMG SHA-256 is:
+
+```text
+f1640197dd8367878703641756ee73b50f6e993d7279ec569496c6f90fd6ed8a
+```
+
+This is the package to use for friend-installation testing. The manual Gatekeeper,
+update/Keychain reauthorization and compatible-server login/sync gates below still
+apply. The earlier foundation result remains applicable to the unchanged native
+application code; subsequent changes only affect packaging, CI runner selection
+and this evidence record.
 
 ## Native acceptance milestone, 2026-11-10
 
