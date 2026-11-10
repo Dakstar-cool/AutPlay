@@ -73,3 +73,9 @@ Apple's [libc contract](https://github.com/apple-oss-distributions/Libc/blob/mai
 guarantees that the clearing call cannot be optimized away; the
 [public header](https://github.com/apple-oss-distributions/Libc/blob/main/include/_string.h)
 declares it for macOS 10.9 and newer, below this port's macOS 13 target.
+
+Run `42810993727` compiled secure state, then rejected a C++ lambda capturing the
+source chooser's Objective-C `__block` variable. After the synchronous main-thread
+chooser completes, its result is now retained in an ordinary ARC local before
+the immediate guarded C++ call. Cancellation, admission checks and chooser-thread
+behavior remain unchanged. See [Clang's block capture rules](https://clang.llvm.org/docs/BlockLanguageSpec.html).

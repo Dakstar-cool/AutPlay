@@ -366,7 +366,9 @@ extern "C" JNIEXPORT jlong JNICALL JNI(choose)(JNIEnv *e,jobject,jlong h) {
         panel.title=@"Remember original source"; panel.message=@"Remember this location for explicit read-only rescans. OS permission is checked each time. Originals are never changed.";
         if([panel runModal]==NSModalResponseOK) chosen=panel.URL; currentPanel=nil; } };
     if(NSThread.isMainThread) choose(); else dispatch_sync(dispatch_get_main_queue(),choose);
-    return call(e,[&]() -> jlong { auto &o=owner(h); o.chooser=false; require(!o.fenced && !admissionFenced.load(),"source_fenced"); return chosen ? selected(o,chosen) : 0; });
+    // The synchronous chooser has finished; C++ lambdas cannot capture __block storage.
+    NSURL *chosenUrl = chosen;
+    return call(e,[&]() -> jlong { auto &o=owner(h); o.chooser=false; require(!o.fenced && !admissionFenced.load(),"source_fenced"); return chosenUrl ? selected(o,chosenUrl) : 0; });
 }
 extern "C" JNIEXPORT jlong JNICALL JNI(admitDrop)(JNIEnv *e,jobject,jlong h,jstring path) { return call(e,[&] { auto &o=owner(h,true); verify(o); return selected(o,[NSURL fileURLWithPath:text(e,path)]); }); }
 extern "C" JNIEXPORT jbyteArray JNICALL JNI(selectionInfo)(JNIEnv *e,jobject,jlong h,jlong t) { return call(e,[&] { auto &o=owner(h,true); auto &s=selection(o,t); checkSelection(o,s); return output(e,json(@{@"kind":s.kind,@"label":s.label}),2048); }); }
