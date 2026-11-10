@@ -37,13 +37,15 @@ inline NSDictionary *signing(SecStaticCodeRef code, NSString *identifier, bool l
     NSDictionary *entitlements = info[(__bridge id)kSecCodeInfoEntitlementsDict];
     check(!entitlements || [entitlements isKindOfClass:NSDictionary.class]);
     for (NSString *forbidden in @[@"get-task-allow", @"com.apple.security.get-task-allow",
+        @"com.apple.security.app-sandbox",
         @"com.apple.security.cs.allow-dyld-environment-variables", @"com.apple.security.cs.debugger",
         @"com.apple.security.cs.allow-unsigned-executable-memory"])
         check(![entitlements[forbidden] boolValue]);
     // No Apple Team ID is available for the bundled JVM. Only the JVM launcher gets this
     // exception; native helpers keep system library validation. Bundle sealing still applies.
     if (!launcher) check(![entitlements[@"com.apple.security.cs.disable-library-validation"] boolValue]);
-    check(entitlements[@"keychain-access-groups"] == nil && entitlements[@"com.apple.application-identifier"] == nil);
+    check(entitlements[@"keychain-access-groups"] == nil && entitlements[@"com.apple.application-identifier"] == nil &&
+        entitlements[@"application-identifier"] == nil && entitlements[@"com.apple.developer.team-identifier"] == nil);
     return info;
 }
 inline SecRequirementRef requirement(NSString *identifier, NSString *expectedPin) {

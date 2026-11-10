@@ -15,12 +15,12 @@ void openCommunityKeychain(Owner &o) {
     int directory = open(root.fileSystemRepresentation, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     require(directory >= 0, "IDENTITY_UNAVAILABLE");
     struct stat parent = {};
-    bool privateDirectory = fstat(directory, &parent) == 0 && S_ISDIR(parent.st_mode) &&
-        parent.st_uid == getuid() && (parent.st_mode & 0077) == 0;
-    ::close(directory); require(privateDirectory, "IDENTITY_UNAVAILABLE");
+    bool ownedDirectory = fstat(directory, &parent) == 0 && S_ISDIR(parent.st_mode) &&
+        parent.st_uid == getuid() && (parent.st_mode & 0022) == 0;
+    ::close(directory); require(ownedDirectory, "IDENTITY_UNAVAILABLE");
     struct stat st = {};
     // Apple's encrypted Keychain database may be 0644 (its file DB defaults to 0666
-    // before umask). Confidentiality comes from Keychain encryption and the private parent;
+    // before umask). Confidentiality comes from Keychain encryption and item access control;
     // require exclusive write ownership, rather than treating ciphertext as a plaintext key.
     require(lstat(url.path.fileSystemRepresentation, &st) == 0 && S_ISREG(st.st_mode) &&
         st.st_uid == getuid() && (st.st_mode & 0022) == 0 && st.st_nlink == 1, "IDENTITY_UNAVAILABLE");

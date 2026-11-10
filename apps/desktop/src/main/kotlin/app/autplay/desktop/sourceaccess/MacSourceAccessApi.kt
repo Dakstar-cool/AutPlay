@@ -20,7 +20,7 @@ public class MacSourceAccessIdentity(public val developerTeam: String) {
     override fun toString(): String = "MacSourceAccessIdentity(<redacted>)"
 }
 
-/** Independent from Keychain/audio. The native preflight verifies Developer ID and non-sandbox mode. */
+/** Independent from Keychain/audio. Native preflight verifies the build's signer and non-sandbox mode. */
 internal fun macSourceAccessNative(identity: MacSourceAccessIdentity, managedDataRoot: Path): SourceAccessNative =
     MacSourceAccessApi(identity, managedDataRoot.toAbsolutePath().normalize())
 

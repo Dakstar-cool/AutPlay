@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <cstdio>
 #include <map>
 #include <limits>
 #include <memory>

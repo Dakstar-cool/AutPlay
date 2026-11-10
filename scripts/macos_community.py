@@ -168,9 +168,10 @@ def probe() -> None:
     foreign = TEMP / "foreign-reader"
     run("xcrun", "clang++", "-fobjc-arc", "-framework", "Foundation", "-framework", "Security",
         ROOT / "tests/native/CommunityForeignReader.mm", "-o", foreign)
-    run("codesign", "--force", "--sign", "-", "--identifier", "example.foreign.reader", foreign)
+    # A spoofed bundle identifier alone must not inherit the application's Keychain access.
+    run("codesign", "--force", "--sign", "-", "--identifier", "app.autplay.desktop", foreign)
     run(foreign, pin(), timeout=30)
-    passed.append("foreign-program-keychain-read-denied")
+    passed.append("foreign-signer-same-id-keychain-read-denied")
     run("security", "default-keychain", "-d", "user", "-s", values["owner_keychain"])
     for phase in ("owner-create", "owner-restart"):
         result = run(executable, phase, timeout=90)

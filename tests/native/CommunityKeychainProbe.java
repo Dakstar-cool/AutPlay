@@ -72,6 +72,10 @@ public final class CommunityKeychainProbe {
             return;
         }
         MacSecureStateJni api = MacSecureStateJni.INSTANCE;
+        if (args[0].equals("create")) {
+            try { api.open(1, "0".repeat(64), "community-keychain-1"); throw new AssertionError("SIGNER_PIN_BYPASSED"); }
+            catch (IllegalStateException expected) { check("SECURE_STATE_IDENTITY_UNAVAILABLE".equals(expected.getMessage())); }
+        }
         long handle = api.open(1, pin, "community-keychain-1");
         try {
             if (args[0].equals("create")) {

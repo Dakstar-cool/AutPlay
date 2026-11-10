@@ -26,8 +26,8 @@ the helper still must pass PID, path and code-hash checks.
 ## Keychain behavior
 
 The community provider uses the user's default file-based Keychain, constrained
-to an owned, non-symlink encrypted file inside the private `~/Library/Keychains`
-directory, with writes denied to other Unix users. It does not
+to an owned, non-symlink encrypted file inside the owned `~/Library/Keychains`
+directory, with other-user writes denied on both file and directory. It does not
 use an entitlement access group, Data Protection Keychain, iCloud Keychain or
 the Secure Enclave. Service/key-label namespaces include the certificate pin;
 existing paid-provider items are neither read nor migrated.
@@ -155,9 +155,21 @@ main-thread handoff. Its ABI and entry behavior were checked against OpenJDK's
 and [jpackage macOS launcher](https://github.com/openjdk/jdk17u/blob/master/src/jdk.jpackage/macosx/native/applauncher/MacLauncher.cpp).
 
 Keychain file validation accepts the platform's encrypted-database permissions
-only inside an owned private keychain directory, with no symlinks or other-user
+only inside an owned keychain directory, with no symlinks or other-user
 writes. Requiring a plaintext-secret file mode would reject normal macOS Keychains:
 Apple's [file database implementation](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_filedb/lib/AppleDatabase.cpp)
 defaults to mode `0666` before umask. Alternatives were changing the user's login
 Keychain mode or introducing another password-protected keychain; neither is needed
 to preserve the encrypted-store and item-ACL boundary.
+
+Run `42825846281` located the remaining preflight failure at the directory's
+overly strict `0700` assumption. The hosted user Keychain directory is readable
+by other users, as macOS also permits for encrypted file Keychains. Reviewed
+options were forcing `chmod` on the user's existing directory, creating a separate
+app keychain with a new password lifecycle, switching to the entitlement-based
+Data Protection provider, and accepting standard read/list permission while
+rejecting other-user writes. The last option preserves platform ownership,
+encryption and [per-item ACL enforcement](https://developer.apple.com/documentation/security/access-control-lists)
+without modifying user system settings. CI tests the actual item boundary using
+an unrelated signer with a spoofed AutPlay identifier, rather than relying on
+directory read permissions to protect plaintext secrets.
