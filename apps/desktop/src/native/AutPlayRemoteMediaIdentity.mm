@@ -3,7 +3,6 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #include <jni.h>
-#include <sys/codesign.h>
 #include <sys/stat.h>
 #include <mach-o/loader.h>
 #include <mach/machine.h>
@@ -50,7 +49,7 @@ NSData *signedInfo(SecStaticCodeRef code, NSString *identifier, NSString *team, 
     NSDictionary *info = (__bridge NSDictionary *)raw.value;
     requireIdentity([info[(__bridge id)kSecCodeInfoIdentifier] isEqual:identifier] &&
         [info[(__bridge id)kSecCodeInfoTeamIdentifier] isEqual:team] &&
-        ([info[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & CS_RUNTIME) != 0);
+        ([info[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & kSecCodeSignatureRuntime) != 0);
     NSDictionary *entitlements = info[(__bridge id)kSecCodeInfoEntitlementsDict];
     if (entitlements) {
         requireIdentity([entitlements isKindOfClass:NSDictionary.class]);

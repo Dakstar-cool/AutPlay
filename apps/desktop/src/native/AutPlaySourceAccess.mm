@@ -6,7 +6,6 @@
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <sys/param.h>
-#include <sys/codesign.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <pwd.h>
@@ -160,7 +159,7 @@ void preflight(NSString *team) {
     NSDictionary *info = (__bridge NSDictionary*)signing.value;
     NSDictionary *entitlements = info[(__bridge id)kSecCodeInfoEntitlementsDict];
     require([info[(__bridge id)kSecCodeInfoTeamIdentifier] isEqual:team] &&
-        ([info[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & CS_RUNTIME) &&
+        ([info[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & kSecCodeSignatureRuntime) &&
         ![entitlements[@"com.apple.security.app-sandbox"] boolValue], "source_identity_unavailable");
     for(NSString *key in @[@"com.apple.security.get-task-allow",@"get-task-allow",@"com.apple.security.cs.disable-library-validation",@"com.apple.security.cs.allow-dyld-environment-variables"])
         require(![entitlements[key] boolValue], "source_identity_unavailable");

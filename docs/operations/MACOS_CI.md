@@ -44,3 +44,22 @@ preserves the pinned distribution and avoids adding an action or project environ
 See [Astral's Actions guide](https://docs.astral.sh/uv/guides/integration/github/),
 [environment activation](https://github.com/astral-sh/setup-uv/blob/main/docs/environment-and-tools.md)
 and [setup-python](https://github.com/actions/setup-python).
+
+## Native SDK compatibility repairs
+
+Run `42806956271` passed all 24 shared tests and seven WAV/HTTP probe cases, then
+exposed a Swift access-control error: an extension of the private `RemoteOwner`
+class explicitly requested `fileprivate` access. The extension now inherits the
+owner's access level.
+
+Run `42807791678` compiled that helper, then reported missing `sys/codesign.h` in
+two Objective-C++ files; inspection found the same dependency in source access.
+Only the `CS_RUNTIME` constant was used. Reviewed options were the public Security
+framework constant, importing the XNU `cs_blobs.h` header, or maintaining a local
+numeric compatibility constant. The public `kSecCodeSignatureRuntime` is selected:
+Apple defines it as the same `0x10000` bit and explicitly specifies
+`SecCodeSignatureFlags` for `kSecCodeInfoFlags`. All three checks retain their
+fail-closed behavior, without importing kernel headers or duplicating constants.
+See Apple's [Security constants](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/CSCommon.h),
+[signing-information contract](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/SecCode.h)
+and [XNU flags](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/cs_blobs.h).

@@ -6,7 +6,6 @@
 #include <jni.h>
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/codesign.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <pwd.h>
@@ -144,7 +143,7 @@ ValidatedIdentity preflight(NSString *team, NSString *profileUuid) {
     CF<CFDictionaryRef> info;
     require(SecCodeCopySigningInformation(running.value, kSecCSSigningInformation, info.out()) == errSecSuccess, "IDENTITY_UNAVAILABLE");
     NSDictionary *signing = (__bridge NSDictionary *)info.value;
-    require(([signing[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & CS_RUNTIME) != 0, "IDENTITY_UNAVAILABLE");
+    require(([signing[(__bridge id)kSecCodeInfoFlags] unsignedIntValue] & kSecCodeSignatureRuntime) != 0, "IDENTITY_UNAVAILABLE");
     require([signing[(__bridge id)kSecCodeInfoIdentifier] isEqual:kBundle] && [signing[(__bridge id)kSecCodeInfoTeamIdentifier] isEqual:team], "IDENTITY_UNAVAILABLE");
     NSDictionary *entitlements = signing[(__bridge id)kSecCodeInfoEntitlementsDict];
     NSString *group = [NSString stringWithFormat:@"%@.%@", team, kBundle];
