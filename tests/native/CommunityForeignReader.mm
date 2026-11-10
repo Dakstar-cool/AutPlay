@@ -6,9 +6,13 @@
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc != 2 || SecKeychainSetUserInteractionAllowed(false) != errSecSuccess) return 2;
+        SecKeychainRef keychain = nullptr;
+        if (SecKeychainCopyDefault(&keychain) != errSecSuccess || !keychain) return 2;
+        NSArray *search = @[(__bridge id)keychain]; CFRelease(keychain);
         NSString *service = [@"app.autplay.desktop.community-state.v1." stringByAppendingString:[NSString stringWithUTF8String:argv[1]]];
         CFTypeRef value = nullptr;
         NSDictionary *query = @{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecMatchSearchList:search,
             (__bridge id)kSecAttrService:service, (__bridge id)kSecAttrAccount:@"k1.control", (__bridge id)kSecReturnData:@YES};
         OSStatus result = SecItemCopyMatching((__bridge CFDictionaryRef)query, &value);
         bool denied = !value && (result == errSecInteractionNotAllowed || result == errSecAuthFailed || result == errSecNoAccessForItem);
@@ -17,6 +21,8 @@ int main(int argc, char **argv) {
         NSString *label = [@"app.autplay.desktop.community-key.v1." stringByAppendingString:[NSString stringWithUTF8String:argv[1]]];
         NSDictionary *keyQuery = @{(__bridge id)kSecClass:(__bridge id)kSecClassKey,
             (__bridge id)kSecAttrKeyClass:(__bridge id)kSecAttrKeyClassPrivate,
+            (__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+            (__bridge id)kSecMatchSearchList:search,
             (__bridge id)kSecAttrLabel:label, (__bridge id)kSecReturnRef:@YES};
         CFTypeRef key = nullptr;
         OSStatus keyStatus = SecItemCopyMatching((__bridge CFDictionaryRef)keyQuery, &key);
