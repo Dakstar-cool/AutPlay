@@ -2,6 +2,7 @@
 // No Keychain access, entitlements, signing, process launch or arbitrary code identifier API.
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
+#include "AutPlayCommunityIdentity.h"
 #include <jni.h>
 #include <sys/stat.h>
 #include <mach-o/loader.h>
@@ -36,14 +37,22 @@ NSURL *exactFile(NSString *path) {
     return url;
 }
 SecRequirementRef requirement(NSString *identifier, NSString *team) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    return autplay_community::requirement(identifier, team);
+#else
     requireIdentity(team.length == 10 && [team rangeOfCharacterFromSet:
         [[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"] invertedSet]].location == NSNotFound);
     NSString *expression = [NSString stringWithFormat:@"anchor apple generic and identifier \"%@\" and certificate leaf[subject.OU] = \"%@\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists", identifier, team];
     SecRequirementRef value = nullptr;
     requireIdentity(SecRequirementCreateWithString((__bridge CFStringRef)expression, kSecCSDefaultFlags, &value) == errSecSuccess);
     return value;
+#endif
 }
 NSData *signedInfo(SecStaticCodeRef code, NSString *identifier, NSString *team, bool helper) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    requireIdentity([team isEqual:autplay_community::pin()]);
+    NSDictionary *info = autplay_community::signing(code, identifier, !helper);
+#else
     OwnedCF<CFDictionaryRef> raw;
     requireIdentity(SecCodeCopySigningInformation(code, kSecCSSigningInformation, raw.out()) == errSecSuccess);
     NSDictionary *info = (__bridge NSDictionary *)raw.value;
@@ -59,6 +68,7 @@ NSData *signedInfo(SecStaticCodeRef code, NSString *identifier, NSString *team, 
         if (helper) requireIdentity(entitlements[@"keychain-access-groups"] == nil &&
             entitlements[@"com.apple.application-identifier"] == nil);
     }
+#endif
     NSData *unique = info[(__bridge id)kSecCodeInfoUnique];
     requireIdentity([unique isKindOfClass:NSData.class] && unique.length >= 20 && unique.length <= 64);
     return unique;
@@ -110,7 +120,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_app_autplay_desktop_media_MacRemoteMediaIdentityJni_staticWitness(JNIEnv *env, jobject, jstring bundle, jstring executable, jstring team) {
     @autoreleasepool {
         try {
-            NSData *value = staticWitness(text(env, bundle, 4096), text(env, executable, 4096), text(env, team, 10));
+            NSData *value = staticWitness(text(env, bundle, 4096), text(env, executable, 4096), text(env, team, 64));
             jbyteArray result = env->NewByteArray(jsize(value.length));
             if (result) env->SetByteArrayRegion(result, 0, jsize(value.length), reinterpret_cast<const jbyte *>(value.bytes));
             return result;
@@ -123,7 +133,7 @@ Java_app_autplay_desktop_media_MacRemoteMediaIdentityJni_runningMatches(JNIEnv *
     @autoreleasepool {
         try {
             requireIdentity(pid > 0 && pid <= INT32_MAX && expected != nullptr);
-            NSString *bundlePath = text(env, bundle, 4096), *helperPath = text(env, executable, 4096), *developer = text(env, team, 10);
+            NSString *bundlePath = text(env, bundle, 4096), *helperPath = text(env, executable, 4096), *developer = text(env, team, 64);
             NSData *fresh = staticWitness(bundlePath, helperPath, developer);
             jsize length = env->GetArrayLength(expected);
             requireIdentity(length == fresh.length && length <= 256);

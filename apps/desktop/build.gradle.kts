@@ -57,19 +57,31 @@ val signedIdentityRecord = nativeResourcesRoot.map { it.file("macos-arm64/native
 // Public reviewed build inputs. Supplying these does not sign code or grant Keychain access.
 val signedIdentityTeam = providers.gradleProperty("autplay.macDeveloperTeam").orElse("")
 val signedIdentityProfile = providers.gradleProperty("autplay.macProvisioningProfileUuid").orElse("")
+val communitySigner = providers.gradleProperty("autplay.macCommunitySignerSha256").orElse("")
+val communitySignerValue = communitySigner.get()
+check(communitySignerValue.isEmpty() || communitySignerValue.matches(Regex("[0-9a-f]{64}"))) {
+    "Community signing requires a lowercase certificate SHA-256"
+}
+check(communitySignerValue.isEmpty() || signedIdentityTeam.get().isEmpty() && signedIdentityProfile.get().isEmpty()) {
+    "Select exactly one macOS signing provider"
+}
 val prepareMacSignedIdentity = tasks.register("prepareMacSignedIdentity") {
     val supportedHost = hostIsMacArm64
     val developerTeam = signedIdentityTeam
     val provisioningProfile = signedIdentityProfile
     val identityRecord = signedIdentityRecord
+    val community = communitySigner
     onlyIf { supportedHost }
     inputs.property("developerTeam", developerTeam)
     inputs.property("provisioningProfileUuid", provisioningProfile)
+    inputs.property("communitySignerSha256", community)
     outputs.file(identityRecord)
     doLast {
         val team = developerTeam.get()
         val profile = provisioningProfile.get()
-        val content = if (team.isEmpty() && profile.isEmpty()) {
+        val content = if (community.get().isNotEmpty()) {
+            "autplay-community-identity-1\n${community.get()}\ncommunity-keychain-1\n"
+        } else if (team.isEmpty() && profile.isEmpty()) {
             "autplay-signed-identity-unavailable-1\n"
         } else {
             check(team.matches(Regex("[A-Z0-9]{10}")) && (profile.isEmpty() || profile.length == 36 &&
@@ -81,6 +93,16 @@ val prepareMacSignedIdentity = tasks.register("prepareMacSignedIdentity") {
         val output = identityRecord.get().asFile
         output.parentFile.mkdirs()
         output.writeText(content, Charsets.UTF_8)
+    }
+}
+// Compile the signer into every boundary that authenticates the application or its helpers.
+tasks.withType<Exec>().configureEach {
+    if (name in setOf("compileMacSecureState", "compileMacSourceAccess")) {
+        inputs.file(layout.projectDirectory.file("src/native/AutPlayCommunityIdentity.h"))
+        inputs.file(layout.projectDirectory.file("src/native/AutPlayCommunityKeychain.h"))
+        inputs.property("communitySignerSha256", communitySignerValue)
+        val signer = communitySignerValue
+        if (signer.isNotEmpty()) doFirst { args("-DAUTPLAY_COMMUNITY_SIGNER_SHA256=\"$signer\"") }
     }
 }
 // Use exactly the JDK running the canonical desktop gate, not a discovered/downloaded header kit.

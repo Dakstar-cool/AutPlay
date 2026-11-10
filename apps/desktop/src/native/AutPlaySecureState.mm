@@ -20,11 +20,17 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include "AutPlayCommunityIdentity.h"
 
 namespace {
 constexpr size_t kValue = 1048576, kControl = 65536, kTotal = 16777216;
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+NSString *const kService = @"app.autplay.desktop.community-state.v1." AUTPLAY_COMMUNITY_SIGNER_SHA256;
+NSString *const kKeyLabel = @"app.autplay.desktop.community-key.v1." AUTPLAY_COMMUNITY_SIGNER_SHA256;
+#else
 NSString *const kService = @"app.autplay.desktop.secure-state.v1";
 NSString *const kKeyLabel = @"app.autplay.desktop.device-key.v1";
+#endif
 NSString *const kBundle = @"app.autplay.desktop";
 struct Failure { const char *code; };
 void require(bool condition, const char *code = "CORRUPT") { if (!condition) throw Failure{code}; }
@@ -93,6 +99,9 @@ struct Owner {
     NSString *__strong profile;
     NSDate *__strong profileExpiration;
     std::thread::id thread;
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    CF<SecKeychainRef> keychain;
+#endif
     ~Owner() { if (lock >= 0) { flock(lock, LOCK_UN); ::close(lock); } }
 };
 std::mutex gMutex;
@@ -110,6 +119,11 @@ Owner& owner(jlong handle, bool requireIdentity = true) {
         require(gOwner->profileExpiration && gOwner->profileExpiration.timeIntervalSinceNow > 0, "IDENTITY_UNAVAILABLE");
         require(SecCodeCopySelf(kSecCSDefaultFlags, running.out()) == errSecSuccess &&
             SecCodeCheckValidity(running.value, kSecCSDefaultFlags, nullptr) == errSecSuccess, "IDENTITY_UNAVAILABLE");
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+        SecKeychainStatus flags = 0;
+        status(SecKeychainGetStatus(gOwner->keychain.value, &flags));
+        require((flags & kSecUnlockStateStatus) != 0, "LOCKED");
+#endif
     }
     return *gOwner;
 }
@@ -129,6 +143,20 @@ void validateStatic(NSURL *url, SecRequirementRef requirement) {
  * authoritative for profile authorization when DP Keychain is used; no fake entitlement grants.
  */
 ValidatedIdentity preflight(NSString *team, NSString *profileUuid) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    require([team isEqual:autplay_community::pin()] && [profileUuid isEqual:@"community-keychain-1"], "IDENTITY_UNAVAILABLE");
+    NSBundle *bundle = NSBundle.mainBundle;
+    require([bundle.bundleIdentifier isEqual:kBundle] && [bundle.bundleURL.pathExtension isEqual:@"app"], "IDENTITY_UNAVAILABLE");
+    NSURL *bundleURL = realURL(bundle.bundleURL), *executable = realURL(bundle.executableURL);
+    require([executable.URLByDeletingLastPathComponent.path isEqual:[[bundleURL URLByAppendingPathComponent:@"Contents/MacOS"] path]], "IDENTITY_UNAVAILABLE");
+    autplay_community::validate(bundleURL, kBundle, true);
+    Dl_info libraryInfo = {};
+    require(dladdr(reinterpret_cast<const void *>(&preflight), &libraryInfo) && libraryInfo.dli_fname, "IDENTITY_UNAVAILABLE");
+    NSURL *library = realURL([NSURL fileURLWithPath:[NSString stringWithUTF8String:libraryInfo.dli_fname]]);
+    require([library.path isEqual:[[bundleURL URLByAppendingPathComponent:@"Contents/app/resources/native/libAutPlaySecureState.dylib"] path]], "IDENTITY_UNAVAILABLE");
+    autplay_community::validate(library, @"app.autplay.desktop.secure-state.v1");
+    return {kService, NSDate.distantFuture};
+#else
     require(team.length == 10 && [team rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"] invertedSet]].location == NSNotFound, "IDENTITY_UNAVAILABLE");
     require([[NSUUID alloc] initWithUUIDString:profileUuid] != nil, "IDENTITY_UNAVAILABLE");
     NSBundle *bundle = NSBundle.mainBundle;
@@ -184,6 +212,7 @@ ValidatedIdentity preflight(NSString *team, NSString *profileUuid) {
     CF<CFDataRef> certificate(SecCertificateCopyData((__bridge SecCertificateRef)certificates[0]));
     require([profile[@"DeveloperCertificates"] containsObject:(__bridge NSData *)certificate.value], "IDENTITY_UNAVAILABLE");
     return {group, profile[@"ExpirationDate"]};
+#endif
 }
 
 int checkedDirectory(int parent, const char *name, bool create) {
@@ -210,37 +239,64 @@ int acquireLock() {
     } catch (...) { if (lock >= 0) ::close(lock); if (directory >= 0) ::close(directory); if (support >= 0) ::close(support); if (library >= 0) ::close(library); ::close(home); throw; }
 }
 
+#include "AutPlayCommunityKeychain.h"
+
 NSMutableDictionary *genericQuery(Owner &o, NSString *account = nil) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    NSMutableDictionary *query = [@{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService:kService,
+        (__bridge id)kSecMatchSearchList:@[(__bridge id)o.keychain.value]} mutableCopy];
+#else
     NSMutableDictionary *query = [@{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService:kService, (__bridge id)kSecAttrAccessGroup:o.group,
         (__bridge id)kSecUseDataProtectionKeychain:@YES, (__bridge id)kSecAttrSynchronizable:@NO,
         (__bridge id)kSecUseAuthenticationUI:(__bridge id)kSecUseAuthenticationUIFail} mutableCopy];
+#endif
     if (account) query[(__bridge id)kSecAttrAccount] = account; return query;
 }
 NSMutableDictionary *keyQuery(Owner &o, NSString *tag = nil) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    NSMutableDictionary *query = [@{(__bridge id)kSecClass:(__bridge id)kSecClassKey,
+        (__bridge id)kSecAttrKeyClass:(__bridge id)kSecAttrKeyClassPrivate,
+        (__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrLabel:kKeyLabel,
+        (__bridge id)kSecMatchSearchList:@[(__bridge id)o.keychain.value]} mutableCopy];
+#else
     NSMutableDictionary *query = [@{(__bridge id)kSecClass:(__bridge id)kSecClassKey,
         (__bridge id)kSecAttrKeyClass:(__bridge id)kSecAttrKeyClassPrivate,
         (__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
         (__bridge id)kSecAttrTokenID:(__bridge id)kSecAttrTokenIDSecureEnclave,
         (__bridge id)kSecAttrAccessGroup:o.group, (__bridge id)kSecUseDataProtectionKeychain:@YES,
         (__bridge id)kSecAttrSynchronizable:@NO, (__bridge id)kSecUseAuthenticationUI:(__bridge id)kSecUseAuthenticationUIFail} mutableCopy];
+#endif
     if (tag) { keyTag(tag); query[(__bridge id)kSecAttrApplicationTag] = [tag dataUsingEncoding:NSASCIIStringEncoding]; }
     else query[(__bridge id)kSecAttrLabel] = kKeyLabel;
     return query;
 }
 void genericAttributes(Owner &o, NSDictionary *attributes, NSString *account) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    require([attributes isKindOfClass:NSDictionary.class] && [attributes[(__bridge id)kSecAttrService] isEqual:kService] &&
+        [attributes[(__bridge id)kSecAttrAccount] isEqual:account] && ![attributes[(__bridge id)kSecAttrSynchronizable] boolValue]);
+#else
     require([attributes isKindOfClass:NSDictionary.class] && [attributes[(__bridge id)kSecAttrService] isEqual:kService] &&
         [attributes[(__bridge id)kSecAttrAccessGroup] isEqual:o.group] && [attributes[(__bridge id)kSecAttrAccount] isEqual:account] &&
         [attributes[(__bridge id)kSecAttrAccessible] isEqual:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly] &&
         ![attributes[(__bridge id)kSecAttrSynchronizable] boolValue]);
+#endif
 }
 NSMutableData *read(Owner &o, NSString *account, size_t maximum) {
     NSMutableDictionary *query = genericQuery(o, account);
     query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
     query[(__bridge id)kSecReturnAttributes] = @YES; query[(__bridge id)kSecReturnData] = @YES;
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    query[(__bridge id)kSecReturnRef] = @YES;
+#endif
     CF<CFTypeRef> result; OSStatus code = SecItemCopyMatching((__bridge CFDictionaryRef)query, result.out());
     if (code == errSecItemNotFound) return nil; status(code);
     NSDictionary *attributes = (__bridge NSDictionary *)result.value; genericAttributes(o, attributes, account);
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    communityACL((__bridge SecKeychainItemRef)attributes[(__bridge id)kSecValueRef], kSecACLAuthorizationDecrypt);
+#endif
     NSData *bytes = attributes[(__bridge id)kSecValueData]; require([bytes isKindOfClass:NSData.class] && bytes.length <= maximum);
     return [bytes mutableCopy];
 }
@@ -257,7 +313,12 @@ void exactRead(Owner &o, NSString *account, NSData *expected, size_t maximum) {
 void add(Owner &o, NSString *account, NSData *bytes, size_t maximum) {
     require(bytes.length >= 2 && bytes.length <= maximum);
     NSMutableDictionary *query = genericQuery(o, account);
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    CF<SecAccessRef> access(communityAccess());
+    communityAddQuery(o, query, access.value);
+#else
     query[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
+#endif
     query[(__bridge id)kSecValueData] = bytes;
     OSStatus code = SecItemAdd((__bridge CFDictionaryRef)query, nullptr);
     if (code != errSecDuplicateItem) status(code);
@@ -283,7 +344,11 @@ NSDictionary *inventory(Owner &o) {
         require(values.count <= 64 && total <= kTotal, "CAPACITY_REQUIRED");
     }
     for (NSDictionary *row in attributes(keyQuery(o), 32)) {
+#ifndef AUTPLAY_COMMUNITY_SIGNER_SHA256
         require([row[(__bridge id)kSecAttrAccessGroup] isEqual:o.group] && ![row[(__bridge id)kSecAttrSynchronizable] boolValue] && [row[(__bridge id)kSecAttrLabel] isEqual:kKeyLabel]);
+#else
+        require(![row[(__bridge id)kSecAttrSynchronizable] boolValue] && [row[(__bridge id)kSecAttrLabel] isEqual:kKeyLabel]);
+#endif
         NSData *tagData = row[(__bridge id)kSecAttrApplicationTag]; require([tagData isKindOfClass:NSData.class] && tagData.length <= 80);
         NSString *tag = [[NSString alloc] initWithData:tagData encoding:NSASCIIStringEncoding]; keyTag(tag); require(![keys containsObject:tag]); [keys addObject:tag];
     }
@@ -300,6 +365,16 @@ SecKeyRef existingKey(Owner &o, NSString *tag, bool allowAbsent = false) {
     CF<CFTypeRef> result; OSStatus code = SecItemCopyMatching((__bridge CFDictionaryRef)query, result.out());
     if (code == errSecItemNotFound) { if (allowAbsent) return nullptr; throw Failure{"KEY_MISSING"}; } status(code);
     NSDictionary *attributes = (__bridge NSDictionary *)result.value;
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    require([attributes isKindOfClass:NSDictionary.class] &&
+        [attributes[(__bridge id)kSecAttrApplicationTag] isEqual:[tag dataUsingEncoding:NSASCIIStringEncoding]] &&
+        [attributes[(__bridge id)kSecAttrKeyClass] isEqual:(__bridge id)kSecAttrKeyClassPrivate] &&
+        [attributes[(__bridge id)kSecAttrKeyType] isEqual:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom] &&
+        [attributes[(__bridge id)kSecAttrLabel] isEqual:kKeyLabel] &&
+        [attributes[(__bridge id)kSecAttrKeySizeInBits] intValue] == 256 &&
+        [attributes[(__bridge id)kSecAttrIsExtractable] isEqual:@NO] && [attributes[(__bridge id)kSecAttrIsSensitive] isEqual:@YES]);
+    communityACL((__bridge SecKeychainItemRef)attributes[(__bridge id)kSecValueRef], kSecACLAuthorizationSign);
+#else
     require([attributes isKindOfClass:NSDictionary.class] && [attributes[(__bridge id)kSecAttrAccessGroup] isEqual:o.group] &&
         [attributes[(__bridge id)kSecAttrApplicationTag] isEqual:[tag dataUsingEncoding:NSASCIIStringEncoding]] &&
         [attributes[(__bridge id)kSecAttrTokenID] isEqual:(__bridge id)kSecAttrTokenIDSecureEnclave] &&
@@ -308,6 +383,7 @@ SecKeyRef existingKey(Owner &o, NSString *tag, bool allowAbsent = false) {
         [attributes[(__bridge id)kSecAttrLabel] isEqual:kKeyLabel] &&
         [attributes[(__bridge id)kSecAttrAccessible] isEqual:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly] &&
         [attributes[(__bridge id)kSecAttrKeySizeInBits] intValue] == 256 && ![attributes[(__bridge id)kSecAttrSynchronizable] boolValue]);
+#endif
     SecKeyRef key = (__bridge SecKeyRef)attributes[(__bridge id)kSecValueRef]; require(key && CFGetTypeID(key) == SecKeyGetTypeID());
     CFRetain(key); return key;
 }
@@ -340,10 +416,13 @@ extern "C" JNIEXPORT jint JNICALL APJNI(abiVersion)(JNIEnv *, jobject) { return 
 extern "C" JNIEXPORT jlong JNICALL APJNI(open)(JNIEnv *env, jobject, jint abi, jstring teamValue, jstring profileValue) {
     APBEGIN
     require(abi == 1 && !gOwner, "IN_USE");
-    NSString *team = string(env, teamValue, 10), *profile = string(env, profileValue, 36);
+    NSString *team = string(env, teamValue, 64), *profile = string(env, profileValue, 36);
     ValidatedIdentity identity = preflight(team, profile);
     auto instance = std::make_unique<Owner>(); instance->group = identity.group; instance->profileExpiration = identity.expiration; instance->team = team; instance->profile = profile;
     instance->lock = acquireLock(); instance->thread = std::this_thread::get_id();
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    openCommunityKeychain(*instance);
+#endif
     require(gNext > 0 && gNext < INT64_MAX, "UNAVAILABLE"); instance->handle = gNext++;
     jlong result = instance->handle; gOwner = std::move(instance); return result;
     APEND(0)
@@ -408,6 +487,18 @@ extern "C" JNIEXPORT jbyteArray JNICALL APJNI(createNewKey)(JNIEnv *env, jobject
     CF<SecKeyRef> found(existingKey(o, tag, true));
     if (found.value) return output(env, point(found.value), 65);
     require([inventory(o)[@"keys"] count] < 32, "CAPACITY_REQUIRED");
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    CF<CFErrorRef> error; CF<SecAccessRef> access(communityAccess());
+    NSDictionary *attributes = @{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
+        (__bridge id)kSecAttrKeySizeInBits:@256, (__bridge id)kSecUseKeychain:(__bridge id)o.keychain.value,
+        (__bridge id)kSecAttrAccess:(__bridge id)access.value,
+        (__bridge id)kSecPrivateKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@YES,
+            (__bridge id)kSecAttrApplicationTag:[tag dataUsingEncoding:NSASCIIStringEncoding],
+            (__bridge id)kSecAttrLabel:kKeyLabel, (__bridge id)kSecAttrIsExtractable:@NO,
+            (__bridge id)kSecAttrIsSensitive:@YES, (__bridge id)kSecAttrCanSign:@YES,
+            (__bridge id)kSecAttrCanDerive:@NO, (__bridge id)kSecAttrCanDecrypt:@NO},
+        (__bridge id)kSecPublicKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@NO}};
+#else
     CF<CFErrorRef> error; CF<SecAccessControlRef> access(SecAccessControlCreateWithFlags(kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, kSecAccessControlPrivateKeyUsage, error.out()));
     require(access.value != nullptr, "UNAVAILABLE");
     NSDictionary *attributes = @{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
@@ -417,6 +508,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL APJNI(createNewKey)(JNIEnv *env, jobject
             (__bridge id)kSecAttrApplicationTag:[tag dataUsingEncoding:NSASCIIStringEncoding], (__bridge id)kSecAttrAccessGroup:o.group,
             (__bridge id)kSecAttrLabel:kKeyLabel, (__bridge id)kSecAttrAccessControl:(__bridge id)access.value},
         (__bridge id)kSecPublicKeyAttrs:@{(__bridge id)kSecAttrIsPermanent:@NO}};
+#endif
     CF<SecKeyRef> created(SecKeyCreateRandomKey((__bridge CFDictionaryRef)attributes, error.out()));
     require(created.value != nullptr, "OUTCOME_PENDING");
     CF<SecKeyRef> verified(existingKey(o, tag));

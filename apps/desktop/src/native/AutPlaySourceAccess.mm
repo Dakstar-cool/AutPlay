@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
 #import <Security/Security.h>
+#include "AutPlayCommunityIdentity.h"
 #include <jni.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -145,6 +146,20 @@ void external(Owner &o, NSString *path) {
     for(NSString *root in o.exclusions) require(!within(path,root) && !within(root,path), "source_internal_rejected");
 }
 void preflight(NSString *team) {
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    require([team isEqual:autplay_community::pin()], "source_identity_unavailable");
+    NSBundle *bundle = NSBundle.mainBundle;
+    FD bundleFd = openAbsolute(bundle.bundleURL.path);
+    require(S_ISDIR(statFd(bundleFd.value).st_mode), "source_identity_unavailable");
+    autplay_community::validate(bundle.bundleURL, @"app.autplay.desktop", true);
+    Dl_info libraryInfo = {};
+    require(dladdr(reinterpret_cast<const void*>(&preflight), &libraryInfo) && libraryInfo.dli_fname, "source_identity_unavailable");
+    NSString *library = [NSString stringWithUTF8String:libraryInfo.dli_fname];
+    NSString *expected = [bundle.bundlePath stringByAppendingPathComponent:@"Contents/app/resources/native/libAutPlaySourceAccess.dylib"];
+    require([library isEqual:expected], "source_identity_unavailable");
+    FD libraryFd = openAbsolute(library);
+    autplay_community::validate([NSURL fileURLWithPath:library], @"app.autplay.desktop.source-access.v1");
+#else
     require(team.length == 10 && [team rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"] invertedSet]].location == NSNotFound, "source_identity_unavailable");
     NSBundle *bundle = NSBundle.mainBundle;
     require([bundle.bundleIdentifier isEqual:@"app.autplay.desktop"] && [bundle.bundleURL.pathExtension isEqual:@"app"], "source_identity_unavailable");
@@ -172,6 +187,7 @@ void preflight(NSString *team) {
     require(SecRequirementCreateWithString((__bridge CFStringRef)libraryRequirementText,0,libraryRequirement.out()) == errSecSuccess &&
         SecStaticCodeCreateWithPath((__bridge CFURLRef)[NSURL fileURLWithPath:library],0,libraryCode.out()) == errSecSuccess &&
         SecStaticCodeCheckValidity(libraryCode.value,kSecCSStrictValidate | kSecCSCheckAllArchitectures,libraryRequirement.value) == errSecSuccess, "source_identity_unavailable");
+#endif
 }
 Owner &owner(jlong token, bool work = false) {
     require(lifetime && lifetime->token == token, "source_closed");
@@ -327,7 +343,7 @@ extern "C" JNIEXPORT jint JNICALL JNI(abiVersion)(JNIEnv*,jobject) { return 1; }
 extern "C" JNIEXPORT void JNICALL JNI(settleInitialization)(JNIEnv *e,jobject) { call(e,[&] { require(uncertainDescriptors.empty(),"source_drain_pending"); }); }
 extern "C" JNIEXPORT jlong JNICALL JNI(open)(JNIEnv *e,jobject,jint abi,jstring team,jstring managed) {
     return call(e,[&]() -> jlong {
-        require(abi==1 && !lifetime,"source_busy"); require(uncertainDescriptors.empty(),"source_drain_pending"); NSString *expectedTeam=text(e,team,10); preflight(expectedTeam);
+        require(abi==1 && !lifetime,"source_busy"); require(uncertainDescriptors.empty(),"source_drain_pending"); NSString *expectedTeam=text(e,team,64); preflight(expectedTeam);
         struct passwd *account=getpwuid(getuid()); require(account && account->pw_dir,"source_unavailable");
         NSString *home=[NSString stringWithUTF8String:account->pw_dir]; FD cursor=openAbsolute(home);
         auto state=std::make_unique<Owner>(); state->team=expectedTeam; state->home=home;

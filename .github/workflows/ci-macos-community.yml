@@ -1,0 +1,102 @@
+name: CI / macOS community
+on:
+  push:
+    branches: [codex/macos-port-ci-20261110]
+    paths:
+      - apps/desktop/**
+      - shared/**
+      - config/macos/**
+      - scripts/macos_community.py
+      - tests/native/**
+      - .github/workflows/ci-macos-community.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-community-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  community:
+    if: github.repository == 'Dakstar-cool/AutPlay'
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MICROSOFT_JDK_URL: https://aka.ms/download-jdk/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
+      MICROSOFT_JDK_SHA256: 13f45a64a3d3a1f2eec490527bf3e42913ac0ca3f95af2c5471446a2da8e5a22
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify Apple Silicon and pinned JDK archive
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          jdk_archive="${RUNNER_TEMP}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-delay 2 --output "$jdk_archive" "$MICROSOFT_JDK_URL"
+          printf '%s  %s\n' "$MICROSOFT_JDK_SHA256" "$jdk_archive" | shasum -a 256 --check
+      - name: Install pinned Microsoft JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: jdkfile
+          jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
+          java-version: "17.0.20"
+          architecture: aarch64
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: false
+      - name: Install and verify pinned probe Python
+        id: python
+        shell: bash
+        run: |
+          uv python install 3.14.7
+          autplay_python="$(uv python find 3.14.7)"
+          "$autplay_python" -c 'import platform; assert platform.python_version() == "3.14.7"; assert platform.machine() == "arm64"'
+          printf 'AUTPLAY_PYTHON=%s\n' "$autplay_python" >> "$GITHUB_ENV"
+      - name: Install private signer in disposable keychain
+        env:
+          AUTPLAY_COMMUNITY_P12: ${{ secrets.AUTPLAY_COMMUNITY_P12 }}
+          AUTPLAY_COMMUNITY_P12_PASSWORD: ${{ secrets.AUTPLAY_COMMUNITY_P12_PASSWORD }}
+        run: '"$AUTPLAY_PYTHON" scripts/macos_community.py prepare'
+      - name: Build community app and run shared and desktop tests
+        shell: bash
+        run: |
+          signer="$(cat config/macos/community-signer.sha256)"
+          bash ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
+            --max-workers=1 --dependency-verification=strict -Pautplay.desktopOnly=true \
+            "-Pautplay.macCommunitySignerSha256=$signer" \
+            :shared:domain:jvmTest :shared:application:jvmTest :shared:data:jvmTest \
+            :shared:ui:jvmTest :apps:desktop:test :apps:desktop:createDistributable
+      - name: Sign, test real Keychain and package DMG
+        run: '"$AUTPLAY_PYTHON" scripts/macos_community.py package'
+      - name: Remove temporary signing and account keychains
+        if: always()
+        run: '"$AUTPLAY_PYTHON" scripts/macos_community.py cleanup'
+      - name: Retain acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-community-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/macos-community/*.json
+            build/macos-audio-spike/desktop-startup.json
+            shared/*/build/test-results/jvmTest/
+            apps/desktop/build/test-results/test/
+            apps/desktop/build/compose/logs/
+      - name: Retain verified friend-installable package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: AutPlay-community-arm64-${{ github.sha }}
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            build/macos-community/*.dmg
+            build/macos-community/SHA256SUMS
+            build/macos-community/community-signer.*

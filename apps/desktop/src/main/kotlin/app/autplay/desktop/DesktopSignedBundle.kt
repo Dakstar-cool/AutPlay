@@ -49,7 +49,10 @@ internal fun readDesktopSignedBundle(): DesktopSignedBundle? = try {
                                 .onMalformedInput(CodingErrorAction.REPORT)
                                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(buffer).toString()
                             val fields = text.split('\n')
-                            if (fields.size != 4 || fields[0] != "autplay-signed-identity-1" ||
+                            if (fields.size == 4 && fields[0] == "autplay-community-identity-1" &&
+                                fields[1].matches(Regex("[0-9a-f]{64}")) && fields[2] == "community-keychain-1" && fields[3].isEmpty())
+                                DesktopSignedBundle(bundle, fields[1], fields[2])
+                            else if (fields.size != 4 || fields[0] != "autplay-signed-identity-1" ||
                                 fields[3].isNotEmpty() || (fields[2] != "-" && (fields[2].length != 36 ||
                                     !UUID.fromString(fields[2]).toString().equals(fields[2], ignoreCase = true)))) null
                             else DesktopSignedBundle(bundle, fields[1], fields[2].takeUnless { it == "-" })

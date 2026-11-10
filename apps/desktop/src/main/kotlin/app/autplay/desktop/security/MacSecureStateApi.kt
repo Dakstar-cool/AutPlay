@@ -6,11 +6,15 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import kotlinx.serialization.json.*
 
-/** Team/profile are reviewed signed build inputs. There is deliberately no default Team ID. */
+/** Explicit signed build identity. Community mode never falls back from Developer ID. */
 public class MacSecureStateIdentity(public val developerTeam: String, public val provisioningProfileUuid: String) {
+    public val community: Boolean get() = provisioningProfileUuid == "community-keychain-1"
     init {
-        secureRequire(developerTeam.length == 10 && developerTeam.all { it in 'A'..'Z' || it in '0'..'9' }, SecureStateStatus.IDENTITY_UNAVAILABLE)
-        secureRequire(provisioningProfileUuid.length == 36 && runCatching { java.util.UUID.fromString(provisioningProfileUuid) }.isSuccess, SecureStateStatus.IDENTITY_UNAVAILABLE)
+        if (community) secureRequire(developerTeam.matches(Regex("[0-9a-f]{64}")), SecureStateStatus.IDENTITY_UNAVAILABLE)
+        else {
+            secureRequire(developerTeam.length == 10 && developerTeam.all { it in 'A'..'Z' || it in '0'..'9' }, SecureStateStatus.IDENTITY_UNAVAILABLE)
+            secureRequire(provisioningProfileUuid.length == 36 && runCatching { java.util.UUID.fromString(provisioningProfileUuid) }.isSuccess, SecureStateStatus.IDENTITY_UNAVAILABLE)
+        }
     }
     override fun toString(): String = "MacSecureStateIdentity(<redacted>)"
 }

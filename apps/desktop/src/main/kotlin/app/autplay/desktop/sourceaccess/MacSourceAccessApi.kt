@@ -12,10 +12,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.*
 
-/** Public Developer ID input only. G1 does not depend on K's provisioning profile/entitlements. */
+/** Public Developer Team or community certificate SHA-256; native code pins the build mode. */
 public class MacSourceAccessIdentity(public val developerTeam: String) {
     init {
-        if (!developerTeam.matches(Regex("[A-Z0-9]{10}"))) throw SourceAccessFailure("source_identity_unavailable")
+        if (!developerTeam.matches(Regex("[A-Z0-9]{10}|[0-9a-f]{64}"))) throw SourceAccessFailure("source_identity_unavailable")
     }
     override fun toString(): String = "MacSourceAccessIdentity(<redacted>)"
 }
