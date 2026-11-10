@@ -778,8 +778,12 @@ internal class DesktopAccountProductionRuntime private constructor(
                 readMeteredPreference, saveMeteredPreference)
             try { owner.start(initialLocal, createLocal, allowMetered, initializeVirgin) }
             catch (failure: Throwable) {
-                owner.availabilityMutable.value = if (failure is SecureStateFailure && failure.status == SecureStateStatus.IDENTITY_UNAVAILABLE)
-                    DesktopAccountAvailability.IdentityUnavailable else DesktopAccountAvailability.RecoveryRequired
+                owner.availabilityMutable.value = when ((failure as? SecureStateFailure)?.status) {
+                    SecureStateStatus.IDENTITY_UNAVAILABLE -> DesktopAccountAvailability.IdentityUnavailable
+                    SecureStateStatus.LOCKED -> DesktopAccountAvailability.KeychainLocked
+                    SecureStateStatus.ACCESS_DENIED -> DesktopAccountAvailability.KeychainAccessRequired
+                    else -> DesktopAccountAvailability.RecoveryRequired
+                }
                 owner.binding = DesktopAccountWorkspaceBinding.unavailable(owner.availabilityMutable.value)
                 if (failure is CancellationException) owner.beginClose()
                 // The returned owner retains uncertain K/J startup. No replacement store/fake authority.

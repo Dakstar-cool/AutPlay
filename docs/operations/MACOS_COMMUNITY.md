@@ -15,7 +15,7 @@ The sealed identity record and all native identity boundaries must agree with
 this compiled pin. No environment variable or user file can change it at runtime.
 
 The native bootstrap checks its certificate, designated requirement, Hardened
-Runtime flags and the complete sealed bundle before executing the JVM launcher.
+Runtime flags and the complete sealed bundle before loading the bundled JVM.
 It removes inherited JVM injection options and `DYLD_*` variables. Java and its
 libraries are bundled and individually signed. Native account/source libraries
 and the remote-media helper retain their exact identifiers and signer checks;
@@ -60,15 +60,20 @@ an end-to-end account/sync acceptance claim.
 * Keychain lock state is enforced on every protected operation. Locking the screen
   does not necessarily lock the login Keychain; its settings remain the user's.
 * Without an Apple Team ID, library validation cannot accept the bundled JVM under
-  its usual same-Team-ID rule. Only the JVM launcher receives `allow-jit` and
-  `disable-library-validation`. The native bootstrap and native helpers retain
-  library validation. Debugging, DYLD injection and unsigned executable memory
+  its usual same-Team-ID rule. Only the main launcher receives `allow-jit` and
+  `disable-library-validation`; native helpers retain library validation. The
+  main executable validates the seal and strips injection settings before loading
+  the pinned JDK's JLI in-process. No alternate account-authorized JVM launcher is
+  shipped. Debugging, DYLD injection and unsigned executable memory
   entitlements remain forbidden. Bundle validation before Java starts reduces
   this exposure, but does not make it equivalent to Apple's library validation.
 * macOS can partition self-signed Keychain access by code hash. A changed release
   can require explicit OS reauthorization even with the same certificate. Never
   fix this by granting all apps access or assigning broad Apple tool partitions
-  to account keys. Update/reauthorization qualification is tracked separately.
+  to account keys. The explicit **Reopen accounts** action closes the old account
+  owner, validates the new bundle and lets macOS request approval for existing
+  items. It neither collects the password nor changes item contents. Interactive
+  update/reauthorization qualification is tracked separately from automated CI.
 
 ## Signing custody and workflow
 
@@ -85,7 +90,9 @@ dependency verification. It does not run on pull requests or use a paid larger
 runner. Private signing material is installed in an ephemeral signing keychain;
 synthetic account tests use a different disposable keychain. The CI-only
 `apple-tool:` grant belongs to the signing certificate, never to account items.
-Temporary keychains and user trust changes are removed even on failure.
+Temporary keychains and admin trust changes are removed even on failure. The
+signing-only trust entry is also removed before acceptance launches, so runtime
+tests do not rely on recipients trusting the certificate globally.
 
 The gate builds/tests the shared and desktop modules, signs the app, checks the
 real production JNI in a separately sealed probe app, starts the production GUI

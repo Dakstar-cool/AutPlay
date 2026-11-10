@@ -26,6 +26,13 @@ public class MacSecureStateIdentity(public val developerTeam: String, public val
  */
 public fun macSecureStateApi(identity: MacSecureStateIdentity): SecureNativePort = MacSecureStateLibrary.load(identity)
 
+/** Explicit user reopen, after retiring the prior owner; never called by background retry. */
+internal fun authorizeMacCommunityKeychain(identity: MacSecureStateIdentity): Unit {
+    secureRequire(identity.community, SecureStateStatus.IDENTITY_UNAVAILABLE)
+    MacSecureStateLibrary.load(identity)
+    MacSecureStateJni.authorizeCommunity(identity.developerTeam)
+}
+
 private object MacSecureStateLibrary {
     private var loaded: Boolean = false
     @Synchronized fun load(identity: MacSecureStateIdentity): SecureNativePort {
@@ -90,6 +97,7 @@ private class MacSecureStateApi(private val identity: MacSecureStateIdentity) : 
 /** Exact JNI ABI1 descriptors; no overloads, arbitrary service/query/domain or private-key API. */
 internal object MacSecureStateJni {
     external fun abiVersion(): Int
+    external fun authorizeCommunity(signer: String)
     external fun open(abi: Int, developerTeam: String, profileUuid: String): Long
     external fun inventory(handle: Long): ByteArray
     external fun readControl(handle: Long): ByteArray?

@@ -36,6 +36,10 @@ struct Failure { const char *code; };
 void require(bool condition, const char *code = "CORRUPT") { if (!condition) throw Failure{code}; }
 void status(OSStatus code) {
     if (code == errSecSuccess) return;
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    // The owner checks actual Keychain lock state before each protected operation.
+    if (code == errSecInteractionNotAllowed) throw Failure{"ACCESS_DENIED"};
+#endif
     if (code == errSecInteractionNotAllowed || code == errSecNotAvailable) throw Failure{"LOCKED"};
     if (code == errSecMissingEntitlement) throw Failure{"IDENTITY_UNAVAILABLE"};
     if (code == errSecAuthFailed || code == errSecUserCanceled || code == errSecNoAccessForItem) throw Failure{"ACCESS_DENIED"};
@@ -413,6 +417,41 @@ const char *const domains[] = {
 #define APENDVOID } catch (const Failure &failure) { throwJava(env, failure.code); } catch (...) { throwJava(env, "UNAVAILABLE"); } } @catch (NSException *) { throwJava(env, "CORRUPT"); } }
 
 extern "C" JNIEXPORT jint JNICALL APJNI(abiVersion)(JNIEnv *, jobject) { return 1; }
+// Only the explicit UI reopen action calls this while the account graph is closed. macOS
+// owns the password/approval UI; no password or private key enters the JVM. No item is reset.
+extern "C" JNIEXPORT void JNICALL APJNI(authorizeCommunity)(JNIEnv *env, jobject, jstring signer) {
+    APBEGIN
+#ifdef AUTPLAY_COMMUNITY_SIGNER_SHA256
+    require(!gOwner, "IN_USE");
+    preflight(string(env, signer, 64), @"community-keychain-1");
+    Owner o; o.group = kService; o.lock = acquireLock(); openCommunityKeychain(o);
+    struct Interaction {
+        Interaction() { status(SecKeychainSetUserInteractionAllowed(true)); }
+        ~Interaction() { SecKeychainSetUserInteractionAllowed(false); }
+    } interaction;
+    for (NSDictionary *row in attributes(genericQuery(o), 65)) {
+        NSString *account = row[(__bridge id)kSecAttrAccount];
+        genericAttributes(o, row, account);
+        require([account isEqual:@"k1.control"] || ([account hasPrefix:@"k1.value."] && uuid([account substringFromIndex:9])));
+        NSMutableData *bytes = read(o, account, [account isEqual:@"k1.control"] ? kControl : kValue);
+        require(bytes != nil); wipe(bytes);
+    }
+    for (NSDictionary *row in attributes(keyQuery(o), 32)) {
+        NSData *tagData = row[(__bridge id)kSecAttrApplicationTag];
+        require([tagData isKindOfClass:NSData.class] && tagData.length <= 80);
+        NSString *tag = [[NSString alloc] initWithData:tagData encoding:NSASCIIStringEncoding];
+        CF<SecKeyRef> key(existingKey(o, tag)); CF<CFErrorRef> error;
+        // A separate local-only domain cannot authorize any server operation.
+        NSData *message = [@"autplay:local-keychain-reauthorization:v1\n" dataUsingEncoding:NSASCIIStringEncoding];
+        CF<CFDataRef> proof(SecKeyCreateSignature(key.value, kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+            (__bridge CFDataRef)message, error.out()));
+        require(proof.value != nullptr, "ACCESS_DENIED");
+    }
+#else
+    throw Failure{"IDENTITY_UNAVAILABLE"};
+#endif
+    APENDVOID
+}
 extern "C" JNIEXPORT jlong JNICALL APJNI(open)(JNIEnv *env, jobject, jint abi, jstring teamValue, jstring profileValue) {
     APBEGIN
     require(abi == 1 && !gOwner, "IN_USE");

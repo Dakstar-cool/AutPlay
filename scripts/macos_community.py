@@ -66,22 +66,30 @@ def prepare() -> None:
     p12.write_bytes(base64.b64decode(os.environ["AUTPLAY_COMMUNITY_P12"], validate=True))
     p12.chmod(0o600)
     old_default = run("security", "default-keychain", "-d", "user").stdout.strip().strip('"')
+    old_search = [line.strip().strip('"') for line in run("security", "list-keychains", "-d", "user").stdout.splitlines()]
     signing = TEMP / "signing.keychain-db"
     accounts = Path.home() / "Library/Keychains" / ("autplay-ci-" + secrets.token_hex(8) + ".keychain-db")
-    values = {"signing": str(signing), "accounts": str(accounts), "old_default": old_default,
+    owner_keychain = accounts.with_name(accounts.stem + "-owner.keychain-db")
+    values = {"signing": str(signing), "accounts": str(accounts), "owner_keychain": str(owner_keychain), "old_default": old_default, "old_search": old_search,
               "password": secrets.token_urlsafe(48), "account_password": secrets.token_urlsafe(48),
-              "sha1": hashlib.sha1(cert_bytes).hexdigest()}
+              "sha1": hashlib.sha1(cert_bytes).hexdigest().upper()}
     STATE.write_text(json.dumps(values)); STATE.chmod(0o600)
-    for path, password in ((signing, values["password"]), (accounts, values["account_password"])):
+    for path, password in ((signing, values["password"]), (accounts, values["account_password"]), (owner_keychain, values["account_password"])):
         run("security", "create-keychain", "-p", password, path)
         run("security", "set-keychain-settings", "-lut", "7200", path)
         run("security", "unlock-keychain", "-p", password, path)
     run("security", "import", p12, "-k", signing, "-P", os.environ["AUTPLAY_COMMUNITY_P12_PASSWORD"], "-T", "/usr/bin/codesign")
     # This permission belongs ONLY to the CI certificate keychain, never account items.
-    run("security", "set-key-partition-list", "-S", "apple-tool:", "-s", "-k", values["password"], signing)
-    # User trust changes request an interactive SecurityAgent confirmation. This disposable
-    # hosted runner has passwordless sudo; use the admin trust domain and remove it at cleanup.
-    run("sudo", "-n", "security", "add-trusted-cert", "-d", "-r", "trustRoot", "-p", "codeSign", "-k", signing, cert)
+    run("security", "set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", values["password"], signing)
+    run("security", "list-keychains", "-d", "user", "-s", signing, accounts, owner_keychain, *old_search)
+    print(run("security", "find-identity", "-p", "codesigning", signing).stdout, flush=True)
+    # Fail before the expensive build if this PKCS#12 cannot sign. A pinned designated
+    # requirement does not require introducing our root into the recipient's trust store.
+    check_binary = TEMP / "signer-check"
+    shutil.copy2("/usr/bin/true", check_binary)
+    run("codesign", "--force", "--sign", values["sha1"], "--keychain", signing,
+        "--options", "runtime", "--timestamp=none", check_binary)
+    run("codesign", "--verify", "--strict", check_binary)
     run("security", "default-keychain", "-d", "user", "-s", accounts)
     p12.unlink()
     print("Community signing identity installed; account test keychain isolated")
@@ -103,7 +111,7 @@ def sign(app: Path) -> None:
             args += ["--entitlements", str(entitlements)]
         run(*args, path)
     for path in sorted(app.rglob("*"), key=lambda item: len(item.parts), reverse=True):
-        if path.is_symlink() or not path.is_file() or path in (app / "Contents/MacOS/AutPlay", app / "Contents/MacOS/AutPlayJVM"):
+        if path.is_symlink() or not path.is_file() or path == app / "Contents/MacOS/AutPlay":
             continue
         with path.open("rb") as source:
             magic = source.read(4)
@@ -113,8 +121,7 @@ def sign(app: Path) -> None:
     runtime = app / "Contents/runtime"
     if (runtime / "Contents/Info.plist").exists():
         seal(runtime, "app.autplay.desktop.runtime")
-    seal(app / "Contents/MacOS/AutPlayJVM", "app.autplay.desktop", True)
-    seal(app, "app.autplay.desktop")
+    seal(app, "app.autplay.desktop", True)
     run("codesign", "--verify", "--deep", "--strict", "--all-architectures", app)
 
 
@@ -124,9 +131,9 @@ def probe() -> None:
     classes = TEMP / "classes"
     classes.mkdir()
     jdk = Path(os.environ["JAVA_HOME"])
-    run(jdk / "bin/javac", "-d", classes, ROOT / "tests/native/CommunityKeychainProbe.java")
+    run(jdk / "bin/javac", "-cp", str(probe_app / "Contents/app/*"), "-d", classes, ROOT / "tests/native/CommunityKeychainProbe.java")
     run(jdk / "bin/jar", "--create", "--file", probe_app / "Contents/app/community-probe.jar", "-C", classes, ".")
-    cfg = probe_app / "Contents/app/AutPlayJVM.cfg"
+    cfg = probe_app / "Contents/app/AutPlay.cfg"
     text = cfg.read_text()
     text, count = re.subn(r"^app.mainclass=.*$", "app.mainclass=app.autplay.desktop.security.CommunityKeychainProbe", text, flags=re.M)
     if count != 1:
@@ -142,7 +149,14 @@ def probe() -> None:
     executable = probe_app / "Contents/MacOS/AutPlay"
     passed = []
     for phase in ("create", "restart", "lock"):
-        result = run(executable, phase, timeout=90)
+        if phase == "restart":
+            os.environ["JAVA_TOOL_OPTIONS"] = "-javaagent:/autplay-must-not-load.jar"
+            os.environ["_JAVA_OPTIONS"] = "-javaagent:/autplay-must-not-load.jar"
+        try:
+            result = run(executable, phase, timeout=90)
+        finally:
+            os.environ.pop("JAVA_TOOL_OPTIONS", None)
+            os.environ.pop("_JAVA_OPTIONS", None)
         if f"AUTPLAY_COMMUNITY_PROBE_PASSED {phase}" not in result.stdout.splitlines():
             raise RuntimeError("Missing Keychain acceptance marker")
         passed.append(phase)
@@ -155,6 +169,13 @@ def probe() -> None:
     run("codesign", "--force", "--sign", "-", "--identifier", "example.foreign.reader", foreign)
     run(foreign, pin(), timeout=30)
     passed.append("foreign-program-keychain-read-denied")
+    run("security", "default-keychain", "-d", "user", "-s", values["owner_keychain"])
+    for phase in ("owner-create", "owner-restart"):
+        result = run(executable, phase, timeout=90)
+        if f"AUTPLAY_COMMUNITY_PROBE_PASSED {phase}" not in result.stdout.splitlines():
+            raise RuntimeError("Missing production owner acceptance marker")
+        passed.append(phase)
+    run("security", "default-keychain", "-d", "user", "-s", values["accounts"])
     # A changed sealed resource must be rejected even if the executable still starts.
     record = probe_app / "Contents/app/resources/native/AutPlaySignedIdentity"
     record.write_text(record.read_text() + "tampered\n")
@@ -162,16 +183,19 @@ def probe() -> None:
     if result.returncode == 0 or "AUTPLAY_COMMUNITY_PROBE_PASSED" in result.stdout:
         raise RuntimeError("Tampered package accepted")
     report = {"status": "passed", "source_commit": os.environ["GITHUB_SHA"], "signer_sha256": pin(),
-              "checks": passed + ["device-proof-verification", "private-key-export-rejected", "sealed-resource-tamper-rejected"],
+              "checks": passed + ["device-proof-verification", "private-key-export-rejected", "sealed-resource-tamper-rejected", "java-agent-environment-rejected"],
               "scope": "real file-based Keychain and production JNI; synthetic account data; no production server"}
     (OUT / "keychain-acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
 def package() -> None:
-    (APP / "Contents/MacOS/AutPlay").rename(APP / "Contents/MacOS/AutPlayJVM")
-    (APP / "Contents/app/AutPlay.cfg").rename(APP / "Contents/app/AutPlayJVM.cfg")
+    # Replace the jpackage executable. Keeping an account-authorized alternate launcher would
+    # let an attacker skip the native seal/environment gate by invoking that executable.
+    (APP / "Contents/MacOS/AutPlay").unlink()
+    jdk = Path(os.environ["JAVA_HOME"])
     run("xcrun", "clang++", "-std=c++17", "-O2", "-fobjc-arc", "-target", "arm64-apple-macosx13.0",
         '-DAUTPLAY_COMMUNITY_SIGNER_SHA256="' + pin() + '"',
+        "-I" + str(jdk / "include"), "-I" + str(jdk / "include/darwin"),
         "-framework", "Foundation", "-framework", "Security",
         ROOT / "apps/desktop/src/native/AutPlayCommunityLauncher.mm", "-o", APP / "Contents/MacOS/AutPlay")
     sign(APP)
@@ -198,11 +222,18 @@ def cleanup() -> None:
     if not STATE.exists():
         return
     values = state()
-    run("security", "default-keychain", "-d", "user", "-s", values["old_default"], check=False)
-    for key in ("accounts", "signing"):
-        run("security", "delete-keychain", values[key], check=False)
-    run("sudo", "-n", "security", "remove-trusted-cert", "-d", ROOT / "config/macos/community-signer.pem", check=False)
+    commands = [("security", "default-keychain", "-d", "user", "-s", values["old_default"]),
+                ("security", "list-keychains", "-d", "user", "-s", *values["old_search"])]
+    commands += [("security", "delete-keychain", values[key]) for key in ("accounts", "signing", "owner_keychain")]
+    problems = []
+    for command in commands:
+        try:
+            run(*command, timeout=20)
+        except RuntimeError:
+            problems.append(command[1])
     shutil.rmtree(TEMP)
+    if problems:
+        raise RuntimeError("Disposable keychain cleanup failed: " + ", ".join(problems))
 
 
 if __name__ == "__main__":

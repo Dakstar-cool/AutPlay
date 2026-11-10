@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
+import java.time.Instant;
+import java.util.concurrent.TimeUnit;
 
 /** Runs only in a separately packaged CI app on a disposable macOS keychain. */
 public final class CommunityKeychainProbe {
@@ -26,7 +28,22 @@ public final class CommunityKeychainProbe {
         String pin = Files.readAllLines(nativeDir.resolve("AutPlaySignedIdentity")).get(1);
         System.load(nativeDir.resolve("libAutPlaySecureState.dylib").toString());
         System.load(nativeDir.resolve("libCommunityProbeChecks.dylib").toString());
-        MacSecureStateJni api = new MacSecureStateJni();
+        if (args[0].startsWith("owner-")) {
+            var owner = new DesktopSecureStateOwner(MacSecureStateApiKt.macSecureStateApi(
+                new MacSecureStateIdentity(pin, "community-keychain-1")), Instant::now);
+            try {
+                var control = owner.open().get(30, TimeUnit.SECONDS);
+                if (args[0].equals("owner-create")) {
+                    check(control == null);
+                    control = owner.initializeEmpty(false).get(30, TimeUnit.SECONDS);
+                }
+                check(control != null && control.getRevision() == 0 && control.getSelected().isEmpty());
+                check(owner.snapshot().get(30, TimeUnit.SECONDS).equals(control));
+            } finally { owner.close().get(30, TimeUnit.SECONDS); }
+            System.out.println("AUTPLAY_COMMUNITY_PROBE_PASSED " + args[0]);
+            return;
+        }
+        MacSecureStateJni api = MacSecureStateJni.INSTANCE;
         long handle = api.open(1, pin, "community-keychain-1");
         try {
             if (args[0].equals("create")) {
@@ -61,18 +78,4 @@ public final class CommunityKeychainProbe {
         } finally { api.close(handle); }
         System.out.println("AUTPLAY_COMMUNITY_PROBE_PASSED " + args[0]);
     }
-}
-
-// JNI ABI fixture. Its class precedes production jars only in the separate CI package.
-final class MacSecureStateJni {
-    native long open(int abi, String signer, String provider);
-    native byte[] readControl(long handle);
-    native void initializeControl(long handle, byte[] value);
-    native void publishControl(long handle, byte[] before, byte[] after);
-    native void stageValue(long handle, String id, byte[] value);
-    native byte[] readValue(long handle, String id);
-    native byte[] createNewKey(long handle, String tag);
-    native byte[] publicKey(long handle, String tag);
-    native byte[] sign(long handle, String tag, int operation, byte[] digest);
-    native void close(long handle);
 }

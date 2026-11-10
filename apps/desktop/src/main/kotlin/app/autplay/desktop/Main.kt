@@ -264,7 +264,8 @@ public fun main(args: Array<String>): Unit {
                     if (smoke || closing || initializingAccounts || accountInitializationFailed ||
                         currentRuntime.get() !== expectedHost) return
                     val allowed = if (initializeVirgin) setOf(DesktopAccountAvailability.InitializeRequired)
-                        else setOf(DesktopAccountAvailability.Retired, DesktopAccountAvailability.RecoveryRequired)
+                        else setOf(DesktopAccountAvailability.Retired, DesktopAccountAvailability.RecoveryRequired,
+                            DesktopAccountAvailability.KeychainLocked, DesktopAccountAvailability.KeychainAccessRequired)
                     val availability = expectedHost.accounts?.availability?.value ?: return
                     if (availability !in allowed) return
                     initializingAccounts = true
@@ -280,6 +281,9 @@ public fun main(args: Array<String>): Unit {
                                     else {
                                         expectedHost.close()
                                         if (shutdownOwner.requested.value) null else {
+                                            if (!initializeVirgin) readDesktopSignedBundle()?.identity?.takeIf { it.community }?.let {
+                                                app.autplay.desktop.security.authorizeMacCommunityKeychain(it)
+                                            }
                                             val next = DesktopRuntime.open(dataRoot, initializeAccounts = initializeVirgin)
                                             currentRuntime.set(next)
                                             if (shutdownOwner.requested.value) { next.beginClose(); next.close(); null } else next
@@ -1348,6 +1352,12 @@ public fun DesktopApp(
                             DesktopAccountAvailability.Retired -> if (ru)
                                 "Доступ к аккаунтам приостановлен. Откройте их заново для повторной проверки."
                                 else "Account access is suspended. Reopen accounts to revalidate."
+                            DesktopAccountAvailability.KeychainLocked -> if (ru)
+                                "Связка ключей заблокирована. Разблокируйте её в macOS и откройте аккаунты заново. Данные сохранены."
+                                else "Keychain is locked. Unlock it in macOS, then reopen accounts. Your data is preserved."
+                            DesktopAccountAvailability.KeychainAccessRequired -> if (ru)
+                                "macOS требует разрешить доступ к сохранённым ключам. Нажмите «Открыть аккаунты заново» и подтвердите доступ в системном окне."
+                                else "macOS requires permission to access saved keys. Reopen accounts and approve access in the system dialog."
                             DesktopAccountAvailability.Opening -> if (ru) "Открытие аккаунтов..." else "Opening accounts..."
                             else -> if (ru) "Требуется восстановление доступа. Существующие данные сохранены."
                                 else "Account access needs recovery. Existing data is preserved."
@@ -1362,6 +1372,8 @@ public fun DesktopApp(
                             }
                         }
                         if ((accountAvailability == DesktopAccountAvailability.Retired ||
+                                accountAvailability == DesktopAccountAvailability.KeychainLocked ||
+                                accountAvailability == DesktopAccountAvailability.KeychainAccessRequired ||
                                 accountAvailability == DesktopAccountAvailability.RecoveryRequired) && onReopenAccounts != null) {
                             TextButton(enabled = !initializingAccounts && !lifecycleState.closing && !accountInitializationFailed,
                                 onClick = { if (navigationCurrent() && !lifecycleState.closing) onReopenAccounts() }) {

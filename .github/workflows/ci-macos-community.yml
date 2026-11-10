@@ -69,6 +69,7 @@ jobs:
           bash ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
             --max-workers=1 --dependency-verification=strict -Pautplay.desktopOnly=true \
             "-Pautplay.macCommunitySignerSha256=$signer" \
+            :apps:desktop:compileMacSecureState :apps:desktop:compileMacSourceAccess \
             :shared:domain:jvmTest :shared:application:jvmTest :shared:data:jvmTest \
             :shared:ui:jvmTest :apps:desktop:test :apps:desktop:createDistributable
       - name: Sign, test real Keychain and package DMG

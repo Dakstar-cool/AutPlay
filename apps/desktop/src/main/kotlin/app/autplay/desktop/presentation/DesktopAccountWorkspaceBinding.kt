@@ -9,7 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 internal enum class DesktopAccountAvailability {
-    Opening, InitializeRequired, Available, IdentityUnavailable, RecoveryRequired, Retired,
+    Opening, InitializeRequired, Available, IdentityUnavailable, KeychainLocked, KeychainAccessRequired,
+    RecoveryRequired, Retired,
 }
 
 internal enum class DesktopContextSettlement { Ready, Settling, Failed }

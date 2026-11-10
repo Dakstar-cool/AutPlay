@@ -14,9 +14,11 @@ extern "C" JNIEXPORT void JNICALL Java_app_autplay_desktop_security_CommunityKey
             (__bridge id)kSecReturnRef:@YES};
         if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &key) != errSecSuccess || !key) { failed(env); return; }
         CFDataRef exported = nullptr;
-        OSStatus result = SecItemExport(key, kSecFormatWrappedPKCS8, 0, nullptr, &exported);
-        // An invalid export configuration could fail even for an exportable key. Test both
-        // supported raw export paths and also check the immutable key attributes in production.
+        SecItemImportExportKeyParameters parameters = {};
+        parameters.version = SEC_KEY_IMPORT_EXPORT_PARAMS_VERSION;
+        parameters.passphrase = CFSTR("synthetic-export-test-password");
+        OSStatus result = SecItemExport(key, kSecFormatWrappedPKCS8, 0, &parameters, &exported);
+        // Test encrypted and raw export, as well as immutable attributes in production.
         CFErrorRef error = nullptr;
         CFDataRef rawKey = SecKeyCopyExternalRepresentation((SecKeyRef)key, &error);
         CFDataRef plain = nullptr;
