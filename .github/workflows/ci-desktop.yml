@@ -1,4 +1,4 @@
-name: CI / macOS desktop foundation
+name: CI / macOS desktop
 
 on:
   push:
@@ -13,6 +13,8 @@ on:
       - settings.gradle.kts
       - gradle.properties
       - scripts/check-desktop.*
+      - scripts/macos_ci.py
+      - tests/tools/test_macos_ci.py
       - .github/workflows/ci-desktop.yml
   workflow_dispatch:
 
@@ -27,7 +29,7 @@ jobs:
   desktop-arm64:
     name: Shared / desktop / unsigned macOS package
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       MICROSOFT_JDK_URL: https://aka.ms/download-jdk/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
       MICROSOFT_JDK_SHA256: 13f45a64a3d3a1f2eec490527bf3e42913ac0ca3f95af2c5471446a2da8e5a22
@@ -51,7 +53,27 @@ jobs:
           jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
           java-version: "17.0.20"
           architecture: aarch64
+      - name: Install pinned probe Python
+        id: python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.3"
+          python-version: "3.14.7"
+          enable-cache: false
+      - name: Test CI evidence rejection cases
+        run: '"$(uv python find 3.14.7)" -m unittest discover -s tests/tools -p test_macos_ci.py -v'
+      - name: Record source and Apple toolchain
+        shell: bash
+        run: |
+          mkdir -p build/macos-audio-spike
+          git rev-parse HEAD
+          sw_vers
+          xcode-select -p
+          xcrun --sdk macosx --show-sdk-version
+          xcrun swiftc --version
+          "$JAVA_HOME/bin/java" -version
       - name: Check shared policies and package development app
+        id: package
         run: bash scripts/check-desktop.sh --package-macos
       - name: Show native packaging diagnostics
         if: failure()
@@ -60,45 +82,23 @@ jobs:
           if test -d apps/desktop/build/compose/logs; then
             find apps/desktop/build/compose/logs -name '*-err.txt' -type f -exec cat {} \;
           fi
-      - name: Install pinned probe Python
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.3"
-          python-version: "3.14.7"
       - name: Launch packaged desktop shell with bundled runtime
+        id: startup
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: |
-          "$(uv python find 3.14.7)" - <<'PY'
-          import json
-          import pathlib
-          import subprocess
-          import tempfile
-          app = pathlib.Path("apps/desktop/build/compose/binaries/main/app/AutPlay.app")
-          executable = app / "Contents/MacOS/AutPlay"
-          with tempfile.TemporaryDirectory(prefix="autplay-startup-", dir=pathlib.Path("${{ runner.temp }}").resolve()) as storage:
-              result = subprocess.run([str(executable.resolve()), "--smoke-test",
-                                       "--test-data-root=" + str(pathlib.Path(storage).resolve())],
-                                      capture_output=True, text=True, timeout=30, check=False)
-          ready = "AUTPLAY_DESKTOP_SMOKE_READY java=17.0.20 bundled=true" in result.stdout.splitlines()
-          report = {"kind": "packaged_desktop_startup", "exit_code": result.returncode,
-                    "window_and_frames": ready, "bundled_runtime": ready,
-                    "status": "passed" if result.returncode == 0 and ready else "failed"}
-          output = pathlib.Path("build/macos-audio-spike/desktop-startup.json")
-          output.parent.mkdir(parents=True, exist_ok=True)
-          output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-          if report["status"] != "passed":
-              print(result.stdout)
-              print(result.stderr)
-              raise SystemExit("Packaged desktop startup failed")
-          print(json.dumps(report))
-          PY
+          "$(uv python find 3.14.7)" scripts/macos_ci.py startup
       - name: Exercise persistent library and packaged native JVM adapter
+        id: native-tests
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: |
           native_helper="${PWD}/apps/desktop/build/compose/binaries/main/app/AutPlay.app/Contents/app/resources/native/AutPlayAudioHelper"
           test -x "$native_helper"
           test "$(lipo -archs "$native_helper")" = arm64
           bash ./gradlew "-Dorg.gradle.java.home=$JAVA_HOME" --no-daemon --console=plain \
             --max-workers=1 --dependency-verification=strict -Pautplay.desktopOnly=true \
-            "-Pautplay.nativeTestHelper=$native_helper" :apps:desktop:test
+            "-Pautplay.nativeTestHelper=$native_helper" --rerun-tasks \
+            :shared:domain:jvmTest :shared:application:jvmTest :shared:data:jvmTest \
+            :shared:ui:jvmTest :apps:desktop:test
       - name: Capture native file-open diagnostics
         if: failure()
         shell: bash
@@ -109,16 +109,28 @@ jobs:
               --helper "$native_helper" > build/macos-audio-spike/local-audio-diagnostic.json
           fi
       - name: Compile and exercise bounded native WAV probe
+        id: probe
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: |
           mkdir -p build/macos-audio-spike
           "$(uv python find 3.14.7)" tools/macos-audio-spike/run_probe.py --run \
             --output build/macos-audio-spike/native-wav.json
-      - name: Retain foundation evidence
+      - name: Verify complete evidence and package hashes
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          CI_PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          CI_STARTUP_OUTCOME: ${{ steps.startup.outcome }}
+          CI_NATIVE_TESTS_OUTCOME: ${{ steps.native-tests.outcome }}
+          CI_PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: '"$(uv python find 3.14.7)" scripts/macos_ci.py evidence'
+      - name: Retain small test reports only
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: desktop-arm64-foundation-${{ github.sha }}
-          retention-days: 7
+          name: desktop-arm64-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 9
           path: |
             shared/domain/build/test-results/jvmTest/
             shared/application/build/test-results/jvmTest/
@@ -126,8 +138,8 @@ jobs:
             shared/ui/build/test-results/jvmTest/
             shared/data/schemas/
             apps/desktop/build/test-results/test/
-            apps/desktop/build/compose/binaries/main/dmg/
             apps/desktop/build/compose/logs/
+            build/macos-audio-spike/ci-summary.json
             build/macos-audio-spike/native-wav.json
             build/macos-audio-spike/desktop-startup.json
             build/macos-audio-spike/local-audio-diagnostic.json
