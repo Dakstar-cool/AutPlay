@@ -17,6 +17,12 @@ on:
       - gradlew.bat
       - .github/workflows/ci-macos-community.yml
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard free ARM64 runner
+        type: choice
+        default: macos-26
+        options: [macos-26, macos-15]
 permissions:
   contents: read
 concurrency:
@@ -25,7 +31,8 @@ concurrency:
 jobs:
   community:
     if: github.repository == 'Dakstar-cool/AutPlay'
-    runs-on: macos-15
+    # Keep a strict allowlist: even a crafted dispatch cannot select a paid larger runner.
+    runs-on: ${{ inputs.runner == 'macos-15' && 'macos-15' || 'macos-26' }}
     timeout-minutes: 90
     env:
       MICROSOFT_JDK_URL: https://aka.ms/download-jdk/microsoft-jdk-17.0.20-macos-aarch64.tar.gz

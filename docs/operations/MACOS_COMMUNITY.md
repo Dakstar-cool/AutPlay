@@ -8,7 +8,8 @@ strongest practical protection compatible with that choice. It is separate from
 the existing Developer ID / provisioning-profile / Secure Enclave provider. A
 failed Developer ID check never silently selects community storage.
 The current package targets Apple Silicon (ARM64), with macOS 13 as its deployment
-target. Automated native acceptance runs on macOS 15; this is not an Intel build.
+target. Native acceptance passed on macOS 15; the final package gate also targets
+the standard macOS 26 ARM64 runner. This is not an Intel build.
 
 ## Native acceptance milestone, 2026-11-10
 
@@ -120,7 +121,8 @@ separately protected backup before relying on the identity for long-term updates
 Losing or replacing this key changes the identity and is not an automatic migration.
 
 [`CI / macOS community`](../../.github/workflows/ci-macos-community.yml) uses the
-standard public-repository `macos-15` runner, pinned JDK/Python and strict Gradle
+standard public-repository `macos-26` runner (`macos-15` is an explicit manual
+choice), pinned JDK/Python and strict Gradle
 dependency verification. It does not run on pull requests or use a paid larger
 runner. Private signing material is installed in an ephemeral signing keychain;
 synthetic account tests use a different disposable keychain. The CI-only
@@ -237,3 +239,12 @@ server operation can have used it, and an existing bound key is never replaced.
 The launcher also forces the documented
 [`DisableAttachMechanism` option](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html)
 to close HotSpot's same-user agent-loading channel.
+
+The final DMG run `42839864898` was cancelled before acquiring any runner, with
+GitHub's explicit macOS ARM64 capacity annotation. Options considered were a
+bounded retry, waiting for the same pool, another standard ARM64 image, or a
+self-hosted Mac. The workflow now defaults to `macos-26`, with only `macos-15`
+as its other allowed choice. Both are listed as free standard public-repository
+runners in [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+No larger/paid runner, toolchain upgrade, Intel substitution or relaxed security
+acceptance is used to bypass the queue.
