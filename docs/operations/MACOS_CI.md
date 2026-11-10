@@ -63,3 +63,13 @@ fail-closed behavior, without importing kernel headers or duplicating constants.
 See Apple's [Security constants](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/CSCommon.h),
 [signing-information contract](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/SecCode.h)
 and [XNU flags](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/cs_blobs.h).
+
+Run `42809171900` exposed two uses of `explicit_bzero`, which the macOS SDK does
+not declare. Reviewed non-elidable replacements were Darwin's `memset_s`, a
+volatile byte loop, and an indirect volatile `memset` call. The implementation
+uses the platform API with the exact existing nonempty buffer size for both
+bounds. Its feature macro is defined before Foundation can import `string.h`.
+Apple's [libc contract](https://github.com/apple-oss-distributions/Libc/blob/main/string/NetBSD/memset_s.3)
+guarantees that the clearing call cannot be optimized away; the
+[public header](https://github.com/apple-oss-distributions/Libc/blob/main/include/_string.h)
+declares it for macOS 10.9 and newer, below this port's macOS 13 target.

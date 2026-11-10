@@ -1,5 +1,7 @@
 // Secure-state JNI ABI1. Build with ARC, Foundation/Security and the pinned JDK JNI headers.
 // Independent of audio IPC1, system-media ABI1 and portable ROOT signing.
+// Request Darwin's non-elidable memset_s before Foundation imports string.h.
+#define __STDC_WANT_LIB_EXT1__ 1
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #import <Security/CMSDecoder.h>
@@ -42,7 +44,7 @@ template<class T> struct CF {
 };
 struct Bytes {
     std::vector<uint8_t> value;
-    ~Bytes() { if (!value.empty()) explicit_bzero(value.data(), value.size()); }
+    ~Bytes() { if (!value.empty()) (void)memset_s(value.data(), value.size(), 0, value.size()); }
 };
 Bytes input(JNIEnv *env, jbyteArray array, size_t maximum, size_t minimum = 0) {
     require(array != nullptr);
@@ -242,7 +244,7 @@ NSMutableData *read(Owner &o, NSString *account, size_t maximum) {
     NSData *bytes = attributes[(__bridge id)kSecValueData]; require([bytes isKindOfClass:NSData.class] && bytes.length <= maximum);
     return [bytes mutableCopy];
 }
-void wipe(NSMutableData *bytes) { if (bytes.length) explicit_bzero(bytes.mutableBytes, bytes.length); }
+void wipe(NSMutableData *bytes) { if (bytes.length) (void)memset_s(bytes.mutableBytes, bytes.length, 0, bytes.length); }
 NSDictionary *control(Owner &o) {
     NSMutableData *bytes = read(o, @"k1.control", kControl); require(bytes != nil);
     @try { NSDictionary *result = json(bytes, kControl); require([result[@"format"] isEqual:@"autplay-secure-control-1"]); return result; }
