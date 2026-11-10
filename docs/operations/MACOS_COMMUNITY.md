@@ -10,6 +10,34 @@ failed Developer ID check never silently selects community storage.
 The current package targets Apple Silicon (ARM64), with macOS 13 as its deployment
 target. Automated native acceptance runs on macOS 15; this is not an Intel build.
 
+## Verified build, 2026-11-10
+
+Source: `23d17a46406be95ab497c7cd2e1b9e4f1cdddbfe`.
+Both [community acceptance](https://github.com/Dakstar-cool/AutPlay/actions/runs/42834919924)
+and the [desktop foundation gate](https://github.com/Dakstar-cool/AutPlay/actions/runs/42834919676)
+passed. Each ran 28 shared/desktop JUnit cases with zero failures or skips. Community
+acceptance additionally passed 14 Keychain/identity checks and signed GUI startup;
+the foundation gate passed all seven native WAV scenarios on macOS 15.8.2 ARM64.
+
+Verified artifact: `AutPlay-community-arm64.dmg`, 113037635 bytes.
+Its downloaded copy was independently hashed on Windows and matched CI:
+
+```text
+eeb4a9d0b66934272b21fec4a90fce49400e4e58fa8fc2357e6983c9441329d8
+```
+
+All three private-key export attempts were rejected with the final sensitive,
+non-exportable key generator. The same certificate's sealed package survived
+restart, enforced locked-Keychain refusal, rejected an unrelated signer spoofing
+the AutPlay identifier, and rejected that process's private-key signing attempt.
+The probe also rejected JVM attach, inherited Java agents and resource tampering.
+
+This qualifies the community client storage/signing boundary. First-open Gatekeeper
+approval, interactive reauthorization after an actual update, audible output and
+end-to-end login/sync against a compatible server remain manual/integration gates.
+
+## Build identity
+
 `autplay.macCommunitySignerSha256` selects the provider at compilation. Its value
 is the SHA-256 of the DER certificate in
 [`config/macos/community-signer.pem`](../../config/macos/community-signer.pem).
