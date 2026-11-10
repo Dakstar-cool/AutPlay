@@ -31,3 +31,16 @@ The initial CI branch snapshots `apps/desktop`, `shared`, and
 on `b72498f6f569d98f37a97cee4ebceab571cf434b`. Local Android and server continuations
 are not part of this CI snapshot. The workflow summary records the exact tested
 commit and run identity; the source worktree is retained unchanged.
+
+## Initial runner preparation repair
+
+Run `42806646438` exposed an inherited setup issue: setup-uv's `python-version`
+sets the requested interpreter but does not install it, so `uv python find` failed
+in three subsequent steps. Reviewed fixes were explicit `uv python install`,
+automatic installation through `uv run`, setup-uv environment activation, and
+`actions/setup-python`. The gate uses explicit installation with the already pinned
+uv, then verifies Python 3.14.7/ARM64 and exports its resolved path once. This
+preserves the pinned distribution and avoids adding an action or project environment.
+See [Astral's Actions guide](https://docs.astral.sh/uv/guides/integration/github/),
+[environment activation](https://github.com/astral-sh/setup-uv/blob/main/docs/environment-and-tools.md)
+and [setup-python](https://github.com/actions/setup-python).

@@ -53,15 +53,22 @@ jobs:
           jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
           java-version: "17.0.20"
           architecture: aarch64
-      - name: Install pinned probe Python
-        id: python
+      - name: Install pinned uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.3"
           python-version: "3.14.7"
           enable-cache: false
+      - name: Install and verify pinned probe Python
+        id: python
+        shell: bash
+        run: |
+          uv python install 3.14.7
+          autplay_python="$(uv python find 3.14.7)"
+          "$autplay_python" -c 'import platform; assert platform.python_version() == "3.14.7"; assert platform.machine() == "arm64"'
+          printf 'AUTPLAY_PYTHON=%s\n' "$autplay_python" >> "$GITHUB_ENV"
       - name: Test CI evidence rejection cases
-        run: '"$(uv python find 3.14.7)" -m unittest discover -s tests/tools -p test_macos_ci.py -v'
+        run: '"$AUTPLAY_PYTHON" -m unittest discover -s tests/tools -p test_macos_ci.py -v'
       - name: Record source and Apple toolchain
         shell: bash
         run: |
@@ -86,7 +93,7 @@ jobs:
         id: startup
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: |
-          "$(uv python find 3.14.7)" scripts/macos_ci.py startup
+          "$AUTPLAY_PYTHON" scripts/macos_ci.py startup
       - name: Exercise persistent library and packaged native JVM adapter
         id: native-tests
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
@@ -104,8 +111,8 @@ jobs:
         shell: bash
         run: |
           native_helper="${PWD}/apps/desktop/build/compose/binaries/main/app/AutPlay.app/Contents/app/resources/native/AutPlayAudioHelper"
-          if test -x "$native_helper" && command -v uv >/dev/null 2>&1; then
-            "$(uv python find 3.14.7)" apps/desktop/src/native/probe_local_audio.py \
+          if test -x "$native_helper" && test -n "${AUTPLAY_PYTHON:-}"; then
+            "$AUTPLAY_PYTHON" apps/desktop/src/native/probe_local_audio.py \
               --helper "$native_helper" > build/macos-audio-spike/local-audio-diagnostic.json
           fi
       - name: Compile and exercise bounded native WAV probe
@@ -113,7 +120,7 @@ jobs:
         if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: |
           mkdir -p build/macos-audio-spike
-          "$(uv python find 3.14.7)" tools/macos-audio-spike/run_probe.py --run \
+          "$AUTPLAY_PYTHON" tools/macos-audio-spike/run_probe.py --run \
             --output build/macos-audio-spike/native-wav.json
       - name: Verify complete evidence and package hashes
         if: ${{ !cancelled() && steps.python.outcome == 'success' }}
@@ -122,7 +129,7 @@ jobs:
           CI_STARTUP_OUTCOME: ${{ steps.startup.outcome }}
           CI_NATIVE_TESTS_OUTCOME: ${{ steps.native-tests.outcome }}
           CI_PROBE_OUTCOME: ${{ steps.probe.outcome }}
-        run: '"$(uv python find 3.14.7)" scripts/macos_ci.py evidence'
+        run: '"$AUTPLAY_PYTHON" scripts/macos_ci.py evidence'
       - name: Retain small test reports only
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
