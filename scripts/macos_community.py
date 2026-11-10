@@ -25,7 +25,12 @@ MACHO = {bytes.fromhex(x) for x in ("feedface", "cefaedfe", "feedfacf", "cffaedf
 
 
 def run(*args: str | Path, timeout: int = 120, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, timeout=timeout)
+    if str(args[0]) == "security":
+        print("Keychain setup: " + str(args[1]), flush=True)
+    try:
+        result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{Path(args[0]).name} timed out") from None
     if check and result.returncode:
         # Never echo a command: keychain commands contain ephemeral credentials.
         message = result.stderr[-5000:]
@@ -74,7 +79,9 @@ def prepare() -> None:
     run("security", "import", p12, "-k", signing, "-P", os.environ["AUTPLAY_COMMUNITY_P12_PASSWORD"], "-T", "/usr/bin/codesign")
     # This permission belongs ONLY to the CI certificate keychain, never account items.
     run("security", "set-key-partition-list", "-S", "apple-tool:", "-s", "-k", values["password"], signing)
-    run("security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign", "-k", signing, cert)
+    # User trust changes request an interactive SecurityAgent confirmation. This disposable
+    # hosted runner has passwordless sudo; use the admin trust domain and remove it at cleanup.
+    run("sudo", "-n", "security", "add-trusted-cert", "-d", "-r", "trustRoot", "-p", "codeSign", "-k", signing, cert)
     run("security", "default-keychain", "-d", "user", "-s", accounts)
     p12.unlink()
     print("Community signing identity installed; account test keychain isolated")
@@ -142,6 +149,12 @@ def probe() -> None:
         print("Keychain acceptance passed: " + phase)
     values = state()
     run("security", "unlock-keychain", "-p", values["account_password"], values["accounts"])
+    foreign = TEMP / "foreign-reader"
+    run("xcrun", "clang++", "-fobjc-arc", "-framework", "Foundation", "-framework", "Security",
+        ROOT / "tests/native/CommunityForeignReader.mm", "-o", foreign)
+    run("codesign", "--force", "--sign", "-", "--identifier", "example.foreign.reader", foreign)
+    run(foreign, pin(), timeout=30)
+    passed.append("foreign-program-keychain-read-denied")
     # A changed sealed resource must be rejected even if the executable still starts.
     record = probe_app / "Contents/app/resources/native/AutPlaySignedIdentity"
     record.write_text(record.read_text() + "tampered\n")
@@ -173,7 +186,8 @@ def package() -> None:
     shutil.copytree(APP, stage / "AutPlay.app")
     (stage / "Applications").symlink_to("/Applications", target_is_directory=True)
     run("hdiutil", "create", "-volname", "AutPlay Community", "-srcfolder", stage, "-format", "UDZO", dmg, timeout=180)
-    checksum = hashlib.file_digest(dmg.open("rb"), "sha256").hexdigest()
+    with dmg.open("rb") as source:
+        checksum = hashlib.file_digest(source, "sha256").hexdigest()
     (OUT / "SHA256SUMS").write_text(checksum + "  " + dmg.name + "\n")
     shutil.copy2(ROOT / "config/macos/community-signer.pem", OUT)
     shutil.copy2(ROOT / "config/macos/community-signer.sha256", OUT)
@@ -187,7 +201,7 @@ def cleanup() -> None:
     run("security", "default-keychain", "-d", "user", "-s", values["old_default"], check=False)
     for key in ("accounts", "signing"):
         run("security", "delete-keychain", values[key], check=False)
-    run("security", "remove-trusted-cert", ROOT / "config/macos/community-signer.pem", check=False)
+    run("sudo", "-n", "security", "remove-trusted-cert", "-d", ROOT / "config/macos/community-signer.pem", check=False)
     shutil.rmtree(TEMP)
 
 

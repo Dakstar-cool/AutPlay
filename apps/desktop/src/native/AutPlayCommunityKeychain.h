@@ -32,7 +32,7 @@ void communityACL(SecKeychainItemRef item, CFStringRef operation) {
     CF<CFArrayRef> list(SecAccessCopyMatchingACLList(access.value, operation));
     require(list.value && CFArrayGetCount(list.value) > 0, "ACCESS_DENIED");
     for (id entry in (__bridge NSArray *)list.value) {
-        CF<CFArrayRef> apps; CF<CFStringRef> description; CSSM_ACL_KEYCHAIN_PROMPT_SELECTOR prompt = {};
+        CF<CFArrayRef> apps; CF<CFStringRef> description; SecKeychainPromptSelector prompt = 0;
         status(SecACLCopyContents((__bridge SecACLRef)entry, apps.out(), description.out(), &prompt));
         require(apps.value && CFArrayGetCount(apps.value) == 1, "ACCESS_DENIED");
     }

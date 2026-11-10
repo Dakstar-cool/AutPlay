@@ -1,0 +1,124 @@
+# Free community macOS signing and account storage
+
+## Decision and scope
+
+The project owner requested this opt-in provider on 2026-11-10: distribute the
+macOS port to friends without paid Apple Developer membership, preserving the
+strongest practical protection compatible with that choice. It is separate from
+the existing Developer ID / provisioning-profile / Secure Enclave provider. A
+failed Developer ID check never silently selects community storage.
+
+`autplay.macCommunitySignerSha256` selects the provider at compilation. Its value
+is the SHA-256 of the DER certificate in
+[`config/macos/community-signer.pem`](../../config/macos/community-signer.pem).
+The sealed identity record and all native identity boundaries must agree with
+this compiled pin. No environment variable or user file can change it at runtime.
+
+The native bootstrap checks its certificate, designated requirement, Hardened
+Runtime flags and the complete sealed bundle before executing the JVM launcher.
+It removes inherited JVM injection options and `DYLD_*` variables. Java and its
+libraries are bundled and individually signed. Native account/source libraries
+and the remote-media helper retain their exact identifiers and signer checks;
+the helper still must pass PID, path and code-hash checks.
+
+## Keychain behavior
+
+The community provider uses the user's default file-based Keychain, constrained
+to an owned, non-symlink, private file inside `~/Library/Keychains`. It does not
+use an entitlement access group, Data Protection Keychain, iCloud Keychain or
+the Secure Enclave. Service/key-label namespaces include the certificate pin;
+existing paid-provider items are neither read nor migrated.
+
+Credential items use an explicit trusted-application ACL created from the signed
+application. A null trusted-application list is forbidden because it means all
+applications. Reads reject broad or multiple-application access lists. The OS
+enforces the designated requirement and partition ACL. Background operations
+cannot open a password prompt or automatically unlock the Keychain.
+
+Device keys are permanent P-256 keys generated inside Security.framework, marked
+sensitive and non-exportable at creation. Only public keys and domain-separated
+signatures cross JNI. No private-key export method is exposed to Java. Existing
+bounded operation queues, writer lock, exact readback, revision checks, key intents
+and recovery rules remain in force. Locked/missing/denied items are errors, never
+permission to silently replace a key or recreate an account namespace.
+
+The TLS, account enrollment, D1v2 proof domains, session renewal, revocation and
+sync authorization protocols are unchanged. A compatible server is still required.
+The CI snapshot does not include the unpublished D1/B1 server continuation from
+the integration worktree. Native Keychain evidence is not server deployment or
+an end-to-end account/sync acceptance claim.
+
+## Differences from the paid design
+
+* A self-signed certificate provides a stable project identity, but Apple does not
+  attest the publisher and does not notarize the package. Gatekeeper requires a
+  deliberate per-app first-open decision by the recipient.
+* P-256 key export is denied by the OS software provider. This does not provide
+  Secure Enclave hardware non-extractability against a compromised OS or user
+  session. File-based Keychain backup/migration semantics also differ from
+  `WhenUnlockedThisDeviceOnly`.
+* Keychain lock state is enforced on every protected operation. Locking the screen
+  does not necessarily lock the login Keychain; its settings remain the user's.
+* Without an Apple Team ID, library validation cannot accept the bundled JVM under
+  its usual same-Team-ID rule. Only the JVM launcher receives `allow-jit` and
+  `disable-library-validation`. The native bootstrap and native helpers retain
+  library validation. Debugging, DYLD injection and unsigned executable memory
+  entitlements remain forbidden. Bundle validation before Java starts reduces
+  this exposure, but does not make it equivalent to Apple's library validation.
+* macOS can partition self-signed Keychain access by code hash. A changed release
+  can require explicit OS reauthorization even with the same certificate. Never
+  fix this by granting all apps access or assigning broad Apple tool partitions
+  to account keys. Update/reauthorization qualification is tracked separately.
+
+## Signing custody and workflow
+
+The stable private certificate is an encrypted PKCS#12 outside the repository.
+Its local password is protected by Windows DPAPI and the directory has a private
+ACL. GitHub receives only encrypted Actions secrets `AUTPLAY_COMMUNITY_P12` and
+`AUTPLAY_COMMUNITY_P12_PASSWORD`; build artifacts never contain them. Keep a
+separately protected backup before relying on the identity for long-term updates.
+Losing or replacing this key changes the identity and is not an automatic migration.
+
+[`CI / macOS community`](../../.github/workflows/ci-macos-community.yml) uses the
+standard public-repository `macos-15` runner, pinned JDK/Python and strict Gradle
+dependency verification. It does not run on pull requests or use a paid larger
+runner. Private signing material is installed in an ephemeral signing keychain;
+synthetic account tests use a different disposable keychain. The CI-only
+`apple-tool:` grant belongs to the signing certificate, never to account items.
+Temporary keychains and user trust changes are removed even on failure.
+
+The gate builds/tests the shared and desktop modules, signs the app, checks the
+real production JNI in a separately sealed probe app, starts the production GUI
+with its bundled JDK, then creates the DMG. The probe classes/native checks are
+never shipped in the production package. Keychain checks cover persistence after
+process restart, D1v2 signature verification, private-key export rejection,
+locked-Keychain refusal, foreign-program read denial and resource tampering.
+
+Successful DMGs are retained for one day; small reports for three days. Standard
+public runner compute is free, but artifact storage is metered separately. Download
+the DMG promptly and avoid accumulating old package artifacts.
+
+## Installing a verified build
+
+Use the DMG and `SHA256SUMS` from the same successful workflow run. Check the DMG
+checksum against a value received through the trusted project channel. Copy
+`AutPlay.app` into `/Applications`. Keep Gatekeeper enabled; use macOS's per-app
+**Privacy & Security > Open Anyway** only after verifying the source and checksum.
+Do not install the project certificate as a system-wide trusted root, disable
+Gatekeeper globally, or remove quarantine recursively.
+
+The account screen offers explicit storage initialization on first use. If the
+Keychain is locked, unlock it through macOS and reopen account access. Existing
+account metadata is not an instruction to reset protected storage. Reauthorization
+after an update must preserve all existing keys and pending operations.
+
+## Primary references
+
+* [Apple TN3137: macOS keychains](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+* [Apple: code signing and self-signed identities](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/AboutCS/AboutCS.html)
+* [Apple: library validation entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.disable-library-validation)
+* [Apple: Keychain exportability constraints](https://developer.apple.com/forums/thread/731001)
+* [Apple: opening software outside App Store](https://support.apple.com/102445)
+
+Verification status and exact run/artifact identity must be taken from the current
+workflow evidence. Prior unsigned desktop successes do not qualify this provider.
