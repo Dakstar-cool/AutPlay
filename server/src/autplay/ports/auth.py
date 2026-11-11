@@ -9,6 +9,7 @@ from typing import Protocol, Self
 from uuid import UUID
 
 from autplay.domain.auth import AccessTokenClaims, AuthSessionState, Principal
+from autplay.ports.portable_access import PortableAccessReader
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +208,11 @@ class AuthUnitOfWork(Protocol):
     def auth(self) -> AuthRepository:
         """Return the transaction-bound authentication repository."""
 
+        ...
+
+    @property
+    def portable_access(self) -> PortableAccessReader | None:
+        """Return an R1 reader bound to this UoW, never a cached other pool."""
         ...
 
     def __enter__(self) -> Self:

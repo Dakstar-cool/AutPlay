@@ -34,6 +34,7 @@ autplay-admin = "autplay.entrypoints.admin:main"
 autplay-api = "autplay.entrypoints.api:main"
 autplay-stream = "autplay.entrypoints.stream:main"
 autplay-sona-source-preflight = "autplay.entrypoints.sona_source_preflight:main"
+autplay-sona-native-dataset = "autplay.entrypoints.sona_native_dataset:main"
 autplay-worker-cpu = "autplay.entrypoints.worker_cpu:main"
 
 [dependency-groups]

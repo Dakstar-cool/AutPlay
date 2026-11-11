@@ -13,7 +13,7 @@ from typing import ClassVar, cast
 from uuid import UUID
 
 import rfc8785
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -90,6 +90,10 @@ class ImportReviewConflictError(ImportRuntimeError):
     code = "import.review_conflict"
 
 
+class ImportReviewContextLimitError(ImportRuntimeError):
+    code = "import.review_context_limit"
+
+
 class ImportOperationConflictError(ImportRuntimeError):
     code = "operation_conflict"
 
@@ -161,6 +165,37 @@ class ImportReviewResult:
     status: str
     recording_id: UUID | None
     replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ImportReviewCandidate:
+    """Current catalog display alongside immutable, redacted evidence identity."""
+
+    rank: int
+    recording_id: UUID
+    current_title: str
+    current_artist: str
+    duration_ms: int | None
+    raw_score: Decimal | None
+    confidence: Decimal | None
+    evidence_tier: str
+    evidence_schema_version: str
+    evidence_sha256: bytes
+    has_hard_conflicts: bool
+    available: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ImportReviewContext:
+    """One complete owner entry; this read conveys no mutation authority."""
+
+    import_job_id: UUID
+    import_entry_id: UUID
+    predecessor_decision_id: UUID | None
+    entry_state: str
+    resolver_state: str | None
+    eligible_actions: tuple[str, ...]
+    candidates: tuple[ImportReviewCandidate, ...]
 
 
 class PostgresImportRepository:
@@ -403,6 +438,166 @@ class PostgresImportRepository:
             counts=dict(sorted(counts.items())),
             entries=reports,
             next_after=(page[-1].source_row_key if len(entry_rows) > limit and page else None),
+        )
+
+    def review_context(
+        self, *, owner_user_id: UUID, import_job_id: UUID, import_entry_id: UUID
+    ) -> ImportReviewContext:
+        """Read only safe columns from the current exact owned decision lineage."""
+
+        entry = self._session.execute(
+            select(ImportEntryRow.current_match_decision_id, ImportEntryRow.match_status)
+            .join(ImportJobRow, ImportJobRow.import_job_id == ImportEntryRow.import_job_id)
+            .where(
+                ImportJobRow.user_id == owner_user_id,
+                ImportEntryRow.import_job_id == import_job_id,
+                ImportEntryRow.import_entry_id == import_entry_id,
+            )
+        ).one_or_none()
+        if entry is None:
+            raise ImportNotFoundError
+        predecessor_id, entry_state = entry
+        if len(entry_state.encode("utf-8")) > 100:
+            raise ImportReviewContextLimitError
+        if (
+            predecessor_id is not None
+            and self._session.scalar(
+                select(MatchDecisionRow.decision_id).where(
+                    MatchDecisionRow.decision_id == predecessor_id,
+                    MatchDecisionRow.query_type == "IMPORT_ENTRY",
+                    MatchDecisionRow.import_entry_id == import_entry_id,
+                    MatchDecisionRow.owner_user_id == owner_user_id,
+                )
+            )
+            is None
+        ):
+            raise ImportNotFoundError
+        # Initial SHADOW evaluations deliberately do not mutate the owner pointer.
+        # Mirror report's latest-decision selection, with the exact typed owner lineage filter.
+        predecessor = self._session.execute(
+            select(
+                MatchDecisionRow.decision_id,
+                MatchDecisionRow.decision_state,
+                MatchDecisionRow.candidate_count,
+            )
+            .where(
+                MatchDecisionRow.query_type == "IMPORT_ENTRY",
+                MatchDecisionRow.import_entry_id == import_entry_id,
+                MatchDecisionRow.owner_user_id == owner_user_id,
+            )
+            .order_by(MatchDecisionRow.decided_at.desc(), MatchDecisionRow.decision_id.desc())
+            .limit(1)
+        ).one_or_none()
+        if predecessor is None:
+            return ImportReviewContext(
+                import_job_id, import_entry_id, None, entry_state, None, (), ()
+            )
+        predecessor_id, state, candidate_count = predecessor
+        if len(state.encode("utf-8")) > 100:
+            raise ImportReviewContextLimitError
+        # No raw feature, conflict, origin, extractor or query documents are loaded.
+        # Oversized catalog labels are refused whole, including before transfer to Python.
+        rows = self._session.execute(
+            select(
+                MatchCandidateEvidenceRow.rank,
+                MatchCandidateEvidenceRow.recording_id,
+                case((func.octet_length(RecordingRow.title) <= 4096, RecordingRow.title)),
+                case(
+                    (
+                        func.octet_length(ArtistCreditRow.display_name) <= 4096,
+                        ArtistCreditRow.display_name,
+                    )
+                ),
+                RecordingRow.duration_ms,
+                MatchCandidateEvidenceRow.raw_score,
+                MatchCandidateEvidenceRow.confidence,
+                MatchCandidateEvidenceRow.evidence_tier,
+                MatchCandidateEvidenceRow.evidence_schema_version,
+                MatchCandidateEvidenceRow.evidence_sha256,
+                func.jsonb_array_length(MatchCandidateEvidenceRow.hard_conflicts) > 0,
+            )
+            .join(RecordingRow, RecordingRow.recording_id == MatchCandidateEvidenceRow.recording_id)
+            .join(
+                ArtistCreditRow, ArtistCreditRow.artist_credit_id == RecordingRow.artist_credit_id
+            )
+            .where(MatchCandidateEvidenceRow.decision_id == predecessor_id)
+            .order_by(MatchCandidateEvidenceRow.rank)
+            .limit(101)
+        ).all()
+        if len(rows) > 100:
+            raise ImportReviewContextLimitError
+        if len(rows) != candidate_count or any(
+            row.rank != index for index, row in enumerate(rows, 1)
+        ):
+            raise ImportNotFoundError
+        candidates: list[ImportReviewCandidate] = []
+        for row in rows:
+            (
+                rank,
+                recording,
+                title,
+                artist,
+                duration,
+                score,
+                confidence,
+                tier,
+                schema,
+                digest,
+                conflicts,
+            ) = row
+            if (
+                title is None
+                or artist is None
+                or len(tier.encode("utf-8")) > 100
+                or len(schema.encode("utf-8")) > 100
+            ):
+                raise ImportReviewContextLimitError
+            if len(digest) != 32:
+                raise ImportNotFoundError
+            candidates.append(
+                ImportReviewCandidate(
+                    rank,
+                    recording,
+                    title,
+                    artist,
+                    duration,
+                    score,
+                    confidence,
+                    tier,
+                    schema,
+                    digest,
+                    conflicts,
+                    schema == "1" and tier in {"T0", "T1", "T2", "T3", "T4"},
+                )
+            )
+        actions: tuple[str, ...] = ()
+        if state in {"AUTO_MATCH", "REVIEW_REQUIRED", "NO_MATCH", "DEFERRED_EVIDENCE"}:
+            actions = ("KEEP_UNRESOLVED", "CREATE_RECORDING")
+            if candidates and all(candidate.available for candidate in candidates):
+                actions = ("ACCEPT", "REJECT", *actions)
+        elif state == "INTEGRITY_CONFLICT":
+            actions = ("KEEP_UNRESOLVED",)
+        # Unknown retained evidence is visible, but none of its actions is advertised.
+        if any(not candidate.available for candidate in candidates) or entry_state not in {
+            "PENDING",
+            "AUTO_MATCH",
+            "MANUAL_MATCH",
+            "MANUAL_UNRESOLVED",
+            "REVIEW_REQUIRED",
+            "NO_MATCH",
+            "INTEGRITY_CONFLICT",
+            "DEFERRED_EVIDENCE",
+            "REJECTED",
+        }:
+            actions = ()
+        return ImportReviewContext(
+            import_job_id,
+            import_entry_id,
+            predecessor_id,
+            entry_state,
+            state,
+            actions,
+            tuple(candidates),
         )
 
     def cancel(self, *, owner_user_id: UUID, import_job_id: UUID) -> CancelRequestResult:

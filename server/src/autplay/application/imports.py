@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from autplay.adapters.postgresql.import_runtime import (
     ImportCollectionArtist,
     ImportJobReport,
+    ImportReviewContext,
     ImportReviewResult,
     ImportStartResult,
     PostgresImportRepository,
@@ -119,6 +120,18 @@ class ImportService:
                 import_job_id=import_job_id,
                 limit=limit,
                 after=after,
+            )
+
+    def review_context(
+        self, principal: Principal, import_job_id: UUID, import_entry_id: UUID
+    ) -> ImportReviewContext:
+        """Read one complete redacted candidate context without committing a mutation."""
+
+        with self._sessions() as session:
+            return PostgresImportRepository(session).review_context(
+                owner_user_id=principal.user_id,
+                import_job_id=import_job_id,
+                import_entry_id=import_entry_id,
             )
 
     def cancel(self, principal: Principal, import_job_id: UUID) -> CancelRequestResult:

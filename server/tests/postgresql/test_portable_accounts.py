@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -26,7 +27,8 @@ from autplay.domain.profile_pairing import ProfilePairingError
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+
+from .deletion_evidence import configured_sessions
 
 
 def passport(key: ec.EllipticCurvePrivateKey, account_id: UUID | None = None) -> dict[str, Any]:
@@ -59,9 +61,11 @@ def proof(key: ec.EllipticCurvePrivateKey, body: dict[str, Any]) -> str:
     return base64.b64encode(key.sign(payload, ec.ECDSA(hashes.SHA256()))).decode()
 
 
-def services(database_url: str) -> tuple[Any, PortableAccountService, ProfilePairingService]:
+def services(
+    database_url: str, tmp_path: Path
+) -> tuple[Any, PortableAccountService, ProfilePairingService]:
     engine = create_engine(database_url)
-    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    sessions = configured_sessions(engine, tmp_path)
     codec = Hs256AccessTokenCodec(
         b"portable-test-access-secret-distinct-32bytes", issuer="test", audience="test"
     )
@@ -99,8 +103,68 @@ def binding_body(challenge: dict[str, Any], key: ec.EllipticCurvePrivateKey) -> 
     }
 
 
-def test_register_login_exact_receipt_and_action_proof(database_url: str) -> None:
-    engine, account, pairing = services(database_url)
+@pytest.mark.parametrize("platform", ["ANDROID", "WEB", "OTHER", "MACOS"])
+@pytest.mark.parametrize("revoked", [False, True])
+def test_v1_binding_preserves_legacy_platforms_and_rejects_known_mac(
+    database_url: str, platform: str, revoked: bool, tmp_path: Path
+) -> None:
+    engine, account, _ = services(database_url, tmp_path)
+    root, device = ec.generate_private_key(ec.SECP256R1()), ec.generate_private_key(ec.SECP256R1())
+    try:
+        command = binding_body(
+            account.challenge("REGISTER", "source", document=passport(root)), device
+        )
+        first = account.complete(command, proof(root, command))
+        with account.sessions.begin() as session:
+            row = session.get(DeviceRow, UUID(str(first["device_id"])))
+            assert row is not None
+            row.platform = platform
+            row.revoked_at = datetime.now(UTC) if revoked else None
+            if platform == "MACOS" and revoked:
+                row.public_key_thumbprint_sha256 = None
+        with account.sessions() as session:
+            before = session.execute(
+                select(UserSessionRow.session_id, UserSessionRow.revoked_at).order_by(
+                    UserSessionRow.session_id
+                )
+            ).all()
+        login = binding_body(account.challenge("LOGIN", "source", login="portable_test"), device)
+        if platform == "MACOS":
+            with pytest.raises(ProfilePairingError, match="account_authentication_failed"):
+                account.complete(login, proof(root, login))
+            with pytest.raises(ProfilePairingError, match="account_authentication_failed"):
+                account.complete(command, proof(root, command))
+            with account.sessions.begin() as session:
+                receipt = session.get(
+                    PortableAccountChallengeRow, UUID(str(command["challenge"]["challenge_id"]))
+                )
+                assert receipt is not None
+                receipt.receipt_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            with pytest.raises(ProfilePairingError, match="account_authentication_failed"):
+                account.complete(command, proof(root, command))
+            with account.sessions() as session:
+                assert (
+                    session.execute(
+                        select(UserSessionRow.session_id, UserSessionRow.revoked_at).order_by(
+                            UserSessionRow.session_id
+                        )
+                    ).all()
+                    == before
+                )
+                retained = session.get(DeviceRow, UUID(str(first["device_id"])))
+                assert retained is not None and retained.platform == "MACOS"
+        else:
+            result = account.complete(login, proof(root, login))
+            with account.sessions() as session:
+                bound = session.get(DeviceRow, UUID(str(result["device_id"])))
+                assert bound is not None
+                assert bound.platform == ("ANDROID" if revoked else platform)
+    finally:
+        engine.dispose()
+
+
+def test_register_login_exact_receipt_and_action_proof(database_url: str, tmp_path: Path) -> None:
+    engine, account, pairing = services(database_url, tmp_path)
     root, device = ec.generate_private_key(ec.SECP256R1()), ec.generate_private_key(ec.SECP256R1())
     document = passport(root)
     try:
@@ -145,8 +209,10 @@ def test_register_login_exact_receipt_and_action_proof(database_url: str) -> Non
         engine.dispose()
 
 
-def test_claim_preserves_legacy_identity_and_rejects_second_root(database_url: str) -> None:
-    engine, account, _ = services(database_url)
+def test_claim_preserves_legacy_identity_and_rejects_second_root(
+    database_url: str, tmp_path: Path
+) -> None:
+    engine, account, _ = services(database_url, tmp_path)
     root = ec.generate_private_key(ec.SECP256R1())
     document = passport(root)
     user, device, session_id = UUID(document["account_id"]), uuid4(), uuid4()
@@ -197,8 +263,9 @@ def test_claim_preserves_legacy_identity_and_rejects_second_root(database_url: s
 
 def test_rotation_preserves_uuid_revokes_authority_and_recovers_exact_receipt(
     database_url: str,
+    tmp_path: Path,
 ) -> None:
-    engine, account, _ = services(database_url)
+    engine, account, _ = services(database_url, tmp_path)
     old_key, new_key = (
         ec.generate_private_key(ec.SECP256R1()),
         ec.generate_private_key(ec.SECP256R1()),
@@ -271,8 +338,10 @@ def test_rotation_preserves_uuid_revokes_authority_and_recovers_exact_receipt(
         engine.dispose()
 
 
-def test_expired_pending_retires_refresh_before_terminal_outcome(database_url: str) -> None:
-    engine, account, _ = services(database_url)
+def test_expired_pending_retires_refresh_before_terminal_outcome(
+    database_url: str, tmp_path: Path
+) -> None:
+    engine, account, _ = services(database_url, tmp_path)
     key = ec.generate_private_key(ec.SECP256R1())
     try:
         command = binding_body(account.challenge("REGISTER", "source", document=passport(key)), key)
@@ -302,8 +371,10 @@ def test_expired_pending_retires_refresh_before_terminal_outcome(database_url: s
         engine.dispose()
 
 
-def test_failed_lookup_and_bad_proof_persist_source_limit(database_url: str) -> None:
-    engine, account, _ = services(database_url)
+def test_failed_lookup_and_bad_proof_persist_source_limit(
+    database_url: str, tmp_path: Path
+) -> None:
+    engine, account, _ = services(database_url, tmp_path)
     key = ec.generate_private_key(ec.SECP256R1())
     try:
         for _ in range(2):

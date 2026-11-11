@@ -12,6 +12,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.account_recovery import revoke_account_authority
+from autplay.adapters.postgresql.device_identifier_reservations import device_v2_identifier_reserved
+from autplay.adapters.postgresql.device_platform_evidence import (
+    device_has_macos_evidence,
+    has_macos_key_evidence,
+)
 from autplay.adapters.postgresql.models import (
     AuditEventRow,
     DeviceRow,
@@ -27,6 +32,7 @@ from autplay.adapters.postgresql.resource_limits import (
     lock_resource_admission,
     require_device_capacity,
 )
+from autplay.adapters.postgresql.retained_deletion_reservations import DeletionReservationReplay
 from autplay.adapters.postgresql.self_device_pairing import SqlAlchemySelfPairingRepository
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.domain.account_recovery import (
@@ -180,7 +186,8 @@ class AccountRecoveryService:
             populate_existing=True,
         )
         if row is not None and (
-            row.kind != kind
+            row.contract_version != "v1"
+            or row.kind != kind
             or row.user_id != account.user_id
             or row.server_instance_id != UUID(request["expected_server_instance_id"])
             or row.identity_epoch != request["expected_identity_epoch"]
@@ -242,6 +249,9 @@ class AccountRecoveryService:
         with self.sessions.begin() as session:
             identity, account = self._lock(session, request)
             family = self._actor(session, account, actor)
+            if device_v2_identifier_reserved(session, UUID(request["operation_id"])):
+                raise AccountRecoveryError("operation_conflict")
+            family = self._actor(session, account, actor)
             now = database_now(session)
             old = self._receipt(session, "CONFIGURE", request, account, now)
             credential = session.get(
@@ -257,7 +267,10 @@ class AccountRecoveryService:
                 ):
                     raise AccountRecoveryError()
                 self._current_receipt(credential, old)
+                if old.expires_at <= database_now(session):
+                    raise AccountRecoveryError()
                 return self._configured(old, replayed=True)
+            now = database_now(session)
             require_fresh(request, now)
             generation = 0 if credential is None else credential.generation
             if generation != request["expected_code_generation"]:
@@ -278,9 +291,13 @@ class AccountRecoveryService:
     def preview(self, code: str, document: dict[str, Any]) -> dict[str, Any]:
         request = parse_request("preview", document)
         self.rate_gate("", UUID(request["account_id"]))
-        verify_device("preview", request)
+        key = verify_device("preview", request)
         with self.sessions.begin() as session:
             identity, account = self._lock(session, request)
+            if has_macos_key_evidence(
+                session, bytes.fromhex(request["device_key_thumbprint_sha256"]), public_key=key
+            ):
+                raise AccountRecoveryError()
             credential = self._credential(session, identity, account)
             require_fresh(request, database_now(session))
             self._possession(identity, account, credential.verifier_sha256, code)
@@ -351,6 +368,7 @@ class AccountRecoveryService:
         code: str,
         *,
         kind: str,
+        deletion_replay: DeletionReservationReplay | None = None,
     ) -> dict[str, Any]:
         """Caller verifies the purpose-bound proof and holds all lifecycle locks."""
         if (
@@ -359,6 +377,18 @@ class AccountRecoveryService:
             or account.deleted_at is not None
         ):
             raise AccountRecoveryError()
+        if deletion_replay is not None and kind != "DELETE_CANCEL":
+            raise AccountRecoveryError("operation_conflict")
+        if any(
+            device_v2_identifier_reserved(
+                session, UUID(request[name]), deletion_replay=deletion_replay
+            )
+            for name in (
+                "operation_id",
+                "binding_commit_id",
+            )
+        ):
+            raise AccountRecoveryError("operation_conflict")
         credential = self._credential(session, identity, account)
         now = database_now(session)
         old = self._receipt(session, kind, request, account, now)
@@ -367,7 +397,9 @@ class AccountRecoveryService:
                 raise AccountRecoveryError()
             self._possession(identity, account, old.spent_verifier_sha256, code)
             self._current_receipt(credential, old)
-            return self._binding_response(session, account, old, now, replayed=True)
+            return self._binding_response(
+                session, account, old, now, replayed=True, deletion_replay=deletion_replay
+            )
         require_fresh(request, now)
         self._possession(identity, account, credential.verifier_sha256, code)
         if request["expected_code_generation"] != credential.generation:
@@ -376,6 +408,8 @@ class AccountRecoveryService:
         if hmac.compare_digest(credential.verifier_sha256, verifier):
             raise AccountRecoveryError("recovery_code_unchanged")
         thumbprint = bytes.fromhex(request["device_key_thumbprint_sha256"])
+        if has_macos_key_evidence(session, thumbprint, public_key=key):
+            raise AccountRecoveryError()
         block = session.get(DeviceKeyBlockRow, (account.user_id, thumbprint))
         if block is not None and block.unblocked_at is None:
             raise AccountRecoveryError()
@@ -414,9 +448,13 @@ class AccountRecoveryService:
             is not None
         ):
             raise AccountRecoveryError("operation_conflict")
+        now = database_now(session)
+        require_fresh(request, now)
         revoke_account_authority(session, account, now)
         session.flush()
         require_device_capacity(session, account.user_id)
+        now = database_now(session)
+        require_fresh(request, now)
         device_id, session_id = uuid4(), uuid4()
         device = DeviceRow(
             device_id=device_id,
@@ -456,7 +494,9 @@ class AccountRecoveryService:
         session.add(receipt)
         self._audit(session, account.user_id, device_id, receipt, now)
         session.flush()
-        return self._binding_response(session, account, receipt, now, replayed=False)
+        return self._binding_response(
+            session, account, receipt, now, replayed=False, deletion_replay=deletion_replay
+        )
 
     @staticmethod
     def _possession(
@@ -528,15 +568,35 @@ class AccountRecoveryService:
         expected_key: bytes | None = None,
         expected_refresh_hash: bytes | None = None,
         recovered_outcome: bool = False,
+        deletion_replay: DeletionReservationReplay | None = None,
     ) -> dict[str, Any]:
         if receipt.result_device_id is None or receipt.result_session_id is None:
             raise AccountRecoveryError()
+        if (
+            receipt.binding_commit_id is None
+            or device_v2_identifier_reserved(
+                session,
+                receipt.operation_id,
+                deletion_replay=deletion_replay,
+            )
+            or device_v2_identifier_reserved(
+                session, receipt.binding_commit_id, deletion_replay=deletion_replay
+            )
+        ):
+            raise AccountRecoveryError("operation_conflict")
         device = session.get(
             DeviceRow, receipt.result_device_id, with_for_update=True, populate_existing=True
         )
         binding = session.get(
             UserSessionRow, receipt.result_session_id, with_for_update=True, populate_existing=True
         )
+        if device is not None and device_has_macos_evidence(session, device):
+            raise AccountRecoveryError()
+        # Retained evidence and row/key reads may wait. Preserve historical outcome
+        # semantics, but recheck a normal receipt and live binding at the final clock.
+        now = database_now(session)
+        if not recovered_outcome and receipt.expires_at <= now:
+            raise AccountRecoveryError()
         if (
             device is None
             or device.user_id != account.user_id

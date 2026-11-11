@@ -88,6 +88,8 @@ class SnapshotTrack:
     last_played_at_ms: int | None
     added_at_ms: int
     release_date_ordinal: int | None
+    owner_identity_decision_id: UUID | None = None
+    verified_audio_variant_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,8 +99,11 @@ class RecommendationInputSnapshot:
     reference: RecommendationSnapshotRef
     tracks: tuple[SnapshotTrack, ...]
     retained_until: datetime
+    policy_version: str = "1"
 
     def __post_init__(self) -> None:
+        if self.policy_version not in {"1", "2"}:
+            raise ValueError("unsupported recommendation snapshot policy")
         recording_ids = tuple(track.recording_id for track in self.tracks)
         if len(recording_ids) != len(set(recording_ids)):
             raise ValueError("recommendation snapshot contains duplicate recordings")

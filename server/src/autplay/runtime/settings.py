@@ -64,6 +64,9 @@ _API_ENV_FIELDS: Final = {
     "refresh_token_ttl_seconds": "REFRESH_TOKEN_TTL_SECONDS",
     "password_login_enabled": "PASSWORD_LOGIN_ENABLED",
     "portable_accounts_enabled": "PORTABLE_ACCOUNTS_ENABLED",
+    "device_compatibility_v2_enabled": "DEVICE_COMPATIBILITY_V2_ENABLED",
+    "sync_binding_v2_enabled": "SYNC_BINDING_V2_ENABLED",
+    "media_source_snapshot_v1_enabled": "MEDIA_SOURCE_SNAPSHOT_V1_ENABLED",
     "profile_identity_private_key_pem": "PROFILE_IDENTITY_PRIVATE_KEY_PEM",
     "profile_label_hint": "PROFILE_LABEL_HINT",
     "profile_api_origin": "PROFILE_API_ORIGIN",
@@ -74,6 +77,7 @@ _API_ENV_FIELDS: Final = {
     "account_recovery_enabled": "ACCOUNT_RECOVERY_ENABLED",
     "account_deletion_enabled": "ACCOUNT_DELETION_ENABLED",
     "shared_training_consent_enabled": "SHARED_TRAINING_CONSENT_ENABLED",
+    "native_recommendation_capture_enabled": "NATIVE_RECOMMENDATION_CAPTURE_ENABLED",
     "direct_vault_upload_enabled": "DIRECT_VAULT_UPLOAD_ENABLED",
     "admin_web_origin": "ADMIN_WEB_ORIGIN",
     "admin_web_source_hmac_secret": "ADMIN_WEB_SOURCE_HMAC_SECRET",
@@ -316,6 +320,9 @@ class ApiSettings(_ExplicitSettings):
     refresh_token_ttl_seconds: int = Field(default=2_592_000, ge=3_600, le=7_776_000)
     password_login_enabled: bool = False
     portable_accounts_enabled: bool = False
+    device_compatibility_v2_enabled: bool = False
+    sync_binding_v2_enabled: bool = False
+    media_source_snapshot_v1_enabled: bool = False
     profile_identity_private_key_pem: SecretStr | None = Field(
         default=None, repr=False, max_length=16_384
     )
@@ -332,6 +339,7 @@ class ApiSettings(_ExplicitSettings):
     account_recovery_enabled: bool = False
     account_deletion_enabled: bool = False
     shared_training_consent_enabled: bool = False
+    native_recommendation_capture_enabled: bool = False
     # Transitional compatibility path for deployments whose reviewed resource
     # budget has not been initialized yet. It restores the pre-admission Vault
     # writer only when an operator opts in explicitly.
@@ -398,6 +406,8 @@ class ApiSettings(_ExplicitSettings):
     def _validate_auth_contract(self) -> Self:
         if self.portable_accounts_enabled and self.profile_identity_private_key_pem is None:
             raise ValueError("portable accounts require a persistent profile identity")
+        if self.native_recommendation_capture_enabled and not self.shared_training_consent_enabled:
+            raise ValueError("native capture requires shared training consent enabled")
         if self.shared_training_consent_enabled and self.training_consent_ledger_path is None:
             raise ValueError("shared training requires independent consent evidence")
         if self.account_deletion_enabled and not self.account_recovery_enabled:

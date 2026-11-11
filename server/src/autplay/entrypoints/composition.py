@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -18,11 +19,16 @@ from autplay.adapters.postgresql.auth_runtime import SqlAlchemyAuthUnitOfWorkFac
 from autplay.adapters.postgresql.discovery_automation_runtime import (
     SqlAlchemyDiscoveryAutomationRepository,
 )
+from autplay.adapters.postgresql.media_source import PostgresMediaSourceReader
+from autplay.adapters.postgresql.media_source_runtime import MediaSourceDatabaseRuntime
 from autplay.adapters.postgresql.recommendations import (
     SqlAlchemyOfflinePackRepository,
     SqlAlchemyRecommendationRuntime,
 )
-from autplay.adapters.postgresql.self_device_pairing import SqlAlchemySelfPairingUnitOfWorkFactory
+from autplay.adapters.postgresql.self_device_pairing import (
+    SqlAlchemySelfPairingUnitOfWorkFactory,
+    SqlAlchemySelfPairingV2UnitOfWorkFactory,
+)
 from autplay.adapters.postgresql.vault_uow import SqlAlchemyVaultUnitOfWorkFactory
 from autplay.adapters.postgresql.wave import SqlAlchemyWaveService
 from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
@@ -36,21 +42,30 @@ from autplay.application.admin_commands import AdminCommandService
 from autplay.application.auth import AuthService
 from autplay.application.bulk_discovery import BulkDiscoveryService
 from autplay.application.catalog_artist_sync import CatalogArtistMutationService
+from autplay.application.device_admission_service_v2 import DeviceAdmissionServiceV2
+from autplay.application.device_compatibility import DeviceCompatibilityService
+from autplay.application.device_deletion_service_v2 import DeviceDeletionServiceV2
+from autplay.application.device_profile_service_v2 import DeviceProfileServiceV2
+from autplay.application.device_recovery_service_v2 import DeviceRecoveryServiceV2
+from autplay.application.device_self_service_v2 import DeviceSelfServiceV2
 from autplay.application.discovery_automation import DiscoveryAutomationService
 from autplay.application.guest_room import GuestRoomService
 from autplay.application.imports import ImportService
 from autplay.application.library import LibraryService
 from autplay.application.manual_discovery import ManualDiscoveryService
+from autplay.application.media_source import MediaSourceService
 from autplay.application.portable_account import PortableAccountService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
 from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
+    baseline_pipeline_definition,
 )
 from autplay.application.self_device_pairing import SelfDevicePairingService
 from autplay.application.social import SocialService
 from autplay.application.sync import SyncService
+from autplay.application.sync_binding_v2 import SyncBindingV2Service
 from autplay.application.training_consent import TrainingConsentService
 from autplay.application.vault_uploads import (
     CreateUploadCommand,
@@ -62,6 +77,8 @@ from autplay.application.vault_uploads import (
 from autplay.application.web_admin import WebAdminService
 from autplay.application.web_passkeys import WebPasskeyService
 from autplay.domain.auth import Principal
+from autplay.domain.device_capability_state import DeviceCapabilityPolicy
+from autplay.domain.device_compatibility import NegotiationPolicy
 from autplay.domain.profile_pairing import load_private_key
 from autplay.domain.resource_admission import LocalBridgeClaim, ResourceAdmissionError
 from autplay.domain.vault import (
@@ -71,19 +88,53 @@ from autplay.domain.vault import (
     VaultCapacityError,
     VaultLimits,
 )
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.entrypoints.stream_http import AuthorizedStream
 from autplay.entrypoints.vault_http import AdmittedChunk, UploadView
+from autplay.ports.media_source import ElapsedClock, MediaSourceAuthenticator, MediaSourcePolicy
+from autplay.ports.sync_binding_v2 import BindingAccessAuthenticator
 from autplay.runtime.settings import ApiSettings, StreamSettings
 from autplay.runtime.vault_io import VaultIoSession
 
 
-def build_auth_service(settings: ApiSettings, engine: Engine) -> AuthService:
+def build_identifier_sessions(
+    settings: ApiSettings | StreamSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> sessionmaker[Session]:
+    """Inject before opening sessions; standalone callers own restore lifecycle."""
+    owner = (
+        deletion_evidence
+        if deletion_evidence is not None
+        else DeletionEvidenceRuntime(settings, engine)
+    )
+    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    owner.configure(sessions)
+    return sessions
+
+
+def build_auth_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+    identity: ProfilePairingService | None = None,
+) -> AuthService:
     """Assemble authentication without opening a database connection eagerly."""
 
-    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    sessions = build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence)
     access_ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    identity = identity or build_profile_pairing_service(
+        settings, engine, deletion_evidence=deletion_evidence
+    )
     return AuthService(
-        unit_of_work_factory=SqlAlchemyAuthUnitOfWorkFactory(sessions),
+        unit_of_work_factory=SqlAlchemyAuthUnitOfWorkFactory(
+            sessions,
+            portable_identity=None
+            if identity is None
+            else identity.current_device_contract_identity,
+        ),
         clock=SystemClock(),
         ids=Uuid7Generator(),
         access_tokens=Hs256AccessTokenCodec(
@@ -99,14 +150,17 @@ def build_auth_service(settings: ApiSettings, engine: Engine) -> AuthService:
 
 
 def build_profile_pairing_service(
-    settings: ApiSettings, engine: Engine
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
 ) -> ProfilePairingService | None:
     """Assemble M5B only when an operator supplied a persistent secret-file key."""
     pem = settings.profile_identity_private_key_pem
     if pem is None:
         return None
     return ProfilePairingService(
-        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
         private_key=load_private_key(pem.get_secret_value().encode("utf-8")),
         label_hint=settings.profile_label_hint,
         api_origin=settings.profile_api_origin,
@@ -123,13 +177,253 @@ def build_profile_pairing_service(
         account_deletion_enabled=settings.account_deletion_enabled,
         shared_training_consent_enabled=settings.shared_training_consent_enabled,
         portable_accounts_enabled=settings.portable_accounts_enabled,
+        device_compatibility_v2_enabled=lambda: settings.device_compatibility_v2_enabled,
+        media_source_snapshot_v1_enabled=settings.media_source_snapshot_v1_enabled,
     )
 
 
-def build_public_access_service(settings: ApiSettings, engine: Engine) -> PublicAccessService:
+def build_device_compatibility_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceCompatibilityService | None:
+    """Keep negotiation composed when disabled; reuse the already assembled M5 owner."""
+    if identity is None:
+        return None
+    return DeviceCompatibilityService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        identity=identity,
+        policy=_device_capability_policy(settings, deletion_evidence).d1,
+        combined_policy=lambda: _device_capability_policy(settings, deletion_evidence),
+    )
+
+
+def _device_capability_policy(
+    settings: ApiSettings,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceCapabilityPolicy:
+    """The same live settings snapshot feeds BOTH shared revision producers."""
+    return DeviceCapabilityPolicy(
+        binding_enabled=settings.sync_binding_v2_enabled,
+        d1=NegotiationPolicy(
+            enabled=settings.device_compatibility_v2_enabled,
+            portable_enabled=settings.portable_accounts_enabled,
+            self_enabled=settings.self_device_pairing_enabled,
+            recovery_enabled=settings.account_recovery_enabled,
+            deletion_enabled=settings.account_deletion_enabled,
+            deletion_evidence_ready=(
+                deletion_evidence is not None and deletion_evidence.evidence_ready()
+            ),
+        ),
+    )
+
+
+def build_sync_binding_authenticator(
+    authentication: AuthService,
+    sessions: sessionmaker[Session],
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> BindingAccessAuthenticator:
+    """Keep the real codec/clock/auth rules; replace only the DB UoW owner."""
+    # This returns only the access reader, never a session issuer. API-owned
+    # transient factories still carry the same guard as its issuing factories.
+    if deletion_evidence is not None:
+        deletion_evidence.configure(sessions)
+    original_units = authentication.unit_of_work_factory
+    units = (
+        original_units.using_sessions(sessions)
+        if isinstance(original_units, SqlAlchemyAuthUnitOfWorkFactory)
+        else SqlAlchemyAuthUnitOfWorkFactory(sessions)
+    )
+    return replace(authentication, unit_of_work_factory=units).authenticate_access_with_claims
+
+
+def build_sync_binding_v2_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> SyncBindingV2Service | None:
+    if identity is None:
+        return None
+    # Off switches refuse first admission; they never remove negotiation/replay.
+    return SyncBindingV2Service(
+        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        identity=identity,
+        policy=lambda: _device_capability_policy(settings, deletion_evidence),
+    )
+
+
+def build_media_source_service(
+    settings: ApiSettings,
+    database: MediaSourceDatabaseRuntime,
+    *,
+    identity: ProfilePairingService | None,
+    clock: ElapsedClock,
+) -> MediaSourceService:
+    """Separate read-only pool; an absent initialized M5 view remains unavailable."""
+    unavailable = MediaSourcePolicy(
+        settings.media_source_snapshot_v1_enabled, None, settings.access_token_ttl_seconds
+    )
+    if isinstance(identity, ProfilePairingService):
+        identity.configure_media_source_policy(enabled=settings.media_source_snapshot_v1_enabled)
+    return MediaSourceService(
+        PostgresMediaSourceReader(database.engine.sync_engine, clock=clock),
+        policy=identity.current_media_source_policy
+        if isinstance(identity, ProfilePairingService)
+        else lambda: unavailable,
+        clock=clock,
+    )
+
+
+def build_media_source_authenticator(
+    authentication: AuthService,
+    sessions: sessionmaker[Session],
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime,
+) -> MediaSourceAuthenticator:
+    """Actual codec/clock/R1 rules, with ALL reads in this operation's owned pool.
+
+    R1 keeps its complete original receipt predicates and final-time evidence;
+    M1 uses a read-only repeatable-read observation and the committed public M5
+    capture instead of identity/resource/row locks. No reader or original-pool
+    Session is cached or captured. The issuing-session deletion guard stays the
+    same API-owned object; this UoW is used only to authenticate reads.
+    """
+    deletion_evidence.configure(sessions)
+    units = SqlAlchemyAuthUnitOfWorkFactory(
+        sessions,
+        portable_identity=identity.media_source_portable_identity
+        if isinstance(identity, ProfilePairingService)
+        else None,
+        portable_read_only=True,
+    )
+    return replace(authentication, unit_of_work_factory=units).authenticate_access_with_claims
+
+
+def build_device_profile_v2_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceProfileServiceV2 | None:
+    """Retain replay handlers when disabled; M5 remains the sole identity owner."""
+    if identity is None:
+        return None
+    access_ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    return DeviceProfileServiceV2(
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
+        identity=identity,
+        enabled=lambda: settings.device_compatibility_v2_enabled,
+        access_tokens=Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=access_ttl,
+        ),
+        access_ttl=access_ttl,
+    )
+
+
+def build_device_admission_v2_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceAdmissionServiceV2 | None:
+    """Keep bounded committed continuations when the admission flag is false."""
+    if identity is None:
+        return None
+    return DeviceAdmissionServiceV2(
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
+        identity=identity,
+        enabled=lambda: settings.device_compatibility_v2_enabled,
+    )
+
+
+def build_device_self_v2_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceSelfServiceV2 | None:
+    """Compose bounded SELF receipts even when either independent admission gate is off."""
+    if identity is None:
+        return None
+    sessions = build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence)
+    ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    access = Hs256AccessTokenCodec(
+        settings.auth_signing_secret.get_secret_value(),
+        issuer=settings.auth_issuer,
+        audience=settings.auth_audience,
+        max_ttl=ttl,
+    )
+    rates = SelfDevicePairingService(
+        SqlAlchemySelfPairingUnitOfWorkFactory(sessions),
+        access,
+        ttl,
+        settings.public_access_source_hmac_secret.get_secret_value().encode(),
+    )
+    return DeviceSelfServiceV2(
+        SqlAlchemySelfPairingV2UnitOfWorkFactory(
+            sessions, lambda session: identity.device_contract_identity(session, datetime.now(UTC))
+        ),
+        enabled=lambda: (
+            settings.device_compatibility_v2_enabled and settings.self_device_pairing_enabled
+        ),
+        access_tokens=access,
+        access_ttl=ttl,
+        rates=rates,
+    )
+
+
+def build_device_recovery_v2_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceRecoveryServiceV2 | None:
+    """Retain exact committed replay/outcome when either independent gate is off."""
+    if identity is None:
+        return None
+    ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    recovery = AccountRecoveryService(
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
+        Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=ttl,
+        ),
+        ttl,
+        settings.public_access_source_hmac_secret.get_secret_value().encode(),
+    )
+    return DeviceRecoveryServiceV2(
+        recovery,
+        identity=identity,
+        enabled=lambda: (
+            settings.device_compatibility_v2_enabled and settings.account_recovery_enabled
+        ),
+    )
+
+
+def build_public_access_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> PublicAccessService:
     """Assemble PA2 without modifying M5 enrollment authority."""
     return PublicAccessService(
-        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
         access_tokens=Hs256AccessTokenCodec(
             settings.auth_signing_secret.get_secret_value(),
             issuer=settings.auth_issuer,
@@ -144,13 +438,16 @@ def build_public_access_service(settings: ApiSettings, engine: Engine) -> Public
 
 
 def build_portable_account_service(
-    settings: ApiSettings, engine: Engine
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
 ) -> PortableAccountService | None:
     if not settings.portable_accounts_enabled:
         return None
     ttl = timedelta(seconds=settings.access_token_ttl_seconds)
     return PortableAccountService(
-        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
         Hs256AccessTokenCodec(
             settings.auth_signing_secret.get_secret_value(),
             issuer=settings.auth_issuer,
@@ -163,14 +460,17 @@ def build_portable_account_service(
 
 
 def build_self_device_pairing_service(
-    settings: ApiSettings, engine: Engine
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
 ) -> SelfDevicePairingService | None:
     if not settings.self_device_pairing_enabled:
         return None
     ttl = timedelta(seconds=settings.access_token_ttl_seconds)
     return SelfDevicePairingService(
         SqlAlchemySelfPairingUnitOfWorkFactory(
-            sessionmaker(engine, class_=Session, expire_on_commit=False)
+            build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence)
         ),
         Hs256AccessTokenCodec(
             settings.auth_signing_secret.get_secret_value(),
@@ -184,13 +484,16 @@ def build_self_device_pairing_service(
 
 
 def build_account_recovery_service(
-    settings: ApiSettings, engine: Engine
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
 ) -> AccountRecoveryService | None:
     if not settings.account_recovery_enabled:
         return None
     ttl = timedelta(seconds=settings.access_token_ttl_seconds)
     return AccountRecoveryService(
-        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
         Hs256AccessTokenCodec(
             settings.auth_signing_secret.get_secret_value(),
             issuer=settings.auth_issuer,
@@ -203,19 +506,59 @@ def build_account_recovery_service(
 
 
 def build_account_deletion_service(
-    settings: ApiSettings, engine: Engine
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
 ) -> AccountDeletionService | None:
     if not settings.account_deletion_enabled:
         return None
-    recovery = build_account_recovery_service(settings, engine)
+    owner = (
+        deletion_evidence
+        if deletion_evidence is not None
+        else DeletionEvidenceRuntime(settings, engine)
+    )
+    recovery = build_account_recovery_service(settings, engine, deletion_evidence=owner)
     if recovery is None:
         raise ValueError("account deletion requires recovery")
-    from autplay.entrypoints.privacy_deletion import build_deletion_ledger
+    return AccountDeletionService(recovery, owner.ledger)
 
-    ledger = build_deletion_ledger(settings)
-    if ledger is None:
-        raise ValueError("account deletion requires independent decisions")
-    return AccountDeletionService(recovery, ledger)
+
+def build_device_deletion_v2_service(
+    settings: ApiSettings,
+    engine: Engine,
+    *,
+    identity: ProfilePairingService | None,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> DeviceDeletionServiceV2 | None:
+    """Keep all six terminal handlers mounted across independent admission gates."""
+    if identity is None:
+        return None
+    owner = (
+        deletion_evidence
+        if deletion_evidence is not None
+        else DeletionEvidenceRuntime(settings, engine)
+    )
+    ttl = timedelta(seconds=settings.access_token_ttl_seconds)
+    recovery = AccountRecoveryService(
+        build_identifier_sessions(settings, engine, deletion_evidence=owner),
+        Hs256AccessTokenCodec(
+            settings.auth_signing_secret.get_secret_value(),
+            issuer=settings.auth_issuer,
+            audience=settings.auth_audience,
+            max_ttl=ttl,
+        ),
+        ttl,
+        settings.public_access_source_hmac_secret.get_secret_value().encode(),
+    )
+    return DeviceDeletionServiceV2(
+        AccountDeletionService(recovery, owner.ledger),
+        identity=identity,
+        enabled=lambda: settings.device_compatibility_v2_enabled,
+        deletion_enabled=lambda: settings.account_deletion_enabled,
+        recovery_enabled=lambda: settings.account_recovery_enabled,
+        evidence_ready=owner.evidence_ready,
+    )
 
 
 def build_web_admin_service(settings: ApiSettings, engine: Engine) -> WebAdminService | None:
@@ -638,17 +981,30 @@ def build_sync_service(settings: ApiSettings, engine: Engine) -> SyncService:
     )
 
 
-def build_recommendation_service(engine: Engine) -> RecommendationService:
+def build_recommendation_service(
+    engine: Engine, settings: ApiSettings | None = None
+) -> RecommendationService:
     """Assemble the CPU-only P11 graph without embeddings or model dependencies."""
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
-    runtime = SqlAlchemyRecommendationRuntime(sessions)
+    capture = None
+    if settings is not None and settings.native_recommendation_capture_enabled:
+        from autplay.adapters.postgresql.sona_native_capture import SqlAlchemySonaNativeCapture
+
+        consent = build_training_consent_service(settings, engine)
+        if consent is None:
+            raise ValueError("native capture requires shared training consent authority")
+        capture = SqlAlchemySonaNativeCapture(consent)
+    runtime = SqlAlchemyRecommendationRuntime(
+        sessions, native_capture=capture, snapshot_policy_version="2"
+    )
     return RecommendationService(
         snapshots=runtime,
         traces=runtime,
-        registry=StaticRecommendationVersionRegistry(),
+        registry=StaticRecommendationVersionRegistry(baseline_pipeline_definition("2")),
         ids=Uuid7Generator().new,
         clock=SystemClock().now,
         packs=SqlAlchemyOfflinePackRepository(runtime),
+        atomic_writer=runtime if capture is not None else None,
     )
 
 
@@ -711,10 +1067,15 @@ def build_stream_lookup(engine: Engine) -> _StreamLookup:
     return _StreamLookup(engine)
 
 
-def build_stream_auth_service(settings: StreamSettings, engine: Engine) -> AuthService:
+def build_stream_auth_service(
+    settings: StreamSettings,
+    engine: Engine,
+    *,
+    deletion_evidence: DeletionEvidenceRuntime | None = None,
+) -> AuthService:
     """Assemble auth for stream without importing API-only settings."""
 
-    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    sessions = build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence)
     access_ttl = timedelta(seconds=900)
     return AuthService(
         unit_of_work_factory=SqlAlchemyAuthUnitOfWorkFactory(sessions),
@@ -754,8 +1115,15 @@ __all__ = (
     "build_auth_service",
     "build_bulk_discovery_service",
     "build_catalog_artist_mutation_service",
+    "build_device_admission_v2_service",
+    "build_device_compatibility_service",
+    "build_device_deletion_v2_service",
+    "build_device_profile_v2_service",
+    "build_device_recovery_v2_service",
+    "build_device_self_v2_service",
     "build_discovery_automation_service",
     "build_guest_room_service",
+    "build_identifier_sessions",
     "build_import_service",
     "build_library_service",
     "build_manual_discovery_service",
@@ -764,6 +1132,7 @@ __all__ = (
     "build_recommendation_service",
     "build_stream_auth_service",
     "build_stream_lookup",
+    "build_sync_binding_v2_service",
     "build_sync_service",
     "build_vault_http_service",
     "build_wave_service",

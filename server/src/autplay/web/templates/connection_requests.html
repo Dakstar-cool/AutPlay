@@ -44,6 +44,7 @@
   <article class="pending-device" aria-labelledby="pending-title-{{ item.request_id }}">
     <h3 id="pending-title-{{ item.request_id }}">{{ item.device_model_hint or item.device_label }}</h3>
     <p>{{ item.platform }} · {{ item.app_version }}</p>
+    {% if item.contract_version == "v2" %}<p>v2 · {{ item.platform }}</p>{% endif %}
     <p class="field-help">{{ t("requested_at") }}: {{ format_datetime(item.requested_at) }} · {{ t("expires") }}: {{ format_datetime(item.expires_at) }}</p>
     <form method="post" action="/admin/connection-requests/pending/{{ item.request_id }}/trust">
       <label for="device-name-{{ item.request_id }}">{{ t("new_device_name") }}</label>

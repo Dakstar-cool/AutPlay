@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Barrier
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -48,6 +49,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .conftest import DatabaseHarness
+from .controlled_clock import control_database_clock
+from .deletion_evidence import configured_sessions
 
 REQUEST_DOMAIN = "autplay:s1b:admission-request:v1\n"
 POLL_DOMAIN = "autplay:s1b:admission-poll:v1\n"
@@ -72,11 +75,19 @@ class _Runtime:
 
 
 @pytest.fixture
-def admission_runtime(database_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Runtime]:
+def admission_runtime(
+    database_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[_Runtime]:
     engine = create_engine(database_url, pool_pre_ping=True)
-    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
-    clock = _Clock(datetime(2026, 8, 25, 12, 0, tzinfo=UTC))
+    sessions = configured_sessions(engine, tmp_path)
+    clock = _Clock(datetime.now(UTC))
     monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: clock.value)
+    control_database_clock(
+        monkeypatch,
+        lambda: clock.value,
+        "autplay.application.profile_pairing",
+        "autplay.application.device_admission_service_v2",
+    )
     service = ProfilePairingService(
         sessions,
         private_key=ec.generate_private_key(ec.SECP256R1()),
@@ -775,6 +786,122 @@ def test_submit_rate_limits_are_exact_and_transactional(
             source="203.0.113.200",
             nonce_marker=90,
         )
+
+
+@pytest.mark.parametrize("stage", ["admission", "trusted_challenge", "trusted_exchange"])
+@pytest.mark.parametrize("evidence", ["admission", "revoked_device"])
+def test_v1_admission_and_trusted_issuers_refuse_mac_evidence(
+    admission_runtime: _Runtime, database_connection: Connection[Any], stage: str, evidence: str
+) -> None:
+    request, created, key, request_hash = _admission(admission_runtime)
+    owner = _web_actor(admission_runtime, database_connection)
+    _bind_and_decide(admission_runtime, owner, created, "TRUST_DEVICE")
+    thumb = bytes.fromhex(str(request["device_key_thumbprint_sha256"]))
+    database_connection.execute(
+        "INSERT INTO account.trusted_device_key ("
+        "user_id,device_key_thumbprint_sha256,device_public_key_spki,approved_request_id,"
+        "key_reference,revision,created_at) VALUES (%s,%s,%s,%s,%s,1,%s)",
+        (
+            owner.user_id,
+            thumb,
+            public_spki(key),
+            UUID(str(request["request_id"])),
+            uuid4(),
+            admission_runtime.clock.value,
+        ),
+    )
+    database_connection.commit()
+    principal = Principal(owner.user_id, UUID(int=0), UUID(int=0), owner.role)
+    challenge = None
+    if stage == "trusted_exchange":
+        challenge = admission_runtime.service.issue_trusted_reenrollment_challenge(
+            principal=principal,
+            thumbprint=thumb,
+            challenge_id=uuid4(),
+            request_sha256=b"r" * 32,
+            client_nonce_sha256=b"n" * 32,
+        )
+    if evidence == "admission":
+        database_connection.execute(
+            "UPDATE account.device_admission SET platform='MACOS' WHERE request_id=%s",
+            (UUID(str(request["request_id"])),),
+        )
+    else:
+        database_connection.execute(
+            "INSERT INTO account.device (user_id,device_name,platform,app_version,"
+            "public_key,public_key_thumbprint_sha256,revoked_at) "
+            "VALUES (%s,'Historical Mac','MACOS','fixture',%s,%s,%s)",
+            (owner.user_id, public_spki(key), None, admission_runtime.clock.value),
+        )
+    database_connection.commit()
+    before = database_connection.execute(
+        "SELECT * FROM account.device_admission WHERE request_id=%s",
+        (UUID(str(request["request_id"])),),
+    ).fetchone()
+    database_connection.commit()
+    binding: dict[str, object] = {
+        "exchange_id": str(uuid4()),
+        "binding_commit_id": str(uuid4()),
+        "expected_server_instance_id": request["expected_server_instance_id"],
+        "expected_identity_epoch": request["expected_identity_epoch"],
+        "expected_identity_thumbprint_sha256": request["expected_identity_thumbprint_sha256"],
+        "expected_api_origin": "https://api.test.invalid",
+        "expected_stream_origin": "https://stream.test.invalid",
+        "device_key_thumbprint_sha256": thumb.hex(),
+        "device_public_key_jwk": _jwk(key),
+        "next_refresh_token_sha256": hashlib.sha256(b"mac-conflict-refresh").hexdigest(),
+        "client_nonce_b64url": _nonce(90),
+    }
+    with pytest.raises(ProfilePairingError):
+        if stage == "trusted_challenge":
+            admission_runtime.service.issue_trusted_reenrollment_challenge(
+                principal=principal,
+                thumbprint=thumb,
+                challenge_id=uuid4(),
+                request_sha256=b"r" * 32,
+                client_nonce_sha256=b"n" * 32,
+            )
+        elif stage == "trusted_exchange":
+            assert challenge is not None
+            admission_runtime.service.complete_trusted_reenrollment(
+                _signed(
+                    key,
+                    TRUSTED_REENROLLMENT_DOMAIN,
+                    {
+                        **binding,
+                        "account_id": str(owner.user_id),
+                        "challenge_id": challenge["challenge_id"],
+                        "challenge": challenge["challenge"],
+                    },
+                )
+            )
+        else:
+            admission_runtime.service.exchange_device_admission(
+                _signed(
+                    key,
+                    EXCHANGE_DOMAIN,
+                    {
+                        **binding,
+                        "request_id": request["request_id"],
+                        "request_sha256": request_hash,
+                        "approved_account_id": str(owner.user_id),
+                        "poll_bearer_sha256": hashlib.sha256(
+                            str(created["poll_bearer"]).encode()
+                        ).hexdigest(),
+                    },
+                ),
+                str(created["poll_bearer"]),
+            )
+    assert database_connection.execute("SELECT count(*) FROM account.user_session").fetchone() == (
+        0,
+    )
+    assert (
+        database_connection.execute(
+            "SELECT * FROM account.device_admission WHERE request_id=%s",
+            (UUID(str(request["request_id"])),),
+        ).fetchone()
+        == before
+    )
 
 
 def test_exchange_replay_trust_removal_and_revocation_remain_distinct(

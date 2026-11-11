@@ -15,6 +15,7 @@ from autplay.adapters.postgresql.catalog_changes import (
 )
 from autplay.adapters.postgresql.import_runtime import (
     IMPORT_JOB_KEY,
+    ImportNotFoundError,
     ImportOperationConflictError,
     ImportReviewConflictError,
     PostgresImportRepository,
@@ -157,6 +158,43 @@ def test_probabilistic_import_stays_shadow_until_explicit_manual_resolution(
             assert shadow_entry.current_match_decision_id is None
             assert shadow_entry.selected_recording_id is None
             assert shadow_entry.user_track_ref_id is None
+        # Future I1 qualification assertions: source authored only, not executed here.
+        context = service.review_context(
+            principal, created.import_job_id, reviewable.import_entry_id
+        )
+        assert context.predecessor_decision_id == reviewable.decision_id
+        assert len(context.candidates) == reviewable.candidate_count
+        assert context.candidates[0].recording_id == recording_id
+        assert context.candidates[0].current_title == "Song"
+        assert context.candidates[0].current_artist == "Artist"
+        assert "ACCEPT" in context.eligible_actions
+        assert "private.invalid" not in repr(context) and "do-not-report" not in repr(context)
+        foreign = Principal(uuid4(), uuid4(), uuid4(), AccountRole.OWNER)
+        with pytest.raises(ImportNotFoundError):
+            service.review_context(foreign, created.import_job_id, reviewable.import_entry_id)
+        with pytest.raises(ImportNotFoundError):
+            service.review_context(principal, created.import_job_id, uuid4())
+        with Session(engine) as session, session.begin():
+            session.execute(
+                text(
+                    "UPDATE catalog.recording SET title='Current display only' WHERE "
+                    "recording_id=:id"
+                ),
+                {"id": recording_id},
+            )
+        current_display = service.review_context(
+            principal, created.import_job_id, reviewable.import_entry_id
+        )
+        assert current_display.candidates[0].current_title == "Current display only"
+        assert (
+            current_display.candidates[0].evidence_sha256 == context.candidates[0].evidence_sha256
+        )
+        assert current_display.predecessor_decision_id == context.predecessor_decision_id
+        with Session(engine) as session, session.begin():
+            session.execute(
+                text("UPDATE catalog.recording SET title='Song' WHERE recording_id=:id"),
+                {"id": recording_id},
+            )
         reviewed = service.review(
             principal,
             created.import_job_id,

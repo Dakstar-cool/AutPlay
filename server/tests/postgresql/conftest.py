@@ -302,6 +302,15 @@ def database_connection(
 
 
 @pytest.fixture
+def replacement_owner(database_connection: Connection[Any]) -> None:
+    """Permit authority tests to retire their actor while the last-owner guard stays active."""
+    database_connection.execute(
+        "INSERT INTO account.user_account(display_name, role) VALUES ('Replacement owner', 'OWNER')"
+    )
+    database_connection.commit()
+
+
+@pytest.fixture
 def empty_database_name(database_harness: DatabaseHarness) -> Iterator[str]:
     """Create an empty database for migration or reference-DDL tests."""
     name = database_harness.create_database()

@@ -14,6 +14,8 @@ from autplay.adapters.postgresql.import_runtime import (
     ImportJobReport,
     ImportNotFoundError,
     ImportReviewConflictError,
+    ImportReviewContext,
+    ImportReviewContextLimitError,
     ImportReviewResult,
     ImportStartResult,
     ImportStateConflictError,
@@ -25,6 +27,7 @@ from autplay.ports.jobs import JobIdempotencyConflict
 from autplay.runtime.http import ApiError
 
 _NO_STORE = {"Cache-Control": "no-store"}
+_REVIEW_HEADERS = {"Cache-Control": "no-store, private", "Pragma": "no-cache"}
 
 
 class ImportHttpService(Protocol):
@@ -48,6 +51,10 @@ class ImportHttpService(Protocol):
         limit: int = 200,
         after: str | None = None,
     ) -> ImportJobReport: ...
+
+    def review_context(
+        self, principal: Principal, import_job_id: UUID, import_entry_id: UUID
+    ) -> ImportReviewContext: ...
 
     def cancel(self, principal: Principal, import_job_id: UUID) -> CancelRequestResult: ...
 
@@ -153,6 +160,28 @@ def create_import_router(
             raise ApiError("import.state_conflict", "The import cannot be resumed.", 409) from error
         return JSONResponse(_start_result(result), status_code=202, headers=_NO_STORE)
 
+    @router.get("/{import_job_id}/entries/{import_entry_id}/review-context", response_model=None)
+    def review_context(
+        import_job_id: UUID, import_entry_id: UUID, request: Request
+    ) -> JSONResponse:
+        try:
+            result = service.review_context(_principal(request), import_job_id, import_entry_id)
+            response = JSONResponse(_review_context(result), headers=_REVIEW_HEADERS)
+            if len(response.body) > 1_048_576:
+                raise ImportReviewContextLimitError
+            return response
+        except ImportNotFoundError as error:
+            raise ApiError(
+                "not_found", "The requested resource was not found.", 404, headers=_REVIEW_HEADERS
+            ) from error
+        except ImportReviewContextLimitError as error:
+            raise ApiError(
+                "import.review_context_limit",
+                "The complete review context exceeds its limit.",
+                413,
+                headers=_REVIEW_HEADERS,
+            ) from error
+
     @router.post("/{import_job_id}/entries/{import_entry_id}/review", response_model=None)
     def review(
         import_job_id: UUID,
@@ -223,6 +252,38 @@ def _report(result: ImportJobReport) -> dict[str, object]:
             for entry in result.entries
         ],
         "next_after": result.next_after,
+    }
+
+
+def _review_context(result: ImportReviewContext) -> dict[str, object]:
+    return {
+        "format": 1,
+        "import_job_id": str(result.import_job_id),
+        "import_entry_id": str(result.import_entry_id),
+        "predecessor_decision_id": (
+            str(result.predecessor_decision_id) if result.predecessor_decision_id else None
+        ),
+        "entry_state": result.entry_state,
+        "resolver_state": result.resolver_state,
+        "eligible_actions": list(result.eligible_actions),
+        "display_metadata": "CURRENT_CATALOG_DISPLAY",
+        "candidates": [
+            {
+                "rank": row.rank,
+                "recording_id": str(row.recording_id),
+                "current_title": row.current_title,
+                "current_artist": row.current_artist,
+                "duration_ms": row.duration_ms,
+                "raw_score": str(row.raw_score) if row.raw_score is not None else None,
+                "confidence": str(row.confidence) if row.confidence is not None else None,
+                "evidence_tier": row.evidence_tier,
+                "evidence_schema_version": row.evidence_schema_version,
+                "evidence_sha256": row.evidence_sha256.hex(),
+                "has_hard_conflicts": row.has_hard_conflicts,
+                "available": row.available,
+            }
+            for row in result.candidates
+        ],
     }
 
 

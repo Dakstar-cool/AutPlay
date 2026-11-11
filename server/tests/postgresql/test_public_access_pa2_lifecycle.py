@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Barrier, Lock
 from typing import Literal, cast
 from uuid import UUID, uuid4
@@ -29,8 +30,9 @@ def test_cached_owner_principal_cannot_mutate_or_replay_after_revocation(
     database_url: str,
     database_connection: Connection[object],
     gate: Literal["device", "session", "expired"],
+    tmp_path: Path,
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         create = {
@@ -89,9 +91,9 @@ def test_cached_owner_principal_cannot_mutate_or_replay_after_revocation(
 
 
 def test_account_cap_race_admits_only_one_last_slot(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         for index in range(18):
@@ -138,9 +140,9 @@ def test_account_cap_race_admits_only_one_last_slot(
 
 
 def test_active_invitation_cap_race_admits_only_one_fifth_invitation(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         for index in range(4):
@@ -191,9 +193,9 @@ def test_active_invitation_cap_race_admits_only_one_fifth_invitation(
 
 
 def test_disable_revokes_session_and_exact_replay_returns_same_result(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -236,9 +238,9 @@ def test_disable_revokes_session_and_exact_replay_returns_same_result(
 
 
 def test_disable_and_registration_replay_are_serialized_before_token_issue(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -294,9 +296,9 @@ def test_disable_and_registration_replay_are_serialized_before_token_issue(
 
 
 def test_session_retirement_and_registration_replay_are_serialized(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -349,9 +351,9 @@ def test_session_retirement_and_registration_replay_are_serialized(
 
 
 def test_pa2_account_disable_activates_existing_s1c_retirement_trigger(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -414,9 +416,9 @@ def test_pa2_account_disable_activates_existing_s1c_retirement_trigger(
 
 
 def test_invitation_cursor_has_no_gap_or_duplicate(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         for index in range(3):
@@ -442,9 +444,9 @@ def test_invitation_cursor_has_no_gap_or_duplicate(
 
 
 def test_cleanup_has_one_global_bound_and_rejects_invalid_limits(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         for marker in range(3):
             database_connection.execute(
@@ -471,9 +473,9 @@ def test_cleanup_has_one_global_bound_and_rejects_invalid_limits(
 
 
 def test_cleanup_removes_only_expired_or_cancelled_invitations_after_thirty_days(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation_ids: list[UUID] = []
@@ -515,9 +517,9 @@ def test_cleanup_removes_only_expired_or_cancelled_invitations_after_thirty_days
 
 
 def test_failed_active_invitation_cap_still_commits_owner_issue_rate_attempt(
-    database_url: str, database_connection: Connection[object]
+    database_url: str, database_connection: Connection[object], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         for index in range(5):

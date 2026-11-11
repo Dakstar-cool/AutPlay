@@ -15,6 +15,7 @@ from autplay.adapters.postgresql.models import (
     BootstrapSessionRow,
     BootstrapSnapshotItemRow,
     DeviceRow,
+    DeviceSyncCursorRow,
     PlaylistEntryRow,
     SyncEventRow,
     UserAccountRow,
@@ -23,6 +24,8 @@ from autplay.adapters.postgresql.models import (
 )
 from autplay.application.sync import SyncError, SyncService
 from autplay.domain.auth import AccountRole, Principal
+from autplay.domain.profile_pairing import public_spki
+from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
@@ -88,7 +91,13 @@ def _event(
     return value
 
 
-def _bind(service: SyncService, principal: Principal, epoch: UUID) -> dict[str, object]:
+def _bind(
+    service: SyncService,
+    principal: Principal,
+    epoch: UUID,
+    *,
+    platform: str = "ANDROID",
+) -> dict[str, object]:
     profile = uuid4()
     body: dict[str, object] = {
         "protocol_version": 1,
@@ -97,7 +106,7 @@ def _bind(service: SyncService, principal: Principal, epoch: UUID) -> dict[str, 
         "server_profile_id": str(profile),
         "journal_epoch": str(epoch),
         "device_name": "bound",
-        "platform": "ANDROID",
+        "platform": platform,
         "app_version": "p09",
     }
     service.bind(principal, body)
@@ -108,6 +117,339 @@ def _rehash(value: dict[str, object]) -> None:
     value["request_hash"] = hashlib.sha256(
         rfc8785.dumps({key: item for key, item in value.items() if key != "request_hash"})  # type: ignore[misc]
     ).hexdigest()
+
+
+@pytest.mark.parametrize("stored_platform", ["ANDROID", "WEB", "OTHER"])
+@pytest.mark.parametrize("requested_platform", ["ANDROID", "WEB", "OTHER"])
+def test_v1_bind_preserves_legacy_platform_updates_without_mac_evidence(
+    database_url: str,
+    stored_platform: str,
+    requested_platform: str,
+) -> None:
+    """Future D1 regression source; not executed during the macOS check pause."""
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "legacy bind fixture")
+            device = session.get(DeviceRow, owner.device_id)
+            assert device is not None
+            device.platform = stored_platform
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"test-only-sync-secret-with-32-bytes")
+        epoch = uuid4()
+        body = _bind(service, owner, epoch, platform=requested_platform)
+        service.bind(owner, body)
+        with Session(engine) as session:
+            device = session.get(DeviceRow, owner.device_id)
+            cursor = session.get(DeviceSyncCursorRow, owner.device_id)
+            assert device is not None and device.platform == requested_platform
+            assert (
+                device.device_name == body["device_name"]
+                and device.app_version == body["app_version"]
+            )
+            assert (
+                cursor is not None
+                and cursor.user_id == owner.user_id
+                and cursor.journal_epoch == epoch
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("requested_platform", ["ANDROID", "WEB", "OTHER"])
+@pytest.mark.parametrize("existing_cursor", [False, True])
+@pytest.mark.parametrize(
+    "evidence", ["CURRENT_MACOS", "REVOKED_MISSING_THUMB", "REVOKED_WRONG_THUMB"]
+)
+def test_v1_bind_cannot_reclassify_known_mac_or_mutate_its_journal(
+    database_url: str,
+    requested_platform: str,
+    existing_cursor: bool,
+    evidence: str,
+) -> None:
+    """Future real-DB refusal cases; all keys/rows are disposable synthetic inputs."""
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "mac bind refusal fixture")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"test-only-sync-secret-with-32-bytes")
+        epoch = uuid4()
+        if existing_cursor:
+            _bind(service, owner, epoch)
+        spki = public_spki(ec.generate_private_key(ec.SECP256R1()))
+        with Session(engine) as session:
+            device = session.get(DeviceRow, owner.device_id)
+            assert device is not None
+            device.public_key = spki
+            device.public_key_thumbprint_sha256 = hashlib.sha256(spki).digest()
+            if evidence == "CURRENT_MACOS":
+                device.platform = "MACOS"
+            else:
+                other = _principal(session, "historical mac bind fixture")
+                historical = session.get(DeviceRow, other.device_id)
+                assert historical is not None
+                historical.platform = "MACOS"
+                historical.public_key = spki
+                historical.public_key_thumbprint_sha256 = (
+                    None if evidence == "REVOKED_MISSING_THUMB" else b"x" * 32
+                )
+                historical.revoked_at = datetime.now(UTC)
+            session.commit()
+            before_devices = session.execute(
+                select(DeviceRow.__table__).order_by(DeviceRow.device_id)
+            ).all()
+            before_cursors = session.execute(
+                select(DeviceSyncCursorRow.__table__).order_by(DeviceSyncCursorRow.device_id),
+            ).all()
+        with pytest.raises(SyncError, match="BINDING_MISMATCH"):
+            _bind(service, owner, epoch, platform=requested_platform)
+        with Session(engine) as session:
+            assert (
+                session.execute(select(DeviceRow.__table__).order_by(DeviceRow.device_id)).all()
+                == before_devices
+            )
+            assert (
+                session.execute(
+                    select(DeviceSyncCursorRow.__table__).order_by(DeviceSyncCursorRow.device_id),
+                ).all()
+                == before_cursors
+            )
+    finally:
+        engine.dispose()
+
+
+def test_v1_bind_and_push_complete_when_bind_waits_for_the_push_cursor(
+    database_url: str,
+) -> None:
+    """Future PostgreSQL regression: cursor -> inbox FK versus device -> cursor.
+
+    Not executed during the macOS check pause. Hooks observe the real services;
+    no device KEY SHARE is pre-acquired to hide an incompatible bind row lock.
+    """
+    from time import monotonic
+
+    from autplay.adapters.postgresql.models import DeviceEventInboxRow, IdempotencyRecordRow
+    from sqlalchemy import event as sql_events
+
+    engine = create_engine(
+        database_url,
+        pool_timeout=5,
+        connect_args={
+            "connect_timeout": 5,
+            "options": (
+                "-c statement_timeout=15000 -c lock_timeout=12000 "
+                "-c idle_in_transaction_session_timeout=30000"
+            ),
+        },
+    )
+    cursor_locked = threading.Event()
+    device_locked = threading.Event()
+    bind_updating_cursor = threading.Event()
+    release_push = threading.Event()
+    worker_finished = threading.Event()
+    inbox_attempted = threading.Event()
+    worker_state = threading.local()
+    pids: dict[str, int] = {}
+    results: dict[str, dict[str, Any]] = {}
+    failures: dict[str, BaseException] = {}
+    device_locks: list[str] = []
+    writes: list[tuple[str, str]] = []
+    workers: list[threading.Thread] = []
+    listeners_installed = False
+
+    def before_statement(
+        connection: Any,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: bool,
+    ) -> None:
+        role = getattr(worker_state, "role", None)
+        sql = " ".join(statement.split())
+        if role == "bind" and sql.startswith("UPDATE sync.device_sync_cursor "):
+            bind_updating_cursor.set()
+        if role == "push" and sql.startswith("INSERT INTO sync.device_event_inbox "):
+            inbox_attempted.set()
+
+    def after_statement(
+        connection: Any,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: bool,
+    ) -> None:
+        role = getattr(worker_state, "role", None)
+        if role not in {"bind", "push"}:
+            return
+        sql = " ".join(statement.split())
+        if role == "push" and "FROM sync.device_sync_cursor " in sql and sql.endswith("FOR UPDATE"):
+            pids["push"] = cursor.connection.info.backend_pid
+            cursor_locked.set()
+            if not release_push.wait(20):
+                raise RuntimeError("bind/push fixture did not release the locked cursor")
+        if role == "bind" and "FROM account.device " in sql and " FOR " in sql:
+            pids["bind"] = cursor.connection.info.backend_pid
+            device_locks.append(sql)
+            device_locked.set()
+        for prefix in (
+            "UPDATE account.device ",
+            "UPDATE sync.device_sync_cursor ",
+            "INSERT INTO sync.device_event_inbox ",
+        ):
+            if sql.startswith(prefix):
+                writes.append((role, prefix))
+
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "coordinated legacy bind/push")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"test-only-sync-secret-with-32-bytes")
+        epoch, ref_id = uuid4(), uuid4()
+        body = _bind(service, owner, epoch)
+        rebound = {
+            **body,
+            "device_name": "concurrent legacy bind",
+            "platform": "WEB",
+            "app_version": "p09-concurrent",
+        }
+        create = _event(
+            owner,
+            ref_id,
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "coordinated offline creation"},
+        )
+        # Retain the original v1 JCS/hash recipe; compute only in a future test run.
+        canonical_request = rfc8785.dumps(
+            cast(Any, {key: value for key, value in create.items() if key != "request_hash"})
+        )
+        assert create["request_hash"] == hashlib.sha256(canonical_request).hexdigest()
+        frozen_wire = rfc8785.dumps(cast(Any, create))
+
+        def run_worker(role: str) -> None:
+            worker_state.role = role
+            try:
+                results[role] = (
+                    service.push(owner, {**body, "events": [create]}, uuid4())
+                    if role == "push"
+                    else service.bind(owner, rebound)
+                )
+            except BaseException as error:
+                failures[role] = error
+            finally:
+                worker_finished.set()
+
+        sql_events.listen(engine, "before_cursor_execute", before_statement)
+        sql_events.listen(engine, "after_cursor_execute", after_statement)
+        listeners_installed = True
+        for role, ready in (("push", cursor_locked), ("bind", device_locked)):
+            worker = threading.Thread(target=run_worker, args=(role,), daemon=True)
+            worker.start()
+            workers.append(worker)
+            assert ready.wait(3), f"{role} did not acquire its first real row lock"
+        assert bind_updating_cursor.wait(3), "bind did not attempt its cursor UPDATE"
+        assert not inbox_attempted.is_set(), "push reached its FK before bind held the device"
+
+        # The hook signals an attempt, not a wait. Prove the actual blocking edge
+        # in PostgreSQL before releasing push; polling delays never establish order.
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as observer:
+            deadline = monotonic() + 5
+            while not observer.scalar(
+                text("SELECT :push_pid = ANY(pg_blocking_pids(:bind_pid))"),
+                {"push_pid": pids["push"], "bind_pid": pids["bind"]},
+            ):
+                assert not worker_finished.is_set(), "a worker ended before the blocking edge"
+                assert monotonic() < deadline, "bind never waited for the push cursor"
+                worker_finished.wait(0.02)
+        release_push.set()
+        for worker in workers:
+            worker.join(timeout=20)
+            assert not worker.is_alive(), "bind/push did not complete within its DB timeouts"
+        for error in failures.values():
+            raise error
+
+        assert len(device_locks) == 1 and device_locks[0].endswith("FOR NO KEY UPDATE")
+        assert results["bind"] == rebound
+        expected_ack = {
+            "event_id": str(ref_id),
+            "device_sequence": 1,
+            "aggregate_type": "USER_TRACK_REF",
+            "aggregate_local_id": str(ref_id),
+            "aggregate_server_id": str(ref_id),
+            "outcome": "APPLIED",
+            "server_row_version": 1,
+        }
+        assert results["push"]["acks"] == [expected_ack]
+        assert results["push"]["acknowledged_through_device_sequence"] == 1
+        assert writes.count(("bind", "UPDATE account.device ")) == 1
+        assert writes.count(("bind", "UPDATE sync.device_sync_cursor ")) == 1
+        assert writes.count(("push", "UPDATE sync.device_sync_cursor ")) == 1
+        assert writes.count(("push", "INSERT INTO sync.device_event_inbox ")) == 1
+        replay = service.push(owner, {**body, "events": [create]}, uuid4())
+        assert replay["acks"] == [
+            {
+                **expected_ack,
+                "outcome": "DUPLICATE",
+                "original_outcome": "APPLIED",
+            }
+        ]
+        assert replay["acknowledged_through_device_sequence"] == 1
+        assert rfc8785.dumps(cast(Any, create)) == frozen_wire
+        with Session(engine) as session:
+            device = session.get(DeviceRow, owner.device_id)
+            cursor = session.get(DeviceSyncCursorRow, owner.device_id)
+            assert device is not None and device.user_id == owner.user_id
+            assert (device.device_name, device.platform, device.app_version) == (
+                rebound["device_name"],
+                rebound["platform"],
+                rebound["app_version"],
+            )
+            assert device.revoked_at is None and device.last_seen_at is not None
+            assert cursor is not None and cursor.user_id == owner.user_id
+            assert cursor.journal_epoch == epoch and cursor.last_acked_device_sequence == 1
+            assert cursor.last_successful_sync_at is not None
+            inboxes = list(session.scalars(select(DeviceEventInboxRow)))
+            assert len(inboxes) == 1
+            inbox = inboxes[0]
+            assert (inbox.event_id, inbox.user_id, inbox.device_id, inbox.device_sequence) == (
+                ref_id,
+                owner.user_id,
+                owner.device_id,
+                1,
+            )
+            assert inbox.apply_status == "APPLIED" and inbox.error_code is None
+            assert inbox.terminal_ack == expected_ack and inbox.payload == create["payload"]
+            assert inbox.request_hash == bytes.fromhex(str(create["request_hash"]))
+            receipts = list(session.scalars(select(IdempotencyRecordRow)))
+            assert len(receipts) == 1 and receipts[0].response_reference == expected_ack
+            refs = list(session.scalars(select(UserTrackRefRow)))
+            assert len(refs) == 1 and refs[0].user_track_ref_id == ref_id
+            assert refs[0].user_id == owner.user_id and refs[0].row_version == 1
+            assert refs[0].raw_title == "coordinated offline creation"
+            events = list(session.scalars(select(SyncEventRow)))
+            assert len(events) == 1 and events[0].event_id == ref_id
+            assert (
+                events[0].user_id == owner.user_id and events[0].origin_device_id == owner.device_id
+            )
+            assert events[0].aggregate_id == ref_id and events[0].server_row_version == 1
+    finally:
+        # Release before any join, including failed staging assertions. Avoid a
+        # ThreadPoolExecutor context that could wait without a cleanup deadline.
+        release_push.set()
+        cleanup_deadline = monotonic() + 25
+        for worker in workers:
+            worker.join(timeout=max(0.0, cleanup_deadline - monotonic()))
+        try:
+            assert all(not worker.is_alive() for worker in workers), "bind/push worker leaked"
+        finally:
+            if listeners_installed:
+                sql_events.remove(engine, "before_cursor_execute", before_statement)
+                sql_events.remove(engine, "after_cursor_execute", after_statement)
+            engine.dispose()
 
 
 def test_projected_track_ids_replay_and_remain_owner_scoped(database_url: str) -> None:

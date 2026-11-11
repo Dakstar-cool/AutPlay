@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import Mock
 from uuid import uuid4
 
+from autplay.application.auth import AuthService
 from autplay.application.internet_music import InternetMusicService
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.music_search import MusicSearchKind
 from autplay.entrypoints.api import create_app
+from autplay.entrypoints.library_http import LibraryQueryService
 from autplay.entrypoints.music_http import create_music_router
 from autplay.runtime.http import install_error_handlers
 from autplay.runtime.settings import ApiSettings
@@ -95,8 +98,14 @@ class Queries:
 
 
 def test_library_queries_are_authenticated_bounded_and_read_only() -> None:
-    app = create_app(_SETTINGS, auth_service=Auth(), library_service=Queries())  # type: ignore[arg-type]
-    with TestClient(app) as client:
+    def application() -> FastAPI:
+        return create_app(
+            _SETTINGS,
+            auth_service=cast(AuthService, Auth()),
+            library_service=cast(LibraryQueryService, Queries()),
+        )
+
+    with TestClient(application()) as client:
         response = client.get(
             "/api/v1/library/entries?limit=1", headers={"Authorization": "Bearer good"}
         )
@@ -114,7 +123,7 @@ def test_library_queries_are_authenticated_bounded_and_read_only() -> None:
     assert response.json()["items"][0]["availability_status"] == "LOCAL"
     cursor = response.json()["next_cursor"]
     assert isinstance(cursor, str)
-    with TestClient(app) as client:
+    with TestClient(application()) as client:
         next_page = client.get(
             f"/api/v1/library/entries?limit=1&cursor={cursor}",
             headers={"Authorization": "Bearer good"},
@@ -128,7 +137,7 @@ def test_library_queries_are_authenticated_bounded_and_read_only() -> None:
     assert blank_search.status_code == 422
     assert blank_search.json()["error"]["code"] == "search_query_invalid"
     assert isinstance(playlists.json()["next_cursor"], str)
-    with TestClient(app) as client:
+    with TestClient(application()) as client:
         playlist_page = client.get(
             f"/api/v1/library/playlists?limit=1&cursor={playlists.json()['next_cursor']}",
             headers={"Authorization": "Bearer good"},

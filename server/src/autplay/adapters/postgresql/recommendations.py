@@ -21,6 +21,7 @@ from autplay.application.recommendations import (
     recommendation_availability_snapshot_document,
     recommendation_input_snapshot_document,
     recommendation_policy_snapshot_document,
+    recommendation_snapshot_limit,
 )
 from autplay.domain.recommendations import (
     CandidateContribution,
@@ -44,6 +45,7 @@ from .models import (
     RecommendationPipelineVersionRow,
     RecommendationRequestRow,
 )
+from .sona_native_capture import SqlAlchemySonaNativeCapture
 
 _MAX_SNAPSHOT_TRACKS = RECOMMENDATION_MAX_SNAPSHOT_TRACKS
 _SNAPSHOT_CLEANUP_BATCH = 100
@@ -52,80 +54,97 @@ _SNAPSHOT_CLEANUP_BATCH = 100
 class SqlAlchemyRecommendationRuntime:
     """Short-transaction owner-filtered P11 persistence adapter."""
 
-    def __init__(self, sessions: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        sessions: Callable[[], Session],
+        native_capture: SqlAlchemySonaNativeCapture | None = None,
+        snapshot_policy_version: str = "1",
+    ) -> None:
         self._sessions = sessions
+        self._native_capture = native_capture
+        self._snapshot_policy_version = snapshot_policy_version
+        self._snapshot_limit = recommendation_snapshot_limit(snapshot_policy_version)
 
     def capture(self, user_id: UUID, *, retained_until: datetime) -> RecommendationInputSnapshot:
         """Capture one bounded immutable ACL/catalog/history snapshot."""
         with self._sessions() as session:
             # Keep the catalog/history rows and their watermark on one MVCC view.
             session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
-            session.execute(
-                text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
-                {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
-            )
-            session.execute(
-                text(_PURGE_EXPIRED_SNAPSHOTS_SQL),
-                {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
-            )
-            rows = session.execute(
-                text(_SNAPSHOT_SQL),
-                {"user_id": user_id, "limit": _MAX_SNAPSHOT_TRACKS},
-            ).mappings()
-            tracks = tuple(_track_from_mapping(row) for row in rows)
-            watermark = int(
-                session.scalar(
-                    text(
-                        "SELECT COALESCE(max(server_sequence), 0) FROM sync.sync_event "
-                        "WHERE user_id = :user_id AND event_type IN "
-                        "('LISTENING_EVENT_RECORDED', 'RECOMMENDATION_IMPRESSION_RECORDED', "
-                        "'RECOMMENDATION_FEEDBACK_RECORDED', 'USER_TRACK_PREFERENCE_SET')"
-                    ),
-                    {"user_id": user_id},
-                )
-                or 0
-            )
-            document = recommendation_input_snapshot_document(
-                user_id,
-                interaction_watermark=watermark,
-                tracks=tracks,
-            )
-            encoded = _canonical_bytes(document)
-            availability_document = recommendation_availability_snapshot_document(tracks)
-            policy_document = recommendation_policy_snapshot_document(tracks)
-            snapshot_id = uuid7()
-            input_digest = sha256(encoded)
-            availability_digest = sha256(_canonical_bytes(availability_document)).hexdigest()
-            policy_digest = sha256(_canonical_bytes(policy_document))
-            catalog_snapshot = max(
-                (max(track.added_at_ms, track.last_played_at_ms or 0) for track in tracks),
-                default=0,
-            )
-            row = RecommendationInputSnapshotRow(
-                recommendation_input_snapshot_id=snapshot_id,
-                user_id=user_id,
-                input_snapshot_sha256=input_digest.digest(),
-                interaction_watermark=watermark,
-                catalog_snapshot=catalog_snapshot,
-                availability_snapshot=availability_digest,
-                policy_snapshot_sha256=policy_digest.digest(),
-                snapshot_document=document,
-                retained_until=retained_until,
-            )
-            session.add(row)
+            snapshot = self._capture_in_session(session, user_id, retained_until=retained_until)
             session.commit()
-            return RecommendationInputSnapshot(
-                RecommendationSnapshotRef(
-                    snapshot_id,
-                    input_digest.hexdigest(),
-                    watermark,
-                    catalog_snapshot,
-                    availability_digest,
-                    policy_digest.hexdigest(),
+            return snapshot
+
+    def _capture_in_session(
+        self, session: Session, user_id: UUID, *, retained_until: datetime
+    ) -> RecommendationInputSnapshot:
+        session.execute(
+            text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
+            {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+        )
+        session.execute(
+            text(_PURGE_EXPIRED_SNAPSHOTS_SQL),
+            {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
+        )
+        rows = session.execute(
+            text(_SNAPSHOT_SQL_V2 if self._snapshot_policy_version == "2" else _SNAPSHOT_SQL),
+            {"user_id": user_id, "limit": self._snapshot_limit},
+        ).mappings()
+        tracks = tuple(_track_from_mapping(row) for row in rows)
+        watermark = int(
+            session.scalar(
+                text(
+                    "SELECT COALESCE(max(server_sequence), 0) FROM sync.sync_event "
+                    "WHERE user_id = :user_id AND event_type IN "
+                    "('LISTENING_EVENT_RECORDED', 'RECOMMENDATION_IMPRESSION_RECORDED', "
+                    "'RECOMMENDATION_FEEDBACK_RECORDED', 'USER_TRACK_PREFERENCE_SET')"
                 ),
-                tracks,
-                retained_until,
+                {"user_id": user_id},
             )
+            or 0
+        )
+        document = recommendation_input_snapshot_document(
+            user_id,
+            interaction_watermark=watermark,
+            tracks=tracks,
+            policy_version=self._snapshot_policy_version,
+        )
+        encoded = _canonical_bytes(document)
+        availability_document = recommendation_availability_snapshot_document(tracks)
+        policy_document = recommendation_policy_snapshot_document(tracks)
+        snapshot_id = uuid7()
+        input_digest = sha256(encoded)
+        availability_digest = sha256(_canonical_bytes(availability_document)).hexdigest()
+        policy_digest = sha256(_canonical_bytes(policy_document))
+        catalog_snapshot = max(
+            (max(track.added_at_ms, track.last_played_at_ms or 0) for track in tracks),
+            default=0,
+        )
+        row = RecommendationInputSnapshotRow(
+            recommendation_input_snapshot_id=snapshot_id,
+            user_id=user_id,
+            input_snapshot_sha256=input_digest.digest(),
+            interaction_watermark=watermark,
+            catalog_snapshot=catalog_snapshot,
+            availability_snapshot=availability_digest,
+            policy_snapshot_sha256=policy_digest.digest(),
+            snapshot_document=document,
+            retained_until=retained_until,
+        )
+        session.add(row)
+        session.flush()
+        return RecommendationInputSnapshot(
+            RecommendationSnapshotRef(
+                snapshot_id,
+                input_digest.hexdigest(),
+                watermark,
+                catalog_snapshot,
+                availability_digest,
+                policy_digest.hexdigest(),
+            ),
+            tracks,
+            retained_until,
+            self._snapshot_policy_version,
+        )
 
     def load(self, user_id: UUID, snapshot_id: UUID) -> RecommendationInputSnapshot | None:
         """Load an unexpired retained snapshot without substituting current state."""
@@ -144,6 +163,9 @@ class SqlAlchemyRecommendationRuntime:
             if not isinstance(track_values, list) or len(track_values) > _MAX_SNAPSHOT_TRACKS:
                 return None
             try:
+                policy_version = str(_integer(document, "schema_version"))
+                if len(track_values) > recommendation_snapshot_limit(policy_version):
+                    return None
                 tracks = tuple(_track_from_document(_json_object(value)) for value in track_values)
             except KeyError, TypeError, ValueError:
                 return None
@@ -158,6 +180,7 @@ class SqlAlchemyRecommendationRuntime:
                 ),
                 tracks,
                 row.retained_until,
+                policy_version,
             )
 
     def ensure_pipeline(self, pipeline: PipelineDefinition) -> None:
@@ -195,66 +218,91 @@ class SqlAlchemyRecommendationRuntime:
 
     def save(self, response: RecommendationResponse) -> None:
         """Atomically save the request and every final ranked item."""
+        with self._sessions() as session:
+            self._save_in_session(session, response)
+            session.commit()
+
+    def _save_in_session(self, session: Session, response: RecommendationResponse) -> None:
         trace = response.request
         pipeline = trace.pipeline
-        with self._sessions() as session:
+        session.add(
+            RecommendationRequestRow(
+                recommendation_request_id=trace.recommendation_request_id,
+                user_id=trace.query.user_id,
+                context=trace.query.context,
+                surface=trace.query.surface.value,
+                pipeline_key=pipeline.pipeline_key,
+                pipeline_version=pipeline.version,
+                pipeline_manifest_sha256=bytes.fromhex(pipeline.manifest_sha256),
+                request_schema_version=trace.query.schema_version,
+                request_canonicalization_version=trace.query.canonicalization_version,
+                request_sha256=bytes.fromhex(trace.request_sha256),
+                recommendation_input_snapshot_id=trace.snapshot.snapshot_id,
+                input_snapshot_sha256=bytes.fromhex(trace.snapshot.input_snapshot_sha256),
+                interaction_watermark=trace.snapshot.interaction_watermark,
+                catalog_snapshot=trace.snapshot.catalog_snapshot,
+                availability_snapshot_ref=trace.snapshot.availability_snapshot,
+                policy_snapshot_sha256=bytes.fromhex(trace.snapshot.policy_snapshot_sha256),
+                request_document=trace.canonical_request,
+                shadow=trace.query.shadow,
+                model_bundle_version=f"{pipeline.pipeline_key}:{pipeline.version}",
+                candidate_policy_version=_component_version(pipeline, "candidate_generator"),
+                filter_policy_version=_component_version(pipeline, "filter"),
+                reranker_version=_component_version(pipeline, "reranker"),
+                seed=trace.query.seed,
+                request_features={
+                    "limit": trace.query.limit,
+                    "exploration": trace.query.exploration,
+                },
+                created_at=trace.created_at,
+            )
+        )
+        session.flush()
+        for item in response.items:
             session.add(
-                RecommendationRequestRow(
+                RecommendationItemRow(
                     recommendation_request_id=trace.recommendation_request_id,
-                    user_id=trace.query.user_id,
-                    context=trace.query.context,
-                    surface=trace.query.surface.value,
-                    pipeline_key=pipeline.pipeline_key,
-                    pipeline_version=pipeline.version,
-                    pipeline_manifest_sha256=bytes.fromhex(pipeline.manifest_sha256),
-                    request_schema_version=trace.query.schema_version,
-                    request_canonicalization_version=trace.query.canonicalization_version,
-                    request_sha256=bytes.fromhex(trace.request_sha256),
-                    recommendation_input_snapshot_id=trace.snapshot.snapshot_id,
-                    input_snapshot_sha256=bytes.fromhex(trace.snapshot.input_snapshot_sha256),
-                    interaction_watermark=trace.snapshot.interaction_watermark,
-                    catalog_snapshot=trace.snapshot.catalog_snapshot,
-                    availability_snapshot_ref=trace.snapshot.availability_snapshot,
-                    policy_snapshot_sha256=bytes.fromhex(trace.snapshot.policy_snapshot_sha256),
-                    request_document=trace.canonical_request,
-                    shadow=trace.query.shadow,
-                    model_bundle_version=f"{pipeline.pipeline_key}:{pipeline.version}",
-                    candidate_policy_version=_component_version(pipeline, "candidate_generator"),
-                    filter_policy_version=_component_version(pipeline, "filter"),
-                    reranker_version=_component_version(pipeline, "reranker"),
-                    seed=trace.query.seed,
-                    request_features={
-                        "limit": trace.query.limit,
-                        "exploration": trace.query.exploration,
+                    rank=item.source_rank,
+                    recording_id=item.recording_id,
+                    score=Decimal(str(item.score)),
+                    candidate_sources=[value.source_key for value in item.contributions],
+                    explanation_code=item.reason_code,
+                    availability_snapshot={"snapshot_sha256": trace.snapshot.availability_snapshot},
+                    contributions=[_contribution_document(value) for value in item.contributions],
+                    reason_codes=list(item.reason_codes),
+                    item_provenance={
+                        "artist_key": item.artist_key,
+                        "release_key": item.release_key,
+                        "section": item.section,
                     },
-                    created_at=trace.created_at,
                 )
             )
-            session.flush()
-            for item in response.items:
-                session.add(
-                    RecommendationItemRow(
-                        recommendation_request_id=trace.recommendation_request_id,
-                        rank=item.source_rank,
-                        recording_id=item.recording_id,
-                        score=Decimal(str(item.score)),
-                        candidate_sources=[value.source_key for value in item.contributions],
-                        explanation_code=item.reason_code,
-                        availability_snapshot={
-                            "snapshot_sha256": trace.snapshot.availability_snapshot
-                        },
-                        contributions=[
-                            _contribution_document(value) for value in item.contributions
-                        ],
-                        reason_codes=list(item.reason_codes),
-                        item_provenance={
-                            "artist_key": item.artist_key,
-                            "release_key": item.release_key,
-                            "section": item.section,
-                        },
-                    )
-                )
-            session.commit()
+        session.flush()
+
+    def serve_atomic(
+        self,
+        query: RecommendationQuery,
+        *,
+        retained_until: datetime,
+        serve: Callable[[RecommendationInputSnapshot], RecommendationResponse],
+    ) -> RecommendationResponse:
+        """A failure leaves no original-request trace or partial capture behind."""
+        with self._sessions() as session, session.begin():
+            session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+            capture = self._native_capture
+            revision = (
+                capture.grant(session, query.user_id)
+                if capture is not None and not query.shadow
+                else None
+            )
+            snapshot = self._capture_in_session(
+                session, query.user_id, retained_until=retained_until
+            )
+            response = serve(snapshot)
+            self._save_in_session(session, response)
+            if capture is not None and revision is not None:
+                capture.save(session, response, snapshot, revision)
+            return response
 
     def exact(self, user_id: UUID, request_id: UUID) -> RecommendationResponse | None:
         """Return persisted response bytes semantically, never rerunning the pipeline."""
@@ -543,6 +591,8 @@ def _track_from_mapping(value: RowMapping) -> SnapshotTrack:
             if value["release_date_ordinal"] is None
             else cast(int, value["release_date_ordinal"])
         ),
+        owner_identity_decision_id=cast(UUID | None, value.get("owner_identity_decision_id")),
+        verified_audio_variant_id=cast(UUID | None, value.get("verified_audio_variant_id")),
     )
 
 
@@ -569,7 +619,13 @@ def _track_from_document(value: Mapping[str, JsonValue]) -> SnapshotTrack:
         _optional_integer(value, "last_played_at_ms"),
         _integer(value, "added_at_ms"),
         _optional_integer(value, "release_date_ordinal"),
+        _optional_uuid(value, "owner_identity_decision_id"),
+        _optional_uuid(value, "verified_audio_variant_id"),
     )
+
+
+def _optional_uuid(value: Mapping[str, JsonValue], key: str) -> UUID | None:
+    return None if value.get(key) is None else UUID(_string(value, key))
 
 
 def _json_object(value: object) -> dict[str, JsonValue]:
@@ -784,6 +840,59 @@ SELECT
 FROM selected
 ORDER BY recording_id
 """
+
+# Preserve V1 selection and ordering verbatim for historical replay. Evidence is
+# evaluated in the same MVCC snapshot, only for the explicitly bounded V2 universe.
+_SNAPSHOT_SQL_V2 = (
+    "WITH selected_tracks AS ("
+    + _SNAPSHOT_SQL
+    + """
+)
+SELECT selected_tracks.*, decision.decision_id AS owner_identity_decision_id,
+       audio.audio_variant_id AS verified_audio_variant_id
+FROM selected_tracks
+LEFT JOIN library.user_track_ref ref
+  ON ref.user_track_ref_id = selected_tracks.user_track_ref_id
+ AND ref.user_id = :user_id AND ref.recording_id = selected_tracks.recording_id
+ AND ref.deleted_at IS NULL AND ref.resolution_status = 'RESOLVED'
+LEFT JOIN identity.match_decision decision
+  ON decision.decision_id = ref.current_match_decision_id
+ AND decision.owner_user_id = :user_id
+ AND decision.user_track_ref_id = ref.user_track_ref_id
+ AND decision.candidate_recording_id = selected_tracks.recording_id
+ AND decision.query_type = 'USER_TRACK_REF'
+ AND decision.decision_kind = 'REVIEW_ACTION' AND decision.execution_mode = 'APPLIED'
+ AND decision.review_action IN ('CREATE_RECORDING', 'ACCEPT')
+ AND decision.actor_type = 'USER' AND decision.actor_user_id = :user_id
+LEFT JOIN LATERAL (
+    SELECT variant.audio_variant_id
+    FROM vault.recording_canonical_variant canonical
+    JOIN vault.audio_variant variant ON variant.audio_variant_id = canonical.audio_variant_id
+    JOIN vault.vault_object object ON object.vault_object_id = variant.vault_object_id
+    WHERE canonical.recording_id = selected_tracks.recording_id
+      AND variant.recording_id = selected_tracks.recording_id
+      AND variant.validation_status = 'VALID' AND variant.deleted_at IS NULL
+      AND object.commit_status = 'COMMITTED'
+      AND EXISTS (
+          SELECT 1 FROM library.library_entry entry
+          WHERE entry.user_track_ref_id = ref.user_track_ref_id
+            AND entry.user_id = :user_id AND entry.removed_at IS NULL
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM identity.recording_redirect redirect
+          WHERE redirect.source_recording_id = selected_tracks.recording_id
+      )
+      AND EXISTS (
+          SELECT 1 FROM vault.vault_replica replica
+          WHERE replica.vault_object_id = object.vault_object_id
+            AND replica.replica_status = 'AVAILABLE'
+            AND replica.storage_backend = 'LOCAL_FILESYSTEM'
+            AND replica.verified_at IS NOT NULL
+      )
+) audio ON true
+ORDER BY selected_tracks.recording_id
+"""
+)
 
 _PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL = """
 WITH expired AS (

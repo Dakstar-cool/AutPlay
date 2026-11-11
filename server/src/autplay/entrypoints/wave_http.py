@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -12,8 +13,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import NoResultFound
+from starlette.requests import HTTPConnection
 
-from autplay.domain.auth import InvalidAccessTokenError, Principal
+from autplay.application.vault_uploads import VaultNotFoundError
+from autplay.domain.auth import InvalidAccessTokenError, OwnedObjectNotFoundError, Principal
 from autplay.domain.vault import VaultError
 from autplay.domain.wave import Availability, WaveConflict, WaveForbidden, WaveRoom
 from autplay.runtime.http import ApiError
@@ -84,22 +87,39 @@ class WaveBroadcaster:
 
     def __init__(self) -> None:
         self._subscribers: dict[UUID, set[asyncio.Queue[dict[str, object]]]] = defaultdict(set)
+        self._loops: dict[asyncio.Queue[dict[str, object]], asyncio.AbstractEventLoop] = {}
+        self._lock = threading.Lock()
 
     def subscribe(self, room_id: UUID) -> asyncio.Queue[dict[str, object]]:
         queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(maxsize=8)
-        self._subscribers[room_id].add(queue)
+        with self._lock:
+            self._subscribers[room_id].add(queue)
+            self._loops[queue] = asyncio.get_running_loop()
         return queue
 
     def unsubscribe(self, room_id: UUID, queue: asyncio.Queue[dict[str, object]]) -> None:
-        self._subscribers[room_id].discard(queue)
+        with self._lock:
+            self._subscribers[room_id].discard(queue)
+            self._loops.pop(queue, None)
+            if not self._subscribers[room_id]:
+                del self._subscribers[room_id]
 
     def publish(self, room_id: UUID, event: dict[str, object]) -> None:
         event = {"protocol_version": 1, **event}
-        for queue in tuple(self._subscribers[room_id]):
-            if queue.full():
-                queue.get_nowait()
-                queue.put_nowait({"type": "snapshot_required"})
-                continue
+        with self._lock:
+            subscribers = [
+                (queue, self._loops[queue]) for queue in self._subscribers.get(room_id, ())
+            ]
+        for queue, loop in subscribers:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(self._deliver, queue, event)
+
+    @staticmethod
+    def _deliver(queue: asyncio.Queue[dict[str, object]], event: dict[str, object]) -> None:
+        if queue.full():
+            queue.get_nowait()
+            queue.put_nowait({"protocol_version": 1, "type": "snapshot_required"})
+        else:
             queue.put_nowait(event)
 
 
@@ -112,7 +132,11 @@ def create_wave_router(
     source_lookup: Any | None = None,
     metrics: RuntimeMetrics | None = None,
 ) -> APIRouter:
-    router = APIRouter(prefix="/wave", dependencies=[Depends(authenticated)])
+    def authenticate_http(connection: HTTPConnection) -> None:
+        if isinstance(connection, Request):
+            authenticated(connection)
+
+    router = APIRouter(prefix="/wave", dependencies=[Depends(authenticate_http)])
     live = broadcaster or WaveBroadcaster()
 
     def principal(request: Request) -> Principal:
@@ -151,6 +175,7 @@ def create_wave_router(
             "room_epoch": str(value.room_epoch),
             "state": value.state,
             "playback_state": value.playback_state,
+            "playback_command": value.playback_command,
             "role": value.self_role,
             "queue_version": value.version,
             "latest_sequence": value.command_sequence,
@@ -186,12 +211,12 @@ def create_wave_router(
 
     @router.post("/rooms/join")
     def join(request: Request, body: JoinBody) -> dict[str, object]:
-        return view(
-            cast(
-                WaveRoom,
-                call(lambda: service.join(body.room_code, principal(request), now())),
-            )
+        room = cast(
+            WaveRoom,
+            call(lambda: service.join(body.room_code, principal(request), now())),
         )
+        live.publish(room.room_id, {"type": "invalidate"})
+        return view(room)
 
     @router.get("/rooms/{room_id}")
     @router.get("/rooms/{room_id}/snapshot")
@@ -301,7 +326,15 @@ def create_wave_router(
                 return {"vault_streamable": False}
             source_lookup.resolve(principal(request), body.audio_variant_id)
             return {"vault_streamable": True}
-        except KeyError, NoResultFound, ValueError, VaultError, WaveForbidden:
+        except (
+            KeyError,
+            NoResultFound,
+            ValueError,
+            VaultError,
+            VaultNotFoundError,
+            OwnedObjectNotFoundError,
+            WaveForbidden,
+        ):
             if metrics is not None:
                 metrics.increment_wave_failure("buffer")
             return {"vault_streamable": False}
@@ -319,7 +352,8 @@ def create_wave_router(
     @router.websocket("/rooms/{room_id}/events")
     async def ws(websocket: WebSocket, room_id: UUID) -> None:
         # Authorization is header-only: query credentials are deliberately ignored.
-        raw = websocket.headers.get("authorization", "")
+        authorizations = websocket.headers.getlist("authorization")
+        raw = authorizations[0] if len(authorizations) == 1 else ""
         scheme, _, token = raw.partition(" ")
         try:
             if scheme.lower() != "bearer" or not token:

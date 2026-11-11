@@ -16,6 +16,7 @@ from jwt.exceptions import PyJWTError
 
 from autplay.domain.auth import AccessTokenClaims, InvalidAccessTokenError, Principal
 from autplay.ports.auth import RefreshCredential
+from autplay.ports.portable_access import PortableAccessTtlExceeded
 
 ACCESS_TOKEN_TYPE: Final = "access"
 ACCESS_TOKEN_HEADER_TYPE: Final = "at+jwt"
@@ -140,13 +141,13 @@ class Hs256AccessTokenCodec:
             expires_at = _claim_time(payload, "exp")
             if not_before != issued_at:
                 raise InvalidAccessTokenError
-            if not timedelta(0) < expires_at - issued_at <= self._max_ttl:
+            if not timedelta(0) < expires_at - issued_at <= timedelta(minutes=15):
                 raise InvalidAccessTokenError
             if issued_at > now + self._clock_skew or not_before > now + self._clock_skew:
                 raise InvalidAccessTokenError
             if expires_at <= now - self._clock_skew:
                 raise InvalidAccessTokenError
-            return AccessTokenClaims(
+            claims = AccessTokenClaims(
                 user_id=_claim_uuid(payload, "sub"),
                 device_id=_claim_uuid(payload, "did"),
                 session_id=_claim_uuid(payload, "sid"),
@@ -155,6 +156,26 @@ class Hs256AccessTokenCodec:
                 not_before=not_before,
                 expires_at=expires_at,
             )
+            # All signature, metadata, canonical IDs and original time checks
+            # precede this sole exceptional rejection. No generic failure may
+            # turn into a portable candidate or authorize an HTTP consumer.
+            if expires_at - issued_at > self._max_ttl:
+                if (
+                    issued_at > now
+                    or expires_at <= now
+                    or any(
+                        payload[name] != str(value)
+                        for name, value in (
+                            ("sub", claims.user_id),
+                            ("did", claims.device_id),
+                            ("sid", claims.session_id),
+                            ("jti", claims.token_id),
+                        )
+                    )
+                ):
+                    raise InvalidAccessTokenError
+                raise PortableAccessTtlExceeded(claims)
+            return claims
         except InvalidAccessTokenError:
             raise
         except (PyJWTError, TypeError, ValueError, OverflowError) as error:

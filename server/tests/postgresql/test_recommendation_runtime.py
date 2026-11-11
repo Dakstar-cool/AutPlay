@@ -320,6 +320,80 @@ def test_expired_snapshot_is_purged_without_losing_exact_replay(database_url: st
         engine.dispose()
 
 
+def _seed_many_candidates(session: Session, owner: Principal, count: int = 5001) -> UUID:
+    assert 1 <= count <= 20_000
+    provider_id, credit_id = uuid4(), uuid4()
+    session.execute(
+        text(
+            "INSERT INTO identity.source_provider "
+            "(provider_id, provider_key, display_name, adapter_id, adapter_version) "
+            "VALUES (:id, 'p11.limit', 'P11 limit', 'fixture', '1')"
+        ),
+        {"id": provider_id},
+    )
+    session.execute(
+        text(
+            "INSERT INTO catalog.artist_credit "
+            "(artist_credit_id, display_name, normalized_name) "
+            "VALUES (:id, 'Limit artist', 'limit artist')"
+        ),
+        {"id": credit_id},
+    )
+    session.execute(
+        text(
+            "CREATE TEMP TABLE p11_candidates ON COMMIT DROP AS "
+            "SELECT n, uuidv7() recording_id, uuidv7() object_id, uuidv7() variant_id "
+            f"FROM generate_series(1, {count}) AS value(n)"
+        )
+    )
+    session.execute(
+        text(
+            "INSERT INTO catalog.recording "
+            "(recording_id, artist_credit_id, title, normalized_title, duration_ms, "
+            "identity_status) SELECT recording_id, :credit, 'track-' || n, "
+            "'track-' || n, 180000, 'ACTIVE' FROM p11_candidates"
+        ),
+        {"credit": credit_id},
+    )
+    session.execute(
+        text(
+            "INSERT INTO vault.vault_object "
+            "(vault_object_id, sha256, byte_size, detected_mime_type, commit_status, "
+            "committed_at) SELECT object_id, decode(lpad(to_hex(n), 64, '0'), 'hex'), "
+            "1024, 'audio/flac', 'COMMITTED', now() FROM p11_candidates"
+        )
+    )
+    session.execute(
+        text(
+            "INSERT INTO vault.vault_replica "
+            "(vault_object_id, storage_backend, storage_key, replica_status, verified_at) "
+            "SELECT object_id, 'FILESYSTEM', 'p11/limit/' || n, 'AVAILABLE', now() "
+            "FROM p11_candidates"
+        )
+    )
+    session.execute(
+        text(
+            "INSERT INTO vault.audio_variant "
+            "(audio_variant_id, recording_id, vault_object_id, codec, container, "
+            "sample_rate_hz, channels, duration_ms, validation_status, created_at) "
+            "SELECT variant_id, recording_id, object_id, 'flac', 'flac', 44100, 2, "
+            f"180000, 'VALID', now() - make_interval(secs => {count} - n) "
+            "FROM p11_candidates"
+        )
+    )
+    session.execute(
+        text(
+            "INSERT INTO vault.acquisition_record "
+            "(audio_variant_id, provider_id, authorized_by_user_id, rights_capability) "
+            "SELECT variant_id, :provider, :owner, 'USER_UPLOAD' FROM p11_candidates"
+        ),
+        {"provider": provider_id, "owner": owner.user_id},
+    )
+    oldest = session.scalar(text("SELECT recording_id FROM p11_candidates WHERE n = 1"))
+    assert isinstance(oldest, UUID)
+    return oldest
+
+
 def test_snapshot_limit_selects_the_same_recent_5000_recordings(database_url: str) -> None:
     """Bounded snapshot truncation has a stable, recorded global selection policy."""
     engine = create_engine(database_url)
@@ -327,74 +401,7 @@ def test_snapshot_limit_selects_the_same_recent_5000_recordings(database_url: st
         sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
         with sessions() as session:
             owner = _principal(session, "snapshot-limit")
-            provider_id, credit_id = uuid4(), uuid4()
-            session.execute(
-                text(
-                    "INSERT INTO identity.source_provider "
-                    "(provider_id, provider_key, display_name, adapter_id, adapter_version) "
-                    "VALUES (:id, 'p11.limit', 'P11 limit', 'fixture', '1')"
-                ),
-                {"id": provider_id},
-            )
-            session.execute(
-                text(
-                    "INSERT INTO catalog.artist_credit "
-                    "(artist_credit_id, display_name, normalized_name) "
-                    "VALUES (:id, 'Limit artist', 'limit artist')"
-                ),
-                {"id": credit_id},
-            )
-            session.execute(
-                text(
-                    "CREATE TEMP TABLE p11_candidates ON COMMIT DROP AS "
-                    "SELECT n, uuidv7() recording_id, uuidv7() object_id, uuidv7() variant_id "
-                    "FROM generate_series(1, 5001) AS value(n)"
-                )
-            )
-            session.execute(
-                text(
-                    "INSERT INTO catalog.recording "
-                    "(recording_id, artist_credit_id, title, normalized_title, duration_ms, "
-                    "identity_status) SELECT recording_id, :credit, 'track-' || n, "
-                    "'track-' || n, 180000, 'ACTIVE' FROM p11_candidates"
-                ),
-                {"credit": credit_id},
-            )
-            session.execute(
-                text(
-                    "INSERT INTO vault.vault_object "
-                    "(vault_object_id, sha256, byte_size, detected_mime_type, commit_status, "
-                    "committed_at) SELECT object_id, decode(lpad(to_hex(n), 64, '0'), 'hex'), "
-                    "1024, 'audio/flac', 'COMMITTED', now() FROM p11_candidates"
-                )
-            )
-            session.execute(
-                text(
-                    "INSERT INTO vault.vault_replica "
-                    "(vault_object_id, storage_backend, storage_key, replica_status, verified_at) "
-                    "SELECT object_id, 'FILESYSTEM', 'p11/limit/' || n, 'AVAILABLE', now() "
-                    "FROM p11_candidates"
-                )
-            )
-            session.execute(
-                text(
-                    "INSERT INTO vault.audio_variant "
-                    "(audio_variant_id, recording_id, vault_object_id, codec, container, "
-                    "sample_rate_hz, channels, duration_ms, validation_status, created_at) "
-                    "SELECT variant_id, recording_id, object_id, 'flac', 'flac', 44100, 2, "
-                    "180000, 'VALID', now() - make_interval(secs => 5001 - n) "
-                    "FROM p11_candidates"
-                )
-            )
-            session.execute(
-                text(
-                    "INSERT INTO vault.acquisition_record "
-                    "(audio_variant_id, provider_id, authorized_by_user_id, rights_capability) "
-                    "SELECT variant_id, :provider, :owner, 'USER_UPLOAD' FROM p11_candidates"
-                ),
-                {"provider": provider_id, "owner": owner.user_id},
-            )
-            oldest = session.scalar(text("SELECT recording_id FROM p11_candidates WHERE n = 1"))
+            oldest = _seed_many_candidates(session, owner)
             session.commit()
 
         runtime = SqlAlchemyRecommendationRuntime(sessions)

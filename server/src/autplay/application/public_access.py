@@ -16,6 +16,13 @@ from uuid import UUID, uuid4
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.postgresql.device_identifier_reservations import (
+    device_v2_identifier_reserved,
+)
+from autplay.adapters.postgresql.device_platform_evidence import (
+    device_has_macos_evidence,
+    has_macos_key_evidence,
+)
 from autplay.adapters.postgresql.models.account import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.audit import AuditEventRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
@@ -88,7 +95,10 @@ class PublicAccessService:
         # same operation lock below so a concurrent first application remains exact.
         with self.sessions.begin() as session:
             self._require_bootstrap_owner(session, actor)
+            _require_v2_ids_available(session, operation_id)
             _lock_uuid(session, b"OWNER_OPERATION", operation_id)
+            self._require_bootstrap_owner(session, actor)
+            now = _database_now(session)
             existing = session.get(
                 AccountProvisioningOperationReceiptRow, operation_id, with_for_update=True
             )
@@ -101,7 +111,10 @@ class PublicAccessService:
         self._issue_gate(actor, now)
         with self.sessions.begin() as session:
             self._require_bootstrap_owner(session, actor)
+            _require_v2_ids_available(session, operation_id)
             _lock_uuid(session, b"OWNER_OPERATION", operation_id)
+            self._require_bootstrap_owner(session, actor)
+            now = _database_now(session)
             existing = session.get(
                 AccountProvisioningOperationReceiptRow, operation_id, with_for_update=True
             )
@@ -126,6 +139,9 @@ class PublicAccessService:
             if int(active or 0) >= 5:
                 raise PublicAccessError("invitation_limit_reached")
             invitation_id, secret = uuid4(), _new_bearer()
+            _require_v2_ids_available(session, invitation_id)
+            self._require_bootstrap_owner(session, actor)
+            now = _database_now(session)
             row = AccountInvitationRow(
                 invitation_id=invitation_id,
                 issued_by_user_id=actor.user_id,
@@ -332,9 +348,18 @@ class PublicAccessService:
         except KeyError, ValueError, TypeError, ProfilePairingError, PublicAccessError:
             raise PublicAccessError() from None
         registration_id = UUID(str(body["registration_id"]))
+        binding_commit_id = UUID(str(body["binding_commit_id"]))
         with self.sessions.begin() as session:
             server = self._server(session)
             lock_resource_admission(session)
+            # Check both IDs before first writes OR an exact receipt access reissue.
+            # The v2-only predicate leaves our own PA2 receipt available for replay.
+            _require_v2_ids_available(
+                session, registration_id, binding_commit_id, code="registration_conflict"
+            )
+            now = _database_now(session)
+            if has_macos_key_evidence(session, thumb, public_key=spki):
+                raise PublicAccessError()
             discovered = session.get(AccountRegistrationReceiptRow, registration_id)
             if discovered is not None:
                 session.get(UserAccountRow, discovered.user_id, with_for_update=True)
@@ -350,10 +375,13 @@ class PublicAccessService:
                     receipt.request_sha256 != request_hash
                     or receipt.invitation_secret_sha256 != secret_hash
                     or receipt.device_key_thumbprint_sha256 != thumb
+                    or receipt.invitation_id != invitation_id
+                    or receipt.binding_commit_id != binding_commit_id
                 ):
                     raise PublicAccessError("registration_conflict")
                 return self._registration_response(session, receipt, server, replayed=True), True
             invitation = session.get(AccountInvitationRow, invitation_id, with_for_update=True)
+            now = _database_now(session)
             if (
                 invitation is None
                 or invitation.secret_sha256 != secret_hash
@@ -371,6 +399,9 @@ class PublicAccessService:
             )
             if int(account_count or 0) >= 20:
                 raise PublicAccessError("account_limit_reached")
+            now = _database_now(session)
+            if invitation.expires_at <= now:
+                raise PublicAccessError()
             user_id, device_id, session_id = uuid4(), uuid4(), uuid4()
             account = UserAccountRow(
                 user_id=user_id,
@@ -422,7 +453,7 @@ class PublicAccessService:
                 user_id=user_id,
                 device_id=device_id,
                 session_id=session_id,
-                binding_commit_id=UUID(str(body["binding_commit_id"])),
+                binding_commit_id=binding_commit_id,
                 receipt_expires_at=user_session.expires_at + timedelta(minutes=5),
                 created_at=now,
             )
@@ -471,7 +502,12 @@ class PublicAccessService:
                 actor,
                 target_user_id=target_id if action != "CANCEL" else None,
             )
+            _require_v2_ids_available(session, operation_id)
             _lock_uuid(session, b"OWNER_OPERATION", operation_id)
+            self._require_bootstrap_owner(
+                session, actor, target_user_id=target_id if action != "CANCEL" else None
+            )
+            now = _database_now(session)
             receipt = session.get(
                 AccountProvisioningOperationReceiptRow, operation_id, with_for_update=True
             )
@@ -702,6 +738,15 @@ class PublicAccessService:
         account = session.get(UserAccountRow, receipt.user_id, with_for_update=True)
         device = session.get(DeviceRow, receipt.device_id, with_for_update=True)
         user_session = session.get(UserSessionRow, receipt.session_id, with_for_update=True)
+        if device is not None and (
+            device_has_macos_evidence(session, device)
+            or has_macos_key_evidence(
+                session,
+                receipt.device_key_thumbprint_sha256,
+            )
+        ):
+            raise PublicAccessError()
+        now = _database_now(session)
         if (
             account is None
             or device is None
@@ -713,11 +758,10 @@ class PublicAccessService:
             or user_session.device_id != device.device_id
             or device.revoked_at is not None
             or user_session.revoked_at is not None
-            or user_session.expires_at <= _now()
-            or receipt.receipt_expires_at <= _now()
+            or user_session.expires_at <= now
+            or receipt.receipt_expires_at <= now
         ):
             raise PublicAccessError()
-        now = _now()
         principal = Principal(
             account.user_id, device.device_id, user_session.session_id, AccountRole.USER
         )
@@ -810,6 +854,22 @@ def _source_token(secret: bytes, source: str) -> bytes:
         b"AutPlay public-access source v1\x00" + source.encode("utf-8", "replace"),
         hashlib.sha256,
     ).digest()
+
+
+def _require_v2_ids_available(
+    session: Session, *identifiers: UUID, code: str = "operation_conflict"
+) -> None:
+    """Caller holds resource admission; preserve PA2's existing conflict result."""
+    if any(device_v2_identifier_reserved(session, identifier) for identifier in identifiers):
+        raise PublicAccessError(code)
+
+
+def _database_now(session: Session) -> datetime:
+    with session.no_autoflush:
+        now = session.scalar(select(func.clock_timestamp()))
+    if not isinstance(now, datetime):
+        raise PublicAccessError()
+    return now
 
 
 def _lock_uuid(session: Session, domain: bytes, value: UUID) -> None:

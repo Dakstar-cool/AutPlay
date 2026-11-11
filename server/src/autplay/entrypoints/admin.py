@@ -29,6 +29,7 @@ from autplay.domain.auth import (
     DevicePlatform,
     TokenPair,
 )
+from autplay.domain.privacy_deletion import DeletionEvidenceError
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.domain.web_admin import BrowserInvitation, WebSessionMetadata
 from autplay.entrypoints.composition import (
@@ -41,6 +42,7 @@ from autplay.entrypoints.internal_io_budget import (
     configure_internal_io_parser,
     run_internal_io_budget,
 )
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.entrypoints.resource_measurements import (
     configure_resource_budget_parser,
     run_resource_budget_initialize,
@@ -545,7 +547,11 @@ def main(
                 return run_web_session_recovery(
                     web_service, command_arguments, stdout=sys.stdout, stderr=sys.stderr
                 )
-            pairing_service = build_profile_pairing_service(api_settings, engine)
+            deletion_evidence = DeletionEvidenceRuntime(api_settings, engine)
+            deletion_evidence.restore_guard()
+            pairing_service = build_profile_pairing_service(
+                api_settings, engine, deletion_evidence=deletion_evidence
+            )
             if pairing_service is None:
                 _write_error(sys.stderr, "profile_identity_configuration_missing")
                 return 2
@@ -556,6 +562,9 @@ def main(
             return run_profile_pairing_cleanup(
                 pairing_service, command_arguments, stdout=sys.stdout, stderr=sys.stderr
             )
+        except DeletionEvidenceError:
+            _write_error(sys.stderr, "deletion_evidence_unavailable")
+            return 5
         except SQLAlchemyError:
             _write_error(sys.stderr, "database_unavailable")
             return 3
@@ -569,12 +578,17 @@ def main(
         return 2
     engine = create_runtime_engine(api_settings)
     try:
+        deletion_evidence = DeletionEvidenceRuntime(api_settings, engine)
+        deletion_evidence.restore_guard()
         return run_bootstrap(
-            build_auth_service(api_settings, engine),
+            build_auth_service(api_settings, engine, deletion_evidence=deletion_evidence),
             command_arguments,
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
+    except DeletionEvidenceError:
+        _write_error(sys.stderr, "deletion_evidence_unavailable")
+        return 5
     except SQLAlchemyError:
         _write_error(sys.stderr, "database_unavailable")
         return 3

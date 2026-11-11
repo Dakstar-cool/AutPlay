@@ -187,7 +187,7 @@ class DeviceRow(Base):
         ),
         UniqueConstraint("user_id", "device_id", name="uq_device_user_pair"),
         CheckConstraint(
-            "platform IN ('ANDROID', 'WEB', 'OTHER')",
+            "platform IN ('ANDROID', 'WEB', 'OTHER', 'MACOS')",
             name="ck_device_platform",
         ),
         {"schema": "account"},

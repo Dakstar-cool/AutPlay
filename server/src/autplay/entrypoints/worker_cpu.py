@@ -185,6 +185,7 @@ def run_cpu_worker(
     discovery_dispatch: Callable[[], int] | None = None,
     ingest_cleanup: Callable[[], int] | None = None,
     account_purge: Callable[[], int] | None = None,
+    native_capture_cleanup: Callable[[], int] | None = None,
     cleanup_interval: timedelta = timedelta(minutes=5),
     discovery_dispatch_interval: timedelta = timedelta(minutes=5),
 ) -> None:
@@ -231,6 +232,11 @@ def run_cpu_worker(
                         discovery_cleanup()
                     except SQLAlchemyError:
                         _LOGGER.exception("discovery_cleanup_failed")
+                if native_capture_cleanup is not None:
+                    try:
+                        native_capture_cleanup()
+                    except SQLAlchemyError:
+                        _LOGGER.exception("native_capture_cleanup_failed")
                 next_cleanup_at = current + cleanup_interval.total_seconds()
             if current >= next_discovery_dispatch_at:
                 if discovery_dispatch is not None:
@@ -483,6 +489,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     + social_cleanup()
                 )
 
+            def capture_cleanup() -> int:
+                from autplay.adapters.postgresql.sona_native_capture import cleanup_native_capture
+
+                return cleanup_native_capture(sessions)
+
             def social_cleanup() -> int:
                 return SocialService(sessions, None).cleanup(datetime.now(UTC), limit=10_000)
 
@@ -507,6 +518,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             if namespace.once and not process_stop.is_set():
                 cleanup()
                 web_cleanup()
+                capture_cleanup()
                 discovery_cleanup()
                 discovery_dispatch()
                 if ingest_runtime is not None:
@@ -527,6 +539,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     process_stop,
                     profile_receipt_cleanup=cleanup,
                     web_admin_cleanup=web_cleanup,
+                    native_capture_cleanup=capture_cleanup,
                     discovery_cleanup=discovery_cleanup,
                     discovery_dispatch=discovery_dispatch,
                     ingest_cleanup=(

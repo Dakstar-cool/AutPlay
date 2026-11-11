@@ -28,6 +28,8 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
     ]
 )
 EXPECTED_TABLE_KEYS: tuple[str, ...] = (
+    "ml.sona_native_capture",
+    "account.device_capability_revision",
     "account.portable_identity",
     "account.portable_challenge",
     "account.portable_record",
@@ -43,6 +45,7 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "account.training_consent",
     "account.training_consent_operation",
     "account.account_deletion_hold",
+    "account.account_deletion_proof",
     "account.account_deletion_request",
     "account.account_purge_receipt",
     "account.account_recovery_credential",
@@ -209,8 +212,10 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.guest_rate_window",
 )
 EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
+    "ml.sona_native_capture": 9,
+    "account.device_capability_revision": 10,
     "account.portable_identity": 7,
-    "account.portable_challenge": 12,
+    "account.portable_challenge": 20,
     "account.portable_record": 7,
     "library.portable_taste_signal": 8,
     "jobs.worker_health": 9,
@@ -224,10 +229,11 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "account.training_consent": 5,
     "account.training_consent_operation": 7,
     "account.account_deletion_hold": 3,
-    "account.account_deletion_request": 18,
+    "account.account_deletion_proof": 17,
+    "account.account_deletion_request": 20,
     "account.account_purge_receipt": 3,
     "account.account_recovery_credential": 8,
-    "account.account_recovery_operation": 18,
+    "account.account_recovery_operation": 24,
     "account.internal_io_policy": 14,
     "account.resource_quota_policy": 12,
     "account.account_quota_override": 6,
@@ -247,24 +253,24 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "library.track_metadata": 10,
     "library.track_metadata_revision": 6,
     "account.user_account": 10,
-    "account.self_device_pairing": 21,
-    "account.self_pairing_command": 8,
+    "account.self_device_pairing": 33,
+    "account.self_pairing_command": 12,
     "account.self_pairing_rate": 3,
     "account.device": 12,
     "account.user_session": 11,
     "account.server_instance": 10,
     "account.enrollment_invitation": 9,
-    "account.enrollment_exchange_receipt": 9,
-    "account.session_rotation_receipt": 7,
+    "account.enrollment_exchange_receipt": 14,
+    "account.session_rotation_receipt": 12,
     "account.profile_lifecycle_command": 12,
-    "account.device_admission": 30,
+    "account.device_admission": 35,
     "account.device_admission_nonce": 4,
-    "account.device_admission_exchange_receipt": 9,
+    "account.device_admission_exchange_receipt": 16,
     "account.device_admission_rate_window": 5,
-    "account.device_admission_web_operation_receipt": 10,
+    "account.device_admission_web_operation_receipt": 11,
     "account.device_key_block": 5,
-    "account.trusted_device_key": 8,
-    "account.trusted_device_reenrollment_challenge": 9,
+    "account.trusted_device_key": 10,
+    "account.trusted_device_reenrollment_challenge": 16,
     "account.web_session_invitation": 9,
     "account.web_login_challenge": 6,
     "account.web_session": 14,
@@ -391,8 +397,12 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
 }
 EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
     {
+        "sona_native_capture_owner_time",
+        "sona_native_capture_expiry",
+        "ix_deletion_proof_user",
         "portable_challenge_source_time",
         "portable_challenge_expiry",
+        "portable_challenge_binding_commit",
         "portable_record_account_cursor",
         "portable_record_listening_aliases",
         "portable_taste_signal_account_cursor",
@@ -436,6 +446,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_device_key_block_active",
         "ix_trusted_reenrollment_challenge_expiry",
         "ix_device_admission_receipt_expiry",
+        "admission_v2_binding_commit",
         "ix_device_admission_web_operation_receipt_expiry",
         "ix_device_admission_rate_window_expiry",
         "ix_web_invitation_user_active",
@@ -451,6 +462,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_self_pairing_expiry",
         "ix_self_pairing_command_ceremony",
         "ix_self_pairing_rate_expiry",
+        "self_pairing_v2_binding_commit",
         "ix_web_passkey_ceremony_expiry",
         "ix_web_passkey_ceremony_user",
         "ix_web_session_passkey",
@@ -555,7 +567,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 1998
+EXPECTED_COLUMN_COUNT = 2098
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

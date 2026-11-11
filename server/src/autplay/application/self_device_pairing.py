@@ -71,6 +71,8 @@ class SelfDevicePairingService:
             if not identity.matches(request):
                 raise SelfPairingError()
             repo.require_unique("start_operation_id", UUID(request["operation_id"]), identifier)
+            family = repo.actor_family(actor, now)
+            now = repo.database_now()
             if existing is not None:
                 if (
                     existing.user_id != actor.user_id
@@ -85,6 +87,8 @@ class SelfDevicePairingService:
             fresh(request, now)
             if repo.pending_count(actor.user_id, now) >= 3:
                 raise SelfPairingError("self_pairing_rate_limited")
+            now = repo.database_now()
+            fresh(request, now)
             ceremony = SelfDevicePairing(
                 identifier,
                 identity.server_instance_id,
@@ -122,6 +126,9 @@ class SelfDevicePairingService:
             self._possession(secret, ceremony.start_document["rendezvous_secret_sha256"])
             repo.require_source(ceremony, now)
             repo.require_unique("claim_id", UUID(request["claim_id"]), ceremony.ceremony_id)
+            repo.require_source(ceremony, now)
+            now = repo.database_now()
+            self._live(ceremony, now)
             if ceremony.claim_document is not None:
                 if ceremony.claim_document != public_document(request):
                     raise SelfPairingError("operation_conflict")
@@ -170,6 +177,8 @@ class SelfDevicePairingService:
             self._identity_request(ceremony, request)
             self._source(repo, ceremony, actor, now)
             previous = repo.command(operation_id)
+            self._source(repo, ceremony, actor, now)
+            now = repo.database_now()
             if previous is not None:
                 if (
                     previous.ceremony_id != ceremony.ceremony_id
@@ -241,6 +250,7 @@ class SelfDevicePairingService:
             ] != str(ceremony.approval_operation_id):
                 raise SelfPairingError()
             repo.require_unique("exchange_id", UUID(request["exchange_id"]), ceremony.ceremony_id)
+            now = repo.database_now()
             replayed = ceremony.state == "EXCHANGED"
             if replayed:
                 if ceremony.exchange_document != public_document(request):
@@ -262,6 +272,13 @@ class SelfDevicePairingService:
                 ceremony.state, ceremony.revision = "EXCHANGED", ceremony.revision + 1
                 repo.save(ceremony)
                 repo.audit(ceremony, "self_pairing.exchanged", ceremony.exchange_id, now)
+            now = repo.database_now()
+            if (
+                binding.expires_at <= now
+                or ceremony.receipt_expires_at is None
+                or ceremony.receipt_expires_at <= now
+            ):
+                raise SelfPairingError()
             result = self._exchange_response(ceremony, account, binding, now, replayed)
             unit.commit()
             return result

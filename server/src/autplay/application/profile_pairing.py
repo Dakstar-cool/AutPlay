@@ -7,17 +7,24 @@ import hashlib
 import hmac
 import secrets
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-import rfc8785
 from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.postgresql.device_identifier_reservations import (
+    device_identifier_reserved,
+    device_v2_identifier_reserved,
+)
+from autplay.adapters.postgresql.device_platform_evidence import (
+    device_has_macos_evidence,
+    has_macos_key_evidence,
+)
 from autplay.adapters.postgresql.models import (
     AuditEventRow,
     DeviceRow,
@@ -46,8 +53,19 @@ from autplay.adapters.postgresql.resource_limits import (
     terminate_resource_authority,
     terminate_retired_session,
 )
+from autplay.adapters.postgresql.retained_deletion_reservations import (
+    retained_deletion_identifier_reserved,
+)
+from autplay.application.media_source_policy import MediaSourcePolicyCapture
 from autplay.application.portable_account import require_portable_reauthentication
 from autplay.domain.auth import AccountRole, Principal
+from autplay.domain.canonical_json import canonical_json_bytes
+from autplay.domain.device_compatibility import (
+    DeviceCompatibilityError,
+    NegotiationIdentity,
+    signed_capabilities,
+    signed_discovery,
+)
 from autplay.domain.profile_pairing import (
     ProfilePairingError,
     canonical_sha256,
@@ -59,8 +77,21 @@ from autplay.domain.profile_pairing import (
     verify_p1363,
 )
 from autplay.domain.resource_admission import ResourceAdmissionError
+from autplay.domain.sync_binding_v2 import (
+    CAPABILITIES_DOMAIN as BINDING_CAPABILITIES_DOMAIN,
+)
+from autplay.domain.sync_binding_v2 import (
+    DISCOVERY_DOMAIN as BINDING_DISCOVERY_DOMAIN,
+)
+from autplay.domain.sync_binding_v2 import (
+    NegotiationKind as BindingNegotiationKind,
+)
+from autplay.domain.sync_binding_v2 import (
+    parse_negotiation as parse_binding_negotiation,
+)
 from autplay.domain.web_admin import WebActor
 from autplay.ports.auth import AccessTokenCodec
+from autplay.ports.media_source import ConfiguredM5Identity, MediaSourcePolicy
 
 _DISCOVERY_DOMAIN = "AutPlay discovery v1\n"
 _CAPABILITIES_DOMAIN = "AutPlay capabilities v1\n"
@@ -95,6 +126,8 @@ class ProfilePairingService:
         account_deletion_enabled: bool = False,
         shared_training_consent_enabled: bool = False,
         portable_accounts_enabled: bool = False,
+        device_compatibility_v2_enabled: Callable[[], bool] | None = None,
+        media_source_snapshot_v1_enabled: bool = False,
     ) -> None:
         self._sessions, self._key, self._label, self._api, self._stream = (
             sessions,
@@ -109,6 +142,135 @@ class ProfilePairingService:
         self._account_deletion_enabled = account_deletion_enabled
         self._shared_training_consent_enabled = shared_training_consent_enabled
         self._portable_accounts_enabled = portable_accounts_enabled
+        self._device_v2_enabled = device_compatibility_v2_enabled or (lambda: False)
+        public = public_spki(private_key)
+        self._media_source_capture = MediaSourcePolicyCapture(
+            enabled=media_source_snapshot_v1_enabled,
+            access_token_ttl_seconds=int(access_ttl.total_seconds()),
+            public_key_spki=public,
+            thumbprint_sha256=public_key_thumbprint(public),
+            api_origin=api_origin,
+            stream_origin=stream_origin,
+        )
+
+    def current_media_source_policy(self) -> MediaSourcePolicy:
+        """Atomic public immutable-reference read; no locks, SQL, key work or allocation."""
+        return self._media_source_capture.current()
+
+    def configure_media_source_policy(self, *, enabled: bool) -> None:
+        """Explicit composition/shutdown seam using this owner's actual ordinary TTL."""
+        self._media_source_capture.configure(
+            enabled=enabled, access_token_ttl_seconds=int(self._access_ttl.total_seconds())
+        )
+
+    def media_source_portable_identity(self, session: Session) -> NegotiationIdentity:
+        """R1's M1-only read seam, from already committed configured public M5.
+
+        No _instance/current_device_contract_identity call or identity SQL occurs
+        on snapshot GET. The same request's relationship SELECT checks this
+        capture against the actual singleton; the router pins it across auth.
+        """
+        identity = self.current_media_source_policy().identity
+        if identity is None:
+            raise DeviceCompatibilityError()
+        return NegotiationIdentity(
+            identity.server_instance_id,
+            identity.identity_epoch,
+            identity.public_key_spki,
+            identity.thumbprint_sha256,
+            identity.api_origin,
+            identity.stream_origin,
+        )
+
+    def device_contract_identity(self, s: Session, now: datetime) -> NegotiationIdentity:
+        """Share the M5 singleton transaction/lock; preserve every v1 signed byte."""
+        row = self._instance(s, now)
+        if row.identity_public_key_spki != public_spki(
+            self._key
+        ) or row.identity_thumbprint_sha256 != public_key_thumbprint(row.identity_public_key_spki):
+            raise DeviceCompatibilityError()
+        return NegotiationIdentity(
+            row.server_instance_id,
+            row.identity_epoch,
+            row.identity_public_key_spki,
+            row.identity_thumbprint_sha256,
+            row.api_origin,
+            row.stream_origin,
+        )
+
+    def current_device_contract_identity(self, s: Session) -> NegotiationIdentity:
+        """Lock existing M5 authority without initializing or updating identity evidence.
+
+        Recovery has no authority to create an identity or reconcile configuration
+        before all account/code checks. Keep the same singleton lock and owner.
+        """
+        s.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": SERVER_INSTANCE_ADVISORY_LOCK},
+        )
+        rows = list(
+            s.scalars(
+                select(ServerInstanceRow)
+                .limit(2)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        if len(rows) != 1:
+            raise DeviceCompatibilityError()
+        row = rows[0]
+        if (
+            row.identity_public_key_spki != public_spki(self._key)
+            or row.identity_thumbprint_sha256 != public_key_thumbprint(row.identity_public_key_spki)
+            or row.api_origin != self._api
+            or row.stream_origin != self._stream
+            or row.label_hint != self._label
+        ):
+            raise DeviceCompatibilityError()
+        identity = NegotiationIdentity(
+            row.server_instance_id,
+            row.identity_epoch,
+            row.identity_public_key_spki,
+            row.identity_thumbprint_sha256,
+            row.api_origin,
+            row.stream_origin,
+        )
+        identity.fields()  # Validate prepared epoch/origin bounds before actor reads.
+        return identity
+
+    def sign_device_contract_discovery(self, payload: dict[str, object]) -> dict[str, object]:
+        return signed_discovery(self._key, payload)
+
+    def sign_device_contract_capabilities(self, payload: dict[str, object]) -> dict[str, object]:
+        return signed_capabilities(self._key, payload)
+
+    def sign_sync_binding_discovery(self, payload: dict[str, object]) -> dict[str, object]:
+        """Closed B1 domain; the existing M5 key remains the sole signer."""
+        return self._sign_sync_binding(payload, BindingNegotiationKind.DISCOVERY)
+
+    def sign_sync_binding_capabilities(self, payload: dict[str, object]) -> dict[str, object]:
+        return self._sign_sync_binding(payload, BindingNegotiationKind.CAPABILITIES)
+
+    def _sign_sync_binding(
+        self,
+        payload: dict[str, object],
+        kind: BindingNegotiationKind,
+    ) -> dict[str, object]:
+        domain = (
+            BINDING_DISCOVERY_DOMAIN
+            if kind is BindingNegotiationKind.DISCOVERY
+            else BINDING_CAPABILITIES_DOMAIN
+        )
+        digest = canonical_sha256(payload)
+        envelope = {
+            "contract_version": "v2",
+            "schema_version": 2,
+            "payload": payload,
+            "payload_sha256": digest.hex(),
+            "signature_algorithm": "ES256-P1363",
+            "signature_b64url": sign_p1363(self._key, domain, digest),
+        }
+        return parse_binding_negotiation(kind, canonical_json_bytes(envelope)).document
 
     def discovery(self) -> dict[str, object]:
         now = _now()
@@ -199,6 +361,8 @@ class ProfilePairingService:
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, operation_id):
+                raise ProfilePairingError("enrollment_invitation_unavailable")
             account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
@@ -206,7 +370,7 @@ class ProfilePairingService:
                 if account.role not in {"OWNER", "ADMIN"}:
                     raise ProfilePairingError("unauthorized")
                 self._require_application_actor(s, principal)
-            now = _now()
+            now = _database_now(s)
             active = (
                 s.scalar(
                     select(func.count())
@@ -233,6 +397,9 @@ class ProfilePairingService:
             )
             if active >= 5 or hourly >= 10:
                 raise ProfilePairingError("enrollment_rate_limited", retryable=True)
+            if not audit_as_system:
+                self._require_application_actor(s, principal)
+            now = _database_now(s)
             invitation = EnrollmentInvitationRow(
                 invitation_id=operation_id,
                 server_instance_id=instance.server_instance_id,
@@ -633,6 +800,12 @@ class ProfilePairingService:
 
     def exchange(self, request: dict[str, object]) -> tuple[dict[str, object], bool]:
         """Consume one invitation or return only its exact device-PoP replay."""
+        if (
+            request.get("contract_version") != "v1"
+            or type(request.get("schema_version")) is not int
+            or request["schema_version"] != 1
+        ):
+            raise ProfilePairingError("enrollment_invitation_unavailable")
         now = _now()
         exchange_id = UUID(str(request["exchange_id"]))
         request_hash = _request_hash(request)
@@ -651,6 +824,11 @@ class ProfilePairingService:
             # discovered before this transaction and every value is revalidated.
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, exchange_id) or device_v2_identifier_reserved(
+                s,
+                UUID(str(request["binding_commit_id"])),
+            ):
+                raise ProfilePairingError("enrollment_invitation_unavailable")
             if account_id is None:
                 raise ProfilePairingError("enrollment_invitation_unavailable")
             account = s.get(UserAccountRow, account_id, with_for_update=True)
@@ -666,6 +844,7 @@ class ProfilePairingService:
                 .where(EnrollmentExchangeReceiptRow.exchange_id == exchange_id)
                 .with_for_update()
             )
+            now = _database_now(s)
             if receipt is not None:
                 if (
                     receipt.invitation_id != invitation_id
@@ -685,10 +864,15 @@ class ProfilePairingService:
                 request, invitation, instance, now
             ):
                 raise ProfilePairingError("enrollment_invitation_unavailable")
+            if has_macos_key_evidence(s, device_thumb, public_key=device_spki):
+                raise ProfilePairingError("enrollment_invitation_unavailable")
+            _require_device_slot(s, account.user_id)
+            now = _database_now(s)
+            if not _exchange_matches(request, invitation, instance, now):
+                raise ProfilePairingError("enrollment_invitation_unavailable")
             device_id, session_id = uuid4(), uuid4()
             refresh_hash = bytes.fromhex(str(request["next_refresh_token_sha256"]))
             expires_at = now + timedelta(days=90)
-            _require_device_slot(s, account.user_id)
             device = DeviceRow(
                 device_id=device_id,
                 user_id=account.user_id,
@@ -761,15 +945,37 @@ class ProfilePairingService:
         thumb = public_key_thumbprint(spki)
         if thumb.hex() != str(request["device_key_thumbprint_sha256"]):
             raise ProfilePairingError("admission_request_unavailable")
-        verify_p1363(spki, _ADMISSION_DOMAIN, digest, str(request["proof_b64url"]))
         locator, bearer = _secret(), _secret()
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, request_id):
+                raise ProfilePairingError("admission_request_unavailable")
             if not _admission_binding_matches(request, instance):
                 raise ProfilePairingError("admission_request_unavailable")
             _transaction_lock(s, b"admission-key", thumb)
+            if has_macos_key_evidence(s, thumb, public_key=spki):
+                raise ProfilePairingError("admission_request_unavailable")
             existing = s.get(DeviceAdmissionRow, request_id, with_for_update=True)
+            if existing is not None and existing.contract_version != "v1":
+                raise ProfilePairingError("admission_request_unavailable")
+            if (
+                s.scalar(
+                    select(DeviceAdmissionRow.request_id)
+                    .where(
+                        DeviceAdmissionRow.device_key_thumbprint_sha256 == thumb,
+                        DeviceAdmissionRow.state == "PENDING",
+                        DeviceAdmissionRow.contract_version != "v1",
+                    )
+                    .limit(1)
+                )
+                is not None
+            ):
+                raise ProfilePairingError("admission_request_unavailable")
+            verify_p1363(spki, _ADMISSION_DOMAIN, digest, str(request["proof_b64url"]))
+            now = _database_now(s)
+            if abs(now - _client_timestamp(request["requested_at"])) > timedelta(seconds=120):
+                raise ProfilePairingError("admission_request_unavailable")
             if existing is not None:
                 if (
                     existing.request_sha256 != digest
@@ -795,6 +1001,9 @@ class ProfilePairingService:
                 # Release the partial unique key before inserting the replacement request.
                 s.flush()
             self._admission_submit_rate_gate(s, thumb, source, now)
+            now = _database_now(s)
+            if abs(now - _client_timestamp(request["requested_at"])) > timedelta(seconds=120):
+                raise ProfilePairingError("admission_request_unavailable")
             row = DeviceAdmissionRow(
                 request_id=request_id,
                 request_sha256=digest,
@@ -857,9 +1066,12 @@ class ProfilePairingService:
                 .order_by(DeviceAdmissionRow.created_at.desc(), DeviceAdmissionRow.request_id)
                 .limit(50)
             ).all()
+            for row in rows:
+                self._admission_web_dispatch(s, row)
             return [
                 {
                     "request_id": str(row.request_id),
+                    "contract_version": row.contract_version,
                     "nickname": row.nickname,
                     "device_model_hint": row.device_model_hint,
                     "platform": row.platform,
@@ -911,6 +1123,11 @@ class ProfilePairingService:
             )
             if row is None or account is None or account.status != "ACTIVE" or account.deleted_at:
                 raise ProfilePairingError("admission_request_unavailable")
+            if row.contract_version == "v2" and device_identifier_reserved(s, operation_id):
+                raise ProfilePairingError("operation_conflict")
+            _, now = self._lock_admin_actor(s, actor, web_session_id=web_session_id)
+            if row.expires_at <= now:
+                raise ProfilePairingError("admission_request_unavailable")
             bound_count = s.scalar(
                 select(func.count())
                 .select_from(DeviceAdmissionRow)
@@ -926,6 +1143,7 @@ class ProfilePairingService:
             )
             if int(bound_count or 0) >= 5:
                 raise ProfilePairingError("admission_request_unavailable")
+            self._admission_web_dispatch(s, row)
             row.review_locator_hash = _hash_secret(_secret())
             row.review_binding_hash = _hash_secret(_secret())
             row.review_web_session_id = web_session_id
@@ -939,10 +1157,12 @@ class ProfilePairingService:
                 _hash_secret(locator),
                 request_sha256,
                 now,
+                contract_version=row.contract_version,
             )
             return {
                 "request_id": str(row.request_id),
                 "request_sha256": row.request_sha256.hex(),
+                "contract_version": row.contract_version,
                 "nickname": row.nickname,
                 "device_model_hint": row.device_model_hint,
                 "platform": row.platform,
@@ -976,8 +1196,11 @@ class ProfilePairingService:
             )
             if row is None or account is None or account.status != "ACTIVE" or account.deleted_at:
                 raise ProfilePairingError("admission_request_unavailable")
+            self._admission_web_dispatch(s, row)
             return {
                 "request_id": str(row.request_id),
+                "contract_version": row.contract_version,
+                "request_sha256": row.request_sha256.hex(),
                 "nickname": row.nickname,
                 "device_model_hint": row.device_model_hint,
                 "platform": row.platform,
@@ -998,6 +1221,8 @@ class ProfilePairingService:
             row = s.get(DeviceAdmissionRow, request_id, with_for_update=True)
             if (
                 row is None
+                or row.contract_version != "v1"
+                or row.platform == "MACOS"
                 or row.poll_bearer_hash != _hash_secret(poll_bearer)
                 or row.device_key_thumbprint_sha256.hex()
                 != str(request["device_key_thumbprint_sha256"])
@@ -1044,7 +1269,16 @@ class ProfilePairingService:
             instance = self._instance(s, now)
             lock_resource_admission(s)
             row = s.get(DeviceAdmissionRow, request_id, with_for_update=True)
-            if row is None or row.state != "PENDING" or row.expires_at <= now:
+            if (
+                row is None
+                or row.contract_version != "v1"
+                or row.platform == "MACOS"
+                or row.state != "PENDING"
+                or row.expires_at <= now
+                or has_macos_key_evidence(
+                    s, row.device_key_thumbprint_sha256, public_key=row.device_public_key_spki
+                )
+            ):
                 raise ProfilePairingError("admission_request_unavailable")
             if (
                 row.request_sha256.hex() != str(request["request_sha256"])
@@ -1147,6 +1381,9 @@ class ProfilePairingService:
             row = s.get(DeviceAdmissionRow, request_id, with_for_update=True)
             if row is None:
                 raise ProfilePairingError("admission_request_unavailable")
+            if row.contract_version == "v2" and device_identifier_reserved(s, operation_id):
+                raise ProfilePairingError("operation_conflict")
+            _, now = self._lock_admin_actor(s, actor, web_session_id=web_session_id)
             if row.state == "PENDING" and row.expires_at <= now:
                 row.state, row.decided_at = "EXPIRED", now
             if row.state != "PENDING":
@@ -1162,10 +1399,18 @@ class ProfilePairingService:
                     raise ProfilePairingError("admission_request_unavailable")
             elif web_session_id is not None and row.review_web_session_id != web_session_id:
                 raise ProfilePairingError("admission_request_unavailable")
+            self._admission_web_dispatch(
+                s, row, granting=action in {"APPROVE_ONCE", "TRUST_DEVICE"}
+            )
             row.approved_device_name = device_name
             row.approved_user_id = (
                 actor.user_id if action in {"APPROVE_ONCE", "TRUST_DEVICE"} else None
             )
+            if row.contract_version == "v2":
+                row.approved_authority_generation = (
+                    account.authority_generation if row.approved_user_id else None
+                )
+                row.approved_account_role = account.role if row.approved_user_id else None
             row.decision_action, row.state, row.decided_at = (
                 action,
                 (
@@ -1206,6 +1451,7 @@ class ProfilePairingService:
                 _uuid_hash(request_id),
                 request_sha256,
                 now,
+                contract_version=row.contract_version,
             )
             return {
                 "operation_id": str(operation_id),
@@ -1229,6 +1475,11 @@ class ProfilePairingService:
                 raise ProfilePairingError("admission_request_unavailable")
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(
+                s,
+                UUID(str(request["exchange_id"])),
+            ) or device_v2_identifier_reserved(s, UUID(str(request["binding_commit_id"]))):
+                raise ProfilePairingError("admission_request_unavailable")
             account = s.get(UserAccountRow, account_id, with_for_update=True)
             row = s.scalar(
                 select(DeviceAdmissionRow)
@@ -1237,6 +1488,25 @@ class ProfilePairingService:
                 .execution_options(populate_existing=True)
             )
             if row is None or row.approved_user_id != account_id:
+                raise ProfilePairingError("admission_request_unavailable")
+            if (
+                row.contract_version != "v1"
+                or row.platform == "MACOS"
+                or has_macos_key_evidence(
+                    s, row.device_key_thumbprint_sha256, public_key=row.device_public_key_spki
+                )
+            ):
+                raise ProfilePairingError("admission_request_unavailable")
+            prior_trust = s.get(
+                TrustedDeviceKeyRow,
+                (account_id, row.device_key_thumbprint_sha256),
+                with_for_update=True,
+            )
+            if (
+                row.decision_action == "TRUST_DEVICE"
+                and prior_trust is not None
+                and prior_trust.contract_version != "v1"
+            ):
                 raise ProfilePairingError("admission_request_unavailable")
             request_hash = canonical_sha256(request, omit=frozenset({"proof_b64url"}))
             if (
@@ -1264,6 +1534,8 @@ class ProfilePairingService:
             exchange_id = UUID(str(request["exchange_id"]))
             existing = s.get(DeviceAdmissionExchangeReceiptRow, exchange_id, with_for_update=True)
             if existing is not None:
+                if existing.contract_version != "v1":
+                    raise ProfilePairingError("admission_request_unavailable")
                 if (
                     existing.request_or_challenge_id != request_id
                     or existing.request_sha256 != request_hash
@@ -1273,7 +1545,11 @@ class ProfilePairingService:
                 session = s.get(UserSessionRow, existing.session_id, with_for_update=True)
                 if session is None:
                     raise ProfilePairingError("session_revoked")
+                now = _database_now(s)
                 self._validate_admission_exchange_authority(s, account, session, now)
+                now = _database_now(s)
+                if existing.receipt_expires_at <= now:
+                    raise ProfilePairingError("admission_request_unavailable")
                 if account is None:  # Narrowed by the authority helper for static analysis.
                     raise ProfilePairingError("auth_attention_required")
                 return self._exchange_response(
@@ -1294,6 +1570,7 @@ class ProfilePairingService:
             )
             if blocked is not None and blocked.unblocked_at is None:
                 raise ProfilePairingError("device_key_blocked")
+            now = _database_now(s)
             if row.state == "APPROVED" and row.expires_at <= now:
                 row.state, row.decided_at = "EXPIRED", now
             if row.state == "EXCHANGED":
@@ -1301,6 +1578,9 @@ class ProfilePairingService:
             if row.state != "APPROVED":
                 raise ProfilePairingError("admission_request_unavailable")
             _require_device_slot(s, account.user_id)
+            now = _database_now(s)
+            if row.expires_at <= now:
+                raise ProfilePairingError("admission_request_unavailable")
             device_id, session_id = uuid4(), uuid4()
             session = UserSessionRow(
                 session_id=session_id,
@@ -1416,7 +1696,14 @@ class ProfilePairingService:
             trust = s.get(
                 TrustedDeviceKeyRow, (principal.user_id, thumbprint), with_for_update=True
             )
+            if (
+                trust is not None
+                and trust.contract_version == "v2"
+                and device_identifier_reserved(s, operation_id)
+            ):
+                raise ProfilePairingError("operation_conflict")
             block = s.get(DeviceKeyBlockRow, (principal.user_id, thumbprint), with_for_update=True)
+            _, now = self._lock_admin_actor(s, principal)
             if action in {"REMOVE_TRUST", "REVOKE_AND_REMOVE"} and trust is not None:
                 trust.removed_at = now
                 trust.revision += 1
@@ -1467,6 +1754,7 @@ class ProfilePairingService:
                 target,
                 request_sha256,
                 now,
+                contract_version=trust.contract_version if trust is not None else "v1",
             )
             return {
                 "operation_id": str(operation_id),
@@ -1567,7 +1855,7 @@ class ProfilePairingService:
                             if admission is not None
                             else known_device.platform
                             if known_device is not None
-                            else "ANDROID"
+                            else row.platform or "UNKNOWN"
                         ),
                         "created_at": iso8601(row.created_at),
                         "connected_at": iso8601(
@@ -1704,6 +1992,8 @@ class ProfilePairingService:
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, challenge_id):
+                raise ProfilePairingError("trusted_key_unavailable")
             _transaction_lock(s, b"trusted-challenge-request", challenge_id.bytes)
             account = s.get(UserAccountRow, principal.user_id, with_for_update=True)
             existing = s.get(
@@ -1712,6 +2002,8 @@ class ProfilePairingService:
                 with_for_update=True,
             )
             if existing is not None:
+                if existing.contract_version != "v1":
+                    raise ProfilePairingError("trusted_key_unavailable")
                 # Plaintext challenges are never retained, so even an exact retry fails closed.
                 exact_replay = (
                     existing.user_id == principal.user_id
@@ -1729,12 +2021,19 @@ class ProfilePairingService:
             block = s.get(DeviceKeyBlockRow, (principal.user_id, thumbprint), with_for_update=True)
             if (
                 trust is None
+                or trust.contract_version != "v1"
                 or trust.removed_at is not None
                 or (block is not None and block.unblocked_at is None)
                 or account is None
                 or account.status != "ACTIVE"
                 or account.deleted_at
             ):
+                raise ProfilePairingError("trusted_key_unavailable")
+            approved = s.get(DeviceAdmissionRow, trust.approved_request_id)
+            if (
+                approved is not None
+                and (approved.contract_version != "v1" or approved.platform == "MACOS")
+            ) or has_macos_key_evidence(s, thumbprint, public_key=trust.device_public_key_spki):
                 raise ProfilePairingError("trusted_key_unavailable")
             active = s.scalar(
                 select(func.count())
@@ -1749,6 +2048,7 @@ class ProfilePairingService:
             )
             if int(active or 0) >= 3:
                 raise ProfilePairingError("trusted_reenrollment_rate_limited", retryable=True)
+            now = _database_now(s)
             expiry = now.replace(second=0, microsecond=0) + timedelta(minutes=15)
             self._advance_admission_rate_window(
                 s,
@@ -1803,10 +2103,18 @@ class ProfilePairingService:
         if thumb.hex() != str(request["device_key_thumbprint_sha256"]):
             raise ProfilePairingError("trusted_key_unavailable")
         digest = canonical_sha256(request, omit=frozenset({"proof_b64url"}))
-        verify_p1363(spki, _TRUSTED_REENROLLMENT_DOMAIN, digest, str(request["proof_b64url"]))
         with self._sessions.begin() as s:
             if not _admission_binding_matches(request, self._instance(s, now)):
                 raise ProfilePairingError("trusted_key_unavailable")
+            lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, UUID(str(request["challenge_request_id"]))):
+                raise ProfilePairingError("trusted_key_unavailable")
+            trust = s.get(TrustedDeviceKeyRow, (account_id, thumb), with_for_update=True)
+            if trust is not None and trust.contract_version != "v1":
+                raise ProfilePairingError("trusted_key_unavailable")
+            if has_macos_key_evidence(s, thumb, public_key=spki):
+                raise ProfilePairingError("trusted_key_unavailable")
+            verify_p1363(spki, _TRUSTED_REENROLLMENT_DOMAIN, digest, str(request["proof_b64url"]))
         return self.issue_trusted_reenrollment_challenge(
             principal=Principal(account_id, UUID(int=0), UUID(int=0), AccountRole.USER),
             thumbprint=thumb,
@@ -1835,6 +2143,11 @@ class ProfilePairingService:
                 raise ProfilePairingError("trusted_key_unavailable")
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, exchange_id) or device_v2_identifier_reserved(
+                s,
+                UUID(str(request["binding_commit_id"])),
+            ):
+                raise ProfilePairingError("trusted_key_unavailable")
             account = s.get(UserAccountRow, account_id, with_for_update=True)
             challenge = s.scalar(
                 select(TrustedDeviceReenrollmentChallengeRow)
@@ -1842,7 +2155,11 @@ class ProfilePairingService:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-            if challenge is None or challenge.user_id != account_id:
+            if (
+                challenge is None
+                or challenge.contract_version != "v1"
+                or challenge.user_id != account_id
+            ):
                 raise ProfilePairingError("trusted_key_unavailable")
             trust = s.get(
                 TrustedDeviceKeyRow,
@@ -1856,6 +2173,7 @@ class ProfilePairingService:
             )
             if (
                 trust is None
+                or trust.contract_version != "v1"
                 or trust.removed_at
                 or (block is not None and block.unblocked_at is None)
                 or account is None
@@ -1870,6 +2188,14 @@ class ProfilePairingService:
                 or str(request["expected_stream_origin"]) != instance.stream_origin
             ):
                 raise ProfilePairingError("trusted_key_unavailable")
+            approved = s.get(DeviceAdmissionRow, trust.approved_request_id)
+            if (
+                approved is not None
+                and (approved.contract_version != "v1" or approved.platform == "MACOS")
+            ) or has_macos_key_evidence(
+                s, challenge.device_key_thumbprint_sha256, public_key=trust.device_public_key_spki
+            ):
+                raise ProfilePairingError("trusted_key_unavailable")
             verify_p1363(
                 trust.device_public_key_spki,
                 _TRUSTED_REENROLLMENT_DOMAIN,
@@ -1878,13 +2204,19 @@ class ProfilePairingService:
             )
             existing = s.get(DeviceAdmissionExchangeReceiptRow, exchange_id, with_for_update=True)
             if existing is not None:
+                if existing.contract_version != "v1":
+                    raise ProfilePairingError("trusted_key_unavailable")
                 if existing.request_sha256 != digest:
                     raise ProfilePairingError("operation_conflict")
                 s.get(DeviceRow, existing.device_id, with_for_update=True)
                 session = s.get(UserSessionRow, existing.session_id, with_for_update=True)
                 if session is None:
                     raise ProfilePairingError("session_revoked")
+                now = _database_now(s)
                 self._validate_admission_exchange_authority(s, account, session, now)
+                now = _database_now(s)
+                if existing.receipt_expires_at <= now:
+                    raise ProfilePairingError("trusted_key_unavailable")
                 return self._exchange_response(
                     account.role,
                     account.user_id,
@@ -1894,11 +2226,14 @@ class ProfilePairingService:
                     now,
                     True,
                 ), True
+            now = _database_now(s)
             if challenge.consumed_at or challenge.expires_at <= now:
                 raise ProfilePairingError("trusted_key_unavailable")
             _require_device_slot(s, account.user_id)
+            now = _database_now(s)
+            if challenge.expires_at <= now:
+                raise ProfilePairingError("trusted_key_unavailable")
             device_id, session_id = uuid4(), uuid4()
-            approved = s.get(DeviceAdmissionRow, trust.approved_request_id)
             known_device = s.scalar(
                 select(DeviceRow)
                 .where(
@@ -1972,6 +2307,12 @@ class ProfilePairingService:
 
     def rotate(self, request: dict[str, object]) -> tuple[dict[str, object], bool]:
         """Perform additive M5 v2 client-secret-hash rotation with replay receipts."""
+        if (
+            request.get("contract_version") != "v1"
+            or type(request.get("schema_version")) is not int
+            or request["schema_version"] != 1
+        ):
+            raise ProfilePairingError("session_revoked")
         now = _now()
         rotation_id = UUID(str(request["rotation_id"]))
         request_hash = _request_hash(request)
@@ -1981,6 +2322,8 @@ class ProfilePairingService:
         with self._sessions.begin() as s:
             instance = self._instance(s, now)
             lock_resource_admission(s)
+            if device_v2_identifier_reserved(s, rotation_id):
+                raise ProfilePairingError("session_revoked")
             account = s.get(UserAccountRow, candidate.user_id, with_for_update=True)
             if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
                 raise ProfilePairingError("auth_attention_required")
@@ -2000,6 +2343,12 @@ class ProfilePairingService:
                 or device is None
             ):
                 raise ProfilePairingError("session_revoked")
+            if device_has_macos_evidence(s, device) or (
+                receipt is not None
+                and has_macos_key_evidence(s, receipt.device_key_thumbprint_sha256)
+            ):
+                raise ProfilePairingError("session_revoked")
+            now = _database_now(s)
             if receipt is not None:
                 if receipt.receipt_expires_at <= now:
                     raise ProfilePairingError("session_revoked")
@@ -2087,6 +2436,9 @@ class ProfilePairingService:
                 or int(str(request["expected_identity_epoch"])) != instance.identity_epoch
             ):
                 raise ProfilePairingError("session_revoked")
+            now = _database_now(s)
+            if parent.expires_at <= now:
+                raise ProfilePairingError("session_revoked")
             successor_id = uuid4()
             successor = UserSessionRow(
                 session_id=successor_id,
@@ -2124,13 +2476,40 @@ class ProfilePairingService:
             )
             return self._rotation_response(s, receipt, successor, now, False), False
 
+    def _admission_web_dispatch(
+        self, s: Session, row: DeviceAdmissionRow, *, granting: bool = False
+    ) -> None:
+        if row.contract_version == "v2":
+            from autplay.application.device_admission_service_v2 import require_admission_review_v2
+
+            try:
+                require_admission_review_v2(s, row, self.device_contract_identity(s, _now()))
+            except DeviceCompatibilityError:
+                raise ProfilePairingError("admission_request_unavailable") from None
+            if granting:
+                if not self._device_v2_enabled():
+                    raise ProfilePairingError("admission_request_unavailable")
+                from autplay.adapters.postgresql.device_platform_evidence import (
+                    has_v2_key_evidence_conflict,
+                )
+
+                if has_v2_key_evidence_conflict(
+                    s,
+                    row.device_key_thumbprint_sha256,
+                    public_key=row.device_public_key_spki,
+                    platform=row.platform,
+                ):
+                    raise ProfilePairingError("admission_request_unavailable")
+        elif row.contract_version != "v1" or row.platform != "ANDROID":
+            raise ProfilePairingError("admission_request_unavailable")
+
     @staticmethod
     def _require_application_actor(s: Session, actor: Principal) -> UserAccountRow:
         """Caller holds admission; validate after locks, before a new command takes effect."""
         account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
         device = s.get(DeviceRow, actor.device_id, with_for_update=True)
         credential = s.get(UserSessionRow, actor.session_id, with_for_update=True)
-        now = _now()
+        now = _database_now(s)
         if (
             account is None
             or account.status != "ACTIVE"
@@ -2157,20 +2536,24 @@ class ProfilePairingService:
         mutation: bool = True,
     ) -> tuple[UserAccountRow, datetime]:
         """Recheck typed S1 authority in identity/admission/account/session lock order."""
-        if (
-            isinstance(actor, WebActor)
-            and s.get(ServerInstanceRow, actor.server_instance_id, with_for_update=True) is None
-        ):
+        # The M5 singleton advisory lock precedes its row lock everywhere.
+        # Acquiring the row/resource/account first would invert the v2 issuer
+        # order when a later Web review loads the same identity singleton.
+        try:
+            instance = self._instance(s, _now())
+        except RuntimeError, ValueError:
+            raise ProfilePairingError("admission_request_unavailable") from None
+        if isinstance(actor, WebActor) and actor.server_instance_id != instance.server_instance_id:
             raise ProfilePairingError("admission_request_unavailable")
         lock_resource_admission(s)
         if isinstance(actor, Principal):
             principal_account = self._require_application_actor(s, actor)
             if principal_account.role not in {"OWNER", "ADMIN"}:
                 raise ProfilePairingError("unauthorized")
-            return principal_account, _now()
+            return principal_account, _database_now(s)
         account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
         web = s.get(WebSessionRow, actor.web_session_id, with_for_update=True)
-        now = _now()
+        now = _database_now(s)
         if (
             account is None
             or account.status != "ACTIVE"
@@ -2205,7 +2588,14 @@ class ProfilePairingService:
         """Return an exact durable Web replay after rechecking mutable account authority."""
         receipt = s.get(DeviceAdmissionWebOperationReceiptRow, operation_id, with_for_update=True)
         if receipt is None:
+            if device_v2_identifier_reserved(s, operation_id):
+                raise ProfilePairingError("operation_conflict")
+            self._lock_admin_actor(s, actor, web_session_id=web_session_id)
             return False
+        # Keep the existing exact Web SQL receipt exclusion, but never exclude
+        # an independent reservation or skip evidence readiness on a replay.
+        if retained_deletion_identifier_reserved(s, operation_id):
+            raise ProfilePairingError("operation_conflict")
         if (
             receipt.actor_user_id != actor.user_id
             or receipt.web_session_id != web_session_id
@@ -2215,6 +2605,7 @@ class ProfilePairingService:
             or not hmac.compare_digest(receipt.request_sha256, request_sha256)
         ):
             raise ProfilePairingError("operation_conflict")
+        _, now = self._lock_admin_actor(s, actor, web_session_id=web_session_id)
         if receipt.receipt_expires_at <= now:
             raise ProfilePairingError("admission_request_unavailable")
         account = s.get(UserAccountRow, actor.user_id, with_for_update=True)
@@ -2237,6 +2628,9 @@ class ProfilePairingService:
         device = s.get(DeviceRow, session.device_id, with_for_update=True)
         if device is None or device.user_id != account.user_id or device.revoked_at is not None:
             raise ProfilePairingError("device_revoked")
+        if device_has_macos_evidence(s, device):
+            raise ProfilePairingError("device_revoked")
+        now = _database_now(s)
         if session.revoked_at is not None or session.expires_at <= now:
             raise ProfilePairingError("session_revoked")
 
@@ -2251,10 +2645,13 @@ class ProfilePairingService:
         target_sha256: bytes,
         request_sha256: bytes,
         now: datetime,
+        *,
+        contract_version: str = "v1",
     ) -> None:
         s.add(
             DeviceAdmissionWebOperationReceiptRow(
                 operation_id=operation_id,
+                contract_version=contract_version,
                 actor_user_id=actor.user_id,
                 web_session_id=web_session_id,
                 action=action,
@@ -2334,6 +2731,10 @@ class ProfilePairingService:
         session = s.get(UserSessionRow, receipt.session_id, with_for_update=True)
         if session is None or device is None or session.user_id != account.user_id:
             raise ProfilePairingError("enrollment_invitation_unavailable")
+        if device_has_macos_evidence(s, device) or has_macos_key_evidence(
+            s, receipt.device_key_thumbprint_sha256
+        ):
+            raise ProfilePairingError("enrollment_invitation_unavailable")
         if account.status != "ACTIVE" or account.deleted_at is not None:
             raise ProfilePairingError("auth_attention_required")
         if device.revoked_at is not None:
@@ -2342,6 +2743,9 @@ class ProfilePairingService:
             raise ProfilePairingError("session_revoked")
         invitation = s.get(EnrollmentInvitationRow, receipt.invitation_id, with_for_update=True)
         if invitation is None:
+            raise ProfilePairingError("enrollment_invitation_unavailable")
+        now = _database_now(s)
+        if receipt.receipt_expires_at <= now or session.expires_at <= now:
             raise ProfilePairingError("enrollment_invitation_unavailable")
         self._audit(
             s,
@@ -2427,6 +2831,13 @@ class ProfilePairingService:
             raise ProfilePairingError("auth_attention_required")
         if device is None or device.revoked_at is not None:
             raise ProfilePairingError("device_revoked")
+        if device_has_macos_evidence(s, device) or has_macos_key_evidence(
+            s, receipt.device_key_thumbprint_sha256
+        ):
+            raise ProfilePairingError("device_revoked")
+        now = _database_now(s)
+        if receipt.receipt_expires_at <= now:
+            raise ProfilePairingError("session_revoked")
         if successor.revoked_at is not None or successor.expires_at <= now:
             raise ProfilePairingError("session_revoked")
         principal = Principal(
@@ -2478,6 +2889,10 @@ class ProfilePairingService:
         access_token_id: UUID | None = None,
     ) -> dict[str, object] | None:
         """Claim an operation ID or return its immutable prior terminal response."""
+        if device_v2_identifier_reserved(s, operation_id):
+            raise ProfilePairingError("operation_conflict")
+        if s.get(ProfileLifecycleCommandRow, operation_id) is None:
+            self._require_application_actor(s, principal)
         claimed = s.scalar(
             insert(ProfileLifecycleCommandRow)
             .values(
@@ -2667,6 +3082,18 @@ class ProfilePairingService:
             row.capability_revision += 1
             row.updated_at = now
             s.flush()
+        self._media_source_capture.stage(
+            s,
+            ConfiguredM5Identity(
+                row.server_instance_id,
+                row.identity_epoch,
+                row.identity_public_key_spki,
+                row.identity_thumbprint_sha256,
+                row.api_origin,
+                row.stream_origin,
+            ),
+            row.capability_revision,
+        )
         return row
 
     def _signed(self, payload: dict[str, object], domain: str) -> dict[str, object]:
@@ -2683,6 +3110,14 @@ class ProfilePairingService:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _database_now(session: Session) -> datetime:
+    with session.no_autoflush:
+        now = session.scalar(select(func.clock_timestamp()))
+    if not isinstance(now, datetime):
+        raise ProfilePairingError("session_revoked")
+    return now
 
 
 def _require_device_slot(session: Session, user_id: UUID) -> None:
@@ -2732,17 +3167,21 @@ def _admission_sas(row: DeviceAdmissionRow) -> str:
     counter = 0
     while True:
         payload: list[Any] = [
-            "autplay:s1a:admission-sas:v1",
+            "autplay:device-compatibility:admission:sas:v2"
+            if row.contract_version == "v2"
+            else "autplay:s1a:admission-sas:v1",
             str(row.server_instance_id),
             str(row.request_id),
             row.request_sha256.hex(),
             row.device_key_thumbprint_sha256.hex(),
             counter,
         ]
-        value = int.from_bytes(hashlib.sha256(rfc8785.dumps(payload)).digest()[:5], "big")
+        value = int.from_bytes(hashlib.sha256(canonical_json_bytes(payload)).digest()[:5], "big")
         if value < 1_000_000_000_000:
             return f"{value:012d}"
         counter += 1
+        if row.contract_version == "v2" and counter >= 128:
+            raise ProfilePairingError("admission_request_unavailable")
 
 
 def cleanup_expired_pairing_receipts(
@@ -2840,7 +3279,10 @@ def cleanup_expired_device_admissions(
             .with_for_update(skip_locked=True)
         ).all()
         for row in expired:
-            row.state, row.decided_at = "EXPIRED", cutoff
+            row.state, row.decided_at = (
+                "EXPIRED",
+                row.expires_at if row.contract_version == "v2" else cutoff,
+            )
         remaining = limit - len(expired)
         if remaining <= 0:
             return len(expired)
@@ -2855,8 +3297,13 @@ def cleanup_expired_device_admissions(
         stale = s.scalars(
             select(DeviceAdmissionRow)
             .where(
-                DeviceAdmissionRow.state.in_(
-                    ("REJECTED", "BLOCKED", "EXPIRED", "CANCELLED", "EXCHANGED")
+                or_(
+                    DeviceAdmissionRow.state.in_(
+                        ("REJECTED", "BLOCKED", "EXPIRED", "CANCELLED", "EXCHANGED")
+                    ),
+                    (DeviceAdmissionRow.contract_version == "v2")
+                    & (DeviceAdmissionRow.state == "APPROVED")
+                    & (DeviceAdmissionRow.expires_at <= cutoff),
                 ),
                 DeviceAdmissionRow.decided_at <= cutoff - timedelta(days=1),
                 ~exchange_receipt_exists,

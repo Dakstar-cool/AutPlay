@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 from uuid import UUID, uuid4, uuid5
 
@@ -43,9 +44,9 @@ EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _register(
-    database_url: str, key: ec.EllipticCurvePrivateKey, user_id: UUID
+    database_url: str, key: ec.EllipticCurvePrivateKey, user_id: UUID, tmp_path: Path
 ) -> tuple[Any, PortableAccountDataService, Principal]:
-    engine, account, _ = services(database_url)
+    engine, account, _ = services(database_url, tmp_path)
     command = binding_body(
         account.challenge("REGISTER", "test-source", document=passport(key, user_id)),
         ec.generate_private_key(ec.SECP256R1()),
@@ -85,14 +86,15 @@ def test_legacy_account_moves_between_servers_with_stable_domain_copies(
     database_harness: DatabaseHarness,
     migrated_template_database: str,
     database_url: str,
+    tmp_path: Path,
 ) -> None:
     target_name = database_harness.create_database(template=migrated_template_database)
     root, owner = ec.generate_private_key(ec.SECP256R1()), uuid4()
-    source_engine, source, actor = _register(database_url, root, owner)
+    source_engine, source, actor = _register(database_url, root, owner, tmp_path)
     target_engine = None
     try:
         target_engine, target, target_actor = _register(
-            database_harness.database_url(target_name), root, owner
+            database_harness.database_url(target_name), root, owner, tmp_path
         )
         now = datetime.now(UTC) - timedelta(days=1)
         track, event, playlist, entry, taste = (uuid4() for _ in range(5))
@@ -208,8 +210,11 @@ def test_legacy_account_moves_between_servers_with_stable_domain_copies(
 
 def test_alias_bridge_and_clock_rollback_do_not_lose_or_double_count_records(
     database_url: str,
+    tmp_path: Path,
 ) -> None:
-    engine, data, actor = _register(database_url, ec.generate_private_key(ec.SECP256R1()), uuid4())
+    engine, data, actor = _register(
+        database_url, ec.generate_private_key(ec.SECP256R1()), uuid4(), tmp_path
+    )
     now = datetime.now(UTC) - timedelta(days=1)
     high, low, track = UUID(int=400), UUID(int=100), uuid4()
     try:
@@ -264,8 +269,11 @@ def test_portable_taste_enters_recommendations_only_after_owner_identity_and_ava
     database_harness: DatabaseHarness,
     database_name: str,
     database_url: str,
+    tmp_path: Path,
 ) -> None:
-    engine, data, actor = _register(database_url, ec.generate_private_key(ec.SECP256R1()), uuid4())
+    engine, data, actor = _register(
+        database_url, ec.generate_private_key(ec.SECP256R1()), uuid4(), tmp_path
+    )
     now = datetime.now(UTC) - timedelta(days=1)
     track_key, taste_id = uuid4(), uuid4()
     record: dict[str, Any] = {

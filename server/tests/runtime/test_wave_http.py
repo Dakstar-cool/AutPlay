@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import uuid4
 
 import pytest
-from autplay.domain.auth import AccountRole, Principal
+from autplay.application.auth import AuthService
+from autplay.application.vault_uploads import VaultNotFoundError
+from autplay.domain.auth import AccountRole, OwnedObjectNotFoundError, Principal
+from autplay.domain.vault import VaultError
 from autplay.domain.wave import WaveRoom
+from autplay.entrypoints.auth_http import bearer_authentication
 from autplay.entrypoints.wave_http import WaveBroadcaster, create_wave_router
 from fastapi import FastAPI
 from starlette.requests import HTTPConnection
@@ -37,9 +45,11 @@ class Auth:
 
 
 class Service:
+    room = ROOM
+
     def snapshot(self, room_id: object, principal: Principal, now: object) -> WaveRoom:
         assert room_id == ROOM.room_id and principal == OWNER
-        return ROOM
+        return self.room
 
     def catch_up(
         self, room_id: object, principal: Principal, after: int, now: object
@@ -51,7 +61,9 @@ class Service:
         )
 
 
-def _client(source_lookup: object | None = None) -> tuple[TestClient, WaveBroadcaster, Auth]:
+def _client(
+    source_lookup: object | None = None, *, production_bearer: bool = False
+) -> tuple[TestClient, WaveBroadcaster, Auth]:
     app = FastAPI()
 
     def principal_state(connection: HTTPConnection) -> None:
@@ -62,13 +74,46 @@ def _client(source_lookup: object | None = None) -> tuple[TestClient, WaveBroadc
     app.include_router(
         create_wave_router(
             Service(),
-            authenticated=principal_state,
+            authenticated=bearer_authentication(cast(AuthService, auth))
+            if production_bearer
+            else principal_state,
             auth_service=auth,
             broadcaster=live,
             source_lookup=source_lookup,
         )
     )
     return TestClient(app), live, auth
+
+
+def test_ws_accepts_header_auth_with_production_http_dependency() -> None:
+    client, _, _ = _client(production_bearer=True)
+    with client.websocket_connect(
+        f"/wave/ws/{ROOM.room_id}", headers={"Authorization": "Bearer good"}
+    ) as socket:
+        socket.send_json({"type": "hello", "after_sequence": 1})
+        assert socket.receive_json()["type"] == "hello"
+
+
+@pytest.mark.parametrize("query", ["", "?access_token=good"])
+def test_ws_rejects_missing_header_with_production_http_dependency(query: str) -> None:
+    client, _, _ = _client(production_bearer=True)
+    with (
+        pytest.raises(WebSocketDisconnect) as closed,
+        client.websocket_connect(f"/wave/ws/{ROOM.room_id}{query}"),
+    ):
+        pass
+    assert closed.value.code == 4401
+
+
+def test_ws_rejects_duplicate_authorization_headers() -> None:
+    client, _, _ = _client(production_bearer=True)
+    headers = {"Authorization": "Bearer good", "authorization": "Bearer good"}
+    with (
+        pytest.raises(WebSocketDisconnect) as closed,
+        client.websocket_connect(f"/wave/ws/{ROOM.room_id}", headers=headers),
+    ):
+        pass
+    assert closed.value.code == 4401
 
 
 def test_ws_header_auth_hello_catchup_and_gap() -> None:
@@ -113,16 +158,15 @@ def test_ws_live_invalidation_and_revoke_on_ping() -> None:
         assert closed.value.code == 4401
 
 
-def test_source_lookup_is_owner_filtered_and_masked() -> None:
+@pytest.mark.parametrize("denial", [VaultError(), VaultNotFoundError(), OwnedObjectNotFoundError()])
+def test_source_lookup_is_owner_filtered_and_masked(denial: Exception) -> None:
     class Lookup:
         fail = False
 
         def resolve(self, principal: Principal, variant_id: object) -> object:
             assert principal == OWNER and variant_id is not None
             if self.fail:
-                from autplay.domain.vault import VaultError
-
-                raise VaultError()
+                raise denial
             return object()
 
     lookup = Lookup()
@@ -135,3 +179,34 @@ def test_source_lookup_is_owner_filtered_and_masked() -> None:
     assert client.post(
         f"/wave/rooms/{ROOM.room_id}/source", json={"audio_variant_id": str(variant)}
     ).json() == {"vault_streamable": False}
+
+
+def test_invalidation_from_http_worker_wakes_socket_without_a_ping() -> None:
+    async def scenario() -> None:
+        live = WaveBroadcaster()
+        queue = live.subscribe(ROOM.room_id)
+        worker = threading.Thread(target=live.publish, args=(ROOM.room_id, {"type": "invalidate"}))
+        worker.start()
+        try:
+            event = await asyncio.wait_for(queue.get(), timeout=1)
+            assert event == {"protocol_version": 1, "type": "invalidate"}
+        finally:
+            worker.join(timeout=1)
+            live.unsubscribe(ROOM.room_id, queue)
+
+    asyncio.run(scenario())
+
+
+def test_snapshot_contains_durable_playback_intent_for_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    intent = {
+        "sequence": 3,
+        "kind": "PLAY",
+        "payload": {"queue_entry_id": str(uuid4()), "effective_at": "2026-10-13T12:00:00Z"},
+    }
+    monkeypatch.setattr(Service, "room", replace(ROOM, command_sequence=3, playback_command=intent))
+    client, _, _ = _client()
+    response = client.get(f"/wave/rooms/{ROOM.room_id}/snapshot")
+    assert response.status_code == 200
+    assert response.json()["playback_command"] == intent

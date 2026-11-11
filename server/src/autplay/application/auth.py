@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from autplay.application.portable_access import authorize_original_portable_access
 from autplay.domain.auth import (
+    AccessAuthenticationUnavailableError,
     AccessTokenClaims,
     AccountReauthenticationRequiredError,
     AccountRole,
@@ -31,6 +34,7 @@ from autplay.ports.auth import (
 )
 from autplay.ports.clock import Clock
 from autplay.ports.ids import IdGenerator
+from autplay.ports.portable_access import PortableAccessTtlExceeded
 
 MAX_ACCESS_TOKEN_TTL = timedelta(minutes=15)
 MAX_REFRESH_TOKEN_TTL = timedelta(days=90)
@@ -83,12 +87,6 @@ class AuthService:
             refresh = self.refresh_tokens.issue()
             refresh_expires_at = now + self.refresh_token_ttl
             principal = Principal(user_id, device_id, session_id, AccountRole.OWNER)
-            pair = self._issue_pair(
-                principal,
-                refresh=refresh,
-                issued_at=now,
-                refresh_expires_at=refresh_expires_at,
-            )
             repository.create_owner_bundle(
                 NewOwnerBundle(
                     user_id=user_id,
@@ -102,6 +100,12 @@ class AuthService:
                     issued_at=now,
                     expires_at=refresh_expires_at,
                 )
+            )
+            pair = self._issue_pair(
+                principal,
+                refresh=refresh,
+                issued_at=now,
+                refresh_expires_at=refresh_expires_at,
             )
             repository.add_audit_event(
                 AuditRecord(
@@ -127,21 +131,49 @@ class AuthService:
     def authenticate_access_with_claims(self, token: str) -> tuple[Principal, AccessTokenClaims]:
         """Authenticate an active principal and retain the verified JWT identity."""
         now = _aware(self.clock.now())
-        claims = self.access_tokens.decode(token, now=now)
-        with self.unit_of_work_factory() as unit_of_work:
-            principal = unit_of_work.auth.load_active_principal(
-                user_id=claims.user_id,
-                device_id=claims.device_id,
-                session_id=claims.session_id,
-                now=now,
+        try:
+            claims = self.access_tokens.decode(token, now=now)
+        except PortableAccessTtlExceeded as rejected:
+            return authorize_original_portable_access(
+                rejected.claims, units=self.unit_of_work_factory, clock=self.clock
             )
+        try:
+            with self.unit_of_work_factory() as unit_of_work:
+                principal = unit_of_work.auth.load_active_principal(
+                    user_id=claims.user_id,
+                    device_id=claims.device_id,
+                    session_id=claims.session_id,
+                    now=now,
+                )
+        except AccessAuthenticationUnavailableError:
+            raise
+        except Exception:
+            # Authentication is a sanitized boundary for every storage port.
+            raise InvalidAccessTokenError from None
         if principal is None:
             raise InvalidAccessTokenError
+        # Include blocking account reads and connection release in expiry.
+        claims = self.access_tokens.decode(token, now=_aware(self.clock.now()))
         return principal, claims
 
     def decode_access(self, token: str) -> AccessTokenClaims:
-        """Validate JWT cryptography and expiry without authorizing a protected route."""
-        return self.access_tokens.decode(token, now=_aware(self.clock.now()))
+        """Keep ordinary decode semantics; R1 always requires live owned authority."""
+        try:
+            return self.access_tokens.decode(token, now=_aware(self.clock.now()))
+        except PortableAccessTtlExceeded as rejected:
+            _, claims = authorize_original_portable_access(
+                rejected.claims, units=self.unit_of_work_factory, clock=self.clock
+            )
+            return claims
+
+    def preflight_access(self, token: str) -> None:
+        """Pure ingress rejection only; return no claims or authenticated identity.
+
+        B1 must enter its bounded DB runtime before R1 receipt authorization.
+        Every admitted request still runs authenticate_access_with_claims there.
+        """
+        with contextlib.suppress(PortableAccessTtlExceeded):
+            self.access_tokens.decode(token, now=_aware(self.clock.now()))
 
     def rotate_refresh(self, refresh_token: str, *, request_id: UUID | None = None) -> TokenPair:
         """Rotate one refresh generation and detect reuse of revoked generations."""
@@ -216,12 +248,6 @@ class AuthService:
                     new_session_id,
                     stored.role,
                 )
-                pair = self._issue_pair(
-                    principal,
-                    refresh=replacement,
-                    issued_at=now,
-                    refresh_expires_at=refresh_expires_at,
-                )
                 repository.create_session(
                     NewSession(
                         session_id=new_session_id,
@@ -231,6 +257,12 @@ class AuthService:
                         issued_at=now,
                         expires_at=refresh_expires_at,
                     )
+                )
+                pair = self._issue_pair(
+                    principal,
+                    refresh=replacement,
+                    issued_at=now,
+                    refresh_expires_at=refresh_expires_at,
                 )
                 repository.add_audit_event(
                     AuditRecord(

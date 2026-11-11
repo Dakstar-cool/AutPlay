@@ -8,10 +8,19 @@ from types import TracebackType
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import exists, select, text, update
+from sqlalchemy import exists, func, select, text, update
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 
-from autplay.domain.auth import AccountRole, AuthSessionState, Principal
+from autplay.domain.auth import (
+    AccessAuthenticationUnavailableError,
+    AccountRole,
+    AuthSessionState,
+    InvalidRefreshTokenError,
+    OwnerAlreadyBootstrappedError,
+    Principal,
+)
+from autplay.domain.device_compatibility import NegotiationIdentity
 from autplay.ports.auth import (
     AuditRecord,
     AuthRepository,
@@ -19,9 +28,13 @@ from autplay.ports.auth import (
     NewOwnerBundle,
     NewSession,
 )
+from autplay.ports.portable_access import PortableAccessReader
 
+from .device_identifier_reservations import device_v2_identifier_reserved
+from .device_platform_evidence import device_has_macos_evidence
 from .models import AuditEventRow, DeviceRow, PortableAccountRow, UserAccountRow, UserSessionRow
 from .models.types import JsonValue
+from .portable_access import SqlAlchemyPortableAccessReader
 from .resource_limits import (
     lock_resource_admission,
     require_device_capacity,
@@ -62,6 +75,19 @@ class SqlAlchemyAuthRepository:
     def create_owner_bundle(self, bundle: NewOwnerBundle) -> None:
         """Stage the first OWNER, device, and session in the same transaction."""
 
+        lock_resource_admission(self._session)
+        if any(
+            device_v2_identifier_reserved(self._session, identifier)
+            for identifier in (
+                bundle.user_id,
+                bundle.device_id,
+                bundle.session_id,
+            )
+        ):
+            raise OwnerAlreadyBootstrappedError()
+        now = self._session.scalar(select(func.clock_timestamp()))
+        if now is None or bundle.expires_at <= now:
+            raise OwnerAlreadyBootstrappedError()
         # These frozen mappings intentionally have no ORM relationships, so
         # flush each dependency level explicitly. All three flushes remain in
         # the caller's single transaction and roll back together on failure.
@@ -134,7 +160,7 @@ class SqlAlchemyAuthRepository:
             .where(DeviceRow.user_id == user_id, DeviceRow.device_id == device_id)
             .with_for_update()
         )
-        if device is None:
+        if device is None or device_has_macos_evidence(self._session, device):
             return None
         session = self._session.scalar(
             select(UserSessionRow)
@@ -186,6 +212,12 @@ class SqlAlchemyAuthRepository:
     def create_session(self, session: NewSession) -> None:
         """Stage a replacement refresh-token generation."""
 
+        lock_resource_admission(self._session)
+        if device_v2_identifier_reserved(self._session, session.session_id):
+            raise InvalidRefreshTokenError()
+        now = self._session.scalar(select(func.clock_timestamp()))
+        if now is None or session.expires_at <= now:
+            raise InvalidRefreshTokenError()
         self._session.add(_new_session_row(session))
         self._session.flush()
 
@@ -273,6 +305,22 @@ class SqlAlchemyAuthRepository:
         session_id: UUID,
         now: datetime,
     ) -> Principal | None:
+        """Preserve pool unavailability without exposing SQL or credentials."""
+        try:
+            return self._load_active_principal(
+                user_id=user_id, device_id=device_id, session_id=session_id, now=now
+            )
+        except PoolTimeoutError:
+            raise AccessAuthenticationUnavailableError from None
+
+    def _load_active_principal(
+        self,
+        *,
+        user_id: UUID,
+        device_id: UUID,
+        session_id: UUID,
+        now: datetime,
+    ) -> Principal | None:
         """Read the database-authoritative role and all current revocation gates."""
 
         row = self._session.execute(
@@ -321,10 +369,19 @@ class SqlAlchemyAuthRepository:
 class SqlAlchemyAuthUnitOfWork:
     """Short-lived SQLAlchemy Session implementing the auth transaction port."""
 
-    def __init__(self, session_factory: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session],
+        *,
+        portable_identity: Callable[[Session], NegotiationIdentity] | None = None,
+        portable_read_only: bool = False,
+    ) -> None:
         self._session_factory = session_factory
+        self._portable_identity = portable_identity
+        self._portable_read_only = portable_read_only
         self._session: Session | None = None
         self._repository: SqlAlchemyAuthRepository | None = None
+        self._portable_reader: SqlAlchemyPortableAccessReader | None = None
         self._committed = False
 
     @property
@@ -335,6 +392,13 @@ class SqlAlchemyAuthUnitOfWork:
             raise RuntimeError("authentication unit of work is not open")
         return self._repository
 
+    @property
+    def portable_access(self) -> PortableAccessReader | None:
+        """The reader is created anew from this UoW's exact owned Session."""
+        if self._session is None:
+            raise RuntimeError("authentication unit of work is not open")
+        return self._portable_reader
+
     def __enter__(self) -> SqlAlchemyAuthUnitOfWork:
         """Open one isolated SQLAlchemy Session."""
 
@@ -342,6 +406,9 @@ class SqlAlchemyAuthUnitOfWork:
             raise RuntimeError("authentication unit of work cannot be re-entered")
         self._session = self._session_factory()
         self._repository = SqlAlchemyAuthRepository(self._session)
+        self._portable_reader = SqlAlchemyPortableAccessReader(
+            self._session, self._portable_identity, read_only=self._portable_read_only
+        )
         self._committed = False
         return self
 
@@ -378,6 +445,7 @@ class SqlAlchemyAuthUnitOfWork:
             self._session.close()
             self._session = None
             self._repository = None
+            self._portable_reader = None
             self._committed = False
         return None
 
@@ -385,13 +453,35 @@ class SqlAlchemyAuthUnitOfWork:
 class SqlAlchemyAuthUnitOfWorkFactory:
     """Create unopened SQLAlchemy authentication units of work."""
 
-    def __init__(self, session_factory: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session],
+        *,
+        portable_identity: Callable[[Session], NegotiationIdentity] | None = None,
+        portable_read_only: bool = False,
+    ) -> None:
         self._session_factory = session_factory
+        self._portable_identity = portable_identity
+        self._portable_read_only = portable_read_only
+
+    def using_sessions(
+        self, session_factory: Callable[[], Session]
+    ) -> SqlAlchemyAuthUnitOfWorkFactory:
+        """Rebind storage for B1 without caching a reader from the API pool."""
+        return SqlAlchemyAuthUnitOfWorkFactory(
+            session_factory,
+            portable_identity=self._portable_identity,
+            portable_read_only=self._portable_read_only,
+        )
 
     def __call__(self) -> AuthUnitOfWork:
         """Return one isolated authentication unit of work."""
 
-        return SqlAlchemyAuthUnitOfWork(self._session_factory)
+        return SqlAlchemyAuthUnitOfWork(
+            self._session_factory,
+            portable_identity=self._portable_identity,
+            portable_read_only=self._portable_read_only,
+        )
 
 
 def _new_session_row(session: NewSession) -> UserSessionRow:

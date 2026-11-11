@@ -28,12 +28,61 @@ PORTABLE_INDEXES = frozenset(
     {
         "portable_challenge_source_time",
         "portable_challenge_expiry",
+        "portable_challenge_binding_commit",
         "portable_record_account_cursor",
         "portable_record_listening_aliases",
         "portable_taste_signal_account_cursor",
     }
 )
 PORTABLE_TRIGGERS = frozenset({"erase_portable_challenges"})
+DEVICE_V2_TABLES = frozenset(
+    {("account", "device_capability_revision"), ("account", "account_deletion_proof")}
+)
+DEVICE_V2_FUNCTIONS = frozenset(
+    {
+        "guard_device_capability_revision",
+        "guard_device_profile_receipt",
+        "guard_portable_v2_challenge",
+        "guard_device_admission_v2",
+        "valid_self_document_v2",
+        "guard_self_device_v2",
+        "valid_recovery_commit_v2",
+        "valid_deletion_document_v2",
+        "guard_deletion_proof_v2",
+        "check_deletion_v2",
+    }
+)
+DEVICE_V2_TRIGGERS = frozenset(
+    {
+        "device_capability_revision_guard",
+        "device_capability_revision_no_truncate",
+        "enrollment_receipt_contract_guard",
+        "rotation_receipt_contract_guard",
+        "portable_challenge_v2_guard",
+        "admission_v2_guard",
+        "trusted_key_v2_guard",
+        "trusted_challenge_v2_guard",
+        "admission_receipt_v2_guard",
+        "admission_web_v2_guard",
+        "self_pairing_v2_guard",
+        "self_command_v2_guard",
+        "deletion_proof_v2_guard",
+        "deletion_proof_v2_no_truncate",
+        "deletion_proof_v2_result",
+        "deletion_request_v2_original",
+        "deletion_cancel_v2_original",
+    }
+)
+
+NATIVE_CAPTURE_TABLES = frozenset({("ml", "sona_native_capture")})
+NATIVE_CAPTURE_INDEXES = frozenset({"sona_native_capture_owner_time", "sona_native_capture_expiry"})
+NATIVE_CAPTURE_TRIGGERS = frozenset(
+    {
+        "guard_sona_native_capture",
+        "erase_sona_native_capture_consent",
+        "erase_sona_native_capture_account",
+    }
+)
 
 A1B_TABLES = frozenset(
     {
@@ -100,6 +149,7 @@ S1B_INDEXES = frozenset(
         "ix_device_key_block_active",
         "ix_trusted_reenrollment_challenge_expiry",
         "ix_device_admission_receipt_expiry",
+        "admission_v2_binding_commit",
         "ix_device_admission_web_operation_receipt_expiry",
         "ix_device_admission_rate_window_expiry",
     }
@@ -452,6 +502,8 @@ def test_migrated_database_has_exact_named_inventory(
         | R1B_TABLES
         | POST_0030_TABLES
         | PORTABLE_TABLES
+        | NATIVE_CAPTURE_TABLES
+        | DEVICE_V2_TABLES
     )
     assert index_names == (
         expected.indexes
@@ -464,9 +516,15 @@ def test_migrated_database_has_exact_named_inventory(
         | R1B_INDEXES
         | POST_0030_INDEXES
         | PORTABLE_INDEXES
+        | NATIVE_CAPTURE_INDEXES
+        | {"self_pairing_v2_binding_commit", "ix_deletion_proof_user"}
     )
     assert function_names == (
-        expected.functions | A1C_FUNCTIONS | R1B_FUNCTIONS | POST_0030_FUNCTIONS
+        expected.functions
+        | A1C_FUNCTIONS
+        | R1B_FUNCTIONS
+        | POST_0030_FUNCTIONS
+        | DEVICE_V2_FUNCTIONS
     )
     assert trigger_names == (
         expected.triggers
@@ -476,6 +534,8 @@ def test_migrated_database_has_exact_named_inventory(
         | R1B_TRIGGERS
         | POST_0030_TRIGGERS
         | PORTABLE_TRIGGERS
+        | NATIVE_CAPTURE_TRIGGERS
+        | DEVICE_V2_TRIGGERS
     )
     assert ("importing", "match_candidate") not in table_names
     assert activation_count == 0
@@ -522,7 +582,6 @@ def _portable_privacy_definitions(connection: Connection[Any]) -> tuple[tuple[An
 
 def test_portable_additive_reference_matches_migrated_schema_and_privacy_functions(
     database_harness: DatabaseHarness,
-    database_name: str,
     empty_database_name: str,
 ) -> None:
     """Check the independently stored 0066 reference without changing the historic 0019 baseline."""
@@ -531,6 +590,36 @@ def test_portable_additive_reference_matches_migrated_schema_and_privacy_functio
         connection.execute(_portable_reference_sql(), prepare=False)
         reference = snapshot_schema(connection)
         reference_privacy = _portable_privacy_definitions(connection)
-    with database_harness.connect(database_name) as connection:
-        assert snapshot_schema(connection) == reference
-        assert _portable_privacy_definitions(connection) == reference_privacy
+    # Both sides are exactly 0066. The shared head template is intentionally
+    # 0074; never downgrade it or compare it against this frozen reference.
+    migrated_database = database_harness.create_database()
+    try:
+        database_harness.upgrade(migrated_database, "0066_portable_local_account")
+        with database_harness.connect(migrated_database) as connection:
+            assert snapshot_schema(connection) == reference
+            assert _portable_privacy_definitions(connection) == reference_privacy
+    finally:
+        database_harness.drop_database(migrated_database)
+
+
+def test_native_collection_reference_matches_migrated_schema(
+    database_harness: DatabaseHarness, empty_database_name: str
+) -> None:
+    ddl = REFERENCE_DDL_PATH.read_text(encoding="utf-8")
+    block = ddl.split("-- BEGIN SONA COLLECTION 0067 REFERENCE\n", 1)[1].split(
+        "-- END SONA COLLECTION 0067 REFERENCE", 1
+    )[0]
+    reference_sql = "\n".join(
+        line.removeprefix("-- | ") for line in block.splitlines() if line.startswith("-- | ")
+    )
+    database_harness.upgrade(empty_database_name, "0066_portable_local_account")
+    with database_harness.connect(empty_database_name) as connection:
+        connection.execute(reference_sql, prepare=False)
+        reference = snapshot_schema(connection)
+    migrated_database = database_harness.create_database()
+    try:
+        database_harness.upgrade(migrated_database, "0067_sona_native_collection")
+        with database_harness.connect(migrated_database) as connection:
+            assert snapshot_schema(connection) == reference
+    finally:
+        database_harness.drop_database(migrated_database)

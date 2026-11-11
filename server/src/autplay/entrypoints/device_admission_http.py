@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Final
 from uuid import UUID
@@ -107,7 +108,11 @@ class TrustedReenrollment(BaseModel):
     proof_b64url: str = Field(pattern=r"^[A-Za-z0-9_-]{86}$")
 
 
-def create_device_admission_router(service: ProfilePairingService | None) -> APIRouter:
+def create_device_admission_router(
+    service: ProfilePairingService | None,
+    *,
+    canonical_source: Callable[[Request], str | None] | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.post("/social/admission-requests", status_code=202)
@@ -115,7 +120,11 @@ def create_device_admission_router(service: ProfilePairingService | None) -> API
         if service is None:
             raise _error("capability_missing", 503)
         try:
-            source = None if request.client is None else request.client.host
+            source = (
+                canonical_source(request)
+                if canonical_source is not None
+                else (request.client.host if request.client else None)
+            )
             result, replayed = service.submit_device_admission(
                 body.model_dump(mode="json", exclude_none=True), source=source
             )

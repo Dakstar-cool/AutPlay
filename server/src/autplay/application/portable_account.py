@@ -20,6 +20,11 @@ from autplay.adapters.portable_account_crypto import (
     verify_account_proof,
 )
 from autplay.adapters.postgresql.account_recovery import revoke_account_authority
+from autplay.adapters.postgresql.device_identifier_reservations import device_v2_identifier_reserved
+from autplay.adapters.postgresql.device_platform_evidence import (
+    device_has_macos_evidence,
+    has_macos_key_evidence,
+)
 from autplay.adapters.postgresql.models import (
     AccountRecoveryCredentialRow,
     AuditEventRow,
@@ -42,6 +47,14 @@ from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.profile_pairing import ProfilePairingError, iso8601
 from autplay.ports.auth import AccessTokenCodec
+
+
+def _database_now(session: Session) -> datetime:
+    with session.no_autoflush:
+        now = session.scalar(select(func.clock_timestamp()))
+    if not isinstance(now, datetime):
+        raise ProfilePairingError("account_authentication_failed")
+    return now
 
 
 class PortableAccountService:
@@ -151,6 +164,11 @@ class PortableAccountService:
             if instance is None:
                 raise ProfilePairingError("capability_missing")
             challenge_id = uuid4()
+            if device_v2_identifier_reserved(session, challenge_id):
+                raise ProfilePairingError("operation_conflict")
+            if actor is not None:
+                self._actor(session, actor, now)
+            now = _database_now(session)
             body: dict[str, object] = {
                 "challenge_id": str(challenge_id),
                 "purpose": purpose,
@@ -196,7 +214,7 @@ class PortableAccountService:
         """Commit exact proof once; replay never extends the original access grant."""
         now = datetime.now(UTC)
         self._admit_attempt(source)
-        self._retire_expired_receipt(body, proof, now)
+        self._retire_expired_receipt(body, proof)
         with self.sessions.begin() as session:
             # Rotation uses the existing recovery lock order to serialize sync and pairing.
             challenge = body.get("challenge")
@@ -206,6 +224,9 @@ class PortableAccountService:
                 _acquire_sync_owner_publish_lock(session, UUID(str(challenge.get("account_id"))))
             lock_resource_admission(session)
             row, passport, digest = self._proof(session, body, proof, now, actor)
+            now = _database_now(session)
+            if row.receipt is None and row.expires_at <= now:
+                raise ProfilePairingError("account_challenge_expired")
             if row.purpose == "REAUTH":
                 raise ProfilePairingError("account_request_invalid")
             if row.purpose == "ROTATE":
@@ -214,11 +235,20 @@ class PortableAccountService:
                 if row.request_hash != digest or row.receipt_expires_at is None:
                     raise ProfilePairingError("operation_conflict")
                 return self._receipt(session, row, now)
+            if row.purpose in {"REGISTER", "LOGIN"}:
+                device_key = decode_b64(body.get("device_public_key_spki_b64"), 91, 91)
+                if has_macos_key_evidence(
+                    session, hashlib.sha256(device_key).digest(), public_key=device_key
+                ):
+                    raise ProfilePairingError("account_authentication_failed")
             account_id, login, public_key = validate_account_document(passport)
             account = session.get(UserAccountRow, account_id, with_for_update=True)
             root = session.get(PortableAccountRow, account_id, with_for_update=True)
             if root is not None and (root.public_key != public_key or root.document != passport):
                 raise ProfilePairingError("account_identity_conflict")
+            now = _database_now(session)
+            if row.expires_at <= now:
+                raise ProfilePairingError("account_challenge_expired")
             if account is None:
                 if row.purpose != "REGISTER":
                     raise ProfilePairingError("account_authentication_failed")
@@ -318,6 +348,8 @@ class PortableAccountService:
             if expiry.tzinfo is not None and expiry <= now:
                 raise ProfilePairingError("account_challenge_expired")
             raise ProfilePairingError("account_authentication_failed")
+        if row.contract_version != "v1":
+            raise ProfilePairingError("account_authentication_failed")
         if row.document != challenge:
             raise ProfilePairingError("account_authentication_failed")
         if row.receipt is None and row.expires_at <= now:
@@ -358,6 +390,24 @@ class PortableAccountService:
             digest = verify_account_proof(key, row.purpose.lower(), body, proof)
         except ValueError:
             raise ProfilePairingError("account_authentication_failed") from None
+        # All callers hold admission serialization. Check the verified original
+        # before first-bind writes, active replay or durable expiry retirement.
+        identifiers = [row.challenge_id]
+        if row.purpose in {"REGISTER", "LOGIN"}:
+            try:
+                binding_id = UUID(str(body.get("binding_commit_id")))
+            except ValueError:
+                # Keep malformed legacy requests on their existing error path.
+                pass
+            else:
+                identifiers.append(binding_id)
+        if any(device_v2_identifier_reserved(session, identifier) for identifier in identifiers):
+            raise ProfilePairingError("operation_conflict")
+        if actor is not None:
+            PortableAccountService._actor(session, actor, now)
+        now = _database_now(session)
+        if row.receipt is None and row.expires_at <= now:
+            raise ProfilePairingError("account_challenge_expired")
         return row, cast(dict[str, object], passport), digest
 
     def _rotate(
@@ -442,12 +492,16 @@ class PortableAccountService:
     def _bind(
         self, session: Session, account: UserAccountRow, body: Mapping[str, object], now: datetime
     ) -> dict[str, object]:
+        # _proof checked both IDs before any first-bind write. Do not introduce
+        # another blocking ledger read after the final challenge clock.
         key = decode_b64(body.get("device_public_key_spki_b64"), 91, 91)
         # Reuse the already bounded P-256 passport parser to validate the device public key.
         device_passport = dict(cast(dict[str, object], body["account"]))
         device_passport["public_key_spki_b64"] = body["device_public_key_spki_b64"]
         validate_account_document(device_passport)
         thumbprint = hashlib.sha256(key).digest()
+        if has_macos_key_evidence(session, thumbprint, public_key=key):
+            raise ProfilePairingError("account_authentication_failed")
         block = session.get(DeviceKeyBlockRow, (account.user_id, thumbprint))
         if block is not None and block.unblocked_at is None:
             raise ProfilePairingError("device_key_blocked")
@@ -500,6 +554,11 @@ class PortableAccountService:
         for previous in prior:
             previous.revoked_at = now
             terminate_retired_session(session, previous, now)
+        now = _database_now(session)
+        challenge = cast(Mapping[str, object], body["challenge"])
+        if datetime.fromisoformat(str(challenge["expires_at"])) <= now:
+            raise ProfilePairingError("account_challenge_expired")
+        expires = now + timedelta(days=90)
         session.add(
             UserSessionRow(
                 user_id=account.user_id,
@@ -530,6 +589,8 @@ class PortableAccountService:
     def _receipt(
         self, session: Session, row: PortableAccountChallengeRow, now: datetime
     ) -> dict[str, object]:
+        if row.contract_version != "v1":
+            raise ProfilePairingError("account_authentication_failed")
         # A rotation receipt grants no session. Keep exact crash recovery available for as
         # long as its replacement root is current; _rotate verifies both possession proofs.
         if row.purpose == "ROTATE" and row.receipt is not None:
@@ -539,6 +600,14 @@ class PortableAccountService:
             raise ProfilePairingError("account_receipt_expired")
         self._account(session, row.account_id)
         result = dict(row.receipt)
+        if row.purpose in {"REGISTER", "LOGIN"} and device_v2_identifier_reserved(
+            session,
+            UUID(str(result["binding_commit_id"])),
+        ):
+            raise ProfilePairingError("operation_conflict")
+        now = _database_now(session)
+        if row.receipt_expires_at <= now:
+            raise ProfilePairingError("account_receipt_expired")
         if row.purpose == "CLAIM":
             if row.actor_device_id is None or row.actor_session_id is None:
                 raise ProfilePairingError("account_authentication_failed")
@@ -557,6 +626,16 @@ class PortableAccountService:
                 UUID(str(result["session_id"])),
                 AccountRole(account.role),
             )
+            self._actor(session, actor, now)
+            device = session.get(DeviceRow, actor.device_id, with_for_update=True)
+            if device is None or device_has_macos_evidence(session, device):
+                raise ProfilePairingError("account_authentication_failed")
+            now = _database_now(session)
+            if (
+                row.receipt_expires_at <= now
+                or datetime.fromisoformat(str(result["access_expires_at"])) <= now
+            ):
+                raise ProfilePairingError("account_receipt_expired")
             self._actor(session, actor, now)
             result["access_token"] = self.access_tokens.issue(
                 actor,
@@ -578,6 +657,7 @@ class PortableAccountService:
         cls._account(session, actor.user_id)
         device = session.get(DeviceRow, actor.device_id, with_for_update=True)
         row = session.get(UserSessionRow, actor.session_id, with_for_update=True)
+        now = _database_now(session)
         if (
             device is None
             or device.user_id != actor.user_id
@@ -590,7 +670,7 @@ class PortableAccountService:
         ):
             raise ProfilePairingError("account_authentication_failed")
 
-    def _retire_expired_receipt(self, body: dict[str, object], proof: str, now: datetime) -> None:
+    def _retire_expired_receipt(self, body: dict[str, object], proof: str) -> None:
         """Commit expiry retirement before the rejecting proof transaction can roll back."""
         challenge = body.get("challenge")
         if not isinstance(challenge, dict):
@@ -599,6 +679,9 @@ class PortableAccountService:
         with self.sessions.begin() as session:
             lock_resource_admission(session)
             row = session.get(PortableAccountChallengeRow, challenge_id, with_for_update=True)
+            now = _database_now(session)
+            if row is not None and row.contract_version != "v1":
+                raise ProfilePairingError("account_authentication_failed")
             if (
                 row is None
                 or row.purpose not in {"REGISTER", "LOGIN"}
@@ -610,6 +693,14 @@ class PortableAccountService:
             _, _, digest = self._proof(session, body, proof, now, None)
             if row.request_hash != digest:
                 raise ProfilePairingError("operation_conflict")
+            device = session.get(
+                DeviceRow, UUID(str(row.receipt["device_id"])), with_for_update=True
+            )
+            key = decode_b64(body.get("device_public_key_spki_b64"), 91, 91)
+            if (device is not None and device_has_macos_evidence(session, device)) or (
+                has_macos_key_evidence(session, hashlib.sha256(key).digest(), public_key=key)
+            ):
+                raise ProfilePairingError("account_authentication_failed")
             # Retire the whole refresh family, including a successor issued before a crash.
             session_id = UUID(str(row.receipt["session_id"]))
             credentials = session.scalars(
@@ -622,6 +713,11 @@ class PortableAccountService:
                 )
                 .with_for_update()
             ).all()
+            # Row/family locks may block. Retire only against a fresh database
+            # sample after those reads, just as receipt grants use final SQL time.
+            now = _database_now(session)
+            if row.receipt_expires_at > now:
+                return
             for credential in credentials:
                 credential.revoked_at = now
             for credential in credentials:
@@ -693,6 +789,26 @@ class PortableAccountService:
         )
 
 
+def portable_v2_identifier_reserved(session: Session, identifier: UUID) -> bool:
+    """Other issuers call under shared admission lock before first ID use.
+
+    Keeping this read-only guard in the existing owner avoids dependency cycles
+    when profile/enrollment/recovery writers reserve portable v2 IDs too.
+    """
+    return (
+        session.scalar(
+            select(PortableAccountChallengeRow.challenge_id)
+            .where(
+                PortableAccountChallengeRow.contract_version == "v2",
+                (PortableAccountChallengeRow.challenge_id == identifier)
+                | (PortableAccountChallengeRow.binding_commit_id == identifier),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def require_portable_reauthentication(
     session: Session,
     actor: Principal,
@@ -713,6 +829,10 @@ def require_portable_reauthentication(
         raise ProfilePairingError("account_reauthentication_required")
     now = datetime.now(UTC)
     row, passport, digest = PortableAccountService._proof(session, body, proof, now, actor)
+    PortableAccountService._actor(session, actor, now)
+    now = _database_now(session)
+    if row.expires_at <= now:
+        raise ProfilePairingError("account_reauthentication_required")
     if (
         row.purpose != "REAUTH"
         or passport != root.document

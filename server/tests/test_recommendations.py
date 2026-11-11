@@ -20,6 +20,8 @@ from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
     baseline_pipeline_definition,
+    recommendation_input_snapshot_document,
+    recommendation_policy_snapshot_document,
 )
 from autplay.domain.recommendations import (
     RecommendationInputSnapshot,
@@ -148,6 +150,75 @@ def _query(user_id: UUID, *, limit: int = 10, seed: int = 42) -> RecommendationQ
         limit=limit,
         seed=seed,
     )
+
+
+@pytest.mark.parametrize("surface", list(RecommendationSurface))
+def test_v2_owner_verified_provisional_audio_and_v1_replay(surface: RecommendationSurface) -> None:
+    track = replace(
+        _track(uuid4(), identity="PROVISIONAL", availability="VAULT"),
+        owner_identity_decision_id=uuid4(),
+        verified_audio_variant_id=uuid4(),
+    )
+    snapshot = replace(_snapshot((track,)), policy_version="2")
+    query = replace(_query(uuid4()), surface=surface)
+    runner = RecommendationPipelineRunner()
+    assert runner.run(query, snapshot, baseline_pipeline_definition()) == ()
+    ranked = runner.run(query, snapshot, baseline_pipeline_definition("2"))
+    assert [item.recording_id for item in ranked] == [track.recording_id]
+    assert runner.filter_snapshot_tracks(query, snapshot) == (track,)
+    assert track.identity_status == "PROVISIONAL" and track.availability == "VAULT"
+    registry = StaticRecommendationVersionRegistry(baseline_pipeline_definition("2"))
+    assert registry.resolve("cpu-baseline", "1") == baseline_pipeline_definition()
+    assert registry.resolve("cpu-baseline").version == "2"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"owner_identity_decision_id": None},
+        {"verified_audio_variant_id": None},
+        {"user_track_ref_id": None},
+        {"authorized": False},
+        {"identity_status": "MERGED"},
+        {"identity_status": "DEPRECATED"},
+        {"preference": "DISLIKED"},
+        {"excluded": True},
+        {"availability": "PENDING"},
+        {"availability": "EXTERNAL"},
+    ],
+)
+def test_v2_offline_owner_policy_fails_closed(change: dict[str, object]) -> None:
+    track = replace(
+        _track(uuid4(), identity="PROVISIONAL", availability="VAULT"),
+        owner_identity_decision_id=uuid4(),
+        verified_audio_variant_id=uuid4(),
+    )
+    # Parametrized malformed evidence must never produce an offline candidate.
+    track = replace(track, **change)  # type: ignore[arg-type]
+    snapshot = replace(_snapshot((track,)), policy_version="2")
+    query = replace(_query(uuid4()), surface=RecommendationSurface.OFFLINE_PACK)
+    runner = RecommendationPipelineRunner()
+    assert runner.run(query, snapshot, baseline_pipeline_definition("2")) == ()
+    assert runner.filter_snapshot_tracks(query, snapshot) == ()
+
+
+def test_v2_snapshot_cap_and_owner_evidence_are_frozen_without_changing_v1() -> None:
+    track = _track(uuid4())
+    old = recommendation_input_snapshot_document(uuid4(), interaction_watermark=0, tracks=(track,))
+    assert old["schema_version"] == 1 and old["max_tracks"] == 5000
+    assert "owner_identity_decision_id" not in str(old)
+    newer = recommendation_input_snapshot_document(
+        uuid4(), interaction_watermark=0, tracks=(track,), policy_version="2"
+    )
+    assert newer["schema_version"] == 2 and newer["max_tracks"] == 1024
+    reviewed = replace(track, owner_identity_decision_id=uuid4())
+    assert recommendation_policy_snapshot_document((track,)) != (
+        recommendation_policy_snapshot_document((reviewed,))
+    )
+    with pytest.raises(ValueError, match="bounds"):
+        recommendation_input_snapshot_document(
+            uuid4(), interaction_watermark=0, tracks=(track,) * 1025, policy_version="2"
+        )
 
 
 def test_cold_start_without_embedding_or_sequential_surfaces_authorized_non_library_track() -> None:

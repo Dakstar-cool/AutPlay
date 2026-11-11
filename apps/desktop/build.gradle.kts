@@ -45,6 +45,13 @@ tasks.register<Sync>("prepareDesktopRuntime") {
     into(layout.buildDirectory.dir("resolved-runtime"))
 }
 
+// Test-only launcher payload. It is copied only into a separate signed acceptance app.
+tasks.register<Jar>("accountAcceptanceJar") {
+    dependsOn(tasks.named("testClasses"))
+    archiveFileName.set("account-acceptance.jar")
+    from(sourceSets.test.get().output)
+}
+
 val hostIsMacArm64 = System.getProperty("os.name").startsWith("Mac") &&
     System.getProperty("os.arch") in setOf("aarch64", "arm64")
 val nativeResourcesRoot = layout.buildDirectory.dir("native-resources")

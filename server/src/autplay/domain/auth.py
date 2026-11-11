@@ -48,6 +48,37 @@ class GuestPrincipal:
     expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class PortableAccessAdmission:
+    """Internal R1 evidence produced only after owned receipt authorization.
+
+    It is never a JWT claim, wire field, persisted credential or TTL policy.
+    Consumers can carry it through pure final-time checks without another read.
+    """
+
+    principal: Principal
+    token_id: UUID
+    issued_at: datetime
+    not_before: datetime
+    expires_at: datetime
+    receipt_expires_at: datetime
+    session_expires_at: datetime
+
+    def accepts(self, principal: Principal, claims: AccessTokenClaims, now: datetime) -> bool:
+        """Bind the complete original tuple and retain its strict expiry."""
+        return (
+            principal == self.principal
+            and (claims.user_id, claims.device_id, claims.session_id)
+            == (principal.user_id, principal.device_id, principal.session_id)
+            and (claims.token_id, claims.issued_at, claims.not_before, claims.expires_at)
+            == (self.token_id, self.issued_at, self.not_before, self.expires_at)
+            and self.issued_at == self.not_before
+            and self.issued_at
+            <= now
+            < min(self.expires_at, self.receipt_expires_at, self.session_expires_at)
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class AccessTokenClaims:
     """Integrity-checked access-token claims before database authorization."""
@@ -59,6 +90,9 @@ class AccessTokenClaims:
     issued_at: datetime
     not_before: datetime
     expires_at: datetime
+    portable_admission: PortableAccessAdmission | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +171,10 @@ class InvalidAccessTokenError(AuthenticationError):
     code = "invalid_access_token"
 
 
+class AccessAuthenticationUnavailableError(InvalidAccessTokenError):
+    """No principal was authenticated because the bounded storage pool timed out."""
+
+
 class AccountReauthenticationRequiredError(AuthenticationError):
     """Portable identities use the action-bound proof lifecycle instead of legacy logout."""
 
@@ -168,6 +206,7 @@ class OwnedObjectNotFoundError(AuthenticationError):
 
 
 __all__ = (
+    "AccessAuthenticationUnavailableError",
     "AccessTokenClaims",
     "AccountReauthenticationRequiredError",
     "AccountRole",
@@ -180,6 +219,7 @@ __all__ = (
     "InvalidRefreshTokenError",
     "OwnedObjectNotFoundError",
     "OwnerAlreadyBootstrappedError",
+    "PortableAccessAdmission",
     "Principal",
     "RefreshTokenReplayError",
     "TokenPair",

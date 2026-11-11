@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import BYTEA, TIMESTAMP
+from sqlalchemy.dialects.postgresql import BYTEA, JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,7 +51,121 @@ class EnrollmentInvitationRow(Base):
     __table_args__ = ({"schema": "account"},)
 
 
-class EnrollmentExchangeReceiptRow(Base):
+class _DeviceProfileReceiptEvidence:
+    """Historical v1 has no invented platform or reconstructed original evidence."""
+
+    contract_version: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'v1'"))
+    platform: Mapped[str | None] = mapped_column(Text)
+    original_document_sha256: Mapped[bytes | None] = mapped_column(BYTEA)
+    original_request_evidence: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    authority_generation: Mapped[int | None] = mapped_column(BigInteger)
+
+
+def _profile_evidence_constraint(operation: str, name: str) -> CheckConstraint:
+    enrollment = operation == "enrollment.exchange"
+    credential = "invitation_secret_sha256" if enrollment else "current_refresh_token_sha256"
+    keys = (
+        "'operation','contract_version','schema_version','platform','server_instance_id','identity_epoch',"
+        "'identity_thumbprint_sha256','api_origin','stream_origin','device_public_key_spki_hex',"
+        "'device_key_thumbprint_sha256','matched_body_key','domain','signature_algorithm','proof_digest',"
+        "'original_document_sha256','signature_hex','fields','credential_hashes'"
+    )
+    field_names = (
+        (
+            "exchange_id",
+            "binding_commit_id",
+            "invitation_id",
+            "expected_user_id",
+            "device_name",
+            "app_version",
+            "next_refresh_token_sha256",
+            "client_nonce_b64url",
+            "request_sha256",
+        )
+        if enrollment
+        else (
+            "rotation_id",
+            "device_id",
+            "parent_session_id",
+            "current_generation",
+            "next_refresh_token_sha256",
+            "request_sha256",
+        )
+    )
+    fields = ",".join(f"'{field}'" for field in field_names)
+    scalar_types = (
+        "".join(
+            f"AND jsonb_typeof(original_request_evidence->'{field}')='string' "
+            for field in (
+                "operation",
+                "contract_version",
+                "platform",
+                "server_instance_id",
+                "identity_thumbprint_sha256",
+                "api_origin",
+                "stream_origin",
+                "device_public_key_spki_hex",
+                "device_key_thumbprint_sha256",
+                "domain",
+                "signature_algorithm",
+                "proof_digest",
+                "original_document_sha256",
+                "signature_hex",
+            )
+        )
+        + "AND jsonb_typeof(original_request_evidence->'identity_epoch')='number' "
+    )
+    field_types = "".join(
+        f"AND jsonb_typeof(original_request_evidence->'fields'->'{field}')="
+        f"'{'number' if field == 'current_generation' else 'string'}' "
+        for field in field_names
+    )
+    return CheckConstraint(
+        "(contract_version = 'v1' AND platform IS NULL "
+        "AND original_document_sha256 IS NULL AND original_request_evidence IS NULL "
+        "AND authority_generation IS NULL) OR COALESCE((contract_version = 'v2' "
+        "AND platform IN ('ANDROID', 'MACOS') "
+        "AND octet_length(original_document_sha256) = 32 "
+        "AND authority_generation >= 1 "
+        "AND jsonb_typeof(original_request_evidence) = 'object' "
+        "AND octet_length(original_request_evidence::text) <= 16384 "
+        f"AND original_request_evidence->>'operation' = '{operation}' "
+        "AND original_request_evidence->>'contract_version' = 'v2' "
+        "AND original_request_evidence->'schema_version' = '2'::jsonb "
+        "AND original_request_evidence->>'platform' = platform "
+        "AND original_request_evidence->>'original_document_sha256' = "
+        "encode(original_document_sha256,'hex') "
+        "AND original_request_evidence->>'proof_digest' = encode(request_sha256,'hex') "
+        "AND original_request_evidence->>'device_key_thumbprint_sha256' "
+        "= encode(device_key_thumbprint_sha256,'hex') "
+        "AND original_request_evidence->>'signature_algorithm' = 'ES256-P1363' "
+        "AND original_request_evidence->>'signature_hex' ~ '^[0-9a-f]{128}$' "
+        f"AND original_request_evidence ?& ARRAY[{keys}] "
+        f"AND original_request_evidence - ARRAY[{keys}] = '{{}}'::jsonb "
+        f"{scalar_types}"
+        f"AND original_request_evidence->>'domain' = E'autplay:device-compatibility:{
+            operation.replace(('.'), (':'))
+        }:v2\\n' "
+        f"AND original_request_evidence->'matched_body_key' = '{
+            ('true') if enrollment else ('false')
+        }'::jsonb "
+        "AND original_request_evidence->>'device_public_key_spki_hex' ~ '^[0-9a-f]{182}$' "
+        "AND original_request_evidence->>'identity_thumbprint_sha256' ~ '^[0-9a-f]{64}$' "
+        "AND jsonb_typeof(original_request_evidence->'fields') = 'object' "
+        f"AND (original_request_evidence->'fields') ?& ARRAY[{fields}] "
+        f"AND (original_request_evidence->'fields') - ARRAY[{fields}] = '{{}}'::jsonb "
+        f"{field_types}"
+        "AND jsonb_typeof(original_request_evidence->'credential_hashes') = 'object' "
+        f"AND (original_request_evidence->'credential_hashes') - '{credential}' = '{{}}'::jsonb "
+        "AND original_request_evidence->'credential_hashes'->>"
+        f"'{credential}' ~ '^[0-9a-f]{{64}}$'), false)",
+        name=name,
+    )
+
+
+class EnrollmentExchangeReceiptRow(_DeviceProfileReceiptEvidence, Base):
     __tablename__ = "enrollment_exchange_receipt"
     exchange_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     invitation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
@@ -62,10 +176,15 @@ class EnrollmentExchangeReceiptRow(Base):
     binding_commit_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     receipt_expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
-    __table_args__ = ({"schema": "account"},)
+    __table_args__ = (
+        _profile_evidence_constraint(
+            "enrollment.exchange", "enrollment_receipt_contract_evidence_check"
+        ),
+        {"schema": "account"},
+    )
 
 
-class SessionRotationReceiptRow(Base):
+class SessionRotationReceiptRow(_DeviceProfileReceiptEvidence, Base):
     __tablename__ = "session_rotation_receipt"
     rotation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     parent_session_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
@@ -74,7 +193,10 @@ class SessionRotationReceiptRow(Base):
     device_key_thumbprint_sha256: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     receipt_expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
-    __table_args__ = ({"schema": "account"},)
+    __table_args__ = (
+        _profile_evidence_constraint("session.rotate", "rotation_receipt_contract_evidence_check"),
+        {"schema": "account"},
+    )
 
 
 class ProfileLifecycleCommandRow(Base):
@@ -123,7 +245,123 @@ class ProfileLifecycleCommandRow(Base):
     )
 
 
-class DeviceAdmissionRow(Base):
+class _AdmissionOriginalEvidence:
+    contract_version: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'v1'"))
+    original_document_sha256: Mapped[bytes | None] = mapped_column(BYTEA)
+    original_request_evidence: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+
+
+def _admission_evidence_constraint(operations: tuple[str, ...], name: str) -> CheckConstraint:
+    """Closed storage projection, including the challenge hash rather than its bearer."""
+    keys = (
+        "'operation','contract_version','schema_version','platform','server_instance_id','identity_epoch',"
+        "'identity_thumbprint_sha256','api_origin','stream_origin','device_public_key_spki_hex',"
+        "'device_key_thumbprint_sha256','matched_body_key','domain','signature_algorithm','proof_digest',"
+        "'original_document_sha256','signature_hex','fields','credential_hashes'"
+    )
+    # Match the frozen 0071 safe_evidence scalar types as well as its key names.
+    fields = {
+        "admission.submit": (
+            ("request_id", "string"),
+            ("client_nonce_b64url", "string"),
+            ("api_major", "number"),
+            ("nickname", "string"),
+            ("app_version", "string"),
+            ("requested_at", "string"),
+        ),
+        "trusted.challenge": (
+            ("challenge_request_id", "string"),
+            ("account_id", "string"),
+            ("client_nonce_b64url", "string"),
+        ),
+        "admission.exchange": (
+            ("request_id", "string"),
+            ("request_sha256", "string"),
+            ("exchange_id", "string"),
+            ("binding_commit_id", "string"),
+            ("poll_bearer_sha256", "string"),
+            ("approved_account_id", "string"),
+            ("client_nonce_b64url", "string"),
+            ("next_refresh_token_sha256", "string"),
+        ),
+        "trusted.exchange": (
+            ("challenge_id", "string"),
+            ("exchange_id", "string"),
+            ("binding_commit_id", "string"),
+            ("account_id", "string"),
+            ("next_refresh_token_sha256", "string"),
+            ("client_nonce_b64url", "string"),
+        ),
+    }
+    variants = []
+    for operation in operations:
+        required = ",".join(f"'{field}'" for field, _ in fields[operation])
+        allowed = required + (",'device_model_hint'" if operation == "admission.submit" else "")
+        scalar_types = "".join(
+            f"AND jsonb_typeof(original_request_evidence->'fields'->'{field}')='{kind}' "
+            for field, kind in fields[operation]
+        )
+        if operation == "admission.submit":
+            scalar_types += (
+                "AND original_request_evidence->'fields'->'api_major'='1'::jsonb "
+                "AND (NOT (original_request_evidence->'fields' ? 'device_model_hint') "
+                "OR jsonb_typeof(original_request_evidence->'fields'->'device_mo"
+                "del_hint') IN ('string','null')) "
+            )
+        credentials = (
+            "AND original_request_evidence->'credential_hashes' ? 'challenge_sha256' "
+            "AND (original_request_evidence->'credential_hashes') - 'challenge_sha256' "
+            "= '{}'::jsonb "
+            "AND original_request_evidence->'credential_hashes'->>'challenge"
+            "_sha256' ~ '^[0-9a-f]{64}$' "
+            if operation == "trusted.exchange"
+            else "AND original_request_evidence->'credential_hashes' = '{}'::jsonb "
+        )
+        variants.append(
+            f"(original_request_evidence->>'operation' = '{operation}' "
+            f"AND original_request_evidence->>'domain' = E'autplay:device-compatibility:{
+                operation.replace(('.'), (':'))
+            }:v2\\n' "
+            f"AND (original_request_evidence->'fields') ?& ARRAY[{required}] "
+            f"AND (original_request_evidence->'fields') - ARRAY[{allowed}] = '{{}}'::jsonb "
+            f"{scalar_types}{credentials})"
+        )
+    return CheckConstraint(
+        "(contract_version='v1' AND original_document_sha256 IS NULL "
+        "AND original_request_evidence IS NULL) "
+        "OR COALESCE((contract_version='v2' AND platform IN ('ANDROID','MACOS') "
+        "AND octet_length(original_document_sha256)=32 "
+        "AND jsonb_typeof(original_request_evidence)='object' "
+        "AND octet_length(original_request_evidence::text)<=16384 "
+        f"AND original_request_evidence ?& ARRAY[{keys}] "
+        f"AND original_request_evidence - ARRAY[{keys}]='{{}}'::jsonb "
+        "AND original_request_evidence->>'contract_version'='v2' "
+        "AND original_request_evidence->'schema_version'='2'::jsonb "
+        "AND original_request_evidence->>'platform'=platform "
+        "AND jsonb_typeof(original_request_evidence->'server_instance_id')='string' "
+        "AND jsonb_typeof(original_request_evidence->'identity_epoch')='number' "
+        "AND jsonb_typeof(original_request_evidence->'api_origin')='string' "
+        "AND jsonb_typeof(original_request_evidence->'stream_origin')='string' "
+        "AND original_request_evidence->>'original_document_sha256'=enco"
+        "de(original_document_sha256,'hex') "
+        "AND original_request_evidence->>'proof_digest'=encode(request_sha256,'hex') "
+        "AND original_request_evidence->>'device_key_thumbprint_sha256'="
+        "encode(device_key_thumbprint_sha256,'hex') "
+        "AND original_request_evidence->>'device_public_key_spki_hex' ~ '^[0-9a-f]{182}$' "
+        "AND original_request_evidence->>'identity_thumbprint_sha256' ~ '^[0-9a-f]{64}$' "
+        "AND original_request_evidence->>'signature_algorithm'='ES256-P1363' "
+        "AND original_request_evidence->>'signature_hex' ~ '^[0-9a-f]{128}$' "
+        "AND original_request_evidence->'matched_body_key'='true'::jsonb "
+        "AND jsonb_typeof(original_request_evidence->'fields')='object' "
+        "AND jsonb_typeof(original_request_evidence->'credential_hashes')='object' "
+        "AND (" + " OR ".join(variants) + ")),false)",
+        name=name,
+    )
+
+
+class DeviceAdmissionRow(_AdmissionOriginalEvidence, Base):
     """One targetless, exact-key admission request; secrets are hash-only."""
 
     __tablename__ = "device_admission"
@@ -167,11 +405,27 @@ class DeviceAdmissionRow(Base):
         ForeignKey("account.user_session.session_id", ondelete="RESTRICT")
     )
     decision_action: Mapped[str | None] = mapped_column(Text)
+    approved_authority_generation: Mapped[int | None] = mapped_column(BigInteger)
+    approved_account_role: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
     decided_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     __table_args__ = (
+        _admission_evidence_constraint(("admission.submit",), "admission_v2_evidence_check"),
+        CheckConstraint(
+            "COALESCE(((contract_version='v1' AND "
+            "approved_authority_generation IS NULL AND "
+            "approved_account_role IS NULL) OR "
+            "(contract_version='v2' AND expires_at=created_at+interval '900 seconds' "
+            "AND ((approved_user_id IS NULL AND "
+            "approved_authority_generation IS NULL AND "
+            "approved_account_role IS NULL) "
+            "OR (approved_user_id IS NOT NULL AND "
+            "approved_authority_generation>=1 AND approved_account_role IN "
+            "('OWNER','ADMIN','USER'))))),false)",
+            name="admission_v2_authority_check",
+        ),
         CheckConstraint(
             "octet_length(request_sha256) = 32", name="device_admission_request_sha256_check"
         ),
@@ -195,7 +449,7 @@ class DeviceAdmissionRow(Base):
             "device_model_hint IS NULL OR length(device_model_hint) <= 96",
             name="device_admission_device_model_hint_check",
         ),
-        CheckConstraint("platform = 'ANDROID'", name="device_admission_platform_check"),
+        CheckConstraint("platform IN ('ANDROID', 'MACOS')", name="device_admission_platform_check"),
         CheckConstraint(
             "length(app_version) BETWEEN 1 AND 32", name="device_admission_app_version_check"
         ),
@@ -285,11 +539,18 @@ class TrustedDeviceKeyRow(Base):
     approved_request_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     key_reference: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    contract_version: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'v1'"))
+    platform: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
     removed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     __table_args__ = (
+        CheckConstraint(
+            "COALESCE(((contract_version='v1' AND platform IS NULL) OR "
+            "(contract_version='v2' AND platform IN ('ANDROID','MACOS'))),false)",
+            name="trusted_key_v2_platform_check",
+        ),
         CheckConstraint(
             "octet_length(device_key_thumbprint_sha256) = 32",
             name="trusted_device_key_device_key_thumbprint_sha256_check",
@@ -325,7 +586,7 @@ class DeviceKeyBlockRow(Base):
     )
 
 
-class TrustedDeviceReenrollmentChallengeRow(Base):
+class TrustedDeviceReenrollmentChallengeRow(_AdmissionOriginalEvidence, Base):
     __tablename__ = "trusted_device_reenrollment_challenge"
     challenge_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     user_id: Mapped[UUID] = mapped_column(
@@ -335,12 +596,28 @@ class TrustedDeviceReenrollmentChallengeRow(Base):
     request_sha256: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     client_nonce_sha256: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     challenge_hash: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
+    platform: Mapped[str | None] = mapped_column(Text)
+    authority_generation: Mapped[int | None] = mapped_column(BigInteger)
+    trust_revision: Mapped[int | None] = mapped_column(BigInteger)
+    account_role: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
     __table_args__ = (
+        _admission_evidence_constraint(
+            ("trusted.challenge",), "trusted_challenge_v2_evidence_check"
+        ),
+        CheckConstraint(
+            "COALESCE(((contract_version='v1' AND platform IS NULL AND "
+            "authority_generation IS NULL AND trust_revision IS NULL AND "
+            "account_role IS NULL) "
+            "OR (contract_version='v2' AND authority_generation>=1 AND "
+            "trust_revision>=1 AND account_role IN ('OWNER','ADMIN','USER') "
+            "AND expires_at=created_at+interval '300 seconds')),false)",
+            name="trusted_challenge_v2_authority_check",
+        ),
         CheckConstraint(
             "octet_length(device_key_thumbprint_sha256) = 32",
             name="trusted_device_reenrollment__device_key_thumbprint_sha256_check",
@@ -362,7 +639,7 @@ class TrustedDeviceReenrollmentChallengeRow(Base):
     )
 
 
-class DeviceAdmissionExchangeReceiptRow(Base):
+class DeviceAdmissionExchangeReceiptRow(_AdmissionOriginalEvidence, Base):
     __tablename__ = "device_admission_exchange_receipt"
     exchange_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     request_or_challenge_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
@@ -375,11 +652,37 @@ class DeviceAdmissionExchangeReceiptRow(Base):
         ForeignKey("account.user_session.session_id", ondelete="RESTRICT"), nullable=False
     )
     binding_commit_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    platform: Mapped[str | None] = mapped_column(Text)
+    authority_generation: Mapped[int | None] = mapped_column(BigInteger)
+    trust_revision: Mapped[int | None] = mapped_column(BigInteger)
+    account_role: Mapped[str | None] = mapped_column(Text)
     receipt_expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
     __table_args__ = (
+        _admission_evidence_constraint(
+            ("admission.exchange", "trusted.exchange"),
+            "admission_receipt_v2_evidence_check",
+        ),
+        CheckConstraint(
+            "COALESCE(((contract_version='v1' AND platform IS NULL AND "
+            "authority_generation IS NULL AND trust_revision IS NULL AND "
+            "account_role IS NULL) "
+            "OR (contract_version='v2' AND authority_generation>=1 AND "
+            "(trust_revision IS NULL OR trust_revision>=1) AND account_role "
+            "IN ('OWNER','ADMIN','USER') "
+            "AND (original_request_evidence->>'operation'<>'trusted.exchange"
+            "' OR trust_revision>=1) "
+            "AND receipt_expires_at=created_at+interval '30 days')),false)",
+            name="admission_receipt_v2_authority_check",
+        ),
+        Index(
+            "admission_v2_binding_commit",
+            "binding_commit_id",
+            unique=True,
+            postgresql_where=text("contract_version='v2'"),
+        ),
         CheckConstraint(
             "octet_length(request_sha256) = 32",
             name="device_admission_exchange_receipt_request_sha256_check",
@@ -398,6 +701,7 @@ class DeviceAdmissionWebOperationReceiptRow(Base):
 
     __tablename__ = "device_admission_web_operation_receipt"
     operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    contract_version: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'v1'"))
     actor_user_id: Mapped[UUID] = mapped_column(
         ForeignKey("account.user_account.user_id", ondelete="RESTRICT"), nullable=False
     )
@@ -414,6 +718,7 @@ class DeviceAdmissionWebOperationReceiptRow(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
     __table_args__ = (
+        CheckConstraint("contract_version IN ('v1','v2')", name="admission_web_v2_version_check"),
         CheckConstraint(
             "length(action) BETWEEN 1 AND 80",
             name="device_admission_web_operation_receipt_action_check",

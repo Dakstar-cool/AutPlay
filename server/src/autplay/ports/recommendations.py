@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -25,6 +25,18 @@ from autplay.domain.sona import (
     SonaShadowEvidence,
     SonaTemporalSnapshot,
 )
+
+
+class AtomicRecommendationWriter(Protocol):
+    """Commit original inputs, response and optional collection in one transaction."""
+
+    def serve_atomic(
+        self,
+        query: RecommendationQuery,
+        *,
+        retained_until: datetime,
+        serve: Callable[[RecommendationInputSnapshot], RecommendationResponse],
+    ) -> RecommendationResponse: ...
 
 
 class CandidateGenerator(Protocol):

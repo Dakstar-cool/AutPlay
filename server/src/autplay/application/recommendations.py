@@ -39,6 +39,7 @@ from autplay.domain.recommendations import (
     SnapshotTrack,
 )
 from autplay.ports.recommendations import (
+    AtomicRecommendationWriter,
     CandidateGenerator,
     CandidatePoolComposer,
     OfflinePackRepository,
@@ -328,6 +329,41 @@ class MandatoryRecommendationFilter:
         )
 
 
+class OwnerVerifiedRecommendationFilter:
+    """V2: owner-reviewed provisional audio is usable without global identity promotion.
+
+    Offline packs are candidate rankings. Android intersects them with its local files;
+    a server-side VAULT claim is deliberately never rewritten as LOCAL.
+    """
+
+    def apply(
+        self, query: RecommendationQuery, candidates: Sequence[Candidate]
+    ) -> Sequence[Candidate]:
+        def eligible(track: SnapshotTrack) -> bool:
+            owned_audio = (
+                track.user_track_ref_id is not None
+                and track.owner_identity_decision_id is not None
+                and track.verified_audio_variant_id is not None
+            )
+            identity_ok = track.identity_status == "ACTIVE" or (
+                track.identity_status == "PROVISIONAL" and owned_audio
+            )
+            availability_ok = track.availability in {"LOCAL", "VAULT", "EXTERNAL"}
+            if query.surface is RecommendationSurface.OFFLINE_PACK:
+                availability_ok = track.availability == "LOCAL" or (
+                    track.availability == "VAULT" and owned_audio
+                )
+            return (
+                track.authorized
+                and identity_ok
+                and availability_ok
+                and track.preference != "DISLIKED"
+                and not track.excluded
+            )
+
+        return tuple(candidate for candidate in candidates if eligible(candidate.track))
+
+
 class DeterministicHeuristicRanker:
     """Score source evidence without interpreting the result as probability."""
 
@@ -427,6 +463,17 @@ class StaticRecommendationVersionRegistry:
         self._pipeline = pipeline or baseline_pipeline_definition()
 
     def resolve(self, pipeline_key: str, version: str | None = None) -> PipelineDefinition:
+        if pipeline_key == self._pipeline.pipeline_key and version in {
+            None,
+            self._pipeline.version,
+        }:
+            return self._pipeline
+        if (
+            pipeline_key == DEFAULT_PIPELINE_KEY
+            and version in {"1", "2"}
+            and self._pipeline.pipeline_key == DEFAULT_PIPELINE_KEY
+        ):
+            return baseline_pipeline_definition(version)
         if pipeline_key != self._pipeline.pipeline_key or (
             version is not None and version != self._pipeline.version
         ):
@@ -434,30 +481,48 @@ class StaticRecommendationVersionRegistry:
         return self._pipeline
 
 
-def baseline_pipeline_definition() -> PipelineDefinition:
+def baseline_pipeline_definition(version: str = "1") -> PipelineDefinition:
     """Return the immutable manifest identity for the initial CPU graph."""
+    recommendation_snapshot_limit(version)
     component_specs = (
         ("preferences", "candidate_generator", "1"),
         ("history", "candidate_generator", "1"),
         ("artist_release_metadata", "candidate_generator", "1"),
         ("freshness", "candidate_generator", "1"),
         ("exploration", "candidate_generator", "1"),
-        ("mandatory-filters", "filter", "1"),
+        ("mandatory-filters", "filter", version),
         ("deterministic-heuristic-ranker", "ranker", "1"),
         ("deterministic-diversity-reranker", "reranker", "1"),
         ("baseline-user-representation", "representation", "1"),
     )
     components = tuple(
-        ComponentVersionRef(key, kind, version, _COMPONENT_CONFIG_SHA256)
-        for key, kind, version in component_specs
+        ComponentVersionRef(
+            key,
+            kind,
+            component_version,
+            sha256(
+                _canonical_bytes(
+                    {
+                        "provisional": "owned_applied_user_review_and_verified_canonical_audio",
+                        "offline": "local_or_owner_verified_vault_then_client_local_intersection",
+                        "snapshot_cap": 1024,
+                    }
+                )
+            ).hexdigest()
+            if kind == "filter" and version == "2"
+            else _COMPONENT_CONFIG_SHA256,
+        )
+        for key, kind, component_version in component_specs
     )
     budgets = tuple(
-        (key, 1_000) for key, kind, _ in component_specs if kind == "candidate_generator"
+        (key, 1_024 if version == "2" else 1_000)
+        for key, kind, _ in component_specs
+        if kind == "candidate_generator"
     )
     pipeline = PipelineDefinition(
         pipeline_key=DEFAULT_PIPELINE_KEY,
-        version=DEFAULT_PIPELINE_VERSION,
-        implementation_revision="p11-cpu-v1",
+        version=version,
+        implementation_revision=f"p11-cpu-v{version}",
         manifest_sha256="0" * 64,
         components=components,
         generator_budgets=budgets,
@@ -521,10 +586,19 @@ class RecommendationPipelineRunner:
         )
         self._generators = {generator.key: generator for generator in configured}
         self._composer = composer or DeterministicCandidatePoolComposer()
-        self._filter = mandatory_filter or MandatoryRecommendationFilter()
+        self._filter = mandatory_filter
         self._ranker = ranker or DeterministicHeuristicRanker()
         self._reranker = reranker or DeterministicDiversityReranker()
         self._representation = representation_provider or BaselineUserRepresentationProvider()
+
+    def _mandatory_filter(self, version: str) -> RecommendationFilter:
+        if self._filter is not None:
+            return self._filter
+        if version == "2":
+            return OwnerVerifiedRecommendationFilter()
+        if version != "1":
+            raise ReplayInputUnavailable
+        return MandatoryRecommendationFilter()
 
     def run(
         self,
@@ -552,7 +626,12 @@ class RecommendationPipelineRunner:
         """Apply the production mandatory filter to an external model's snapshot universe."""
 
         candidates = tuple(Candidate(track, ()) for track in snapshot.tracks)
-        return tuple(candidate.track for candidate in self._filter.apply(query, candidates))
+        return tuple(
+            candidate.track
+            for candidate in self._mandatory_filter(snapshot.policy_version).apply(
+                query, candidates
+            )
+        )
 
     def rank_external_scores(
         self,
@@ -587,7 +666,7 @@ class RecommendationPipelineRunner:
             )
             for source_rank, (recording_id, score) in enumerate(scores, 1)
         )
-        allowed = self._filter.apply(query, candidates)
+        allowed = self._mandatory_filter(snapshot.policy_version).apply(query, candidates)
         score_by_id = dict(scores)
         scored = tuple(
             ScoredCandidate(candidate, score_by_id[candidate.recording_id], ("SONA_SHADOW_SCORE",))
@@ -610,7 +689,8 @@ class RecommendationPipelineRunner:
                 raise ReplayInputUnavailable
             batches.append(generator.generate(query, snapshot, representation, budget))
         pool = self._composer.compose(batches)
-        filtered = self._filter.apply(query, pool)
+        filter_version = next(c.version for c in pipeline.components if c.kind == "filter")
+        filtered = self._mandatory_filter(filter_version).apply(query, pool)
         scored = self._ranker.score(query, filtered)
         return tuple(
             sorted(
@@ -637,6 +717,7 @@ class RecommendationService:
         runner: RecommendationPipelineRunner | None = None,
         packs: OfflinePackRepository | None = None,
         snapshot_retention: timedelta = timedelta(days=30),
+        atomic_writer: AtomicRecommendationWriter | None = None,
     ) -> None:
         self._snapshots = snapshots
         self._traces = traces
@@ -646,6 +727,7 @@ class RecommendationService:
         self._runner = runner or RecommendationPipelineRunner()
         self._packs = packs
         self._snapshot_retention = snapshot_retention
+        self._atomic_writer = atomic_writer
 
     def recommend(
         self,
@@ -656,6 +738,16 @@ class RecommendationService:
     ) -> RecommendationResponse:
         now = self._clock()
         pipeline = self._registry.resolve(pipeline_key, pipeline_version)
+        if self._atomic_writer is not None:
+            self._traces.ensure_pipeline(pipeline)
+            request_id = self._ids()
+            return self._atomic_writer.serve_atomic(
+                query,
+                retained_until=now + self._snapshot_retention,
+                serve=lambda snapshot: self._serve(
+                    query, pipeline, snapshot, request_id, now, persist=False
+                ),
+            )
         snapshot = self._snapshots.capture(
             query.user_id, retained_until=now + self._snapshot_retention
         )
@@ -822,22 +914,33 @@ def request_document(
     }
 
 
+def recommendation_snapshot_limit(policy_version: str) -> int:
+    """Versioned capture bound; V2 freezes the complete Sona-sized universe."""
+    if policy_version == "1":
+        return RECOMMENDATION_MAX_SNAPSHOT_TRACKS
+    if policy_version == "2":
+        return 1024
+    raise ValueError("unsupported recommendation snapshot policy")
+
+
 def recommendation_input_snapshot_document(
     owner_user_id: UUID,
     *,
     interaction_watermark: int,
     tracks: tuple[SnapshotTrack, ...],
+    policy_version: str = "1",
 ) -> dict[str, JsonValue]:
     """Build the exact canonical baseline snapshot document persisted by P11."""
 
-    if interaction_watermark < 0 or len(tracks) > RECOMMENDATION_MAX_SNAPSHOT_TRACKS:
+    limit = recommendation_snapshot_limit(policy_version)
+    if interaction_watermark < 0 or len(tracks) > limit:
         raise ValueError("recommendation snapshot bounds are invalid")
     return {
-        "schema_version": 1,
+        "schema_version": int(policy_version),
         "user_id": str(owner_user_id),
         "interaction_watermark": interaction_watermark,
-        "selection_policy": "most_recent_added_then_recording_id_v1",
-        "max_tracks": RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
+        "selection_policy": f"most_recent_added_then_recording_id_v{policy_version}",
+        "max_tracks": limit,
         "tracks": [recommendation_snapshot_track_document(track) for track in tracks],
     }
 
@@ -853,6 +956,7 @@ def recommendation_availability_snapshot_document(
                 "recording_id": str(track.recording_id),
                 "availability": track.availability,
                 "authorized": track.authorized,
+                **_audio_evidence_document(track),
             }
             for track in tracks
         ]
@@ -871,6 +975,7 @@ def recommendation_policy_snapshot_document(
                 "identity_status": track.identity_status,
                 "preference": track.preference,
                 "excluded": track.excluded,
+                **_owner_evidence_document(track),
             }
             for track in tracks
         ]
@@ -899,7 +1004,25 @@ def recommendation_snapshot_track_document(track: SnapshotTrack) -> dict[str, Js
         "last_played_at_ms": track.last_played_at_ms,
         "added_at_ms": track.added_at_ms,
         "release_date_ordinal": track.release_date_ordinal,
+        **_owner_evidence_document(track),
+        **_audio_evidence_document(track),
     }
+
+
+def _owner_evidence_document(track: SnapshotTrack) -> dict[str, JsonValue]:
+    return (
+        {}
+        if track.owner_identity_decision_id is None
+        else {"owner_identity_decision_id": str(track.owner_identity_decision_id)}
+    )
+
+
+def _audio_evidence_document(track: SnapshotTrack) -> dict[str, JsonValue]:
+    return (
+        {}
+        if track.verified_audio_variant_id is None
+        else {"verified_audio_variant_id": str(track.verified_audio_variant_id)}
+    )
 
 
 def offline_pack_document(

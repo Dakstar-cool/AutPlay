@@ -6,7 +6,11 @@ from uuid import UUID, uuid4
 from autplay.adapters.postgresql.import_runtime import (
     ImportEntryReport,
     ImportJobReport,
+    ImportNotFoundError,
+    ImportReviewCandidate,
     ImportReviewConflictError,
+    ImportReviewContext,
+    ImportReviewContextLimitError,
     ImportReviewResult,
     ImportStartResult,
 )
@@ -43,6 +47,7 @@ class Auth:
 @dataclass
 class Imports:
     last_payload: bytes | None = None
+    context_failure: str | None = None
 
     def start(
         self,
@@ -91,6 +96,44 @@ class Imports:
                 ),
             ),
             None,
+        )
+
+    def review_context(
+        self, principal: Principal, import_job_id: UUID, import_entry_id: UUID
+    ) -> ImportReviewContext:
+        assert principal == _OWNER and import_job_id == _IMPORT_ID and import_entry_id == _ENTRY_ID
+        if self.context_failure == "not_found":
+            raise ImportNotFoundError
+        if self.context_failure == "row_cap":
+            raise ImportReviewContextLimitError
+        title = (
+            "Current catalog title" if self.context_failure != "encoded_cap" else "\u0001" * 4096
+        )
+        count = 1 if self.context_failure != "encoded_cap" else 100
+        return ImportReviewContext(
+            _IMPORT_ID,
+            _ENTRY_ID,
+            _DECISION_ID,
+            "REVIEW_REQUIRED",
+            "REVIEW_REQUIRED",
+            ("ACCEPT", "REJECT", "KEEP_UNRESOLVED", "CREATE_RECORDING"),
+            tuple(
+                ImportReviewCandidate(
+                    rank,
+                    uuid4(),
+                    title,
+                    "Current catalog artist",
+                    None,
+                    None,
+                    None,
+                    "T0",
+                    "1",
+                    bytes(32),
+                    False,
+                    True,
+                )
+                for rank in range(1, count + 1)
+            ),
         )
 
     def cancel(self, principal: Principal, import_job_id: UUID) -> CancelRequestResult:
@@ -216,3 +259,55 @@ def test_manual_review_idempotency_conflict_is_stable_409() -> None:
         )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "import.review_conflict"
+
+
+# Future I1 assertions only. No execution/qualification was authorized for this source slice.
+def test_owned_review_context_is_complete_redacted_and_explicitly_current_display() -> None:
+    app = create_app(_SETTINGS, auth_service=Auth(), import_service=Imports())  # type: ignore[arg-type]
+    path = f"/api/v1/imports/{_IMPORT_ID}/entries/{_ENTRY_ID}/review-context"
+    with TestClient(app) as client:
+        unauthorized = client.get(path)
+        response = client.get(path, headers={"Authorization": "Bearer good"})
+    assert unauthorized.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, private"
+    assert response.headers["pragma"] == "no-cache"
+    body = response.json()
+    assert body["format"] == 1 and body["display_metadata"] == "CURRENT_CATALOG_DISPLAY"
+    assert body["predecessor_decision_id"] == str(_DECISION_ID)
+    candidate = body["candidates"][0]
+    assert candidate["rank"] == 1 and candidate["current_title"] == "Current catalog title"
+    assert candidate["available"] is True and len(candidate["evidence_sha256"]) == 64
+    assert set(candidate) == {
+        "rank",
+        "recording_id",
+        "current_title",
+        "current_artist",
+        "duration_ms",
+        "raw_score",
+        "confidence",
+        "evidence_tier",
+        "evidence_schema_version",
+        "evidence_sha256",
+        "has_hard_conflicts",
+        "available",
+    }
+
+
+def test_owned_review_context_refuses_whole_caps_and_uses_uniform_not_found() -> None:
+    path = f"/api/v1/imports/{_IMPORT_ID}/entries/{_ENTRY_ID}/review-context"
+    for failure, status, code in (
+        ("not_found", 404, "not_found"),
+        ("row_cap", 413, "import.review_context_limit"),
+        ("encoded_cap", 413, "import.review_context_limit"),
+    ):
+        app = create_app(
+            _SETTINGS,
+            auth_service=Auth(),  # type: ignore[arg-type]
+            import_service=Imports(context_failure=failure),
+        )
+        with TestClient(app) as client:
+            response = client.get(path, headers={"Authorization": "Bearer good"})
+        assert response.status_code == status and response.json()["error"]["code"] == code
+        assert response.headers["cache-control"] == "no-store, private"
+        assert "candidates" not in response.json()

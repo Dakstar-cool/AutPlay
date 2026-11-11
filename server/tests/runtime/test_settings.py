@@ -20,6 +20,35 @@ AUTH_SECRET = "api-signing-secret-with-at-least-thirty-two-bytes"
 PUBLIC_SOURCE_SECRET = "public-access-source-hmac-secret-at-least-thirty-two-bytes"
 
 
+def test_native_capture_is_opt_in_and_requires_consent_authority(tmp_path: Path) -> None:
+    overrides = {
+        "database_url": DATABASE_URL,
+        "auth_signing_secret": AUTH_SECRET,
+        "public_access_source_hmac_secret": PUBLIC_SOURCE_SECRET,
+    }
+    assert not load_api_settings(
+        overrides=overrides, environ={}
+    ).native_recommendation_capture_enabled
+    with pytest.raises(SettingsLoadError):
+        load_api_settings(
+            overrides=overrides,
+            environ={
+                "AUTPLAY_NATIVE_RECOMMENDATION_CAPTURE_ENABLED": "true",
+            },
+        )
+    settings = load_api_settings(
+        overrides=overrides,
+        environ={
+            "AUTPLAY_NATIVE_RECOMMENDATION_CAPTURE_ENABLED": "true",
+            "AUTPLAY_SHARED_TRAINING_CONSENT_ENABLED": "true",
+            "AUTPLAY_TRAINING_CONSENT_LEDGER_PATH": str(tmp_path / "consent.sqlite3"),
+            "AUTPLAY_TRAINING_CONSENT_LEDGER_KEY": "c" * 32,
+            "AUTPLAY_TRAINING_CONSENT_LEDGER_KEY_ID": "fixture",
+        },
+    )
+    assert settings.native_recommendation_capture_enabled
+
+
 @pytest.mark.parametrize(
     "enabled,origin,valid",
     [
@@ -655,3 +684,26 @@ def test_worker_timing_is_bounded() -> None:
             environ={"AUTPLAY_DATABASE_URL": DATABASE_URL},
             overrides={"lease_seconds": 60, "heartbeat_seconds": 30},
         )
+
+
+def test_device_v2_switch_defaults_off_and_uses_the_existing_api_env_prefix() -> None:
+    overrides = {
+        "database_url": DATABASE_URL,
+        "auth_signing_secret": AUTH_SECRET,
+        "public_access_source_hmac_secret": PUBLIC_SOURCE_SECRET,
+    }
+    assert not load_api_settings(overrides=overrides, environ={}).device_compatibility_v2_enabled
+    # The map stores the suffix; the loader supplies the established AUTPLAY_ prefix.
+    assert not load_api_settings(
+        overrides=overrides, environ={"DEVICE_COMPATIBILITY_V2_ENABLED": "true"}
+    ).device_compatibility_v2_enabled
+    settings = load_api_settings(
+        overrides=overrides, environ={"AUTPLAY_DEVICE_COMPATIBILITY_V2_ENABLED": "true"}
+    )
+    assert settings.device_compatibility_v2_enabled
+    assert settings.profile_identity_private_key_pem is None
+    assert not settings.portable_accounts_enabled
+    assert not settings.self_device_pairing_enabled
+    assert not settings.account_recovery_enabled
+    assert not settings.account_deletion_enabled
+    assert "device_compatibility_v2_enabled" not in WorkerSettings.model_fields

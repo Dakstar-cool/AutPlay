@@ -29,6 +29,7 @@ from autplay.adapters.postgresql.models.resource_admission import ResourceAdmiss
 from autplay.adapters.postgresql.models.self_device_pairing import SelfDevicePairingRow
 from autplay.adapters.postgresql.models.web_admin import WebSessionInvitationRow, WebSessionRow
 from autplay.adapters.postgresql.models.web_passkeys import WebPasskeyRow
+from autplay.adapters.postgresql.self_device_pairing import SqlAlchemySelfPairingUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.account_recovery import (
     AccountRecoveryService,
@@ -39,8 +40,11 @@ from autplay.domain.profile_pairing import canonical_sha256, public_spki, sign_p
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+from typed_assertions import require_instance
 
 from .conftest import DatabaseHarness
+from .recovery_clock import RecoveryClock
+from .recovery_clock import recovery_clock as recovery_clock
 from .test_self_device_pairing import PairingHarness
 from .test_self_device_pairing import pair as pair
 
@@ -52,7 +56,16 @@ def required[T](value: T | None) -> T:
 
 def service(pair: PairingHarness) -> AccountRecoveryService:
     return AccountRecoveryService(
-        sessionmaker(pair.engine, class_=Session, expire_on_commit=False),
+        sessionmaker(
+            pair.engine,
+            class_=Session,
+            expire_on_commit=False,
+            info=dict(
+                require_instance(
+                    pair.service._units, SqlAlchemySelfPairingUnitOfWorkFactory
+                )._sessions.kw.get("info", {})
+            ),
+        ),
         Hs256AccessTokenCodec(
             b"recovery-test-access-secret-distinct-32bytes", issuer="test", audience="test"
         ),
@@ -118,6 +131,63 @@ def configured(pair: PairingHarness) -> tuple[AccountRecoveryService, str, dict[
         confirmed_account_id=str(pair.actor.user_id),
     )
     return recovery, code, commit
+
+
+@pytest.mark.parametrize("stage", ["known_revoked", "replay", "outcome"])
+def test_v1_recovery_refuses_mac_without_replacing_account_authority(
+    pair: PairingHarness, stage: str
+) -> None:
+    recovery, code, commit = configured(pair)
+    refresh = "mac-conflict-fixture-refresh-01234567890123456789"
+    commit = request(
+        pair,
+        "recover",
+        **{**commit, "next_refresh_token_sha256": hashlib.sha256(refresh.encode()).hexdigest()},
+    )
+    result = recovery.recover(code, commit) if stage != "known_revoked" else None
+    with Session(pair.engine) as session, session.begin():
+        if result is not None:
+            device = required(session.get(DeviceRow, UUID(result["device_id"])))
+            device.platform = "MACOS"
+        else:
+            key = public_spki(pair.key)
+            session.add(
+                DeviceRow(
+                    device_id=uuid4(),
+                    user_id=pair.actor.user_id,
+                    device_name="Historical Mac",
+                    platform="MACOS",
+                    app_version="fixture",
+                    public_key=key,
+                    public_key_thumbprint_sha256=None,
+                    revoked_at=datetime.now(UTC),
+                )
+            )
+    with pair.engine.connect() as connection:
+        before_sessions = connection.execute(
+            text("SELECT * FROM account.user_session ORDER BY session_id")
+        ).all()
+        before_account = connection.execute(text("SELECT * FROM account.user_account")).all()
+        before_code = connection.execute(
+            text("SELECT * FROM account.account_recovery_credential")
+        ).all()
+    with pytest.raises(AccountRecoveryError):
+        if stage == "outcome":
+            recovery.recover_outcome(refresh, commit)
+        else:
+            recovery.recover(code, commit)
+    with pair.engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT * FROM account.user_session ORDER BY session_id")).all()
+            == before_sessions
+        )
+        assert (
+            connection.execute(text("SELECT * FROM account.user_account")).all() == before_account
+        )
+        assert (
+            connection.execute(text("SELECT * FROM account.account_recovery_credential")).all()
+            == before_code
+        )
 
 
 def test_configure_compare_and_set_and_exact_replay(pair: PairingHarness) -> None:
@@ -452,7 +522,7 @@ def test_replay_denied_after_result_revocation(pair: PairingHarness) -> None:
 
 
 def test_lost_reply_after_receipt_expiry_recovers_only_with_result_refresh_proof(
-    pair: PairingHarness, monkeypatch: pytest.MonkeyPatch
+    pair: PairingHarness, recovery_clock: RecoveryClock
 ) -> None:
     recovery, code = service(pair), new_code()
     recovery.configure(
@@ -474,18 +544,12 @@ def test_lost_reply_after_receipt_expiry_recovers_only_with_result_refresh_proof
         binding_commit_id=str(uuid4()),
         confirmed_account_id=str(pair.actor.user_id),
     )
-    original_receipt = recovery._new_receipt
-
-    def expired_receipt(*args: Any, **kwargs: Any) -> AccountRecoveryOperationRow:
-        receipt = original_receipt(*args, **kwargs)
-        receipt.created_at -= timedelta(days=2)
-        receipt.expires_at -= timedelta(days=2)
-        return receipt
-
-    monkeypatch.setattr(recovery, "_new_receipt", expired_receipt)
     committed = recovery.recover(code, commit)
+    recovery_clock.advance(timedelta(days=2))
     with pytest.raises(AccountRecoveryError):
         recovery.recover(code, commit)
+    # Only the expired CONFIGURE receipt is removed; the live result is retained.
+    assert cleanup_expired_recovery_operations(recovery.sessions) == 1
     assert cleanup_expired_recovery_operations(recovery.sessions) == 0
     with pytest.raises(AccountRecoveryError):
         recovery.recover_outcome(secrets.token_urlsafe(32), commit)

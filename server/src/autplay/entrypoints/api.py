@@ -15,12 +15,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
+from autplay.adapters.postgresql.media_source import SystemElapsedClock
+from autplay.adapters.postgresql.media_source_runtime import MediaSourceDatabaseRuntime
 from autplay.adapters.postgresql.readiness import (
     PostgreSQLReadinessProbe,
     ReadinessProbe,
     ReadinessResult,
 )
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
+from autplay.adapters.postgresql.sync_binding_v2 import BindingDatabaseRuntime
 from autplay.adapters.public_music_search import MusicBrainzDiscoveryProvider
 from autplay.application.acquisition_control import AcquisitionControlService
 from autplay.application.auth import AuthService
@@ -52,6 +55,11 @@ from autplay.entrypoints.admin_web_http import (
 from autplay.entrypoints.auth_http import bearer_authentication, create_auth_router
 from autplay.entrypoints.backup_control_http import create_backup_control_router
 from autplay.entrypoints.catalog_composition import CatalogRuntime
+from autplay.entrypoints.catalog_view_http import (
+    CatalogViewDatabaseRuntime,
+    CatalogViewIngressMiddleware,
+    create_catalog_view_router,
+)
 from autplay.entrypoints.composition import (
     build_account_deletion_service,
     build_account_recovery_service,
@@ -59,11 +67,19 @@ from autplay.entrypoints.composition import (
     build_admin_view_service,
     build_auth_service,
     build_bulk_discovery_service,
+    build_device_admission_v2_service,
+    build_device_compatibility_service,
+    build_device_deletion_v2_service,
+    build_device_profile_v2_service,
+    build_device_recovery_v2_service,
+    build_device_self_v2_service,
     build_discovery_automation_service,
     build_guest_room_service,
     build_import_service,
     build_library_service,
     build_manual_discovery_service,
+    build_media_source_authenticator,
+    build_media_source_service,
     build_portable_account_service,
     build_profile_pairing_service,
     build_public_access_service,
@@ -71,6 +87,8 @@ from autplay.entrypoints.composition import (
     build_self_device_pairing_service,
     build_social_service,
     build_stream_lookup,
+    build_sync_binding_authenticator,
+    build_sync_binding_v2_service,
     build_sync_service,
     build_training_consent_service,
     build_vault_http_service,
@@ -79,7 +97,17 @@ from autplay.entrypoints.composition import (
     build_web_passkey_service,
 )
 from autplay.entrypoints.device_admission_http import create_device_admission_router
+from autplay.entrypoints.device_admission_v2_http import create_device_admission_v2_router
 from autplay.entrypoints.device_admission_web import DeviceAdmissionWebAdapter
+from autplay.entrypoints.device_compatibility_http import create_device_compatibility_router
+from autplay.entrypoints.device_deletion_v2_http import create_device_deletion_v2_router
+from autplay.entrypoints.device_portable_v2_http import (
+    build_device_portable_v2_service,
+    create_device_portable_v2_router,
+)
+from autplay.entrypoints.device_profile_v2_http import create_device_profile_v2_router
+from autplay.entrypoints.device_recovery_v2_http import create_device_recovery_v2_router
+from autplay.entrypoints.device_self_v2_http import create_device_self_v2_router
 from autplay.entrypoints.discovery_admin_http import (
     ManualDiscoveryHttp,
     create_discovery_admin_router,
@@ -91,11 +119,16 @@ from autplay.entrypoints.discovery_automation_http import create_discovery_autom
 from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
+from autplay.entrypoints.media_source_http import (
+    MediaSourceIngressMiddleware,
+    create_media_source_router,
+)
 from autplay.entrypoints.metadata_http import create_metadata_router
 from autplay.entrypoints.music_catalogue_context_http import create_catalogue_context_router
 from autplay.entrypoints.music_discovery_http import create_music_discovery_router
 from autplay.entrypoints.music_http import create_music_router
 from autplay.entrypoints.portable_account_http import create_portable_account_router
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.entrypoints.public_access_http import (
     build_exact_proxy_source_resolver,
@@ -109,6 +142,10 @@ from autplay.entrypoints.resource_admission_http import create_resource_admissio
 from autplay.entrypoints.resource_composition import ResourceIoRuntime
 from autplay.entrypoints.self_device_pairing_http import create_self_device_pairing_router
 from autplay.entrypoints.social_http import create_social_router
+from autplay.entrypoints.sync_binding_v2_http import (
+    SyncBindingV2IngressMiddleware,
+    create_sync_binding_v2_router,
+)
 from autplay.entrypoints.sync_http import create_sync_router
 from autplay.entrypoints.training_consent_http import create_training_consent_router
 from autplay.entrypoints.vault_http import AdmittedUploadService, UploadService, create_vault_router
@@ -173,12 +210,27 @@ def create_app(
     resolved_settings = settings or load_api_settings()
     runtime_metrics = metrics or RuntimeMetrics()
     engine = create_runtime_engine(resolved_settings)
+    deletion_evidence = DeletionEvidenceRuntime(resolved_settings, engine)
     probe = readiness_probe or PostgreSQLReadinessProbe(engine)
-    authentication = auth_service or build_auth_service(resolved_settings, engine)
+    pairing = (
+        profile_pairing_service
+        if profile_pairing_service is not None
+        else build_profile_pairing_service(
+            resolved_settings, engine, deletion_evidence=deletion_evidence
+        )
+    )
+    authentication = auth_service or build_auth_service(
+        resolved_settings,
+        engine,
+        deletion_evidence=deletion_evidence,
+        identity=pairing,
+    )
     uploads = upload_service or build_vault_http_service(resolved_settings, engine)
     library = library_service or build_library_service(engine)
     imports = import_service or build_import_service(engine)
-    recommendations = recommendation_service or build_recommendation_service(engine)
+    recommendations = recommendation_service or build_recommendation_service(
+        engine, resolved_settings
+    )
     sync = sync_service or build_sync_service(resolved_settings, engine)
     wave = wave_service or build_wave_service(engine)
     guest_room = guest_room_service or build_guest_room_service(engine)
@@ -186,12 +238,18 @@ def create_app(
     training_consent = training_consent_service or build_training_consent_service(
         resolved_settings, engine
     )
-    pairing = (
-        profile_pairing_service
-        if profile_pairing_service is not None
-        else build_profile_pairing_service(resolved_settings, engine)
+    binding_database = BindingDatabaseRuntime(engine.url)
+    catalog_view_database = CatalogViewDatabaseRuntime(engine.url)
+    media_source_clock = SystemElapsedClock()
+    media_source_database = MediaSourceDatabaseRuntime(engine.url)
+    media_source = build_media_source_service(
+        resolved_settings, media_source_database, identity=pairing, clock=media_source_clock
     )
-    public_access = public_access_service or build_public_access_service(resolved_settings, engine)
+    public_access = public_access_service or build_public_access_service(
+        resolved_settings,
+        engine,
+        deletion_evidence=deletion_evidence,
+    )
     discovery_automation = (
         discovery_automation_service or build_discovery_automation_service(engine)
         if resolved_settings.discovery_automation_enabled
@@ -226,16 +284,22 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        from autplay.entrypoints.privacy_deletion import enforce_privacy_restore_guard
-
+        deletion_evidence.reset()
         try:
-            enforce_privacy_restore_guard(resolved_settings, engine)
+            deletion_evidence.restore_guard()
+            binding_database.start()
+            catalog_view_database.start()
+            media_source_database.start()
             if resource_runtime is not None:
                 resource_runtime.start()
             elif resource_io is not None:
                 resource_io.start()
             yield
         finally:
+            if isinstance(pairing, ProfilePairingService):
+                # Invalidate prepared reads before waiting on any shutdown owner.
+                pairing.configure_media_source_policy(enabled=False)
+            deletion_evidence.reset()
             try:
                 if catalog is not None:
                     application.state.unconfirmed_catalog_io = await run_in_threadpool(
@@ -250,7 +314,16 @@ def create_app(
                     elif resource_io is not None:
                         application.state.unconfirmed_resource_io = await resource_io.shutdown()
                 finally:
-                    engine.dispose()
+                    try:
+                        await media_source_database.shutdown()
+                    finally:
+                        try:
+                            await binding_database.shutdown()
+                        finally:
+                            try:
+                                await catalog_view_database.shutdown()
+                            finally:
+                                engine.dispose()
 
     app = ResourceIoFastAPI(
         title="AutPlay API",
@@ -264,16 +337,32 @@ def create_app(
     app.state.metrics = runtime_metrics
     app.state.readiness_probe = probe
     app.state.auth_service = authentication
+    app.state.deletion_evidence = deletion_evidence
+    app.state.sync_binding_database = binding_database
+    app.state.catalog_view_database = catalog_view_database
+    app.state.profile_pairing_service = pairing
+    app.state.media_source_database = media_source_database
+    app.state.media_source_service = media_source
+    app.state.media_source_clock = media_source_clock
+    app.state.media_source_policy = media_source.current_policy
     app.state.catalog_runtime = catalog
     app.state.music_discovery_service = music_discovery
     app.state.catalogue_context_service = catalogue_context
-    install_error_handlers(app)
+    install_error_handlers(app, deletion_evidence_failed=deletion_evidence.reset)
     app.add_middleware(RequestRuntimeMiddleware, metrics=runtime_metrics)
+    app.add_middleware(SyncBindingV2IngressMiddleware)
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
     api_router.include_router(
+        create_catalog_view_router(
+            authentication, catalog_view_database, configure_sessions=deletion_evidence.configure
+        )
+    )
+    api_router.include_router(
         create_portable_account_router(
-            build_portable_account_service(resolved_settings, engine),
+            build_portable_account_service(
+                resolved_settings, engine, deletion_evidence=deletion_evidence
+            ),
             authenticated=bearer_authentication(authentication),
             canonical_source=build_exact_proxy_source_resolver(
                 resolved_settings.public_access_trusted_proxy_ip
@@ -316,10 +405,76 @@ def create_app(
             decode_access=getattr(authentication, "decode_access", None),
         )
     )
-    api_router.include_router(create_device_admission_router(pairing))
+    admission_source = build_exact_proxy_source_resolver(
+        resolved_settings.public_access_trusted_proxy_ip
+    )
+    api_router.include_router(
+        create_device_admission_router(pairing, canonical_source=admission_source)
+    )
+    api_router.include_router(
+        create_device_admission_v2_router(
+            build_device_admission_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            canonical_source=admission_source,
+        )
+    )
+    api_router.include_router(
+        create_device_compatibility_router(
+            build_device_compatibility_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            authenticate=getattr(authentication, "authenticate_access_with_claims", None),
+        )
+    )
+    api_router.include_router(
+        create_sync_binding_v2_router(
+            build_sync_binding_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            authenticate=getattr(authentication, "authenticate_access_with_claims", None),
+            database=binding_database,
+            authenticate_sessions=lambda sessions: build_sync_binding_authenticator(
+                authentication, sessions, deletion_evidence=deletion_evidence
+            ),
+            preflight_access=getattr(authentication, "preflight_access", None),
+        )
+    )
+    api_router.include_router(
+        create_media_source_router(
+            media_source,
+            authenticate=getattr(authentication, "authenticate_access_with_claims", None),
+            clock=media_source_clock,
+            database=media_source_database,
+            authenticate_sessions=lambda sessions: build_media_source_authenticator(
+                authentication, sessions, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            preflight_access=getattr(authentication, "preflight_access", None),
+            current_policy=media_source.current_policy,
+        )
+    )
+    api_router.include_router(
+        create_device_profile_v2_router(
+            build_device_profile_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+        )
+    )
+    api_router.include_router(
+        create_device_portable_v2_router(
+            build_device_portable_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            canonical_source=build_exact_proxy_source_resolver(
+                resolved_settings.public_access_trusted_proxy_ip
+            ),
+        )
+    )
     api_router.include_router(
         create_account_deletion_router(
-            build_account_deletion_service(resolved_settings, engine),
+            build_account_deletion_service(
+                resolved_settings, engine, deletion_evidence=deletion_evidence
+            ),
             authenticated=bearer_authentication(authentication),
             canonical_source=build_exact_proxy_source_resolver(
                 resolved_settings.public_access_trusted_proxy_ip
@@ -328,20 +483,46 @@ def create_app(
     )
     api_router.include_router(
         create_account_recovery_router(
-            build_account_recovery_service(resolved_settings, engine),
-            authenticated=bearer_authentication(authentication),
-            canonical_source=build_exact_proxy_source_resolver(
-                resolved_settings.public_access_trusted_proxy_ip
+            build_account_recovery_service(
+                resolved_settings, engine, deletion_evidence=deletion_evidence
             ),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=admission_source,
+        )
+    )
+    api_router.include_router(
+        create_device_recovery_v2_router(
+            build_device_recovery_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            canonical_source=admission_source,
+        )
+    )
+    api_router.include_router(
+        create_device_deletion_v2_router(
+            build_device_deletion_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            authenticate=getattr(authentication, "authenticate_access_with_claims", None),
+            canonical_source=admission_source,
+        )
+    )
+    api_router.include_router(
+        create_device_self_v2_router(
+            build_device_self_v2_service(
+                resolved_settings, engine, identity=pairing, deletion_evidence=deletion_evidence
+            ),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=admission_source,
         )
     )
     api_router.include_router(
         create_self_device_pairing_router(
-            build_self_device_pairing_service(resolved_settings, engine),
-            authenticated=bearer_authentication(authentication),
-            canonical_source=build_exact_proxy_source_resolver(
-                resolved_settings.public_access_trusted_proxy_ip
+            build_self_device_pairing_service(
+                resolved_settings, engine, deletion_evidence=deletion_evidence
             ),
+            authenticated=bearer_authentication(authentication),
+            canonical_source=admission_source,
         )
     )
     api_router.include_router(
@@ -526,6 +707,12 @@ def create_app(
             )
         )
 
+    # Added last: this raw ingress is OUTSIDE every user middleware, including
+    # RequestRuntime's body buffer and Admin Web security. It closes unknown
+    # paths/slashes/framing before routing, redirect handling or authentication.
+    app.add_middleware(CatalogViewIngressMiddleware)
+    app.add_middleware(MediaSourceIngressMiddleware, clock=media_source_clock)
+
     @app.get("/health/live", include_in_schema=False)
     async def health_live() -> dict[str, str]:
         return {"status": "live", "component": "api"}
@@ -534,6 +721,9 @@ def create_app(
     async def health_ready(request: Request) -> Response:
         result = await run_in_threadpool(probe.check)
         runtime_metrics.set_readiness(result.component, ready=result.ready)
+        if result.ready and not deletion_evidence.evidence_ready():
+            result = ReadinessResult(False, "privacy_deletion", "deletion_evidence_unavailable")
+        runtime_metrics.set_readiness("privacy_deletion", ready=deletion_evidence.evidence_ready())
         if result.ready and resolved_settings.internet_music_enabled:
             if catalog_unavailable is not None:
                 result = catalog_unavailable

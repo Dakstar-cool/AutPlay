@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Final, cast
@@ -13,6 +13,8 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHttpException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from autplay.domain.privacy_deletion import DeletionEvidenceError
 
 from .metrics import RuntimeMetrics
 from .request_context import (
@@ -201,11 +203,36 @@ class RequestRuntimeMiddleware:
             reset_request_id(token)
 
 
-def install_error_handlers(app: FastAPI) -> None:
+def install_error_handlers(
+    app: FastAPI,
+    *,
+    deletion_evidence_failed: Callable[[], None] | None = None,
+) -> None:
     """Install stable handlers for expected framework/application failures."""
+
+    @app.exception_handler(DeletionEvidenceError)
+    async def handle_deletion_evidence_error(
+        request: Request,
+        error: DeletionEvidenceError,
+    ) -> JSONResponse:
+        # Never log the exception chain: adapter context can contain private paths.
+        del error
+        if deletion_evidence_failed is not None:
+            deletion_evidence_failed()
+        return error_response(
+            request_id=_request_id(request),
+            code="deletion_evidence_unavailable",
+            message="Deletion evidence is unavailable.",
+            status_code=503,
+            retryable=True,
+        )
 
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, error: ApiError) -> JSONResponse:
+        # Deletion routers preserve their existing domain mapping. Their stable
+        # evidence error must invalidate the same runtime snapshot too.
+        if error.code == "deletion_evidence_unavailable" and deletion_evidence_failed is not None:
+            deletion_evidence_failed()
         return error_response(
             request_id=_request_id(request),
             code=error.code,

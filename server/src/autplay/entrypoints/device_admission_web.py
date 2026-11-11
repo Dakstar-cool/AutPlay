@@ -60,6 +60,10 @@ class DeviceAdmissionWebAdapter:
             requested_at=datetime.fromisoformat(str(data["requested_at"]).replace("Z", "+00:00")),
             expires_at=datetime.fromisoformat(str(data["expires_at"]).replace("Z", "+00:00")),
             sas_3x4=(sas[:4], sas[4:8], sas[8:]),
+            contract_version=str(data.get("contract_version", "v1")),
+            request_sha256=str(data["request_sha256"])
+            if data.get("contract_version") == "v2"
+            else None,
         )
 
     def pending_reviews(self, actor: WebActor) -> tuple[PendingDeviceAdmission, ...]:
@@ -77,6 +81,7 @@ class DeviceAdmissionWebAdapter:
                     str(row["requested_at"]).replace("Z", "+00:00")
                 ),
                 expires_at=datetime.fromisoformat(str(row["expires_at"]).replace("Z", "+00:00")),
+                contract_version=str(row.get("contract_version", "v1")),
             )
             for row in rows
         )

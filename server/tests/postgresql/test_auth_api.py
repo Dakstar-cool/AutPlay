@@ -9,14 +9,18 @@ import sys
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
+from autplay.adapters.filesystem.deletion_ledger import FilesystemDeletionLedger
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.application.auth import AuthService, BootstrapOwnerCommand
 from autplay.domain.auth import DeviceDescription, DevicePlatform, Principal
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_auth_service
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.runtime.settings import ApiSettings, RuntimeProfile
 from fastapi import FastAPI
 from psycopg import Connection
@@ -34,7 +38,7 @@ class ReadyProbe:
 
 
 @pytest.fixture
-def auth_http_runtime(database_url: str) -> Iterator[tuple[FastAPI, AuthService]]:
+def auth_http_runtime(database_url: str, tmp_path: Path) -> Iterator[tuple[FastAPI, AuthService]]:
     settings = ApiSettings(
         profile=RuntimeProfile.TEST,
         database_url=SecretStr(database_url),
@@ -45,9 +49,19 @@ def auth_http_runtime(database_url: str) -> Iterator[tuple[FastAPI, AuthService]
         auth_issuer="autplay-p03-test",
         auth_audience="autplay-p03-client",
         access_token_ttl_seconds=600,
+        privacy_ledger_path=tmp_path / "auth-ledger.sqlite3",
+        privacy_ledger_key=SecretStr("auth-http-deletion-ledger-secret-32bytes"),
+        privacy_ledger_key_id="fixture-v1",
     )
+    FilesystemDeletionLedger(
+        tmp_path / "auth-ledger.sqlite3",
+        b"auth-http-deletion-ledger-secret-32bytes",
+        "fixture-v1",
+    ).initialize(coverage_started_at=datetime.now(UTC) - timedelta(days=1))
     engine = create_engine(database_url, pool_pre_ping=True)
-    service = build_auth_service(settings, engine)
+    evidence = DeletionEvidenceRuntime(settings, engine)
+    evidence.restore_guard()
+    service = build_auth_service(settings, engine, deletion_evidence=evidence)
     app = create_app(settings, readiness_probe=ReadyProbe(), auth_service=service)
     try:
         yield app, service
@@ -226,10 +240,20 @@ def test_refresh_replay_revokes_replacement_and_device_authorization_hides_owner
     ).fetchone() == (None,)
 
 
+@pytest.mark.parametrize("evidence", ["ready", "missing", "corrupt"])
 def test_admin_module_bootstraps_through_real_runtime_composition(
     database_url: str,
     database_connection: Connection[Any],
+    tmp_path: Path,
+    evidence: str,
 ) -> None:
+    ledger_path = tmp_path / "cli-ledger.sqlite3"
+    if evidence == "ready":
+        FilesystemDeletionLedger(
+            ledger_path, b"cli-deletion-ledger-secret-at-least-32bytes", "v1"
+        ).initialize(coverage_started_at=datetime.now(UTC) - timedelta(days=1))
+    elif evidence == "corrupt":
+        ledger_path.write_bytes(b"invalid ledger")
     environment = {
         key: value for key, value in os.environ.items() if not key.startswith("AUTPLAY_")
     }
@@ -241,6 +265,9 @@ def test_admin_module_bootstraps_through_real_runtime_composition(
                 "public-access-source-hmac-secret-at-least-32-bytes"
             ),
             "AUTPLAY_PROFILE": "test",
+            "AUTPLAY_PRIVACY_LEDGER_PATH": str(ledger_path),
+            "AUTPLAY_PRIVACY_LEDGER_KEY": "cli-deletion-ledger-secret-at-least-32bytes",
+            "AUTPLAY_PRIVACY_LEDGER_KEY_ID": "v1",
         }
     )
     command = [
@@ -265,6 +292,14 @@ def test_admin_module_bootstraps_through_real_runtime_composition(
         timeout=30,
         env=environment,
     )
+    if evidence != "ready":
+        assert first.returncode == 5
+        assert first.stdout == ""
+        assert json.loads(first.stderr) == {"error": {"code": "deletion_evidence_unavailable"}}
+        assert database_connection.execute(
+            "SELECT count(*) FROM account.user_account"
+        ).fetchone() == (0,)
+        return
     second = subprocess.run(
         command,
         check=False,

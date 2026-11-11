@@ -44,8 +44,8 @@ type _EvidenceSpecification = tuple[TemporalSignal, str, OriginLane, float, floa
 
 
 @dataclass(frozen=True, slots=True)
-class Sona0026AcceptedEvent:
-    """Typed owner-bearing facts retained across the 0026 sync/inbox projections."""
+class AcceptedSyncEvent:
+    """Typed facts verified against frozen sync/inbox projections by the caller."""
 
     source_event_id: UUID
     owner_user_id: UUID
@@ -136,6 +136,10 @@ class Sona0026AcceptedEvent:
             raise ValueError("0026 recommendation feedback source event shape is invalid")
 
 
+# Compatibility name for the independently approved historical restore path.
+Sona0026AcceptedEvent = AcceptedSyncEvent
+
+
 def classify_sona_0026_listening_outcome(
     event: Sona0026AcceptedEvent,
     *,
@@ -199,6 +203,26 @@ def normalize_sona_0026_event(
     """Expand one accepted event into canonical R1 evidence without persisting it."""
 
     verify_sona_source_provenance_acceptance(acceptance)
+    return normalize_accepted_sync_event(
+        event,
+        server_profile_id=derive_reconstructed_server_profile_id(acceptance, event.owner_user_id),
+        lineage_sha256=acceptance.acceptance_sha256,
+        evidence_namespace=SONA_0026_EVIDENCE_NAMESPACE,
+        policy=policy,
+    )
+
+
+def normalize_accepted_sync_event(
+    event: Sona0026AcceptedEvent,
+    *,
+    server_profile_id: UUID,
+    lineage_sha256: str,
+    evidence_namespace: UUID,
+    policy: AdaptiveFeaturePolicy = DEFAULT_ADAPTIVE_FEATURE_POLICY,
+) -> tuple[TemporalEvidence, ...]:
+    """Normalize verified sync facts under an explicit, caller-owned provenance namespace."""
+    if len(lineage_sha256) != 64 or any(c not in "0123456789abcdef" for c in lineage_sha256):
+        raise ValueError("Invalid normalization lineage hash")
     decision = classify_event_time(event.occurred_at_ms, event.received_at_ms, policy)
     specifications: tuple[_EvidenceSpecification, ...]
     if event.excluded_from_taste:
@@ -283,14 +307,11 @@ def normalize_sona_0026_event(
             )
         specifications = tuple(values)
 
-    server_profile_id = derive_reconstructed_server_profile_id(
-        acceptance,
-        event.owner_user_id,
-    )
     return tuple(
         _evidence(
             event,
-            acceptance=acceptance,
+            lineage_sha256=lineage_sha256,
+            evidence_namespace=evidence_namespace,
             server_profile_id=server_profile_id,
             decision_effective_at_ms=decision.effective_at_ms,
             decision_classification=decision.classification,
@@ -361,7 +382,8 @@ def _listening_origin(event: Sona0026AcceptedEvent) -> OriginLane:
 def _evidence(
     event: Sona0026AcceptedEvent,
     *,
-    acceptance: SonaSourceProvenanceAcceptance,
+    lineage_sha256: str,
+    evidence_namespace: UUID,
     server_profile_id: UUID,
     decision_effective_at_ms: int,
     decision_classification: TimeClassification,
@@ -373,10 +395,10 @@ def _evidence(
     causal: bool,
 ) -> TemporalEvidence:
     evidence_id = uuid5(
-        SONA_0026_EVIDENCE_NAMESPACE,
+        evidence_namespace,
         ":".join(
             (
-                acceptance.acceptance_sha256,
+                lineage_sha256,
                 event.owner_user_id.hex,
                 event.source_event_id.hex,
                 signal.value,
@@ -416,9 +438,11 @@ __all__ = (
     "SONA_0026_EVIDENCE_ID_SCHEME",
     "SONA_0026_EVIDENCE_NAMESPACE",
     "SONA_0026_NORMALIZATION_POLICY",
+    "AcceptedSyncEvent",
     "Sona0026AcceptedEvent",
     "classify_sona_0026_listening_outcome",
     "classify_sona_0026_listening_values",
+    "normalize_accepted_sync_event",
     "normalize_sona_0026_event",
     "normalize_sona_0026_events",
 )

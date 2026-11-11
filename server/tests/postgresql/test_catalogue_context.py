@@ -433,7 +433,7 @@ def test_migration_preserves_old_snapshot_and_refuses_receipt_loss(
             (search_id, owner, b"r" * 32),
         )
         head_before = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head_before == ("0066_portable_local_account",)
+        assert head_before == ("0074_device_deletion_v2",)
         purge_before = conn.execute(
             "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
         ).fetchone()

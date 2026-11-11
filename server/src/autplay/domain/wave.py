@@ -75,6 +75,7 @@ class WaveRoom:
     self_role: str = "MEMBER"
     self_preflight: dict[UUID, Availability] = field(default_factory=dict)
     host_transfer_targets: tuple[HostTransferTarget, ...] = ()
+    playback_command: dict[str, object] | None = None
 
     @classmethod
     def create(cls, host_user_id: UUID, now: datetime) -> WaveRoom:

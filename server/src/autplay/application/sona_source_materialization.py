@@ -376,7 +376,7 @@ def build_sona_source_historical_inputs(
     raw_tracks = record.snapshot_document.get("tracks")
     if not isinstance(raw_tracks, list):
         raise ValueError("Sona historical snapshot tracks are invalid")
-    tracks = tuple(_source_snapshot_track(value) for value in raw_tracks)
+    tracks = tuple(snapshot_track_from_document(value) for value in raw_tracks)
     baseline = RecommendationInputSnapshot(
         reference=RecommendationSnapshotRef(
             snapshot_id=record.baseline_snapshot_id,
@@ -663,7 +663,7 @@ def _verify_historical_request_ancestry(
         raise ValueError("Sona historical P11 request hash is not canonical")
 
 
-def _source_snapshot_track(value: object) -> SnapshotTrack:
+def snapshot_track_from_document(value: object) -> SnapshotTrack:
     document = _source_object(value, "track")
     raw_ref = document.get("user_track_ref_id")
     raw_release = document.get("release_key")
@@ -691,6 +691,16 @@ def _source_snapshot_track(value: object) -> SnapshotTrack:
         last_played_at_ms=_source_optional_integer(document, "last_played_at_ms"),
         added_at_ms=_source_integer(document, "added_at_ms"),
         release_date_ordinal=_source_optional_integer(document, "release_date_ordinal"),
+        owner_identity_decision_id=(
+            None
+            if document.get("owner_identity_decision_id") is None
+            else UUID(_source_string(document, "owner_identity_decision_id"))
+        ),
+        verified_audio_variant_id=(
+            None
+            if document.get("verified_audio_variant_id") is None
+            else UUID(_source_string(document, "verified_audio_variant_id"))
+        ),
     )
 
 

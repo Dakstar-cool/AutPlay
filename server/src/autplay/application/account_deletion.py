@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
@@ -13,11 +13,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.account_recovery import revoke_account_authority
+from autplay.adapters.postgresql.device_identifier_reservations import device_v2_identifier_reserved
+from autplay.adapters.postgresql.device_platform_evidence import (
+    device_has_macos_evidence,
+    has_macos_key_evidence,
+)
 from autplay.adapters.postgresql.models import AuditEventRow, DeviceRow, UserAccountRow
 from autplay.adapters.postgresql.models.account_deletion import AccountDeletionRequestRow
 from autplay.adapters.postgresql.models.account_recovery import AccountRecoveryCredentialRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
 from autplay.adapters.postgresql.resource_limits import lock_resource_admission
+from autplay.adapters.postgresql.retained_deletion_reservations import DeletionReservationReplay
 from autplay.application.account_recovery import AccountRecoveryService, database_now
 from autplay.application.deletion_request_evidence import (
     initial_receipt_sha256,
@@ -145,6 +151,8 @@ class AccountDeletionService:
             device = session.get(DeviceRow, actor.device_id)
             if device is None or device.public_key != key:
                 raise AccountDeletionError()
+            if device_has_macos_evidence(session, device):
+                raise AccountDeletionError()
             now = database_now(session)
             require_fresh(request, now)
             if requested_at(request) <= self.ledger.request_coverage_started_at() + timedelta(
@@ -194,6 +202,19 @@ class AccountDeletionService:
                 state="PENDING",
                 revision=1,
             )
+            # An ambiguous v1 ATTEMPTED retry is allowed only for the complete
+            # independently retained original receipt, never an own-ID assertion.
+            if device_v2_identifier_reserved(
+                session,
+                operation_id,
+                deletion_replay=DeletionReservationReplay(
+                    account.user_id,
+                    operation_id,
+                    request["request_sha256"],
+                    initial_receipt_sha256(row),
+                ),
+            ):
+                raise AccountDeletionError("operation_conflict")
             self.ledger.request_record(
                 DeletionRequestEvidence(
                     self.ledger.owner_tag(account.user_id),
@@ -204,6 +225,13 @@ class AccountDeletionService:
                     accepted_at,
                 )
             )
+            # Independent history validation/fsync can wait. Keep the original
+            # accepted_at; never restart freshness or the cancellation deadline.
+            self.recovery._actor(session, account, actor)
+            now = database_now(session)
+            require_fresh(request, now)
+            if now >= row.cancel_before:
+                raise AccountDeletionError()
             revoke_account_authority(session, account, now)
             account.status = "DELETION_PENDING"
             session.add(row)
@@ -331,6 +359,11 @@ class AccountDeletionService:
                     is None
                 ):
                     raise AccountDeletionError()
+                if device_v2_identifier_reserved(session, operation):
+                    raise AccountDeletionError("operation_conflict")
+                now = database_now(session)
+                if now <= requested_at(request) + timedelta(seconds=120, microseconds=1):
+                    raise AccountDeletionError("deletion_resolution_not_ready")
                 item = self.ledger.request_record(
                     DeletionRequestEvidence(
                         self.ledger.owner_tag(account.user_id),
@@ -379,9 +412,13 @@ class AccountDeletionService:
     def preview(self, code: str, document: dict[str, Any]) -> dict[str, Any]:
         request = parse_request("preview", document)
         self.recovery.rate_gate("", UUID(request["account_id"]))
-        verify_device("preview", request)
+        key = verify_device("preview", request)
         with self.sessions.begin() as session:
             identity, account = self._lock(session, request)
+            if has_macos_key_evidence(
+                session, bytes.fromhex(request["device_key_thumbprint_sha256"]), public_key=key
+            ):
+                raise AccountDeletionError()
             locked_owner_history(session, self.ledger, account.user_id)
             now = database_now(session)
             require_fresh(request, now)
@@ -431,6 +468,9 @@ class AccountDeletionService:
             ):
                 raise AccountDeletionError()
             operation_id = UUID(request["operation_id"])
+            deletion_replay = DeletionReservationReplay(
+                account.user_id, parent, request["request_sha256"], cancel_operation_id=operation_id
+            )
             if row.state == "CANCELLED":
                 if row.cancel_operation_id != operation_id or account.status != "ACTIVE":
                     raise AccountDeletionError()
@@ -443,7 +483,14 @@ class AccountDeletionService:
                     # Expired receipt cleanup cannot turn a historical cancel into a new binding.
                     raise AccountDeletionError()
                 return self.recovery.replace_binding(
-                    session, identity, account, request, key, code, kind="DELETE_CANCEL"
+                    session,
+                    identity,
+                    account,
+                    request,
+                    key,
+                    code,
+                    kind="DELETE_CANCEL",
+                    deletion_replay=deletion_replay,
                 )
             now = database_now(session)
             if (
@@ -453,10 +500,34 @@ class AccountDeletionService:
                 or row.revision != request["expected_revision"]
             ):
                 raise AccountDeletionError()
+            if has_macos_key_evidence(
+                session, bytes.fromhex(request["device_key_thumbprint_sha256"]), public_key=key
+            ):
+                raise AccountDeletionError()
+            if any(
+                device_v2_identifier_reserved(
+                    session, UUID(request[name]), deletion_replay=deletion_replay
+                )
+                for name in (
+                    "operation_id",
+                    "binding_commit_id",
+                )
+            ):
+                raise AccountDeletionError("operation_conflict")
+            now = database_now(session)
+            if now >= row.cancel_before:
+                raise AccountDeletionError()
             # A failure in proof, capacity, binding or receipt persistence rolls this back.
             account.status = "ACTIVE"
             result = self.recovery.replace_binding(
-                session, identity, account, request, key, code, kind="DELETE_CANCEL"
+                session,
+                identity,
+                account,
+                request,
+                key,
+                code,
+                kind="DELETE_CANCEL",
+                deletion_replay=deletion_replay,
             )
             row.state, row.revision = "CANCELLED", row.revision + 1
             evidence = history[parent]
@@ -471,6 +542,12 @@ class AccountDeletionService:
                     cancelled_at=row.cancelled_at,
                 )
             )
+            final = database_now(session)
+            require_fresh(request, final)
+            if final >= row.cancel_before or final >= datetime.fromisoformat(
+                result["access_expires_at"]
+            ):
+                raise AccountDeletionError()
             return result
 
     def cancel_outcome(self, refresh: str, document: dict[str, Any]) -> dict[str, Any]:
@@ -528,6 +605,12 @@ class AccountDeletionService:
                 expected_key=key,
                 expected_refresh_hash=refresh_hash,
                 recovered_outcome=True,
+                deletion_replay=DeletionReservationReplay(
+                    account.user_id,
+                    parent,
+                    request["request_sha256"],
+                    cancel_operation_id=operation_id,
+                ),
             )
 
     @staticmethod

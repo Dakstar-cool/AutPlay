@@ -7,6 +7,7 @@ on:
       - shared/**
       - config/macos/**
       - scripts/macos_community.py
+      - scripts/macos_account_acceptance.py
       - scripts/macos_ci.py
       - tests/native/**
       - build.gradle.kts
@@ -23,6 +24,10 @@ on:
         type: choice
         default: macos-26
         options: [macos-26, macos-15]
+      account_acceptance:
+        description: Run isolated real server, account and sync acceptance
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -85,9 +90,12 @@ jobs:
             "-Pautplay.macCommunitySignerSha256=$signer" \
             :apps:desktop:compileMacSecureState :apps:desktop:compileMacSourceAccess \
             :shared:domain:jvmTest :shared:application:jvmTest :shared:data:jvmTest \
-            :shared:ui:jvmTest :apps:desktop:test :apps:desktop:createDistributable
+            :shared:ui:jvmTest :apps:desktop:test :apps:desktop:createDistributable :apps:desktop:accountAcceptanceJar
       - name: Sign, test real Keychain and package DMG
         run: '"$AUTPLAY_PYTHON" scripts/macos_community.py package'
+      - name: Test real production account and sync graph on isolated PostgreSQL
+        if: inputs.account_acceptance == true
+        run: '"$AUTPLAY_PYTHON" scripts/macos_account_acceptance.py run'
       - name: Remove temporary signing and account keychains
         if: always()
         run: '"$AUTPLAY_PYTHON" scripts/macos_community.py cleanup'

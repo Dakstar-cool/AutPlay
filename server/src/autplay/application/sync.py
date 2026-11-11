@@ -20,6 +20,7 @@ from sqlalchemy import Engine, String, cast, delete, func, select, text, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.postgresql.device_platform_evidence import device_has_macos_evidence
 from autplay.adapters.postgresql.models import (
     ArtistCreditNameRow,
     ArtistCreditRow,
@@ -48,6 +49,7 @@ from autplay.adapters.postgresql.models import (
     UserTrackRefRow,
 )
 from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
+from autplay.adapters.postgresql.resource_limits import lock_resource_admission
 from autplay.application.metadata_projection import metadata_view
 from autplay.domain.auth import Principal
 
@@ -338,12 +340,18 @@ class SyncService:
     def bind(self, principal: Principal, body: dict[str, Any]) -> dict[str, Any]:
         device_id, epoch = _binding(principal, body)
         with self._sessions.begin() as session:
-            device = session.get(DeviceRow, device_id)
+            lock_resource_admission(session)
+            # Bind changes no device keys. FOR NO KEY UPDATE keeps writers out but
+            # lets push's inbox FK take KEY SHARE while bind waits for its cursor.
+            # SQLAlchemy's key_share=True without read=True selects this mode.
+            device = session.get(DeviceRow, device_id, with_for_update={"key_share": True})
             if (
                 device is None
                 or device.user_id != principal.user_id
                 or device.revoked_at is not None
             ):
+                raise SyncError("BINDING_MISMATCH")
+            if device_has_macos_evidence(session, device):
                 raise SyncError("BINDING_MISMATCH")
             device.device_name, device.platform, device.app_version = (
                 _string(body, "device_name", 200),

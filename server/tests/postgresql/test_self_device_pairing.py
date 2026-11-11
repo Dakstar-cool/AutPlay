@@ -11,14 +11,19 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from autplay.adapters.filesystem.deletion_ledger import FilesystemDeletionLedger
 from autplay.adapters.postgresql.models import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.account_recovery import AccountRecoveryCredentialRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
 from autplay.adapters.postgresql.resource_limits import lock_resource_admission
+from autplay.adapters.postgresql.retained_deletion_reservations import (
+    configure_retained_deletion_reservations,
+)
 from autplay.adapters.postgresql.self_device_pairing import (
     SqlAlchemySelfPairingRepository,
     SqlAlchemySelfPairingUnitOfWorkFactory,
@@ -39,6 +44,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+from typed_assertions import require_instance
 
 from .conftest import DatabaseHarness
 from .test_profile_pairing_m5b import _exchange_request
@@ -136,11 +142,18 @@ class PairingHarness:
 
 
 @pytest.fixture
-def pair(database_url: str) -> Iterator[PairingHarness]:
+def pair(database_url: str, tmp_path: Path) -> Iterator[PairingHarness]:
     engine = create_engine(
         database_url, pool_pre_ping=True, connect_args={"options": "-c statement_timeout=5000"}
     )
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    ledger = FilesystemDeletionLedger(
+        tmp_path / "self-reservations.sqlite3",
+        b"self-retained-reservations-test-secret",
+        "fixture-v1",
+    )
+    ledger.initialize(coverage_started_at=datetime.now(UTC) - timedelta(days=90))
+    configure_retained_deletion_reservations(sessions, ledger=ledger, evidence_ready=lambda: True)
     now = datetime.now(UTC)
     server_id, user_id, device_id, session_id = (uuid4() for _ in range(4))
     identity_key = public_spki(ec.generate_private_key(ec.SECP256R1()))
@@ -215,6 +228,42 @@ def pair(database_url: str) -> Iterator[PairingHarness]:
         )
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("stage", ["known_revoked", "replay"])
+def test_v1_self_pairing_refuses_mac_recipient_evidence(pair: PairingHarness, stage: str) -> None:
+    _, exchange = pair.ready()
+    result = pair.service.exchange(pair.poll_secret, exchange) if stage == "replay" else None
+    with Session(pair.engine) as session, session.begin():
+        if result is not None:
+            device = session.get(DeviceRow, UUID(result["device_id"]))
+            assert device is not None
+            device.platform = "MACOS"
+        else:
+            key = public_spki(pair.key)
+            session.add(
+                DeviceRow(
+                    device_id=uuid4(),
+                    user_id=pair.actor.user_id,
+                    device_name="Historical Mac",
+                    platform="MACOS",
+                    app_version="fixture",
+                    public_key=key,
+                    public_key_thumbprint_sha256=None,
+                    revoked_at=datetime.now(UTC),
+                )
+            )
+    with pair.engine.connect() as connection:
+        before = connection.execute(
+            text("SELECT * FROM account.user_session ORDER BY session_id")
+        ).all()
+    with pytest.raises(SelfPairingError):
+        pair.service.exchange(pair.poll_secret, exchange)
+    with pair.engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT * FROM account.user_session ORDER BY session_id")).all()
+            == before
+        )
 
 
 def test_user_requires_both_confirmations_and_keeps_existing_device(pair: PairingHarness) -> None:
@@ -526,7 +575,7 @@ def test_m5_revocation_waits_without_deadlocking_self_exchange(
             {"id": target_id, "user": pair.actor.user_id},
         )
     m5 = ProfilePairingService(
-        sessionmaker(pair.engine, class_=Session, expire_on_commit=False),
+        require_instance(pair.service._units, SqlAlchemySelfPairingUnitOfWorkFactory)._sessions,
         private_key=ec.generate_private_key(ec.SECP256R1()),
         label_hint="Fixture",
         api_origin="https://api.test.invalid",
@@ -606,7 +655,9 @@ def test_m5_and_self_pairing_cannot_both_take_last_device_slot(pair: PairingHarn
     key = ec.generate_private_key(ec.SECP256R1())
     spki = public_spki(key)
     digest = hashlib.sha256(spki).digest()
-    sessions = sessionmaker(pair.engine, expire_on_commit=False)
+    sessions = require_instance(
+        pair.service._units, SqlAlchemySelfPairingUnitOfWorkFactory
+    )._sessions
     with sessions.begin() as session:
         lock_resource_admission(session)
         account = session.get(UserAccountRow, pair.actor.user_id)

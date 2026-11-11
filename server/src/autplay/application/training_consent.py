@@ -118,6 +118,40 @@ class TrainingConsentService:
             and row.policy_version == 1
         )
 
+    def capture_grant(self, session: Session, user_id: UUID) -> int | None:
+        """Prove current consent while holding the same owner lock as withdrawal."""
+        # FOR NO KEY UPDATE still serializes owner deletion/consent decisions,
+        # while allowing concurrent sync inserts to check their owner foreign key.
+        account = session.get(
+            UserAccountRow, user_id, with_for_update={"key_share": True}, populate_existing=True
+        )
+        if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
+            raise TrainingConsentError("training_consent_unavailable")
+        row = session.get(TrainingConsentRow, user_id, with_for_update=True)
+        if row is None or row.decision != "GRANTED":
+            return None
+        self._require_evidence(session, user_id, row, self._ledger.read())
+        return row.revision
+
+    def inspect_grant(
+        self,
+        session: Session,
+        user_id: UUID,
+        history: TrainingConsentHistory,
+    ) -> int | None:
+        """Read-only audit proof, not a lock or authorization for later training.
+
+        Downstream retained artifacts still require the training execution/erasure fence.
+        """
+        account = session.get(UserAccountRow, user_id, populate_existing=True)
+        if account is None or account.status != "ACTIVE" or account.deleted_at is not None:
+            return None
+        row = session.get(TrainingConsentRow, user_id, populate_existing=True)
+        if row is None or row.decision != "GRANTED":
+            return None
+        self._require_evidence(session, user_id, row, history)
+        return row.revision
+
     def _require_evidence(
         self,
         session: Session,

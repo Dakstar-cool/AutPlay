@@ -7,6 +7,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import timedelta
+from pathlib import Path
 from threading import Barrier
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -29,14 +30,16 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from psycopg import Connection
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
+
+from .deletion_evidence import configured_sessions
 
 
-def _service(database_url: str) -> tuple[PublicAccessService, Engine]:
+def _service(database_url: str, tmp_path: Path) -> tuple[PublicAccessService, Engine]:
     engine = create_engine(database_url, pool_pre_ping=True)
     return (
         PublicAccessService(
-            sessionmaker(engine, class_=Session, expire_on_commit=False),
+            configured_sessions(engine, tmp_path),
             Hs256AccessTokenCodec(
                 b"public-access-test-secret-at-least-thirty-two-bytes",
                 issuer="public-access",
@@ -112,10 +115,49 @@ def _request(invitation: dict[str, object], key: ec.EllipticCurvePrivateKey) -> 
     return request
 
 
-def test_invitation_display_name_is_normalized_before_hash_and_persistence(
-    database_url: str, database_connection: Connection[Any]
+def test_registration_replay_refuses_persisted_mac_without_new_authority(
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
+    try:
+        owner, _ = _owner_and_server(database_connection)
+        invitation, _ = service.create_invitation(
+            owner,
+            {
+                "contract_version": "v1",
+                "schema_version": 1,
+                "operation_id": str(uuid4()),
+                "account_display_name": "Mac conflict fixture",
+                "expires_in_seconds": 600,
+            },
+        )
+        body = _request(invitation, ec.generate_private_key(ec.SECP256R1()))
+        registered, _ = service.redeem(body, "127.0.0.1")
+        database_connection.execute(
+            "UPDATE account.device SET platform='MACOS' WHERE device_id=%s",
+            (UUID(str(registered["device_id"])),),
+        )
+        database_connection.commit()
+        before = database_connection.execute(
+            "SELECT * FROM account.user_session ORDER BY session_id"
+        ).fetchall()
+        database_connection.commit()
+        with pytest.raises(PublicAccessError):
+            service.redeem(body, "127.0.0.1")
+        assert (
+            database_connection.execute(
+                "SELECT * FROM account.user_session ORDER BY session_id"
+            ).fetchall()
+            == before
+        )
+    finally:
+        engine.dispose()
+
+
+def test_invitation_display_name_is_normalized_before_hash_and_persistence(
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
+) -> None:
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         operation_id = str(uuid4())
@@ -148,9 +190,9 @@ def test_invitation_display_name_is_normalized_before_hash_and_persistence(
 
 
 def test_registration_creates_no_trusted_device_key(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, replayed = service.create_invitation(
@@ -206,9 +248,9 @@ def test_registration_creates_no_trusted_device_key(
 
 
 def test_duplicate_active_owner_fails_closed_and_cancelled_invitation_cannot_redeem(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         database_connection.execute(
@@ -257,9 +299,9 @@ def test_duplicate_active_owner_fails_closed_and_cancelled_invitation_cannot_red
 
 
 def test_concurrent_double_redemption_creates_one_binding_and_no_trust(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -328,9 +370,9 @@ def test_concurrent_double_redemption_creates_one_binding_and_no_trust(
 
 
 def test_concurrent_exact_registration_id_has_one_create_and_one_replay(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -367,9 +409,9 @@ def test_concurrent_exact_registration_id_has_one_create_and_one_replay(
 
 
 def test_failed_authority_attempts_persist_all_three_redemption_rate_scopes(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -407,9 +449,9 @@ def test_failed_authority_attempts_persist_all_three_redemption_rate_scopes(
 
 
 def test_invalid_device_proof_persists_every_applicable_redemption_rate_scope(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(
@@ -451,9 +493,9 @@ def test_invalid_device_proof_persists_every_applicable_redemption_rate_scope(
 
 
 def test_unavailable_canonical_source_uses_no_source_window(
-    database_url: str, database_connection: Connection[Any]
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
 ) -> None:
-    service, engine = _service(database_url)
+    service, engine = _service(database_url, tmp_path)
     try:
         owner, _ = _owner_and_server(database_connection)
         invitation, _ = service.create_invitation(

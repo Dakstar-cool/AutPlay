@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0066_portable_local_account"
+EXPECTED_MIGRATION_HEAD: Final = "0074_device_deletion_v2"
 
 
 @dataclass(frozen=True, slots=True)

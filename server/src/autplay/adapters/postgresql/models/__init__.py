@@ -10,6 +10,7 @@ from .account import (
 )
 from .account_deletion import (
     AccountDeletionHoldRow,
+    AccountDeletionProofRow,
     AccountDeletionRequestRow,
     AccountPurgeReceiptRow,
 )
@@ -32,6 +33,7 @@ from .catalog import (
 )
 from .catalog_execution import CatalogExecutionRow
 from .catalogue_context import InternetCatalogueContextRow, InternetSearchContextRow
+from .device_compatibility import DeviceCapabilityRevisionRow
 from .discovery import (
     AcquisitionAttemptRow,
     ArtistPolicyRevisionRow,
@@ -162,6 +164,7 @@ from .social import (
     SocialRateWindowRow,
     UserBlockRow,
 )
+from .sona_native_capture import SonaNativeCaptureRow
 from .sync import (
     BootstrapSessionRow,
     BootstrapSnapshotItemRow,
@@ -214,6 +217,8 @@ from .web_passkeys import WebPasskeyCeremonyRow, WebPasskeyRevocationRow, WebPas
 from .worker_health import WorkerHealthRow
 
 MAPPED_ROWS: tuple[type[Base], ...] = (
+    SonaNativeCaptureRow,
+    DeviceCapabilityRevisionRow,
     PortableAccountRow,
     PortableAccountChallengeRow,
     PortableAccountRecordRow,
@@ -228,6 +233,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     TrainingConsentRow,
     TrainingConsentOperationRow,
     AccountDeletionHoldRow,
+    AccountDeletionProofRow,
     AccountDeletionRequestRow,
     AccountPurgeReceiptRow,
     AccountRecoveryCredentialRow,
@@ -398,6 +404,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
 __all__ = (
     "MAPPED_ROWS",
     "AccountDeletionHoldRow",
+    "AccountDeletionProofRow",
     "AccountDeletionRequestRow",
     "AccountInvitationRow",
     "AccountProvisioningLinkRow",
@@ -431,6 +438,7 @@ __all__ = (
     "DeviceAdmissionRateWindowRow",
     "DeviceAdmissionRow",
     "DeviceAdmissionWebOperationReceiptRow",
+    "DeviceCapabilityRevisionRow",
     "DeviceEventInboxRow",
     "DeviceKeyBlockRow",
     "DeviceRow",
@@ -524,6 +532,7 @@ __all__ = (
     "SmartPlaylistRuleRow",
     "SocialOperationReceiptRow",
     "SocialRateWindowRow",
+    "SonaNativeCaptureRow",
     "SourceAuthorizationRow",
     "SourceObservationRow",
     "SourceProviderRow",

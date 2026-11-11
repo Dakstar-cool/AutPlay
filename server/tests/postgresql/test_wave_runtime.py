@@ -151,6 +151,60 @@ def test_wave_code_acl_and_idempotency(database_url: str) -> None:
         )
         assert started["started"] is True
         assert started["effective_at"] is not None
+        recovered_play = service.snapshot(room.room_id, member, now).playback_command
+        assert recovered_play is not None
+        assert recovered_play["kind"] == "PLAY"
+        assert recovered_play["sequence"] == 3
+        recovered_payload = recovered_play["payload"]
+        assert isinstance(recovered_payload, dict)
+        assert recovered_payload["effective_at"] == started["effective_at"]
+
+        service.command(room.room_id, owner, "PAUSE", "pause-1", b"p" * 32, 2, 3, None, now)
+        paused = service.snapshot(room.room_id, member, now)
+        assert paused.playback_state == "PAUSED"
+        assert paused.playback_command == {
+            "sequence": 4,
+            "kind": "PAUSE",
+            "payload": {
+                "queue_entry_id": str(entry.queue_entry_id),
+                "recording_id": str(recording_id),
+            },
+        }
+
+        service.command(room.room_id, owner, "QUEUE", "queue-2", b"r" * 32, 2, 4, recording_id, now)
+        second_entry = service.snapshot(room.room_id, owner, now).queue[1]
+        service.command(room.room_id, owner, "SKIP", "skip-1", b"s" * 32, 3, 5, None, now)
+        next_intent = service.snapshot(room.room_id, member, now).playback_command
+        assert next_intent is not None
+        assert next_intent["payload"] == {
+            "queue_entry_id": str(second_entry.queue_entry_id),
+            "recording_id": str(recording_id),
+        }
+        # Preparing the next entry must not reuse the first entry's readiness.
+        assert (
+            service.start(
+                room.room_id, owner, second_entry.queue_entry_id, recording_id, 3, 6, now
+            )["started"]
+            is False
+        )
+        for principal in (owner, member):
+            service.timing(room.room_id, principal, 7, 60, 25, 30, now)
+            service.preflight(
+                room.room_id,
+                principal,
+                second_entry.queue_entry_id,
+                recording_id,
+                3,
+                Availability.LOCAL,
+                True,
+                now,
+            )
+        assert (
+            service.start(
+                room.room_id, owner, second_entry.queue_entry_id, recording_id, 3, 7, now
+            )["started"]
+            is True
+        )
 
         service.transfer_host(room.room_id, owner, member.device_id, now)
         with pytest.raises(WaveForbidden):
@@ -167,7 +221,7 @@ def test_wave_code_acl_and_idempotency(database_url: str) -> None:
                     {"room": room.room_id},
                 ).tuples()
             )
-        assert lifecycle == [(4, "TRANSFER"), (5, "CLOSE")]
+        assert lifecycle == [(9, "TRANSFER"), (10, "CLOSE")]
     finally:
         engine.dispose()
 

@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import StringIO
+from pathlib import Path
 from threading import Barrier, Event, local
 from typing import Any
 from uuid import UUID
@@ -34,12 +35,13 @@ from autplay.domain.auth import (
 from autplay.entrypoints.admin import run_bootstrap
 from psycopg import Connection
 from sqlalchemy import Engine, create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+
+from .deletion_evidence import configured_sessions
 
 ACCESS_SECRET = b"p03-test-access-secret-with-at-least-thirty-two-bytes"
 ISSUER = "autplay-p03-test"
 AUDIENCE = "autplay-api-test"
-INITIAL_TIME = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+INITIAL_TIME = datetime.now(UTC)
 
 
 class MutableClock:
@@ -65,9 +67,9 @@ class AuthRuntime:
 
 
 @pytest.fixture
-def auth_runtime(database_url: str) -> Iterator[AuthRuntime]:
+def auth_runtime(database_url: str, tmp_path: Path) -> Iterator[AuthRuntime]:
     engine: Engine = create_engine(database_url, pool_pre_ping=True)
-    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    sessions = configured_sessions(engine, tmp_path)
     clock = MutableClock(INITIAL_TIME)
     access_tokens = Hs256AccessTokenCodec(
         ACCESS_SECRET,
@@ -492,6 +494,30 @@ def test_legacy_refresh_rejects_v2_session_without_mutating_it(
         "SELECT session_mode, revoked_at FROM account.user_session WHERE session_id = %s",
         (pair.session_id,),
     ).fetchone() == ("V2", None)
+
+
+@pytest.mark.parametrize("platform", ["ANDROID", "WEB", "OTHER", "MACOS"])
+def test_legacy_refresh_retains_old_platform_allowlist_and_refuses_mac(
+    auth_runtime: AuthRuntime, database_connection: Connection[Any], platform: str
+) -> None:
+    pair = _bootstrap(auth_runtime)
+    database_connection.execute(
+        "UPDATE account.device SET platform=%s WHERE device_id=%s", (platform, pair.device_id)
+    )
+    database_connection.commit()
+    if platform == "MACOS":
+        with pytest.raises(InvalidRefreshTokenError):
+            auth_runtime.service.rotate_refresh(pair.refresh_token)
+        assert database_connection.execute(
+            "SELECT session_id,revoked_at FROM account.user_session"
+        ).fetchall() == [(pair.session_id, None)]
+    else:
+        replacement = auth_runtime.service.rotate_refresh(pair.refresh_token)
+        assert replacement.device_id == pair.device_id
+        assert replacement.session_id != pair.session_id
+    assert database_connection.execute(
+        "SELECT platform FROM account.device WHERE device_id=%s", (pair.device_id,)
+    ).fetchone() == (platform,)
 
 
 def _bootstrap(runtime: AuthRuntime) -> TokenPair:

@@ -136,6 +136,8 @@ class DeviceAdmissionReview:
     requested_at: datetime
     expires_at: datetime
     sas_3x4: tuple[str, str, str]
+    contract_version: str = "v1"
+    request_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if len(self.sas_3x4) != 3 or any(
@@ -171,6 +173,7 @@ class PendingDeviceAdmission:
     device_model_hint: str | None
     requested_at: datetime
     expires_at: datetime
+    contract_version: str = "v1"
 
 
 class DeviceAdmissionWebHttp(Protocol):

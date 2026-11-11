@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
+import pytest
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_public_access_service
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.runtime.http import MAX_REQUEST_BODY_BYTES, MAX_REQUEST_BODY_FRAMES
 from autplay.runtime.settings import ApiSettings
 from fastapi import FastAPI
@@ -22,6 +24,16 @@ from starlette.types import Message, Scope
 
 DATABASE_URL = "postgresql+psycopg://runtime:runtime@127.0.0.1:1/autplay"
 AUTH_SECRET = "runtime-test-signing-secret-at-least-32-bytes"
+
+
+@pytest.fixture(autouse=True)
+def ready_deletion_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate this component; independent ledger guards have their own integration suite."""
+
+    def restore(owner: DeletionEvidenceRuntime) -> None:
+        owner._ready = True
+
+    monkeypatch.setattr(DeletionEvidenceRuntime, "restore_guard", restore)
 
 
 @dataclass(frozen=True)
@@ -127,6 +139,20 @@ def test_readiness_success_and_metrics_are_exposed() -> None:
     assert "text/plain" in metrics.headers["content-type"]
     assert 'autplay_readiness{component="postgresql"} 1.0' in metrics.text
     assert "autplay_http_requests_total" in metrics.text
+
+
+def test_readiness_refuses_an_unready_independent_deletion_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(owner: DeletionEvidenceRuntime) -> None:
+        owner.reset()
+
+    monkeypatch.setattr(DeletionEvidenceRuntime, "restore_guard", refuse)
+    app = _app(ReadinessResult(ready=True, component="postgresql"))
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "deletion_evidence_unavailable"
 
 
 def test_framework_errors_use_stable_envelope_and_replace_bad_request_id() -> None:

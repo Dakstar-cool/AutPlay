@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Barrier
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from autplay.adapters.filesystem.deletion_ledger import FilesystemDeletionLedger
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.auth import BootstrapOwnerCommand
@@ -28,6 +31,7 @@ from autplay.domain.profile_pairing import (
 from autplay.domain.resource_admission import AdmissionState, ResourceAdmissionError
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_auth_service
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.runtime.settings import ApiSettings, RuntimeProfile
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
@@ -36,10 +40,11 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from .deletion_evidence import configured_sessions
 from .test_resource_admission_runtime import AdmissionHarness, fence, play
 from .test_resource_admission_runtime import admission as admission
 
-NOW = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+NOW = datetime.now(UTC)
 HTTP_AUTH_SECRET = "m5b-http-retry-signing-secret-at-least-thirty-two-bytes"
 
 
@@ -51,12 +56,13 @@ class _ReadyProbe:
 
 @pytest.fixture
 def pairing_service(
-    database_url: str, monkeypatch: pytest.MonkeyPatch
+    database_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Iterator[ProfilePairingService]:
     engine = create_engine(database_url, pool_pre_ping=True)
+    monkeypatch.setattr(sys.modules[__name__], "NOW", datetime.now(UTC))
     monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: NOW)
     service = ProfilePairingService(
-        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        configured_sessions(engine, tmp_path),
         private_key=ec.generate_private_key(ec.SECP256R1()),
         label_hint="M5B test server",
         api_origin="https://api.test.invalid",
@@ -164,6 +170,47 @@ def _rotation_request(
     return request
 
 
+@pytest.mark.parametrize("stage", ["new", "exchange_replay", "rotation", "rotation_replay"])
+def test_v1_issuers_reject_persisted_mac_without_changing_sessions(
+    pairing_service: ProfilePairingService, database_connection: Connection[Any], stage: str
+) -> None:
+    owner = _owner(database_connection)
+    invitation = pairing_service.issue_invitation(owner, uuid4(), 60)
+    request, key, refresh = _exchange_request(invitation)
+    enrolled, _ = pairing_service.exchange(request)
+    rotation = _rotation_request(enrolled, key, refresh)
+    if stage == "rotation_replay":
+        pairing_service.rotate(rotation)
+    if stage == "new":
+        request, _, _ = _exchange_request(
+            pairing_service.issue_invitation(owner, uuid4(), 60), key=key, refresh="another-refresh"
+        )
+    database_connection.execute(
+        "UPDATE account.device SET platform='MACOS' WHERE device_id=%s",
+        (UUID(str(enrolled["device_id"])),),
+    )
+    database_connection.commit()
+    before = database_connection.execute(
+        "SELECT * FROM account.user_session ORDER BY session_id"
+    ).fetchall()
+    database_connection.commit()
+    with pytest.raises(ProfilePairingError):
+        if stage in {"new", "exchange_replay"}:
+            pairing_service.exchange(request)
+        else:
+            pairing_service.rotate(rotation)
+    assert (
+        database_connection.execute(
+            "SELECT * FROM account.user_session ORDER BY session_id"
+        ).fetchall()
+        == before
+    )
+    assert database_connection.execute(
+        "SELECT platform FROM account.device WHERE device_id=%s",
+        (UUID(str(enrolled["device_id"])),),
+    ).fetchone() == ("MACOS",)
+
+
 def test_concurrent_first_discovery_creates_one_server_identity(
     pairing_service: ProfilePairingService, database_connection: Connection[object]
 ) -> None:
@@ -231,14 +278,17 @@ def test_discovery_reconciles_configured_origins_without_rotating_identity(
     database_url: str,
     database_connection: Connection[object],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: NOW)
+    now = datetime.now(UTC)
+    monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: now)
     engine = create_engine(database_url, pool_pre_ping=True)
     key = ec.generate_private_key(ec.SECP256R1())
+    sessions = configured_sessions(engine, tmp_path)
 
     def service(api_origin: str, stream_origin: str) -> ProfilePairingService:
         return ProfilePairingService(
-            sessionmaker(engine, class_=Session, expire_on_commit=False),
+            sessions,
             private_key=key,
             label_hint="M5B configured server",
             api_origin=api_origin,
@@ -455,7 +505,8 @@ def test_real_m5_rotation_keeps_admission_until_terminal_revocation(
     assert admission.service.renew(successor, fence(active)).operation.fence == fence(active)
     permit = admission.service.renew_io(successor, permit)
     # A delayed terminal action on the retired ancestor must not kill the live family.
-    pairing_service.logout_current(original, uuid4())
+    with pytest.raises(ProfilePairingError, match="session_revoked"):
+        pairing_service.logout_current(original, uuid4())
     assert admission.service.renew(successor, fence(active)).operation.fence == fence(active)
     other = admission.actor()
     waiting = admission.service.acquire(other, play())
@@ -492,6 +543,7 @@ def test_http_terminal_lifecycle_exact_retry_uses_only_original_revoked_jwt_rece
     action: str,
     database_url: str,
     database_connection: Connection[object],
+    tmp_path: Path,
 ) -> None:
     settings = ApiSettings(
         profile=RuntimeProfile.TEST,
@@ -503,11 +555,21 @@ def test_http_terminal_lifecycle_exact_retry_uses_only_original_revoked_jwt_rece
         auth_issuer="autplay-m5b-http-test",
         auth_audience="autplay-m5b-http-client",
         access_token_ttl_seconds=600,
+        privacy_ledger_path=tmp_path / "http-ledger.sqlite3",
+        privacy_ledger_key=SecretStr("http-retry-deletion-ledger-secret-32bytes"),
+        privacy_ledger_key_id="fixture-v1",
     )
+    FilesystemDeletionLedger(
+        tmp_path / "http-ledger.sqlite3", b"http-retry-deletion-ledger-secret-32bytes", "fixture-v1"
+    ).initialize(coverage_started_at=datetime.now(UTC) - timedelta(days=1))
     engine = create_engine(database_url, pool_pre_ping=True)
-    auth = build_auth_service(settings, engine)
+    evidence = DeletionEvidenceRuntime(settings, engine)
+    evidence.restore_guard()
+    auth = build_auth_service(settings, engine, deletion_evidence=evidence)
+    sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
+    evidence.configure(sessions)
     pairing = ProfilePairingService(
-        sessionmaker(engine, class_=Session, expire_on_commit=False),
+        sessions,
         private_key=ec.generate_private_key(ec.SECP256R1()),
         label_hint="M5B HTTP test server",
         api_origin="https://api.test.invalid",

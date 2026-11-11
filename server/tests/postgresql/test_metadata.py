@@ -24,9 +24,9 @@ from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 def test_complete_table_and_column_inventory() -> None:
     """Every reference table and column is present exactly once."""
     assert set(metadata.tables) == set(EXPECTED_TABLE_KEYS)
-    assert len(metadata.tables) == 179
+    assert len(metadata.tables) == 182
     assert sum(len(table.columns) for table in metadata.tables.values()) == EXPECTED_COLUMN_COUNT
-    assert EXPECTED_COLUMN_COUNT == 1998
+    assert EXPECTED_COLUMN_COUNT == 2098
     assert {
         key: len(table.columns) for key, table in metadata.tables.items()
     } == EXPECTED_TABLE_COLUMN_COUNTS
@@ -36,7 +36,7 @@ def test_complete_table_and_column_inventory() -> None:
 def test_all_rows_are_typed_mappers_without_relationship_behavior() -> None:
     """Mappings are storage rows, not a second domain model."""
     configure_mappers()
-    assert len(MAPPED_ROWS) == 179
+    assert len(MAPPED_ROWS) == 182
     assert {str(row.__table__) for row in MAPPED_ROWS} == set(EXPECTED_TABLE_KEYS)
     assert all(not list(sa_inspect(row).relationships) for row in MAPPED_ROWS)
 
@@ -71,7 +71,8 @@ def test_explicit_index_inventory_and_no_python_defaults() -> None:
     """All reference indexes are mapped and defaults remain database-owned."""
     indexes = {index.name for table in metadata.tables.values() for index in table.indexes}
     assert indexes == EXPECTED_EXPLICIT_INDEX_NAMES
-    assert len(indexes) == 162
+    # Complete ORM registry: 162 baseline + four D1 indexes + two Sona indexes.
+    assert len(indexes) == 168
     assert all(
         column.default is None for table in metadata.tables.values() for column in table.columns
     )
@@ -118,4 +119,6 @@ def test_complete_mapping_definition_fingerprint() -> None:
     )
     fingerprint = hashlib.sha256("\n".join(statements).encode()).hexdigest()
 
-    assert fingerprint == "862495576da04bacac8b1ecee3028a5790026671e517e78fb8133ef5f43be0b4"
+    # The combined Sona/0074 definition passed live Alembic zero-drift and head/base/head
+    # schema restoration gates before this fixed fingerprint was recorded.
+    assert fingerprint == "ac7eeb91dfe939897d4bca7c7f479899baed851140ab38fd480cda4a43239e7e"

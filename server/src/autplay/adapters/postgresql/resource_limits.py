@@ -22,11 +22,34 @@ from .models.resource_admission import (
 )
 
 RESOURCE_ADMISSION_LOCK = 0x415554504C515401
+_ADMISSION_TRANSACTION_INFO = "autplay.resource_admission_transaction"
 
 
 def lock_resource_admission(session: Session) -> None:
     """Call before account/device/session/job locks; never hold it during network I/O."""
     session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": RESOURCE_ADMISSION_LOCK})
+    session.info[_ADMISSION_TRANSACTION_INFO] = (
+        session.get_transaction(),
+        session.get_nested_transaction(),
+    )
+
+
+def holds_resource_admission_lock(session: Session) -> bool:
+    """Recognize this transaction's acquired lock, never a prior transaction's marker.
+
+    Reservation readers do not acquire locks late or silently reverse M5/account
+    ordering. A savepoint acquisition is deliberately not sufficient: rollback
+    can release its PostgreSQL lock while retaining ordinary Session.info.
+    """
+    transaction = session.get_transaction()
+    return (
+        transaction is not None
+        and transaction.is_active
+        and (
+            not session.in_nested_transaction()
+            and session.info.get(_ADMISSION_TRANSACTION_INFO) == (transaction, None)
+        )
+    )
 
 
 def effective_account_limits(session: Session, user_id: UUID) -> AccountLimits:

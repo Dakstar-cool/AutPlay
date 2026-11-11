@@ -17,12 +17,24 @@ from autplay.domain.catalogue_context import CatalogueContextEntity
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.entrypoints import api, privacy_deletion
 from autplay.entrypoints.catalog_composition import CatalogRuntime
+from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.ports.track_metadata import MetadataProviderError
 from autplay.runtime.settings import ApiSettings
 from pydantic import SecretStr
 from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def ready_deletion_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate this component; independent ledger guards have their own integration suite."""
+
+    def restore(owner: DeletionEvidenceRuntime) -> None:
+        owner._ready = True
+
+    monkeypatch.setattr(DeletionEvidenceRuntime, "restore_guard", restore)
+
 
 OWNER = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
 ARTIST_ID, RELEASE_ID, RECORDING_ID, TRACK_ID = (uuid4() for _ in range(4))
@@ -245,10 +257,10 @@ def test_catalog_shutdown_also_runs_after_startup_guard_failure(
     events: list[str] = []
     runtime = Runtime(events)
 
-    def guard(*_: object) -> None:
+    def guard(self: DeletionEvidenceRuntime) -> None:
         raise RuntimeError("privacy_restore_blocked")
 
-    monkeypatch.setattr(privacy_deletion, "enforce_privacy_restore_guard", guard)
+    monkeypatch.setattr(privacy_deletion.DeletionEvidenceRuntime, "restore_guard", guard)
     app = api.create_app(
         settings(),
         readiness_probe=Probe(),

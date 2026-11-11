@@ -27,6 +27,10 @@ from autplay.adapters.postgresql.models.social import (
 )
 from autplay.adapters.postgresql.models.web_admin import WebSessionRow
 from autplay.adapters.postgresql.models.web_passkeys import WebPasskeyRow
+from autplay.adapters.postgresql.retained_deletion_reservations import (
+    configure_retained_deletion_reservations,
+)
+from autplay.adapters.postgresql.self_device_pairing import SqlAlchemySelfPairingUnitOfWorkFactory
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.account_deletion import AccountDeletionService
 from autplay.application.account_recovery import cleanup_expired_recovery_operations
@@ -39,9 +43,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from typed_assertions import require_instance
 
 from . import test_self_device_pairing as pairing_fixtures
 from .conftest import DatabaseHarness
+from .recovery_clock import RecoveryClock
+from .recovery_clock import recovery_clock as recovery_clock
 from .test_account_recovery import configured, required, seed_authority, verifier
 from .test_account_recovery import request as recovery_request
 from .test_self_device_pairing import PairingHarness as BasePairingHarness
@@ -58,6 +65,13 @@ class PairingHarness(BasePairingHarness):
 def pair(base_pair: BasePairingHarness, tmp_path: Path) -> PairingHarness:
     ledger = FilesystemDeletionLedger(tmp_path / "deletion.sqlite3", b"d" * 32, "fixture-v1")
     ledger.initialize(coverage_started_at=datetime.now(UTC) - timedelta(days=2))
+    configure_retained_deletion_reservations(
+        require_instance(
+            base_pair.service._units, SqlAlchemySelfPairingUnitOfWorkFactory
+        )._sessions,
+        ledger=ledger,
+        evidence_ready=lambda: True,
+    )
     return PairingHarness(**vars(base_pair), deletion_ledger=ledger)
 
 
@@ -123,6 +137,78 @@ def cancel_request(pair: PairingHarness, deletion: dict[str, Any], **extra: Any)
         binding_commit_id=str(uuid4()),
         **extra,
     )
+
+
+@pytest.mark.parametrize("stage", ["new", "cancel", "cancel_replay", "cancel_outcome", "terminal"])
+def test_v1_deletion_mac_guards_preserve_historical_terminal_authority(
+    pair: PairingHarness, stage: str
+) -> None:
+    service, code, _, body = prepared(pair)
+    deletion = service.request(pair.actor, code, body) if stage != "new" else None
+    refresh = "mac-cancel-fixture-refresh-01234567890123456789"
+    cancel = None
+    cancelled = None
+    if stage in {"cancel", "cancel_replay", "cancel_outcome"}:
+        assert deletion is not None
+        cancel = request(
+            pair,
+            "cancel",
+            pair.key,
+            **{
+                **cancel_request(pair, deletion),
+                "next_refresh_token_sha256": hashlib.sha256(refresh.encode()).hexdigest(),
+            },
+        )
+        if stage != "cancel":
+            cancelled = service.cancel(code, cancel)
+    with Session(pair.engine) as session, session.begin():
+        if cancelled is not None:
+            required(session.get(DeviceRow, UUID(cancelled["device_id"]))).platform = "MACOS"
+        elif stage == "cancel":
+            key = public_spki(pair.key)
+            session.add(
+                DeviceRow(
+                    device_id=uuid4(),
+                    user_id=pair.actor.user_id,
+                    device_name="Historical Mac",
+                    platform="MACOS",
+                    app_version="fixture",
+                    public_key=key,
+                    public_key_thumbprint_sha256=None,
+                    revoked_at=datetime.now(UTC),
+                )
+            )
+        else:
+            required(session.get(DeviceRow, pair.actor.device_id)).platform = "MACOS"
+    with pair.engine.connect() as connection:
+        before = connection.execute(
+            text("SELECT * FROM account.user_session ORDER BY session_id")
+        ).all()
+        before_account = connection.execute(text("SELECT * FROM account.user_account")).all()
+    if stage == "terminal":
+        assert deletion is not None
+        receipt = service.request_receipt(code, body)
+        resolved = service.request_resolve(code, body)
+        assert receipt["deletion_request_id"] == resolved["deletion_request_id"]
+        assert receipt["state"] == "PENDING" and "access_token" not in receipt
+    else:
+        with pytest.raises((AccountDeletionError, AccountRecoveryError)):
+            if stage == "new":
+                service.request(pair.actor, code, body)
+            else:
+                assert cancel is not None
+                if stage == "cancel_outcome":
+                    service.cancel_outcome(refresh, cancel)
+                else:
+                    service.cancel(code, cancel)
+    with pair.engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT * FROM account.user_session ORDER BY session_id")).all()
+            == before
+        )
+        assert (
+            connection.execute(text("SELECT * FROM account.user_account")).all() == before_account
+        )
 
 
 def test_request_revokes_authority_preserves_durable_social_data_and_replays_after_loss(
@@ -452,21 +538,11 @@ def test_invalid_purpose_and_changed_receipt_cannot_grant_access(pair: PairingHa
 
 def test_expired_cancel_receipt_is_retained_without_reopening_cancelled_intent(
     pair: PairingHarness,
-    monkeypatch: pytest.MonkeyPatch,
+    recovery_clock: RecoveryClock,
 ) -> None:
     service, code, _, body = prepared(pair)
     deletion = service.request(pair.actor, code, body)
     next_code = new_code()
-    original_receipt = service.recovery._new_receipt
-
-    def expired_receipt(*args: Any, **kwargs: Any) -> Any:
-        receipt = original_receipt(*args, **kwargs)
-        receipt.created_at -= timedelta(days=2)
-        receipt.expires_at -= timedelta(days=2)
-        return receipt
-
-    # The deletion row retains its exact cancellation receipt even after its login result expires.
-    monkeypatch.setattr(service.recovery, "_new_receipt", expired_receipt)
     cancel = request(
         pair,
         "cancel",
@@ -477,6 +553,9 @@ def test_expired_cancel_receipt_is_retained_without_reopening_cancelled_intent(
         },
     )
     service.cancel(code, cancel)
+    recovery_clock.advance(timedelta(days=2))
+    # Only the expired CONFIGURE receipt is removed; the live result is retained.
+    assert cleanup_expired_recovery_operations(service.sessions) == 1
     assert cleanup_expired_recovery_operations(service.sessions) == 0
     fresh_key = ec.generate_private_key(ec.SECP256R1())
     reused = request(
@@ -509,21 +588,12 @@ def test_expired_cancel_receipt_is_retained_without_reopening_cancelled_intent(
 
 def test_lost_cancel_reply_after_receipt_expiry_requires_result_refresh_proof(
     pair: PairingHarness,
-    monkeypatch: pytest.MonkeyPatch,
+    recovery_clock: RecoveryClock,
 ) -> None:
     service, code, _, body = prepared(pair)
     deletion = service.request(pair.actor, code, body)
     next_code = new_code()
     refresh = secrets.token_urlsafe(32)
-    original_receipt = service.recovery._new_receipt
-
-    def expired_receipt(*args: Any, **kwargs: Any) -> Any:
-        receipt = original_receipt(*args, **kwargs)
-        receipt.created_at -= timedelta(days=2)
-        receipt.expires_at -= timedelta(days=2)
-        return receipt
-
-    monkeypatch.setattr(service.recovery, "_new_receipt", expired_receipt)
     cancel = request(
         pair,
         "cancel",
@@ -537,8 +607,11 @@ def test_lost_cancel_reply_after_receipt_expiry_requires_result_refresh_proof(
         binding_commit_id=str(uuid4()),
     )
     committed = service.cancel(code, cancel)
+    recovery_clock.advance(timedelta(days=2))
     with pytest.raises(AccountRecoveryError):
         service.cancel(code, cancel)
+    # Only the expired CONFIGURE receipt is removed; the live result is retained.
+    assert cleanup_expired_recovery_operations(service.sessions) == 1
     assert cleanup_expired_recovery_operations(service.sessions) == 0
     with pytest.raises(AccountDeletionError):
         service.cancel_outcome(secrets.token_urlsafe(32), cancel)
