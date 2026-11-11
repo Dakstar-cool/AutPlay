@@ -162,6 +162,13 @@ are retained; there is no account deletion or change to the owner's password.
 Only after all four phases pass does `live-account-acceptance.json` record live
 9443 evidence. It contains hashes and aggregate results, not the private origin,
 account ID, password or tokens. Ordinary isolated CI does not invoke this mode.
+After the deployment and restoration boundary is actually complete, deliver the
+fresh private target JSON through the repository secret
+`AUTPLAY_LIVE_ACCEPTANCE_TARGET_JSON` and dispatch the exact deployed branch with
+`live_account_acceptance=true`, `account_acceptance=false`. The workflow refuses
+both scopes together and keeps live acceptance off by default. The target must be
+reachable from that runner using its real advertised HTTPS origin; changing
+identity/origins or bypassing TLS to make the probe connect is forbidden.
 
 ## Differences from the paid design
 

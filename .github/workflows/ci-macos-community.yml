@@ -28,6 +28,10 @@ on:
         description: Run isolated real server, account and sync acceptance
         type: boolean
         default: false
+      live_account_acceptance:
+        description: Check the already deployed pinned 9443 target with a new synthetic account
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -47,6 +51,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate acceptance scope
+        env:
+          ISOLATED_ACCEPTANCE: ${{ inputs.account_acceptance }}
+          LIVE_ACCEPTANCE: ${{ inputs.live_account_acceptance }}
+        shell: bash
+        run: |
+          if [[ "$ISOLATED_ACCEPTANCE" == "true" && "$LIVE_ACCEPTANCE" == "true" ]]; then
+            echo "Select one acceptance scope per disposable runner."
+            exit 1
+          fi
       - name: Verify Apple Silicon and pinned JDK archive
         shell: bash
         run: |
@@ -96,6 +110,32 @@ jobs:
       - name: Test real production account and sync graph on isolated PostgreSQL
         if: inputs.account_acceptance == true
         run: '"$AUTPLAY_PYTHON" scripts/macos_account_acceptance.py run'
+      - name: Check deployed 9443 with a new synthetic account
+        if: inputs.live_account_acceptance == true
+        env:
+          AUTPLAY_LIVE_ACCEPTANCE_TARGET_JSON: ${{ secrets.AUTPLAY_LIVE_ACCEPTANCE_TARGET_JSON }}
+        shell: bash
+        run: |
+          "$AUTPLAY_PYTHON" - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          target = Path(os.environ["RUNNER_TEMP"]) / "autplay-community/live-target.private.json"
+          raw = os.environ.pop("AUTPLAY_LIVE_ACCEPTANCE_TARGET_JSON")
+          if not raw or len(raw.encode()) > 16384:
+              raise RuntimeError("Missing or oversized live target evidence")
+          descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(descriptor, "w") as output:
+              output.write(raw)
+          subprocess.run(
+              [sys.executable, "scripts/macos_account_acceptance.py", "live"],
+              env=dict(os.environ, AUTPLAY_LIVE_ACCEPTANCE_TARGET=str(target)),
+              check=True,
+              timeout=1800,
+          )
+          PY
       - name: Remove temporary signing and account keychains
         if: always()
         run: '"$AUTPLAY_PYTHON" scripts/macos_community.py cleanup'

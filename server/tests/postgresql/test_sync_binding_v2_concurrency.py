@@ -598,6 +598,30 @@ def await_binding_settlement(runtime: Any, *, seconds: float = 20) -> None:
     raise AssertionError("B1 connection/cancellation owner did not settle")
 
 
+def await_binding_backend_disposal(
+    connection: Connection[Any], *, name: str | None = None, pid: int | None = None
+) -> None:
+    """Observe server exit after client close without reusing a statistics snapshot."""
+    assert (name is None) != (pid is None)
+    end = monotonic() + 5
+    while True:
+        # PostgreSQL Terminate has no acknowledgement: client close can precede
+        # backend exit. End each observer transaction so pg_stat_activity is fresh.
+        connection.commit()
+        remaining = present(
+            connection.execute(
+                "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
+                "AND (application_name=%s OR pid=%s)",
+                (name, pid),
+            ).fetchone()
+        )[0]
+        connection.commit()
+        if remaining == 0:
+            return
+        assert monotonic() < end, "B1 backend remained after bounded disposal observation"
+        sleep(0.01)
+
+
 def test_exhausting_all_ten_main_connections_does_not_queue_binding_auth_or_discovery(
     qualified: BindingHarness, database_connection: Connection[Any]
 ) -> None:
@@ -906,19 +930,7 @@ def test_real_pg_delayed_admission_cancels_io_retains_cleanup_then_reconciles(
         assert not pending, "B1 HTTP fixture worker did not settle within its bound"
     assert not runtime._thread.is_alive() and not runtime._active
     assert all(connection.closed for connection in opened)
-    assert (
-        present(
-            database_connection.execute(
-                (
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND "
-                    "application_name=%s"
-                ),
-                (name,),
-            ).fetchone()
-        )[0]
-        == 0
-    )
-    database_connection.commit()
+    await_binding_backend_disposal(database_connection, name=name)
 
 
 @pytest.mark.parametrize("cleanup_kind", ["DNS", "TRANSACTION"])
@@ -1173,17 +1185,7 @@ def test_shutdown_while_both_cancelled_owners_retain_cleanup_and_slots(
     assert (
         binding_state(database_connection) == before
     )  # after acknowledged cleanup, before any retry
-    assert (
-        present(
-            database_connection.execute(
-                "SELECT count(*) FROM pg_stat_activity "
-                "WHERE datname=current_database() AND application_name=%s",
-                (name,),
-            ).fetchone()
-        )[0]
-        == 0
-    )
-    database_connection.commit()
+    await_binding_backend_disposal(database_connection, name=name)
     # An independent still-live API runtime uses the same authenticator and DB.
     assert h.post(body).status_code == 200
 
@@ -1266,13 +1268,5 @@ def test_repeated_close_observers_replay_exact_settled_outcome_without_self_wait
     assert not runtime._closer.is_alive() and not runtime._thread.is_alive()
     assert disposals == [True] and runtime._loop.is_closed() and not runtime._active
     if pid is not None:
-        assert (
-            present(
-                database_connection.execute(
-                    "SELECT count(*) FROM pg_stat_activity WHERE pid=%s", (pid,)
-                ).fetchone()
-            )[0]
-            == 0
-        )
-        database_connection.commit()
+        await_binding_backend_disposal(database_connection, pid=pid)
     assert binding_state(database_connection) == before

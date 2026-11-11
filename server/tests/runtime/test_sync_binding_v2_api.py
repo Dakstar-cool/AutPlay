@@ -225,7 +225,12 @@ def test_raw_asgi_frame_bound_precedes_media_and_auth() -> None:
     )
 
 
-def test_setting_defaults_off_and_accepts_explicit_environment_without_qualification() -> None:
+def test_setting_defaults_off_and_accepts_explicit_environment_without_qualification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from device_qualification import set_device_qualification
+
+    set_device_qualification(monkeypatch)
     required = {
         "database_url": "postgresql+psycopg://autplay:synthetic@127.0.0.1:5432/autplay",
         "auth_signing_secret": "b1-synthetic-signing-secret-at-least-thirty-two-bytes",
