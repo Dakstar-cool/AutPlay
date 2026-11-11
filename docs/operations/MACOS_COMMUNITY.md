@@ -108,9 +108,9 @@ permission to silently replace a key or recreate an account namespace.
 
 The TLS, account enrollment, D1v2 proof domains, session renewal, revocation and
 sync authorization protocols are unchanged. A compatible server is still required.
-The CI snapshot does not include the unpublished D1/B1 server continuation from
-the integration worktree. Native Keychain evidence is not server deployment or
-an end-to-end account/sync acceptance claim.
+The branch includes the D1/B1 server continuation, with its production qualification
+registries still closed. Native Keychain evidence alone is not server deployment
+or an end-to-end account/sync acceptance claim.
 
 ## Differences from the paid design
 
@@ -170,6 +170,18 @@ locked-Keychain refusal, foreign-program read/sign refusal and resource tamperin
 The same probe also opens, initializes and reopens the real Kotlin secure-state
 owner on a second empty keychain, checks the production sealed-identity reader,
 and tests rejection of inherited Java agents and a real external `jcmd` attach.
+
+The manual `account_acceptance=true` option additionally runs
+[`macos_account_acceptance.py`](../../scripts/macos_account_acceptance.py).
+It compiles the pinned PostgreSQL/pgvector fixture, starts the production server
+behind verified HTTPS and exercises the actual signed Kotlin account graph.
+The four phases cover registration, process restart and session renewal, login
+from a second isolated Keychain, and a journal round trip between both devices.
+Candidate D1/B1 capabilities are enabled only inside this disposable test server.
+The required success evidence is `account-acceptance.json` with all four phases;
+passing packaging or the earlier Keychain probe does not substitute for it.
+Passwords, recovery material, private configuration and raw HTTP bodies remain
+outside artifacts. This isolated acceptance does not verify a deployed server.
 
 Successful DMGs are retained for one day; small reports for three days. Standard
 public runner compute is free, but artifact storage is metered separately. Download

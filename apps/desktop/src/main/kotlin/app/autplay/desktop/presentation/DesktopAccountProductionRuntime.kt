@@ -692,7 +692,7 @@ internal class DesktopAccountProductionRuntime private constructor(
                 val runtime = account?.accounts ?: unavailable()
                 val selected = runtime.selected ?: unavailable()
                 runtime.requireTarget(owner, selected)
-                if (selected.transport.protectedPolicy(transport.revision) != transport) unavailable()
+                if (!selected.transport.matches(transport)) unavailable()
                 val secret = keychain().access(snapshot, owner).hostAwait()
                 val access = secret.copy()
                 try {
