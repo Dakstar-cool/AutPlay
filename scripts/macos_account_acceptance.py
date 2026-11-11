@@ -169,6 +169,25 @@ def serve() -> None:
             vault_root=TEMP / "vault",
         )
     )
+
+    @app.middleware("http")
+    async def safe_delivery_evidence(request, call_next):
+        response = await call_next(request)
+        route = getattr(request.scope.get("route"), "path", "unmatched")
+        with (TEMP / "http-evidence.jsonl").open("a") as evidence:
+            evidence.write(
+                json.dumps(
+                    {
+                        "route_template": route,
+                        "status": response.status_code,
+                        "content_type": response.headers.get("content-type"),
+                        "content_length": response.headers.get("content-length"),
+                    }
+                )
+                + "\n"
+            )
+        return response
+
     discovery = app.state.profile_pairing_service.discovery()["payload"]
     private_json(
         TEMP / "client.private.json",
@@ -367,6 +386,11 @@ def acceptance() -> None:
             if canonical.exists():
                 canonical.rename(TEMP / "data-final")
             old_data.rename(canonical)
+        if (TEMP / "http-evidence.jsonl").exists():
+            # Only fixed route templates, status and response sizes; no bodies or credentials.
+            shutil.copyfile(
+                TEMP / "http-evidence.jsonl", community.OUT / "account-http-evidence.jsonl"
+            )
 
 
 if __name__ == "__main__":

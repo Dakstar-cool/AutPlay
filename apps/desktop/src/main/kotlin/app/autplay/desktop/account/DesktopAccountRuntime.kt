@@ -310,6 +310,7 @@ public class DesktopAccountRuntime(
                     val bytes = root.passportCopy()
                     val document = try { PortableAccountDocument.parse(bytes) } finally { bytes.fill(0) }
                     val challengeBody = SecureJson.encode(buildJsonObject {
+                        put("contract_version", "v2"); put("schema_version", 2); put("platform", "MACOS")
                         if (register) put("account", document.fields) else put("public_id", document.publicId)
                     })
                     val challenge = if (register) AccountEndpoint.PORTABLE_REGISTER_CHALLENGE else AccountEndpoint.PORTABLE_LOGIN_CHALLENGE

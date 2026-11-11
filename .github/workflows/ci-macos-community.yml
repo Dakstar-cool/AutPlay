@@ -108,6 +108,7 @@ jobs:
           if-no-files-found: warn
           path: |
             build/macos-community/*.json
+            build/macos-community/account-http-evidence.jsonl
             build/macos-audio-spike/desktop-startup.json
             shared/*/build/test-results/jvmTest/
             apps/desktop/build/test-results/test/
