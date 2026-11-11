@@ -1,6 +1,7 @@
 package app.autplay.desktop.sync
 
 import app.autplay.application.desktop.account.*
+import app.autplay.application.securestate.SecureStateFailure
 import app.autplay.desktop.account.AccountControlException
 import app.autplay.desktop.account.AccountControlFailure
 import java.util.concurrent.atomic.AtomicBoolean
@@ -200,6 +201,7 @@ public class DesktopSyncRuntime(private val store: DesktopAccountStore, private 
                 else -> DesktopSyncFailure.OUTCOME_PENDING
             })
         } catch (failure: AccountControlException) {
+            diagnose(failure)
             mutable.value = mutable.value.copy(phase = DesktopSyncPhase.PAUSED, failure = when (failure.code) {
                 AccountControlFailure.TRUST_REQUIRED -> DesktopSyncFailure.TRUST_REQUIRED
                 AccountControlFailure.AUTHENTICATION_REQUIRED, AccountControlFailure.FORBIDDEN -> DesktopSyncFailure.AUTH_REQUIRED
@@ -207,7 +209,8 @@ public class DesktopSyncRuntime(private val store: DesktopAccountStore, private 
                 AccountControlFailure.CAPACITY -> DesktopSyncFailure.CAPACITY
                 else -> DesktopSyncFailure.UNAVAILABLE
             })
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            diagnose(failure)
             mutable.value = mutable.value.copy(phase = DesktopSyncPhase.PAUSED, failure = DesktopSyncFailure.UNAVAILABLE)
         } finally {
             withContext(NonCancellable) {
@@ -221,6 +224,26 @@ public class DesktopSyncRuntime(private val store: DesktopAccountStore, private 
             running.set(false)
         }
         return mutable.value
+    }
+
+    /** Bounded code locations only: exception messages, payloads and credentials never enter logs. */
+    private fun diagnose(failure: Exception) {
+        val logger = System.getLogger("app.autplay.desktop.sync")
+        var current: Throwable? = failure
+        repeat(4) {
+            val cause = current ?: return
+            val locations = cause.stackTrace.asSequence().filter { it.className.startsWith("app.autplay.") }
+                .take(6).joinToString(",") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+            val code = when (cause) {
+                is AccountControlException -> cause.code.name
+                is AccountStoreException -> cause.failure.name
+                is SecureStateFailure -> cause.status.name
+                else -> "INTERNAL"
+            }
+            logger.log(System.Logger.Level.WARNING,
+                "ACCOUNT_SYNC_FAILURE phase=${mutable.value.phase} type=${cause.javaClass.name} code=$code locations=$locations")
+            current = cause.cause.takeUnless { it === cause }
+        }
     }
 
     private suspend fun applyAck(claim: AccountDeliveryClaim, bytes: ByteArray) {

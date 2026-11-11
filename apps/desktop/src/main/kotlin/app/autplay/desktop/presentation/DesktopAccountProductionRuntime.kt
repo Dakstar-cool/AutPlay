@@ -54,6 +54,7 @@ internal class DesktopAccountProductionRuntime private constructor(
     private val catalogAttachment = AtomicReference<Any?>(null)
     private val catalogGate = Any()
     private val selectionMutex = Mutex()
+    private val leaseReadMutex = Mutex()
     private var navigationSettlement: CompletableFuture<Unit>? = null
     private var navigationExecuting = false
     private var navigationRequest: Any = Any()
@@ -213,13 +214,13 @@ internal class DesktopAccountProductionRuntime private constructor(
         availabilityMutable.value = DesktopAccountAvailability.Available
     }
 
-    private suspend fun captureCurrentLease(): AccountLease {
+    private suspend fun captureCurrentLease(): AccountLease = leaseReadMutex.withLock {
         if (closing.get()) unavailable()
         val actual = authority().currentLease().hostAwait()
         if (closing.get()) unavailable()
         if (services?.session?.authorityReconciled(actual) == false) unavailable()
         issued.set(actual)
-        return actual
+        actual
     }
 
     /** Runs in the initiating B1 pass. External drain excludes that Host command and sync pass. */
