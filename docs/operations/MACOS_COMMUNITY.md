@@ -139,6 +139,15 @@ at the existing first-effect boundaries; handlers for bounded committed replay,
 terminal receipts and cleanup remain mounted. Android v1 feature flags are preserved.
 An empty test policy continues to prove refusal independently of the release registry.
 
+The B1 cancellation gate also checks physical PostgreSQL backend disposal. A failed
+first-dialect initialization exposed [SQLAlchemy issue 13548](https://github.com/sqlalchemy/sqlalchemy/issues/13548)
+in the previous 2.0.52 pin. The server and its dependent GPU/training lock graphs now
+pin 2.0.57, including the upstream disposal and subsequent cancellation fixes. The
+regression retains the raw driver connection so garbage collection cannot conceal
+an ownership leak. Backend disappearance is observed within a fixed bound using
+fresh observer transactions, after owner, pool and driver cleanup assertions.
+This dependency change requires fresh complete qualification before deployment.
+
 `scripts/macos_account_acceptance.py live` is a prepared, separate live-target mode.
 It has not been executed against production. It requires a disposable macOS GitHub
 runner with the exact deployed source, the normal community signing setup, built

@@ -20,7 +20,8 @@ dependencies = [
     "pydantic-settings==2.15.0",
     "PyJWT==2.15.0",
     "rfc8785==0.1.4",
-    "sqlalchemy==2.0.52",
+    # Includes connect-event disposal and subsequent cancellation-propagation fixes.
+    "sqlalchemy==2.0.57",
     "urllib3==2.8.0",
     "uvicorn==0.51.0",
     # uv.lock pins the graph; yt-dlp's pin extra requires vulnerable urllib3 2.7.0.

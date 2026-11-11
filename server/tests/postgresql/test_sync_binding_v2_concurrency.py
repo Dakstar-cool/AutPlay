@@ -784,8 +784,14 @@ def test_real_pg_delayed_admission_cancels_io_retains_cleanup_then_reconciles(
         if phase == "FIRST_DIALECT":
             initialize = engine.sync_engine.dialect.initialize
 
+            async def first_initialize(raw: Any) -> None:
+                # Keep a strong reference: driver GC must not hide a connection
+                # stranded before pool ownership (SQLAlchemy upstream #13548).
+                opened.append(raw)
+                await pause()
+
             def delayed_initialize(connection: Any) -> None:
-                connection.connection.dbapi_connection.run_async(lambda raw: pause())
+                connection.connection.dbapi_connection.run_async(first_initialize)
                 initialize(connection)
 
             monkeypatch.setattr(engine.sync_engine.dialect, "initialize", delayed_initialize)
