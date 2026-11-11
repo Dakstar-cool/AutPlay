@@ -821,9 +821,21 @@ interface RecommendationPackDao {
           AND u.server_profile_id = :profileId
           AND u.server_recording_id IN (:recordingIds)
           AND u.deleted_at_ms IS NULL
-          AND r.is_deleted = 0
-          AND r.redirect_server_recording_id IS NULL
-          AND r.server_recording_id = u.server_recording_id
+          AND (
+              (u.local_recording_id IS NULL AND u.resolution_status = 'RESOLVED')
+              OR (r.is_deleted = 0 AND r.redirect_server_recording_id IS NULL
+                  AND r.server_recording_id = u.server_recording_id)
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstone t
+              WHERE t.server_profile_id = :profileId AND t.aggregate_type = 'RECORDING'
+                AND t.aggregate_server_id = u.server_recording_id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM aggregate_redirect redirect
+              WHERE redirect.server_profile_id = :profileId AND redirect.aggregate_type = 'RECORDING'
+                AND redirect.alias_server_id = u.server_recording_id
+          )
         ORDER BY u.local_user_track_ref_id ASC
         LIMIT :limit
         """,

@@ -6,6 +6,8 @@ import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.LibraryEntryEntity
+import app.autplay.data.local.entity.AggregateRedirectEntity
+import app.autplay.data.local.entity.TombstoneEntity
 import app.autplay.data.local.entity.RecordingProjectionEntity
 import app.autplay.data.local.entity.RecommendationPackEntity
 import app.autplay.data.local.entity.ReleaseProjectionEntity
@@ -73,6 +75,52 @@ class OfflineRecommendationRepositoryTest {
         }
         assertTrue(crossOwnerAttempt.isFailure)
         assertTrue(database.recommendationPackDao().latest(PROFILE, OTHER_USER, 5).isEmpty())
+    }
+
+    @Test
+    fun downloadedServerTrackWithoutLocalRecordingProjectionRemainsEligible() = runBlocking {
+        val original = checkNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null))
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        val feed = repository.loadHomeFeed(BINDING, NOW)
+        assertEquals(listOf(RECORDING), feed.recommendationSections.values.flatten().map { it.recordingId })
+
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null, resolutionStatus = "UNRESOLVED"))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 1).recommendationSections.isEmpty())
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null, deletedAtMs = NOW))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 2).recommendationSections.isEmpty())
+    }
+
+    @Test
+    fun serverOnlyRecommendationStillRejectsRedirectedRecordings() = runBlocking {
+        val original = checkNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null))
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        assertFalse(repository.loadHomeFeed(BINDING, NOW).recommendationSections.isEmpty())
+        database.syncDao().upsertRedirect(AggregateRedirectEntity(
+            serverProfileId = PROFILE, aggregateType = "RECORDING", aliasLocalId = LOCAL_RECORDING,
+            aliasServerId = RECORDING, canonicalLocalId = "00000000-0000-0000-0000-000000000901",
+            canonicalServerId = "00000000-0000-0000-0000-000000000902", createdByServerSequence = 1, createdAtMs = NOW,
+        ))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 1).recommendationSections.isEmpty())
+    }
+
+    @Test
+    fun serverOnlyRecommendationStillRejectsRecordingTombstones() = runBlocking {
+        val original = checkNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null))
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        assertFalse(repository.loadHomeFeed(BINDING, NOW).recommendationSections.isEmpty())
+        database.syncDao().upsertTombstone(TombstoneEntity(
+            tombstoneId = "00000000-0000-0000-0000-000000000903", serverProfileId = PROFILE,
+            aggregateType = "RECORDING", aggregateLocalId = LOCAL_RECORDING,
+            aggregateServerId = RECORDING, deletedByEventId = EVENT_ONE,
+            deletedAtMs = NOW, retainUntilMs = NOW + 1000, serverAcked = true,
+        ))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 1).recommendationSections.isEmpty())
     }
 
     @Test
