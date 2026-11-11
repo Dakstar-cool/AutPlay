@@ -1,5 +1,6 @@
 param(
     [switch]$Preflight,
+    [switch]$NativeRecoveryPrompt,
     [int]$VersionCode,
     [string]$VersionName,
     [string]$ReleaseTag,
@@ -24,6 +25,24 @@ function ConvertTo-PlainText {
     }
     finally {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+    }
+}
+
+function Invoke-NativeRecoveryDecryption {
+    param([string]$AgePath, [string]$CiphertextPath, [string]$OutputPath)
+
+    # Keep age attached to the operator's console. Its hidden prompt must not
+    # pass through Read-Host, PowerShell strings, environment variables or logs.
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $AgePath --decrypt --output $OutputPath $CiphertextPath
+        if (-not $? -or $LASTEXITCODE -ne 0) {
+            throw "SIGNER_DECRYPTION_FAILED"
+        }
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
     }
 }
 
@@ -557,6 +576,7 @@ if ($Preflight) {
         SignerReceipt = "PASS"
         AndroidTools = "PASS"
         AgeBatchpass = "PASS"
+        RecoveryPrompt = $(if ($NativeRecoveryPrompt) { "AGE_NATIVE" } else { "POWERSHELL_BATCHPASS" })
         Secrets = "NOT_REQUESTED"
     } | ConvertTo-Json -Compress
     exit 0
@@ -606,15 +626,20 @@ try {
         Write-Host "Do not paste either secret into chat. Input below is hidden."
 
         $keystoreSecure = Read-Host "Enter the Android keystore password" -AsSecureString
-        $recoverySecure = Read-Host "Enter the recovery-envelope passphrase" -AsSecureString
         $keystorePassword = ConvertTo-PlainText $keystoreSecure
-        $recoveryPassphrase = ConvertTo-PlainText $recoverySecure
 
-        if ($keystorePassword.Length -lt 20 -or $recoveryPassphrase.Length -lt 20) {
+        if ($keystorePassword.Length -lt 20) {
             throw "SIGNING_SECRET_TOO_SHORT"
         }
-        if ($keystorePassword -ceq $recoveryPassphrase) {
-            throw "SIGNING_SECRETS_MUST_BE_DISTINCT"
+        if (-not $NativeRecoveryPrompt) {
+            $recoverySecure = Read-Host "Enter the recovery-envelope passphrase" -AsSecureString
+            $recoveryPassphrase = ConvertTo-PlainText $recoverySecure
+            if ($recoveryPassphrase.Length -lt 20) {
+                throw "SIGNING_SECRET_TOO_SHORT"
+            }
+            if ($keystorePassword -ceq $recoveryPassphrase) {
+                throw "SIGNING_SECRETS_MUST_BE_DISTINCT"
+            }
         }
         $temporaryRootPrefix = [IO.Path]::GetFullPath($temporaryRoot).TrimEnd([char[]]"\/") +
             [IO.Path]::DirectorySeparatorChar
@@ -629,16 +654,26 @@ try {
         }
         [void][IO.Directory]::CreateDirectory($temporaryDirectory)
         Set-OwnerOnlyDirectoryAcl -LiteralPath $temporaryDirectory
-        $env:PATH = $ageDirectory + [IO.Path]::PathSeparator + $previousPath
-        $env:AGE_PASSPHRASE = $recoveryPassphrase
-        try {
-            $decrypt = Invoke-NativeCapture $agePath @(
-                "--decrypt", "-j", "batchpass", "--output", $temporaryKeystore, $EncryptedKeystore
-            )
+        if ($NativeRecoveryPrompt) {
+            Write-Host "Now enter the recovery-envelope passphrase at age's hidden prompt."
+            Invoke-NativeRecoveryDecryption `
+                -AgePath $agePath `
+                -CiphertextPath $EncryptedKeystore `
+                -OutputPath $temporaryKeystore
+            $decrypt = [pscustomobject]@{ ExitCode = 0; Output = "" }
         }
-        finally {
-            Remove-Item Env:AGE_PASSPHRASE -ErrorAction SilentlyContinue
-            $env:PATH = $previousPath
+        else {
+            $env:PATH = $ageDirectory + [IO.Path]::PathSeparator + $previousPath
+            $env:AGE_PASSPHRASE = $recoveryPassphrase
+            try {
+                $decrypt = Invoke-NativeCapture $agePath @(
+                    "--decrypt", "-j", "batchpass", "--output", $temporaryKeystore, $EncryptedKeystore
+                )
+            }
+            finally {
+                Remove-Item Env:AGE_PASSPHRASE -ErrorAction SilentlyContinue
+                $env:PATH = $previousPath
+            }
         }
         if ($decrypt.ExitCode -ne 0 -and $decrypt.Output -match "(?i)incorrect passphrase") {
             throw "RECOVERY_PASSPHRASE_INCORRECT"
