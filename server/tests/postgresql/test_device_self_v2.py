@@ -34,9 +34,9 @@ from autplay.application.auth import AuthService
 from autplay.application.device_self_service_v2 import DeviceSelfServiceV2
 from autplay.application.public_access import PublicAccessError, PublicAccessService
 from autplay.application.self_device_pairing import SelfDevicePairingService
+from autplay.domain import device_compatibility
 from autplay.domain.auth import Principal
 from autplay.domain.device_compatibility import (
-    IMPLEMENTED_AND_QUALIFIED_FAMILIES,
     NegotiationIdentity,
 )
 from autplay.domain.device_self_v2 import (
@@ -53,6 +53,7 @@ from autplay.entrypoints.public_access_http import build_exact_proxy_source_reso
 from autplay.entrypoints.self_device_pairing_http import create_self_device_pairing_router
 from autplay.runtime.http import install_error_handlers
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -317,8 +318,11 @@ def self_v2(
 
 
 def test_all_six_routes_mixed_platforms_and_exact_lost_response(
-    self_v2: SelfHarness, database_connection: Connection[Any]
+    self_v2: SelfHarness,
+    database_connection: Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_device_qualification(monkeypatch)
     h = self_v2
     start = h.through("start")
     assert start["source_platform"] == h.profile.platform and start["recipient_platform"] is None
@@ -371,7 +375,7 @@ def test_all_six_routes_mixed_platforms_and_exact_lost_response(
             response.headers["cache-control"] == "no-store"
             and response.headers["pragma"] == "no-cache"
         )
-    assert frozenset() == IMPLEMENTED_AND_QUALIFIED_FAMILIES
+    assert frozenset() == device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES
 
 
 @pytest.mark.parametrize("stage", ["start", "claim", "decision", "exchange"])

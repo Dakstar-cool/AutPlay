@@ -71,7 +71,7 @@ class DeviceAdmissionServiceV2:
         sessions: sessionmaker[Session],
         *,
         identity: ProfilePairingService,
-        enabled: Callable[[], bool],
+        enabled: Callable[[str], bool],
     ) -> None:
         self._sessions, self._identity, self._enabled = sessions, identity, enabled
 
@@ -120,7 +120,7 @@ class DeviceAdmissionServiceV2:
             )
             if pending is not None and pending.expires_at > now:
                 raise ProfilePairingError("admission_request_unavailable")
-            self._require_enabled()
+            self._require_enabled("admission")
             # Use the SAME v1 HMAC source and key/day counters, under its locks.
             self._identity._admission_submit_rate_gate(
                 s, evidence.key.thumbprint_sha256, source, now
@@ -247,7 +247,7 @@ class DeviceAdmissionServiceV2:
             ):
                 raise ProfilePairingError("admission_request_unavailable")
             nonce = _nonce(s, row, "RECOVERY", cast(str, parsed.field("recovery_nonce_b64url")))
-            self._require_enabled()
+            self._require_enabled("admission")
             locator, bearer = _secret(), _secret()
             row.review_locator_hash, row.poll_bearer_hash = (
                 _hash_secret(locator),
@@ -316,7 +316,7 @@ class DeviceAdmissionServiceV2:
                 raise ProfilePairingError("admission_request_unavailable")
             _new_binding(s, parsed)
             require_device_capacity(s, account.user_id)
-            self._require_enabled()
+            self._require_enabled("admission")
             now = _database_now(s)
             if row.expires_at <= now:
                 raise ProfilePairingError("admission_request_unavailable")
@@ -412,7 +412,7 @@ class DeviceAdmissionServiceV2:
             )
             if int(active or 0) >= 3:
                 raise ProfilePairingError("trusted_reenrollment_rate_limited", retryable=True)
-            self._require_enabled()
+            self._require_enabled("trusted")
             expiry = now.replace(second=0, microsecond=0) + timedelta(minutes=15)
             for key, scope in (
                 (
@@ -505,7 +505,7 @@ class DeviceAdmissionServiceV2:
                 raise ProfilePairingError("trusted_key_unavailable")
             _new_binding(s, parsed)
             require_device_capacity(s, account_id)
-            self._require_enabled()
+            self._require_enabled("trusted")
             now = _database_now(s)
             if challenge.expires_at <= now:
                 raise ProfilePairingError("trusted_key_unavailable")
@@ -532,8 +532,8 @@ class DeviceAdmissionServiceV2:
         _require_identity(parsed, identity)
         return identity
 
-    def _require_enabled(self) -> None:
-        if not self._enabled():
+    def _require_enabled(self, family: str) -> None:
+        if not self._enabled(family):
             raise DeviceCompatibilityError()
 
     def _admission(

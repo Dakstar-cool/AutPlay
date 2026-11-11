@@ -78,7 +78,7 @@ from autplay.application.web_admin import WebAdminService
 from autplay.application.web_passkeys import WebPasskeyService
 from autplay.domain.auth import Principal
 from autplay.domain.device_capability_state import DeviceCapabilityPolicy
-from autplay.domain.device_compatibility import NegotiationPolicy
+from autplay.domain.device_compatibility import NegotiationPolicy, family_is_qualified
 from autplay.domain.profile_pairing import load_private_key
 from autplay.domain.resource_admission import LocalBridgeClaim, ResourceAdmissionError
 from autplay.domain.vault import (
@@ -177,7 +177,9 @@ def build_profile_pairing_service(
         account_deletion_enabled=settings.account_deletion_enabled,
         shared_training_consent_enabled=settings.shared_training_consent_enabled,
         portable_accounts_enabled=settings.portable_accounts_enabled,
-        device_compatibility_v2_enabled=lambda: settings.device_compatibility_v2_enabled,
+        device_compatibility_v2_enabled=lambda: (
+            settings.device_compatibility_v2_enabled and family_is_qualified("admission")
+        ),
         media_source_snapshot_v1_enabled=settings.media_source_snapshot_v1_enabled,
     )
 
@@ -319,7 +321,9 @@ def build_device_profile_v2_service(
     return DeviceProfileServiceV2(
         build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
         identity=identity,
-        enabled=lambda: settings.device_compatibility_v2_enabled,
+        enabled=lambda family: (
+            settings.device_compatibility_v2_enabled and family_is_qualified(family)
+        ),
         access_tokens=Hs256AccessTokenCodec(
             settings.auth_signing_secret.get_secret_value(),
             issuer=settings.auth_issuer,
@@ -343,7 +347,9 @@ def build_device_admission_v2_service(
     return DeviceAdmissionServiceV2(
         build_identifier_sessions(settings, engine, deletion_evidence=deletion_evidence),
         identity=identity,
-        enabled=lambda: settings.device_compatibility_v2_enabled,
+        enabled=lambda family: (
+            settings.device_compatibility_v2_enabled and family_is_qualified(family)
+        ),
     )
 
 
@@ -376,7 +382,9 @@ def build_device_self_v2_service(
             sessions, lambda session: identity.device_contract_identity(session, datetime.now(UTC))
         ),
         enabled=lambda: (
-            settings.device_compatibility_v2_enabled and settings.self_device_pairing_enabled
+            settings.device_compatibility_v2_enabled
+            and settings.self_device_pairing_enabled
+            and family_is_qualified("self")
         ),
         access_tokens=access,
         access_ttl=ttl,
@@ -410,7 +418,9 @@ def build_device_recovery_v2_service(
         recovery,
         identity=identity,
         enabled=lambda: (
-            settings.device_compatibility_v2_enabled and settings.account_recovery_enabled
+            settings.device_compatibility_v2_enabled
+            and settings.account_recovery_enabled
+            and family_is_qualified("recovery")
         ),
     )
 
@@ -554,7 +564,9 @@ def build_device_deletion_v2_service(
     return DeviceDeletionServiceV2(
         AccountDeletionService(recovery, owner.ledger),
         identity=identity,
-        enabled=lambda: settings.device_compatibility_v2_enabled,
+        enabled=lambda: (
+            settings.device_compatibility_v2_enabled and family_is_qualified("deletion")
+        ),
         deletion_enabled=lambda: settings.account_deletion_enabled,
         recovery_enabled=lambda: settings.account_recovery_enabled,
         evidence_ready=owner.evidence_ready,

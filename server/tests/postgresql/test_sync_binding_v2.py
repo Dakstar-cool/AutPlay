@@ -35,6 +35,7 @@ from autplay.entrypoints.composition import build_sync_binding_v2_service
 from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.runtime.settings import ApiSettings
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -136,6 +137,7 @@ class BindingHarness:
 def binding(
     profile: ProfileHarness, database_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Iterator[BindingHarness]:
+    set_device_qualification(monkeypatch)
     monkeypatch.setattr("autplay.application.sync_binding_v2._now", lambda: profile.clock["now"])
     monkeypatch.setattr(
         "autplay.application.device_compatibility._now", lambda: profile.clock["now"]

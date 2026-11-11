@@ -32,6 +32,7 @@ from autplay.domain.profile_pairing import (
 from autplay.entrypoints.api import create_app
 from autplay.runtime.settings import ApiSettings
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi.testclient import TestClient
 from psycopg import Connection
 from psycopg.errors import CheckViolation
@@ -69,6 +70,7 @@ def negotiation(
     database_connection: Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[NegotiationHarness]:
+    set_device_qualification(monkeypatch)
     monkeypatch.setattr("autplay.application.profile_pairing._now", lambda: NOW)
     monkeypatch.setattr("autplay.application.device_compatibility._now", lambda: NOW)
     monkeypatch.setattr("autplay.adapters.system.SystemClock.now", lambda self: NOW)

@@ -23,9 +23,9 @@ from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWo
 from autplay.application.device_admission_service_v2 import DeviceAdmissionServiceV2
 from autplay.application.profile_pairing import cleanup_expired_device_admissions
 from autplay.application.web_admin import WebAdminService
+from autplay.domain import device_compatibility
 from autplay.domain.canonical_json import JsonValue
 from autplay.domain.device_compatibility import (
-    IMPLEMENTED_AND_QUALIFIED_FAMILIES,
     DeviceCompatibilityError,
 )
 from autplay.domain.device_profile_v2 import DeviceProfileV2Error
@@ -43,6 +43,7 @@ from autplay.entrypoints.device_admission_web import DeviceAdmissionWebAdapter
 from autplay.runtime.http import install_error_handlers
 from autplay.web.renderer import AdminTemplateRenderer
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -263,7 +264,7 @@ def admission_v2(
         DeviceAdmissionServiceV2(
             admission_runtime.sessions,
             identity=admission_runtime.service,
-            enabled=lambda: gate["enabled"],
+            enabled=lambda family: gate["enabled"],
         ),
         gate,
         request.param,
@@ -311,8 +312,12 @@ def snapshot(connection: Connection[Any]) -> object:
 
 @pytest.mark.parametrize("pending_flow", [False, True])
 def test_actual_http_m6_review_sas_approval_and_both_issuers(
-    admission_v2: AdmissionHarness, database_connection: Connection[Any], pending_flow: bool
+    admission_v2: AdmissionHarness,
+    database_connection: Connection[Any],
+    pending_flow: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_device_qualification(monkeypatch)
     h = admission_v2
     client = client_for(h)
     web = WebAdminService(
@@ -442,7 +447,7 @@ def test_actual_http_m6_review_sas_approval_and_both_issuers(
         assert (
             replay.headers["Cache-Control"] == "no-store" and replay.headers["Pragma"] == "no-cache"
         )
-    assert not IMPLEMENTED_AND_QUALIFIED_FAMILIES
+    assert not device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES
     stored = database_connection.execute(
         "SELECT original_request_evidence FROM account.device_admission_exchange_receipt"
     ).fetchall()
@@ -557,7 +562,7 @@ def reservation_candidate(
     h = AdmissionHarness(
         runtime,
         DeviceAdmissionServiceV2(
-            runtime.sessions, identity=profile.identity, enabled=lambda: gate["enabled"]
+            runtime.sessions, identity=profile.identity, enabled=lambda family: gate["enabled"]
         ),
         gate,
         profile.platform,

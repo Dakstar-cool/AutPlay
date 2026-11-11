@@ -128,6 +128,41 @@ in the same transaction as its track and ACK. This closes the incremental-pull
 gap without manufacturing a relation when the requested library ID already exists.
 The live server and production qualification registries are not enabled by this run.
 
+## Selective activation and live target check
+
+Production composition gates first effects by the source-owned D1 family registry,
+in addition to the existing operator flags. Enrollment and session, and admission
+and trusted reenrollment, have independent checks even though each pair shares a
+service. Web approval of a v2 admission uses the same admission qualification.
+Self, recovery, deletion and portable have their own source gates. The checks stay
+at the existing first-effect boundaries; handlers for bounded committed replay,
+terminal receipts and cleanup remain mounted. Android v1 feature flags are preserved.
+An empty test policy continues to prove refusal independently of the release registry.
+
+`scripts/macos_account_acceptance.py live` is a prepared, separate live-target mode.
+It has not been executed against production. It requires a disposable macOS GitHub
+runner with the exact deployed source, the normal community signing setup, built
+app and acceptance JAR, and an owner-only file named by
+`AUTPLAY_LIVE_ACCEPTANCE_TARGET`. This mode never starts a server, migrates a
+database or replaces qualification registries.
+
+The private target file is prepared from the final deployment/restore receipts and
+a fresh authenticated target observation, not from untrusted discovery. Its exact
+fields are validated by `validate_live_target`: HTTPS origin on port 9443, expected
+server UUID/epoch and identity/TLS SPKI, exact server source/image/schema, hashes of
+the deployment and backup-restore receipts, both completed boundary indicators and
+an observation less than one hour old. These fields are operator evidence inputs;
+parsing the file does not independently prove deployment or backup restoration.
+
+The probe generates its own new account ID/password and runs register, restart,
+second-installation login and pull with two separate real Keychains. It checks the
+pinned identity and HTTPS through the production client and retains the existing
+v1 journal protocol. It accepts no owner account credentials. Synthetic server rows
+are retained; there is no account deletion or change to the owner's password.
+Only after all four phases pass does `live-account-acceptance.json` record live
+9443 evidence. It contains hashes and aggregate results, not the private origin,
+account ID, password or tokens. Ordinary isolated CI does not invoke this mode.
+
 ## Differences from the paid design
 
 * A self-signed certificate provides a stable project identity, but Apple does not

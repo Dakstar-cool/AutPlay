@@ -78,7 +78,13 @@ def test_raw_bounds_content_type_and_closed_routes(operation: str) -> None:
     assert client().post(PREFIX + "/arbitrary", json={}).status_code == 404
 
 
-def test_factory_retains_handlers_for_every_independent_flag_combination() -> None:
+def test_factory_retains_handlers_for_every_independent_flag_combination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES",
+        frozenset({"recovery"}),
+    )
     from autplay.entrypoints.composition import (
         build_device_recovery_v2_service,
         build_profile_pairing_service,

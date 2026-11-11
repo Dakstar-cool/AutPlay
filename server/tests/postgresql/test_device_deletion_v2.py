@@ -45,9 +45,9 @@ from autplay.application.account_recovery import (
 from autplay.application.auth import AuthService
 from autplay.application.device_deletion_service_v2 import DeviceDeletionServiceV2
 from autplay.application.device_recovery_service_v2 import DeviceRecoveryServiceV2
+from autplay.domain import device_compatibility
 from autplay.domain.account_recovery import code_verifier, new_code
 from autplay.domain.auth import Principal
-from autplay.domain.device_compatibility import IMPLEMENTED_AND_QUALIFIED_FAMILIES
 from autplay.domain.privacy_deletion import (
     DeletionEvidence,
     DeletionEvidenceError,
@@ -59,6 +59,7 @@ from autplay.entrypoints.public_access_http import build_exact_proxy_source_reso
 from autplay.runtime.http import install_error_handlers
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, utils
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -341,7 +342,9 @@ def test_full_original_revoked_actor_read_cancel_replay_and_live_late_outcome(
     deletion_v2: DeletionHarness,
     database_connection: Connection[Any],
     cross_platform: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_device_qualification(monkeypatch)
     h = deletion_v2
     h.profile.clock["now"] -= timedelta(days=2)
     accepted = h.accept()
@@ -385,7 +388,7 @@ def test_full_original_revoked_actor_read_cancel_replay_and_live_late_outcome(
     ).fetchone()
     assert receipt == (json.loads(original), hashlib.sha256(original).digest())
     assert h.code not in json.dumps(stored[0]) and h.refresh not in json.dumps(receipt[0])
-    assert frozenset() == IMPLEMENTED_AND_QUALIFIED_FAMILIES
+    assert frozenset() == device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES
 
 
 def test_sealed_veto_is_durable_exact_original_and_unchanged_recipe(

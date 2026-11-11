@@ -204,7 +204,13 @@ def test_internal_exception_text_is_never_returned_or_logged(
     assert response.headers["Pragma"] == "no-cache"
 
 
-def test_factory_retains_disabled_handlers_same_m5_owner_and_independent_gates() -> None:
+def test_factory_retains_disabled_handlers_same_m5_owner_and_independent_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES",
+        frozenset({"portable"}),
+    )
     # Validated synthetic settings construct composition without a DB connection.
     # This does not qualify migration availability or runtime behavior.
     engine = create_engine("sqlite://")

@@ -5,9 +5,11 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
+from autplay.domain import device_compatibility
 from autplay.entrypoints.device_deletion_v2_http import create_device_deletion_v2_router
 from autplay.runtime.http import RequestRuntimeMiddleware, install_error_handlers
 from autplay.runtime.metrics import RuntimeMetrics
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typed_assertions import route_path
@@ -87,12 +89,14 @@ def test_bounded_raw_chunks_duplicate_type_and_exact_route_methods(operation: st
         assert http.post(PREFIX + "/arbitrary", json={}).status_code == 404
 
 
-def test_exactly_six_routes_do_not_qualify_registry_or_construct_default_authority() -> None:
-    from autplay.domain.device_compatibility import IMPLEMENTED_AND_QUALIFIED_FAMILIES
+def test_exactly_six_routes_do_not_qualify_registry_or_construct_default_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_device_qualification(monkeypatch)
 
     router = create_device_deletion_v2_router(None)
     assert {route_path(route) for route in router.routes} == {
         "/device-compatibility/v2/deletion/" + operation for operation in OPERATIONS
     }
     assert len(router.routes) == 6
-    assert frozenset() == IMPLEMENTED_AND_QUALIFIED_FAMILIES
+    assert frozenset() == device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES

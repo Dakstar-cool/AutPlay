@@ -20,6 +20,7 @@ import rfc8785
 from autplay.domain.canonical_json import JsonValue
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
+from device_qualification import set_device_qualification
 from typed_assertions import require_instance, set_field
 
 NOW = datetime(2026, 10, 16, 12, tzinfo=UTC)
@@ -503,7 +504,10 @@ def test_domain_message_digest_and_high_low_s_oracles(kind: binding.NegotiationK
         )
 
 
-def test_default_off_and_independent_empty_qualification_are_source_only() -> None:
+def test_default_off_and_independent_empty_qualification_are_source_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_device_qualification(monkeypatch)
     assert binding.SYNC_BINDING_V2_ENABLED_DEFAULT is False
     assert frozenset() == binding.IMPLEMENTED_AND_QUALIFIED_PLATFORMS
     # No flags, claims, history, cursor, revision publication or bootstrap service is implemented

@@ -35,7 +35,12 @@ def test_factory_http_versions_share_the_established_source_and_ten_request_budg
     database_url: str,
     database_connection: Connection[Any],
     evidence: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES",
+        frozenset({"admission"}),
+    )
     h = admission_v2
     app = create_app(
         ApiSettings(

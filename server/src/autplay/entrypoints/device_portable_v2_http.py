@@ -17,7 +17,7 @@ from autplay.adapters.security.tokens import Hs256AccessTokenCodec
 from autplay.application.device_portable_service_v2 import DevicePortableServiceV2
 from autplay.application.portable_account import PortableAccountService
 from autplay.application.profile_pairing import ProfilePairingService
-from autplay.domain.device_compatibility import DeviceCompatibilityError
+from autplay.domain.device_compatibility import DeviceCompatibilityError, family_is_qualified
 from autplay.domain.profile_pairing import ProfilePairingError
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.entrypoints.composition import build_identifier_sessions
@@ -40,7 +40,7 @@ def build_device_portable_v2_service(
     M5 identity is the already assembled owner. Use the same configured access
     issuer/key/audience, with the codec's existing 15-minute hard ceiling so a
     reduced NEW-grant TTL does not prevent reissuing an older exact live grant.
-    No capability qualification is performed here; API composition owns routes.
+    Source qualification gates first effects without unmounting replay routes.
     """
     if identity is None:
         return None
@@ -59,7 +59,9 @@ def build_device_portable_v2_service(
     return DevicePortableServiceV2(
         portable,
         identity=identity,
-        enabled=lambda: settings.device_compatibility_v2_enabled,
+        enabled=lambda: (
+            settings.device_compatibility_v2_enabled and family_is_qualified("portable")
+        ),
         portable_enabled=lambda: settings.portable_accounts_enabled,
     )
 

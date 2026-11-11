@@ -31,11 +31,13 @@ from autplay.domain.profile_pairing import public_key_thumbprint, public_spki
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, utils
+from device_qualification import set_device_qualification
 
 NOW = datetime(2026, 10, 16, 12, tzinfo=UTC)
 
 
-def test_no_v1_path_or_operator_gate_qualifies_a_v2_family() -> None:
+def test_no_v1_path_or_operator_gate_qualifies_a_v2_family(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_device_qualification(monkeypatch)
     for enabled in (False, True):
         policy = NegotiationPolicy(
             enabled=enabled,

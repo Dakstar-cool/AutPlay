@@ -51,6 +51,7 @@ from autplay.entrypoints.device_portable_v2_http import create_device_portable_v
 from autplay.runtime.http import install_error_handlers
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from psycopg import Connection
@@ -208,7 +209,9 @@ def binding_snapshot(portable: PortableHarness) -> tuple[object, ...]:
 def test_real_http_register_login_hash_only_storage_and_lost_reply(
     portable: PortableHarness,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_device_qualification(monkeypatch)
     body, raw, _ = portable.command()
     with portable.client() as client:
         challenge_reply = client.post(
@@ -348,7 +351,7 @@ def test_expired_receipt_retires_real_rotation_chain_when_both_flags_off(
     profile = DeviceProfileServiceV2(
         portable.legacy.sessions,
         identity=portable.identity,
-        enabled=lambda: True,
+        enabled=lambda family: True,
         access_tokens=portable.legacy.access_tokens,
         access_ttl=portable.legacy.access_ttl,
     )

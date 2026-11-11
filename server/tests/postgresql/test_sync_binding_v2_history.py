@@ -182,7 +182,7 @@ def seed_matching_history(
             "autplay.application.device_admission_service_v2._now", lambda: clock.value
         )
         web = _web_actor(runtime, connection)
-        service = DeviceAdmissionServiceV2(sessions, identity=identity, enabled=lambda: True)
+        service = DeviceAdmissionServiceV2(sessions, identity=identity, enabled=lambda family: True)
         harness = AdmissionHarness(runtime, service, {"enabled": True}, h.profile.platform, web)
         body, key = harness.submit_body(h.key)
         raw = proof(body, key, "admission.submit")

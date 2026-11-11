@@ -2,7 +2,7 @@
 
 Only the strict domain boundary sees full incoming requests. Storage receives
 verified.safe_evidence() projections; no credential-bearing request is copied.
-Qualification/advertising remains a separate, empty source-owned registry.
+Production composition supplies the source-qualified per-family admission policy.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class DeviceProfileServiceV2:
         sessions: sessionmaker[Session],
         *,
         identity: ProfilePairingService,
-        enabled: Callable[[], bool],
+        enabled: Callable[[str], bool],
         access_tokens: AccessTokenCodec,
         access_ttl: timedelta,
     ) -> None:
@@ -124,7 +124,7 @@ class DeviceProfileServiceV2:
             require_device_capacity(s, account.user_id)
             # Gate is deliberately after replay, under the same shared locks as
             # every v1 binding issuer, immediately before the first mutation.
-            self._require_enabled()
+            self._require_enabled("enrollment")
             now = _database_now(s)
             if invitation.expires_at <= now:
                 raise ProfilePairingError("enrollment_invitation_unavailable")
@@ -279,7 +279,7 @@ class DeviceProfileServiceV2:
             # a legacy ANDROID M5 session can rotate, WEB/OTHER cannot guess it.
             refresh_hash = _hash(parsed, "next_refresh_token_sha256")
             _require_unused_refresh(s, refresh_hash)
-            self._require_enabled()
+            self._require_enabled("session")
             now = _database_now(s)
             if parent.expires_at <= now:
                 raise ProfilePairingError("session_revoked")
@@ -331,8 +331,8 @@ class DeviceProfileServiceV2:
                 raise
         raise DeviceCompatibilityError()
 
-    def _require_enabled(self) -> None:
-        if not self._enabled():
+    def _require_enabled(self, family: str) -> None:
+        if not self._enabled(family):
             raise DeviceCompatibilityError()
 
     def _changed_rotation(

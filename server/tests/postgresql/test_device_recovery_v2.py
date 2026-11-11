@@ -28,9 +28,9 @@ from autplay.adapters.system import Uuid7Generator
 from autplay.application.account_recovery import AccountRecoveryService, database_now
 from autplay.application.auth import AuthService
 from autplay.application.device_recovery_service_v2 import DeviceRecoveryServiceV2
+from autplay.domain import device_compatibility
 from autplay.domain.account_recovery import AccountRecoveryError, code_verifier, new_code
 from autplay.domain.auth import AccessTokenClaims, Principal
-from autplay.domain.device_compatibility import IMPLEMENTED_AND_QUALIFIED_FAMILIES
 from autplay.domain.profile_pairing import ProfilePairingError, public_spki
 from autplay.entrypoints.account_recovery_http import create_account_recovery_router
 from autplay.entrypoints.auth_http import bearer_authentication
@@ -39,6 +39,7 @@ from autplay.entrypoints.public_access_http import build_exact_proxy_source_reso
 from autplay.ports.auth import AccessTokenCodec
 from autplay.runtime.http import install_error_handlers
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -212,8 +213,11 @@ def recovery_v2(
 
 
 def test_preview_commit_original_replay_and_outcome_after_one_day(
-    recovery_v2: RecoveryHarness, database_connection: Connection[Any]
+    recovery_v2: RecoveryHarness,
+    database_connection: Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_device_qualification(monkeypatch)
     h = recovery_v2
     # Old ANDROID authority has a distinct real key; it must not contradict a
     # legitimate new MACOS recipient before the actual recovery proof is used.
@@ -264,7 +268,7 @@ def test_preview_commit_original_replay_and_outcome_after_one_day(
     assert bytes(stored[2]).hex() == json.loads(original)["request_sha256"]
     assert stored[3:] == ("ES256-P1363", "autplay:device-compatibility:recovery:recover:v2\n")
     assert h.code not in json.dumps(stored[0]) and h.refresh not in json.dumps(stored[0])
-    assert not IMPLEMENTED_AND_QUALIFIED_FAMILIES
+    assert not device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES
 
 
 @pytest.mark.parametrize("gate", ["v2", "recovery"])

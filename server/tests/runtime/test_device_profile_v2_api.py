@@ -134,6 +134,6 @@ def test_factory_keeps_disabled_service_and_same_m5_identity() -> None:
         settings, engine, identity=cast(ProfilePairingService, identity)
     )
     assert service is not None and service._identity is identity
-    assert service._enabled() is False
+    assert service._enabled("enrollment") is False and service._enabled("session") is False
     assert build_device_profile_v2_service(settings, engine, identity=None) is None
     engine.dispose()

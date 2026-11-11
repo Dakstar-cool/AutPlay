@@ -119,7 +119,13 @@ def test_valid_start_without_m5_is_explicit_unavailable() -> None:
     )
 
 
-def test_factory_retains_handler_for_independently_disabled_flags() -> None:
+def test_factory_retains_handler_for_independently_disabled_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES",
+        frozenset({"self"}),
+    )
     from autplay.entrypoints.composition import (
         build_device_self_v2_service,
         build_profile_pairing_service,

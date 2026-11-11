@@ -26,11 +26,10 @@ from autplay.adapters.postgresql.retained_deletion_reservations import (
     RetainedDeletionReservations,
 )
 from autplay.adapters.security.tokens import Hs256AccessTokenCodec
+from autplay.domain import device_compatibility, sync_binding_v2
 from autplay.domain.canonical_json import JsonValue
-from autplay.domain.device_compatibility import IMPLEMENTED_AND_QUALIFIED_FAMILIES
 from autplay.domain.privacy_deletion import DeletionEvidenceError, DeletionRequestEvidence
 from autplay.domain.profile_pairing import public_spki
-from autplay.domain.sync_binding_v2 import IMPLEMENTED_AND_QUALIFIED_PLATFORMS
 from autplay.entrypoints import composition
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.device_portable_v2_http import build_device_portable_v2_service
@@ -38,6 +37,7 @@ from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.runtime.settings import ApiSettings, StreamSettings
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -49,7 +49,7 @@ from typed_assertions import method_owner, present, require_instance
 from .test_device_deletion_v2 import PREFIX, ROUTES, DeletionHarness, snapshot
 from .test_device_deletion_v2 import deletion_v2 as deletion_v2
 from .test_device_portable_v2 import original as portable_original
-from .test_device_profile_v2 import ENROLL_DOMAIN, signed
+from .test_device_profile_v2 import ENROLL_DOMAIN, ROTATE_DOMAIN, signed
 from .test_device_profile_v2 import profile as profile
 from .test_portable_accounts import passport
 from .test_profile_pairing_m5b import _exchange_request
@@ -119,7 +119,14 @@ class Mounted:
 
 
 @pytest.fixture
-def mounted(deletion_v2: DeletionHarness, database_url: str, tmp_path: Path) -> Iterator[Mounted]:
+def mounted(
+    deletion_v2: DeletionHarness, database_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Mounted]:
+    # Explicit synthetic policy for exercising implementation before qualification.
+    monkeypatch.setattr(
+        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES",
+        frozenset({"enrollment", "session", "portable", "deletion"}),
+    )
     settings = settings_for(deletion_v2, database_url, tmp_path)
     app = create_app(settings)
     owner = app.state.deletion_evidence
@@ -243,13 +250,17 @@ def test_real_mounted_issuers_fail_closed_with_flags_off(
     assert snapshot(database_connection) == before
 
 
-def test_source_mount_keeps_d1_and_b1_separate_and_qualification_empty(mounted: Mounted) -> None:
+def test_source_mount_keeps_d1_and_b1_separate_and_qualification_empty(
+    mounted: Mounted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_device_qualification(monkeypatch)
     paths = set(mounted.app.openapi()["paths"])
     assert {PREFIX + "/" + route for route in ROUTES.values()} <= paths
     d1 = {path for path in paths if path.startswith("/api/v1/device-compatibility/v2/")}
     b1 = {path for path in paths if path.startswith("/api/v1/sync-binding/v2/")}
     assert len(d1) == 29 and len(b1) == 3
-    assert not IMPLEMENTED_AND_QUALIFIED_FAMILIES and not IMPLEMENTED_AND_QUALIFIED_PLATFORMS
+    assert not device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES
+    assert not sync_binding_v2.IMPLEMENTED_AND_QUALIFIED_PLATFORMS
     owner = mounted.app.state.deletion_evidence
     policy = composition._device_capability_policy(mounted.settings, owner)
     assert policy.d1.deletion_evidence_ready is True
@@ -290,12 +301,16 @@ def test_constructor_and_readiness_are_pure_and_failed_same_owner_restore_resets
 
 def test_real_mounted_deletion_terminal_replay_survives_all_admission_gates(
     mounted: Mounted,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     m, h = mounted, mounted.harness
     raw = h.wire("request")
     accepted = m.send("request", raw=raw)
     assert accepted.status_code == 200
     h.parent = accepted.json()
+    monkeypatch.setattr(
+        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES", frozenset()
+    )
     m.rebuild(
         device_compatibility_v2_enabled=False,
         account_deletion_enabled=False,
@@ -308,6 +323,55 @@ def test_real_mounted_deletion_terminal_replay_survives_all_admission_gates(
     assert cancelled.status_code == 200
     assert m.send("cancel").status_code == 200
     assert m.send("outcome").status_code == 200
+
+
+def test_mounted_source_qualification_blocks_first_effects_but_preserves_exact_replay(
+    mounted: Mounted,
+    database_connection: Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m, profile = mounted, mounted.harness.profile
+    registry = "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES"
+    prefix = "/api/v1/device-compatibility/v2/"
+
+    def post(route: str, raw: bytes) -> Response:
+        return m.client.post(
+            prefix + route, content=raw, headers={"Content-Type": "application/json"}
+        )
+
+    def denied(reply: Response) -> None:
+        assert reply.status_code == 503
+        assert reply.json()["error"]["code"] == "device_contract_unavailable"
+
+    body, key, refresh = profile.enrollment()
+    raw = signed(body, key, ENROLL_DOMAIN)
+    monkeypatch.setattr(registry, frozenset())
+    before = snapshot(database_connection)
+    denied(post("enrollment/exchanges", raw))
+    denied(m.send("request"))
+    assert snapshot(database_connection) == before
+
+    monkeypatch.setattr(registry, frozenset({"enrollment"}))
+    first = post("enrollment/exchanges", raw)
+    assert first.status_code in {200, 201}
+    binding = first.json()
+    rotation, _ = profile.rotation(binding, body, refresh)
+    rotate_raw = signed(rotation, key, ROTATE_DOMAIN)
+    before = snapshot(database_connection)
+    denied(post("sessions/rotate", rotate_raw))
+    assert snapshot(database_connection) == before
+
+    monkeypatch.setattr(registry, frozenset())
+    replay = post("enrollment/exchanges", raw)
+    assert replay.status_code == 200 and replay.json()["session_id"] == binding["session_id"]
+
+    monkeypatch.setattr(registry, frozenset({"session"}))
+    rotated = post("sessions/rotate", rotate_raw)
+    assert rotated.status_code == 200
+    monkeypatch.setattr(registry, frozenset())
+    replay = post("sessions/rotate", rotate_raw)
+    assert replay.status_code == 200
+    assert replay.json()["session_id"] == rotated.json()["session_id"]
 
 
 def test_delayed_owned_ledger_rechecks_request_before_any_effect_or_grant(

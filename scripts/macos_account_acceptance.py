@@ -23,6 +23,8 @@ import time
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
+from uuid import UUID
 
 import macos_community as community
 
@@ -216,6 +218,242 @@ def serve() -> None:
     )
 
 
+def exercise_clients(config: Path, password: str) -> list[str]:
+    """Four real process lifecycles with two isolated protected Keychains."""
+    assert sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true"
+    canonical = Path.home() / "Library/Application Support/AutPlay"
+    old_data = TEMP / "preexisting-runner-data"
+    saved_default = (
+        community.run("security", "default-keychain", "-d", "user").stdout.strip().strip('"')
+    )
+    keys: list[Path] = []
+    data_switched = False
+    try:
+        app = TEMP / "probe/AutPlay.app"
+        shutil.copytree(community.APP, app)
+        shutil.copyfile(
+            ROOT / "apps/desktop/build/libs/account-acceptance.jar",
+            app / "Contents/app/account-acceptance.jar",
+        )
+        cfg = app / "Contents/app/AutPlay.cfg"
+        text, count = re.subn(
+            r"^app.mainclass=.*$",
+            "app.mainclass=app.autplay.desktop.CommunityAccountProbe",
+            cfg.read_text(),
+            flags=re.M,
+        )
+        assert count == 1
+        text, count = re.subn(
+            r"^app.classpath=",
+            "app.classpath=$APPDIR/account-acceptance.jar:",
+            text,
+            count=1,
+            flags=re.M,
+        )
+        assert count == 1
+        cfg.write_text(text)
+        community.sign(app)
+        if canonical.exists():
+            canonical.rename(old_data)
+        data_switched = True
+        for _device in ("a", "b"):
+            key = (
+                Path.home()
+                / "Library/Keychains"
+                / ("autplay-account-ci-" + secrets.token_hex(8) + ".keychain-db")
+            )
+            community.run("security", "create-keychain", "-p", password, key)
+            keys.append(key)
+            community.run("security", "set-keychain-settings", "-lut", "3600", key)
+            community.run("security", "unlock-keychain", "-p", password, key)
+        passed = []
+        for phase, device in (("register", "a"), ("restart", "a"), ("login", "b"), ("pull", "a")):
+            if phase == "login":
+                canonical.rename(TEMP / "data-a")
+            if phase == "pull":
+                canonical.rename(TEMP / "data-b")
+                (TEMP / "data-a").rename(canonical)
+            key = keys[0 if device == "a" else 1]
+            community.run("security", "default-keychain", "-d", "user", "-s", key)
+            result = community.run(app / "Contents/MacOS/AutPlay", phase, config, timeout=360)
+            if f"AUTPLAY_ACCOUNT_PROBE_PASSED {phase}" not in result.stdout:
+                raise RuntimeError("Missing production account acceptance marker")
+            passed.append(phase)
+            print("Production Mac account acceptance passed: " + phase, flush=True)
+        return passed
+    finally:
+        cleanup_errors = []
+        try:
+            community.run("security", "default-keychain", "-d", "user", "-s", saved_default)
+        except Exception:
+            cleanup_errors.append("default_keychain")
+        for key in keys:
+            try:
+                community.run("security", "delete-keychain", key)
+            except Exception:
+                cleanup_errors.append("synthetic_keychain")
+        if data_switched:
+            try:
+                if canonical.exists():
+                    canonical.rename(TEMP / "data-final")
+                if old_data.exists():
+                    old_data.rename(canonical)
+            except Exception:
+                cleanup_errors.append("original_data")
+        if cleanup_errors:
+            raise RuntimeError("Account acceptance cleanup failed: " + ",".join(cleanup_errors))
+
+
+def validate_live_target(raw: bytes, now: datetime) -> dict:
+    """Validate operator-supplied, independently pinned deployment evidence.
+
+    This input is prepared after deployment and the final restored backup. It is
+    never derived from unauthenticated discovery and cannot contain account secrets.
+    Validation does not itself prove that deployment or restoration occurred.
+    """
+
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate field")
+            value[key] = item
+        return value
+
+    try:
+        if len(raw) > 16384:
+            raise ValueError("size")
+        target = json.loads(raw, object_pairs_hook=unique)
+        required = {
+            "kind",
+            "origin",
+            "tls_spki_b64",
+            "instance",
+            "identity_epoch",
+            "identity_spki_b64",
+            "server_source",
+            "server_image",
+            "schema_head",
+            "deployment_receipt_sha256",
+            "backup_restore_receipt_sha256",
+            "production_deployed",
+            "backup_restore_verified",
+            "observed_at_utc",
+        }
+        if type(target) is not dict or set(target) != required:
+            raise ValueError("fields")
+        non_text = {"identity_epoch", "production_deployed", "backup_restore_verified"}
+        if any(type(target[key]) is not str for key in required - non_text):
+            raise ValueError("field type")
+        if target["kind"] != "AUTPLAY_LIVE_9443_ACCEPTANCE":
+            raise ValueError("kind")
+        if (
+            target["production_deployed"] is not True
+            or target["backup_restore_verified"] is not True
+        ):
+            raise ValueError("deployment boundary")
+        origin = urlsplit(target["origin"])
+        if (
+            origin.scheme != "https"
+            or not origin.hostname
+            or origin.port != 9443
+            or origin.username is not None
+            or origin.password is not None
+            or origin.path
+            or origin.query
+            or origin.fragment
+            or not target["origin"].isascii()
+            or any(ord(c) <= 32 for c in target["origin"])
+            or "?" in target["origin"]
+            or "#" in target["origin"]
+        ):
+            raise ValueError("origin")
+        if str(UUID(target["instance"])) != target["instance"]:
+            raise ValueError("identity")
+        if (
+            type(target["identity_epoch"]) is not int
+            or not 1 <= target["identity_epoch"] <= 9007199254740991
+        ):
+            raise ValueError("epoch")
+        if not re.fullmatch("[0-9a-f]{40}", target["server_source"]):
+            raise ValueError("source")
+        if not re.fullmatch("sha256:[0-9a-f]{64}", target["server_image"]):
+            raise ValueError("image")
+        if target["schema_head"] != "0074_device_deletion_v2":
+            raise ValueError("schema")
+        for key in ("deployment_receipt_sha256", "backup_restore_receipt_sha256"):
+            if not re.fullmatch("[0-9a-f]{64}", target[key]):
+                raise ValueError("receipt")
+        for key in ("tls_spki_b64", "identity_spki_b64"):
+            value = base64.b64decode(target[key], validate=True)
+            if not 32 <= len(value) <= 2048 or base64.b64encode(value).decode() != target[key]:
+                raise ValueError("public key")
+        observed = datetime.fromisoformat(target["observed_at_utc"])
+        if observed.tzinfo is None or not -120 <= (now - observed).total_seconds() <= 3600:
+            raise ValueError("stale target observation")
+        return target
+    except ValueError, TypeError, KeyError, OverflowError:
+        raise ValueError("Invalid live acceptance target evidence") from None
+
+
+def live_acceptance() -> None:
+    """Prepared live check; never starts, migrates, patches or configures the server."""
+    assert sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true"
+    assert not TEMP.exists(), "Live acceptance requires a fresh disposable hosted runner"
+    target_path = Path(os.environ["AUTPLAY_LIVE_ACCEPTANCE_TARGET"])
+    info = target_path.lstat()
+    if (
+        not target_path.is_file()
+        or target_path.is_symlink()
+        or info.st_mode & 0o077
+        or info.st_uid != os.getuid()
+    ):
+        raise RuntimeError("Live target evidence must be an owner-only regular file")
+    if info.st_size > 16384:
+        raise RuntimeError("Live target evidence is too large")
+    raw = target_path.read_bytes()
+    target = validate_live_target(raw, datetime.now(UTC))
+    if target["server_source"] != os.environ["GITHUB_SHA"]:
+        raise RuntimeError("Live acceptance requires the exact deployed candidate source")
+    TEMP.mkdir(mode=0o700)
+    client = {
+        key: target[key]
+        for key in ("origin", "tls_spki_b64", "instance", "identity_epoch", "identity_spki_b64")
+    }
+    # No owner ID/password input exists. Each attempt creates its own bounded synthetic account.
+    client.update(public_id="mac_live_" + secrets.token_hex(6), password=secrets.token_urlsafe(36))
+    config = TEMP / "client.private.json"
+    private_json(config, client)
+    passed = exercise_clients(config, secrets.token_urlsafe(32))
+    report = {
+        "status": "passed",
+        "scope": "LIVE_9443_SYNTHETIC_ACCOUNT",
+        "source_commit": os.environ["GITHUB_SHA"],
+        "checks": passed,
+        "real_keychain": True,
+        "real_https": True,
+        "production_graph": True,
+        "production_9443_verified": True,
+        "synthetic_candidate_qualification": False,
+        "target_evidence_sha256": hashlib.sha256(raw).hexdigest(),
+        "target_identity_verified_by_client": True,
+        "operator_deployment_evidence": {
+            key: target[key]
+            for key in (
+                "server_source",
+                "server_image",
+                "schema_head",
+                "deployment_receipt_sha256",
+                "backup_restore_receipt_sha256",
+                "observed_at_utc",
+            )
+        },
+        "journal": "unchanged v1 protocol",
+        "devices": 2,
+    }
+    (community.OUT / "live-account-acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
 def acceptance() -> None:
     assert sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true"
     assert not TEMP.exists(), "Acceptance requires a fresh disposable hosted runner"
@@ -249,12 +487,6 @@ def acceptance() -> None:
         "start",
     )
     api = None
-    canonical = Path.home() / "Library/Application Support/AutPlay"
-    old_data = TEMP / "preexisting-runner-data"
-    saved_default = (
-        community.run("security", "default-keychain", "-d", "user").stdout.strip().strip('"')
-    )
-    keys: list[Path] = []
     try:
         env = dict(
             os.environ,
@@ -299,58 +531,7 @@ def acceptance() -> None:
             time.sleep(1)
         else:
             raise RuntimeError("Isolated API readiness deadline")
-        app = TEMP / "probe/AutPlay.app"
-        shutil.copytree(community.APP, app)
-        shutil.copyfile(
-            ROOT / "apps/desktop/build/libs/account-acceptance.jar",
-            app / "Contents/app/account-acceptance.jar",
-        )
-        cfg = app / "Contents/app/AutPlay.cfg"
-        text, count = re.subn(
-            r"^app.mainclass=.*$",
-            "app.mainclass=app.autplay.desktop.CommunityAccountProbe",
-            cfg.read_text(),
-            flags=re.M,
-        )
-        assert count == 1
-        text, count = re.subn(
-            r"^app.classpath=",
-            "app.classpath=$APPDIR/account-acceptance.jar:",
-            text,
-            count=1,
-            flags=re.M,
-        )
-        assert count == 1
-        cfg.write_text(text)
-        community.sign(app)
-        if canonical.exists():
-            canonical.rename(old_data)
-        for _device in ("a", "b"):
-            key = (
-                Path.home()
-                / "Library/Keychains"
-                / ("autplay-account-ci-" + secrets.token_hex(8) + ".keychain-db")
-            )
-            community.run("security", "create-keychain", "-p", password, key)
-            keys.append(key)
-            community.run("security", "set-keychain-settings", "-lut", "3600", key)
-            community.run("security", "unlock-keychain", "-p", password, key)
-        passed = []
-        for phase, device in (("register", "a"), ("restart", "a"), ("login", "b"), ("pull", "a")):
-            if phase == "login":
-                canonical.rename(TEMP / "data-a")
-            if phase == "pull":
-                canonical.rename(TEMP / "data-b")
-                (TEMP / "data-a").rename(canonical)
-            key = keys[0 if device == "a" else 1]
-            community.run("security", "default-keychain", "-d", "user", "-s", key)
-            result = community.run(
-                app / "Contents/MacOS/AutPlay", phase, TEMP / "client.private.json", timeout=360
-            )
-            if f"AUTPLAY_ACCOUNT_PROBE_PASSED {phase}" not in result.stdout:
-                raise RuntimeError("Missing production account acceptance marker")
-            passed.append(phase)
-            print("Production Mac account acceptance passed: " + phase, flush=True)
+        passed = exercise_clients(TEMP / "client.private.json", password)
         (community.OUT / "account-acceptance.json").write_text(
             json.dumps(
                 {
@@ -379,13 +560,6 @@ def acceptance() -> None:
                 api.kill()
                 api.wait(timeout=10)
         run(PG / "bin/pg_ctl", "-D", DATA, "-m", "fast", "-w", "stop")
-        community.run("security", "default-keychain", "-d", "user", "-s", saved_default)
-        for key in keys:
-            community.run("security", "delete-keychain", key)
-        if old_data.exists():
-            if canonical.exists():
-                canonical.rename(TEMP / "data-final")
-            old_data.rename(canonical)
         if (TEMP / "http-evidence.jsonl").exists():
             # Only fixed route templates, status and response sizes; no bodies or credentials.
             shutil.copyfile(
@@ -394,4 +568,4 @@ def acceptance() -> None:
 
 
 if __name__ == "__main__":
-    {"serve": serve, "run": acceptance}[sys.argv[1]]()
+    {"serve": serve, "run": acceptance, "live": live_acceptance}[sys.argv[1]]()

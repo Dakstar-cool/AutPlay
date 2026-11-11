@@ -144,7 +144,12 @@ def test_factory_retains_disabled_handlers_and_m5_identity() -> None:
     )
     identity = cast(ProfilePairingService, object())
     service = build_device_admission_v2_service(settings, engine, identity=identity)
-    assert service is not None and service._identity is identity and service._enabled() is False
+    assert (
+        service is not None
+        and service._identity is identity
+        and service._enabled("admission") is False
+        and service._enabled("trusted") is False
+    )
     assert build_device_admission_v2_service(settings, engine, identity=None) is None
     with client_for(None) as client:
         for route in ROUTES:

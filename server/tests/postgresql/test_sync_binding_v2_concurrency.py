@@ -427,7 +427,7 @@ def test_actual_rotation_and_bind_use_two_real_locked_sessions(
         rotate = DeviceProfileServiceV2(
             w.sessions,
             identity=w.identity,
-            enabled=lambda: True,
+            enabled=lambda family: True,
             access_tokens=h.profile.identity._access,
             access_ttl=h.profile.identity._access_ttl,
         )

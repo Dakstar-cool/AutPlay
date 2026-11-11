@@ -27,6 +27,15 @@ V2_PLATFORMS: Final = ("ANDROID", "MACOS")
 IMPLEMENTED_AND_QUALIFIED_FAMILIES: Final[frozenset[str]] = frozenset()
 
 
+def family_is_qualified(family: str) -> bool:
+    """Source-owned first-effect gate, also used by direct production routes.
+
+    Call only at the service's existing admission boundary, after any bounded
+    committed replay. Operator flags cannot qualify an implementation.
+    """
+    return family in IMPLEMENTED_AND_QUALIFIED_FAMILIES
+
+
 class DeviceCompatibilityError(RuntimeError):
     """Sanitized negotiation failure; never carries tokens or identity material."""
 

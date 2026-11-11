@@ -52,6 +52,7 @@ from autplay.entrypoints.device_profile_v2_http import create_device_profile_v2_
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
 from autplay.runtime.http import install_error_handlers
 from cryptography.hazmat.primitives.asymmetric import ec
+from device_qualification import set_device_qualification
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from psycopg import Connection
@@ -224,7 +225,7 @@ def profile(
     service = DeviceProfileServiceV2(
         pairing_service._sessions,
         identity=pairing_service,
-        enabled=lambda: gate["enabled"],
+        enabled=lambda family: gate["enabled"],
         access_tokens=pairing_service._access,
         access_ttl=pairing_service._access_ttl,
     )
@@ -702,8 +703,11 @@ def test_two_operations_cannot_race_for_same_uuid(
 
 
 def test_qualified_registry_stays_empty_and_v2_receipts_use_existing_pruning(
-    profile: ProfileHarness, database_connection: Connection[Any]
+    profile: ProfileHarness,
+    database_connection: Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_device_qualification(monkeypatch)
     body, binding, key, refresh = profile.enroll()
     rotation, _ = profile.rotation(binding, body, refresh)
     profile.service.session_rotate(signed(rotation, key, ROTATE_DOMAIN))

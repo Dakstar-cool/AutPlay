@@ -145,7 +145,7 @@ def pa2_v2(
         DeviceAdmissionServiceV2(
             runtime.sessions,
             identity=profile.identity,
-            enabled=lambda: profile.gate["enabled"],
+            enabled=lambda family: profile.gate["enabled"],
         ),
         profile.gate,
         profile.platform,
