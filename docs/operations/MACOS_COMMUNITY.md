@@ -128,6 +128,14 @@ in the same transaction as its track and ACK. This closes the incremental-pull
 gap without manufacturing a relation when the requested library ID already exists.
 The live server and production qualification registries are not enabled by this run.
 
+Source `57a3383dbcb061c7b76bfc06c25b26c2fc103108`, with SQLAlchemy 2.0.57, also passed
+[community run 43019153008](https://github.com/Dakstar-cool/AutPlay/actions/runs/43019153008).
+All 30 shared/desktop tests and all four account phases passed, together with the
+native Keychain, signed bundle and mounted-DMG checks. The downloaded DMG's SHA-256
+is `dd44e0b70d69fb7fc77a8f90861b9714db8af418ccd2601b6e19d651ad63f94e`.
+This run still uses the isolated candidate registry override; it does not qualify
+the final source registries or the deployed port 9443 target.
+
 ## Selective activation and live target check
 
 Production composition gates first effects by the source-owned D1 family registry,
@@ -147,6 +155,15 @@ regression retains the raw driver connection so garbage collection cannot concea
 an ownership leak. Backend disappearance is observed within a fixed bound using
 fresh observer transactions, after owner, pool and driver cleanup assertions.
 This dependency change requires fresh complete qualification before deployment.
+
+[Server run 43016503571](https://github.com/Dakstar-cool/AutPlay/actions/runs/43016503571)
+passed 8,547 tests, including B1 cleanup, with 111 platform skips, but failed one
+TCP deadline/EOF observation. Investigation independently reproduced a test-state
+leak: worker startup left the root logger attached to pytest's closed stderr.
+Server tests now restore the prior root handlers and level after each test.
+Production transport, deadlines and test timeouts are unchanged. The logging leak
+is verified; its role in the observed timeout remains a hypothesis pending the next
+complete server gate. Qualification registries remain closed.
 
 `scripts/macos_account_acceptance.py live` is a prepared, separate live-target mode.
 It has not been executed against production. It requires a disposable macOS GitHub
