@@ -9,7 +9,9 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CompletionStage
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 
@@ -44,6 +46,18 @@ public object CommunityAccountProbe {
             val shared: DesktopAccountAuthorityOwners = owner(production, "owners")
             val services: DesktopAccountServices = owner(production, "services")
             val account = controller.accounts
+            suspend fun currentLease(): AccountLease {
+                // The real host observer also reads authority after CONNECTED publication.
+                // Wait only for read contention; authority and reconciliation failures stay fatal.
+                repeat(100) {
+                    try { return shared.authority.currentLease().settled() }
+                    catch (failure: ExecutionException) {
+                        if ((failure.cause as? AccountStoreException)?.failure != AccountFailure.ACCOUNT_BUSY) throw failure
+                    }
+                    delay(100)
+                }
+                error("ACCOUNT_PROBE_AUTHORITY_BUSY_DEADLINE")
+            }
             val tls = AccountTlsTrust.ExactSpki(Base64.getDecoder().decode(value("tls_spki_b64")))
             val transport = ConfirmedAccountTransport.confirm(value("origin"), value("origin"), tls, tls, true, true)
             val discovery = account.inspectDiscovery(transport).settled().use { it.bodyCopy() }
@@ -79,17 +93,17 @@ public object CommunityAccountProbe {
             check(account.state.value.phase == DesktopAccountPhase.CONNECTED)
             println("ACCOUNT_PROBE_CONNECTED $phase")
             if (phase == "register") writePrivate(privateDir.resolve("profile-a.private"),
-                shared.authority.currentLease().settled().profileId.value.toByteArray())
+                currentLease().profileId.value.toByteArray())
             if (phase == "restart") {
-                val before = shared.authority.currentLease().settled()
+                val before = currentLease()
                 controller.profiles.rotateSession().settled()
-                val after = shared.authority.currentLease().settled()
+                val after = currentLease()
                 check(after.sessionFamily == before.sessionFamily && after.sessionGeneration > before.sessionGeneration)
                 println("ACCOUNT_PROBE_KEYCHAIN_SESSION_ROTATED")
             }
             suspend fun synchronize() {
                 repeat(4) {
-                    val lease = shared.authority.currentLease().settled()
+                    val lease = currentLease()
                     check(services.session.authorityReconciled(lease))
                     val result = services.sync.runPass(lease)
                     if (result.failure == null && result.phase in setOf(DesktopSyncPhase.SYNCED, DesktopSyncPhase.IDLE)) {
@@ -102,12 +116,12 @@ public object CommunityAccountProbe {
             }
             synchronize()
             if (phase in setOf("register", "login")) {
-                val lease = shared.authority.currentLease().settled()
+                val lease = currentLease()
                 val change = AccountCreateTrack(uuid(), uuid(), uuid(), "Acceptance $phase", "Synthetic acceptance", System.currentTimeMillis())
                 check(services.domain.createTrack(lease, change).eventId != null)
                 synchronize()
             }
-            val rows = shared.store.readTracks(shared.authority.currentLease().settled(), null)
+            val rows = shared.store.readTracks(currentLease(), null)
             check(rows.any { it.title == "Acceptance register" })
             if (phase in setOf("login", "pull")) check(rows.any { it.title == "Acceptance login" })
             println("ACCOUNT_PROBE_SYNC_ROUNDTRIP_PASSED $phase")
