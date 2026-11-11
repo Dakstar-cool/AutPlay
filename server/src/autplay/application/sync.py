@@ -689,13 +689,16 @@ class SyncService:
             and event["aggregate_type"] != _GENERIC_EVENT_TYPES[event["event_type"]]
         ):
             return _rejected(event, "UNSUPPORTED_AGGREGATE_TYPE", request_id)
+        created_library_entries: list[LibraryEntryRow] = []
         try:
             # Keep the durable inbox/terminal ACK in the outer transaction while
             # guaranteeing that a rejected projection cannot leak dirty ORM state.
             # SQLAlchemy flushes the pending inbox before opening this savepoint;
             # all projection reads and mutations happen only after it exists.
             with session.begin_nested():
-                row, operation, rebalanced_entries = self._generic_row(session, principal, event)
+                row, operation, rebalanced_entries = self._generic_row(
+                    session, principal, event, created_library_entries
+                )
                 for related_entry in rebalanced_entries:
                     related_entry.updated_at = _now()
                 session.flush()
@@ -749,6 +752,32 @@ class SyncService:
                 server_row_version=version,
             )
         )
+        if created_library_entries:
+            # Publish the parent before its relation, including when pull pages split here.
+            # The projection, both events and the inbox ACK share the outer transaction.
+            session.flush()
+            for entry in created_library_entries:
+                session.add(
+                    SyncEventRow(
+                        event_id=uuid5(
+                            NAMESPACE_URL,
+                            f"autplay:nested-library-v1:{event['event_id']}:{entry.library_entry_id}",
+                        ),
+                        user_id=principal.user_id,
+                        origin_device_id=principal.device_id,
+                        event_type="LIBRARY_ENTRY_UPSERTED",
+                        schema_version=1,
+                        aggregate_type="LIBRARY_ENTRY",
+                        aggregate_id=entry.library_entry_id,
+                        payload={
+                            "server_user_track_ref_id": str(entry.user_track_ref_id),
+                            "source": entry.source,
+                            "availability_status": entry.availability_status,
+                        },
+                        operation="UPSERT",
+                        server_row_version=entry.row_version,
+                    )
+                )
         if operation == "DELETE":
             session.flush()
             session.add(
@@ -764,7 +793,11 @@ class SyncService:
         return _applied(event, version)
 
     def _generic_row(
-        self, session: Session, principal: Principal, event: dict[str, Any]
+        self,
+        session: Session,
+        principal: Principal,
+        event: dict[str, Any],
+        created_library_entries: list[LibraryEntryRow],
     ) -> tuple[object, str, tuple[PlaylistEntryRow, ...]]:
         kind, payload, aggregate_id, base, now = (
             event["event_type"],
@@ -822,18 +855,18 @@ class SyncService:
                 nested_entry_id is not None
                 and session.get(LibraryEntryRow, nested_entry_id) is None
             ):
-                session.add(
-                    LibraryEntryRow(
-                        library_entry_id=nested_entry_id,
-                        user_id=principal.user_id,
-                        user_track_ref_id=row.user_track_ref_id,
-                        source="IMPORT",
-                        availability_status="PENDING",
-                        added_at=now,
-                        created_at=now,
-                        updated_at=now,
-                    )
+                nested_entry = LibraryEntryRow(
+                    library_entry_id=nested_entry_id,
+                    user_id=principal.user_id,
+                    user_track_ref_id=row.user_track_ref_id,
+                    source="IMPORT",
+                    availability_status="PENDING",
+                    added_at=now,
+                    created_at=now,
+                    updated_at=now,
                 )
+                session.add(nested_entry)
+                created_library_entries.append(nested_entry)
             return row, "UPSERT", ()
         if kind == "USER_TRACK_REF_PATCHED":
             row = _owned_row(session, UserTrackRefRow, aggregate_id, principal)

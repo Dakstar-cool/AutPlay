@@ -16,6 +16,7 @@ from autplay.adapters.postgresql.models import (
     BootstrapSnapshotItemRow,
     DeviceRow,
     DeviceSyncCursorRow,
+    LibraryEntryRow,
     PlaylistEntryRow,
     SyncEventRow,
     UserAccountRow,
@@ -934,6 +935,141 @@ def test_p07_local_payloads_preference_and_playlist_parent_authorization(databas
             service.push(other, {**other_body, "events": [forged]}, uuid4())["acks"][0]["outcome"]
             == "CONFLICT"
         )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("occupied_by", [None, "owner", "other"])
+def test_nested_library_creation_reaches_incremental_pull_once(
+    database_url: str, occupied_by: str | None
+) -> None:
+    """A nested insert publishes an existing v1 relation event, never a guessed relation."""
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "nested-owner")
+            receiver = _additional_device(session, owner, "nested-receiver")
+            other = _principal(session, "nested-other")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"nested-library-regression-secret")
+        body = _bind(service, owner, uuid4())
+        receiver_body = _bind(service, receiver, uuid4())
+        other_body = _bind(service, other, uuid4())
+        library_id, ref_id = uuid4(), uuid4()
+        existing_ref = uuid4()
+        if occupied_by is not None:
+            occupant, occupant_body = (
+                (owner, body) if occupied_by == "owner" else (other, other_body)
+            )
+            existing = _event(
+                occupant,
+                existing_ref,
+                1,
+                "USER_TRACK_REF_CREATED",
+                "USER_TRACK_REF",
+                {"title": "existing", "library_entry_local_id": str(library_id)},
+            )
+            assert (
+                service.push(occupant, {**occupant_body, "events": [existing]}, uuid4())["acks"][0][
+                    "outcome"
+                ]
+                == "APPLIED"
+            )
+        checkpoint = service.pull(receiver, {**receiver_body, "cursor": None})["next_cursor"]
+        event = _event(
+            owner,
+            ref_id,
+            2 if occupied_by == "owner" else 1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "incremental", "library_entry_local_id": str(library_id)},
+        )
+        pushed = service.push(owner, {**body, "events": [event]}, uuid4())["acks"][0]
+        assert pushed["outcome"] == "APPLIED"
+        assert (
+            service.push(owner, {**body, "events": [event]}, uuid4())["acks"][0]["outcome"]
+            == "DUPLICATE"
+        )
+        first = service.pull(receiver, {**receiver_body, "cursor": checkpoint, "limit": 1})
+        assert len(first["events"]) == 1
+        assert first["events"][0]["aggregate_type"] == "USER_TRACK_REF"
+        assert first["events"][0]["aggregate_server_id"] == str(ref_id)
+        second = service.pull(
+            receiver, {**receiver_body, "cursor": first["next_cursor"], "limit": 1}
+        )
+        with Session(engine) as session:
+            library = session.get(LibraryEntryRow, library_id)
+            assert library is not None
+            assert library.user_track_ref_id == (ref_id if occupied_by is None else existing_ref)
+            if occupied_by is None:
+                assert len(second["events"]) == 1
+                related = second["events"][0]
+                assert related["event_type"] == "LIBRARY_ENTRY_UPSERTED"
+                assert related["aggregate_server_id"] == str(library_id)
+                assert related["server_row_version"] == library.row_version == 1
+                assert related["payload"] == {
+                    "server_user_track_ref_id": str(ref_id),
+                    "source": "IMPORT",
+                    "availability_status": "PENDING",
+                }
+            else:
+                assert second["events"] == []
+        assert (
+            service.pull(receiver, {**receiver_body, "cursor": second["next_cursor"]})["events"]
+            == []
+        )
+    finally:
+        engine.dispose()
+
+
+def test_nested_library_publication_failure_rolls_back_parent_and_ack(database_url: str) -> None:
+    """A failure after the parent flush leaves a retryable, wholly uncommitted command."""
+    from sqlalchemy import event as sql_events
+
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            owner = _principal(session, "nested-rollback")
+            session.commit()
+        service = SyncService(engine, cursor_secret=b"nested-library-rollback-secret")
+        body = _bind(service, owner, uuid4())
+        ref_id, library_id = uuid4(), uuid4()
+        event = _event(
+            owner,
+            ref_id,
+            1,
+            "USER_TRACK_REF_CREATED",
+            "USER_TRACK_REF",
+            {"title": "atomic", "library_entry_local_id": str(library_id)},
+        )
+
+        def fail_relation(session: Session, _context: Any, _instances: Any) -> None:
+            if any(
+                isinstance(row, SyncEventRow) and row.aggregate_type == "LIBRARY_ENTRY"
+                for row in session.new
+            ):
+                raise RuntimeError("synthetic relation publication failure")
+
+        sql_events.listen(service._sessions, "before_flush", fail_relation)
+        try:
+            with pytest.raises(RuntimeError, match="synthetic relation publication failure"):
+                service.push(owner, {**body, "events": [event]}, uuid4())
+        finally:
+            sql_events.remove(service._sessions, "before_flush", fail_relation)
+        with Session(engine) as session:
+            assert session.get(UserTrackRefRow, ref_id) is None
+            assert session.get(LibraryEntryRow, library_id) is None
+            assert (
+                session.scalars(
+                    select(SyncEventRow).where(SyncEventRow.user_id == owner.user_id)
+                ).all()
+                == []
+            )
+        assert (
+            service.push(owner, {**body, "events": [event]}, uuid4())["acks"][0]["outcome"]
+            == "APPLIED"
+        )
+        assert len(service.pull(owner, {**body, "cursor": None})["events"]) == 2
     finally:
         engine.dispose()
 
