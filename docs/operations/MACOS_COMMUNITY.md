@@ -112,6 +112,22 @@ The branch includes the D1/B1 server continuation, with its production qualifica
 registries still closed. Native Keychain evidence alone is not server deployment
 or an end-to-end account/sync acceptance claim.
 
+## Account and sync acceptance, 2026-11-11
+
+Source `4ce6a5af043c1d7d5199e5c0f191d6d1d5a8dd2f` passed
+[the full macOS 26 community run](https://github.com/Dakstar-cool/AutPlay/actions/runs/43000705704),
+including the signed DMG, native Keychain checks and all four account phases:
+registration, restart with session rotation, login from a second Keychain and
+incremental synchronization back to the first installation. The fixture used
+PostgreSQL 18.4 and pgvector 0.8.6, verified HTTPS and the production account graph.
+
+The account proof is `account-acceptance.json`; it identifies both the exact source
+and the disposable candidate qualification. The server now publishes an actually
+inserted nested library entry as the existing v1 `LIBRARY_ENTRY_UPSERTED` event,
+in the same transaction as its track and ACK. This closes the incremental-pull
+gap without manufacturing a relation when the requested library ID already exists.
+The live server and production qualification registries are not enabled by this run.
+
 ## Differences from the paid design
 
 * A self-signed certificate provides a stable project identity, but Apple does not

@@ -385,13 +385,13 @@ def test_rollback_refuses_to_discard_collected_data(
     recommendations, _ = _runtime(pair)
     recommendations.recommend(RecommendationQuery(pair.actor.user_id, RecommendationSurface.HOME))
     before = _documents(pair)
+    with Session(pair.engine) as session:
+        before_revision = session.scalar(text("SELECT version_num FROM alembic_version"))
     with pytest.raises(DBAPIError, match="requires an empty collection"):
         database_harness.downgrade(database_name, "0066_portable_local_account")
     assert _documents(pair) == before
     with Session(pair.engine) as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0067_sona_native_collection"
-        )
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == before_revision
 
 
 def test_history_identity_is_frozen_outside_the_p11_candidate_list(pair: PairingHarness) -> None:
