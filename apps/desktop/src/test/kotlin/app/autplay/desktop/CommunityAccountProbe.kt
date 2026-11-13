@@ -1,6 +1,8 @@
 package app.autplay.desktop
 
 import app.autplay.application.desktop.account.*
+import app.autplay.application.securestate.SecureStateFailure
+import app.autplay.application.securestate.SecureStateStatus
 import app.autplay.desktop.account.*
 import app.autplay.desktop.sync.*
 import java.nio.file.Files
@@ -22,6 +24,18 @@ import kotlinx.serialization.json.*
  */
 public object CommunityAccountProbe {
     private fun <T> CompletionStage<T>.settled(): T = toCompletableFuture().get(90, TimeUnit.SECONDS)
+    private suspend fun <T> readProtectedState(read: () -> T): T {
+        // CONNECTED also wakes the real host observer. Retry only admission contention on
+        // these read-only assertions, never an account command or an ambiguous outcome.
+        repeat(100) {
+            try { return read() }
+            catch (failure: ExecutionException) {
+                if ((failure.cause as? SecureStateFailure)?.status != SecureStateStatus.IN_USE) throw failure
+            }
+            delay(100)
+        }
+        error("ACCOUNT_PROBE_PROTECTED_READ_BUSY_DEADLINE")
+    }
     private inline fun <reified T> owner(parent: Any, name: String): T =
         parent.javaClass.getDeclaredField(name).run { isAccessible = true; get(parent) as T }
     private fun uuid(): AccountUuid = AccountUuid(UUID.randomUUID().toString())
@@ -82,13 +96,13 @@ public object CommunityAccountProbe {
                     }
                     "login" -> {
                         check(!Files.exists(privateDir.resolve("recovery.private")))
-                        val before = account.secure.snapshot().settled()
+                        val before = readProtectedState { account.secure.snapshot().settled() }
                         check(before.selected.none { it.slot == app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved })
-                        fun rejectedLogin(id: String, secret: CharArray) {
+                        suspend fun rejectedLogin(id: String, secret: CharArray) {
                             try {
                                 val failure = runCatching { account.loginPortable(id, secret).settled() }.exceptionOrNull()
                                 check((failure as? ExecutionException)?.cause.let { it as? AccountControlException }?.code == AccountControlFailure.AUTHENTICATION_FAILED)
-                                val after = account.secure.snapshot().settled()
+                                val after = readProtectedState { account.secure.snapshot().settled() }
                                 check(after.selected == before.selected && after.keys == before.keys &&
                                     after.reservations.isEmpty() && after.firstBind == null && after.activeBinding == null)
                             } finally { secret.fill('\u0000') }
@@ -109,10 +123,12 @@ public object CommunityAccountProbe {
                 currentLease().profileId.value.toByteArray())
             if (phase == "login") writePrivate(privateDir.resolve("profile-b.private"), currentLease().profileId.value.toByteArray())
             if (phase in setOf("login", "restart-login")) {
-                val control = account.secure.snapshot().settled()
-                account.secure.read(requireNotNull(app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved), control).settled().use { record ->
-                    val rootPayload = record?.payload as? app.autplay.application.securestate.PortableRootPayload ?: error("MISSING_PASSWORD_LOGIN_ROOT")
-                    check(!rootPayload.hasRecoveryDocument && rootPayload.everEnrolled)
+                readProtectedState {
+                    val control = account.secure.snapshot().settled()
+                    account.secure.read(requireNotNull(app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved), control).settled().use { record ->
+                        val rootPayload = record?.payload as? app.autplay.application.securestate.PortableRootPayload ?: error("MISSING_PASSWORD_LOGIN_ROOT")
+                        check(!rootPayload.hasRecoveryDocument && rootPayload.everEnrolled)
+                    }
                 }
             }
             if (phase == "restart") {
