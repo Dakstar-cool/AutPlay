@@ -202,7 +202,13 @@ def serve() -> None:
         TEMP / "client.private.json",
         {
             "origin": origin,
+            "stream_origin": origin,
             "tls_spki_b64": base64.b64encode(
+                tls.public_key().public_bytes(
+                    serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+            ).decode(),
+            "stream_tls_spki_b64": base64.b64encode(
                 tls.public_key().public_bytes(
                     serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
                 )
@@ -334,7 +340,9 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
         required = {
             "kind",
             "origin",
+            "stream_origin",
             "tls_spki_b64",
+            "stream_tls_spki_b64",
             "instance",
             "identity_epoch",
             "identity_spki_b64",
@@ -359,22 +367,23 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
             or target["backup_restore_verified"] is not True
         ):
             raise ValueError("deployment boundary")
-        origin = urlsplit(target["origin"])
-        if (
-            origin.scheme != "https"
-            or not origin.hostname
-            or origin.port != 9443
-            or origin.username is not None
-            or origin.password is not None
-            or origin.path
-            or origin.query
-            or origin.fragment
-            or not target["origin"].isascii()
-            or any(ord(c) <= 32 for c in target["origin"])
-            or "?" in target["origin"]
-            or "#" in target["origin"]
-        ):
-            raise ValueError("origin")
+        for key in ("origin", "stream_origin"):
+            origin = urlsplit(target[key])
+            if (
+                origin.scheme != "https"
+                or not origin.hostname
+                or origin.port != 9443
+                or origin.username is not None
+                or origin.password is not None
+                or origin.path
+                or origin.query
+                or origin.fragment
+                or not target[key].isascii()
+                or any(ord(c) <= 32 for c in target[key])
+                or "?" in target[key]
+                or "#" in target[key]
+            ):
+                raise ValueError("origin")
         if str(UUID(target["instance"])) != target["instance"]:
             raise ValueError("identity")
         if (
@@ -391,7 +400,7 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
         for key in ("deployment_receipt_sha256", "backup_restore_receipt_sha256"):
             if not re.fullmatch("[0-9a-f]{64}", target[key]):
                 raise ValueError("receipt")
-        for key in ("tls_spki_b64", "identity_spki_b64"):
+        for key in ("tls_spki_b64", "stream_tls_spki_b64", "identity_spki_b64"):
             value = base64.b64decode(target[key], validate=True)
             if not 32 <= len(value) <= 2048 or base64.b64encode(value).decode() != target[key]:
                 raise ValueError("public key")
@@ -401,6 +410,59 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
         return target
     except ValueError, TypeError, KeyError, OverflowError:
         raise ValueError("Invalid live acceptance target evidence") from None
+
+
+def verify_live_source(server_source: str, client_source: str, root: Path = ROOT) -> dict:
+    """Permit a harness repair only when every other tracked byte matches deployment."""
+    allowed = {
+        ".github/workflows/ci-macos-community.yml",
+        "scripts/macos_account_acceptance.py",
+        "apps/desktop/src/test/kotlin/app/autplay/desktop/CommunityAccountProbe.kt",
+        "tests/release/test_macos_live_acceptance.py",
+    }
+
+    def git(*args: str) -> bytes:
+        return subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, check=True, timeout=30
+        ).stdout
+
+    try:
+        if not all(re.fullmatch("[0-9a-f]{40}", value) for value in (server_source, client_source)):
+            raise ValueError("source")
+        if git("rev-parse", "HEAD").decode().strip() != client_source:
+            raise ValueError("checkout")
+        git("merge-base", "--is-ancestor", server_source, client_source)
+        if git("diff", "--no-ext-diff", "--name-only", "HEAD", "--"):
+            raise ValueError("modified checkout")
+        changed = set(
+            filter(
+                None,
+                git(
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-renames",
+                    "--name-only",
+                    "-z",
+                    server_source,
+                    client_source,
+                    "--",
+                )
+                .decode()
+                .split("\0"),
+            )
+        )
+        if not changed <= allowed:
+            raise ValueError("production source differs")
+    except ValueError, subprocess.SubprocessError:
+        raise RuntimeError(
+            "Live acceptance source does not match deployed production code"
+        ) from None
+    return {
+        "server_source": server_source,
+        "client_source": client_source,
+        "production_tree_equal": True,
+        "harness_only_paths": sorted(changed),
+    }
 
 
 def live_acceptance() -> None:
@@ -420,12 +482,19 @@ def live_acceptance() -> None:
         raise RuntimeError("Live target evidence is too large")
     raw = target_path.read_bytes()
     target = validate_live_target(raw, datetime.now(UTC))
-    if target["server_source"] != os.environ["GITHUB_SHA"]:
-        raise RuntimeError("Live acceptance requires the exact deployed candidate source")
+    source_proof = verify_live_source(target["server_source"], os.environ["GITHUB_SHA"])
     TEMP.mkdir(mode=0o700)
     client = {
         key: target[key]
-        for key in ("origin", "tls_spki_b64", "instance", "identity_epoch", "identity_spki_b64")
+        for key in (
+            "origin",
+            "stream_origin",
+            "tls_spki_b64",
+            "stream_tls_spki_b64",
+            "instance",
+            "identity_epoch",
+            "identity_spki_b64",
+        )
     }
     # No owner ID/password input exists. Each attempt creates its own bounded synthetic account.
     client.update(public_id="mac_live_" + secrets.token_hex(6), password=secrets.token_urlsafe(36))
@@ -436,6 +505,7 @@ def live_acceptance() -> None:
         "status": "passed",
         "scope": "LIVE_9443_SYNTHETIC_ACCOUNT",
         "source_commit": os.environ["GITHUB_SHA"],
+        "source_qualification": source_proof,
         "checks": passed,
         "real_keychain": True,
         "real_https": True,

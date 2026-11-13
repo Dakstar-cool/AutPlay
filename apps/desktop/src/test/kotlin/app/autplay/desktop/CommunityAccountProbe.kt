@@ -59,7 +59,8 @@ public object CommunityAccountProbe {
                 error("ACCOUNT_PROBE_AUTHORITY_BUSY_DEADLINE")
             }
             val tls = AccountTlsTrust.ExactSpki(Base64.getDecoder().decode(value("tls_spki_b64")))
-            val transport = ConfirmedAccountTransport.confirm(value("origin"), value("origin"), tls, tls, true, true)
+            val streamTls = AccountTlsTrust.ExactSpki(Base64.getDecoder().decode(value("stream_tls_spki_b64")))
+            val transport = ConfirmedAccountTransport.confirm(value("origin"), value("stream_origin"), tls, streamTls, true, true)
             val discovery = account.inspectDiscovery(transport).settled().use { it.bodyCopy() }
             try {
                 account.selectServer(transport, discovery, value("instance"), value("identity_epoch").toLong(),
