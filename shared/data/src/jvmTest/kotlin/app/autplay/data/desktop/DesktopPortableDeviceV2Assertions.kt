@@ -131,6 +131,18 @@ internal fun desktopPortableDeviceV2Assertions(): Unit {
         return result
     }
     try {
+        fun loginDocument(response: JsonObject = fixture(Codec.Purpose.LOGIN), id: String = document.publicId,
+            trust: TrustedM5Identity = trusted(), clock: Instant = now): PortableAccountDocument =
+            Codec.loginDocument(bytes(response), trust, Codec.Platform.MACOS, id, clock)
+        assertEquals(document.fields, loginDocument().fields)
+        rejected(Codec.Failure.SCOPE_MISMATCH) { loginDocument(id = "another_account") }
+        rejected(Codec.Failure.SCOPE_MISMATCH) { loginDocument(fixture(Codec.Purpose.REGISTER)) }
+        rejected(Codec.Failure.SCOPE_MISMATCH) { loginDocument(fixture(Codec.Purpose.LOGIN, Codec.Platform.ANDROID)) }
+        rejected(Codec.Failure.IDENTITY_MISMATCH) { loginDocument(trust = trusted(id = otherId)) }
+        rejected(Codec.Failure.EXPIRED) { loginDocument(clock = now.plusSeconds(120)) }
+        rejected(Codec.Failure.SCOPE_MISMATCH) {
+            loginDocument(changedChallenge(fixture(Codec.Purpose.LOGIN), "document_sha256", JsonPrimitive("0".repeat(64))))
+        }
         PortableAccountCrypto.unlock(document, password).use { unlocked ->
             for (purpose in Codec.Purpose.entries) for (platform in Codec.Platform.entries)
                 for (field in listOf("api_origin", "stream_origin")) {

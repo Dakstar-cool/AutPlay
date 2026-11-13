@@ -79,6 +79,7 @@ internal class DesktopAccountUiOwner(
             when (command) {
                 is DesktopAccountCommand.Secret -> command.clear()
                 is DesktopAccountCommand.CreatePortable -> command.password.clear()
+                is DesktopAccountCommand.LoginPortable -> command.password.clear()
                 is DesktopAccountCommand.Discover -> command.enteredOrigin.clear()
                 is DesktopAccountCommand.RecoveryPreview -> command.clear()
                 is DesktopAccountCommand.PinnedTransport -> command.clear()

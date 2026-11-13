@@ -33,7 +33,7 @@ public object CommunityAccountProbe {
     @JvmStatic public fun main(args: Array<String>): Unit = runBlocking {
         check(args.size == 2 && System.getProperty("os.name") == "Mac OS X")
         val phase = args[0]
-        check(phase in setOf("register", "restart", "login", "pull"))
+        check(phase in setOf("register", "restart", "login", "restart-login", "pull"))
         val configPath = Path.of(args[1])
         val config = Json.parseToJsonElement(Files.readString(configPath)).jsonObject
         fun value(name: String): String = config.getValue(name).jsonPrimitive.content
@@ -81,20 +81,40 @@ public object CommunityAccountProbe {
                         account.connectPortable(password, register = true).settled()
                     }
                     "login" -> {
-                        val bytes = Files.readAllBytes(privateDir.resolve("recovery.private"))
-                        try {
-                            account.importPortable(bytes).settled()
-                            account.acknowledgeRecoveryExport(bytes).settled()
-                        } finally { bytes.fill(0) }
-                        account.connectPortable(password, register = false).settled()
+                        check(!Files.exists(privateDir.resolve("recovery.private")))
+                        val before = account.secure.snapshot().settled()
+                        check(before.selected.none { it.slot == app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved })
+                        fun rejectedLogin(id: String, secret: CharArray) {
+                            try {
+                                val failure = runCatching { account.loginPortable(id, secret).settled() }.exceptionOrNull()
+                                check((failure as? ExecutionException)?.cause.let { it as? AccountControlException }?.code == AccountControlFailure.AUTHENTICATION_FAILED)
+                                val after = account.secure.snapshot().settled()
+                                check(after.selected == before.selected && after.keys == before.keys &&
+                                    after.reservations.isEmpty() && after.firstBind == null && after.activeBinding == null)
+                            } finally { secret.fill('\u0000') }
+                        }
+                        rejectedLogin(value("public_id"), "incorrect synthetic login password".toCharArray())
+                        rejectedLogin("missing_" + UUID.randomUUID().toString().replace("-", "").take(12), password.copyOf())
+                        account.loginPortable(value("public_id"), password).settled()
+                        check(!account.state.value.recoveryExportRequired)
+                        println("ACCOUNT_PROBE_PASSWORD_LOGIN_WITHOUT_RECOVERY_PASSED")
                     }
-                    else -> account.restoreBinding(Files.readString(privateDir.resolve("profile-a.private"))).settled()
+                    else -> account.restoreBinding(Files.readString(privateDir.resolve(
+                        if (phase == "restart-login") "profile-b.private" else "profile-a.private"))).settled()
                 }
             } finally { password.fill('\u0000') }
             check(account.state.value.phase == DesktopAccountPhase.CONNECTED)
             println("ACCOUNT_PROBE_CONNECTED $phase")
             if (phase == "register") writePrivate(privateDir.resolve("profile-a.private"),
                 currentLease().profileId.value.toByteArray())
+            if (phase == "login") writePrivate(privateDir.resolve("profile-b.private"), currentLease().profileId.value.toByteArray())
+            if (phase in setOf("login", "restart-login")) {
+                val control = account.secure.snapshot().settled()
+                account.secure.read(requireNotNull(app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved), control).settled().use { record ->
+                    val rootPayload = record?.payload as? app.autplay.application.securestate.PortableRootPayload ?: error("MISSING_PASSWORD_LOGIN_ROOT")
+                    check(!rootPayload.hasRecoveryDocument && rootPayload.everEnrolled)
+                }
+            }
             if (phase == "restart") {
                 val before = currentLease()
                 controller.profiles.rotateSession().settled()
@@ -124,7 +144,7 @@ public object CommunityAccountProbe {
             }
             val rows = shared.store.readTracks(currentLease(), null)
             check(rows.any { it.title == "Acceptance register" })
-            if (phase in setOf("login", "pull")) check(rows.any { it.title == "Acceptance login" })
+            if (phase in setOf("login", "restart-login", "pull")) check(rows.any { it.title == "Acceptance login" })
             println("ACCOUNT_PROBE_SYNC_ROUNDTRIP_PASSED $phase")
         } finally { runtime.close() }
         println("AUTPLAY_ACCOUNT_PROBE_PASSED $phase")

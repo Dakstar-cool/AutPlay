@@ -232,7 +232,7 @@ def serve() -> None:
 
 
 def exercise_clients(config: Path, password: str) -> list[str]:
-    """Four real process lifecycles with two isolated protected Keychains."""
+    """Real process lifecycles, including password-only login, with two protected Keychains."""
     assert sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true"
     canonical = Path.home() / "Library/Application Support/AutPlay"
     old_data = TEMP / "preexisting-runner-data"
@@ -280,8 +280,16 @@ def exercise_clients(config: Path, password: str) -> list[str]:
             community.run("security", "set-keychain-settings", "-lut", "3600", key)
             community.run("security", "unlock-keychain", "-p", password, key)
         passed = []
-        for phase, device in (("register", "a"), ("restart", "a"), ("login", "b"), ("pull", "a")):
+        for phase, device in (
+            ("register", "a"),
+            ("restart", "a"),
+            ("login", "b"),
+            ("restart-login", "b"),
+            ("pull", "a"),
+        ):
             if phase == "login":
+                # The recipient gets only its ID/password and independently pinned server target.
+                (TEMP / "recovery.private").unlink()
                 canonical.rename(TEMP / "data-a")
             if phase == "pull":
                 canonical.rename(TEMP / "data-b")
@@ -291,6 +299,11 @@ def exercise_clients(config: Path, password: str) -> list[str]:
             result = community.run(app / "Contents/MacOS/AutPlay", phase, config, timeout=360)
             if f"AUTPLAY_ACCOUNT_PROBE_PASSED {phase}" not in result.stdout:
                 raise RuntimeError("Missing production account acceptance marker")
+            if (
+                phase == "login"
+                and "ACCOUNT_PROBE_PASSWORD_LOGIN_WITHOUT_RECOVERY_PASSED" not in result.stdout
+            ):
+                raise RuntimeError("Missing password-only login and rejection evidence")
             passed.append(phase)
             print("Production Mac account acceptance passed: " + phase, flush=True)
         return passed
@@ -413,12 +426,13 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
 
 
 def verify_live_source(server_source: str, client_source: str, root: Path = ROOT) -> dict:
-    """Permit a harness repair only when every other tracked byte matches deployment."""
+    """Keep deployed server inputs exact while separately qualifying client-only changes."""
     allowed = {
         ".github/workflows/ci-macos-community.yml",
         "scripts/macos_account_acceptance.py",
         "apps/desktop/src/test/kotlin/app/autplay/desktop/CommunityAccountProbe.kt",
         "tests/release/test_macos_live_acceptance.py",
+        "docs/operations/MACOS_COMMUNITY.md",
     }
 
     def git(*args: str) -> bytes:
@@ -451,7 +465,10 @@ def verify_live_source(server_source: str, client_source: str, root: Path = ROOT
                 .split("\0"),
             )
         )
-        if not changed <= allowed:
+        client_changes = {
+            path for path in changed - allowed if path.startswith(("apps/desktop/", "shared/"))
+        }
+        if not changed - client_changes <= allowed:
             raise ValueError("production source differs")
     except ValueError, subprocess.SubprocessError:
         raise RuntimeError(
@@ -460,8 +477,9 @@ def verify_live_source(server_source: str, client_source: str, root: Path = ROOT
     return {
         "server_source": server_source,
         "client_source": client_source,
-        "production_tree_equal": True,
-        "harness_only_paths": sorted(changed),
+        "server_tree_equal": True,
+        "client_only_paths": sorted(client_changes),
+        "harness_only_paths": sorted(changed - client_changes),
     }
 
 
@@ -507,6 +525,9 @@ def live_acceptance() -> None:
         "source_commit": os.environ["GITHUB_SHA"],
         "source_qualification": source_proof,
         "checks": passed,
+        "password_login_without_recovery": True,
+        "negative_login_preserves_local_state": True,
+        "password_login_restart_verified": True,
         "real_keychain": True,
         "real_https": True,
         "production_graph": True,
@@ -624,6 +645,9 @@ def acceptance() -> None:
                     "production_9443_verified": False,
                     "production_graph": True,
                     "checks": passed,
+                    "password_login_without_recovery": True,
+                    "negative_login_preserves_local_state": True,
+                    "password_login_restart_verified": True,
                     "real_keychain": True,
                     "real_https": True,
                     "journal": "unchanged v1 protocol",

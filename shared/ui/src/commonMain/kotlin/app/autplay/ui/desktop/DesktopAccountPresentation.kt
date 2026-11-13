@@ -25,6 +25,10 @@ public data class DesktopAccountPermit(
     public val requiresPassword: Boolean = false,
 )
 
+public fun DesktopAccountPermit.acceptsCommand(command: DesktopAccountCommand): Boolean =
+    action == command.action && targetId == command.targetId &&
+        (!requiresPassword || command is DesktopAccountCommand.Secret || command is DesktopAccountCommand.LoginPortable)
+
 /** One synchronous handoff. The receiver must consume/copy before dispatch returns. */
 public class DesktopAccountSecret(text: String) {
     private var value: CharArray? = text.toCharArray()
@@ -81,6 +85,10 @@ public sealed interface DesktopAccountCommand {
         override val action: DesktopAccountAction = DesktopAccountAction.CreatePortable
         override fun toString(): String = "DesktopAccountCommand.CreatePortable(<redacted>)"
     }
+    public class LoginPortable(public val publicId: String, public val password: DesktopAccountSecret) : DesktopAccountCommand {
+        override val action: DesktopAccountAction = DesktopAccountAction.LoginPortable
+        override fun toString(): String = "DesktopAccountCommand.LoginPortable(<redacted>)"
+    }
     public class Discover(public val enteredOrigin: DesktopAccountSecret) : DesktopAccountCommand {
         override val action: DesktopAccountAction = DesktopAccountAction.Discover
         override fun toString(): String = "DesktopAccountCommand.Discover(<redacted>)"
@@ -135,7 +143,7 @@ public enum class DesktopAccountCondition {
     Ready, Loading, Empty, Offline, Locked, RecoveryNeeded, Unsupported, Attention, Pending, Unavailable,
 }
 public enum class DesktopAccountIssue {
-    None, Retry, Reconnect, Unlock, Recover, Capacity, IdentityChanged, Expired, Conflict,
+    None, Retry, Reconnect, Unlock, Authentication, Recover, Capacity, IdentityChanged, Expired, Conflict,
     ExportExists, ExportReadback, Unsupported, Storage, CancelPending,
 }
 public data class DesktopAccountOperation(
@@ -155,6 +163,7 @@ public class DesktopPortableAccountView(
     /** Opaque frozen proposal IDs, never recovery documents or keys. */
     public val rotationPreviewId: String? = null,
     public val reauthenticationId: String? = null,
+    public val recoveryAvailable: Boolean = false,
 ) { override fun toString(): String = "DesktopPortableAccountView(<redacted>)" }
 
 /** Exact decision data is rendered only in the transport confirmation surface. */

@@ -161,7 +161,7 @@ public class PortableRootPayload(
 ) : SecurePayload() {
     override val kind: SecureRecordKind = SecureRecordKind.PORTABLE_ROOT
     init {
-        secureRequire(passport.size in 2..4096 && recovery.size in 2..65536 && lineage.size in 2..49152 && ownershipCutoffMs in 0..SecureStateLimits.INTEGER)
+        secureRequire(passport.size in 2..4096 && (recovery.isEmpty() || recovery.size in 2..65536) && lineage.size in 2..49152 && ownershipCutoffMs in 0..SecureStateLimits.INTEGER)
         secureRequire(localMediaGuard.size <= 512)
         if (localMediaGuard.isNotEmpty()) SecureMediaGuardCodec.readLocal(localMediaGuard)
         val document = app.autplay.application.portableaccount.PortableAccountDocument.parse(passport)
@@ -183,16 +183,21 @@ public class PortableRootPayload(
                 try { secureRequire(code.size == 32 && java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(code) == entry.string("recovery_code")) } finally { code.fill(0) }
             } finally { bytes.fill(0) }
         }
-        val recoveryObject = SecureJson.parse(recovery, 65536)
-        recoveryObject.exact("format", "version", "account", "recovery_code", "predecessors")
-        secureRequire(recoveryObject.string("format") == "autplay-portable-account-recovery" && recoveryObject.number("version") == 2L)
-        val currentCode = java.util.Base64.getUrlDecoder().decode(recoveryObject.string("recovery_code"))
-        try { secureRequire(currentCode.size == 32 && java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(currentCode) == recoveryObject.string("recovery_code")) } finally { currentCode.fill(0) }
-        val current = SecureJson.encode(document.fields)
-        val recoveryAccount = SecureJson.encode(recoveryObject.getValue("account"))
-        try { secureRequire(current.contentEquals(recoveryAccount)) } finally { current.fill(0); recoveryAccount.fill(0) }
-        secureRequire(recoveryObject["predecessors"] == history["predecessors"])
+        // Password login proves the existing ROOT but cannot recover its independent recovery code.
+        // Only an enrolled passport with no invented predecessor archive may omit that material.
+        if (recovery.isEmpty()) secureRequire(everEnrolled && entries.isEmpty()) else {
+            val recoveryObject = SecureJson.parse(recovery, 65536)
+            recoveryObject.exact("format", "version", "account", "recovery_code", "predecessors")
+            secureRequire(recoveryObject.string("format") == "autplay-portable-account-recovery" && recoveryObject.number("version") == 2L)
+            val currentCode = java.util.Base64.getUrlDecoder().decode(recoveryObject.string("recovery_code"))
+            try { secureRequire(currentCode.size == 32 && java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(currentCode) == recoveryObject.string("recovery_code")) } finally { currentCode.fill(0) }
+            val current = SecureJson.encode(document.fields)
+            val recoveryAccount = SecureJson.encode(recoveryObject.getValue("account"))
+            try { secureRequire(current.contentEquals(recoveryAccount)) } finally { current.fill(0); recoveryAccount.fill(0) }
+            secureRequire(recoveryObject["predecessors"] == history["predecessors"])
+        }
     }
+    public val hasRecoveryDocument: Boolean = recovery.isNotEmpty()
     private val values: List<SecretBytes> = listOf(passport, recovery, lineage).map { SecretBytes(it) }
     private val localGuard: SecretBytes = SecretBytes(localMediaGuard)
     public fun passportCopy(): ByteArray = values[0].copy()

@@ -3,6 +3,9 @@ package app.autplay.ui.desktop
 internal enum class DesktopAccountText(val ru: String, val en: String) {
     Workspace("Аккаунт и ваша музыка", "Account and your music"),
     Portable("Переносимый аккаунт", "Portable account"),
+    Login("Вход по ID и паролю", "Log in with ID and password"),
+    LoginHelp("Введите ID и пароль аккаунта, сохранённого на выбранном сервере. Файл восстановления для входа не нужен.", "Enter the ID and password of an account saved on the selected server. No recovery file is required to log in."),
+    RecoveryUnavailable("На этом Mac нет файла восстановления: аккаунт загружен с сервера по паролю. Сохранённый ранее файл продолжает действовать.", "This Mac has no recovery file: the account was downloaded using your password. Your previously saved recovery file remains valid."),
     Connection("Личный сервер", "Personal server"),
     Self("Другое ваше устройство", "Another device of yours"),
     Devices("Устройства и сеансы", "Devices and sessions"),
@@ -13,7 +16,7 @@ internal enum class DesktopAccountText(val ru: String, val en: String) {
     ImportMatching("Сопоставление импорта", "Import matching"),
     ServerRecovery("Восстановление доступа к серверу", "Server access recovery"),
     ServerRecoveryHelp("Код восстановления сервера восстанавливает доступ к этому серверу. Файл переносимого аккаунта используется отдельно.", "A server recovery code restores access to this server. The portable account recovery file is a separate flow."),
-    PortableHelp("Пароль открывает переносимую личность. Подключение к серверу и локальная библиотека имеют отдельные состояния.", "Your password unlocks the portable identity. Server connection and the local library have separate states."),
+    PortableHelp("Уже есть аккаунт? Выберите личный сервер и войдите по ID и паролю. Здесь можно создать новый аккаунт или открыть сохранённый на этом Mac.", "Already have an account? Select your personal server and log in with ID and password. Here you can create an account or unlock one saved on this Mac."),
     Password("Пароль", "Password"),
     NewPassword("Новый пароль", "New password"),
     RepeatPassword("Повторите пароль", "Repeat password"),
@@ -238,6 +241,7 @@ internal fun desktopAccountIssueText(issue: DesktopAccountIssue, language: Deskt
         DesktopAccountIssue.Retry -> "Повторите действие после обновления состояния." to "Refresh the state, then retry."
         DesktopAccountIssue.Reconnect -> "Подключитесь заново; локальные данные сохранены." to "Reconnect; local data is retained."
         DesktopAccountIssue.Unlock -> "Откройте аккаунт для продолжения." to "Unlock the account to continue."
+        DesktopAccountIssue.Authentication -> "Не удалось войти. Проверьте ID и пароль аккаунта." to "Could not log in. Check the account ID and password."
         DesktopAccountIssue.Recover -> "Откройте восстановление доступа." to "Open access recovery."
         DesktopAccountIssue.Capacity -> "Недостаточно места или достигнут предел хранения. Новые действия приостановлены." to "Storage is full or a storage limit was reached. New actions are paused."
         DesktopAccountIssue.IdentityChanged -> "Идентичность сервера или сертификат изменились. Проверьте их перед новым подключением." to "Server identity or certificate changed. Review them before reconnecting."

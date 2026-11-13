@@ -125,7 +125,7 @@ def test_probe_packaging_failure_preserves_existing_app_data(
     assert original.read_bytes() == b"synthetic-existing-state"
 
 
-def test_source_proof_accepts_only_harness_changes_and_rejects_dirty_or_runtime_changes(
+def test_source_proof_accepts_client_changes_and_rejects_dirty_or_server_changes(
     tmp_path: Path,
 ) -> None:
     def git(*args: str) -> str:
@@ -158,14 +158,23 @@ def test_source_proof_accepts_only_harness_changes_and_rejects_dirty_or_runtime_
     runtime.write_text("original_runtime = True\n")
     baseline = commit()
     exact = tool.verify_live_source(baseline, baseline, tmp_path)
-    assert exact["production_tree_equal"] and exact["harness_only_paths"] == []
+    assert exact["server_tree_equal"] and exact["harness_only_paths"] == []
+    assert exact["client_only_paths"] == []
     harness = tmp_path / "scripts/macos_account_acceptance.py"
     harness.parent.mkdir()
     harness.write_text("synthetic_harness_fix = True\n")
     repaired = commit()
     proof = tool.verify_live_source(baseline, repaired, tmp_path)
-    assert proof["production_tree_equal"]
+    assert proof["server_tree_equal"]
     assert proof["harness_only_paths"] == ["scripts/macos_account_acceptance.py"]
+    desktop = tmp_path / "apps/desktop/PasswordLogin.kt"
+    desktop.parent.mkdir(parents=True)
+    desktop.write_text("// Synthetic client-only update\n")
+    repaired = commit()
+    proof = tool.verify_live_source(baseline, repaired, tmp_path)
+    assert proof["server_tree_equal"] and proof["client_only_paths"] == [
+        "apps/desktop/PasswordLogin.kt"
+    ]
     runtime.write_text("changed_runtime = True\n")
     with pytest.raises(RuntimeError, match="does not match deployed production code"):
         tool.verify_live_source(baseline, repaired, tmp_path)
