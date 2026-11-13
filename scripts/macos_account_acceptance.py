@@ -1,7 +1,7 @@
 """Real signed Mac account/sync acceptance against an isolated, pinned PostgreSQL server.
 
 Private test state stays under RUNNER_TEMP. Only aggregate evidence enters artifacts.
-The synthetic qualification switch is confined to this test launcher, never production.
+The isolated server uses the checked source registries without replacing qualification policy.
 """
 
 from __future__ import annotations
@@ -99,13 +99,20 @@ def serve() -> None:
     """Child process uses unchanged production composition and actual authentication."""
     from autplay.domain import device_capability_state, device_compatibility, sync_binding_v2
 
-    # Explicit experiment before qualification: only this ephemeral local server enables candidates.
+    # Verify both producers use the released policy; this launcher cannot qualify a path.
     families = frozenset({"enrollment", "session", "portable"})
     platforms = frozenset({"ANDROID", "MACOS"})
-    device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES = families
-    device_capability_state.IMPLEMENTED_AND_QUALIFIED_FAMILIES = families
-    sync_binding_v2.IMPLEMENTED_AND_QUALIFIED_PLATFORMS = platforms
-    device_capability_state.IMPLEMENTED_AND_QUALIFIED_PLATFORMS = platforms
+    if (
+        families != device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES
+        or families != device_capability_state.IMPLEMENTED_AND_QUALIFIED_FAMILIES
+        or platforms != sync_binding_v2.IMPLEMENTED_AND_QUALIFIED_PLATFORMS
+        or platforms != device_capability_state.IMPLEMENTED_AND_QUALIFIED_PLATFORMS
+    ):
+        raise RuntimeError("Account acceptance requires the exact qualified source policy")
+    private_json(
+        TEMP / "source-qualification.json",
+        {"d1_families": sorted(families), "b1_platforms": sorted(platforms)},
+    )
     import uvicorn
     from autplay.adapters.filesystem.deletion_ledger import FilesystemDeletionLedger
     from autplay.entrypoints.api import create_app
@@ -539,7 +546,12 @@ def acceptance() -> None:
                     "source_commit": os.environ["GITHUB_SHA"],
                     "postgresql": "18.4",
                     "pgvector": "0.8.6",
-                    "synthetic_candidate_qualification": True,
+                    "scope": "ISOLATED_SYNTHETIC_ACCOUNT",
+                    "synthetic_candidate_qualification": False,
+                    "source_qualification": json.loads(
+                        (TEMP / "source-qualification.json").read_text()
+                    ),
+                    "production_9443_verified": False,
                     "production_graph": True,
                     "checks": passed,
                     "real_keychain": True,

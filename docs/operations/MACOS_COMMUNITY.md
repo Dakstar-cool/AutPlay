@@ -108,9 +108,10 @@ permission to silently replace a key or recreate an account namespace.
 
 The TLS, account enrollment, D1v2 proof domains, session renewal, revocation and
 sync authorization protocols are unchanged. A compatible server is still required.
-The branch includes the D1/B1 server continuation, with its production qualification
-registries still closed. Native Keychain evidence alone is not server deployment
-or an end-to-end account/sync acceptance claim.
+The branch includes the D1/B1 server continuation, with source qualification limited
+to enrollment, session and portable for D1, and Android/macOS for B1. Operator flags
+remain required. Native Keychain evidence alone is not server deployment or an
+end-to-end account/sync acceptance claim.
 
 ## Account and sync acceptance, 2026-11-11
 
@@ -162,8 +163,23 @@ TCP deadline/EOF observation. Investigation independently reproduced a test-stat
 leak: worker startup left the root logger attached to pytest's closed stderr.
 Server tests now restore the prior root handlers and level after each test.
 Production transport, deadlines and test timeouts are unchanged. The logging leak
-is verified; its role in the observed timeout remains a hypothesis pending the next
-complete server gate. Qualification registries remain closed.
+is verified; its role in the observed timeout was a hypothesis requiring a fresh
+complete server gate.
+
+Source `e1c4a3bc53cbe575e3c9b41888f8fc76466eb888` then passed
+[server run 43029200688](https://github.com/Dakstar-cool/AutPlay/actions/runs/43029200688):
+8,548 server tests and 342 contract/release tests, with 111 platform skips. Static
+checks passed and the owned PostgreSQL container, network and volume were removed.
+This baseline supports promoting only D1 enrollment/session/portable and B1
+Android/macOS. Admission, trusted reenrollment, self, recovery and deletion v2 stay
+closed; Android v1 flags and bounded committed replay remain unchanged.
+
+The promotion removes the isolated launcher's qualification override. It checks the
+exact source registries and their shared-policy aliases, then records them in
+`account-acceptance.json` with `synthetic_candidate_qualification=false` and scope
+`ISOLATED_SYNTHETIC_ACCOUNT`. Fresh full server and native Mac gates must verify this
+promoted source before rollout. Neither the baseline nor isolated acceptance proves
+deployment, fresh backup restoration, or successful login against the live port 9443.
 
 `scripts/macos_account_acceptance.py live` is a prepared, separate live-target mode.
 It has not been executed against production. It requires a disposable macOS GitHub
@@ -261,7 +277,8 @@ It compiles the pinned PostgreSQL/pgvector fixture, starts the production server
 behind verified HTTPS and exercises the actual signed Kotlin account graph.
 The four phases cover registration, process restart and session renewal, login
 from a second isolated Keychain, and a journal round trip between both devices.
-Candidate D1/B1 capabilities are enabled only inside this disposable test server.
+The fixture enables its operator flags and requires the checked source D1/B1 policy;
+it never adds qualification entries or replaces the production registries.
 The required success evidence is `account-acceptance.json` with all four phases;
 passing packaging or the earlier Keychain probe does not substitute for it.
 Passwords, recovery material, private configuration and raw HTTP bodies remain

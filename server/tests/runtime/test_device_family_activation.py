@@ -29,13 +29,20 @@ FAMILIES = (
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-@pytest.mark.parametrize("qualified", [frozenset(), *[frozenset({f}) for f in FAMILIES]])
+@pytest.mark.parametrize("qualified", [None, frozenset(), *[frozenset({f}) for f in FAMILIES]])
 def test_only_source_qualified_first_effects_open_and_android_v1_flags_survive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool, qualified: frozenset[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    enabled: bool,
+    qualified: frozenset[str] | None,
 ) -> None:
-    monkeypatch.setattr(
-        "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES", qualified
-    )
+    if qualified is None:
+        # Exercise the shipped policy through real composition, without registry overrides.
+        qualified = frozenset({"enrollment", "session", "portable"})
+    else:
+        monkeypatch.setattr(
+            "autplay.domain.device_compatibility.IMPLEMENTED_AND_QUALIFIED_FAMILIES", qualified
+        )
     pem = (
         ec.generate_private_key(ec.SECP256R1())
         .private_bytes(

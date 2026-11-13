@@ -12,6 +12,7 @@ from uuid import UUID
 import pytest
 import rfc8785
 from autplay.domain.canonical_json import JsonValue
+from autplay.domain.device_capability_state import DeviceCapabilityPolicy
 from autplay.domain.device_compatibility import (
     CAPABILITIES_DOMAIN,
     CAPABILITIES_MAX_BYTES,
@@ -34,6 +35,27 @@ from cryptography.hazmat.primitives.asymmetric import ec, utils
 from device_qualification import set_device_qualification
 
 NOW = datetime(2026, 10, 16, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("portable", [False, True])
+@pytest.mark.parametrize("binding", [False, True])
+def test_released_policy_only_advertises_qualified_paths(
+    enabled: bool, portable: bool, binding: bool
+) -> None:
+    policy = NegotiationPolicy(
+        enabled=enabled,
+        portable_enabled=portable,
+        self_enabled=True,
+        recovery_enabled=True,
+        deletion_enabled=True,
+        deletion_evidence_ready=True,
+    )
+    expected = ["enrollment", "portable", "session"] if portable else ["enrollment", "session"]
+    assert policy.families() == (expected if enabled else [])
+    assert DeviceCapabilityPolicy(d1=policy, binding_enabled=binding).binding_available() is (
+        enabled and binding
+    )
 
 
 def test_no_v1_path_or_operator_gate_qualifies_a_v2_family(monkeypatch: pytest.MonkeyPatch) -> None:

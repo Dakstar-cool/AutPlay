@@ -24,7 +24,9 @@ CAPABILITIES_DOMAIN: Final = "autplay:device-compatibility:negotiation:capabilit
 V2_PLATFORMS: Final = ("ANDROID", "MACOS")
 # Source-owned qualification registry. A v1 implementation or an operator flag
 # cannot add an entry. Each entry requires the entire v2 path and qualification.
-IMPLEMENTED_AND_QUALIFIED_FAMILIES: Final[frozenset[str]] = frozenset()
+IMPLEMENTED_AND_QUALIFIED_FAMILIES: Final[frozenset[str]] = frozenset(
+    {"enrollment", "session", "portable"}
+)
 
 
 def family_is_qualified(family: str) -> bool:

@@ -42,7 +42,7 @@ MAX_DEPTH: Final = 4
 DISCOVERY_DOMAIN: Final = "autplay:sync-binding:negotiation:discovery:v2\n"
 CAPABILITIES_DOMAIN: Final = "autplay:sync-binding:negotiation:capabilities:v2\n"
 # Independent from D1's eight-family registry. Source authoring is not qualification.
-IMPLEMENTED_AND_QUALIFIED_PLATFORMS: Final[frozenset[str]] = frozenset()
+IMPLEMENTED_AND_QUALIFIED_PLATFORMS: Final[frozenset[str]] = frozenset({"ANDROID", "MACOS"})
 SYNC_BINDING_V2_ENABLED_DEFAULT: Final = False
 
 
