@@ -18,7 +18,8 @@ jobs:
   android-host:
     name: Android host / Linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # The canonical host gate includes the complete D1/B1 PostgreSQL suite.
+    timeout-minutes: 120
     env:
       MICROSOFT_JDK_URL: https://aka.ms/download-jdk/microsoft-jdk-17.0.20-linux-x64.tar.gz
       MICROSOFT_JDK_SHA256: 69479b83a0e4408cc24d4dfb551db3759ba145ddce6131c6806a97d7bd8604cd
