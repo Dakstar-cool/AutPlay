@@ -3,7 +3,6 @@ package app.autplay.application.profilepairing
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
-import java.util.UUID
 
 /** Immutable guard carried by every M5 asynchronous operation. */
 data class PairingFlowSnapshot(
@@ -76,6 +75,3 @@ sealed interface PairingState {
 }
 
 enum class PairingFailure { STALE_FLOW_GENERATION, SERVER_IDENTITY_CHANGED, INCOMPATIBLE_API_MAJOR, CAPABILITY_ROLLBACK_DETECTED, AUTH_ATTENTION_REQUIRED, SERVER_UNAVAILABLE }
-
-internal fun requireCanonicalUuid(value: String) { require(runCatching { UUID.fromString(value) }.getOrNull()?.toString() == value) }
-internal fun requireSha256(value: String) { require(Regex("^[0-9a-f]{64}$").matches(value)) }

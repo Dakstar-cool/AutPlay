@@ -35,8 +35,10 @@ class PortableAccountCryptoTest {
                             try { expectFailure { PortableRecoveryFile.parse(nested) } } finally { nested.fill(0) }
                             expectFailure { PortableRecoveryFile.create(current.document, current.recoveryCode, listOf(entry, entry)) }
                             expectFailure { PortableRecoveryFile.create(current.document, current.recoveryCode, List(9) { entry }) }
-                            val foreign = PortableAccountDocument(JsonObject(previous.document.fields +
-                                ("account_id" to JsonPrimitive("819777b7-b82c-4f61-a988-38f822f0fd75"))))
+                            val foreignBytes = JsonObject(previous.document.fields +
+                                ("account_id" to JsonPrimitive("819777b7-b82c-4f61-a988-38f822f0fd75"))).toString().toByteArray()
+                            val foreign = try { PortableAccountDocument.parse(foreignBytes) }
+                            finally { foreignBytes.fill(0) }
                             PortableRecoveryPredecessor(foreign, previous.recoveryCode.copyOf()).use { alien ->
                                 expectFailure { PortableRecoveryFile.create(current.document, current.recoveryCode, listOf(alien)) }
                             }
