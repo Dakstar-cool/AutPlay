@@ -179,6 +179,8 @@ internal fun LegacySecondaryRouteRenderer(
                 onPausePlayback = actions.pauseWavePlayback,
                 onError = actions.reportError,
                 settings = state.settings,
+                libraryEntries = state.libraryEntries,
+                onOpenProfile = { actions.navigate(UiDestination.Profile) },
             )
             "Server" -> ServerFeaturesScreen(
                 isBound = state.isProfileBound,

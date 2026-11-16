@@ -646,14 +646,11 @@ internal fun AutPlayBootstrap(
                 catch (_: Exception) { pairingSafeError = "ACCOUNT_SCOPE_IDENTITY_CONFLICT" }
             }
             var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
-            LaunchedEffect(binding, onboardingComplete) {
-                waveCoordinator?.close()
+            LaunchedEffect(binding, onboardingComplete, settings.serverBaseUrl) {
+                if (binding == null || !onboardingComplete) AutPlayRuntime.releaseWaveCoordinator()
                 waveCoordinator = if (binding == null || !onboardingComplete) null else runCatching {
                     AutPlayRuntime.waveCoordinator(context, binding)
                 }.getOrNull()
-            }
-            DisposableEffect(Unit) {
-                onDispose { waveCoordinator?.close() }
             }
             var onboardingCompletionRoute by rememberSaveable { mutableStateOf<String?>(null) }
             AutPlayTheme(appearanceFrom(settings)) {
@@ -2284,189 +2281,11 @@ private fun rememberOfflineActivityLaunchers(
 }
 
 @Composable
-internal fun WaveFrontendScreen(
-    coordinator: WaveCoordinator?,
-    isProfileBound: Boolean,
-    localTrackRefId: String?,
-    resolveServerRecordingId: suspend (String) -> String?,
-    onStartPlayback: suspend () -> WavePlaybackCommandOutcome,
-    onPausePlayback: suspend () -> WavePlaybackCommandOutcome,
-    onError: (String) -> Unit,
-    settings: NonSecretSettings,
-) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val state by (coordinator?.uiState ?: flowOf(app.autplay.application.wave.WaveUiState()))
-        .collectAsState(initial = app.autplay.application.wave.WaveUiState())
-    var roomCode by remember { mutableStateOf("") }
-    var createdCode by remember { mutableStateOf<String?>(null) }
-    var inviteUserIds by remember { mutableStateOf("") }
-    var waveActionMessage by remember { mutableStateOf<Int?>(null) }
-    val guestShareTitle = stringResource(R.string.guest_share_title)
-    val inviteList = inviteUserIds.split(Regex("[,;\\s]+"))
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-    val inviteIsValid = inviteList.size <= 7 && inviteList.distinct().size == inviteList.size &&
-        inviteList.all { value -> runCatching { java.util.UUID.fromString(value) }.isSuccess }
-
-    Text(stringResource(R.string.wave_intro))
-    if (!isProfileBound || coordinator == null) {
-        Text(stringResource(R.string.wave_requires_server))
-        return
-    }
-    if (state.roomId == null) {
-        OutlinedTextField(
-            value = inviteUserIds,
-            onValueChange = { inviteUserIds = it.take(300) },
-            label = { Text(stringResource(R.string.wave_invite_codes)) },
-            isError = !inviteIsValid,
-            minLines = 2,
-        )
-        Button(enabled = inviteIsValid, onClick = {
-            scope.launch {
-                runCatching { coordinator.create(inviteList) }
-                    .onSuccess { createdCode = it }
-                    .onFailure { onError("WAVE_CREATE_UNAVAILABLE") }
-            }
-        }) { Text(stringResource(R.string.wave_create_room)) }
-        OutlinedTextField(
-            value = roomCode,
-            onValueChange = { roomCode = it.uppercase().filter(Char::isLetterOrDigit).take(10) },
-            label = { Text(stringResource(R.string.wave_room_code_label)) },
-        )
-        Button(
-            enabled = roomCode.length == 10,
-            onClick = {
-                scope.launch {
-                    runCatching { coordinator.joinByCode(roomCode) }
-                        .onFailure { onError("WAVE_JOIN_UNAVAILABLE") }
-                }
-            },
-        ) { Text(stringResource(R.string.wave_join_room)) }
-    } else {
-        createdCode?.let { code ->
-            Text(stringResource(R.string.wave_room_code, code))
-            val shareText = stringResource(R.string.wave_share_text, code)
-            val shareTitle = stringResource(R.string.wave_share_title)
-            OutlinedButton(onClick = {
-                val share = Intent(Intent.ACTION_SEND)
-                    .setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, shareText)
-                context.startActivity(Intent.createChooser(share, shareTitle))
-            }) { Text(stringResource(R.string.wave_share_code)) }
-        }
-        Text(waveStateLabel(state.state))
-        Text(stringResource(if (state.isHost) R.string.wave_you_control else R.string.wave_host_controls))
-        if (state.isHost) {
-            Column {
-                WaveHostTransferControls(
-                    state = state,
-                    onTransfer = { target -> checkNotNull(coordinator).transferHost(target.deviceId) },
-                    onError = onError,
-                )
-                Button(
-                    enabled = settings.serverBaseUrl != null && settings.m5Binding != null,
-                    onClick = {
-                        scope.launch {
-                            val origin = settings.serverBaseUrl
-                            val identity = settings.m5Binding
-                            if (origin == null || identity == null) {
-                                onError("GUEST_INVITATION_UNAVAILABLE")
-                                return@launch
-                            }
-                            runCatching {
-                                coordinator.issueGuestDocument().use { receipt ->
-                                    GuestRoomDocumentCodec.encode(
-                                        receipt,
-                                        origin,
-                                        identity.serverInstanceId,
-                                        identity.identityEpoch,
-                                    )
-                                }
-                            }.onSuccess { document ->
-                                val share = Intent(Intent.ACTION_SEND).apply {
-                                    type = GUEST_DOCUMENT_MIME_TYPE
-                                    putExtra(Intent.EXTRA_TEXT, document)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(
-                                    Intent.createChooser(
-                                        share,
-                                        guestShareTitle,
-                                    ),
-                                )
-                            }.onFailure { onError("GUEST_INVITATION_UNAVAILABLE") }
-                        }
-                    },
-                ) { Text(stringResource(R.string.guest_invite_without_account)) }
-                Button(
-                    enabled = localTrackRefId != null,
-                    onClick = {
-                        val trackRefId = localTrackRefId ?: return@Button
-                        scope.launch {
-                            val recordingId = runCatching { resolveServerRecordingId(trackRefId) }.getOrNull()
-                            if (recordingId == null) {
-                                onError("WAVE_RECORDING_NOT_SYNCED")
-                            } else {
-                                runCatching { coordinator.enqueueRecording(recordingId) }
-                                    .onFailure { onError("WAVE_QUEUE_UNAVAILABLE") }
-                            }
-                        }
-                    },
-                ) { Text(stringResource(R.string.wave_add_selected_track)) }
-                Button(onClick = {
-                    scope.launch {
-                        when (onStartPlayback()) {
-                            WavePlaybackCommandOutcome.Started -> {
-                                waveActionMessage = R.string.wave_start_scheduled
-                            }
-                            WavePlaybackCommandOutcome.WaitingForReadyDevices -> {
-                                waveActionMessage = R.string.wave_waiting_devices
-                            }
-                            WavePlaybackCommandOutcome.RoleRejected,
-                            WavePlaybackCommandOutcome.CommandFailed,
-                            -> onError("WAVE_START_UNAVAILABLE")
-                            WavePlaybackCommandOutcome.Paused -> Unit
-                        }
-                    }
-                }) { Text(stringResource(R.string.wave_start_playback)) }
-                Button(onClick = {
-                    scope.launch {
-                        when (onPausePlayback()) {
-                            WavePlaybackCommandOutcome.Paused -> Unit
-                            WavePlaybackCommandOutcome.RoleRejected,
-                            WavePlaybackCommandOutcome.CommandFailed,
-                            -> onError("WAVE_PAUSE_UNAVAILABLE")
-                            WavePlaybackCommandOutcome.Started,
-                            WavePlaybackCommandOutcome.WaitingForReadyDevices,
-                            -> Unit
-                        }
-                    }
-                }) { Text(stringResource(R.string.wave_pause_playback)) }
-            }
-            waveActionMessage?.let { Text(stringResource(it)) }
-            OutlinedButton(onClick = {
-                scope.launch {
-                    runCatching { coordinator.closeRoom() }
-                        .onFailure { onError("WAVE_CLOSE_UNAVAILABLE") }
-                }
-            }) { Text(stringResource(R.string.wave_close_room)) }
-        } else {
-            OutlinedButton(onClick = {
-                scope.launch {
-                    runCatching { coordinator.leave() }
-                        .onFailure { onError("WAVE_LEAVE_UNAVAILABLE") }
-                }
-            }) { Text(stringResource(R.string.wave_leave_room)) }
-        }
-    }
-}
-
-@Composable
 internal fun WaveHostTransferControls(
     state: app.autplay.application.wave.WaveUiState,
     onTransfer: suspend (app.autplay.application.wave.WaveHostTransferTarget) -> Unit,
     onError: (String) -> Unit,
+    enabled: Boolean = true,
 ) {
     if (!state.isHost || state.hostTransferTargets.isEmpty()) return
     val scope = rememberCoroutineScope()
@@ -2505,7 +2324,7 @@ internal fun WaveHostTransferControls(
     state.hostTransferTargets.forEachIndexed { index, target ->
         OutlinedButton(
             modifier = Modifier.testTag("wave-transfer-target-$index"),
-            enabled = !pending,
+            enabled = !pending && enabled,
             onClick = { selected = target },
         ) { Text(stringResource(R.string.wave_transfer_to, target.deviceName)) }
     }

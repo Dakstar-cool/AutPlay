@@ -9,6 +9,8 @@ from autplay.domain.admin_views import (
     AdminJobItem,
     AdminPage,
     AdminReviewItem,
+    AdminSessionFilters,
+    AdminSessionItem,
     AdminUnavailable,
     AdminVaultStatus,
     AdminWorkerHealth,
@@ -95,6 +97,48 @@ def test_session_expiry_format_is_locale_stable() -> None:
     item = AdminDeviceItem(uuid4(), "Phone", "ANDROID", now - timedelta(minutes=1))
     context = page_context(AdminPage((item,), None), "devices", locale="en")
     assert "UTC" in str(context["rows"])
+
+
+def test_session_filters_survive_pagination_and_terminal_sessions_have_no_actions() -> None:
+    now = datetime.now(UTC)
+    active, expired, revoked, current = (uuid4() for _ in range(4))
+    filters = AdminSessionFilters("ACTIVE", "24h", "no", "revoke")
+    context = page_context(
+        AdminPage(
+            (
+                AdminSessionItem(active, "ANDROID_LEGACY", "ACTIVE", now, now, False),
+                AdminSessionItem(expired, "ANDROID_LEGACY", "EXPIRED", now, now, False),
+                AdminSessionItem(revoked, "BROWSER", "REVOKED", now, now, False),
+                AdminSessionItem(current, "BROWSER", "ACTIVE", now, now, True),
+            ),
+            str(active),
+        ),
+        "sessions",
+        locale="ru",
+        session_filters=filters,
+    )
+    html = AdminTemplateRenderer().render(
+        "table.html", locale="ru", context=_base("sessions", "ru") | context
+    )
+    assert f"/admin/confirm/session/{active}?lang=ru" in html
+    assert all(str(identifier) not in html for identifier in (expired, revoked, current))
+    assert "Истекла" in html and "Отозвана" in html
+    assert 'name="state"' in html and 'value="ACTIVE" selected' in html
+    assert 'value="24h" selected' in html and 'value="no" selected' in html
+    assert 'value="revoke" selected' in html
+    assert "state=ACTIVE&amp;expires=24h&amp;current=no&amp;action=revoke" in html
+    assert f"after={active}" in html
+    assert "за последние 7 дней" in html
+
+
+def test_session_filters_remain_available_for_empty_results() -> None:
+    context = page_context(AdminPage((), None), "sessions", locale="en")
+    html = AdminTemplateRenderer().render(
+        "table.html", locale="en", context=_base("sessions", "en") | context
+    )
+    assert html.count("<select ") == 4
+    assert "Nothing to show" in html
+    assert "/admin/sessions?lang=en" in html
 
 
 def test_jobs_page_renders_download_progress_statistics_and_live_refresh() -> None:

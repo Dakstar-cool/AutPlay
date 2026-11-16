@@ -481,6 +481,20 @@ instead of a fabricated percentage.
 
 ### 9.4. Wave behavior
 
+The room lobby provides separate create and join cards, a visible canonical queue and a library
+picker. It explains the same-server invitation allowlist and each device's independent media
+authorization. Pending actions disable duplicate submission; closing a room requires confirmation.
+The host can prepare the next queue entry, then use strict start after all devices report readiness.
+Members see the queue and availability, with host controls absent.
+
+Authoritative snapshots include an optional `playback_command` containing the latest durable
+playback intent. Live invalidations refresh the snapshot without reconnecting the socket. Clients
+apply each playback sequence once, preserve prepared media during refresh and calibrate the clock
+before a new scheduled start. A late join seeks to the elapsed room position. Pause, exit and queue
+replacement cancel pending starts. The process owns the coordinator across Activity recreation;
+changing account/device/server authority releases it. Exit restores the previous ordinary queue
+paused, with its saved position, and cannot replace a newer ordinary queue selected by the user.
+
 In a Wave room:
 
 - the host may issue seek only when a versioned Wave contract carries the target position and

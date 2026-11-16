@@ -147,6 +147,11 @@ tbody tr:hover { background: #fafcfb; }
 td { max-width: 24rem; overflow-wrap: anywhere; }
 .actions { white-space: normal; }
 .actions .button { margin: .15rem .25rem .15rem 0; padding: .45rem .7rem; font-size: .76rem; }
+.session-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.session-filters > div { flex: 1 1 10rem; min-width: 0; }
+.session-filters label { margin: 0 0 .4rem; }
+.session-filter-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.session-filter-actions button, .session-filter-actions .button { margin: 0; }
 .trusted-device-list { margin-top: 0; }
 .trusted-device-table { table-layout: fixed; }
 .trusted-device-table th:first-child { width: 36%; }

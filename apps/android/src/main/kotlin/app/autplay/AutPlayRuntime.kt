@@ -37,6 +37,8 @@ import app.autplay.work.WorkManagerDeferredWorkScheduler
 object AutPlayRuntime {
     @Volatile private var databaseInstance: AutPlayDatabase? = null
     @Volatile private var guestRoomRuntimeInstance: GuestRoomRuntime? = null
+    private var waveCoordinatorIdentity: Pair<ClientEventBinding, String>? = null
+    private var waveCoordinatorInstance: WaveCoordinator? = null
 
     fun database(context: Context): AutPlayDatabase = databaseInstance ?: synchronized(this) {
         databaseInstance ?: AutPlayDatabase.open(context.applicationContext).also { databaseInstance = it }
@@ -53,6 +55,7 @@ object AutPlayRuntime {
 
     /** Instrumentation-only lifecycle seam; production keeps one database for the process. */
     fun closeDatabaseForTests() = synchronized(this) {
+        closeWaveCoordinator()
         guestRoomRuntimeInstance = null
         databaseInstance?.close()
         databaseInstance = null
@@ -117,24 +120,44 @@ object AutPlayRuntime {
     suspend fun waveCoordinator(context: Context, binding: ClientEventBinding): WaveCoordinator {
         val settingsStore = applicationNonSecretSettingsStore(context.applicationContext)
         val settings = settingsStore.settings.first()
-        check(settings.activeServerProfileId == binding.serverProfileId && settings.serverBaseUrl != null) { "WAVE_PROFILE_NOT_ACTIVE" }
-        val database = database(context)
-        return WaveCoordinator(
-            database,
-            OkHttpWaveTransport(
-                apiRootBaseUrl(settings.serverBaseUrl),
-                binding.serverProfileId,
-                AndroidKeystoreCredentialStore(context.applicationContext),
-                authBaseUrl = apiV1BaseUrl(settings.serverBaseUrl),
-                m5Rotation = m5Rotation(context),
-            ),
-            ServicePlaybackSessionOwner(context.applicationContext),
-            AndroidWaveSourceProbe(context.applicationContext, database),
-            Media3WavePrefetchExecutor(context.applicationContext, database),
-            prefetchMode = {
-                wavePrefetchMode(settingsStore.settings.first().wavePrefetchMode)
-            },
-        )
+        check(settings.activeServerProfileId == binding.serverProfileId && settings.activeUserId == binding.userId &&
+            settings.deviceId == binding.deviceId && settings.serverBaseUrl != null) { "WAVE_PROFILE_NOT_ACTIVE" }
+        val identity = binding to checkNotNull(settings.serverBaseUrl)
+        synchronized(this) { waveCoordinatorInstance.takeIf { waveCoordinatorIdentity != identity } }?.disconnectLocally()
+        return synchronized(this) {
+            if (waveCoordinatorIdentity == identity) waveCoordinatorInstance?.let { return@synchronized it }
+            waveCoordinatorInstance?.close()
+            val database = database(context)
+            WaveCoordinator(
+                database,
+                OkHttpWaveTransport(
+                    apiRootBaseUrl(settings.serverBaseUrl),
+                    binding.serverProfileId,
+                    AndroidKeystoreCredentialStore(context.applicationContext),
+                    authBaseUrl = apiV1BaseUrl(settings.serverBaseUrl),
+                    m5Rotation = m5Rotation(context),
+                ),
+                ServicePlaybackSessionOwner(context.applicationContext),
+                AndroidWaveSourceProbe(context.applicationContext, database),
+                Media3WavePrefetchExecutor(context.applicationContext, database),
+                prefetchMode = {
+                    wavePrefetchMode(settingsStore.settings.first().wavePrefetchMode)
+                },
+            ).also { waveCoordinatorInstance = it; waveCoordinatorIdentity = identity }
+        }
+    }
+
+    /** A room outlives an Activity; changing the authenticated authority releases that owner. */
+    fun closeWaveCoordinator() = synchronized(this) {
+        waveCoordinatorInstance?.close()
+        waveCoordinatorInstance = null
+        waveCoordinatorIdentity = null
+    }
+
+    suspend fun releaseWaveCoordinator() {
+        val current = synchronized(this) { waveCoordinatorInstance }
+        current?.disconnectLocally()
+        closeWaveCoordinator()
     }
 
     /** Fetches one owner/device-bound pack; callers keep serving the cached local feed on failure. */

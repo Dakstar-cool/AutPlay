@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from autplay.domain.admin_views import AdminConfirmationTarget, AdminDashboard, AdminPage
+from autplay.domain.admin_views import (
+    AdminConfirmationTarget,
+    AdminDashboard,
+    AdminPage,
+    AdminSessionFilters,
+)
 from autplay.domain.web_admin import WebActor
 
 
@@ -19,7 +24,14 @@ class AdminViews(Protocol):
     def invitations(
         self, actor: WebActor, *, limit: int, after: str | None = None
     ) -> AdminPage: ...
-    def sessions(self, actor: WebActor, *, limit: int, after: str | None = None) -> AdminPage: ...
+    def sessions(
+        self,
+        actor: WebActor,
+        *,
+        limit: int,
+        after: str | None = None,
+        filters: AdminSessionFilters | None = None,
+    ) -> AdminPage: ...
     def jobs(self, actor: WebActor, *, limit: int, after: str | None = None) -> AdminPage: ...
     def imports(self, actor: WebActor, *, limit: int, after: str | None = None) -> AdminPage: ...
     def review(self, actor: WebActor, *, limit: int, after: str | None = None) -> AdminPage: ...

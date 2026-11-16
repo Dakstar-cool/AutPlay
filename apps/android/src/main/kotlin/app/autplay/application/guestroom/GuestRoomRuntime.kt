@@ -270,13 +270,15 @@ class GuestRoomRuntime(
     }
 
     suspend fun cancel() {
-        val cancelledSessionId = synchronized(this) {
+        val (cancelledSessionId, cancelledCoordinator) = synchronized(this) {
             authorityGeneration++
             val currentSessionId = activeSessionId
-            clearProcessSecrets()
+            val currentCoordinator = coordinator
+            clearProcessSecrets(closeCoordinator = false)
             mutableState.value = GuestRoomRuntimeState()
-            currentSessionId
+            currentSessionId to currentCoordinator
         }
+        cancelledCoordinator?.disconnectLocally()
         cancelledSessionId?.let {
             database.guestRoomDao().markState(it, "CANCELLED", System.currentTimeMillis())
         }
@@ -288,7 +290,7 @@ class GuestRoomRuntime(
         errorCode: String?,
         expectedSessionId: String? = null,
     ) {
-        val terminalSessionId = synchronized(this) {
+        val (terminalSessionId, terminalCoordinator) = synchronized(this) {
             if (
                 authorityGeneration != expectedGeneration ||
                 (expectedSessionId != null && activeSessionId != expectedSessionId)
@@ -297,13 +299,15 @@ class GuestRoomRuntime(
             }
             authorityGeneration++
             val currentSessionId = activeSessionId
-            clearProcessSecrets()
+            val currentCoordinator = coordinator
+            clearProcessSecrets(closeCoordinator = false)
             mutableState.value = GuestRoomRuntimeState(
                 stage = GuestRoomStage.TERMINAL,
                 errorCode = errorCode,
             )
-            currentSessionId
+            currentSessionId to currentCoordinator
         }
+        terminalCoordinator?.disconnectLocally()
         terminalSessionId?.let {
             database.guestRoomDao().markState(it, stateCode, System.currentTimeMillis())
         }
@@ -319,8 +323,8 @@ class GuestRoomRuntime(
     ): Boolean = authorityGeneration == expectedGeneration && activeSessionId == expectedSessionId
 
     @Synchronized
-    private fun clearProcessSecrets() {
-        coordinator?.close()
+    private fun clearProcessSecrets(closeCoordinator: Boolean = true) {
+        if (closeCoordinator) coordinator?.close()
         coordinator = null
         transport?.close()
         transport = null
