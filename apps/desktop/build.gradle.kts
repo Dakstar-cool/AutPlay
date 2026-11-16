@@ -372,10 +372,9 @@ compose.desktop {
             appResourcesRootDir.set(nativeResourcesRoot)
             targetFormats(TargetFormat.Dmg)
             packageName = "AutPlay"
-            // JDK 17's macOS bundler requires a positive first version component.
-            // This installer remains an unsigned development foundation.
-            packageVersion = "1.0.0"
-            description = "AutPlay macOS development prototype"
+            // The community workflow signs this package with the retained project certificate.
+            packageVersion = "1.0.10"
+            description = "AutPlay music player for macOS"
             vendor = "AutPlay"
             includeAllModules = true
             macOS {

@@ -43,9 +43,9 @@ manifest and `SHA256SUMS`.
 | Action | Exact commit | Upstream release |
 | --- | --- | --- |
 | `actions/checkout` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | `v7.0.1` |
-| `astral-sh/setup-uv` | `20cfd1bf945f4377ade1205e4dbc17946fc9a30d` | `v10.0.1` |
-| `actions/setup-java` | `dd06d9cba3e5552c54d9f8ea23572deb30010f7c` | `v6.0.0` |
-| `actions/upload-artifact` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | `v7.0.1` |
+| `astral-sh/setup-uv` | `68559e99cc807c1eb7e9238fd43a15bba460eec2` | `v10.3.3` |
+| `actions/setup-java` | `b843ebf9b913146b38da2eaa7aeddf76074ae1ad` | `v6.1.0` |
+| `actions/upload-artifact` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | `v7.0.2` |
 
 The action commits were resolved from official upstream tags and verified commits. The hosted Linux
 jobs download the versioned Microsoft OpenJDK `17.0.20+8-LTS` x64 archive from the official

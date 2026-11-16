@@ -136,7 +136,7 @@ internal class DesktopAccountProductionRuntime private constructor(
         // The authority publishes RESERVED before J creation, then exact READY readback.
         shared.authority.initialize().hostAwait()
         initialized = true
-        val controller = DesktopAccountController.create(protected, shared.authority, "AutPlay Mac", "1.0.0")
+        val controller = DesktopAccountController.create(protected, shared.authority, "AutPlay Mac", "1.0.10")
         account = controller
         val serviceOwner = DesktopAccountServices(controller.accounts, shared.store, shared.authority, SyncGuardPublication())
         services = serviceOwner

@@ -1,7 +1,7 @@
 name: CI / macOS community
 on:
   push:
-    branches: [codex/macos-port-ci-20261110]
+    branches: [master, codex/macos-port-ci-20261110]
     paths:
       - apps/desktop/**
       - shared/**
@@ -71,14 +71,14 @@ jobs:
             --retry 3 --retry-delay 2 --output "$jdk_archive" "$MICROSOFT_JDK_URL"
           printf '%s  %s\n' "$MICROSOFT_JDK_SHA256" "$jdk_archive" | shasum -a 256 --check
       - name: Install pinned Microsoft JDK
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: jdkfile
           jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-macos-aarch64.tar.gz
           java-version: "17.0.20"
           architecture: aarch64
       - name: Install pinned uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.3"
           python-version: "3.14.7"
@@ -142,7 +142,7 @@ jobs:
         run: '"$AUTPLAY_PYTHON" scripts/macos_community.py cleanup'
       - name: Retain acceptance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-community-reports-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 3
@@ -155,7 +155,7 @@ jobs:
             apps/desktop/build/test-results/test/
             apps/desktop/build/compose/logs/
       - name: Retain verified friend-installable package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: AutPlay-community-arm64-${{ github.sha }}
           retention-days: 1
