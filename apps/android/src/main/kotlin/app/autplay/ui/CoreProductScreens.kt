@@ -44,6 +44,7 @@ import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
@@ -1139,10 +1140,12 @@ private fun LibraryTrackCard(
                 )
             }
             AutPlayIconButton(
-                icon = AutPlayIcon.Favorite,
+                icon = if (track.loved) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
                 labelRes = if (track.loved) R.string.action_liked else R.string.action_like,
                 onClick = { onLike(track.id) },
-                modifier = Modifier.testTag("library-like-${track.id}"),
+                modifier = Modifier.testTag("library-like-${track.id}")
+                    .semantics { selected = track.loved },
+                tint = if (track.loved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
             Box {
                 androidx.compose.material3.TextButton(

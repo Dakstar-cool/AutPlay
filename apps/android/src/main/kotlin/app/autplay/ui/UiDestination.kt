@@ -98,6 +98,7 @@ public enum class AutPlayIcon {
     Repeat,
     Check,
     Favorite,
+    FavoriteFilled,
     ThumbUp,
     ThumbDown,
     Timer,

@@ -167,10 +167,10 @@ public fun PlaybackMiniPlayer(
                     IconButton(
                         onClick = onLike,
                         enabled = likeEnabled,
-                        modifier = Modifier.testTag("mini-player-like"),
+                        modifier = Modifier.testTag("mini-player-like").semantics { selected = liked },
                     ) {
                         AutPlayPlatformIcon(
-                            AutPlayIcon.Favorite,
+                            if (liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
                             stringResource(if (liked) R.string.action_liked else R.string.action_like),
                             tint = if (liked) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.onMiniPlayer,
                         )

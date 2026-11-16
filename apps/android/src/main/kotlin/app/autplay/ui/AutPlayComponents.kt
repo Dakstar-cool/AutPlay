@@ -63,6 +63,7 @@ public fun AutPlayIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    tint: Color? = null,
 ) {
     val label = stringResource(labelRes)
     IconButton(
@@ -72,7 +73,7 @@ public fun AutPlayIconButton(
             .size(AutPlayTokens.dimensions.minimumTouchTarget)
             .semantics { contentDescription = label },
     ) {
-        AutPlayPlatformIcon(icon, null, Modifier.size(24.dp))
+        AutPlayPlatformIcon(icon, null, Modifier.size(24.dp), tint ?: androidx.compose.material3.LocalContentColor.current)
     }
 }
 
@@ -227,6 +228,7 @@ private fun platformIconResource(icon: AutPlayIcon): Int = when (icon) {
     AutPlayIcon.Repeat -> R.drawable.ic_autplay_repeat
     AutPlayIcon.Check -> R.drawable.ic_autplay_check
     AutPlayIcon.Favorite -> R.drawable.ic_autplay_favorite
+    AutPlayIcon.FavoriteFilled -> R.drawable.ic_autplay_favorite_filled
     AutPlayIcon.ThumbUp -> R.drawable.ic_autplay_thumb_up
     AutPlayIcon.ThumbDown -> R.drawable.ic_autplay_thumb_down
     AutPlayIcon.Timer -> R.drawable.ic_autplay_timer

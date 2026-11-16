@@ -175,7 +175,7 @@ public fun HomePlaybackHero(
                     }
                 }
                 HeroIconButton(
-                    icon = AutPlayIcon.Favorite,
+                    icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
                     label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
                     enabled = state.trackId != null && !motion.busy,
                     selected = state.liked,
