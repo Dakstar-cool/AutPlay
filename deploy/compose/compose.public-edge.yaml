@@ -33,6 +33,8 @@ services:
   migrate:
     environment: !override
       <<: *autplay-production-database-environment
+      AUTPLAY_SONA_SKIP_COLLECTION_START_MS: ${AUTPLAY_SONA_SKIP_COLLECTION_START_MS:-0}
+      AUTPLAY_SONA_SKIP_COLLECTION_END_MS: ${AUTPLAY_SONA_SKIP_COLLECTION_END_MS:-0}
     secrets: !override
       - source: autplay-database-url
         target: autplay-database-url

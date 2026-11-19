@@ -38,6 +38,7 @@ from autplay.application.internet_music import InternetMusicService
 from autplay.application.music_discovery import MusicDiscoveryService
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
+from autplay.application.sona_collection import SonaCollectionService
 from autplay.application.track_metadata import TrackMetadataService
 from autplay.application.training_consent import TrainingConsentService
 from autplay.application.web_admin import WebAdminService
@@ -700,6 +701,7 @@ def create_app(
                 discovery_automation_enabled=(
                     discovery is not None and resolved_settings.discovery_automation_enabled
                 ),
+                sona_collection=SonaCollectionService(sessionmaker(engine, expire_on_commit=False)),
                 device_admission=(
                     DeviceAdmissionWebAdapter(pairing) if pairing is not None else None
                 ),

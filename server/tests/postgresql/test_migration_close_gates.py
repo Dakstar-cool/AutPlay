@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from .conftest import DatabaseHarness
 
 REVISION_PAIRS = (
+    ("0075_sona_collection_window", "0074_device_deletion_v2"),
     ("0074_device_deletion_v2", "0073_device_recovery_v2"),
     ("0073_device_recovery_v2", "0072_device_self_v2"),
     ("0072_device_self_v2", "0071_device_admission_v2"),

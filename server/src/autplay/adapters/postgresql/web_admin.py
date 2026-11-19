@@ -786,6 +786,22 @@ class SqlAlchemyWebAdminRepository:
             raise ValueError("forbidden")
         return account
 
+    def require_current_admin_session(
+        self, actor: WebActor, *, mutation: bool
+    ) -> tuple[WebSessionRow, datetime]:
+        """Hold browser and account authority until the caller commits its transaction."""
+        row = self._locked_actor_session(actor)
+        now = self._session.scalar(select(func.clock_timestamp()))
+        if (
+            row is None
+            or not isinstance(now, datetime)
+            or row.idle_expires_at <= now
+            or row.absolute_expires_at <= now
+            or (mutation and row.token_issued_at <= now - timedelta(minutes=15))
+        ):
+            raise ValueError("authentication_required")
+        return row, now
+
     def _locked_actor_session(self, actor: WebActor) -> WebSessionRow | None:
         self._lock_actor_authority(actor)
         return self._session.scalar(

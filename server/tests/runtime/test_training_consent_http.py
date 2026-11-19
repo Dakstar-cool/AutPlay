@@ -57,6 +57,15 @@ class Service:
             "changed_at": None,
         }
 
+    def sona_variation_skips(self, principal: Principal) -> dict[str, object]:
+        assert principal == ACTOR
+        return {
+            "schema_version": 1,
+            "account_id": str(ACTOR.user_id),
+            "remaining_ms": 50,
+            "variation_skips": [],
+        }
+
     def decide(self, principal: Principal, body: dict[str, object]) -> dict[str, object]:
         assert principal == ACTOR
         return body
@@ -99,6 +108,22 @@ def private(response: HttpResponse) -> None:
     assert "private" in response.headers["cache-control"]
     assert response.headers["vary"] == "Authorization"
     assert response.headers["pragma"] == "no-cache"
+
+
+def test_sona_report_transport_requires_authentication_and_never_caches() -> None:
+    path = "/privacy/shared-training/sona-variation-skips"
+    with client() as http:
+        denied = http.get(path)
+        assert denied.status_code == 401
+        private(denied)
+        allowed = http.get(path, headers={"Authorization": "Bearer test"})
+        assert allowed.json()["account_id"] == str(ACTOR.user_id)
+        private(allowed)
+    with client(None) as http:
+        unavailable = http.get(path, headers={"Authorization": "Bearer test"})
+        assert "variation_skips" not in unavailable.json()
+        assert unavailable.status_code == 503
+        private(unavailable)
 
 
 def test_read_is_caller_owned_and_auth_errors_are_private() -> None:

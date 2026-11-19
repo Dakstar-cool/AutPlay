@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% macro tokens(operation) -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="operation_id" value="{{ operation }}">
+  <input type="hidden" name="revision" value="{{ window.revision }}">
+{%- endmacro %}
+{% block content %}
+<header class="page-heading"><div><h1>{{ t('nav_sona_collection') }}</h1>
+<p class="page-summary">{{ t('sona_summary') }}</p></div></header>
+{% if notice %}<p role="alert" class="panel">{{ t(notice) }}</p>{% endif %}
+<section class="panel">
+  <h2>{{ t('sona_state_' ~ window.state) }}</h2>
+  <dl class="facts">
+    <div><dt>{{ t('sona_start') }}</dt><dd>{{ format_datetime(window.starts_at) }}</dd></div>
+    <div><dt>{{ t('sona_end') }}</dt><dd>{{ format_datetime(window.ends_at) if window.ends_at else t('sona_no_end') }}</dd></div>
+    {% if window.stopped_at %}<div><dt>{{ t('sona_stopped_at') }}</dt><dd>{{ format_datetime(window.stopped_at) }}</dd></div>{% endif %}
+  </dl>
+  {% if window.state in ('active', 'scheduled') %}
+  <form method="post" action="/admin/sona-collection/stop?lang={{ locale }}">{{ tokens(stop_id) }}
+    <button type="submit">{{ t('sona_cancel' if window.state == 'scheduled' else 'sona_stop') }}</button>
+  </form>
+  {% endif %}
+</section>
+<section class="panel">
+  <h2>{{ t('sona_edit' if window.state in ('active', 'scheduled') else 'sona_new') }}</h2>
+  <form method="post" action="/admin/sona-collection/save?lang={{ locale }}">{{ tokens(save_id) }}
+    <input type="hidden" name="clock" value="{{ clock_label }}">
+    <p>{{ t('sona_time_help') }}</p>
+    <label for="sona-start">{{ t('sona_start') }} ({{ clock_label }})</label>
+    <input id="sona-start" name="starts_at" type="datetime-local" step="any" value="{{ field('starts_at', window.starts_at) }}">
+    <label for="sona-end">{{ t('sona_end') }} ({{ clock_label }})</label>
+    <input id="sona-end" name="ends_at" type="datetime-local" step="any" value="{{ field('ends_at', window.ends_at) }}">
+    <button type="submit">{{ t('sona_save') }}</button>
+  </form>
+</section>
+{% endblock %}

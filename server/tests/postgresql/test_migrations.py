@@ -65,12 +65,12 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0074_device_deletion_v2"]
+    assert heads == ["0075_sona_collection_window"]
     assert heads == [EXPECTED_MIGRATION_HEAD]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 182
+    assert _object_count(database_harness, empty_database_name) == 183
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -78,7 +78,28 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 182
+    assert _object_count(database_harness, empty_database_name) == 183
+
+
+def test_sona_upgrade_imports_legacy_window_and_preserves_operator_stop(
+    database_harness: DatabaseHarness, empty_database_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prior = "0074_device_deletion_v2"
+    database_harness.upgrade(empty_database_name, prior)
+    monkeypatch.setenv("AUTPLAY_SONA_SKIP_COLLECTION_START_MS", "1770000000000")
+    monkeypatch.setenv("AUTPLAY_SONA_SKIP_COLLECTION_END_MS", "1770003600000")
+    database_harness.upgrade(empty_database_name)
+    with database_harness.connect(empty_database_name) as connection:
+        assert connection.execute(
+            "SELECT (extract(epoch FROM starts_at)*1000)::bigint, "
+            "(extract(epoch FROM ends_at)*1000)::bigint, stopped_at, revision "
+            "FROM ml.sona_collection_window"
+        ).fetchone() == (1770000000000, 1770003600000, None, 0)
+        connection.execute("UPDATE ml.sona_collection_window SET stopped_at=now(), revision=1")
+        connection.commit()
+    with pytest.raises(DBAPIError, match="cannot discard an administered Sona"):
+        database_harness.downgrade(empty_database_name, prior)
+    assert _current_revision(database_harness, empty_database_name) == EXPECTED_MIGRATION_HEAD
 
 
 def test_upgrade_accepts_file_only_database_url(
@@ -199,6 +220,7 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0072_device_self_v2",
         "0073_device_recovery_v2",
         "0074_device_deletion_v2",
+        "0075_sona_collection_window",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 

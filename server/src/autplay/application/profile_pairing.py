@@ -108,6 +108,22 @@ _TRUSTED_REENROLLMENT_DOMAIN = "autplay:s1b:trusted-reenrollment:v1\n"
 SERVER_INSTANCE_ADVISORY_LOCK = 0x415554504C415905
 
 
+def device_developer_mode_enabled(s: Session, device_id: UUID) -> bool:
+    latest = s.scalar(
+        select(AuditEventRow)
+        .where(
+            AuditEventRow.target_type == "DEVICE",
+            AuditEventRow.target_id == device_id,
+            AuditEventRow.action.in_(
+                ("profile.developer_mode_enabled", "profile.developer_mode_disabled")
+            ),
+        )
+        .order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.audit_event_id.desc())
+        .limit(1)
+    )
+    return latest is not None and latest.action == "profile.developer_mode_enabled"
+
+
 class ProfilePairingService:
     """Short PostgreSQL transactions; identity private key is never persisted."""
 
@@ -1868,7 +1884,7 @@ class ProfilePairingService:
                         "device_id": None if known_device is None else str(known_device.device_id),
                         "developer_mode_enabled": False
                         if known_device is None
-                        else self._developer_mode_enabled(s, known_device.device_id),
+                        else device_developer_mode_enabled(s, known_device.device_id),
                     }
                 )
             return {"trusted_keys": items}
@@ -1890,7 +1906,7 @@ class ProfilePairingService:
                 "contract_version": "v1",
                 "schema_version": 1,
                 "device_id": str(device.device_id),
-                "enabled": self._developer_mode_enabled(s, device.device_id),
+                "enabled": device_developer_mode_enabled(s, device.device_id),
             }
 
     def manage_device_developer_mode(
@@ -1961,22 +1977,6 @@ class ProfilePairingService:
                 "enabled": enabled,
                 "terminal_at": iso8601(now),
             }
-
-    @staticmethod
-    def _developer_mode_enabled(s: Session, device_id: UUID) -> bool:
-        latest = s.scalar(
-            select(AuditEventRow)
-            .where(
-                AuditEventRow.target_type == "DEVICE",
-                AuditEventRow.target_id == device_id,
-                AuditEventRow.action.in_(
-                    ("profile.developer_mode_enabled", "profile.developer_mode_disabled")
-                ),
-            )
-            .order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.audit_event_id.desc())
-            .limit(1)
-        )
-        return latest is not None and latest.action == "profile.developer_mode_enabled"
 
     def issue_trusted_reenrollment_challenge(
         self,

@@ -280,7 +280,7 @@ def test_each_table_independently_prevents_all_downgrade_removal(
         database_harness.downgrade(database_name, "0070_device_portable_contract_v2")
     assert snapshot_schema(database_connection) == before
     assert database_connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-        "0074_device_deletion_v2",
+        "0075_sona_collection_window",
     )
     assert (
         database_connection.execute(f"SELECT * FROM account.{retained} ORDER BY 1").fetchall()

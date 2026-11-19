@@ -11,10 +11,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from autplay.adapters.postgresql.models.account import DeviceRow, UserAccountRow, UserSessionRow
 from autplay.adapters.postgresql.models.profile_pairing import ServerInstanceRow
 from autplay.adapters.postgresql.models.training_consent import (
+    SonaCollectionWindowRow,
     TrainingConsentOperationRow,
     TrainingConsentRow,
 )
 from autplay.adapters.postgresql.models.training_work import TrainingParticipantRow, TrainingRunRow
+from autplay.adapters.postgresql.variation_skips import variation_counts
+from autplay.application.profile_pairing import device_developer_mode_enabled
 from autplay.domain.auth import Principal
 from autplay.domain.profile_pairing import canonical_sha256, iso8601
 from autplay.domain.training_consent import TrainingConsentHistory, TrainingConsentIntent
@@ -93,6 +96,40 @@ class TrainingConsentService:
             if row is not None and row.decision == "GRANTED":
                 self._require_evidence(session, principal.user_id, row, history)
             return self._view(principal.user_id, row)
+
+    def sona_variation_skips(self, principal: Principal) -> dict[str, object]:
+        """Restrict the report to the collection window and the current consent grant."""
+        with self._sessions.begin() as session:
+            self._actor(session, principal)
+            window = session.get(SonaCollectionWindowRow, True, with_for_update={"read": True})
+            through = self._now(session)
+            if (
+                window is None
+                or window.state_at(through) != "active"
+                or not device_developer_mode_enabled(session, principal.device_id)
+            ):
+                raise TrainingConsentError("sona_collection_unavailable")
+            grant = session.get(TrainingConsentRow, principal.user_id, with_for_update=True)
+            if grant is None or grant.decision != "GRANTED":
+                raise TrainingConsentError("sona_collection_unavailable")
+            self._require_evidence(session, principal.user_id, grant, self._ledger.read())
+            rows = variation_counts(
+                session, principal.user_id, through, since=max(window.starts_at, grant.changed_at)
+            )
+            # Bound the lifetime of a report when the operator stops an open-ended window.
+            remaining_ms = 15_000
+            if window.ends_at is not None:
+                remaining_ms = min(
+                    remaining_ms, int((window.ends_at - self._now(session)).total_seconds() * 1000)
+                )
+            if remaining_ms <= 0:
+                raise TrainingConsentError("sona_collection_unavailable")
+            return {
+                "schema_version": 1,
+                "account_id": str(principal.user_id),
+                "remaining_ms": remaining_ms,
+                "variation_skips": rows,
+            }
 
     def _proven_grant(
         self,

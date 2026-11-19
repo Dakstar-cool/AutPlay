@@ -3,11 +3,35 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import BYTEA, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
+
+
+class SonaCollectionWindowRow(Base):
+    __tablename__ = "sona_collection_window"
+    singleton: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    starts_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    stopped_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    revision: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (
+        CheckConstraint("singleton", name="sona_window_singleton_check"),
+        CheckConstraint("revision >= 0", name="sona_window_revision_check"),
+        CheckConstraint("ends_at IS NULL OR ends_at > starts_at", name="sona_window_end_check"),
+        {"schema": "ml"},
+    )
+
+    def state_at(self, now: datetime) -> str:
+        if self.stopped_at is not None:
+            return "stopped"
+        if now < self.starts_at:
+            return "scheduled"
+        if self.ends_at is not None and now >= self.ends_at:
+            return "ended"
+        return "active"
 
 
 class TrainingConsentRow(Base):

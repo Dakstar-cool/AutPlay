@@ -38,6 +38,7 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.public_id_registration",
     "ml.training_checkpoint",
     "ml.training_execution",
+    "ml.sona_collection_window",
     "ml.training_run",
     "ml.training_participant",
     "ml.training_publication_revocation",
@@ -220,6 +221,7 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "library.portable_taste_signal": 8,
     "jobs.worker_health": 9,
     "social.public_id_registration": 3,
+    "ml.sona_collection_window": 5,
     "ml.training_run": 16,
     "ml.training_participant": 4,
     "ml.training_publication_revocation": 4,
@@ -567,7 +569,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 2098
+EXPECTED_COLUMN_COUNT = 2103
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",
