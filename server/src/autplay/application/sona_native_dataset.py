@@ -36,8 +36,11 @@ from autplay.application.recommendations import (
 from autplay.application.sona import build_sona_inference_request
 from autplay.application.sona_native_catalogue import (
     COLLECTION_V2,
+    COLLECTION_V3,
+    EXTENDED_CATALOGUE_TRACKS,
     catalogue_document,
     catalogue_matches_served,
+    unpack_extended_catalogue,
 )
 from autplay.application.sona_shadow import recommendation_ranking_document
 from autplay.application.sona_source_materialization import snapshot_track_from_document
@@ -168,7 +171,7 @@ def decode_native_capture(
     doc = json.loads(row.payload)
     _require(isinstance(doc, dict) and rfc8785.dumps(doc) == row.payload, "NONCANONICAL_CAPTURE")
     _require(
-        doc["schema"] in ("AUTPLAY_P11_NATIVE_COLLECTION_V1", COLLECTION_V2)
+        doc["schema"] in ("AUTPLAY_P11_NATIVE_COLLECTION_V1", COLLECTION_V2, COLLECTION_V3)
         and doc["producer"] == "ORIGINAL_REQUEST_TRANSACTION"
         and doc["quality_eligible"] is False
         and doc["admission_blocker"] == "TEMPORAL_SCHEMA2_DATASET_ADAPTER_REQUIRED",
@@ -249,7 +252,9 @@ def decode_native_capture(
     _require(status in {"COLLECTED", "SOURCE_LIMIT", "SOURCE_PROVENANCE_GAP"}, "UNKNOWN_STATUS")
     blockers: set[str] = set()
     catalogue = None
-    if doc["schema"] == COLLECTION_V2:
+    if doc["schema"] in (COLLECTION_V2, COLLECTION_V3):
+        extended = doc["schema"] == COLLECTION_V3
+        track_limit = EXTENDED_CATALOGUE_TRACKS if extended else RECOMMENDATION_MAX_SNAPSHOT_TRACKS
         _require(
             pipeline == baseline_pipeline_definition("2") and baseline.policy_version == "2",
             "CATALOGUE_PIPELINE_MISMATCH",
@@ -258,15 +263,23 @@ def decode_native_capture(
         catalogue_status = doc["catalogue_status"]
         if catalogue_status == "COMPLETE":
             full = doc["catalogue"]
+            if extended:
+                try:
+                    full = unpack_extended_catalogue(full, _digest(doc["catalogue_sha256"]))
+                except (ValueError, RecursionError) as exc:
+                    raise NativeDatasetRejected("CATALOGUE_ENCODING_INVALID") from exc
             _require(
                 isinstance(full, dict)
                 and isinstance(full.get("tracks"), list)
-                and len(full["tracks"]) == count_bound <= RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
+                and len(full["tracks"]) == count_bound <= track_limit,
                 "CATALOGUE_COUNT_MISMATCH",
             )
             catalogue = tuple(snapshot_track_from_document(t) for t in full["tracks"])
             expected = catalogue_document(
-                query.user_id, baseline.reference.interaction_watermark, catalogue
+                query.user_id,
+                baseline.reference.interaction_watermark,
+                catalogue,
+                extended=extended,
             )
             _require(
                 full == expected and canonical_sha256(expected) == _digest(doc["catalogue_sha256"]),
@@ -279,9 +292,9 @@ def decode_native_capture(
             _require(
                 catalogue_status in ("TRACK_LIMIT", "BYTE_LIMIT", "SERVING_WINDOW_MISMATCH")
                 and (
-                    count_bound == RECOMMENDATION_MAX_SNAPSHOT_TRACKS + 1
+                    count_bound == track_limit + 1
                     if catalogue_status == "TRACK_LIMIT"
-                    else count_bound <= RECOMMENDATION_MAX_SNAPSHOT_TRACKS
+                    else count_bound <= track_limit
                 )
                 and doc["catalogue"] is None
                 and doc["catalogue_sha256"] is None,

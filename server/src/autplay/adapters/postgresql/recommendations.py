@@ -23,6 +23,7 @@ from autplay.application.recommendations import (
     recommendation_policy_snapshot_document,
     recommendation_snapshot_limit,
 )
+from autplay.application.sona_native_catalogue import EXTENDED_CATALOGUE_TRACKS
 from autplay.domain.recommendations import (
     CandidateContribution,
     ComponentVersionRef,
@@ -314,7 +315,7 @@ class SqlAlchemyRecommendationRuntime:
                     # One extra row distinguishes a complete catalogue from overflow.
                     rows = session.execute(
                         text(_SNAPSHOT_SQL_V2),
-                        {"user_id": query.user_id, "limit": _MAX_SNAPSHOT_TRACKS + 1},
+                        {"user_id": query.user_id, "limit": EXTENDED_CATALOGUE_TRACKS + 1},
                     ).mappings()
                     catalogue = tuple(_track_from_mapping(row) for row in rows)
                     capture.save(session, response, snapshot, revision, catalogue=catalogue)

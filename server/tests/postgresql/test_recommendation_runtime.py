@@ -321,7 +321,7 @@ def test_expired_snapshot_is_purged_without_losing_exact_replay(database_url: st
 
 
 def _seed_many_candidates(session: Session, owner: Principal, count: int = 5001) -> UUID:
-    assert 1 <= count <= 20_000
+    assert 1 <= count <= 20_001
     provider_id, credit_id = uuid4(), uuid4()
     session.execute(
         text(

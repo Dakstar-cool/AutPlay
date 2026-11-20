@@ -22,8 +22,12 @@ from autplay.application.recommendations import (
 )
 from autplay.application.sona_native_catalogue import (
     COLLECTION_V2,
+    COLLECTION_V3,
+    EXTENDED_CATALOGUE_TRACKS,
+    CatalogueSizeExceeded,
     catalogue_document,
     catalogue_matches_served,
+    pack_extended_catalogue,
 )
 from autplay.application.sona_shadow import recommendation_ranking_document
 from autplay.application.training_consent import TrainingConsentService
@@ -197,22 +201,33 @@ class SqlAlchemySonaNativeCapture:
         if catalogue is not None:
             if trace.query.user_id != self.catalogue_owner or snapshot.policy_version != "2":
                 raise ValueError("native catalogue owner or policy mismatch")
-            document["schema"] = COLLECTION_V2
+            extended = len(catalogue) > RECOMMENDATION_MAX_SNAPSHOT_TRACKS
+            document["schema"] = COLLECTION_V3 if extended else COLLECTION_V2
             document["catalogue_count_lower_bound"] = len(catalogue)
             document["catalogue"] = None
             document["catalogue_sha256"] = None
-            if len(catalogue) > RECOMMENDATION_MAX_SNAPSHOT_TRACKS:
+            if len(catalogue) > EXTENDED_CATALOGUE_TRACKS:
                 document["catalogue_status"] = "TRACK_LIMIT"
             elif not catalogue_matches_served(catalogue, snapshot.tracks):
                 document["catalogue_status"] = "SERVING_WINDOW_MISMATCH"
             else:
                 full = catalogue_document(
-                    trace.query.user_id, snapshot.reference.interaction_watermark, catalogue
+                    trace.query.user_id,
+                    snapshot.reference.interaction_watermark,
+                    catalogue,
+                    extended=extended,
                 )
-                raw_catalogue = rfc8785.dumps(full)
-                document["catalogue"] = full
-                document["catalogue_sha256"] = sha256(raw_catalogue).hexdigest()
-                document["catalogue_status"] = "COMPLETE"
+                try:
+                    if extended:
+                        packed, digest = pack_extended_catalogue(full)
+                        document["catalogue"] = packed
+                    else:
+                        digest = sha256(rfc8785.dumps(full)).hexdigest()
+                        document["catalogue"] = full
+                    document["catalogue_sha256"] = digest
+                    document["catalogue_status"] = "COMPLETE"
+                except CatalogueSizeExceeded:
+                    document["catalogue_status"] = "BYTE_LIMIT"
         payload = rfc8785.dumps(document)
         if len(payload) > MAX_CAPTURE_BYTES:
             # Preserve the full P11 universe and an explicit rejected-source marker.

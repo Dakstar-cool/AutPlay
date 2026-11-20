@@ -446,7 +446,9 @@ def test_history_identity_is_frozen_outside_the_p11_candidate_list(pair: Pairing
     assert fact["recording_context"]["artist_key"] == str(artist_id)
 
 
-@pytest.mark.parametrize("track_count,pilot", [(5000, True), (5001, True), (1, False)])
+@pytest.mark.parametrize(
+    "track_count,pilot", [(5000, True), (5001, True), (20_000, True), (20_001, True), (1, False)]
+)
 def test_v2_catalogue_and_actual_served_input(
     pair: PairingHarness, track_count: int, pilot: bool
 ) -> None:
@@ -486,14 +488,40 @@ def test_v2_catalogue_and_actual_served_input(
         assert capture.catalogue is None
         return
     assert capture.document["quality_eligible"] is False
-    if track_count == 5001:
+    if track_count == 20_001:
         assert "CATALOGUE_TRACK_LIMIT" in capture.blockers
         assert capture.catalogue is None
+        # Prior releases retained only a lower bound when a V2 catalogue overflowed.
+        earlier = {
+            **capture.document,
+            "schema": "AUTPLAY_P11_NATIVE_COLLECTION_V2",
+            "catalogue_count_lower_bound": 5001,
+        }
+        raw = rfc8785.dumps(earlier)
+        historical = decode_native_capture(
+            replace(row, payload=raw, payload_sha256=sha256(raw).hexdigest()),
+            current_revision=1,
+            now=datetime.now(UTC),
+        )
+        assert historical.catalogue is None and "CATALOGUE_TRACK_LIMIT" in historical.blockers
         return
     assert capture.catalogue is not None and len(capture.catalogue) == track_count
     assert oldest in {t.recording_id for t in capture.catalogue}
     assert oldest not in {t.recording_id for t in capture.baseline.tracks}
     full = capture.document["catalogue"]
+    if track_count > 5000:
+        assert capture.document["schema"] == "AUTPLAY_P11_NATIVE_COLLECTION_V3"
+        assert full["codec"] == "zlib-base64"
+        assert full["canonical_bytes"] > len(full["data"])
+        full["canonical_bytes"] -= 1
+        changed = rfc8785.dumps(capture.document)
+        with pytest.raises(NativeDatasetRejected, match="CATALOGUE_ENCODING_INVALID"):
+            decode_native_capture(
+                replace(row, payload=changed, payload_sha256=sha256(changed).hexdigest()),
+                current_revision=1,
+                now=datetime.now(UTC),
+            )
+        return
     full["tracks"].reverse()
     capture.document["catalogue_sha256"] = sha256(rfc8785.dumps(full)).hexdigest()
     changed = rfc8785.dumps(capture.document)
