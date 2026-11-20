@@ -35,13 +35,12 @@ class DeveloperModeSettingsTest {
                         { settings = it(settings) },
                         {}, {}, {}, {}, {},
                         onRefreshDeveloperMode = { refreshes++ },
-                        onNavigate = {},
+                        page = app.autplay.ui.UiDestination.SettingsDiagnostics, onNavigate = {},
                     )
                 }
             }
         }
         compose.onNodeWithText(context.getString(R.string.settings_diagnostics)).assertDoesNotExist()
-        compose.onNodeWithText(context.getString(R.string.settings_about)).performScrollTo().performClick()
         compose.onNodeWithText(context.getString(R.string.settings_developer_mode)).performScrollTo().assertExists()
         compose.onNodeWithText(context.getString(R.string.settings_developer_refresh)).performScrollTo().performClick()
         compose.runOnIdle { assert(refreshes == 1) }

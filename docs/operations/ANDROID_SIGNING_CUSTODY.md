@@ -146,6 +146,16 @@ The launcher disables the Gradle configuration cache for the signed build. The A
 fails closed if all signing environment variables are present while configuration caching is
 requested. This prevents production signing secrets from being serialized into a project cache.
 
+If direct `age --decrypt --output NUL <encrypted-keystore>` succeeds but the PowerShell recovery
+prompt fails, add `-NativeRecoveryPrompt` to both preflight and the build invocation. The keystore
+password still uses hidden `Read-Host`; the recovery passphrase is then entered directly at age's
+hidden console prompt. This mode neither captures the recovery passphrase in PowerShell nor puts
+it in an environment variable. It cannot recheck the recovery passphrase's length or compare it
+with the keystore password: those custody requirements were established when the pinned encrypted
+signer was created. The ciphertext hash, owner-only temporary directory, keytool verification,
+APK certificate check and verified plaintext cleanup are enforced in both modes. Any failed age
+invocation aborts before keytool or Gradle runs. Use a visible terminal without output redirection.
+
 The preflight also requires the configured Java and Android SDK tools and verifies the pinned
 SHA-256 hashes of `age.exe` and `age-plugin-batchpass.exe` before any secret is requested. Override
 `-AgeDirectory` only when the replacement directory contains those exact reviewed binaries.

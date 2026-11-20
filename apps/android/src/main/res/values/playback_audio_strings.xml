@@ -1,0 +1,15 @@
+<resources>
+    <string name="settings_complete_tracks">Tracks play from beginning to end. Preloading can reduce pauses between them; it does not crossfade or trim audio.</string>
+    <string name="settings_replay_gain">ReplayGain</string>
+    <string name="settings_gain_off">Off</string>
+    <string name="settings_gain_track">Track</string>
+    <string name="settings_gain_album">Album</string>
+    <string name="settings_gain_tags_help">Uses ReplayGain tags in the audio file. Album mode falls back to track gain. Untagged tracks keep their original level. Preamp applies to tagged tracks.</string>
+    <string name="settings_gain_preamp">Preamp</string>
+    <string name="settings_gain_protection">Prevent clipping</string>
+    <string name="settings_equalizer">Equalizer</string>
+    <string name="settings_equalizer_headroom">Boosts reserve headroom to prevent overload, so overall volume may decrease. Audio settings are saved on this device.</string>
+    <string name="settings_equalizer_band">%1$d Hz</string>
+    <string name="settings_audio_db">%1$s: %2$+d dB</string>
+    <string name="settings_equalizer_reset">Reset bands</string>
+</resources>

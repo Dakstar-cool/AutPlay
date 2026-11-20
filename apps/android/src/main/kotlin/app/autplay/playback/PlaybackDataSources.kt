@@ -90,6 +90,7 @@ object PlaybackMediaSourceFactory {
             RoutingPlaybackDataSource(DefaultDataSource.Factory(context, http), cachedVault)
         }
         val delegate = DefaultMediaSourceFactory(routing, playbackExtractorsFactory())
+            .setLoadErrorHandlingPolicy(PlaybackLoadErrorPolicy())
         val reporting = onTimeline?.let { PlaybackSourceTimelineFactory(delegate, it) } ?: delegate
         return ResolvingMediaSourceFactory(reporting)
     }

@@ -14,6 +14,26 @@ class AccountStatisticsDecoderTest {
         assertEquals(30000L, result.listenedMs)
     }
 
+    @Test fun legacyOwnerCacheDropsSkipCounts() {
+        val row = """{"surface":"home","kind":"REMIX","plays":5,"skips":3}"""
+        val raw = document.dropLast(1) + ""","variation_skips":[$row]}"""
+        val snapshot = decodeAccountStatistics(raw.toByteArray(), account)
+        assertEquals(decodeAccountStatistics(document.toByteArray(), account), snapshot)
+        assertEquals(false, "variation_skips" in encodeAccountStatistics(snapshot))
+    }
+
+    @Test fun liveSonaReportRequiresAccountPositiveLifetimeAndValidCounts() {
+        val row = """{"surface":"home","kind":"REMIX","plays":5,"skips":3}"""
+        val raw = """{"schema_version":1,"account_id":"$account","remaining_ms":1000,"variation_skips":[$row]}"""
+        val report = decodeSonaVariationSkips(raw.toByteArray(), account)
+        assertEquals(3L, report.rows.single().skips)
+        assertEquals(1000L, report.remainingMs)
+        for (bad in listOf(raw.replace(account, "other"), raw.replace("1000", "0"),
+            raw.replace("[$row]", "[$row,$row]"), raw.replace("REMIX", "DEMO"), raw.replace("3}", "6}"))) {
+            assertEquals(true, runCatching { decodeSonaVariationSkips(bad.toByteArray(), account) }.isFailure)
+        }
+    }
+
     @Test fun anotherAccountNegativeCountsAndDuplicateKeysCannotBeDisplayed() {
         reject(document, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         reject(document.replace("30000", "-1"))

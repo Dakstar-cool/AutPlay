@@ -13,8 +13,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  connected-api-26:
-    name: Android connected / API 26
+  connected:
+    name: Android connected / API ${{ matrix.api }} / ${{ matrix.suite }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 26
+            suite: full
+            instrumentation: ""
+          - api: 33
+            suite: gapless audio
+            instrumentation: "-Pandroid.testInstrumentationRunnerArguments.class=app.autplay.playback.PlaybackGaplessTest"
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -36,7 +46,7 @@ jobs:
             | sha256sum --check --strict
 
       - name: Install pinned Microsoft JDK
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: jdkfile
           jdk-file: ${{ runner.temp }}/microsoft-jdk-17.0.20-linux-x64.tar.gz
@@ -68,20 +78,20 @@ jobs:
       - name: Run connected lifecycle, WorkManager, and Room scenarios
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 26
+          api-level: ${{ matrix.api }}
           arch: x86_64
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -timezone Etc/UTC
           script: |
-            ./gradlew --no-daemon --console=plain --max-workers=1 --dependency-verification=strict :apps:android:connectedDebugAndroidTest
-            python3 scripts/test_l1_process_death.py
+            ./gradlew --no-daemon --console=plain --max-workers=1 --dependency-verification=strict ${{ matrix.instrumentation }} :apps:android:connectedDebugAndroidTest
+            if [ "${{ matrix.api }}" = 26 ]; then python3 scripts/test_l1_process_death.py; fi
 
       - name: Retain connected and process-death evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: android-connected-api26
+          name: android-connected-api${{ matrix.api }}
           retention-days: 7
           path: |
             apps/android/build/outputs/androidTest-results/

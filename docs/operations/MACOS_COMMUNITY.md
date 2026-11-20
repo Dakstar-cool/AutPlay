@@ -181,9 +181,9 @@ exact source registries and their shared-policy aliases, then records them in
 promoted source before rollout. Neither the baseline nor isolated acceptance proves
 deployment, fresh backup restoration, or successful login against the live port 9443.
 
-`scripts/macos_account_acceptance.py live` is a prepared, separate live-target mode.
-It has not been executed against production. It requires a disposable macOS GitHub
-runner with the exact deployed source, the normal community signing setup, built
+`scripts/macos_account_acceptance.py live` is a separate live-target mode.
+It requires a disposable macOS GitHub runner with the independently verified
+deployed server source, the normal community signing setup, built
 app and acceptance JAR, and an owner-only file named by
 `AUTPLAY_LIVE_ACCEPTANCE_TARGET`. This mode never starts a server, migrates a
 database or replaces qualification registries.
@@ -197,18 +197,27 @@ an observation less than one hour old. These fields are operator evidence inputs
 parsing the file does not independently prove deployment or backup restoration.
 
 The probe generates its own new account ID/password and runs register, restart,
-second-installation login and pull with two separate real Keychains. It checks the
+password-only second-installation login, restart of that installation, and pull
+with two separate real Keychains. Before login it removes the fixture's recovery
+file and proves that a wrong password and an unknown ID leave local ROOT, device
+keys and binding reservations unchanged. It checks the
 pinned identity and HTTPS through the production client and retains the existing
 v1 journal protocol. It accepts no owner account credentials. Synthetic server rows
 are retained; there is no account deletion or change to the owner's password.
-Only after all four phases pass does `live-account-acceptance.json` record live
+Only after all five phases pass does `live-account-acceptance.json` record live
 9443 evidence. It contains hashes and aggregate results, not the private origin,
 account ID, password or tokens. Ordinary isolated CI does not invoke this mode.
 After the deployment and restoration boundary is actually complete, deliver the
 fresh private target JSON through the repository secret
 `AUTPLAY_LIVE_ACCEPTANCE_TARGET_JSON` and dispatch the exact deployed branch with
 `live_account_acceptance=true`, `account_acceptance=false`. The workflow refuses
-both scopes together and keeps live acceptance off by default. The target must be
+both scopes together and keeps live acceptance off by default. A newer Mac client
+may be checked against the deployed server only when Git proves every change is
+inside `apps/desktop/`, `shared/`, or the exact harness/documentation allowlist.
+Changes to server code, contracts, root dependency locks or other deployment
+inputs are rejected. Evidence records both source commits and the client-only
+diff separately; it does not claim that the two whole source trees are identical.
+The target must be
 reachable from that runner using its real advertised HTTPS origin; changing
 identity/origins or bypassing TLS to make the probe connect is forbidden.
 
@@ -275,11 +284,13 @@ The manual `account_acceptance=true` option additionally runs
 [`macos_account_acceptance.py`](../../scripts/macos_account_acceptance.py).
 It compiles the pinned PostgreSQL/pgvector fixture, starts the production server
 behind verified HTTPS and exercises the actual signed Kotlin account graph.
-The four phases cover registration, process restart and session renewal, login
-from a second isolated Keychain, and a journal round trip between both devices.
+The five phases cover registration, process restart and session renewal, password
+login from a second isolated Keychain without a recovery file, a restart of that
+installation, and a journal round trip between both devices. Rejected passwords
+and unknown IDs must leave local protected account state unchanged.
 The fixture enables its operator flags and requires the checked source D1/B1 policy;
 it never adds qualification entries or replaces the production registries.
-The required success evidence is `account-acceptance.json` with all four phases;
+The required success evidence is `account-acceptance.json` with all five phases;
 passing packaging or the earlier Keychain probe does not substitute for it.
 Passwords, recovery material, private configuration and raw HTTP bodies remain
 outside artifacts. This isolated acceptance does not verify a deployed server.
@@ -289,6 +300,17 @@ public runner compute is free, but artifact storage is metered separately. Downl
 the DMG promptly and avoid accumulating old package artifacts.
 
 ## Installing a verified build
+
+For an existing account saved on the server, open **Accounts**, initialize account
+storage on a new Mac, discover and explicitly confirm the personal server, then
+use **Log in with ID and password**. The server must hold the account's encrypted
+passport. The password decrypts it locally and is never sent to the server.
+Login preserves the account UUID and root key; it does not register a replacement
+account or overwrite a different local identity. An existing recovery file remains
+valid, but login does not download its independent recovery code or manufacture a
+new one. Recovery export and key-rotation controls require recovery material
+actually held on this Mac. Creating a new account and importing an existing
+recovery file remain separate actions.
 
 Use the DMG and `SHA256SUMS` from the same successful workflow run. Check the DMG
 checksum against a value received through the trusted project channel. Copy

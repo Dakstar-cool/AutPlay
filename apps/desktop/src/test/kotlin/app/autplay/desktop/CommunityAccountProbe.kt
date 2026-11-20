@@ -1,6 +1,8 @@
 package app.autplay.desktop
 
 import app.autplay.application.desktop.account.*
+import app.autplay.application.securestate.SecureStateFailure
+import app.autplay.application.securestate.SecureStateStatus
 import app.autplay.desktop.account.*
 import app.autplay.desktop.sync.*
 import java.nio.file.Files
@@ -22,6 +24,18 @@ import kotlinx.serialization.json.*
  */
 public object CommunityAccountProbe {
     private fun <T> CompletionStage<T>.settled(): T = toCompletableFuture().get(90, TimeUnit.SECONDS)
+    private suspend fun <T> readProtectedState(read: () -> T): T {
+        // CONNECTED also wakes the real host observer. Retry only admission contention on
+        // these read-only assertions, never an account command or an ambiguous outcome.
+        repeat(100) {
+            try { return read() }
+            catch (failure: ExecutionException) {
+                if ((failure.cause as? SecureStateFailure)?.status != SecureStateStatus.IN_USE) throw failure
+            }
+            delay(100)
+        }
+        error("ACCOUNT_PROBE_PROTECTED_READ_BUSY_DEADLINE")
+    }
     private inline fun <reified T> owner(parent: Any, name: String): T =
         parent.javaClass.getDeclaredField(name).run { isAccessible = true; get(parent) as T }
     private fun uuid(): AccountUuid = AccountUuid(UUID.randomUUID().toString())
@@ -33,7 +47,7 @@ public object CommunityAccountProbe {
     @JvmStatic public fun main(args: Array<String>): Unit = runBlocking {
         check(args.size == 2 && System.getProperty("os.name") == "Mac OS X")
         val phase = args[0]
-        check(phase in setOf("register", "restart", "login", "pull"))
+        check(phase in setOf("register", "restart", "login", "restart-login", "pull"))
         val configPath = Path.of(args[1])
         val config = Json.parseToJsonElement(Files.readString(configPath)).jsonObject
         fun value(name: String): String = config.getValue(name).jsonPrimitive.content
@@ -59,7 +73,8 @@ public object CommunityAccountProbe {
                 error("ACCOUNT_PROBE_AUTHORITY_BUSY_DEADLINE")
             }
             val tls = AccountTlsTrust.ExactSpki(Base64.getDecoder().decode(value("tls_spki_b64")))
-            val transport = ConfirmedAccountTransport.confirm(value("origin"), value("origin"), tls, tls, true, true)
+            val streamTls = AccountTlsTrust.ExactSpki(Base64.getDecoder().decode(value("stream_tls_spki_b64")))
+            val transport = ConfirmedAccountTransport.confirm(value("origin"), value("stream_origin"), tls, streamTls, true, true)
             val discovery = account.inspectDiscovery(transport).settled().use { it.bodyCopy() }
             try {
                 account.selectServer(transport, discovery, value("instance"), value("identity_epoch").toLong(),
@@ -80,20 +95,42 @@ public object CommunityAccountProbe {
                         account.connectPortable(password, register = true).settled()
                     }
                     "login" -> {
-                        val bytes = Files.readAllBytes(privateDir.resolve("recovery.private"))
-                        try {
-                            account.importPortable(bytes).settled()
-                            account.acknowledgeRecoveryExport(bytes).settled()
-                        } finally { bytes.fill(0) }
-                        account.connectPortable(password, register = false).settled()
+                        check(!Files.exists(privateDir.resolve("recovery.private")))
+                        val before = readProtectedState { account.secure.snapshot().settled() }
+                        check(before.selected.none { it.slot == app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved })
+                        suspend fun rejectedLogin(id: String, secret: CharArray) {
+                            try {
+                                val failure = runCatching { account.loginPortable(id, secret).settled() }.exceptionOrNull()
+                                check((failure as? ExecutionException)?.cause.let { it as? AccountControlException }?.code == AccountControlFailure.AUTHENTICATION_FAILED)
+                                val after = readProtectedState { account.secure.snapshot().settled() }
+                                check(after.selected == before.selected && after.keys == before.keys &&
+                                    after.reservations.isEmpty() && after.firstBind == null && after.activeBinding == null)
+                            } finally { secret.fill('\u0000') }
+                        }
+                        rejectedLogin(value("public_id"), "incorrect synthetic login password".toCharArray())
+                        rejectedLogin("missing_" + UUID.randomUUID().toString().replace("-", "").take(12), password.copyOf())
+                        account.loginPortable(value("public_id"), password).settled()
+                        check(!account.state.value.recoveryExportRequired)
+                        println("ACCOUNT_PROBE_PASSWORD_LOGIN_WITHOUT_RECOVERY_PASSED")
                     }
-                    else -> account.restoreBinding(Files.readString(privateDir.resolve("profile-a.private"))).settled()
+                    else -> account.restoreBinding(Files.readString(privateDir.resolve(
+                        if (phase == "restart-login") "profile-b.private" else "profile-a.private"))).settled()
                 }
             } finally { password.fill('\u0000') }
             check(account.state.value.phase == DesktopAccountPhase.CONNECTED)
             println("ACCOUNT_PROBE_CONNECTED $phase")
             if (phase == "register") writePrivate(privateDir.resolve("profile-a.private"),
                 currentLease().profileId.value.toByteArray())
+            if (phase == "login") writePrivate(privateDir.resolve("profile-b.private"), currentLease().profileId.value.toByteArray())
+            if (phase in setOf("login", "restart-login")) {
+                readProtectedState {
+                    val control = account.secure.snapshot().settled()
+                    account.secure.read(requireNotNull(app.autplay.application.securestate.SecureRecordKind.PORTABLE_ROOT.reserved), control).settled().use { record ->
+                        val rootPayload = record?.payload as? app.autplay.application.securestate.PortableRootPayload ?: error("MISSING_PASSWORD_LOGIN_ROOT")
+                        check(!rootPayload.hasRecoveryDocument && rootPayload.everEnrolled)
+                    }
+                }
+            }
             if (phase == "restart") {
                 val before = currentLease()
                 controller.profiles.rotateSession().settled()
@@ -123,7 +160,7 @@ public object CommunityAccountProbe {
             }
             val rows = shared.store.readTracks(currentLease(), null)
             check(rows.any { it.title == "Acceptance register" })
-            if (phase in setOf("login", "pull")) check(rows.any { it.title == "Acceptance login" })
+            if (phase in setOf("login", "restart-login", "pull")) check(rows.any { it.title == "Acceptance login" })
             println("ACCOUNT_PROBE_SYNC_ROUNDTRIP_PASSED $phase")
         } finally { runtime.close() }
         println("AUTPLAY_ACCOUNT_PROBE_PASSED $phase")

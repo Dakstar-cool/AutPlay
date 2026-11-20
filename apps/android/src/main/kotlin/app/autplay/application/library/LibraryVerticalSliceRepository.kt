@@ -10,6 +10,8 @@ import app.autplay.application.sync.P07PayloadCodec
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.JournalLineageEntity
 import app.autplay.data.local.entity.LibraryEntryEntity
+import app.autplay.application.recommendation.variationSurface
+import app.autplay.application.recommendation.waveVersion
 import app.autplay.data.local.entity.ListeningEventEntity
 import app.autplay.data.local.entity.LocalAudioStateEntity
 import app.autplay.data.local.entity.LocalMutationOutboxEntity
@@ -241,6 +243,7 @@ class LibraryVerticalSliceRepository(
         startedAtMs: Long = now,
         sessionStartPositionMs: Long? = null,
         sessionEndPositionMs: Long? = null,
+        personalWaveFallback: Boolean = false,
     ): SliceMutationResult {
         require(playedMs in 0..604_800_000 && (durationMs == null || durationMs in 1..604_800_000))
         require(startedAtMs in 0..now)
@@ -258,8 +261,15 @@ class LibraryVerticalSliceRepository(
         require(origin != "RECOMMENDED" || attribution != null)
         val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
         ensureOwned(binding, track.serverProfileId)
+        val surface = variationSurface(origin, attribution?.let { Json.parseToJsonElement(it).jsonObject["surface"]?.jsonPrimitive?.content }, personalWaveFallback)
+        val kind = surface?.let { database.libraryDao().waveRecordings(track.serverProfileId, listOf(trackRefId.value))
+            .singleOrNull()?.let { row -> waveVersion(row).kind } }
+        val variationFields = buildString {
+            if (surface != null) append(",\"variation_surface\":" + q(surface))
+            if (kind != null) append(",\"variation_kind\":" + q(kind))
+        }
         val ratio = durationMs?.let { (playedMs.toDouble() / it).coerceIn(0.0, 1.0) }
-        val payload = "{\"completion_ratio\":${ratio ?: "null"},\"context\":${q(context)},\"event_origin\":${q(origin)},\"excluded_from_taste\":$excluded,\"explicit_feedback\":\"NONE\",\"interaction_type\":\"LISTENING_EVENT_RECORDED\",\"local_user_track_ref_id\":${q(trackRefId.value)},\"played_ms\":$playedMs,\"recommendation\":${attribution ?: "null"},\"recording_id\":${track.serverRecordingId?.let(::q) ?: "null"},\"server_user_track_ref_id\":${track.serverUserTrackRefId?.let(::q) ?: "null"},\"track_duration_ms\":${durationMs ?: "null"}}"
+        val payload = "{\"completion_ratio\":${ratio ?: "null"},\"context\":${q(context)},\"event_origin\":${q(origin)},\"excluded_from_taste\":$excluded,\"explicit_feedback\":\"NONE\",\"interaction_type\":\"LISTENING_EVENT_RECORDED\",\"local_user_track_ref_id\":${q(trackRefId.value)},\"started_at_ms\":$startedAtMs$variationFields,\"played_ms\":$playedMs,\"recommendation\":${attribution ?: "null"},\"recording_id\":${track.serverRecordingId?.let(::q) ?: "null"},\"server_user_track_ref_id\":${track.serverUserTrackRefId?.let(::q) ?: "null"},\"track_duration_ms\":${durationMs ?: "null"}}"
         return mutate(binding, listeningEventId, "LISTENING_EVENT_RECORDED", "LISTENING_EVENT", listeningEventId, now, payload) { sequence, bound ->
             val requestId = attribution?.let { Json.parseToJsonElement(it).jsonObject.getValue("recommendation_request_id").jsonPrimitive.content }
             database.historyDao().insert(
@@ -282,6 +292,7 @@ class LibraryVerticalSliceRepository(
                     sessionStartPositionMs,
                     sessionEndPositionMs,
                     binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID,
+                    surface, kind,
                 ),
             )
         }

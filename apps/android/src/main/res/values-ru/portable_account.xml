@@ -5,7 +5,7 @@
     <string name="portable_account_login">Логин / ID</string>
     <string name="portable_account_password">Пароль</string>
     <string name="portable_account_password_repeat">Повторите пароль</string>
-    <string name="portable_account_password_rules">Используйте пароль или фразу из 15–128 символов.</string>
+    <string name="portable_account_password_rules">7–128 символов и хотя бы один спецсимвол, например !, @ или _. Пробел не считается.</string>
     <string name="portable_account_existing">У меня уже есть аккаунт</string>
     <string name="portable_account_create">Создать аккаунт</string>
     <string name="portable_account_connect">Подключить этот аккаунт</string>
@@ -21,7 +21,7 @@
     <string name="portable_account_import_file">Выбрать файл восстановления</string>
     <string name="portable_account_file_ready">Файл проверен — выбрать другой</string>
     <string name="portable_account_recovery_code">Код восстановления</string>
-    <string name="portable_account_new_password">Новый пароль (15–128 символов)</string>
+    <string name="portable_account_new_password">Новый пароль (7–128 символов, включая спецсимвол)</string>
     <string name="portable_account_reset">Сбросить пароль и отозвать старый доступ</string>
     <string name="portable_account_recovery_scope">Выберите файл восстановления или введите ID и код. Восстановление сохраняет UUID и создаёт новый ключ. Сброс через сервер завершает все сеансы на выбранном сервере. Подключайтесь к другим серверам с текущим паролем, чтобы обновить их прежние ключи. Сохраняйте новый файл после каждого сброса.</string>
     <string name="portable_account_recovery_local">Будет восстановлен локальный доступ. Серверные копии не отзываются без подключения. При входе с текущим паролем приложение сможет обновить сервер, где ещё действует сохранённый прежний ключ.</string>

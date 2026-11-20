@@ -54,6 +54,22 @@ import org.junit.runner.RunWith
 @UnstableApi
 @RunWith(AndroidJUnit4::class)
 class PlaybackServiceLifecycleTest {
+    @Test fun wavePauseCancelsScheduledStartAndAllowsANewExplicitStart() = runBlocking {
+        val fixture = Fixture()
+        try {
+            fixture.start(listOf("readable"), queueType = "WAVE")
+            fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+            fixture.owner.dispatch(PlaybackCommand.Pause)
+            fixture.await { fixture.main { fixture.controller?.playWhenReady == false } }
+            fixture.owner.dispatch(PlaybackCommand.ScheduledPlay(android.os.SystemClock.elapsedRealtime() + 500))
+            fixture.owner.dispatch(PlaybackCommand.Pause)
+            delay(800)
+            assertFalse(fixture.main { fixture.controller?.playWhenReady == true })
+            fixture.owner.dispatch(PlaybackCommand.ScheduledPlay(android.os.SystemClock.elapsedRealtime() + 100))
+            fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+        } finally { fixture.close() }
+    }
+
     @Test fun notificationExportsNativeFeedbackActionsAndRatesTheCapturedTrack() = runBlocking {
         val fixture = Fixture()
         try {
@@ -203,62 +219,62 @@ class PlaybackServiceLifecycleTest {
         } finally { fixture.close() }
     }
 
-    @Test fun smoothTransitionCutsTimePreservesVolumeAndDisablingKeepsSourcePosition() = runBlocking {
+    @Test fun preloadingPreservesFullTracksVolumeAndSeekPosition() = runBlocking {
         val fixture = Fixture()
         try {
             fixture.start(listOf("readable", "readable", "readable"), smooth = true)
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
             fixture.main { fixture.controller?.pause(); fixture.controller?.volume = 0.8f }
-            fixture.await("initial cut duration") { fixture.main { fixture.controller?.duration == 37_000L } }
+            fixture.await("initial full duration") { fixture.main { fixture.controller?.duration == 40_000L } }
             assertEquals(0L, fixture.main { fixture.controller?.currentMediaItem?.clippingConfiguration?.startPositionMs })
             fixture.owner.dispatch(PlaybackCommand.Next)
-            fixture.await("middle cut duration") { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value && fixture.controller?.duration == 34_000L } }
+            fixture.await("middle full duration") { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value && fixture.controller?.duration == 40_000L } }
             fixture.owner.dispatch(PlaybackCommand.SeekTo(10_000))
-            fixture.await("middle source seek") { fixture.main { fixture.controller?.duration == 34_000L && fixture.controller?.currentPosition == 7_000L } }
+            fixture.await("middle source seek") { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 10_000L } }
             assertEquals(0.8f, fixture.main { fixture.controller!!.volume }, 0.001f)
             fixture.await("source seek persisted") { fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs == 10_000L }
             fixture.smoothTransitions(false)
-            fixture.await("disabled cut retains position") { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 10_000L } }
+            fixture.await("disabled preload retains position") { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 10_000L } }
             assertEquals(0.8f, fixture.main { fixture.controller!!.volume }, 0.001f)
             fixture.main { fixture.controller?.volume = 0f }
             fixture.smoothTransitions(true)
-            fixture.await("reenabled cut retains mute") { fixture.main { fixture.controller?.duration == 34_000L } }
+            fixture.await("reenabled preload retains mute") { fixture.main { fixture.controller?.duration == 40_000L } }
             assertEquals(0f, fixture.main { fixture.controller!!.volume }, 0f)
         } finally { fixture.close() }
     }
 
-    @Test fun cutTransitionStartsSuccessorAtSourceThreeSecondsAndKeepsFinalTail() = runBlocking {
+    @Test fun transitionKeepsFullTailAndStartsSuccessorAtZero() = runBlocking {
         val fixture = Fixture()
         try {
             fixture.start(listOf("readable", "readable"), smooth = true)
-            fixture.await { fixture.main { fixture.controller?.isPlaying == true && fixture.controller?.duration == 37_000L } }
+            fixture.await { fixture.main { fixture.controller?.isPlaying == true && fixture.controller?.duration == 40_000L } }
             fixture.await("initial listening session persisted") {
                 fixture.database.queueDao().activeSnapshotOnce()?.let {
                     it.currentEntryId == fixture.entries[0].value && it.activeListeningEventId != null
                 } == true
             }
             fixture.main { fixture.controller?.pause(); fixture.controller?.volume = 0.35f }
-            fixture.owner.dispatch(PlaybackCommand.SeekTo(36_800))
-            fixture.await { fixture.main { fixture.controller?.currentPosition == 36_800L } }
+            fixture.owner.dispatch(PlaybackCommand.SeekTo(39_800))
+            fixture.await { fixture.main { fixture.controller?.currentPosition == 39_800L } }
             val previousListen = requireNotNull(fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
             fixture.main { fixture.controller?.play() }
             fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value && fixture.controller?.isPlaying == true } }
             fixture.main { fixture.controller?.pause() }
-            fixture.await { fixture.main { fixture.controller?.duration == 37_000L } }
-            assertEquals(3_000L, fixture.main { fixture.controller?.currentMediaItem?.clippingConfiguration?.startPositionMs })
+            fixture.await { fixture.main { fixture.controller?.duration == 40_000L } }
+            assertEquals(0L, fixture.main { fixture.controller?.currentMediaItem?.clippingConfiguration?.startPositionMs })
             fixture.await("successor runtime source position") {
                 PlaybackRuntimeState.state.value.queueEntryId == fixture.entries[1].value &&
-                    PlaybackRuntimeState.state.value.positionMs in 3_000..5_000
+                    PlaybackRuntimeState.state.value.positionMs in 0..2_000
             }
             assertEquals(0.35f, fixture.main { fixture.controller!!.volume }, 0.001f)
             fixture.await { fixture.database.queueDao().activeSnapshotOnce()?.currentEntryId == fixture.entries[1].value }
-            assertTrue((fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs ?: 0) >= 3_000)
+            assertTrue((fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs ?: 0) >= 0)
             val event = requireNotNull(fixture.database.historyDao().event(previousListen))
             assertEquals(40_000L, event.trackDurationMs)
-            assertEquals(37_000L, event.sessionEndPositionMs)
+            assertEquals(40_000L, event.sessionEndPositionMs)
             assertTrue(event.playedMs < 5_000)
             fixture.owner.dispatch(PlaybackCommand.SeekTo(0))
-            fixture.await { fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs == 3_000L }
+            fixture.await { fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs == 0L }
         } finally { fixture.close() }
     }
 
@@ -287,32 +303,32 @@ class PlaybackServiceLifecycleTest {
                 }
                 fixture.await { firstPlayingSourcePosition.get() >= 0 }
                 fixture.main { fixture.controller?.pause() }
-                val expectedStart = if (source == "short") 0L else 3_000L
+                val expectedStart = 0L
                 assertTrue("$source started at ${firstPlayingSourcePosition.get()}",
                     firstPlayingSourcePosition.get() in expectedStart..expectedStart + 1_000)
-                fixture.await { fixture.main { fixture.controller?.duration == if (source == "short") 2_000L else 37_000L } }
+                fixture.await { fixture.main { fixture.controller?.duration == if (source == "short") 2_000L else 40_000L } }
             } finally { fixture.close() }
         }
     }
 
-    @Test fun cutRepeatOneReplaysFromThreeSecondsAndCreatesANewListen() = runBlocking {
+    @Test fun repeatOneReplaysFromZeroAndCreatesANewListen() = runBlocking {
         val fixture = Fixture()
         try {
             fixture.start(listOf("readable"), smooth = true)
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
             fixture.main { fixture.controller?.pause(); fixture.controller?.repeatMode = Player.REPEAT_MODE_ONE }
-            fixture.owner.dispatch(PlaybackCommand.SeekTo(36_800))
-            fixture.await { fixture.main { fixture.controller?.duration == 37_000L && fixture.controller?.currentPosition == 36_800L } }
+            fixture.owner.dispatch(PlaybackCommand.SeekTo(39_800))
+            fixture.await { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 39_800L } }
             val previousListen = fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId
             assertTrue(previousListen != null)
             fixture.main { fixture.controller?.play() }
             fixture.await { fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId?.let { it != previousListen } == true }
             fixture.main { fixture.controller?.pause() }
             val event = requireNotNull(fixture.database.historyDao().event(requireNotNull(previousListen)))
-            assertEquals(37_000L, event.sessionEndPositionMs)
+            assertEquals(40_000L, event.sessionEndPositionMs)
             assertEquals(40_000L, event.trackDurationMs)
             assertEquals(fixture.entries[0].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
-            assertTrue(PlaybackRuntimeState.state.value.positionMs in 3_000..5_000)
+            assertTrue(PlaybackRuntimeState.state.value.positionMs in 0..2_000)
         } finally { fixture.close() }
     }
 
@@ -323,7 +339,7 @@ class PlaybackServiceLifecycleTest {
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
             fixture.main { fixture.controller?.pause() }
             fixture.owner.dispatch(PlaybackCommand.SeekTo(10_000))
-            fixture.await { fixture.main { fixture.controller?.duration == 37_000L } }
+            fixture.await { fixture.main { fixture.controller?.duration == 40_000L } }
             fixture.owner.dispatch(PlaybackCommand.StopAfterCurrentItem(fixture.entries[0]))
             fixture.await { fixture.main { fixture.controller?.duration == 40_000L } }
             fixture.owner.dispatch(PlaybackCommand.SeekTo(39_800))
@@ -335,7 +351,7 @@ class PlaybackServiceLifecycleTest {
         } finally { fixture.close() }
     }
 
-    @Test fun cutPolicyUsesActualShortDurationAndLeavesWaveSynchronized() = runBlocking {
+    @Test fun preloadUsesActualShortDurationAndLeavesWaveSynchronized() = runBlocking {
         val short = Fixture()
         try {
             // Deliberately stale 40s tags: the actual two-second source must remain whole.
@@ -359,14 +375,14 @@ class PlaybackServiceLifecycleTest {
         }
     }
 
-    @Test fun clippedQueueRestoreKeepsOriginalPositionAndListeningIdentity() = runBlocking {
+    @Test fun preloadedQueueRestoreKeepsOriginalPositionAndListeningIdentity() = runBlocking {
         val fixture = Fixture()
         try {
             fixture.start(listOf("readable", "readable"), smooth = true)
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
             fixture.main { fixture.controller?.pause() }
             fixture.owner.dispatch(PlaybackCommand.Next)
-            fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value && fixture.controller?.duration == 37_000L } }
+            fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value && fixture.controller?.duration == 40_000L } }
             fixture.main { fixture.controller?.play() }
             fixture.await("successor listening session started") {
                 fixture.database.queueDao().activeSnapshotOnce()?.let {
@@ -382,14 +398,14 @@ class PlaybackServiceLifecycleTest {
             PlaybackShutdownPersistence.awaitPending()
             fixture.owner.dispatch(PlaybackCommand.PrepareQueue(LocalId(snapshot.queueSnapshotId)))
             fixture.connect()
-            fixture.await { fixture.main { fixture.controller?.playbackState == Player.STATE_READY && fixture.controller?.currentPosition == 7_000L } }
+            fixture.await { fixture.main { fixture.controller?.playbackState == Player.STATE_READY && fixture.controller?.currentPosition == 10_000L } }
             assertEquals(10_000L, PlaybackRuntimeState.state.value.positionMs)
             assertEquals(snapshot.activeListeningEventId, fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
-            assertEquals(37_000L, fixture.main { fixture.controller?.duration })
+            assertEquals(40_000L, fixture.main { fixture.controller?.duration })
         } finally { fixture.close() }
     }
 
-    @Test fun repeatAllAndShuffleRecomputeTheActualLastTrackBoundary() = runBlocking {
+    @Test fun repeatAllAndShufflePreserveFullTrackBoundaries() = runBlocking {
         val fixture = Fixture()
         try {
             fixture.start(listOf("readable", "readable", "readable"), smooth = true)
@@ -398,18 +414,18 @@ class PlaybackServiceLifecycleTest {
             fixture.owner.dispatch(PlaybackCommand.Next)
             fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value } }
             fixture.owner.dispatch(PlaybackCommand.Next)
-            fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[2].value && fixture.controller?.duration == 37_000L } }
+            fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[2].value && fixture.controller?.duration == 40_000L } }
             fixture.main { fixture.controller?.repeatMode = Player.REPEAT_MODE_ALL }
-            fixture.await { fixture.main { fixture.controller?.duration == 34_000L } }
+            fixture.await { fixture.main { fixture.controller?.duration == 40_000L } }
             fixture.main { fixture.controller?.repeatMode = Player.REPEAT_MODE_OFF; fixture.controller?.shuffleModeEnabled = true }
             fixture.await {
                 fixture.main {
                     val controller = fixture.controller ?: return@main false
-                    val expected = if (controller.nextMediaItemIndex >= 0) 34_000L else 37_000L
+                    val expected = 40_000L
                     controller.duration == expected
                 }
             }
-            assertEquals(3_000L, fixture.main { fixture.controller?.currentMediaItem?.clippingConfiguration?.startPositionMs })
+            assertEquals(0L, fixture.main { fixture.controller?.currentMediaItem?.clippingConfiguration?.startPositionMs })
         } finally { fixture.close() }
     }
 
@@ -422,13 +438,13 @@ class PlaybackServiceLifecycleTest {
             fixture.owner.dispatch(PlaybackCommand.SeekTo(39_500))
             fixture.await { fixture.database.queueDao().activeSnapshotOnce()?.currentPositionMs == 39_500L }
             fixture.smoothTransitions(true)
-            fixture.await { fixture.main { fixture.controller?.duration == 37_000L && fixture.controller?.currentPosition == 36_500L } }
+            fixture.await { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 39_500L } }
             val snapshot = requireNotNull(fixture.database.queueDao().activeSnapshotOnce())
             fixture.stop()
             PlaybackShutdownPersistence.awaitPending()
             fixture.owner.dispatch(PlaybackCommand.PrepareQueue(LocalId(snapshot.queueSnapshotId)))
             fixture.connect()
-            fixture.await { fixture.main { fixture.controller?.playbackState == Player.STATE_READY && fixture.controller?.currentPosition == 36_500L } }
+            fixture.await { fixture.main { fixture.controller?.playbackState == Player.STATE_READY && fixture.controller?.currentPosition == 39_500L } }
             assertEquals(39_500L, PlaybackRuntimeState.state.value.positionMs)
             assertEquals(snapshot.activeListeningEventId, fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
         } finally { fixture.close() }
@@ -554,7 +570,22 @@ class PlaybackServiceLifecycleTest {
             AndroidKeystoreCredentialStore(context).write(profile, "a".repeat(64).toByteArray())
         }
 
-        suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER") {
+        suspend fun vaultServer(dispatcher: Dispatcher) {
+            original = settings.settings.first()
+            val mock = MockWebServer().also { it.dispatcher = dispatcher; it.start() }
+            server = mock
+            val origin = mock.url("/").toString().trimEnd('/')
+            settings.update(NonSecretSettings(activeServerProfileId = profile,
+                activeUserId = app.autplay.domain.UserId(ids[13]), deviceId = app.autplay.domain.DeviceId(ids[14]),
+                serverBaseUrl = origin, streamBaseUrl = origin))
+            AndroidKeystoreCredentialStore(context).write(profile, "a".repeat(64).toByteArray())
+        }
+
+        suspend fun disconnectProfile() {
+            settings.mutate { it.copy(activeServerProfileId = null, activeUserId = null, deviceId = null) }
+        }
+
+        suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER", startPositionMs: Long = 0) {
             if (original == null) { original = settings.settings.first(); settings.update(NonSecretSettings()) }
             smoothTransitions(smooth)
             main { context.stopService(Intent(context, AutPlayPlaybackService::class.java)) }
@@ -564,15 +595,17 @@ class PlaybackServiceLifecycleTest {
                 database.libraryDao().upsertTrackRef(UserTrackRefEntity(tracks[index], if (source == "remote") ids[9] else null,
                     null, null, "UNRESOLVED", "Lifecycle fixture", "Fixture", null, 40_000, null,
                     "LOCAL_ONLY", null, 0, 1, 1, null))
-                if (source in listOf("slow", "readable", "short", "xing", "xing-short")) {
+                if (source in listOf("slow", "readable", "short", "xing", "xing-short", "vault")) {
                     val uri = when (source) {
+                        "vault" -> "content://$testPackage.missing/audio/${audioIds[index]}"
                         "slow" -> slowUri.toString()
                         "short" -> "content://$testPackage.readable/audio/short"
                         "xing" -> "content://$testPackage.xing/audio/${audioIds[index]}"
                         "xing-short" -> "content://$testPackage.xing/short/${audioIds[index]}"
                         else -> "content://$testPackage.readable/audio/${audioIds[index]}"
                     }
-                    database.localAudioDao().upsertState(LocalAudioStateEntity(audioIds[index], tracks[index], null, null,
+                    database.localAudioDao().upsertState(LocalAudioStateEntity(audioIds[index], tracks[index], null,
+                        audioIds[index].takeIf { source == "vault" },
                         uri, false, null, null, null, null,
                         if (source.startsWith("xing")) "mp3" else "pcm_s16le",
                         if (source.startsWith("xing")) "mp3" else "wav", 128_000,
@@ -581,6 +614,9 @@ class PlaybackServiceLifecycleTest {
                 }
             }
             val snapshot = activate(sources.indices.toList(), queueType)
+            if (startPositionMs > 0) PlaybackPersistenceRepository(database).selectIdleEntry(
+                snapshot, entries[0], startPositionMs, "OFF", "OFF", null, System.currentTimeMillis(),
+            )
             owner.dispatch(PlaybackCommand.StartQueue(snapshot))
             connect()
         }
@@ -650,14 +686,15 @@ class PlaybackServiceLifecycleTest {
         fun providerCount(key: String): Int = context.contentResolver.call(slowUri, "status", null, null)?.getInt(key) ?: 0
         suspend fun smoothTransitions(enabled: Boolean) { settings.mutate { it.copy(smoothTrackTransitions = enabled) } }
         suspend fun <T> main(block: () -> T): T = withContext(Dispatchers.Main) { block() }
-        suspend fun await(label: String = "condition", condition: suspend () -> Boolean) {
+        suspend fun await(label: String = "condition", timeoutMs: Long = 10_000, condition: suspend () -> Boolean) {
             try {
-                withTimeout(10_000) { while (!condition()) delay(20) }
+                withTimeout(timeoutMs) { while (!condition()) delay(20) }
             } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
                 val details = main { controller?.let {
                     "entry=${it.currentMediaItemIndex} position=${it.currentPosition} duration=${it.duration} " +
                         "cutStart=${it.currentMediaItem?.clippingConfiguration?.startPositionMs} " +
-                        "cutEnd=${it.currentMediaItem?.clippingConfiguration?.endPositionMs} playing=${it.isPlaying} state=${it.playbackState}"
+                        "cutEnd=${it.currentMediaItem?.clippingConfiguration?.endPositionMs} playing=${it.isPlaying} state=${it.playbackState} " +
+                        "playWhenReady=${it.playWhenReady} suppression=${it.playbackSuppressionReason} error=${it.playerError?.errorCodeName}"
                 } }
                 throw AssertionError("$label not reached: $details runtime=${PlaybackRuntimeState.state.value.positionMs}", timeout)
             }

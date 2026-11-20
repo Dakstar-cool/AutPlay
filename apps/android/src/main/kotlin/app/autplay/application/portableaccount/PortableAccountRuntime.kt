@@ -227,6 +227,20 @@ class PortableAccountRuntime(
     }
 
     suspend fun confirmLifecycle(action: RuntimeLifecycleAction, login: String, password: CharArray): Boolean = command {
+        // Legacy server accounts authenticate logout with their existing device session.
+        // A missing marker never bypasses an encrypted portable root or pending enrollment.
+        val current = settings.settings.first()
+        if (action == RuntimeLifecycleAction.LOGOUT_CURRENT && current.portableAccountId == null &&
+            credentials.encryptedPortableAccountDocument() == null) {
+            require(!credentials.hasPortableAccountPendingEnrollment()) { "ACCOUNT_CONNECTION_OUTCOME_PENDING" }
+            require(pairing.performConfirmedLifecycle(action, null, null)) { "ACCOUNT_EXIT_UNAVAILABLE" }
+            refreshState()
+        } else {
+            confirmLifecycleInternal(action, login, password)
+        }
+    }
+
+    private suspend fun confirmLifecycleInternal(action: RuntimeLifecycleAction, login: String, password: CharArray) {
         require(!credentials.hasPortableAccountPendingEnrollment()) { "ACCOUNT_CONNECTION_OUTCOME_PENDING" }
         require(store.verify(login, password)) { "ACCOUNT_AUTHENTICATION_FAILED" }
         val document = requireNotNull(store.read())
@@ -260,6 +274,31 @@ class PortableAccountRuntime(
             require(pairing.performConfirmedLifecycle(action, operation, signed(unlocked, "reauth", request).toString())) { "ACCOUNT_EXIT_UNAVAILABLE" }
         }
         mutableState.value = mutableState.value.copy(serverCopyReady = false)
+        refreshState()
+    }
+
+    /** Ends the server session and locks the saved local identity without discarding its data. */
+    suspend fun signOut(login: String, password: CharArray): Boolean = command {
+        require(store.verify(login, password)) { "ACCOUNT_AUTHENTICATION_FAILED" }
+        require(!credentials.hasPortableAccountPendingEnrollment()) { "ACCOUNT_CONNECTION_OUTCOME_PENDING" }
+        val current = settings.settings.first()
+        require(current.m5AdmissionCheckpoint == null && current.m5PendingExchangeCheckpoint == null) { "FIRST_BIND_CEREMONY_BUSY" }
+        if (current.m5Binding != null) confirmLifecycleInternal(RuntimeLifecycleAction.LOGOUT_CURRENT, login, password)
+        require(settings.settings.first().activeServerProfileId == null) { "ACCOUNT_EXIT_UNAVAILABLE" }
+        settings.mutate { it.copy(accountSignedOut = true) }
+        pairing.cancel()
+        refreshState()
+    }
+
+    suspend fun removeEmptyLocalAccount(login: String, password: CharArray): Boolean = command {
+        store.removeEmptyLocalAccount(login, password)
+        pairing.cancel()
+        refreshState()
+    }
+
+    suspend fun signInLocal(login: String, password: CharArray): Boolean = command {
+        require(store.verify(login, password)) { "ACCOUNT_AUTHENTICATION_FAILED" }
+        settings.mutate { it.copy(accountSignedOut = false) }
         refreshState()
     }
 

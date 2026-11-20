@@ -2,7 +2,6 @@
 <resources>
     <string name="ui_friends_refresh_public_id_label">Публичный ID (@имя)</string>
     <string name="ui_friends_refresh_public_id_rules">3–24 латинские буквы, цифры или подчёркивания. Регистр букв не имеет значения.</string>
-    <string name="ui_friends_refresh_onboarding_pending">Выберите имя, чтобы продолжить. Музыка работает без сети; сервер закрепит ID после подключения. Если имя занято, его можно будет изменить.</string>
     <string name="ui_friends_refresh_my_id">Мой ID</string>
     <string name="ui_friends_refresh_id_confirmed">Закреплён за вашим аккаунтом на этом сервере. Друзья найдут вас по точному ID.</string>
     <string name="ui_friends_refresh_id_pending">Ещё не закреплён. Пока сервер не подтвердил имя, это локальный выбор. Музыку можно слушать без сети.</string>

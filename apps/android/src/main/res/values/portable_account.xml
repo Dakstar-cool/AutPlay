@@ -5,7 +5,7 @@
     <string name="portable_account_login">Login / ID</string>
     <string name="portable_account_password">Password</string>
     <string name="portable_account_password_repeat">Repeat password</string>
-    <string name="portable_account_password_rules">Use a passphrase of 15–128 characters.</string>
+    <string name="portable_account_password_rules">7–128 characters with at least one special character, such as !, @ or _. A space does not count.</string>
     <string name="portable_account_existing">I already have an account</string>
     <string name="portable_account_create">Create account</string>
     <string name="portable_account_connect">Connect this account</string>
@@ -21,7 +21,7 @@
     <string name="portable_account_import_file">Choose recovery file</string>
     <string name="portable_account_file_ready">Recovery file checked — choose another</string>
     <string name="portable_account_recovery_code">Recovery code</string>
-    <string name="portable_account_new_password">New password (15–128 characters)</string>
+    <string name="portable_account_new_password">New password (7–128 characters, including a special character)</string>
     <string name="portable_account_reset">Reset password and revoke old access</string>
     <string name="portable_account_recovery_scope">Choose a recovery file, or enter your ID and recovery code. Recovery keeps the account UUID and creates a new key. An online reset signs out all devices on the selected server. Connect to other servers using the current password to update their old keys. Save the new recovery file after each reset.</string>
     <string name="portable_account_recovery_local">This restores local access. Server copies are not revoked offline. When you connect with the current password, the app can update a server that still uses a retained previous key.</string>

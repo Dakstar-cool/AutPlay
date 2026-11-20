@@ -1,6 +1,7 @@
 package app.autplay.data.local.dao
 
 import androidx.room3.Dao
+import androidx.room3.Embedded
 import androidx.room3.Delete
 import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
@@ -10,6 +11,11 @@ import androidx.room3.Upsert
 import androidx.room3.Update
 import app.autplay.data.local.entity.*
 import kotlinx.coroutines.flow.Flow
+
+data class ArtistAppearanceRow(@Embedded val link: CatalogArtistCreditLinkEntity, val plays: Int)
+
+data class LibraryReleaseRow(@Embedded val release: ReleaseProjectionEntity, val artworkTrackId: String?)
+data class LibraryPlaylistRow(@Embedded val playlist: PlaylistEntity, val artworkTrackId: String?)
 
 @Dao
 interface CatalogProjectionDao {
@@ -22,8 +28,40 @@ interface CatalogProjectionDao {
     @Query("SELECT * FROM release_projection WHERE local_release_id = :localId AND is_deleted = 0") suspend fun release(localId: String): ReleaseProjectionEntity?
     @Query("SELECT DISTINCT rel.* FROM release_projection rel JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id WHERE rel.server_release_id IN (:serverIds) AND rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId ORDER BY rel.projection_updated_at_ms DESC, rel.local_release_id ASC LIMIT :limit") suspend fun releasesByServerIdsForProfile(profileId: String, serverIds: List<String>, limit: Int): List<ReleaseProjectionEntity>
     @Query("SELECT DISTINCT rel.* FROM release_projection rel JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id WHERE rel.local_release_id = :localId AND rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId LIMIT 1") suspend fun releaseForProfile(localId: String, profileId: String): ReleaseProjectionEntity?
-    @Query("SELECT DISTINCT rel.* FROM release_projection rel JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id WHERE rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId ORDER BY rel.projection_updated_at_ms DESC, rel.local_release_id ASC LIMIT :limit") fun releasesForProfile(profileId: String, limit: Int): Flow<List<ReleaseProjectionEntity>>
+    @Query("""
+        SELECT rel.*, MIN(CASE WHEN m.artwork_sha256 IS NOT NULL THEN u.local_user_track_ref_id END) AS artworkTrackId
+        FROM release_projection rel
+        JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id
+        JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id
+        LEFT JOIN track_metadata_projection m ON m.server_profile_id = u.server_profile_id
+            AND m.local_user_track_ref_id = u.local_user_track_ref_id
+        WHERE rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId
+        GROUP BY rel.local_release_id
+        ORDER BY rel.projection_updated_at_ms DESC, rel.local_release_id ASC LIMIT :limit
+    """)
+    fun releasesForProfile(profileId: String, limit: Int): Flow<List<LibraryReleaseRow>>
     @Query("SELECT * FROM release_track_projection WHERE local_release_id = :localReleaseId ORDER BY medium_position ASC, sequence_no ASC, local_release_track_id ASC LIMIT :limit") suspend fun releaseTracks(localReleaseId: String, limit: Int): List<ReleaseTrackProjectionEntity>
+    @Query("""
+        SELECT a.* FROM user_track_ref playing
+        JOIN catalog_artist_credit_link l ON l.server_profile_id = playing.server_profile_id
+            AND l.subject_type = 'RECORDING' AND l.subject_server_id = playing.server_recording_id
+        JOIN artist_credit_projection c ON c.server_profile_id = l.server_profile_id
+            AND c.server_artist_credit_id = l.server_artist_credit_id AND c.deleted_at_ms IS NULL
+        JOIN artist_credit_name_projection n ON n.server_profile_id = c.server_profile_id
+            AND n.server_artist_credit_id = c.server_artist_credit_id
+        JOIN artist_projection a ON a.server_profile_id = n.server_profile_id AND a.server_artist_id = n.server_artist_id
+        WHERE playing.server_profile_id = :profile AND playing.local_user_track_ref_id = :trackId
+          AND playing.deleted_at_ms IS NULL AND a.deleted_at_ms IS NULL
+          AND l.deleted_at_ms IS NULL AND l.owner_scope_complete = 1 AND EXISTS (
+            SELECT 1 FROM catalog_artist_credit_link_owner o JOIN user_track_ref owned
+                ON owned.server_profile_id = o.server_profile_id AND owned.server_recording_id = o.owner_recording_id
+            WHERE o.server_profile_id = l.server_profile_id AND o.subject_type = l.subject_type
+              AND o.subject_server_id = l.subject_server_id AND o.owner_scope_id = l.owner_scope_id
+              AND owned.deleted_at_ms IS NULL)
+        GROUP BY a.local_artist_id ORDER BY MIN(n.position), a.server_artist_id
+    """)
+    fun observeTrackArtists(profile: String, trackId: String): Flow<List<ArtistProjectionEntity>>
+
     @Upsert suspend fun upsertArtists(rows: List<ArtistProjectionEntity>)
     @Upsert suspend fun upsertArtistCredits(rows: List<ArtistCreditProjectionEntity>)
     @Upsert suspend fun upsertArtistCreditNames(rows: List<ArtistCreditNameProjectionEntity>)
@@ -42,7 +80,34 @@ interface CatalogProjectionDao {
     @Query("SELECT DISTINCT c.* FROM artist_credit_projection c JOIN artist_credit_name_projection n ON n.server_profile_id = c.server_profile_id AND n.server_artist_credit_id = c.server_artist_credit_id JOIN catalog_artist_credit_link l ON l.server_profile_id = c.server_profile_id AND l.server_artist_credit_id = c.server_artist_credit_id WHERE c.server_profile_id = :profileId AND n.server_artist_id = :artistId AND c.deleted_at_ms IS NULL AND l.deleted_at_ms IS NULL AND l.owner_scope_complete = 1 AND EXISTS (SELECT 1 FROM catalog_artist_credit_link_owner o JOIN user_track_ref u ON u.server_profile_id = o.server_profile_id AND u.server_recording_id = o.owner_recording_id AND u.deleted_at_ms IS NULL WHERE o.server_profile_id = l.server_profile_id AND o.subject_type = l.subject_type AND o.subject_server_id = l.subject_server_id AND o.owner_scope_id = l.owner_scope_id) ORDER BY c.server_artist_credit_id LIMIT :limit") suspend fun ownedCreditsForArtist(profileId: String, artistId: String, limit: Int): List<ArtistCreditProjectionEntity>
     @Query("SELECT DISTINCT c.* FROM artist_credit_projection c JOIN catalog_artist_credit_link l ON l.server_profile_id = c.server_profile_id AND l.server_artist_credit_id = c.server_artist_credit_id WHERE c.server_profile_id = :profileId AND c.server_artist_credit_id = :creditId AND c.deleted_at_ms IS NULL AND l.deleted_at_ms IS NULL AND l.owner_scope_complete = 1 AND EXISTS (SELECT 1 FROM catalog_artist_credit_link_owner o JOIN user_track_ref u ON u.server_profile_id = o.server_profile_id AND u.server_recording_id = o.owner_recording_id AND u.deleted_at_ms IS NULL WHERE o.server_profile_id = l.server_profile_id AND o.subject_type = l.subject_type AND o.subject_server_id = l.subject_server_id AND o.owner_scope_id = l.owner_scope_id) LIMIT 1") suspend fun ownedArtistCredit(profileId: String, creditId: String): ArtistCreditProjectionEntity?
     @Query("SELECT l.* FROM catalog_artist_credit_link l WHERE l.server_profile_id = :profileId AND l.subject_type = :subjectType AND l.subject_server_id = :subjectId AND l.deleted_at_ms IS NULL AND l.owner_scope_complete = 1 AND EXISTS (SELECT 1 FROM catalog_artist_credit_link_owner o JOIN user_track_ref u ON u.server_profile_id = o.server_profile_id AND u.server_recording_id = o.owner_recording_id AND u.deleted_at_ms IS NULL WHERE o.server_profile_id = l.server_profile_id AND o.subject_type = l.subject_type AND o.subject_server_id = l.subject_server_id AND o.owner_scope_id = l.owner_scope_id) LIMIT :limit") suspend fun creditLinksForSubject(profileId: String, subjectType: String, subjectId: String, limit: Int): List<CatalogArtistCreditLinkEntity>
-    @Query("SELECT DISTINCT l.* FROM catalog_artist_credit_link l JOIN artist_credit_name_projection n ON n.server_profile_id = l.server_profile_id AND n.server_artist_credit_id = l.server_artist_credit_id WHERE l.server_profile_id = :profileId AND n.server_artist_id = :artistId AND l.deleted_at_ms IS NULL AND l.owner_scope_complete = 1 AND EXISTS (SELECT 1 FROM catalog_artist_credit_link_owner o JOIN user_track_ref u ON u.server_profile_id = o.server_profile_id AND u.server_recording_id = o.owner_recording_id AND u.deleted_at_ms IS NULL WHERE o.server_profile_id = l.server_profile_id AND o.subject_type = l.subject_type AND o.subject_server_id = l.subject_server_id AND o.owner_scope_id = l.owner_scope_id) ORDER BY l.subject_type, l.subject_server_id LIMIT :limit") suspend fun ownedSubjectLinksForArtist(profileId: String, artistId: String, limit: Int): List<CatalogArtistCreditLinkEntity>
+    @Query("""
+        WITH owned AS (
+            SELECT DISTINCT l.local_catalog_artist_credit_link_id AS linkId, l.subject_type AS kind,
+                l.subject_server_id AS subjectId
+            FROM catalog_artist_credit_link l JOIN artist_credit_name_projection n
+              ON n.server_profile_id = l.server_profile_id AND n.server_artist_credit_id = l.server_artist_credit_id
+            WHERE l.server_profile_id = :profileId AND n.server_artist_id = :artistId
+              AND l.deleted_at_ms IS NULL AND l.owner_scope_complete = 1 AND EXISTS (
+                SELECT 1 FROM catalog_artist_credit_link_owner o JOIN user_track_ref u
+                  ON u.server_profile_id = o.server_profile_id AND u.server_recording_id = o.owner_recording_id
+                WHERE o.server_profile_id = l.server_profile_id AND o.subject_type = l.subject_type
+                  AND o.subject_server_id = l.subject_server_id AND o.owner_scope_id = l.owner_scope_id
+                  AND u.deleted_at_ms IS NULL)
+        ), counted AS (
+            SELECT owned.*, CASE WHEN kind = 'RECORDING' THEN (
+                SELECT COUNT(*) FROM user_track_ref u JOIN listening_event e ON e.local_user_track_ref_id = u.local_user_track_ref_id
+                WHERE u.server_profile_id = :profileId AND u.server_recording_id = owned.subjectId
+                  AND e.server_profile_id = :profileId AND e.excluded_from_taste = 0 AND e.played_ms > 0
+            ) ELSE 0 END AS plays FROM owned
+        ), ranked AS (
+            SELECT counted.*, ROW_NUMBER() OVER (PARTITION BY kind ORDER BY plays DESC, subjectId) AS sectionPosition
+            FROM counted
+        )
+        SELECT l.*, ranked.plays FROM ranked JOIN catalog_artist_credit_link l
+          ON l.local_catalog_artist_credit_link_id = ranked.linkId
+        ORDER BY ranked.sectionPosition, ranked.kind, ranked.subjectId LIMIT :limit
+    """)
+    suspend fun ownedSubjectLinksForArtist(profileId: String, artistId: String, limit: Int): List<ArtistAppearanceRow>
 }
 
 @Dao
@@ -52,6 +117,12 @@ interface LibraryDao {
         SELECT u.local_user_track_ref_id
         FROM user_track_ref u
         WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+          AND (:onlyUnresolved = 0 OR u.server_recording_id IS NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM user_track_preference p
+              WHERE p.local_user_track_ref_id = u.local_user_track_ref_id AND p.server_profile_id = :profileId
+                AND (p.preference = 'DISLIKED' OR p.excluded_from_taste = 1)
+          )
           AND EXISTS (
               SELECT 1 FROM library_entry l
               WHERE l.local_user_track_ref_id = u.local_user_track_ref_id
@@ -77,7 +148,66 @@ interface LibraryDao {
         LIMIT :limit
         """,
     )
-    suspend fun randomPlaybackCandidates(profileId: String, vaultAvailable: Boolean, limit: Int): List<String>
+    suspend fun randomPlaybackCandidates(
+        profileId: String, vaultAvailable: Boolean, limit: Int, onlyUnresolved: Boolean = false,
+    ): List<String>
+
+    @Query(WAVE_RECORDINGS + """
+        WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+          AND u.local_user_track_ref_id IN (:refIds)
+        """)
+    suspend fun waveRecordings(profileId: String, refIds: List<String>): List<WaveRecordingRow>
+
+    @Query("""
+        SELECT local_user_track_ref_id AS refId, variation_kind AS kind,
+               coalesce(variation_surface, CASE WHEN event_origin = 'RECOMMENDED' AND json_valid(recommendation_attribution_json)
+                  THEN CASE json_extract(recommendation_attribution_json, '$.surface')
+                    WHEN 'home' THEN 'home' WHEN 'offline_pack' THEN 'home' WHEN 'personal_wave' THEN 'personal_wave' END END) AS surface,
+               count(*) AS plays, sum(CASE WHEN played_ms < 30000 OR completion_ratio <= 0.2 THEN 1 ELSE 0 END) AS skips
+        FROM listening_event
+        WHERE server_profile_id = :profile AND excluded_from_taste = 0 AND started_at_ms > :since AND started_at_ms <= :through
+          AND (event_origin = 'RECOMMENDED' OR (event_origin = 'WAVE' AND variation_surface = 'personal_wave'))
+          AND local_user_track_ref_id IN (:refs)
+        GROUP BY local_user_track_ref_id, kind, surface
+    """)
+    suspend fun variationOutcomes(profile: String, since: Long, through: Long, refs: List<String>): List<VariationOutcomeRow>
+
+    @Query(WAVE_RECORDINGS + """
+        WHERE u.server_profile_id = :profile AND u.local_user_track_ref_id IN (
+            SELECT local_user_track_ref_id FROM listening_event WHERE server_profile_id = :profile
+            AND started_at_ms > :since AND started_at_ms <= :through AND excluded_from_taste = 0
+            AND (event_origin = 'RECOMMENDED' OR (event_origin = 'WAVE' AND variation_surface = 'personal_wave')))
+        AND u.local_user_track_ref_id > :after ORDER BY u.local_user_track_ref_id LIMIT 200
+    """)
+    suspend fun variationHistoryRefs(profile: String, since: Long, through: Long, after: String): List<WaveRecordingRow>
+
+    @Query(WAVE_RECORDINGS + """
+        JOIN user_track_preference p ON p.local_user_track_ref_id = u.local_user_track_ref_id
+        WHERE u.server_profile_id = :profileId AND p.server_profile_id = :profileId
+          AND p.preference = 'LIKED' AND p.excluded_from_taste = 0
+          AND u.deleted_at_ms IS NULL AND COALESCE(r.is_deleted, 0) = 0
+          AND r.redirect_server_recording_id IS NULL AND p.local_user_track_ref_id > :after
+        ORDER BY p.local_user_track_ref_id LIMIT :limit
+        """)
+    suspend fun likedWaveRecordings(profileId: String, after: String, limit: Int): List<WaveRecordingRow>
+
+    @Query(WAVE_RECORDINGS + """
+        WHERE u.server_profile_id = :profileId AND u.local_user_track_ref_id > :after
+          AND u.local_user_track_ref_id IN (
+              SELECT local_user_track_ref_id FROM listening_event
+              WHERE server_profile_id = :profileId AND excluded_from_taste = 0 AND played_ms > 0
+                AND started_at_ms > :since AND started_at_ms <= :now
+              UNION
+              SELECT e.local_user_track_ref_id FROM queue_snapshot s
+              JOIN queue_entry e ON e.queue_snapshot_id = s.queue_snapshot_id AND e.queue_entry_id = s.current_entry_id
+              WHERE s.is_active = 1 AND COALESCE(s.server_profile_id, 'legacy-unscoped') = :profileId
+                AND s.active_listening_event_id IS NOT NULL AND s.active_session_observed_played_ms > 0
+                AND s.session_excluded_from_taste = 0 AND s.active_listen_excluded_from_taste = 0
+                AND s.active_session_started_at_ms > :since AND s.active_session_started_at_ms <= :now
+          )
+        ORDER BY u.local_user_track_ref_id LIMIT :limit
+    """)
+    suspend fun recentlyPlayedWaveRecordings(profileId: String, since: Long, now: Long, after: String, limit: Int): List<WaveRecordingRow>
 
     @Upsert suspend fun upsertTrackRef(row: UserTrackRefEntity)
     @Upsert suspend fun upsertTrackRefs(rows: List<UserTrackRefEntity>)
@@ -252,6 +382,22 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist WHERE server_profile_id = :profileId AND server_playlist_id = :serverId LIMIT 1") suspend fun playlistByServerId(profileId: String, serverId: String): PlaylistEntity?
     @Query("SELECT * FROM playlist WHERE deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT :limit") fun activePlaylists(limit: Int): Flow<List<PlaylistEntity>>
     @Query("SELECT * FROM playlist WHERE server_profile_id = :profileId AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT :limit") fun activePlaylistsForProfile(profileId: String, limit: Int): Flow<List<PlaylistEntity>>
+    @Query("""
+        SELECT p.*, (
+            SELECT e.local_user_track_ref_id FROM playlist_entry e
+            JOIN track_metadata_projection m ON m.server_profile_id = e.server_profile_id
+                AND m.local_user_track_ref_id = e.local_user_track_ref_id AND m.artwork_sha256 IS NOT NULL
+            JOIN user_track_ref u ON u.local_user_track_ref_id = e.local_user_track_ref_id
+                AND u.server_profile_id = p.server_profile_id AND u.deleted_at_ms IS NULL
+            WHERE e.local_playlist_id = p.local_playlist_id AND e.server_profile_id = p.server_profile_id
+                AND e.removed_at_ms IS NULL
+            ORDER BY e.position_key, e.local_playlist_entry_id LIMIT 1
+        ) AS artworkTrackId
+        FROM playlist p WHERE p.server_profile_id = :profileId AND p.deleted_at_ms IS NULL
+        ORDER BY p.updated_at_ms DESC, p.local_playlist_id LIMIT :limit
+    """)
+    fun libraryPlaylists(profileId: String, limit: Int): Flow<List<LibraryPlaylistRow>>
+
     @Query("SELECT * FROM playlist WHERE server_profile_id = 'legacy-unscoped' AND deleted_at_ms IS NULL ORDER BY updated_at_ms DESC LIMIT :limit") fun activeLegacyPlaylists(limit: Int): Flow<List<PlaylistEntity>>
     @Query("SELECT * FROM playlist_entry WHERE local_playlist_entry_id = :entryId") suspend fun entry(entryId: String): PlaylistEntryEntity?
     @Query("SELECT * FROM playlist_entry WHERE server_profile_id = :profileId AND server_playlist_entry_id = :serverId LIMIT 1") suspend fun entryByServerId(profileId: String, serverId: String): PlaylistEntryEntity?
@@ -313,6 +459,17 @@ interface QueueDao {
     ): Int
     @Query("UPDATE queue_snapshot SET active_listen_excluded_from_taste = 0, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")
     suspend fun beginActiveListenTasteExclusion(snapshotId: String, nowMs: Long): Int
+    @Query("""
+        UPDATE queue_snapshot
+        SET current_entry_id = :entryId, current_position_ms = :positionMs, shuffle_mode = :shuffleMode,
+            repeat_mode = :repeatMode, seed = :seed, updated_at_ms = :nowMs
+        WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE' AND active_listening_event_id IS NULL
+          AND EXISTS (SELECT 1 FROM queue_entry WHERE queue_snapshot_id = :snapshotId AND queue_entry_id = :entryId)
+    """)
+    suspend fun selectIdleEntry(
+        snapshotId: String, entryId: String, positionMs: Long, shuffleMode: String,
+        repeatMode: String, seed: Long?, nowMs: Long,
+    )
     @Query("UPDATE queue_snapshot SET active_listen_excluded_from_taste = :excluded, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE' AND current_entry_id = :entryId AND active_listening_event_id = :eventId")
     suspend fun setActiveListenTasteExclusion(snapshotId: String, entryId: String, eventId: String, excluded: Boolean, nowMs: Long): Int
     @Query("UPDATE queue_snapshot SET session_excluded_from_taste = :excluded, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")
@@ -409,6 +566,7 @@ interface GuestRoomDao {
 
 @Dao
 interface HistoryDao {
+
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(event: ListeningEventEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertOnce(event: ListeningEventEntity): Long
     @Upsert suspend fun upsert(event: ListeningEventEntity)
@@ -821,9 +979,21 @@ interface RecommendationPackDao {
           AND u.server_profile_id = :profileId
           AND u.server_recording_id IN (:recordingIds)
           AND u.deleted_at_ms IS NULL
-          AND r.is_deleted = 0
-          AND r.redirect_server_recording_id IS NULL
-          AND r.server_recording_id = u.server_recording_id
+          AND (
+              (u.local_recording_id IS NULL AND u.resolution_status = 'RESOLVED')
+              OR (r.is_deleted = 0 AND r.redirect_server_recording_id IS NULL
+                  AND r.server_recording_id = u.server_recording_id)
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM tombstone t
+              WHERE t.server_profile_id = :profileId AND t.aggregate_type = 'RECORDING'
+                AND t.aggregate_server_id = u.server_recording_id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM aggregate_redirect redirect
+              WHERE redirect.server_profile_id = :profileId AND redirect.aggregate_type = 'RECORDING'
+                AND redirect.alias_server_id = u.server_recording_id
+          )
         ORDER BY u.local_user_track_ref_id ASC
         LIMIT :limit
         """,
@@ -868,6 +1038,21 @@ interface RecommendationPackDao {
 
 @Dao
 interface SearchDao {
+    @Query("""
+        SELECT u.local_user_track_ref_id FROM user_track_ref u
+        WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+          AND u.local_user_track_ref_id IN (:trackIds)
+          AND (EXISTS (
+              SELECT 1 FROM local_audio_state a WHERE a.local_user_track_ref_id = u.local_user_track_ref_id
+                AND a.status = 'AVAILABLE' AND (a.persisted_uri_permission = 1 OR a.content_uri LIKE 'content://media/%')
+          ) OR EXISTS (
+              SELECT 1 FROM download_intent d WHERE d.local_user_track_ref_id = u.local_user_track_ref_id
+                AND COALESCE(d.server_profile_id, 'legacy-unscoped') = u.server_profile_id
+                AND d.state = 'COMPLETED' AND d.media3_download_id IS NOT NULL
+          ))
+    """)
+    fun offlineTrackIds(profileId: String, trackIds: List<String>): Flow<List<String>>
+
     @Query("SELECT * FROM track_search_content WHERE local_user_track_ref_id = :trackRefId LIMIT 1") suspend fun contentForTrack(trackRefId: String): TrackSearchContentEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertContent(row: TrackSearchContentEntity): Long
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertContents(rows: List<TrackSearchContentEntity>): List<Long>

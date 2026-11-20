@@ -21,18 +21,19 @@
     <string name="action_open_profile">Open profile</string>
     <string name="action_open_settings">Open settings</string>
 
-    <string name="onboarding_step">Step %1$d of %2$d</string>
-    <string name="onboarding_welcome_title">Music, yours first</string>
-    <string name="onboarding_welcome_body">AutPlay works with music on this phone. You can start locally and stay in control of your library.</string>
-    <string name="onboarding_library_title">Find, play, keep listening</string>
-    <string name="onboarding_library_body">Use My music to add tracks, Search to find them, and the player to keep your queue with you.</string>
-    <string name="onboarding_server_title">Add a personal server when you want</string>
-    <string name="onboarding_server_body">A personal server is optional. It can connect your own devices and enable shared listening, while local playback keeps working without it.</string>
-    <string name="onboarding_next">Continue</string>
-    <string name="onboarding_continue_local">Continue on this phone</string>
-    <string name="onboarding_connect_server">Connect personal server</string>
-    <string name="onboarding_local_note">No account, network, or folder access is needed for this introduction.</string>
-    <string name="onboarding_save_failed">Could not save your choice. Please try again.</string>
+    <string name="onboarding_welcome_title">Your local account</string>
+    <string name="onboarding_welcome_body">Your account keeps your history and playlists together. A password protects access to it.</string>
+    <string name="onboarding_continue_local">Create account and continue</string>
+    <string name="onboarding_local_note">No email or internet connection is required. You can connect a personal server later.</string>
+    <string name="onboarding_save_failed">Could not finish setup. Please try again.</string>
+    <string name="onboarding_required_fields">Complete the fields above to continue.</string>
+    <string name="onboarding_password_invalid">Use 7–128 characters, including at least one special character such as !, @ or _. A space does not count. Avoid common passwords or a single repeated character.</string>
+    <string name="onboarding_password_mismatch">Passwords do not match. Enter the same phrase in both fields.</string>
+    <string name="onboarding_saving">Finishing setup on this phone…</string>
+    <string name="home_first_track_title">Add your first track</string>
+    <string name="home_first_track_body">Choose an audio file from this phone to start listening. Your music works offline.</string>
+    <string name="local_audio_picker_hint">In the file chooser, use its menu to open Downloads or another folder.</string>
+    <string name="library_play_track">Play %1$s</string>
 
     <string name="home_my_wave">My Wave</string>
     <string name="home_hero_personal_flow">Your personal flow</string>
@@ -40,24 +41,15 @@
     <string name="home_hero_playing">Now playing</string>
     <string name="home_hero_ready">Ready to play</string>
     <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
-    <string name="home_hero_empty">Choose a local track to start your flow</string>
     <string name="home_context_collections">Made for the moment</string>
-    <string name="home_context_collections_placeholder">Context mixes are coming soon. The categories below are a preview.</string>
-    <string name="home_context_energy">High energy</string>
-    <string name="home_context_running">For running</string>
-    <string name="home_context_focus">Focus</string>
-    <string name="home_context_evening">Evening</string>
     <string name="home_loading">Loading your local Home feed</string>
     <string name="home_offline_fallback">Offline recommendations are shown only for music available on this device.</string>
     <string name="home_continue_listening">Continue listening</string>
     <string name="home_continue_action">Resume queue</string>
     <string name="home_recently_played">Recently played</string>
     <string name="home_recently_added">Recently added</string>
-    <string name="home_recent_empty">Play or add local music to see it here.</string>
     <string name="home_playlists">Playlists</string>
-    <string name="home_playlists_empty">Your playlists will appear here.</string>
     <string name="home_offline_ready">Offline ready</string>
-    <string name="home_offline_empty">No completed offline downloads yet.</string>
     <string name="home_offline_open">Open offline library</string>
     <string name="home_problems">Problems requiring attention</string>
     <string name="home_problems_open">Review</string>
@@ -66,8 +58,6 @@
         <item quantity="other">%d items need attention</item>
     </plurals>
     <string name="home_recommendations">For you</string>
-    <string name="home_new_releases">New from artists in your collection</string>
-    <string name="home_empty_recommendations">No locally available recommendations yet</string>
     <string name="home_empty_releases">No relevant new releases yet</string>
 
     <string name="search_hint">Search your library</string>
@@ -77,6 +67,12 @@
     <string name="search_vault_scope">Vault</string>
     <string name="search_vault_loading">Searching your personal Vault…</string>
     <string name="search_vault_empty">No matching items in the personal Vault.</string>
+    <string name="search_source_both_offline">On device and server · Offline</string>
+    <string name="search_source_phone_offline">On device · Offline</string>
+    <string name="search_source_server_online">On server · Internet required</string>
+    <string name="search_source_server_unavailable">On server · Playback unavailable</string>
+    <string name="search_source_server_metadata">On server · No offline copy</string>
+    <string name="search_source_library_metadata">In library · No offline copy</string>
     <string name="search_vault_metadata_unavailable">Metadata unavailable on this device</string>
     <string name="search_vault_playback_unavailable">Unavailable here</string>
     <string name="search_empty">No local results</string>
@@ -88,8 +84,9 @@
     <string name="library_add_local_success">Added “%1$s” to the local collection</string>
     <string name="library_empty_body">Choose a music folder or add a local track to get started.</string>
     <string name="library_unknown_artist">Unknown artist</string>
+    <string name="library_favorites_shortcut">Favorites</string>
+    <string name="library_favorites_empty">No favorite tracks yet</string>
     <string name="library_sort_label">Sort</string>
-    <string name="library_filter_label">Filter</string>
     <string name="library_section_tracks">Tracks</string>
     <string name="library_section_artists">Artists</string>
     <string name="library_section_albums">Albums</string>
@@ -100,10 +97,6 @@
     <string name="library_sort_recent">Recently added</string>
     <string name="library_sort_title">Title</string>
     <string name="library_sort_artist">Artist</string>
-    <string name="library_filter_all">All</string>
-    <string name="library_filter_loved">Liked</string>
-    <string name="library_filter_downloaded">Downloaded</string>
-    <string name="library_filter_available">Available</string>
     <string name="library_filter_unavailable">Unavailable</string>
     <string name="library_artist_identity_unavailable">Artist browsing needs a stable artist identity. This build does not group artists by display name.</string>
     <string name="library_artists_loading">Loading artists from the owned catalog…</string>
@@ -128,12 +121,15 @@
     <string name="action_pause">Pause</string>
     <string name="action_previous">Previous</string>
     <string name="action_next">Next</string>
+    <string name="player_previous_track">Previous track</string>
+    <string name="player_next_track">Next track</string>
+    <string name="player_expand_artwork">View full-screen artwork</string>
+    <string name="player_close_artwork">Close full-screen artwork</string>
     <string name="action_like">Like</string>
     <string name="action_liked">Liked</string>
-    <string name="player_taste_exclusion_title">Taste Profile</string>
+    <string name="player_more_options">More options</string>
+    <string name="player_taste_exclusion_title">Recommendation settings</string>
     <string name="player_collapse">Collapse player</string>
-    <string name="player_section_expanded">Expanded</string>
-    <string name="player_section_collapsed">Collapsed</string>
     <string name="player_exclude_listen_short">Exclude listen</string>
     <string name="player_exclude_session_short">Exclude session</string>
     <string name="player_taste_listen_unavailable">Start listening before excluding the current listen.</string>
@@ -158,9 +154,9 @@
     <string name="detail_resolution_confidence">Identity confidence</string>
     <string name="detail_recording_kind">Recording kind</string>
     <string name="detail_recording_version">Version</string>
-    <string name="detail_release_date">Release date</string>
 
     <string name="player_nothing_playing">Nothing playing</string>
+    <string name="player_preparing">Preparing playback…</string>
     <string name="player_unknown_artist">Unknown artist</string>
     <string name="player_buffering">Buffering</string>
     <string name="player_timeline_unknown">Timeline unavailable</string>
@@ -349,7 +345,6 @@
     <string name="wave_share_code">Share code</string>
     <string name="wave_you_control">You control playback in this room</string>
     <string name="wave_host_controls">The room host controls playback</string>
-    <string name="wave_add_selected_track">Add selected track to the room</string>
     <string name="wave_start_scheduled">Playback will start on all ready devices.</string>
     <string name="wave_waiting_devices">Waiting for the other devices to become ready.</string>
     <string name="wave_start_playback">Start playback</string>
@@ -466,20 +461,15 @@
     <string name="settings_language">Application language</string>
     <string name="settings_language_russian">Russian</string>
     <string name="settings_language_english">English</string>
-    <string name="settings_appearance">Appearance</string>
     <string name="settings_theme_light">Light theme</string>
     <string name="settings_theme_dark">Dark theme</string>
-    <string name="settings_library_access">Music folder</string>
     <string name="settings_folder_not_selected">No music folder selected</string>
     <string name="settings_folder_selected">Music folder selected</string>
     <string name="settings_choose_folder">Choose music folder</string>
     <string name="settings_scan_folder">Scan folder again</string>
     <string name="settings_folder_privacy">This folder is used for library updates. Searching the phone requests separate access to audio files. You can revoke permissions in Android settings.</string>
-    <string name="settings_network">Personal server and shared listening</string>
-    <string name="settings_open_personal_server">Open personal server</string>
     <string name="settings_metered_downloads">Download tracks using mobile data</string>
-    <string name="settings_playback">Playback</string>
-    <string name="settings_smooth_track_transitions">Smooth track transitions</string>
+    <string name="settings_smooth_track_transitions">Preload the next track</string>
     <string name="settings_wave_prefetch_off">Do not prepare tracks in advance</string>
     <string name="settings_wave_prefetch_next">Prepare the next track</string>
     <string name="settings_wave_prefetch_three">Prepare the next three tracks</string>
@@ -573,7 +563,7 @@
     <string name="statistics_view">View statistics</string>
     <string name="settings_statistics_privacy">Statistics privacy</string>
     <string name="settings_statistics_share">Share listening statistics with friends</string>
-    <string name="settings_statistics_share_explanation">Off by default. Only confirmed friends on this personal server can see the bounded completed-day aggregate.</string>
+    <string name="settings_statistics_share_explanation">Off by default. Only confirmed friends on this personal server can see a limited summary of your listening for completed days.</string>
     <string name="settings_statistics_loading">Checking the server setting…</string>
     <string name="settings_statistics_updating">Waiting for server confirmation…</string>
     <string name="settings_statistics_unavailable_local">Connect a personal server to share statistics. Your own statistics remain available offline.</string>
@@ -639,4 +629,21 @@
     <string name="discovery_automation_pending_resolution">The previous command has an unknown outcome. Retry the same action or refresh server state before starting another.</string>
     <string name="discovery_automation_unsupported_mode">Unsupported server mode: %1$s</string>
     <string name="home_listen_together_short">Together</string>
+    <string name="variation_skips_title">Version skips during Sona collection</string>
+    <string name="variation_skips_empty">No version recommendations played in this period</string>
+    <string name="variation_skips_note" formatted="false">Skips / plays. A short listen is under 30 seconds or at most 20% of the track.</string>
+    <string name="variation_type">Version</string>
+    <string name="variation_feed">Feed</string>
+    <string name="variation_wave">Wave</string>
+    <string name="variation_covers">Covers</string>
+    <string name="variation_remixes">Remixes</string>
+    <string name="variation_live">Live</string>
+    <string name="variation_skips_count">%1$d / %2$d</string>
+    <string name="detail_collection_listen">Listen</string>
+    <string name="detail_artist_popular">Your most played</string>
+    <string name="detail_artist_more_tracks">More tracks</string>
+    <string name="detail_finish_edit">Done</string>
+    <string name="detail_open_artist">Open artist</string>
+    <string name="detail_artist_info">About the artist</string>
+    <string name="detail_hide_artist_info">Hide artist details</string>
 </resources>

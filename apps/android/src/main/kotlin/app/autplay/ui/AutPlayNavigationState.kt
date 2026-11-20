@@ -38,6 +38,13 @@ public class AutPlayNavigationState internal constructor(
         current = destination
     }
 
+    internal fun openLibraryDetail() {
+        if (current == UiDestination.NowPlaying) {
+            stack.add(current)
+            current = UiDestination.Library
+        } else navigate(UiDestination.Library)
+    }
+
     public fun navigateBack(): Boolean {
         val previous = stack.removeLastOrNull() ?: return false
         current = previous

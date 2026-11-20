@@ -1,5 +1,10 @@
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPOSITORY_ROOT / "scripts" / "build-pa3-signed-release.ps1"
@@ -22,6 +27,102 @@ def test_plaintext_keystore_directory_is_owner_only_before_decryption() -> None:
     assert "SetAccessRuleProtection($true, $false)" in script
     assert protect_directory < decrypt < protect_plaintext < inspect_plaintext
     assert "SIGNING_TEMP_ACL_NOT_OWNER_ONLY" in script
+
+
+def test_native_recovery_prompt_keeps_protected_decryption_and_abort_order() -> None:
+    script = _script()
+    protect_directory = script.index("Set-OwnerOnlyDirectoryAcl -LiteralPath $temporaryDirectory")
+    native_decrypt = script.index("            Invoke-NativeRecoveryDecryption `")
+    protect_plaintext = script.index("Set-OwnerOnlyFileAcl -LiteralPath $temporaryKeystore")
+    inspect_plaintext = script.index("$keyListing = Invoke-NativeCapture $keytool")
+    assert protect_directory < native_decrypt < protect_plaintext < inspect_plaintext
+    assert "[switch]$NativeRecoveryPrompt" in script
+    assert "if (-not $NativeRecoveryPrompt)" in script
+    helper = script.split("function Invoke-NativeRecoveryDecryption {", 1)[1].split(
+        "\nfunction ", 1
+    )[0]
+    assert "& $AgePath --decrypt --output $OutputPath $CiphertextPath" in helper
+    assert "if (-not $? -or $LASTEXITCODE -ne 0)" in helper
+    assert 'throw "SIGNER_DECRYPTION_FAILED"' in helper
+    assert "$ErrorActionPreference = $previousPreference" in helper
+    assert "Read-Host" not in helper.split("$previousPreference", 1)[1]
+    assert "$env:" not in helper
+    assert "2>&1" not in helper
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell signing procedure")
+def test_native_recovery_invocation_reports_failure_and_restores_error_mode(tmp_path: Path) -> None:
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("Windows PowerShell is unavailable")
+    source = str(SCRIPT_PATH).replace("'", "''")
+    harness = tmp_path / "native-recovery-test.ps1"
+    harness.write_text(
+        r"""
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    '__SOURCE__', [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count) { throw 'SIGNER_PARSE_FAILED' }
+$function = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Invoke-NativeRecoveryDecryption'
+}, $true)
+. ([ScriptBlock]::Create($function.Extent.Text))
+function Invoke-FakeAge {
+    $script:received = @($args)
+    $global:LASTEXITCODE = $script:fakeExit
+}
+foreach ($fakeExit in @(0, 7)) {
+    $threw = $false
+    try {
+        Invoke-NativeRecoveryDecryption -AgePath Invoke-FakeAge `
+            -CiphertextPath 'test encrypted.age' -OutputPath 'test output.p12'
+    }
+    catch {
+        if ($_.Exception.Message -cne 'SIGNER_DECRYPTION_FAILED') { throw }
+        $threw = $true
+    }
+    if ($threw -ne ($fakeExit -ne 0)) { throw 'EXIT_STATUS_IGNORED' }
+    if ($ErrorActionPreference -ne 'Stop') { throw 'ERROR_MODE_NOT_RESTORED' }
+    if (($received -join '|') -cne '--decrypt|--output|test output.p12|test encrypted.age') {
+        throw 'NATIVE_ARGUMENTS_CHANGED'
+    }
+}
+# A failed command launch must not reuse a previous successful native exit code.
+$global:LASTEXITCODE = 0
+$threw = $false
+try {
+    Invoke-NativeRecoveryDecryption -AgePath 'Nonexistent-Synthetic-Age-Command' `
+        -CiphertextPath 'test encrypted.age' -OutputPath 'test output.p12'
+}
+catch { $threw = $true }
+if (-not $threw) { throw 'COMMAND_LAUNCH_FAILURE_IGNORED' }
+if ($ErrorActionPreference -ne 'Stop') { throw 'ERROR_MODE_NOT_RESTORED' }
+Write-Output 'NATIVE_RECOVERY_CONTROL_FLOW_PASS'
+""".replace("__SOURCE__", source),
+        encoding="utf-8",
+    )
+    # PS7 -> Python -> PS5 otherwise inherits incompatible PS7 system modules.
+    env = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+    result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "RemoteSigned",
+            "-File",
+            str(harness),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "NATIVE_RECOVERY_CONTROL_FLOW_PASS" in result.stdout
 
 
 def test_pass_receipt_is_atomic_and_follows_verified_cleanup() -> None:
@@ -101,8 +202,8 @@ def test_manifest_binds_apk_source_certificate_and_latest_tracked_room_schema() 
 def test_android_gradle_production_flag_fails_closed() -> None:
     build = ANDROID_BUILD_PATH.read_text(encoding="utf-8")
 
-    assert "versionCode = 18" in build
-    assert 'versionName = "1.0.5"' in build
+    assert "versionCode = 29" in build
+    assert 'versionName = "1.0.11"' in build
     assert 'gradleProperty("autplay.productionRelease")' in build
     assert "productionRelease && qaSideBySide" in build
     assert "Production release requires explicit versionCode and versionName" in build

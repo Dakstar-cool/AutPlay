@@ -10,8 +10,6 @@
     <string name="profile_account_devices_summary">Connection, devices and account security</string>
     <string name="profile_connect_optional">Connect a personal server</string>
     <string name="profile_connect_optional_summary">Optional: sync your collection and listen with friends</string>
-    <string name="settings_privacy_summary">Who can see your listening statistics</string>
-    <string name="settings_music_navigation">Music and history</string>
     <string name="settings_about">About the app</string>
     <string name="settings_app_version">AutPlay %1$s</string>
     <string name="settings_developer_mode">Developer mode</string>

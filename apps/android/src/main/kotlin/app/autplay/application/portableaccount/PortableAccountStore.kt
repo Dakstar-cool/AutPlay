@@ -16,7 +16,8 @@ import kotlinx.coroutines.withContext
 data class PortableAccountOwnership(val accountId: String, val standaloneSinceMs: Long)
 
 /** A local account survives disconnecting a server; no account replacement is implicit. */
-class PortableAccountStore(private val credentials: CredentialStore, private val settings: NonSecretSettingsStore) {
+class PortableAccountStore(private val credentials: CredentialStore, private val settings: NonSecretSettingsStore,
+    private val removeEmptyData: suspend (String) -> Unit = { error("ACCOUNT_REMOVAL_UNAVAILABLE") }) {
     private val slot = CredentialJournalSlots.portableAccount
 
     suspend fun read(): PortableAccountDocument? {
@@ -25,10 +26,46 @@ class PortableAccountStore(private val credentials: CredentialStore, private val
     }
 
     suspend fun recoverIdentity(): PortableAccountDocument? = BindingAuthorityWriteGate.serialized {
+        finishRemovalLocked()
         persistMissingOwnershipCutoff()
         val document = read() ?: return@serialized null
         publishIdentity(document)
         document
+    }
+
+    /** Explicitly forget only a never-enrolled, empty account. The journal survives process death. */
+    suspend fun removeEmptyLocalAccount(login: String, password: CharArray) = BindingAuthorityWriteGate.serialized {
+        require(verify(login, password)) { "ACCOUNT_AUTHENTICATION_FAILED" }
+        requireNoCompetingEnrollment()
+        val current = settings.settings.first()
+        require(current.activeServerProfileId == null && current.m5Binding == null && current.activeUserId == null) { "ACCOUNT_EXIT_UNAVAILABLE" }
+        val envelope = requireNotNull(readEnvelope())
+        val document = document(envelope)
+        PortableAccountLineage.parse(document, envelope.portableAccountLineage).use {
+            require(!it.everEnrolled) { "ACCOUNT_SERVER_ROTATION_REQUIRED" }
+        }
+        // Verify emptiness before recording any destructive intent.
+        removeEmptyData(document.accountId)
+        val marker = document.accountId.toByteArray(Charsets.US_ASCII)
+        try { credentials.write(CredentialJournalSlots.portableAccountRemoval, marker) } finally { marker.fill(0) }
+        finishRemovalLocked()
+    }
+
+    private suspend fun finishRemovalLocked() {
+        val marker = credentials.read(CredentialJournalSlots.portableAccountRemoval) ?: return
+        val account = try { marker.toString(Charsets.US_ASCII) } finally { marker.fill(0) }
+        app.autplay.application.profilepairing.requireCanonicalUuid(account)
+        require(read()?.accountId.let { it == null || it == account }) { "ACCOUNT_CONTEXT_CHANGED" }
+        val current = settings.settings.first()
+        require(current.activeServerProfileId == null && current.m5Binding == null) { "ACCOUNT_CONTEXT_CHANGED" }
+        removeEmptyData(account)
+        credentials.clear(slot)
+        settings.mutate { latest ->
+            require(latest.portableAccountId == null || latest.portableAccountId == account) { "ACCOUNT_CONTEXT_CHANGED" }
+            latest.copy(portableAccountId = null, portableAccountKeyThumbprint = null, pendingPublicId = null,
+                accountSignedOut = false)
+        }
+        credentials.clear(CredentialJournalSlots.portableAccountRemoval)
     }
 
     suspend fun standaloneOwnershipStart(): Long? = ownership()?.standaloneSinceMs

@@ -32,7 +32,7 @@ class AppearanceSettingsTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun themeAndLanguageSwitchPreservePreferencesAndExpandedSections() {
+    @Test fun themeAndLanguageSwitchPreserveOtherPreferences() {
         var latest = NonSecretSettings(appLanguage = "EN", accentPalette = "BLUE", downloadOnMeteredNetwork = true)
         compose.setContent {
             var settings by remember { mutableStateOf(latest) }
@@ -45,25 +45,20 @@ class AppearanceSettingsTest {
                             onAppLanguageChange = { settings = settings.copy(appLanguage = it.storedValue); latest = settings },
                             onChooseLibraryRoot = {}, onRescanLibraryRoot = {},
                             onExportSettings = {}, onImportSettings = {}, onNavigate = {},
+                            page = app.autplay.ui.UiDestination.SettingsAppearance,
                         )
                     }
                 }
             }
         }
         fun label(language: AppLanguage, resource: Int) = localizedAppContext(context, language).getString(resource)
-        compose.onNodeWithText(label(AppLanguage.English, R.string.settings_playback)).performScrollTo().performClick()
         compose.onNodeWithTag("settings-theme-toggle").performScrollTo().performClick()
         compose.runOnIdle { assertEquals("LIGHT", latest.appearanceMode) }
         compose.onNodeWithTag("settings-language-RU").performScrollTo().performClick()
         compose.onNodeWithTag("settings-language-RU").assertIsSelected()
-        compose.onNodeWithText(label(AppLanguage.Russian, R.string.settings_appearance)).assertIsDisplayed()
-        compose.onNodeWithText(label(AppLanguage.English, R.string.settings_appearance)).assertDoesNotExist()
-        compose.onNodeWithText(label(AppLanguage.Russian, R.string.settings_smooth_track_transitions)).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText(label(AppLanguage.English, R.string.settings_smooth_track_transitions)).assertDoesNotExist()
         compose.onNodeWithTag("settings-theme-toggle").performScrollTo().performClick()
         compose.onNodeWithTag("settings-language-EN").performScrollTo().performClick()
         compose.onNodeWithTag("settings-language-EN").assertIsSelected()
-        compose.onNodeWithText(label(AppLanguage.Russian, R.string.settings_appearance)).assertDoesNotExist()
         compose.onNodeWithText("System language").assertDoesNotExist()
         compose.onNodeWithText("Use device theme").assertDoesNotExist()
         compose.onNodeWithText("Blue accent").assertDoesNotExist()

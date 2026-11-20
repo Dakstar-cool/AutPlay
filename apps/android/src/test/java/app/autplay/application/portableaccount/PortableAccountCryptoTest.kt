@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PortableAccountCryptoTest {
-    private val password get() = "coffee rain snowy garden".toCharArray()
+    private val password get() = "coffee rain snowy garden!".toCharArray()
 
     @Test fun recoveryArchiveAcceptsLegacyAndClosesAllSecretsButRejectsMixedRecursiveOrDuplicateRoots() {
         val passphrase = password
@@ -35,8 +35,10 @@ class PortableAccountCryptoTest {
                             try { expectFailure { PortableRecoveryFile.parse(nested) } } finally { nested.fill(0) }
                             expectFailure { PortableRecoveryFile.create(current.document, current.recoveryCode, listOf(entry, entry)) }
                             expectFailure { PortableRecoveryFile.create(current.document, current.recoveryCode, List(9) { entry }) }
-                            val foreign = PortableAccountDocument(JsonObject(previous.document.fields +
-                                ("account_id" to JsonPrimitive("819777b7-b82c-4f61-a988-38f822f0fd75"))))
+                            val foreignBytes = JsonObject(previous.document.fields +
+                                ("account_id" to JsonPrimitive("819777b7-b82c-4f61-a988-38f822f0fd75"))).toString().toByteArray()
+                            val foreign = try { PortableAccountDocument.parse(foreignBytes) }
+                            finally { foreignBytes.fill(0) }
                             PortableRecoveryPredecessor(foreign, previous.recoveryCode.copyOf()).use { alien ->
                                 expectFailure { PortableRecoveryFile.create(current.document, current.recoveryCode, listOf(alien)) }
                             }
@@ -97,12 +99,12 @@ class PortableAccountCryptoTest {
     @Test fun recoveryRotatesRootAndCodeWhilePreservingTheAccount() {
         PortableAccountCrypto.create("owner", password).use { created ->
             PortableAccountCrypto.recover(created.document, created.recoveryCode).use { recovered ->
-                PortableAccountCrypto.rotate(recovered, "another long password phrase".toCharArray()).use { updated ->
+                PortableAccountCrypto.rotate(recovered, "another long password phrase!".toCharArray()).use { updated ->
                     assertEquals(created.document.accountId, updated.document.accountId)
                     assertNotEquals(created.document.keyThumbprint, updated.document.keyThumbprint)
                     expectFailure { PortableAccountCrypto.unlock(updated.document, password) }
                     expectFailure { PortableAccountCrypto.recover(updated.document, created.recoveryCode) }
-                    PortableAccountCrypto.unlock(updated.document, "another long password phrase".toCharArray()).close()
+                    PortableAccountCrypto.unlock(updated.document, "another long password phrase!".toCharArray()).close()
                     PortableAccountCrypto.recover(updated.document, updated.recoveryCode).close()
                 }
             }
@@ -130,12 +132,37 @@ class PortableAccountCryptoTest {
     @Test fun closedSecretCannotSignAndPasswordRulesAllowPassphrases() {
         assertFalse(PortableAccountCrypto.validPassword("short".toCharArray()))
         assertFalse(PortableAccountCrypto.validPassword("aaaaaaaaaaaaaaaa".toCharArray()))
-        assertTrue(PortableAccountCrypto.validPassword("длинная фраза для входа".toCharArray()))
+        assertTrue(PortableAccountCrypto.validPassword("длинная фраза для входа!".toCharArray()))
         PortableAccountCrypto.create("owner", password).use { created ->
             val unlocked = PortableAccountCrypto.unlock(created.document, password)
             unlocked.close()
             expectFailure { unlocked.sign("login", "{}".toByteArray()) }
         }
+    }
+
+    @Test fun sevenCodePointsRequirePunctuationOrSymbolButNotWhitespace() {
+        assertTrue(PortableAccountCrypto.validPassword("abc123!".toCharArray()))
+        assertFalse(PortableAccountCrypto.validPassword("abc12!".toCharArray()))
+        assertFalse(PortableAccountCrypto.validPassword("abc1234".toCharArray()))
+        assertFalse(PortableAccountCrypto.validPassword("abc123 ".toCharArray()))
+        assertFalse(PortableAccountCrypto.validPassword("abc123\n".toCharArray()))
+        assertTrue(PortableAccountCrypto.validPassword(("a".repeat(127) + "!").toCharArray()))
+        assertFalse(PortableAccountCrypto.validPassword(("a".repeat(128) + "!").toCharArray()))
+        PortableAccountCrypto.create("minimum", "abc123!".toCharArray()).use {
+            PortableAccountCrypto.unlock(it.document, "abc123!".toCharArray()).close()
+        }
+    }
+
+    @Test fun preexistingPassphraseWithoutSpecialCharacterStillUnlocks() {
+        val bytes = requireNotNull(javaClass.getResourceAsStream("/portable-account-legacy-passphrase.json")).use { it.readBytes() }
+        val document = PortableAccountDocument.parse(bytes)
+        val legacy = "coffee rain snowy garden".toCharArray()
+        try {
+            assertFalse(PortableAccountCrypto.validPassword(legacy))
+            PortableAccountCrypto.unlock(document, legacy).use {
+                assertEquals("legacy_fixture", it.document.publicId)
+            }
+        } finally { legacy.fill('\u0000'); bytes.fill(0) }
     }
 
     private fun expectFailure(action: () -> Unit) {

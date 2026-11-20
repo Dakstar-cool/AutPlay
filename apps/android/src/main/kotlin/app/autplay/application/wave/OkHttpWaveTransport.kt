@@ -71,7 +71,9 @@ class OkHttpWaveTransport(
         val (status, payload) = executeAuthorized("${baseUrl.trimEnd('/')}/v1/wave/rooms/$normalizedRoomId/snapshot") { url, bearer ->
             Request.Builder().url(url).header("Authorization", bearer).build()
         }
-        check(status in 200..299) { if (status == 401 || status == 403) "WAVE_AUTH_REQUIRED" else "WAVE_SNAPSHOT_FAILED" }
+        if (status == 401 || status == 403) throw SecurityException("WAVE_AUTH_REQUIRED")
+        if (status == 404 || status == 410) throw WaveRoomUnavailableException()
+        check(status in 200..299) { "WAVE_SNAPSHOT_FAILED" }
         check(payload.length <= MAX_SNAPSHOT_CHARS) { "WAVE_SNAPSHOT_TOO_LARGE" }
         return decodeSnapshot(Json.parseToJsonElement(payload).jsonObject)
     }
@@ -99,7 +101,7 @@ class OkHttpWaveTransport(
                 runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()?.let { value ->
                     when (value["type"]?.jsonPrimitive?.contentOrNull) {
                         "snapshot_required", "invalidate" -> {
-                            onFailure()
+                            onEvent(WaveEvent(roomEpoch))
                             return@let
                         }
                         "event" -> Unit
@@ -277,6 +279,7 @@ class OkHttpWaveTransport(
             Request.Builder().url(url).header("Authorization", bearer).post(body).build()
         }
         if (status == 401 || status == 403) throw SecurityException("WAVE_AUTH_REQUIRED")
+        if (status == 404 || status == 410) throw WaveRoomUnavailableException()
         check(status in 200..299) { "WAVE_REQUEST_FAILED" }
         check(payload.length <= MAX_SNAPSHOT_CHARS) { "WAVE_RESPONSE_TOO_LARGE" }
         return if (payload.isBlank()) buildJsonObject {} else Json.parseToJsonElement(payload).jsonObject
@@ -327,7 +330,7 @@ class OkHttpWaveTransport(
             )
         }.orEmpty()
         val preflight = value["preflight"]?.jsonObject?.mapValues { (_, element) ->
-            runCatching { WaveAvailability.valueOf(element.jsonPrimitive.content) }
+            runCatching { if (element.jsonPrimitive.content == "LOCAL") WaveAvailability.LOCAL_READABLE else WaveAvailability.valueOf(element.jsonPrimitive.content) }
                 .getOrDefault(WaveAvailability.UNAVAILABLE)
         }.orEmpty()
         val transferTargets = value["host_transfer_targets"]?.jsonArray
@@ -361,6 +364,7 @@ class OkHttpWaveTransport(
             preflight,
             value["room_code"]?.jsonPrimitive?.contentOrNull?.ifBlank { null },
             transferTargets,
+            decodeWavePlaybackCommand(value),
         )
     }
 
@@ -368,4 +372,15 @@ class OkHttpWaveTransport(
         const val MAX_SNAPSHOT_CHARS = 262_144
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
+}
+
+class WaveRoomUnavailableException : IllegalStateException("WAVE_ROOM_UNAVAILABLE")
+
+internal fun decodeWavePlaybackCommand(value: JsonObject): WaveCommand? {
+    val command = value["playback_command"] as? JsonObject ?: return null
+    return WaveCommand(
+        command.getValue("sequence").jsonPrimitive.long,
+        command.getValue("kind").jsonPrimitive.content,
+        command["payload"]?.toString().orEmpty(),
+    )
 }

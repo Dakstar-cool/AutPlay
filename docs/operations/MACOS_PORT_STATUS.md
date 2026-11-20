@@ -1,5 +1,28 @@
 # macOS port execution
 
+## Current delivery status, November 2026
+
+The foundation report below is historical. The current implementation includes the local
+library/player, signed community distribution, real Keychain storage, password-only account
+login and server synchronization. The November 13 source `1aa3c97` passed 34 shared/desktop
+tests, 14 Keychain checks and live-server registration, restart, login without a recovery file,
+restart after login and incremental pull on disposable accounts.
+[Exact run](https://github.com/Dakstar-cool/AutPlay/actions/runs/43435865448).
+
+Version 1.0.10 integrates this implementation with the current Android/room source and
+dependency security fixes. Use the [release](https://github.com/Dakstar-cool/AutPlay/releases/tag/v1.0.10)
+for exact package hashes and fresh build evidence, and the
+[installation guide](GET_STARTED_1.0.10.md) for both platforms. Historical evidence does not
+qualify changed inputs by itself.
+
+Mac Community targets Apple Silicon and macOS 13+; native CI runs on macOS 15 and 26.
+It uses a retained project certificate and Keychain, without Apple notarization or Secure Enclave.
+Manual Gatekeeper/update authorization, audible hardware output, the full codec matrix,
+media keys and sleep/wake remain separate acceptance work. Recommendations, Wave rooms and
+social features are not part of the delivered Mac scope. No Android feature parity is claimed.
+
+## Historical foundation report
+
 Implementation started 2026-10-13 on `codex/macos-port-20261013`.
 
 ## Source and working boundaries

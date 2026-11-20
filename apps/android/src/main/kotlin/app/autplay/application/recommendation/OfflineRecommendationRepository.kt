@@ -34,6 +34,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import app.autplay.data.security.BindingAuthorityWriteGate
@@ -701,7 +702,17 @@ class OfflineRecommendationRepository(
             decoded.items.map(OfflinePackItem::recordingId),
             OfflineRecommendationPackCodec.MAX_ITEMS * 2,
         )
-        val bestLocalByRecording = localRows
+        val orderedRows = localRows.groupBy { it.recordingId }
+        val orderedRefs = decoded.items.sortedBy { it.packPosition }.flatMap { item ->
+            orderedRows[item.recordingId].orEmpty().filter { it.isLocallyAvailable && !it.excludedFromTaste && it.preference != "DISLIKED" }
+                .sortedBy { it.localUserTrackRefId }.map { it.localUserTrackRefId }
+        }
+        val confirmedVariations = decoded.items.filter { LIKED_ORIGINAL_VERSION in it.reasonCodes }
+            .mapTo(mutableSetOf()) { it.recordingId }
+        val eligibleRefs = database.libraryDao().selectSongRefs(binding.serverProfileId.value, orderedRefs, nowMs, wave = false,
+            confirmedVariationRecordings = confirmedVariations, lessFrequentRecordings = decoded.items.filter { currentSkipHints(decoded.createdAtMs, nowMs) && "FREQUENT_HOME_SKIPS" in it.reasonCodes }
+                .mapTo(mutableSetOf()) { it.recordingId }).toSet()
+        val bestLocalByRecording = localRows.filter { it.localUserTrackRefId in eligibleRefs }
             .groupBy(LocalRecommendationCandidateRow::recordingId)
             .mapValues { (_, rows) -> rows.sortedWith(compareByDescending<LocalRecommendationCandidateRow> { it.isLocallyAvailable }.thenBy { it.localUserTrackRefId }).first() }
         val evidence = decoded.items.mapNotNull { item ->
@@ -837,6 +848,125 @@ class OfflineRecommendationRepository(
             )
         }
         return result
+    }
+
+    /** Called inside the queue checkpoint transaction, once the player actually plays the entry. */
+    internal suspend fun recordWavePlaybackImpression(
+        binding: ClientEventBinding, attribution: JsonObject, nowMs: Long,
+    ) {
+        fun member(key: String) = attribution.getValue(key).jsonPrimitive.content
+        val eventId = LocalId(member("impression_event_local_id"))
+        val mapping = RecommendationPresentationEntity(
+            binding.serverProfileId.value, binding.userId.value, member("presentation_id"),
+            member("recommendation_request_id"), member("source_rank").toInt(), eventId.value,
+            member("recording_id"), attribution["offline_pack_id"]?.jsonPrimitive?.content,
+            member("source"), member("surface"), member("section_key"), member("display_position").toInt(), nowMs,
+        )
+        val dao = database.recommendationPackDao()
+        val existing = dao.presentation(mapping.serverProfileId, mapping.ownerUserId, mapping.presentationId,
+            mapping.recommendationRequestId, mapping.sourceRank)
+        if (existing != null) {
+            check(existing.copy(createdAtMs = nowMs) == mapping && database.journalDao().event(eventId.value) != null)
+            return
+        }
+        val lineage = resolveLineage(binding, nowMs)
+        val sequence = database.journalDao().allocateSequence(lineage.lineageId)
+        val payload = P07PayloadCodec.canonicalize(buildJsonObject {
+            put("interaction_type", "RECOMMENDATION_IMPRESSION_RECORDED")
+            put("recommendation", JsonObject(attribution - "impression_event_local_id"))
+        }.toString())
+        dao.insertPresentation(mapping)
+        database.journalDao().insert(journal(lineage, binding, eventId, sequence, payload, nowMs))
+    }
+
+    /** Starts only the tapped, already presented item; no impression or continuation is invented. */
+    suspend fun activatePresentedPlayback(
+        binding: ClientEventBinding,
+        presentationId: LocalId,
+        item: HomeRecommendationItem,
+        impressionEventId: LocalId,
+        nowMs: Long,
+        isBindingActive: suspend () -> Boolean,
+    ): LocalId = BindingAuthorityWriteGate.serialized {
+        check(isBindingActive()) { "RECOMMENDATION_PROFILE_NOT_ACTIVE" }
+        require(nowMs >= 0)
+        validatePresentationItem(item)
+        database.withWriteTransaction {
+            val dao = database.recommendationPackDao()
+            val mapping = checkNotNull(dao.presentation(
+                binding.serverProfileId.value, binding.userId.value, presentationId.value,
+                item.recommendationRequestId, item.sourceRank,
+            )) { "RECOMMENDATION_IMPRESSION_REQUIRED" }
+            checkMappingMatches(mapping, item)
+            check(mapping.impressionEventId == impressionEventId.value) { "RECOMMENDATION_IMPRESSION_MISMATCH" }
+            val journal = checkNotNull(database.journalDao().event(impressionEventId.value)) {
+                "IMPRESSION_MAPPING_WITHOUT_JOURNAL"
+            }
+            check(
+                journal.userId == binding.userId.value && journal.deviceId == binding.deviceId.value &&
+                    journal.serverProfileId == binding.serverProfileId.value &&
+                    journal.eventType == "RECOMMENDATION_IMPRESSION_RECORDED" &&
+                    journal.occurredAtMs <= nowMs,
+            ) { "RECOMMENDATION_IMPRESSION_MISMATCH" }
+            val cursor = checkNotNull(database.syncDao().cursor(binding.serverProfileId.value)) {
+                "SERVER_PROFILE_LINEAGE_MISMATCH"
+            }
+            check(
+                cursor.journalLineageId == journal.journalLineageId &&
+                    cursor.deviceId == binding.deviceId.value &&
+                    (binding.journalEpoch == null || cursor.journalEpoch == binding.journalEpoch.value),
+            ) { "SERVER_PROFILE_LINEAGE_MISMATCH" }
+            val payload = Json.parseToJsonElement(journal.payloadJson) as? JsonObject
+            val shown = checkNotNull(payload?.get("recommendation") as? JsonObject) {
+                "RECOMMENDATION_IMPRESSION_MISMATCH"
+            }
+            check(
+                shown["presentation_id"] == JsonPrimitive(presentationId.value) &&
+                    shown["recommendation_request_id"] == JsonPrimitive(item.recommendationRequestId) &&
+                    shown["recording_id"] == JsonPrimitive(item.recordingId) &&
+                    shown["source_rank"] == JsonPrimitive(item.sourceRank) &&
+                    shown["offline_pack_id"] == JsonPrimitive(item.offlinePackId) &&
+                    shown["source"] == JsonPrimitive(mapping.source) &&
+                    shown["display_position"] == JsonPrimitive(mapping.displayPosition),
+            ) { "RECOMMENDATION_IMPRESSION_MISMATCH" }
+            // A delta may expire while its parent presentation remains visible. Preserve the
+            // first impression's exact source, display position and delta identity, even then.
+            val frozenAttribution = P07PayloadCodec.canonicalize(buildJsonObject {
+                shown.forEach { (key, value) -> put(key, value) }
+                put("impression_event_local_id", impressionEventId.value)
+                put("impression_event_server_id", JsonNull)
+            }.toString())
+            val eligible = dao.localCandidates(
+                binding.serverProfileId.value, binding.userId.value, listOf(item.recordingId),
+                OfflineRecommendationPackCodec.MAX_ITEMS * 2,
+            ).any { row ->
+                row.localUserTrackRefId == item.localUserTrackRefId && row.recordingId == item.recordingId &&
+                    row.isLocallyAvailable && !row.excludedFromTaste && row.preference != "DISLIKED"
+            }
+            check(eligible) { "RECOMMENDATION_ITEM_NO_LONGER_ELIGIBLE" }
+            val previous = database.queueDao().activeSnapshotOnce()
+            check(isBindingActive()) { "RECOMMENDATION_PROFILE_NOT_ACTIVE" }
+            val snapshotId = LocalId.random()
+            app.autplay.application.playback.PlaybackPersistenceRepository(database).activateQueue(
+                snapshotId = snapshotId,
+                entries = listOf(app.autplay.application.playback.NewPlaybackQueueEntry(
+                    queueEntryId = LocalId.random(),
+                    trackRefId = LocalId(item.localUserTrackRefId),
+                    sourceOrigin = "RECOMMENDED",
+                    sourceAudioPolicy = "LOCAL_THEN_VAULT",
+                    recommendationAttributionJson = frozenAttribution,
+                )),
+                queueType = "USER",
+                sourceContextId = presentationId.value,
+                serverProfileId = binding.serverProfileId.value,
+                listeningContext = "GENERAL",
+                nowMs = nowMs,
+                ordinaryReplacementGuard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(
+                    previous?.queueSnapshotId, previous?.queueType, binding.serverProfileId.value,
+                ),
+            )
+            snapshotId
+        }
     }
 
     fun attributionJson(

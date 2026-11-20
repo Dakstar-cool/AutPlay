@@ -1,6 +1,5 @@
 package app.autplay.ui.settings
 
-import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +17,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -50,12 +50,24 @@ internal fun SettingsProductScreen(
     onRefreshDeveloperMode: () -> Unit = {},
     onNavigate: (UiDestination) -> Unit,
     trainingConsent: app.autplay.TrainingConsentUi = app.autplay.TrainingConsentUi(),
+    page: UiDestination = UiDestination.Settings,
+    onChooseAudio: () -> Unit = {},
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(AutPlayTokens.dimensions.sectionSpacing),
-    ) {
-        SettingsSection(icon = AutPlayIcon.Settings, titleRes = R.string.settings_appearance) {
+    when (page) {
+        UiDestination.Settings -> Surface(
+            color = AutPlayTokens.colors.glassSurface,
+            shape = MaterialTheme.shapes.extraLarge,
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                UiDestination.settingsNavigation.forEachIndexed { index, destination ->
+                    SettingsNavigationRow(destination, settingsSummary(destination, settings)) { onNavigate(destination) }
+                    if (index < UiDestination.settingsNavigation.lastIndex) {
+                        HorizontalDivider(Modifier.padding(start = 52.dp), color = AutPlayTokens.colors.border)
+                    }
+                }
+            }
+        }
+        UiDestination.SettingsAppearance -> SettingsPageSurface {
             val dark = settings.appearanceMode != "LIGHT"
             val currentTheme = stringResource(if (dark) R.string.settings_theme_dark else R.string.settings_theme_light)
             val switchTheme = stringResource(if (dark) R.string.settings_switch_to_light else R.string.settings_switch_to_dark)
@@ -91,8 +103,7 @@ internal fun SettingsProductScreen(
                 }
             }
         }
-
-        SettingsSection(icon = AutPlayIcon.Play, titleRes = R.string.settings_playback) {
+        UiDestination.SettingsPlayback -> SettingsPageSurface {
             SettingsSwitchRow(
                 label = stringResource(R.string.settings_smooth_track_transitions),
                 checked = settings.smoothTrackTransitions,
@@ -100,9 +111,15 @@ internal fun SettingsProductScreen(
                     onUpdate { current -> current.copy(smoothTrackTransitions = enabled) }
                 },
             )
+            Text(stringResource(R.string.settings_complete_tracks), color = AutPlayTokens.colors.mutedText)
+            PlaybackAudioSettingsPanel(settings.playbackAudio) { transform ->
+                onUpdate { current -> current.copy(playbackAudio = transform(current.playbackAudio)) }
+            }
         }
-
-        SettingsSection(icon = AutPlayIcon.Library, titleRes = R.string.settings_library_access) {
+        UiDestination.SettingsMusic -> SettingsPageSurface {
+            Button(onClick = onChooseAudio, modifier = Modifier.fillMaxWidth().testTag("settings-add-audio")) {
+                Text(stringResource(R.string.library_add_local))
+            }
             PhoneMusicTools(settings)
             Text(
                 stringResource(
@@ -121,30 +138,7 @@ internal fun SettingsProductScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.settings_scan_folder)) }
         }
-
-        SettingsSection(icon = AutPlayIcon.Server, titleRes = R.string.settings_network) {
-            Text(
-                stringResource(
-                    if (settings.activeServerProfileId == null) R.string.profile_connection_local
-                    else R.string.profile_connection_connected,
-                ),
-                style = MaterialTheme.typography.titleSmall,
-                color = if (settings.activeServerProfileId == null) AutPlayTokens.colors.mutedText
-                else MaterialTheme.colorScheme.primary,
-            )
-            Button(
-                onClick = { onNavigate(UiDestination.Profile) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(stringResource(R.string.settings_open_personal_server)) }
-            OutlinedButton(onClick = { onNavigate(UiDestination.ServerFeatures) }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.nav_server_features))
-            }
-            OutlinedButton(onClick = { onNavigate(UiDestination.SyncStatus) }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.nav_sync_status))
-            }
-        }
-
-        SettingsSection(icon = AutPlayIcon.Download, titleRes = R.string.nav_downloads) {
+        UiDestination.SettingsDownloads -> SettingsPageSurface {
             SettingsSwitchRow(
                 label = stringResource(R.string.settings_metered_downloads),
                 checked = settings.downloadOnMeteredNetwork,
@@ -152,12 +146,8 @@ internal fun SettingsProductScreen(
                     onUpdate { current -> current.copy(downloadOnMeteredNetwork = enabled) }
                 },
             )
-        }
-
-        SettingsSection(icon = AutPlayIcon.Wave, titleRes = R.string.nav_wave_rooms) {
-            OutlinedButton(onClick = { onNavigate(UiDestination.WaveRooms) }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.nav_wave_rooms))
-            }
+            HorizontalDivider()
+            Text(stringResource(R.string.settings_room_downloads), style = MaterialTheme.typography.titleSmall)
             ChoiceColumn {
                 listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
                     FilterChip(
@@ -169,69 +159,76 @@ internal fun SettingsProductScreen(
                 }
             }
         }
-
-        TrainingConsentCard(trainingConsent)
-
-        SettingsSection(icon = AutPlayIcon.Privacy, titleRes = R.string.settings_statistics_privacy) {
-            Text(
-                stringResource(R.string.settings_statistics_share_explanation),
-                color = AutPlayTokens.colors.mutedText,
-            )
-            val confirmed = statisticsSettings as? ProfileStatisticsSettingsState.Confirmed
-            val checked = when (statisticsSettings) {
-                is ProfileStatisticsSettingsState.Confirmed -> statisticsSettings.enabled
-                is ProfileStatisticsSettingsState.Updating -> statisticsSettings.confirmed.enabled
-                ProfileStatisticsSettingsState.Loading,
-                ProfileStatisticsSettingsState.Unavailable,
-                -> false
-            }
-            val switchStateDescription = stringResource(
-                when (statisticsSettings) {
-                    ProfileStatisticsSettingsState.Loading -> R.string.settings_statistics_state_loading
-                    is ProfileStatisticsSettingsState.Updating -> R.string.settings_statistics_state_updating
-                    ProfileStatisticsSettingsState.Unavailable -> R.string.settings_statistics_state_unavailable
-                    is ProfileStatisticsSettingsState.Confirmed -> if (statisticsSettings.enabled) {
-                        R.string.settings_statistics_state_shared
-                    } else {
-                        R.string.settings_statistics_state_private
-                    }
-                },
-            )
-            SettingsSwitchRow(
-                label = stringResource(R.string.settings_statistics_share),
-                checked = checked,
-                enabled = confirmed != null,
-                stateDescriptionText = switchStateDescription,
-                onCheckedChange = onStatisticsVisibilityChange,
-            )
-            Text(
-                stringResource(
+        UiDestination.PrivacyAndData -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SettingsPageSurface {
+                Text(stringResource(R.string.settings_statistics_privacy), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.settings_statistics_share_explanation),
+                    color = AutPlayTokens.colors.mutedText,
+                )
+                val confirmed = statisticsSettings as? ProfileStatisticsSettingsState.Confirmed
+                val checked = when (statisticsSettings) {
+                    is ProfileStatisticsSettingsState.Confirmed -> statisticsSettings.enabled
+                    is ProfileStatisticsSettingsState.Updating -> statisticsSettings.confirmed.enabled
+                    ProfileStatisticsSettingsState.Loading,
+                    ProfileStatisticsSettingsState.Unavailable,
+                    -> false
+                }
+                val switchStateDescription = stringResource(
                     when (statisticsSettings) {
-                        ProfileStatisticsSettingsState.Loading -> R.string.settings_statistics_loading
-                        is ProfileStatisticsSettingsState.Updating -> R.string.settings_statistics_updating
-                        ProfileStatisticsSettingsState.Unavailable -> if (settings.activeServerProfileId == null) {
-                            R.string.settings_statistics_unavailable_local
-                        } else {
-                            R.string.settings_statistics_unavailable_server
-                        }
+                        ProfileStatisticsSettingsState.Loading -> R.string.settings_statistics_state_loading
+                        is ProfileStatisticsSettingsState.Updating -> R.string.settings_statistics_state_updating
+                        ProfileStatisticsSettingsState.Unavailable -> R.string.settings_statistics_state_unavailable
                         is ProfileStatisticsSettingsState.Confirmed -> if (statisticsSettings.enabled) {
                             R.string.settings_statistics_state_shared
                         } else {
                             R.string.settings_statistics_state_private
                         }
                     },
-                ),
-                color = AutPlayTokens.colors.mutedText,
-            )
-            if (statisticsSettingsErrorCode != null && confirmed != null) {
-                Text(
-                    stringResource(R.string.settings_statistics_update_failed),
-                    color = MaterialTheme.colorScheme.error,
                 )
+                SettingsSwitchRow(
+                    label = stringResource(R.string.settings_statistics_share),
+                    checked = checked,
+                    enabled = confirmed != null,
+                    stateDescriptionText = switchStateDescription,
+                    onCheckedChange = onStatisticsVisibilityChange,
+                )
+                Text(
+                    stringResource(
+                        when (statisticsSettings) {
+                            ProfileStatisticsSettingsState.Loading -> R.string.settings_statistics_loading
+                            is ProfileStatisticsSettingsState.Updating -> R.string.settings_statistics_updating
+                            ProfileStatisticsSettingsState.Unavailable -> if (settings.activeServerProfileId == null) {
+                                R.string.settings_statistics_unavailable_local
+                            } else {
+                                R.string.settings_statistics_unavailable_server
+                            }
+                            is ProfileStatisticsSettingsState.Confirmed -> if (statisticsSettings.enabled) {
+                                R.string.settings_statistics_state_shared
+                            } else {
+                                R.string.settings_statistics_state_private
+                            }
+                        },
+                    ),
+                    color = AutPlayTokens.colors.mutedText,
+                )
+                if (statisticsSettingsErrorCode != null && confirmed != null) {
+                    Text(
+                        stringResource(R.string.settings_statistics_update_failed),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            SettingsPageSurface {
+                Text(stringResource(R.string.training_consent_summary), style = MaterialTheme.typography.titleMedium)
+                TrainingConsentCard(trainingConsent, expanded = true)
             }
         }
-
-        SettingsSection(icon = AutPlayIcon.Privacy, titleRes = R.string.settings_transfer) {
+        UiDestination.SettingsAbout -> SettingsPageSurface {
+            Text(stringResource(R.string.settings_app_version, app.autplay.BuildConfig.VERSION_NAME))
+            HorizontalDivider()
+            Text(stringResource(R.string.settings_transfer), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.settings_transfer_scope), color = AutPlayTokens.colors.mutedText)
             Text(stringResource(R.string.settings_export_privacy), color = AutPlayTokens.colors.mutedText)
             Button(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.settings_export))
@@ -239,29 +236,12 @@ internal fun SettingsProductScreen(
             OutlinedButton(onClick = onImportSettings, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.settings_import))
             }
-        }
-
-        SettingsSection(icon = AutPlayIcon.Playlist, titleRes = R.string.settings_music_navigation) {
-            listOf(UiDestination.Playlists, UiDestination.Downloads, UiDestination.History, UiDestination.ImportReview).forEach { target ->
-                Surface(
-                    onClick = { onNavigate(target) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AutPlayPlatformIcon(target.icon, contentDescription = null, modifier = Modifier.size(22.dp))
-                        Text(stringResource(target.labelRes), style = MaterialTheme.typography.titleSmall)
-                    }
-                }
+            HorizontalDivider()
+            SettingsNavigationRow(UiDestination.SettingsDiagnostics, stringResource(R.string.settings_diagnostics_summary)) {
+                onNavigate(UiDestination.SettingsDiagnostics)
             }
         }
-        SettingsSection(icon = AutPlayIcon.Settings, titleRes = R.string.settings_about) {
-            Text(stringResource(R.string.settings_app_version, app.autplay.BuildConfig.VERSION_NAME))
+        UiDestination.SettingsDiagnostics -> SettingsPageSurface {
             Text(stringResource(R.string.settings_developer_mode), style = MaterialTheme.typography.titleSmall)
             Text(stringResource(R.string.settings_developer_description), color = AutPlayTokens.colors.mutedText)
             OutlinedButton(onClick = onRefreshDeveloperMode, modifier = Modifier.fillMaxWidth()) {
@@ -270,34 +250,57 @@ internal fun SettingsProductScreen(
             if (settings.developerMode) {
                 Text(stringResource(R.string.settings_developer_enabled), color = MaterialTheme.colorScheme.primary)
                 Text("${app.autplay.BuildConfig.APPLICATION_ID} · ${app.autplay.BuildConfig.VERSION_CODE}")
-                OutlinedButton(onClick = { onNavigate(UiDestination.ServerFeatures) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.settings_diagnostics))
-                }
             } else {
                 Text(stringResource(R.string.settings_developer_disabled), color = AutPlayTokens.colors.mutedText)
             }
+            OutlinedButton(onClick = { onNavigate(UiDestination.ServerFeatures) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.nav_server_features))
+            }
         }
-
+        else -> Unit
     }
 }
 
 @Composable
-private fun SettingsSection(
-    icon: AutPlayIcon,
-    @StringRes titleRes: Int,
-    content: @Composable () -> Unit,
-) {
-    app.autplay.ui.PreferenceSection(
-        title = stringResource(titleRes),
-        icon = icon,
-        summary = if (titleRes == R.string.settings_statistics_privacy) {
-            stringResource(R.string.settings_privacy_summary)
-        } else {
-            null
-        },
-        initiallyExpanded = titleRes == R.string.settings_appearance,
-        content = content,
-    )
+private fun SettingsPageSurface(content: @Composable () -> Unit) {
+    app.autplay.ui.PreferenceSurface {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(destination: UiDestination, summary: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).testTag("settings-row-${destination.route}"),
+        color = androidx.compose.ui.graphics.Color.Transparent,
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AutPlayPlatformIcon(destination.icon, null, Modifier.size(24.dp), MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(destination.labelRes), style = MaterialTheme.typography.titleSmall)
+                Text(summary, style = MaterialTheme.typography.bodyMedium, color = AutPlayTokens.colors.mutedText)
+            }
+            AutPlayPlatformIcon(AutPlayIcon.ChevronDown, null, Modifier.size(18.dp).rotate(-90f), AutPlayTokens.colors.mutedText)
+        }
+    }
+}
+
+@Composable
+private fun settingsSummary(destination: UiDestination, settings: NonSecretSettings): String = when (destination) {
+    UiDestination.SettingsAccount -> stringResource(if (settings.activeServerProfileId == null)
+        R.string.settings_account_local_summary else R.string.settings_account_connected_summary)
+    UiDestination.SettingsPlayback -> stringResource(R.string.settings_sound_summary)
+    UiDestination.SettingsMusic -> stringResource(R.string.settings_music_summary)
+    UiDestination.SettingsDownloads -> stringResource(R.string.settings_downloads_summary)
+    UiDestination.SettingsAppearance -> stringResource(R.string.settings_appearance_summary,
+        stringResource(if (settings.appearanceMode == "LIGHT") R.string.settings_theme_light else R.string.settings_theme_dark),
+        stringResource(AppLanguage.fromStoredValue(settings.appLanguage).labelRes))
+    UiDestination.PrivacyAndData -> stringResource(R.string.settings_data_summary)
+    else -> stringResource(R.string.settings_about_summary)
 }
 
 @Composable

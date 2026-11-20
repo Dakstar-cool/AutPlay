@@ -61,6 +61,8 @@ data class NonSecretSettings(
     val libraryRootTreeUri: String? = null,
     val wavePrefetchMode: String = "NEXT",
     val smoothTrackTransitions: Boolean = false,
+    /** Device-local DSP preferences; audio files and server metadata remain unchanged. */
+    val playbackAudio: PlaybackAudioSettings = PlaybackAudioSettings(),
     /** Device-local playback dismissal checkpoint; never exported or synced. */
     val miniPlayerDismissed: Boolean = false,
     /** Versioned first-run education checkpoint. It is device-local and is never transferred. */
@@ -70,6 +72,7 @@ data class NonSecretSettings(
     /** Stable local account identity, independent of the active server binding. No secrets. */
     val portableAccountId: String? = null,
     val portableAccountKeyThumbprint: String? = null,
+    val accountSignedOut: Boolean = false,
     /** M5 non-secret checkpoint. A matching secret marker is required before remote use. */
     val m5Binding: M5BindingCheckpoint? = null,
     /** Signed public identity/capability evidence needed to fail closed across process restart. */
@@ -186,6 +189,11 @@ class DataStoreNonSecretSettingsStore(
         preferences[APPEARANCE_MODE] = settings.appearanceMode
         preferences[ACCENT_PALETTE] = settings.accentPalette
         preferences[SMOOTH_TRACK_TRANSITIONS] = settings.smoothTrackTransitions
+        preferences[REPLAY_GAIN_MODE] = settings.playbackAudio.replayGainMode
+        preferences[REPLAY_GAIN_PREAMP] = settings.playbackAudio.preampDb
+        preferences[REPLAY_GAIN_PREVENT_CLIPPING] = settings.playbackAudio.preventClipping
+        preferences[EQUALIZER_ENABLED] = settings.playbackAudio.equalizerEnabled
+        preferences[EQUALIZER_BANDS] = settings.playbackAudio.equalizerBandsDb.joinToString(",")
         preferences[MINI_PLAYER_DISMISSED] = settings.miniPlayerDismissed
         settings.libraryRootTreeUri?.let { preferences[LIBRARY_ROOT_TREE_URI] = it }
                 ?: preferences.remove(LIBRARY_ROOT_TREE_URI)
@@ -193,6 +201,7 @@ class DataStoreNonSecretSettingsStore(
         preferences[ONBOARDING_REVISION_KEY] = settings.onboardingRevision
         settings.pendingPublicId?.let { preferences[PENDING_PUBLIC_ID] = it }
             ?: preferences.remove(PENDING_PUBLIC_ID)
+        preferences[ACCOUNT_SIGNED_OUT] = settings.accountSignedOut
         settings.portableAccountId?.let { preferences[PORTABLE_ACCOUNT_ID] = it }
             ?: preferences.remove(PORTABLE_ACCOUNT_ID)
         settings.portableAccountKeyThumbprint?.let { preferences[PORTABLE_ACCOUNT_KEY_THUMBPRINT] = it }
@@ -257,12 +266,22 @@ class DataStoreNonSecretSettingsStore(
         appearanceMode = preferences[APPEARANCE_MODE] ?: "DARK",
         accentPalette = preferences[ACCENT_PALETTE] ?: "CORAL",
         smoothTrackTransitions = preferences[SMOOTH_TRACK_TRANSITIONS] ?: false,
+        playbackAudio = PlaybackAudioSettings(
+            replayGainMode = preferences[REPLAY_GAIN_MODE] ?: "OFF",
+            preampDb = (preferences[REPLAY_GAIN_PREAMP] ?: 0).coerceIn(-12, 12),
+            preventClipping = preferences[REPLAY_GAIN_PREVENT_CLIPPING] ?: true,
+            equalizerEnabled = preferences[EQUALIZER_ENABLED] ?: false,
+            equalizerBandsDb = preferences[EQUALIZER_BANDS]?.split(',')?.map { it.toIntOrNull() }
+                ?.takeIf { it.size == 5 && it.all { band -> band != null && band in -12..12 } }
+                ?.map { requireNotNull(it) } ?: List(5) { 0 },
+        ),
         miniPlayerDismissed = preferences[MINI_PLAYER_DISMISSED] ?: false,
         libraryRootTreeUri = preferences[LIBRARY_ROOT_TREE_URI],
         wavePrefetchMode = preferences[WAVE_PREFETCH_MODE] ?: "NEXT",
         onboardingRevision = preferences[ONBOARDING_REVISION_KEY] ?: 0,
         pendingPublicId = preferences[PENDING_PUBLIC_ID],
         portableAccountId = preferences[PORTABLE_ACCOUNT_ID],
+        accountSignedOut = preferences[ACCOUNT_SIGNED_OUT] ?: false,
         portableAccountKeyThumbprint = preferences[PORTABLE_ACCOUNT_KEY_THUMBPRINT],
         m5Binding = m5Binding(preferences),
         m5TrustEvidence = m5TrustEvidence(preferences),
@@ -369,6 +388,7 @@ class DataStoreNonSecretSettingsStore(
 
     private companion object {
         val PENDING_PUBLIC_ID = stringPreferencesKey("pending_public_id")
+        val ACCOUNT_SIGNED_OUT = booleanPreferencesKey("account_signed_out")
         val PORTABLE_ACCOUNT_ID = stringPreferencesKey("portable_account_id")
         val PORTABLE_ACCOUNT_KEY_THUMBPRINT = stringPreferencesKey("portable_account_key_thumbprint")
         val ACTIVE_SERVER_PROFILE_ID = stringPreferencesKey("active_server_profile_id")
@@ -384,6 +404,11 @@ class DataStoreNonSecretSettingsStore(
         val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
         val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
         val SMOOTH_TRACK_TRANSITIONS = booleanPreferencesKey("smooth_track_transitions")
+        val REPLAY_GAIN_MODE = stringPreferencesKey("replay_gain_mode")
+        val REPLAY_GAIN_PREAMP = intPreferencesKey("replay_gain_preamp_db")
+        val REPLAY_GAIN_PREVENT_CLIPPING = booleanPreferencesKey("replay_gain_prevent_clipping")
+        val EQUALIZER_ENABLED = booleanPreferencesKey("equalizer_enabled")
+        val EQUALIZER_BANDS = stringPreferencesKey("equalizer_bands_db")
         val MINI_PLAYER_DISMISSED = booleanPreferencesKey("mini_player_dismissed")
         val LIBRARY_ROOT_TREE_URI = stringPreferencesKey("library_root_tree_uri")
         val WAVE_PREFETCH_MODE = stringPreferencesKey("wave_prefetch_mode")

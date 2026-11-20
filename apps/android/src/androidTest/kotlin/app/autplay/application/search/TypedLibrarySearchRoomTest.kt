@@ -7,6 +7,8 @@ import app.autplay.application.library.projectMetadata
 import app.autplay.application.server.RemoteLibraryEntry
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.UserTrackRefEntity
+import app.autplay.data.local.entity.DownloadIntentEntity
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.After
@@ -105,6 +107,25 @@ class TypedLibrarySearchRoomTest {
         assertNull(rows[0].title); assertNull(rows[0].artist)
         assertEquals("owned", rows[0].localUserTrackRefId)
         assertNull(rows[1].localUserTrackRefId)
+    }
+
+    @Test fun offlineSearchRequiresCompletedDownloadForTheSameProfile() = runBlocking {
+        val ids = listOf("download", "queued", "other-owner", "no-media")
+        for (id in ids) {
+            val owner = if (id == "other-owner") "foreign" else "owner"
+            seed(id, owner, "Signal", "Artist", null)
+            db.localAudioDao().upsertDownloadIntent(DownloadIntentEntity(
+                downloadIntentId = "intent-$id", localUserTrackRefId = id, serverAudioVariantId = null,
+                media3DownloadId = if (id == "no-media") null else "media-$id",
+                desiredStorageClass = "USER_DOWNLOAD", qualityPolicy = "BEST_AVAILABLE", sourcePolicy = "VAULT_ONLY",
+                state = if (id == "queued") "QUEUED" else "COMPLETED", failureCode = null,
+                createdAtMs = 1, updatedAtMs = 1, completedAtMs = null, serverProfileId = owner,
+            ))
+        }
+        val repository = LocalTrackSearchRepository(db)
+        assertEquals(listOf("download"), repository.offlineTrackIds("owner", ids).first())
+        assertEquals(emptyList<String>(), repository.offlineTrackIds(null, ids).first())
+        assertEquals(emptyList<String>(), repository.offlineTrackIds("owner", emptyList()).first())
     }
 
     private suspend fun seed(id: String, owner: String = "owner", title: String, artist: String?, album: String?,

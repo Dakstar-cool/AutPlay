@@ -98,6 +98,46 @@ class ServerFeatureRepositoryTest {
     }
 
     @Test
+    fun olderP11ReceivesTheSameModeAndSeedWithoutTheNewCalendarFields() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(422))
+        server.enqueue(MockResponse().setBody(recommendationJson()))
+        server.start()
+        try {
+            val wave = app.autplay.application.recommendation.PersonalWaveSession.start("WORK")
+            repository(server, MutableStore("access".toByteArray())).recommendations(wave = wave)
+            fun body() = kotlinx.serialization.json.Json.parseToJsonElement(server.takeRequest().body.readUtf8())
+                as kotlinx.serialization.json.JsonObject
+            val first = body()
+            assertEquals(wave.requestContext(), first["wave_session"])
+            assertEquals(first - "wave_session", body())
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun personalWaveUsesTheFrozenLocalCalendarOnEveryRequest() = runBlocking {
+        val server = MockWebServer()
+        repeat(2) { server.enqueue(MockResponse().setBody(recommendationJson())) }
+        server.start()
+        try {
+            val repository = repository(server, MutableStore("access".toByteArray()))
+            val wave = app.autplay.application.recommendation.PersonalWaveSession.start(
+                "SLEEP", java.time.LocalDateTime.parse("2026-11-15T23:59:00"),
+            )
+            repeat(2) { repository.recommendations(wave = wave) }
+            val actual = server.takeRequest().body.readUtf8()
+            assertEquals(actual, server.takeRequest().body.readUtf8())
+            val json = kotlinx.serialization.json.Json.parseToJsonElement(actual) as kotlinx.serialization.json.JsonObject
+            assertEquals(wave.requestContext(), json["wave_session"])
+            assertEquals(kotlinx.serialization.json.JsonPrimitive("SLEEP"), json["context"])
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun separateApiAndStreamOriginsAreCheckedIndependently() = runBlocking {
         val api = MockWebServer()
         val stream = MockWebServer()

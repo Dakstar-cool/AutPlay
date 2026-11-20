@@ -74,6 +74,18 @@ interface PortableAccountDao {
     @Query("SELECT coalesce(max(revision),0) FROM portable_account_record WHERE account_id=:account") suspend fun latestRevision(account: String): Long
     @Query("SELECT coalesce(max(revision),0) FROM portable_account_record WHERE account_id=:account")
     fun observeRevision(account: String): kotlinx.coroutines.flow.Flow<Long>
+    @Query("""SELECT EXISTS(SELECT 1 FROM portable_account_record WHERE account_id=:account)
+        OR EXISTS(SELECT 1 FROM portable_account_statistics WHERE account_id=:account)
+        OR EXISTS(SELECT 1 FROM portable_account_scope WHERE account_id=:account AND profile_id!='legacy-unscoped')
+        OR EXISTS(SELECT 1 FROM user_track_ref WHERE server_profile_id='legacy-unscoped')
+        OR EXISTS(SELECT 1 FROM playlist WHERE server_profile_id='legacy-unscoped')
+        OR EXISTS(SELECT 1 FROM listening_event WHERE server_profile_id='legacy-unscoped')
+        OR EXISTS(SELECT 1 FROM local_import_job WHERE server_profile_id='legacy-unscoped')""")
+    suspend fun hasDataBeforeLocalRemoval(account: String): Boolean
+    @Query("DELETE FROM portable_account_scope WHERE account_id=:account AND profile_id='legacy-unscoped'")
+    suspend fun removeEmptyLocalScope(account: String)
+    @Query("DELETE FROM portable_account_cursor WHERE account_id=:account")
+    suspend fun removeEmptyLocalCursors(account: String)
     @Upsert suspend fun putRecord(row: PortableAccountRecordEntity)
     @Upsert suspend fun putAliases(rows: List<PortableListeningAliasEntity>)
     @Query("DELETE FROM portable_account_record WHERE account_id=:account AND record_id IN (:records)") suspend fun removeMergedCopies(account: String, records: List<String>)

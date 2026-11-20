@@ -98,6 +98,7 @@ import app.autplay.application.history.HistoryRepository
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatusRepository
 import app.autplay.application.download.DownloadIntentRepository
+import app.autplay.application.playback.ActiveQueueContext
 import app.autplay.application.playback.ActiveQueueContextRepository
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
@@ -213,6 +214,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import app.autplay.application.portableaccount.hasPortableAccountPendingEnrollment
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -225,7 +227,7 @@ internal const val BOOTSTRAP_LABEL = "AutPlay"
 internal const val ONBOARDING_REVISION = CURRENT_ONBOARDING_REVISION
 
 internal fun hasCompletedOnboarding(settings: NonSecretSettings): Boolean =
-    settings.onboardingRevision >= ONBOARDING_REVISION &&
+    !settings.accountSignedOut && settings.onboardingRevision >= ONBOARDING_REVISION &&
         settings.pendingPublicId?.let { app.autplay.application.social.normalizeSocialPublicId(it) == it } == true
 
 internal suspend fun completeOnboarding(
@@ -249,6 +251,7 @@ internal suspend fun completeOnboarding(
 class MainActivity : ComponentActivity() {
     private val pendingPublicAccountInvitation = MutableStateFlow<ByteArray?>(null)
     private val pendingPlaybackOpen = MutableStateFlow(false)
+    private var downloadResumeRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -262,14 +265,6 @@ class MainActivity : ComponentActivity() {
         )
         val playbackOwner = ServicePlaybackSessionOwner(applicationContext)
         val downloadRepository = DownloadIntentRepository(applicationContext, database)
-        // Media3 owns transfer execution, while Room keeps durable user intent.  Restart
-        // the service from a foreground app launch so an update/process death cannot
-        // strand REQUESTED rows before they reach Media3's download index.
-        DownloadService.sendResumeDownloads(
-            applicationContext,
-            AutPlayDownloadService::class.java,
-            false,
-        )
         val syncStatusRepository = SyncStatusRepository(database)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
@@ -290,6 +285,21 @@ class MainActivity : ComponentActivity() {
                 pendingPublicAccountInvitation,
                 pendingPlaybackOpen,
             )
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || downloadResumeRequested || isFinishing || isDestroyed) return
+        // onCreate can run while Android still treats this process as background.
+        // Recover durable download intent only after the app's window is visible.
+        try {
+            DownloadService.sendResumeDownloads(applicationContext, AutPlayDownloadService::class.java, false)
+            downloadResumeRequested = true
+        } catch (error: IllegalStateException) {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
+                error !is android.app.BackgroundServiceStartNotAllowedException) throw error
+            // A concurrent background transition must not crash startup. Retry on next focus.
         }
     }
 
@@ -458,7 +468,7 @@ internal fun AutPlayBootstrap(
             }
             val portableAccountRuntime = remember(settingsStore, pairingCredentialStore, pairingDeviceKeys, pairingRuntime, pairingPort) {
                 app.autplay.application.portableaccount.PortableAccountRuntime(
-                    app.autplay.application.portableaccount.PortableAccountStore(pairingCredentialStore, settingsStore),
+                    app.autplay.application.portableaccount.PortableAccountStore(pairingCredentialStore, settingsStore, portableAccountData::removeEmptyLocalAccount),
                     settingsStore, pairingCredentialStore, pairingDeviceKeys, pairingRuntime, pairingPort, firstBindCeremonyGate,
                     { origin -> AutPlayRuntime.portableAccountPort(context, origin) }, android.os.Build.MODEL.ifBlank { "Android device" }, BuildConfig.VERSION_NAME,
                     beforeDisconnect = { profile, owner ->
@@ -646,19 +656,21 @@ internal fun AutPlayBootstrap(
                 catch (_: Exception) { pairingSafeError = "ACCOUNT_SCOPE_IDENTITY_CONFLICT" }
             }
             var waveCoordinator by remember { mutableStateOf<WaveCoordinator?>(null) }
-            LaunchedEffect(binding, onboardingComplete) {
-                waveCoordinator?.close()
+            LaunchedEffect(binding, onboardingComplete, settings.serverBaseUrl) {
+                if (binding == null || !onboardingComplete) AutPlayRuntime.releaseWaveCoordinator()
                 waveCoordinator = if (binding == null || !onboardingComplete) null else runCatching {
                     AutPlayRuntime.waveCoordinator(context, binding)
                 }.getOrNull()
             }
-            DisposableEffect(Unit) {
-                onDispose { waveCoordinator?.close() }
-            }
             var onboardingCompletionRoute by rememberSaveable { mutableStateOf<String?>(null) }
             AutPlayTheme(appearanceFrom(settings)) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    if (!onboardingComplete) {
+                    if (settings.accountSignedOut) {
+                        app.autplay.ui.profilepairing.AccountSignInScreen(
+                            publicId = settings.pendingPublicId.orEmpty(),
+                            signIn = portableAccountRuntime::signInLocal,
+                        )
+                    } else if (!onboardingComplete) {
                         WelcomeOnboardingScreen(
                             initialPublicId = settings.pendingPublicId,
                             createAccount = portableAccountRuntime::create,
@@ -1163,6 +1175,12 @@ private fun OfflineLibraryScreen(
     val homePlaylists = repositorySnapshot.homePlaylists
     val homeActiveQueue = repositorySnapshot.activeQueue
     val syncStatus = repositorySnapshot.syncStatus
+    val waveLibrarySyncing = binding != null && syncStatus.lastErrorCode == null &&
+        syncStatus.bootstrapState in setOf("NOT_STARTED", "BOOTSTRAPPING", "RESET_REQUIRED")
+    LaunchedEffect(stableError, libraryEntries, binding) {
+        if (stableError == "MY_WAVE_EMPTY" && binding != null && myWaveNetworkAvailable(context) &&
+            libraryEntries.any { !it.removed && it.serverPlaybackCandidate }) stableError = null
+    }
     val importProfileId = repositorySnapshot.importProfileId
     val importJob = repositorySnapshot.importJob
     val importItems = repositorySnapshot.importItems
@@ -1205,13 +1223,26 @@ private fun OfflineLibraryScreen(
         contextKey = detailContextKey,
         reportError = { stableError = it },
     )
+    var detailHistory by rememberSaveable(activeProfileId) { mutableStateOf<List<String>>(emptyList()) }
     fun closeCoreDetail() {
         selectedTrackRefId = null
         coreProductState.clearDetail()
+        detailHistory = emptyList()
+    }
+    fun backFromDetail() {
+        val history = ArrayList(detailHistory)
+        val toPlayer = history.lastOrNull() == UiDestination.NowPlaying.route
+        if (toPlayer) history.removeAt(history.lastIndex)
+        val previous = history.removeLastOrNull()
+        if (previous == null) closeCoreDetail() else {
+            coreProductState.selectDetail(DetailTarget(DetailKind.valueOf(previous.substringBefore(':')), previous.substringAfter(':')))
+        }
+        detailHistory = history
+        if (toPlayer) navigation.navigateBack()
     }
     val hasVisibleCoreDetail = destination == UiDestination.Library && coreProductState.selectedDetail != null
     BackHandler(enabled = hasVisibleCoreDetail || navigation.canNavigateBack) {
-        if (hasVisibleCoreDetail) closeCoreDetail() else navigation.navigateBack()
+        if (hasVisibleCoreDetail) backFromDetail() else navigation.navigateBack()
     }
     var selectedUploadCandidate by remember { mutableStateOf<VaultUploadCandidate?>(null) }
     var remoteImportJobId by rememberSaveable(activeProfileId) { mutableStateOf<String?>(null) }
@@ -1239,8 +1270,8 @@ private fun OfflineLibraryScreen(
     LaunchedEffect(durableVaultUploads) {
         serverUiState = serverUiState.copy(
             uploadStatus = durableVaultUploads.firstOrNull()?.let { upload ->
-                "${upload.state} В· ${upload.remoteOffset}/${upload.expectedSize} bytes" +
-                    (upload.lastErrorCode?.let { " В· $it" } ?: "")
+                "${upload.state} · ${upload.remoteOffset}/${upload.expectedSize} bytes" +
+                    (upload.lastErrorCode?.let { " · $it" } ?: "")
             },
         )
     }
@@ -1399,14 +1430,19 @@ private fun OfflineLibraryScreen(
                     section.replace('_', ' ')
                 },
                 feedbackEnabled = presentationResults.containsKey(key),
+                artworkTrackId = item.localUserTrackRefId,
             )
         }
     }
-    val homeReleases = (
-        libraryReleases + activeHomeFeed?.recentRelevantReleases.orEmpty().map { release ->
-            CoreReleaseSummary(release.localReleaseId, release.title, release.artist)
-        }
-    ).distinctBy(CoreReleaseSummary::stableId)
+    val relevantReleases = activeHomeFeed?.recentRelevantReleases.orEmpty()
+    val homeReleases = remember(relevantReleases, libraryReleases) {
+        val owned = libraryReleases.associateBy(CoreReleaseSummary::stableId)
+        (relevantReleases.map { release ->
+            val album = owned[release.localReleaseId]
+            CoreReleaseSummary(release.localReleaseId, release.title, release.artist, release.releaseDateText,
+                ownedTrackCount = album?.ownedTrackCount, artworkTrackId = album?.artworkTrackId)
+        } + libraryReleases).distinctBy(CoreReleaseSummary::stableId)
+    }
     val personalWaveRoomState by (waveCoordinator?.uiState ?: flowOf(app.autplay.application.wave.WaveUiState()))
         .collectAsState(initial = app.autplay.application.wave.WaveUiState())
     fun myWaveAllowed(): Boolean = canStartMyWave(
@@ -1447,6 +1483,10 @@ private fun OfflineLibraryScreen(
         myWaveAllowed = { currentMyWaveAllowed() },
         myWaveCurrentBinding = { currentMyWaveBinding },
         myWaveScope = myWaveScope,
+        personalWaveQueue = remember(context) {
+            app.autplay.application.recommendation.PersonalWaveQueue(AutPlayRuntime.database(context))
+        },
+        fetchWave = { owner, wave -> AutPlayRuntime.serverFeatures(context, owner).recommendations(wave = wave) },
     )
     val manualPlaylistActions = playlistMutationActions.copy(
         playEntry = coreCommandActions.startPlaylistEntry,
@@ -1483,6 +1523,7 @@ private fun OfflineLibraryScreen(
         navigation.navigate(UiDestination.NowPlaying)
     }
     fun openHomePlaylist(stableId: String) {
+        detailHistory = emptyList()
         coreProductState.selectDetail(DetailTarget(DetailKind.Playlist, stableId))
         navigation.navigate(UiDestination.Library)
     }
@@ -1495,8 +1536,17 @@ private fun OfflineLibraryScreen(
             return
         }
         selectedTrackRefId = null
+        val history = if (destination == UiDestination.Library || destination == UiDestination.NowPlaying) {
+            ArrayList(detailHistory).apply {
+                coreProductState.selectedDetail?.let { previous ->
+                    if (previous != target || destination == UiDestination.NowPlaying) add("${previous.kind.name}:${previous.stableId}")
+                }
+                if (destination == UiDestination.NowPlaying) add(UiDestination.NowPlaying.route)
+            }
+        } else emptyList()
+        detailHistory = history
         coreProductState.selectDetail(target)
-        navigation.navigate(UiDestination.Library)
+        navigation.openLibraryDetail()
     }
     fun openCoreCollection(section: LibrarySection, stableId: String) {
         when (section) {
@@ -1518,13 +1568,19 @@ private fun OfflineLibraryScreen(
         binding.searchOwnerContextKey(),
         coreProductState.searchKind,
     )
-    val localSearchTrackIds = visibleSearchResults.map(LocalTrackSearchResult::localUserTrackRefId).toSet()
     val visibleVaultSearchResults = vaultSearchResultStore.visibleFor(
         coreProductState.query,
         automaticSearchScopes(activeProfileId),
         binding.searchOwnerContextKey(),
         coreProductState.searchKind,
-    ).filterNot { it.localUserTrackRefId in localSearchTrackIds }
+    )
+    val searchTrackIds = remember(visibleSearchResults, visibleVaultSearchResults) {
+        (visibleSearchResults.map { it.localUserTrackRefId } +
+            visibleVaultSearchResults.mapNotNull { it.localUserTrackRefId }).distinct()
+    }
+    val offlineSearchIds by key(searchRepository, activeProfileId, searchTrackIds) {
+        remember { searchRepository.offlineTrackIds(activeProfileId, searchTrackIds) }.collectAsState(initial = emptyList())
+    }
     val untitledTrack = stringResource(R.string.player_nothing_playing)
     val queueControls = buildOfflineQueueControls(
         scope, { queueProjection }, queueEditorRepository, playbackOwner,
@@ -1619,6 +1675,8 @@ private fun OfflineLibraryScreen(
     val searchScreenState = SearchScreenUiState(
         kind = coreProductState.searchKind,
         query = coreProductState.query,
+        offlineTrackIds = offlineSearchIds.toSet(),
+        serverLinkedTrackIds = visibleSearchResults.filter { it.serverUserTrackRefId != null }.mapTo(mutableSetOf()) { it.localUserTrackRefId },
         results = visibleSearchResults.map { result ->
             CoreTrackUiItem(
                 result.localUserTrackRefId,
@@ -1635,6 +1693,7 @@ private fun OfflineLibraryScreen(
         vaultResults = visibleVaultSearchResults.map { result ->
             VaultSearchUiItem(
                 id = result.remoteLibraryEntryId,
+                localTrackId = result.localUserTrackRefId,
                 title = result.title,
                 artist = result.artist,
                 source = result.source,
@@ -1654,15 +1713,33 @@ private fun OfflineLibraryScreen(
         playlist = presentedPlaylistDetail,
         artist = presentedArtistDetail,
         artistAppearances = presentedArtistAppearances,
+        albumArtwork = if (presentedArtistDetail == null) emptyMap() else libraryReleases.associate { it.stableId to it.artworkTrackId },
         subjectArtistCredits = presentedSubjectArtistCredits,
     )
     val coreRouteActions = CoreProductRouteActions(
+        playReleaseEntry = { id -> presentedReleaseDetail?.let { coreCommandActions.startReleaseEntry(it, id) } },
         openListenTogether = { navigation.navigate(UiDestination.WaveRooms) },
         recommendationVisible = coreCommandActions.recordRecommendationVisibility,
+        playRecommendation = coreCommandActions.startRecommendation,
         likeRecommendation = { coreCommandActions.recordHomeFeedback(it, "LIKED") },
         dislikeRecommendation = { coreCommandActions.recordHomeFeedback(it, "DISLIKED") },
         retryHome = { homeRetryNonce = !homeRetryNonce },
         resumeHomeQueue = ::resumeHomeQueue,
+        continueHomeQueue = {
+            val saved = homeActiveQueue
+            val active = playerState.context as? ActiveQueueContext.Loaded
+            if (saved != null && saved.queueSnapshotId == active?.snapshotId && myWaveAllowed()) {
+                if (playerState.mediaId != null && playbackState.queueSnapshotId == saved.queueSnapshotId) {
+                    playerAdapter.resumeIfPaused(saved.queueSnapshotId)
+                } else {
+                    myWaveScope.launch {
+                        runCatching { playbackOwner.dispatch(PlaybackCommand.StartQueue(LocalId(saved.queueSnapshotId))) }
+                            .onFailure { if (it is CancellationException) throw it else stableError = "PLAYBACK_UNAVAILABLE" }
+                    }
+                }
+            }
+            navigation.navigate(UiDestination.NowPlaying)
+        },
         startMyWave = coreCommandActions.startMyWave,
         myWaveAllowed = myWaveAllowed(),
         openHomePlaylist = ::openHomePlaylist,
@@ -1672,7 +1749,7 @@ private fun OfflineLibraryScreen(
         changeSearchKind = searchCommandActions.changeKind,
         submitSearch = searchCommandActions.submit,
         playSearchResult = coreCommandActions.startSearchTrack,
-        playVaultSearchResult = coreCommandActions.startVaultSearchTrack,
+        playVaultSearchResult = { id -> coreCommandActions.startVaultSearchTrack(id, searchScreenState.offlineTrackIds) },
         changeVaultScope = searchCommandActions.changeVaultScope,
         changeSearchAnchor = { coreProductState.searchListAnchor = it },
         addLocal = { activityLaunchers.addLocalAudio.launch(arrayOf("audio/*")) },
@@ -1698,6 +1775,13 @@ private fun OfflineLibraryScreen(
         manualPlaylists = playlists.map { ManualPlaylistUi(it.stableId, it.title, it.description) },
         manualPlaylistActions = manualPlaylistActions,
     )
+    val playingTrackId = playerState.localTrackRefId
+    val playingArtists = if (destination == UiDestination.NowPlaying && activeProfileId != null && playingTrackId != null) {
+        key(artistCatalogPort, activeProfileId, playingTrackId) {
+            remember { artistCatalogPort.observeTrackArtists(app.autplay.domain.ServerProfileId(activeProfileId), playingTrackId) }
+                .collectAsState(initial = emptyList()).value
+        }
+    } else emptyList()
     val nowPlayingRouteActions = buildNowPlayingRouteActions(
         playbackActions = playbackActions,
         playerAdapter = playerAdapter,
@@ -1712,7 +1796,7 @@ private fun OfflineLibraryScreen(
         reportError = { stableError = it },
         queueActions = queueControls.actions,
         downloadTrack = coreCommandActions.downloadTrack,
-    )
+    ).copy(artists = playingArtists, openArtist = { artistId -> openCoreDetail(DetailTarget(DetailKind.Artist, artistId)) })
     val historyActions = HistoryUiActions(
         retry = { requestHistory(reset = true) },
         loadMore = { requestHistory(reset = false) },
@@ -1970,7 +2054,8 @@ private fun OfflineLibraryScreen(
         ownerStatisticsState = ownerStatisticsState,
         social = socialState,
         socialAvailable = socialRuntime != null,
-        stableError = stableError,
+        stableError = if (stableError == "MY_WAVE_EMPTY" && waveLibrarySyncing && myWaveNetworkAvailable(context))
+            "MY_WAVE_SYNCING" else stableError,
     )
     val legacySecondaryActions = buildLegacySecondaryRouteActions(
         scope = scope,
@@ -1994,7 +2079,24 @@ private fun OfflineLibraryScreen(
         context = context,
         profilePairingRuntime = pairingRuntime,
         selfPairingActions = selfPairingUi.actions,
-        portableAccountActions = portableAccountUi.actions,
+        portableAccountActions = portableAccountUi.actions.copy(
+            signOut = { login, password ->
+                if (admissionState is app.autplay.application.profilepairing.AdmissionState.Exchanging ||
+                    pairingRuntimeState.pairing is PairingState.ExchangingInvitation ||
+                    !portableAccountUi.runtime.store.verify(login, password)) false else {
+                    admissionRuntime.cancel().join()
+                    portableAccountUi.runtime.signOut(login, password)
+                }
+            },
+            removeEmptyLocalAccount = { login, password ->
+                if (admissionState is app.autplay.application.profilepairing.AdmissionState.Exchanging ||
+                    pairingRuntimeState.pairing is PairingState.ExchangingInvitation ||
+                    !portableAccountUi.runtime.store.verify(login, password)) false else {
+                    admissionRuntime.cancel().join()
+                    portableAccountUi.runtime.removeEmptyLocalAccount(login, password)
+                }
+            },
+        ),
         confirmProfileAction = { action, login, password ->
             portableAccountUi.runtime.confirmLifecycle(app.autplay.application.profilepairing.RuntimeLifecycleAction.valueOf(action.name), login, password)
         },
@@ -2096,7 +2198,7 @@ private fun OfflineLibraryScreen(
             dismissCommandError = { stableError = null },
             navigate = navigation::navigate,
             navigateBack = navigation::navigateBack,
-            closeCoreDetail = ::closeCoreDetail,
+            closeCoreDetail = ::backFromDetail,
             togglePlayPause = playbackActions::toggleDirectPlayPause,
             dismissMiniPlayer = playerAdapter::dismissMiniPlayer,
             skipHomeTrack = { forward ->
@@ -2284,189 +2386,11 @@ private fun rememberOfflineActivityLaunchers(
 }
 
 @Composable
-internal fun WaveFrontendScreen(
-    coordinator: WaveCoordinator?,
-    isProfileBound: Boolean,
-    localTrackRefId: String?,
-    resolveServerRecordingId: suspend (String) -> String?,
-    onStartPlayback: suspend () -> WavePlaybackCommandOutcome,
-    onPausePlayback: suspend () -> WavePlaybackCommandOutcome,
-    onError: (String) -> Unit,
-    settings: NonSecretSettings,
-) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val state by (coordinator?.uiState ?: flowOf(app.autplay.application.wave.WaveUiState()))
-        .collectAsState(initial = app.autplay.application.wave.WaveUiState())
-    var roomCode by remember { mutableStateOf("") }
-    var createdCode by remember { mutableStateOf<String?>(null) }
-    var inviteUserIds by remember { mutableStateOf("") }
-    var waveActionMessage by remember { mutableStateOf<Int?>(null) }
-    val guestShareTitle = stringResource(R.string.guest_share_title)
-    val inviteList = inviteUserIds.split(Regex("[,;\\s]+"))
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-    val inviteIsValid = inviteList.size <= 7 && inviteList.distinct().size == inviteList.size &&
-        inviteList.all { value -> runCatching { java.util.UUID.fromString(value) }.isSuccess }
-
-    Text(stringResource(R.string.wave_intro))
-    if (!isProfileBound || coordinator == null) {
-        Text(stringResource(R.string.wave_requires_server))
-        return
-    }
-    if (state.roomId == null) {
-        OutlinedTextField(
-            value = inviteUserIds,
-            onValueChange = { inviteUserIds = it.take(300) },
-            label = { Text(stringResource(R.string.wave_invite_codes)) },
-            isError = !inviteIsValid,
-            minLines = 2,
-        )
-        Button(enabled = inviteIsValid, onClick = {
-            scope.launch {
-                runCatching { coordinator.create(inviteList) }
-                    .onSuccess { createdCode = it }
-                    .onFailure { onError("WAVE_CREATE_UNAVAILABLE") }
-            }
-        }) { Text(stringResource(R.string.wave_create_room)) }
-        OutlinedTextField(
-            value = roomCode,
-            onValueChange = { roomCode = it.uppercase().filter(Char::isLetterOrDigit).take(10) },
-            label = { Text(stringResource(R.string.wave_room_code_label)) },
-        )
-        Button(
-            enabled = roomCode.length == 10,
-            onClick = {
-                scope.launch {
-                    runCatching { coordinator.joinByCode(roomCode) }
-                        .onFailure { onError("WAVE_JOIN_UNAVAILABLE") }
-                }
-            },
-        ) { Text(stringResource(R.string.wave_join_room)) }
-    } else {
-        createdCode?.let { code ->
-            Text(stringResource(R.string.wave_room_code, code))
-            val shareText = stringResource(R.string.wave_share_text, code)
-            val shareTitle = stringResource(R.string.wave_share_title)
-            OutlinedButton(onClick = {
-                val share = Intent(Intent.ACTION_SEND)
-                    .setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, shareText)
-                context.startActivity(Intent.createChooser(share, shareTitle))
-            }) { Text(stringResource(R.string.wave_share_code)) }
-        }
-        Text(waveStateLabel(state.state))
-        Text(stringResource(if (state.isHost) R.string.wave_you_control else R.string.wave_host_controls))
-        if (state.isHost) {
-            Column {
-                WaveHostTransferControls(
-                    state = state,
-                    onTransfer = { target -> checkNotNull(coordinator).transferHost(target.deviceId) },
-                    onError = onError,
-                )
-                Button(
-                    enabled = settings.serverBaseUrl != null && settings.m5Binding != null,
-                    onClick = {
-                        scope.launch {
-                            val origin = settings.serverBaseUrl
-                            val identity = settings.m5Binding
-                            if (origin == null || identity == null) {
-                                onError("GUEST_INVITATION_UNAVAILABLE")
-                                return@launch
-                            }
-                            runCatching {
-                                coordinator.issueGuestDocument().use { receipt ->
-                                    GuestRoomDocumentCodec.encode(
-                                        receipt,
-                                        origin,
-                                        identity.serverInstanceId,
-                                        identity.identityEpoch,
-                                    )
-                                }
-                            }.onSuccess { document ->
-                                val share = Intent(Intent.ACTION_SEND).apply {
-                                    type = GUEST_DOCUMENT_MIME_TYPE
-                                    putExtra(Intent.EXTRA_TEXT, document)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(
-                                    Intent.createChooser(
-                                        share,
-                                        guestShareTitle,
-                                    ),
-                                )
-                            }.onFailure { onError("GUEST_INVITATION_UNAVAILABLE") }
-                        }
-                    },
-                ) { Text(stringResource(R.string.guest_invite_without_account)) }
-                Button(
-                    enabled = localTrackRefId != null,
-                    onClick = {
-                        val trackRefId = localTrackRefId ?: return@Button
-                        scope.launch {
-                            val recordingId = runCatching { resolveServerRecordingId(trackRefId) }.getOrNull()
-                            if (recordingId == null) {
-                                onError("WAVE_RECORDING_NOT_SYNCED")
-                            } else {
-                                runCatching { coordinator.enqueueRecording(recordingId) }
-                                    .onFailure { onError("WAVE_QUEUE_UNAVAILABLE") }
-                            }
-                        }
-                    },
-                ) { Text(stringResource(R.string.wave_add_selected_track)) }
-                Button(onClick = {
-                    scope.launch {
-                        when (onStartPlayback()) {
-                            WavePlaybackCommandOutcome.Started -> {
-                                waveActionMessage = R.string.wave_start_scheduled
-                            }
-                            WavePlaybackCommandOutcome.WaitingForReadyDevices -> {
-                                waveActionMessage = R.string.wave_waiting_devices
-                            }
-                            WavePlaybackCommandOutcome.RoleRejected,
-                            WavePlaybackCommandOutcome.CommandFailed,
-                            -> onError("WAVE_START_UNAVAILABLE")
-                            WavePlaybackCommandOutcome.Paused -> Unit
-                        }
-                    }
-                }) { Text(stringResource(R.string.wave_start_playback)) }
-                Button(onClick = {
-                    scope.launch {
-                        when (onPausePlayback()) {
-                            WavePlaybackCommandOutcome.Paused -> Unit
-                            WavePlaybackCommandOutcome.RoleRejected,
-                            WavePlaybackCommandOutcome.CommandFailed,
-                            -> onError("WAVE_PAUSE_UNAVAILABLE")
-                            WavePlaybackCommandOutcome.Started,
-                            WavePlaybackCommandOutcome.WaitingForReadyDevices,
-                            -> Unit
-                        }
-                    }
-                }) { Text(stringResource(R.string.wave_pause_playback)) }
-            }
-            waveActionMessage?.let { Text(stringResource(it)) }
-            OutlinedButton(onClick = {
-                scope.launch {
-                    runCatching { coordinator.closeRoom() }
-                        .onFailure { onError("WAVE_CLOSE_UNAVAILABLE") }
-                }
-            }) { Text(stringResource(R.string.wave_close_room)) }
-        } else {
-            OutlinedButton(onClick = {
-                scope.launch {
-                    runCatching { coordinator.leave() }
-                        .onFailure { onError("WAVE_LEAVE_UNAVAILABLE") }
-                }
-            }) { Text(stringResource(R.string.wave_leave_room)) }
-        }
-    }
-}
-
-@Composable
 internal fun WaveHostTransferControls(
     state: app.autplay.application.wave.WaveUiState,
     onTransfer: suspend (app.autplay.application.wave.WaveHostTransferTarget) -> Unit,
     onError: (String) -> Unit,
+    enabled: Boolean = true,
 ) {
     if (!state.isHost || state.hostTransferTargets.isEmpty()) return
     val scope = rememberCoroutineScope()
@@ -2505,7 +2429,7 @@ internal fun WaveHostTransferControls(
     state.hostTransferTargets.forEachIndexed { index, target ->
         OutlinedButton(
             modifier = Modifier.testTag("wave-transfer-target-$index"),
-            enabled = !pending,
+            enabled = !pending && enabled,
             onClick = { selected = target },
         ) { Text(stringResource(R.string.wave_transfer_to, target.deviceName)) }
     }
@@ -2533,8 +2457,12 @@ internal fun SettingsFrontendScreen(
     onRefreshDeveloperMode: () -> Unit,
     onNavigate: (UiDestination) -> Unit,
     trainingConsent: TrainingConsentUi = TrainingConsentUi(),
+    page: UiDestination = UiDestination.Settings,
+    onChooseAudio: () -> Unit = {},
 ) {
     SettingsProductScreen(
+        page = page,
+        onChooseAudio = onChooseAudio,
         settings = settings,
         onUpdate = onUpdate,
         onAppLanguageChange = onAppLanguageChange,
@@ -2596,7 +2524,10 @@ private fun legacyView(destination: UiDestination): String = when (destination) 
     UiDestination.SyncStatus -> "Sync"
     UiDestination.ServerFeatures -> "Server"
     UiDestination.Profile -> "Profile"
-    UiDestination.Settings, UiDestination.PrivacyAndData -> "Settings"
+    UiDestination.SettingsAccount -> "SettingsAccount"
+    UiDestination.Settings, UiDestination.PrivacyAndData, UiDestination.SettingsPlayback,
+    UiDestination.SettingsMusic, UiDestination.SettingsDownloads, UiDestination.SettingsAppearance,
+    UiDestination.SettingsAbout, UiDestination.SettingsDiagnostics -> "Settings"
 }
 
 internal fun appearanceFrom(settings: NonSecretSettings): AutPlayAppearance = AutPlayAppearance(

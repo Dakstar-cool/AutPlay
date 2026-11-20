@@ -1,5 +1,7 @@
 package app.autplay.ui.player
 
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -16,6 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
@@ -25,6 +28,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -56,6 +62,18 @@ class PlaybackPlayerSurfacesTest {
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun restoringQueueShowsPreparationBeforeCurrentItemArrives() {
+        val state = androidx.compose.runtime.mutableStateOf(ordinaryState().copy(mediaId = null,
+            connection = app.autplay.playback.presentation.PlaybackConnectionState.Connected))
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(state.value, {}, {}, {}, {}, {}, {}, {}, {}, true, {})
+        } }
+        composeRule.onNodeWithText(context.getString(R.string.player_preparing)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.state_playback_unavailable_title)).assertDoesNotExist()
+        composeRule.runOnIdle { state.value = state.value.copy(context = ActiveQueueContext.Absent) }
+        composeRule.onNodeWithText(context.getString(R.string.player_nothing_playing)).assertIsDisplayed()
+    }
+
     @Test fun miniPlayerDownwardSwipeDismissesWithoutOpeningOrTogglingPlayback() {
         var dismissCalls = 0
         var openCalls = 0
@@ -79,6 +97,38 @@ class PlaybackPlayerSurfacesTest {
             assertEquals(0, openCalls)
             assertEquals(0, toggleCalls)
         }
+    }
+
+    @Test fun miniPlayerClaimsHorizontalDragsOverButtonsAndKeepsShortDragsFromSkipping() {
+        val calls = mutableListOf<String>()
+        val state = androidx.compose.runtime.mutableStateOf(ordinaryState().copy(previousMediaId = "before", nextMediaId = "after"))
+        composeRule.setContent { AutPlayTheme {
+            PlaybackMiniPlayer(state.value, { calls += "open" }, { calls += "toggle" }, {},
+                likeEnabled = true, onLike = { calls += "like" }, onDismiss = { calls += "dismiss" },
+                onPrevious = { calls += "previous" }, onNext = { calls += "next" })
+        } }
+        val mini = composeRule.onNodeWithTag("persistent-mini-player")
+        val like = composeRule.onNodeWithTag("mini-player-like")
+        like.performTouchInput { swipeLeft(startX = centerX, endX = centerX - 100.dp.toPx()) }
+        mini.performTouchInput { swipeRight() }
+        mini.performTouchInput { swipeLeft(startX = centerX, endX = centerX - 32.dp.toPx()) }
+        mini.performTouchInput {
+            down(center)
+            moveTo(center.copy(x = centerX - 100.dp.toPx()))
+            cancel()
+        }
+        like.performTouchInput { click() }
+        composeRule.runOnIdle { assertEquals(listOf("next", "previous", "like"), calls) }
+
+        composeRule.runOnIdle { state.value = state.value.copy(nextMediaId = null, previousMediaId = state.value.mediaId) }
+        mini.performTouchInput { swipeLeft() }
+        mini.performTouchInput { swipeRight() }
+        composeRule.runOnIdle { state.value = state.value.copy(nextMediaId = "after", previousMediaId = "before",
+            controls = PlaybackControlGate.Locked(PlaybackControlLockReason.WAVE_QUEUE)) }
+        mini.performTouchInput { swipeLeft() }
+        mini.performTouchInput { swipeRight() }
+        mini.performTouchInput { click(center.copy(x = width * .25f)) }
+        composeRule.runOnIdle { assertEquals(listOf("next", "previous", "like", "open"), calls) }
     }
 
     @Test fun fullPlayerUsesActualNeighboursEvenAtLinearQueueBoundary() {
@@ -172,6 +222,43 @@ class PlaybackPlayerSurfacesTest {
         composeRule.onNodeWithTag("player-cover").performTouchInput { swipeLeft() }
         composeRule.onNodeWithTag("player-cover").performTouchInput { swipeRight() }
         composeRule.runOnIdle { assertEquals(0, transportCalls) }
+    }
+
+    @Test
+    fun compactMiniPlayerGivesLongTitlesRoomAndGrowsWithLargeText() {
+        val fontScale = androidx.compose.runtime.mutableFloatStateOf(1f)
+        val title = "Midnight Train Along the Coast and Beyond the Observatory"
+        val artist = "A long artist credit that also needs to stay on one line"
+        composeRule.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, fontScale.floatValue)) {
+                AutPlayTheme {
+                    Box(Modifier.width(320.dp).testTag("mini-slot")) {
+                        PlaybackMiniPlayer(ordinaryState().copy(title = title, artist = artist), {}, {}, {})
+                    }
+                }
+            }
+        }
+        val slot = composeRule.onNodeWithTag("mini-slot")
+        val titleNode = composeRule.onNodeWithText(title, useUnmergedTree = true)
+        val artistNode = composeRule.onNodeWithText(artist, useUnmergedTree = true)
+        val normalHeight = slot.getUnclippedBoundsInRoot().height
+        org.junit.Assert.assertTrue("Mini-player height: $normalHeight", normalHeight <= 55.dp)
+        org.junit.Assert.assertTrue(titleNode.getUnclippedBoundsInRoot().width >= 150.dp)
+        val buttons = listOf(
+            composeRule.onNodeWithTag("mini-player-like"),
+            composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)),
+        )
+        for (button in buttons) {
+            button.assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        }
+        composeRule.runOnIdle { fontScale.floatValue = 2f }
+        val expanded = slot.getUnclippedBoundsInRoot()
+        val firstLine = titleNode.assertIsDisplayed().getUnclippedBoundsInRoot()
+        val secondLine = artistNode.assertIsDisplayed().getUnclippedBoundsInRoot()
+        org.junit.Assert.assertTrue(expanded.height > normalHeight)
+        org.junit.Assert.assertTrue(firstLine.top >= expanded.top && firstLine.bottom <= secondLine.top &&
+            secondLine.bottom <= expanded.bottom)
     }
 
     @Test
@@ -302,7 +389,8 @@ class PlaybackPlayerSurfacesTest {
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).performScrollTo().performClick()
         composeRule.runOnIdle { check(cleared) }
 
-        composeRule.onNodeWithTag("player-sleep-timer").performScrollTo().performClick()
+        composeRule.onNodeWithTag("player-more").performClick()
+        composeRule.onNodeWithTag("player-sleep-timer").performClick()
         composeRule.onNodeWithTag("sleep-timer-dial")
             .performSemanticsAction(SemanticsActions.SetProgress) { action -> action(37f) }
         composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
@@ -331,7 +419,8 @@ class PlaybackPlayerSurfacesTest {
             }
         }
 
-        composeRule.onNodeWithTag("player-sleep-timer").performScrollTo().performClick()
+        composeRule.onNodeWithTag("player-more").performClick()
+        composeRule.onNodeWithTag("player-sleep-timer").performClick()
         composeRule.onNodeWithTag("sleep-timer-after-track").performClick()
         composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
         composeRule.runOnIdle { check(stopAfterTrack) }
@@ -366,7 +455,8 @@ class PlaybackPlayerSurfacesTest {
         }
 
         composeRule.onNodeWithTag("taste-exclude-listen").assertDoesNotExist()
-        composeRule.onNodeWithTag("player-taste-toggle").performScrollTo().performClick()
+        composeRule.onNodeWithTag("player-more").performClick()
+        composeRule.onNodeWithTag("player-recommendations").performClick()
         composeRule.onNodeWithTag("taste-exclude-listen").performScrollTo().performClick()
         composeRule.onNodeWithTag("taste-exclude-session").performScrollTo().performClick()
         composeRule.runOnIdle {
@@ -449,7 +539,7 @@ class PlaybackPlayerSurfacesTest {
     }
 
     @Test
-    fun coverUsesFullWidthAndQueueCanBeOpened() {
+    fun vaultPlayerFitsArtworkDownloadAndQueueInTheViewport() {
         composeRule.setContent {
             AutPlayTheme {
                 app.autplay.ui.AutPlayAdaptiveShell(
@@ -471,14 +561,14 @@ class PlaybackPlayerSurfacesTest {
         }
         val cover = composeRule.onNodeWithTag("player-cover").getUnclippedBoundsInRoot()
         val panel = composeRule.onNodeWithTag("now-playing-panel").getUnclippedBoundsInRoot()
-        assertEquals(panel.width.value, cover.width.value, 1f)
+        org.junit.Assert.assertTrue(cover.width > 0.dp && cover.width <= panel.width)
         assertEquals(cover.width.value, cover.height.value, 1f)
         composeRule.onNodeWithTag("autplay-face").assertDoesNotExist()
-        saveScreenshot("player-layout-collapsed-taste")
-        composeRule.onNodeWithTag("player-taste-toggle").performScrollTo().performClick()
-        composeRule.onNodeWithTag("taste-exclude-session").performScrollTo().assertIsDisplayed()
-        saveScreenshot("player-layout-expanded-taste")
-        composeRule.onNodeWithTag("player-open-queue").performScrollTo().performClick()
+        assertPlayerFits()
+        composeRule.onNodeWithTag("player-download-track").assertIsDisplayed()
+        composeRule.onNodeWithTag("player-sleep-timer").assertDoesNotExist()
+        composeRule.onNodeWithTag("player-recommendations").assertDoesNotExist()
+        composeRule.onNodeWithTag("player-open-queue").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("queue-editor").assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.queue_editor_empty)).assertIsDisplayed()
     }
@@ -520,7 +610,7 @@ class PlaybackPlayerSurfacesTest {
         }
     }
 
-    @Test fun shortScreenKeepsTransportVisibleWithFullWidthCoverAndLongMetadata() {
+    @Test fun shortScreenFitsArtworkSeekAndTransportWithLongMetadata() {
         composeRule.setContent { AutPlayTheme {
             Box(Modifier.size(320.dp, 400.dp)) {
                 NowPlayingScreen(
@@ -532,14 +622,79 @@ class PlaybackPlayerSurfacesTest {
             }
         } }
         val cover = composeRule.onNodeWithTag("player-cover").getUnclippedBoundsInRoot()
-        assertEquals(320f, cover.width.value, 1f)
-        assertEquals(320f, cover.height.value, 1f)
+        org.junit.Assert.assertTrue(cover.width > 0.dp && cover.width < 320.dp)
+        assertEquals(cover.width.value, cover.height.value, 1f)
+        assertPlayerFits()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)).assertIsDisplayed()
         composeRule.onNodeWithTag("player-shuffle").assertIsDisplayed()
         composeRule.onNodeWithTag("player-repeat").assertIsDisplayed()
-        saveScreenshot("player-fullwidth-cover-short")
-        composeRule.onNodeWithTag("player-taste-toggle").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_play)).assertIsDisplayed()
+    }
+
+    @Test fun fullscreenArtworkInterpolatesCoverBoundsInBothDirections() {
+        val opened = androidx.compose.runtime.mutableStateOf(false)
+        val painter = object : Painter() {
+            override val intrinsicSize = Size(600f, 300f)
+            override fun DrawScope.onDraw() { drawRect(Color.Gray) }
+        }
+        composeRule.setContent { AutPlayTheme {
+            if (opened.value) FullscreenPlayerArtwork("Landscape cover", painter,
+                androidx.compose.ui.geometry.Rect(24f, 80f, 224f, 180f), animations = true, onClosed = { opened.value = false })
+        } }
+        composeRule.mainClock.autoAdvance = false
+        try {
+            composeRule.runOnIdle { opened.value = true }
+            composeRule.mainClock.advanceTimeByFrame()
+            val image = composeRule.onNodeWithTag("fullscreen-artwork-image")
+            val frame = composeRule.onNodeWithTag("fullscreen-artwork").fetchSemanticsNode().boundsInRoot
+            val targetWidth = minOf(frame.width, frame.height * 2f)
+            fun awaitIntermediateWidth() = composeRule.waitUntil(5_000) {
+                // Android lays out the dialog window independently of the Compose animation clock.
+                composeRule.mainClock.advanceTimeByFrame()
+                val width = image.fetchSemanticsNode().boundsInRoot.width
+                width > 201f && width < targetWidth - 1f
+            }
+            awaitIntermediateWidth()
+            composeRule.mainClock.advanceTimeBy(400)
+            val full = image.fetchSemanticsNode().boundsInRoot
+            assertEquals(targetWidth, full.width, 1f)
+            assertEquals(2f, full.width / full.height, .01f)
+
+            composeRule.onNodeWithContentDescription(context.getString(R.string.player_close_artwork)).performClick()
+            awaitIntermediateWidth()
+            composeRule.mainClock.advanceTimeBy(300)
+            image.assertDoesNotExist()
+        } finally { composeRule.mainClock.autoAdvance = true }
+    }
+
+    @Test fun draggingACoverWithoutNeighboursKeepsTheArtworkViewerClosed() {
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(ordinaryState(), {}, {}, {}, {}, {}, {}, {}, {}, true, {})
+        } }
+        val cover = composeRule.onNodeWithTag("player-cover")
+        cover.performTouchInput { swipeLeft(startX = width * .8f, endX = width * .2f) }
+        cover.performTouchInput { swipeUp(startY = height * .7f, endY = height * .3f) }
+        composeRule.onNodeWithTag("fullscreen-artwork").assertDoesNotExist()
+        cover.performTouchInput { click() }
+        composeRule.onNodeWithTag("fullscreen-artwork").assertIsDisplayed()
+    }
+
+    @Test fun fullscreenPortraitArtworkFitsImmediatelyWithMotionDisabled() {
+        val painter = object : Painter() {
+            override val intrinsicSize = Size(300f, 900f)
+            override fun DrawScope.onDraw() { drawRect(Color.Gray) }
+        }
+        val opened = androidx.compose.runtime.mutableStateOf(true)
+        composeRule.setContent { AutPlayTheme {
+            if (opened.value) FullscreenPlayerArtwork("Portrait cover", painter,
+                androidx.compose.ui.geometry.Rect.Zero, animations = false, onClosed = { opened.value = false })
+        } }
+        val frame = composeRule.onNodeWithTag("fullscreen-artwork").fetchSemanticsNode().boundsInRoot
+        val image = composeRule.onNodeWithTag("fullscreen-artwork-image")
+        val art = image.fetchSemanticsNode().boundsInRoot
+        assertEquals(3f, art.height / art.width, .01f)
+        assertEquals(minOf(frame.height, frame.width * 3f), art.height, 1f)
+        image.performTouchInput { click() }
+        image.assertDoesNotExist()
     }
 
     @Test fun nonSquareArtworkKeepsFullWidthAndOriginalProportions() {
@@ -552,7 +707,7 @@ class PlaybackPlayerSurfacesTest {
                     override fun DrawScope.onDraw() { drawRect(Color.Gray) }
                 }
             }
-            Box(Modifier.width(320.dp)) { PlayerArtwork("Complete artwork", null, painter = painter) }
+            Box(Modifier.width(320.dp)) { PlayerArtwork("Complete artwork", painter = painter) }
         } }
         var artwork = composeRule.onNodeWithContentDescription("Complete artwork").getUnclippedBoundsInRoot()
         assertEquals(320f, artwork.width.value, 1f)
@@ -563,12 +718,14 @@ class PlaybackPlayerSurfacesTest {
         assertEquals(480f, artwork.height.value, 1f)
     }
 
-    private fun saveScreenshot(name: String) {
-        composeRule.waitForIdle()
-        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
-        java.io.File(context.cacheDir, "$name.png").outputStream().use {
-            check(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
-        }
+    private fun assertPlayerFits() {
+        val range = composeRule.onNodeWithTag("now-playing-scroll").fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange]
+        assertEquals(0f, range.maxValue(), 0f)
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_seek_description)).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).assertIsDisplayed()
+        composeRule.onNodeWithTag("player-transport-controls").assertIsDisplayed()
+        composeRule.onNodeWithTag("player-open-queue").assertIsDisplayed()
     }
 
     private fun ordinaryState() = PlaybackPresentationState(

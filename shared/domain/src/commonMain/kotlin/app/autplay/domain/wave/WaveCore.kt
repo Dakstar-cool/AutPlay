@@ -74,16 +74,24 @@ class DriftCorrector {
     private var direction = 0
     private var mediumCount = 0
     private var settledCount = 0
+    private var speedStartedAtMs: Long? = null
     fun correct(driftMs: Long, expectedPositionMs: Long, nowMs: Long): DriftAction {
         val abs = kotlin.math.abs(driftMs)
-        if (speedActive && abs <= 40) { settledCount++; if (settledCount >= 2) { speedActive = false; return DriftAction.Speed(1f) } }
+        if (speedActive && nowMs - requireNotNull(speedStartedAtMs) >= 5_000) {
+            speedActive = false; speedStartedAtMs = null; settledCount = 0
+            return DriftAction.Speed(1f)
+        }
+        if (speedActive && abs <= 40) { settledCount++; if (settledCount >= 2) { speedActive = false; speedStartedAtMs = null; return DriftAction.Speed(1f) } }
         else settledCount = 0
-        if (abs <= 80) return DriftAction.None
+        if (abs <= 80) { mediumCount = 0; return DriftAction.None }
         val nextDirection = if (driftMs > 0) -1 else 1
         mediumCount = if (abs <= 250) mediumCount + 1 else 3
-        if ((abs > 250 || mediumCount >= 3) && nowMs - lastSeekAtMs >= 10_000) { lastSeekAtMs = nowMs; speedActive = false; mediumCount = 0; return DriftAction.Seek(expectedPositionMs.coerceAtLeast(0)) }
+        if ((abs > 250 || mediumCount >= 3) && nowMs - lastSeekAtMs >= 10_000) { lastSeekAtMs = nowMs; speedActive = false; speedStartedAtMs = null; mediumCount = 0; return DriftAction.Seek(expectedPositionMs.coerceAtLeast(0)) }
         if (abs > 250 || (direction != 0 && direction != nextDirection && nowMs - lastDirectionAtMs < 6_000)) return DriftAction.None
-        direction = nextDirection; lastDirectionAtMs = nowMs; speedActive = true
+        if (direction != nextDirection) lastDirectionAtMs = nowMs
+        direction = nextDirection
+        if (!speedActive) speedStartedAtMs = nowMs
+        speedActive = true
         return DriftAction.Speed(if (nextDirection < 0) .98f else 1.02f)
     }
 }

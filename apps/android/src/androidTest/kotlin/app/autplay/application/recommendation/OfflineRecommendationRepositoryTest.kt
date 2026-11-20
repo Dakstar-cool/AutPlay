@@ -4,12 +4,17 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.library.LibraryVerticalSliceRepository
+import app.autplay.application.library.projectMetadata
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.LibraryEntryEntity
+import app.autplay.data.local.entity.AggregateRedirectEntity
+import app.autplay.data.local.entity.TombstoneEntity
 import app.autplay.data.local.entity.RecordingProjectionEntity
 import app.autplay.data.local.entity.RecommendationPackEntity
 import app.autplay.data.local.entity.ReleaseProjectionEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
+import app.autplay.data.local.entity.UserTrackPreferenceEntity
+import app.autplay.data.local.entity.TrackMetadataEntity
 import app.autplay.domain.DeviceId
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
@@ -18,6 +23,8 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.erdtman.jcs.JsonCanonicalizer
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -73,6 +80,52 @@ class OfflineRecommendationRepositoryTest {
         }
         assertTrue(crossOwnerAttempt.isFailure)
         assertTrue(database.recommendationPackDao().latest(PROFILE, OTHER_USER, 5).isEmpty())
+    }
+
+    @Test
+    fun downloadedServerTrackWithoutLocalRecordingProjectionRemainsEligible() = runBlocking {
+        val original = checkNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null))
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        val feed = repository.loadHomeFeed(BINDING, NOW)
+        assertEquals(listOf(RECORDING), feed.recommendationSections.values.flatten().map { it.recordingId })
+
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null, resolutionStatus = "UNRESOLVED"))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 1).recommendationSections.isEmpty())
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null, deletedAtMs = NOW))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 2).recommendationSections.isEmpty())
+    }
+
+    @Test
+    fun serverOnlyRecommendationStillRejectsRedirectedRecordings() = runBlocking {
+        val original = checkNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null))
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        assertFalse(repository.loadHomeFeed(BINDING, NOW).recommendationSections.isEmpty())
+        database.syncDao().upsertRedirect(AggregateRedirectEntity(
+            serverProfileId = PROFILE, aggregateType = "RECORDING", aliasLocalId = LOCAL_RECORDING,
+            aliasServerId = RECORDING, canonicalLocalId = "00000000-0000-0000-0000-000000000901",
+            canonicalServerId = "00000000-0000-0000-0000-000000000902", createdByServerSequence = 1, createdAtMs = NOW,
+        ))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 1).recommendationSections.isEmpty())
+    }
+
+    @Test
+    fun serverOnlyRecommendationStillRejectsRecordingTombstones() = runBlocking {
+        val original = checkNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(original.copy(localRecordingId = null))
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        assertFalse(repository.loadHomeFeed(BINDING, NOW).recommendationSections.isEmpty())
+        database.syncDao().upsertTombstone(TombstoneEntity(
+            tombstoneId = "00000000-0000-0000-0000-000000000903", serverProfileId = PROFILE,
+            aggregateType = "RECORDING", aggregateLocalId = LOCAL_RECORDING,
+            aggregateServerId = RECORDING, deletedByEventId = EVENT_ONE,
+            deletedAtMs = NOW, retainUntilMs = NOW + 1000, serverAcked = true,
+        ))
+        assertTrue(repository.loadHomeFeed(BINDING, NOW + 1).recommendationSections.isEmpty())
     }
 
     @Test
@@ -200,6 +253,13 @@ class OfflineRecommendationRepositoryTest {
         assertEquals(first.impressionEventId, repeated.impressionEventId)
         assertEquals(1, database.recommendationPackDao().presentationCount(PROFILE, USER))
         assertEquals(2, database.journalDao().eventCount())
+        repository.activatePresentedPlayback(BINDING, LocalId(PACK), baseItem, first.impressionEventId, afterExpiry, { true })
+        val queue = requireNotNull(app.autplay.application.playback.PlaybackPersistenceRepository(database).restoreActive(afterExpiry))
+        assertEquals(
+            repository.attributionJson(LocalId(PACK), first.impressionEventId, deltaItem),
+            queue.entries.single().recommendationAttributionJson,
+        )
+        assertEquals(2, database.journalDao().eventCount())
     }
 
     @Test
@@ -273,6 +333,377 @@ class OfflineRecommendationRepositoryTest {
         val otherProfileReleases = database.recommendationPackDao().recentRelevantReleases(OTHER_PROFILE, OTHER_USER, 10)
         assertEquals(listOf(RELEASE), ownedArtistReleases.map { it.localReleaseId })
         assertTrue(otherProfileReleases.isEmpty())
+    }
+
+    @Test
+    fun standaloneWaveStartsWithoutAProfileOrRecommendationAttribution() = runBlocking {
+        val trackId = LocalId.random().value
+        seedLocalTrack(database, "legacy-unscoped", trackId, LocalId.random().value, LocalId.random().value)
+        database.localAudioDao().upsertDownloadIntent(app.autplay.data.local.entity.DownloadIntentEntity(
+            downloadIntentId = LocalId.random().value, localUserTrackRefId = trackId,
+            serverAudioVariantId = LocalId.random().value, state = "COMPLETED",
+            media3DownloadId = null, desiredStorageClass = "USER_DOWNLOAD", qualityPolicy = "ORIGINAL",
+            sourcePolicy = "VAULT", failureCode = null, createdAtMs = NOW, updatedAtMs = NOW, completedAtMs = NOW,
+        ))
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, null)
+        val snapshot = requireNotNull(PersonalWaveQueue(database).start(null, guard, false, { true }) { _, _ ->
+            error("standalone start attempted HTTP")
+        })
+        val entry = database.queueDao().entries(snapshot.value, 1).single()
+        assertEquals(trackId, entry.localUserTrackRefId)
+        assertEquals(null, entry.recommendationAttributionJson)
+        assertEquals(0, database.journalDao().eventCount())
+    }
+
+    @Test
+    fun wavePackUnlocksRemixOnlyWhileItsOriginalHasAnOwnerLike() = runBlocking {
+        val dao = database.libraryDao()
+        database.trackMetadataDao().upsert(TrackMetadataEntity(
+            PROFILE, TRACK, 1,
+            """{"revision":1,"state":"READY","fields":{"title":"Local recommendation (Club Remix)"}}""",
+            null, NOW,
+        ))
+        val ref = requireNotNull(dao.trackRef(TRACK))
+        val original = LocalId.random().value
+        val other = LocalId.random().value
+        dao.upsertTrackRef(ref.copy(localUserTrackRefId = original, localRecordingId = null, serverRecordingId = null))
+        dao.upsertTrackRef(ref.copy(localUserTrackRefId = other, localRecordingId = null,
+            serverRecordingId = null, serverProfileId = OTHER_PROFILE))
+        val like = UserTrackPreferenceEntity(original, "LIKED", null, false, "SYNCED", 0, NOW, PROFILE)
+        dao.upsertPreference(like.copy(localUserTrackRefId = other, serverProfileId = OTHER_PROFILE))
+        dao.upsertPreference(like.copy(localUserTrackRefId = TRACK))
+        val now = System.currentTimeMillis()
+        OfflineRecommendationRepository(database).storeVerifiedPack(pack(expiresAtMs = now + 60_000), BINDING, now)
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+        val queue = PersonalWaveQueue(database)
+        val home = OfflineRecommendationRepository(database)
+        assertTrue(home.loadHomeFeed(BINDING, now).recommendationSections.isEmpty())
+        assertEquals(null, queue.start(BINDING, guard, false, { true }) { _, _ -> error("offline") })
+        dao.upsertPreference(like)
+        assertEquals(TRACK, home.loadHomeFeed(BINDING, now).recommendationSections.values.flatten().single().localUserTrackRefId)
+        // The one-item pack has no room for the nineteen ordinary wave tracks.
+        assertEquals(null, queue.start(BINDING, guard, false, { true }) { _, _ -> error("offline") })
+        dao.upsertPreference(like.copy(preference = "NEUTRAL"))
+        assertTrue(home.loadHomeFeed(BINDING, now).recommendationSections.isEmpty())
+    }
+
+    @Test
+    fun retitledCoverInOfflineFeedRequiresTheLikedMusicBrainzRecordingOfThatWork() = runBlocking {
+        val dao = database.libraryDao()
+        val ref = requireNotNull(dao.trackRef(TRACK))
+        val original = LocalId.random().value
+        val originalMbid = LocalId.random().value
+        val coverMbid = LocalId.random().value
+        val work = LocalId.random().value
+        val foreign = LocalId.random().value
+        dao.upsertTrackRef(ref.copy(localUserTrackRefId = original, localRecordingId = null, serverRecordingId = null))
+        dao.upsertTrackRef(ref.copy(localUserTrackRefId = foreign, localRecordingId = null, serverRecordingId = null,
+            serverProfileId = OTHER_PROFILE))
+        suspend fun project(profile: String, id: String, recording: String, workId: String, cover: Boolean, revision: Int) {
+            val title = if (cover) "Другие слова" else "First song"
+            val artist = if (cover) "Группа" else "Original singer"
+            val role = if (cover) "COVER" else "PERFORMANCE"
+            val parent = if (cover) "\"$originalMbid\"" else "null"
+            val json = """{"revision":$revision,"state":"READY","fields":{"title":"$title","artist":"$artist",
+                "mb_recording_id":"$recording"},"musicbrainz_performance_v1":{"role":"$role","work_id":"$workId",
+                "recording_id":"$recording","original_recording_id":$parent}}"""
+            assertTrue(database.projectMetadata(profile, id, kotlinx.serialization.json.Json.parseToJsonElement(json).jsonObject))
+        }
+        project(PROFILE, TRACK, coverMbid, work, true, 1)
+        project(OTHER_PROFILE, foreign, originalMbid, work, false, 1)
+        val like = UserTrackPreferenceEntity(original, "LIKED", null, false, "SYNCED", 0, NOW, PROFILE)
+        dao.upsertPreference(like.copy(localUserTrackRefId = foreign, serverProfileId = OTHER_PROFILE))
+        dao.upsertPreference(like.copy(localUserTrackRefId = TRACK))
+        dao.upsertPreference(like)
+        val home = OfflineRecommendationRepository(database)
+        val now = System.currentTimeMillis()
+        home.storeVerifiedPack(pack(expiresAtMs = now + 60_000), BINDING, now)
+        suspend fun visible() = home.loadHomeFeed(BINDING, now).recommendationSections.values.flatten()
+            .map { it.localUserTrackRefId }
+        project(PROFILE, original, LocalId.random().value, work, false, 1)
+        assertTrue(visible().isEmpty())
+        project(PROFILE, original, originalMbid, LocalId.random().value, false, 2)
+        assertTrue(visible().isEmpty())
+        project(PROFILE, original, originalMbid, work, false, 3)
+        assertEquals(listOf(TRACK), visible())
+        dao.upsertPreference(like.copy(excludedFromTaste = true))
+        assertTrue(visible().isEmpty())
+        dao.upsertPreference(like.copy(preference = "NEUTRAL"))
+        assertTrue(visible().isEmpty())
+        dao.upsertPreference(like)
+        val week = 7L * 24 * 60 * 60 * 1000
+        val played = app.autplay.data.local.entity.ListeningEventEntity(LocalId.random().value, original,
+            null, now - week, 12_000, null, null, "ORGANIC", "GENERAL", null, "NONE", false, "CLEAN", now,
+            serverProfileId = PROFILE)
+        database.historyDao().insert(played)
+        assertEquals(listOf(TRACK), visible())
+        database.historyDao().insert(played.copy(listeningEventId = LocalId.random().value, startedAtMs = now + 1))
+        database.historyDao().insert(played.copy(listeningEventId = LocalId.random().value, startedAtMs = now - 1,
+            excludedFromTaste = true))
+        assertEquals(listOf(TRACK), visible())
+        database.historyDao().insert(played.copy(listeningEventId = LocalId.random().value, startedAtMs = now - week + 1))
+        assertTrue(visible().isEmpty())
+        assertTrue(home.loadHomeFeed(BINDING, now + 1).recommendationSections.isEmpty())
+    }
+
+    @Test
+    fun frequentSkipsThinOnlyTheAffectedVersionTypeAndSurface() = runBlocking {
+        val dao = database.libraryDao()
+        val template = requireNotNull(dao.trackRef(TRACK))
+        val parent = LocalId.random().value
+        dao.upsertTrackRef(template.copy(localUserTrackRefId = parent, localRecordingId = null, serverRecordingId = null))
+        dao.upsertPreference(UserTrackPreferenceEntity(parent, "LIKED", null, false, "SYNCED", 0, NOW, PROFILE))
+        database.trackMetadataDao().upsert(TrackMetadataEntity(PROFILE, TRACK, 1,
+            """{"revision":1,"state":"READY","fields":{"title":"Local recommendation (Club Remix)"}}""", null, NOW))
+        val day = 86_400_000L
+        val start = System.currentTimeMillis()
+        val now = (0..2).map { start + it * day }.first { !retainedVariation(RECORDING, it) }
+        val repo = OfflineRecommendationRepository(database)
+        repo.storeVerifiedPack(pack(expiresAtMs = now + 4 * day), BINDING, now)
+        suspend fun visible(at: Long) = repo.loadHomeFeed(BINDING, at).recommendationSections.values.flatten().map { it.localUserTrackRefId }
+        suspend fun play(ms: Long, ratio: Double, surface: String, kind: String? = null, age: Long = 8L, excluded: Boolean = false) {
+            val event = app.autplay.data.local.entity.ListeningEventEntity(LocalId.random().value, TRACK, RECORDING,
+                now - age * day, ms, null, ratio, "RECOMMENDED", "GENERAL", REQUEST, "NONE", excluded, "CLEAN", now,
+                recommendationAttributionJson = """{"surface":"$surface"}""", serverProfileId = PROFILE, variationKind = kind)
+            database.historyDao().insert(event)
+        }
+        play(29_999, .9, "offline_pack")
+        play(30_000, .2, "home")
+        play(30_000, .1, "home")
+        play(30_000, .21, "home")
+        assertEquals(listOf(TRACK), visible(now))
+        play(90_000, 1.0, "home")
+        play(1000, .1, "personal_wave", "LIVE")
+        play(1000, .1, "home", age = 30)
+        play(1000, .1, "home", age = -1, excluded = true)
+        play(1000, .1, "home", excluded = true)
+        assertEquals(setOf(VariationSkips("home","REMIX",5,3), VariationSkips("personal_wave","LIVE",1,1)), dao.variationSkips(PROFILE, now).toSet())
+        assertTrue(dao.variationSkips(OTHER_PROFILE, now).isEmpty())
+        assertTrue(visible(now).isEmpty())
+        val retained = (1..2).map { now + it * day }.first { retainedVariation(RECORDING, it) }
+        assertEquals(listOf(TRACK), visible(retained))
+        play(90_000, 1.0, "home")
+        assertEquals(listOf(TRACK), visible(now))
+        // Other devices can still put this category over the account-wide threshold.
+        assertTrue(dao.selectSongRefs(PROFILE, listOf(TRACK), now, wave = false, lessFrequentRecordings = setOf(RECORDING)).isEmpty())
+    }
+
+    @Test
+    fun onlineWaveDefersRetitledRemixToTwentiethPositionAndPreservesItsSourceRank() = runBlocking {
+        val dao = database.libraryDao()
+        val template = requireNotNull(dao.trackRef(TRACK))
+        val entry = requireNotNull(dao.entry(LIBRARY_ENTRY))
+        val parent = LocalId.random().value
+        val mix = LocalId.random().value
+        val source = LocalId.random().value
+        dao.upsertTrackRef(template.copy(localUserTrackRefId = source, localRecordingId = null,
+            serverRecordingId = null, rawTitle = "Earlier song", rawArtist = "Original artist"))
+        suspend fun metadata(id: String, json: String) = database.projectMetadata(
+            PROFILE, id, kotlinx.serialization.json.Json.parseToJsonElement(json).jsonObject)
+        assertTrue(metadata(source, """{"revision":1,"state":"READY","fields":{"mb_recording_id":"$parent"}}"""))
+        assertTrue(metadata(TRACK, """{"revision":1,"state":"READY","fields":{"title":"New title","artist":"New DJ",
+            "mb_recording_id":"$mix"},"musicbrainz_performance_v1":{"role":"REMIX","work_id":null,
+            "recording_id":"$mix","original_recording_id":"$parent"}}"""))
+        dao.upsertPreference(UserTrackPreferenceEntity(source, "LIKED", null, false, "SYNCED", 0, NOW, PROFILE))
+        val recordings = mutableListOf(RECORDING)
+        // The last recording is another retitled remix whose metadata hasn't synced yet.
+        repeat(20) { n ->
+            val ref = LocalId.random().value
+            val recording = LocalId.random().value
+            dao.upsertTrackRef(template.copy(localUserTrackRefId = ref, localRecordingId = null,
+                serverRecordingId = recording, rawTitle = "Song $n"))
+            dao.upsertEntry(entry.copy(localLibraryEntryId = LocalId.random().value, localUserTrackRefId = ref))
+            recordings.add(recording)
+        }
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+        val id = requireNotNull(PersonalWaveQueue(database).start(BINDING, guard, true, { true }) { _, _ ->
+            app.autplay.application.server.ServerRecommendationResult(REQUEST, "served", recordings.mapIndexed { i, r ->
+                app.autplay.application.server.ServerRecommendationItem(r, i + 1, 1.0, "BASELINE", "recommendations",
+                    confirmedVariation = i == 0 || i == recordings.lastIndex)
+            })
+        })
+        val entries = database.queueDao().entries(id.value, 100)
+        assertEquals(20, entries.size)
+        assertEquals(TRACK, entries.last().localUserTrackRefId)
+        val attribution = kotlinx.serialization.json.Json.parseToJsonElement(requireNotNull(entries.last().recommendationAttributionJson)).jsonObject
+        assertEquals("1", attribution.getValue("source_rank").jsonPrimitive.content)
+        assertEquals("20", attribution.getValue("display_position").jsonPrimitive.content)
+
+        val day = 86_400_000L
+        val today = System.currentTimeMillis()
+        val limited = (0..2).map { today + it * day }.first { !retainedVariation(RECORDING, it) }
+        val history = app.autplay.application.library.LibraryVerticalSliceRepository(database)
+        repeat(5) { index ->
+            val event = LocalId.random()
+            val at = limited - 9 * day + index
+            repeat(2) {
+                history.recordListening(BINDING, event, LocalId(TRACK), 1000, null, false, "WAVE",
+                    now = at, personalWaveFallback = true)
+            }
+            val saved = requireNotNull(database.historyDao().event(PROFILE, event.value))
+            assertEquals("REMIX", saved.variationKind)
+            assertEquals("personal_wave", saved.variationSurface)
+        }
+        val refs = entries.map { it.localUserTrackRefId }
+        assertEquals(19, dao.selectSongRefs(PROFILE, refs, limited, wave = true).size)
+        assertTrue(TRACK in dao.selectSongRefs(PROFILE, refs, limited, wave = false))
+        val next = (1..2).map { limited + it * day }.first { retainedVariation(RECORDING, it) }
+        assertEquals(TRACK, dao.selectSongRefs(PROFILE, refs, next, wave = true).last())
+    }
+
+    @Test
+    fun waveUsesAnOwnedFreshPackWhenDisconnected() = runBlocking {
+        val now = System.currentTimeMillis()
+        OfflineRecommendationRepository(database).storeVerifiedPack(pack(expiresAtMs = now + 60_000), BINDING, now)
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+        val id = requireNotNull(PersonalWaveQueue(database).start(BINDING, guard, false, { true }) { _, _ ->
+            error("offline start attempted HTTP")
+        })
+        val entry = database.queueDao().entries(id.value, 1).single()
+        val attr = kotlinx.serialization.json.Json.parseToJsonElement(requireNotNull(entry.recommendationAttributionJson)).jsonObject
+        assertEquals(PACK, attr.getValue("offline_pack_id").jsonPrimitive.content)
+        assertEquals(REQUEST, attr.getValue("recommendation_request_id").jsonPrimitive.content)
+        assertEquals(0, database.journalDao().eventCount())
+    }
+
+    @Test
+    fun waveQueueRecordsOnlyPlayedItemsAndKeepsOwnerAfterRestart() = runBlocking {
+        val cursor = app.autplay.application.sync.SyncBindingInitializer(database).ensure(BINDING)
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+        val queue = PersonalWaveQueue(database)
+        val id = requireNotNull(queue.start(BINDING, guard, online = true, stillActive = { true }) { _, wave ->
+            assertEquals("GENERAL", wave.mode)
+            app.autplay.application.server.ServerRecommendationResult(REQUEST, "served", listOf(
+                app.autplay.application.server.ServerRecommendationItem(RECORDING, 1, 0.5, "BASELINE", "recommendations"),
+            ))
+        })
+        assertEquals(0, database.journalDao().eventCount())
+        database.close()
+        database = AutPlayDatabase.open(context, name)
+        val playback = app.autplay.application.playback.PlaybackPersistenceRepository(database)
+        val restored = requireNotNull(playback.restoreActive())
+        val bound = BINDING.copy(journalEpoch = LocalId(cursor.journalEpoch))
+        assertEquals(id, PersonalWaveSession.restore(restored.snapshot.sourceContextId, bound)?.id)
+        val entry = LocalId(restored.entries.single().queueEntryId)
+        val wrong = app.autplay.playback.PlaybackSessionOwnerBinding(OTHER_USER, DEVICE, PROFILE)
+        val now = System.currentTimeMillis()
+        assertEquals(null, playback.startSessionIfActive(id, entry, 0, now, wrong))
+        val owner = app.autplay.playback.PlaybackSessionOwnerBinding(USER, DEVICE, PROFILE)
+        val started = requireNotNull(playback.startSessionIfActive(id, entry, 0, now, owner))
+        val impression = requireNotNull(database.journalDao().event(requireNotNull(started.attribution).localImpressionId.value))
+        assertEquals("RECOMMENDATION_IMPRESSION_RECORDED", impression.eventType)
+        playback.finalizeSession(started, 12_000, 180_000, 12_000, now + 12_000)
+        val listen = requireNotNull(database.journalDao().event(started.listeningEventId.value))
+        assertTrue(listen.deviceSequence > impression.deviceSequence)
+        assertEquals(REQUEST, kotlinx.serialization.json.Json.parseToJsonElement(listen.payloadJson)
+            .jsonObject.getValue("recommendation").jsonObject.getValue("recommendation_request_id").jsonPrimitive.content)
+        assertEquals(2, database.journalDao().eventCount())
+    }
+
+    @Test
+    fun presentedPlaybackSurvivesRestartAndFinalizesOneCausalJournalFact() = runBlocking {
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        val item = repository.loadHomeFeed(BINDING, NOW).recommendationSections.values.flatten().single()
+        val impression = repository.recordPresentation(BINDING, LocalId(PACK), item, NOW)
+        val snapshotId = repository.activatePresentedPlayback(
+            BINDING, LocalId(PACK), item, impression.impressionEventId, NOW + 1, { true },
+        )
+        val playback = app.autplay.application.playback.PlaybackPersistenceRepository(database)
+        val queue = requireNotNull(playback.restoreActive(NOW + 2))
+        assertEquals(snapshotId.value, queue.snapshot.queueSnapshotId)
+        assertEquals(1, queue.entries.size)
+        assertEquals(TRACK, queue.entries.single().localUserTrackRefId)
+        assertEquals("RECOMMENDED", queue.entries.single().sourceOrigin)
+        assertEquals(1, database.journalDao().eventCount())
+        val owner = app.autplay.playback.PlaybackSessionOwnerBinding(USER, DEVICE, PROFILE)
+        val session = playback.startSession(LocalId(queue.entries.single().queueEntryId), 0, NOW + 3, owner)
+        playback.checkpoint(session, 90_000, 90_000, "OFF", "OFF", null, NOW + 90_003)
+        database.close()
+        database = AutPlayDatabase.open(context, name)
+        val restarted = app.autplay.application.playback.PlaybackPersistenceRepository(database)
+        val recovered = requireNotNull(restarted.recoverSession())
+        assertEquals(impression.impressionEventId, recovered.attribution?.localImpressionId)
+        assertEquals(owner, recovered.ownerBinding)
+        restarted.finalizeSession(recovered, 100_000, 180_000, 10_000, NOW + 100_003)
+        restarted.finalizeSession(recovered, 100_000, 180_000, 10_000, NOW + 100_004)
+        val fact = requireNotNull(database.journalDao().event(session.listeningEventId.value))
+        val payload = kotlinx.serialization.json.Json.parseToJsonElement(fact.payloadJson).jsonObject
+        assertEquals("RECOMMENDED", payload["event_origin"]?.jsonPrimitive?.content)
+        val attribution = requireNotNull(payload["recommendation"]).jsonObject
+        assertEquals(impression.impressionEventId.value, attribution["impression_event_local_id"]?.jsonPrimitive?.content)
+        assertEquals(REQUEST, attribution["recommendation_request_id"]?.jsonPrimitive?.content)
+        assertEquals(RECORDING, attribution["recording_id"]?.jsonPrimitive?.content)
+        assertEquals("1", attribution["source_rank"]?.jsonPrimitive?.content)
+        assertEquals(100_000L, database.historyDao().event(session.listeningEventId.value)?.playedMs)
+        assertTrue(fact.deviceSequence > impression.deviceSequence)
+        assertEquals(2, database.journalDao().eventCount())
+    }
+
+    @Test
+    fun playbackRequiresExactPersistedImpressionAndOwnerWithoutCreatingFacts() = runBlocking {
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        val item = repository.loadHomeFeed(BINDING, NOW).recommendationSections.values.flatten().single()
+        val missing = runCatching {
+            repository.activatePresentedPlayback(BINDING, LocalId(PACK), item, LocalId(EVENT_ONE), NOW, { true })
+        }
+        assertEquals("RECOMMENDATION_IMPRESSION_REQUIRED", missing.exceptionOrNull()?.message)
+        assertEquals(0, database.journalDao().eventCount())
+        val impression = repository.recordPresentation(BINDING, LocalId(PACK), item, NOW)
+        val cases = listOf(
+            Triple(BINDING, item, LocalId(EVENT_TWO)),
+            Triple(BINDING.copy(deviceId = DeviceId(OTHER_DEVICE)), item, impression.impressionEventId),
+            Triple(BINDING.copy(userId = UserId(OTHER_USER)), item, impression.impressionEventId),
+            Triple(BINDING.copy(serverProfileId = ServerProfileId(OTHER_PROFILE)), item, impression.impressionEventId),
+            Triple(BINDING.copy(journalEpoch = LocalId(OTHER_REQUEST)), item, impression.impressionEventId),
+            Triple(BINDING, item.copy(localUserTrackRefId = OTHER_REQUEST), impression.impressionEventId),
+            Triple(BINDING, item.copy(recordingId = OTHER_REQUEST), impression.impressionEventId),
+            Triple(BINDING, item.copy(sourceRank = 2), impression.impressionEventId),
+        )
+        for ((owner, candidate, event) in cases) {
+            assertTrue(runCatching {
+                repository.activatePresentedPlayback(owner, LocalId(PACK), candidate, event, NOW + 1, { true })
+            }.isFailure)
+            assertEquals(null, database.queueDao().activeSnapshotOnce())
+            assertEquals(1, database.journalDao().eventCount())
+        }
+    }
+
+    @Test
+    fun playbackRejectsInactiveBindingRemovedTrackAndWaveWithoutReplacingQueue() = runBlocking {
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(), BINDING, NOW)
+        val item = repository.loadHomeFeed(BINDING, NOW).recommendationSections.values.flatten().single()
+        val impression = repository.recordPresentation(BINDING, LocalId(PACK), item, NOW)
+        val inactive = runCatching {
+            repository.activatePresentedPlayback(BINDING, LocalId(PACK), item, impression.impressionEventId, NOW + 1, { false })
+        }
+        assertEquals("RECOMMENDATION_PROFILE_NOT_ACTIVE", inactive.exceptionOrNull()?.message)
+        var checks = 0
+        val changed = runCatching {
+            repository.activatePresentedPlayback(BINDING, LocalId(PACK), item, impression.impressionEventId, NOW + 1, { ++checks == 1 })
+        }
+        assertEquals("RECOMMENDATION_PROFILE_NOT_ACTIVE", changed.exceptionOrNull()?.message)
+        val track = requireNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(track.copy(deletedAtMs = NOW))
+        val removed = runCatching {
+            repository.activatePresentedPlayback(BINDING, LocalId(PACK), item, impression.impressionEventId, NOW + 1, { true })
+        }
+        assertEquals("RECOMMENDATION_ITEM_NO_LONGER_ELIGIBLE", removed.exceptionOrNull()?.message)
+        database.libraryDao().upsertTrackRef(track)
+        assertEquals(null, database.queueDao().activeSnapshotOnce())
+        val playback = app.autplay.application.playback.PlaybackPersistenceRepository(database)
+        playback.activateQueue(LocalId(EVENT_TWO), listOf(app.autplay.application.playback.NewPlaybackQueueEntry(
+            LocalId(EVENT_ONE), LocalId(TRACK), "ORGANIC", "LOCAL_THEN_VAULT",
+        )), "WAVE", null, PROFILE, "GENERAL", NOW)
+        val previous = database.queueDao().activeSnapshotOnce()
+        val wave = runCatching {
+            repository.activatePresentedPlayback(BINDING, LocalId(PACK), item, impression.impressionEventId, NOW + 1, { true })
+        }
+        assertEquals("ORDINARY_QUEUE_AUTHORITY_CHANGED", wave.exceptionOrNull()?.message)
+        assertEquals(previous, database.queueDao().activeSnapshotOnce())
+        assertEquals(1, database.journalDao().eventCount())
     }
 
     private suspend fun seedLocalTrack(

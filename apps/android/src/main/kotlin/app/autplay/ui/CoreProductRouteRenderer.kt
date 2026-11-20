@@ -16,10 +16,12 @@ import app.autplay.ui.playlist.ManualPlaylistUi
 internal data class CoreProductRouteActions(
     val openListenTogether: () -> Unit,
     val recommendationVisible: (String) -> Unit,
+    val playRecommendation: (String) -> Unit = {},
     val likeRecommendation: (String) -> Unit,
     val dislikeRecommendation: (String) -> Unit,
     val retryHome: () -> Unit,
     val resumeHomeQueue: (String) -> Unit,
+    val continueHomeQueue: () -> Unit = {},
     val openHomePlaylist: (String) -> Unit,
     val openOffline: () -> Unit,
     val openProblems: () -> Unit,
@@ -51,6 +53,7 @@ internal data class CoreProductRouteActions(
     val changeSearchKind: (LibrarySearchKind) -> Unit = {},
     val startMyWave: () -> Unit = {},
     val myWaveAllowed: Boolean = true,
+    val playReleaseEntry: ((String) -> Unit)? = null,
 )
 
 @Composable
@@ -81,12 +84,17 @@ internal fun CoreProductRouteRenderer(
             contentPadding = contentPadding,
             onOpenListenTogether = actions.openListenTogether,
             onRecommendationVisible = actions.recommendationVisible,
+            onPlayRecommendation = actions.playRecommendation,
+            recommendationPlaybackAllowed = actions.myWaveAllowed,
             onLike = actions.likeRecommendation,
             onDislike = actions.dislikeRecommendation,
             onRetry = actions.retryHome,
             onPlayTrack = actions.resumeHomeQueue,
+            onContinueListening = actions.continueHomeQueue,
             onStartMyWave = actions.startMyWave,
             myWaveAllowed = actions.myWaveAllowed,
+            onAddLocal = actions.addLocal,
+            importingLocalTrack = libraryState.importingLocalTrack,
             onOpenPlaylist = actions.openHomePlaylist,
             onOpenOffline = actions.openOffline,
             onOpenProblems = actions.openProblems,
@@ -99,6 +107,7 @@ internal fun CoreProductRouteRenderer(
             onPreviousTrack = onPreviousTrack,
             onNextTrack = onNextTrack,
             swipeTargets = homeSwipeTargets,
+            onOpenRelease = { actions.openDetail(DetailTarget(DetailKind.Release, it)) },
         )
         UiDestination.Search -> SearchProductScreen(
             state = searchState,
@@ -121,6 +130,7 @@ internal fun CoreProductRouteRenderer(
                 contentPadding = contentPadding,
                 onPlayTrack = actions.playTrack,
                 onPlayPlaylistEntry = actions.playPlaylistEntry,
+                onPlayReleaseEntry = actions.playReleaseEntry,
                 onPlayNext = actions.playNext,
                 onAddToQueue = actions.addToQueue,
                 manualPlaylists = actions.manualPlaylists,

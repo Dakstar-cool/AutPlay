@@ -5,6 +5,8 @@ name. A newer date does not automatically make a report authoritative for a diff
 
 ## Current entry points
 
+- [`RELEASE_NOTES_1.0.11.md`](RELEASE_NOTES_1.0.11.md) describes the Android, Mac Community and Sona server release.
+
 - [`RELEASE_NOTES_1.0.8.md`](RELEASE_NOTES_1.0.8.md) describes the public Android 1.0.8 release,
   compatible 0066 server image, exact signed artifact and physical M52 acceptance scope.
 - [`RELEASE_NOTES_1.0.0.md`](RELEASE_NOTES_1.0.0.md) records the historical first-production candidate

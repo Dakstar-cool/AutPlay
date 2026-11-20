@@ -10,8 +10,6 @@
     <string name="profile_account_devices_summary">Подключение, устройства и безопасность аккаунта</string>
     <string name="profile_connect_optional">Подключить личный сервер</string>
     <string name="profile_connect_optional_summary">По желанию: синхронизация коллекции и музыка с друзьями</string>
-    <string name="settings_privacy_summary">Кто видит статистику ваших прослушиваний</string>
-    <string name="settings_music_navigation">Музыка и история</string>
     <string name="settings_about">О приложении</string>
     <string name="settings_app_version">AutPlay %1$s</string>
     <string name="settings_developer_mode">Режим разработчика</string>

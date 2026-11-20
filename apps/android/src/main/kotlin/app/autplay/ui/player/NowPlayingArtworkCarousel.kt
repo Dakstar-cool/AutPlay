@@ -1,19 +1,26 @@
 package app.autplay.ui.player
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import app.autplay.R
 import app.autplay.ui.HomeSwipeTargets
 import app.autplay.ui.homeCarouselGestures
 import app.autplay.ui.rememberHomeCarouselMotion
@@ -24,24 +31,24 @@ import app.autplay.ui.rememberTrackArtwork
 internal fun NowPlayingArtworkCarousel(
     mediaId: String,
     title: String,
-    trackId: String?,
+    painter: Painter?,
     targets: HomeSwipeTargets,
     enabled: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     animations: Boolean,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val painter = rememberTrackArtwork(trackId)
-    val intrinsic = painter?.intrinsicSize
-    val aspectRatio = intrinsic?.takeIf {
-        it.width.isFinite() && it.height.isFinite() && it.width > 0f && it.height > 0f
-    }?.let { it.width / it.height } ?: 1f
     val motion = rememberHomeCarouselMotion(mediaId)
     val visibleTargets = motion.frozenTargets ?: targets
     LaunchedEffect(enabled, targets.previous?.key, targets.next?.key) {
         if (!enabled || motion.frozenTargets?.let { it != targets } == true) motion.cancel(animations)
     }
-    BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(aspectRatio)) {
+    val openLabel = stringResource(R.string.player_expand_artwork)
+    BoxWithConstraints(modifier.aspectRatio(painter.artworkAspectRatio())
+        .clickable(enabled = !motion.busy, onClickLabel = openLabel, role = Role.Button, onClick = onOpen)
+        .cancelArtworkClickAfterDrag()) {
         val widthPixels = with(LocalDensity.current) { maxWidth.toPx() }
         SideEffect { motion.width = widthPixels }
         Box(
@@ -58,12 +65,32 @@ internal fun NowPlayingArtworkCarousel(
                 ) {
                     PlayerArtwork(
                         title = if (side == 0) title else neighbor!!.title ?: title,
-                        trackId = if (side == 0) trackId else neighbor!!.trackRefId,
-                        painter = if (side == 0) painter else null,
+                        painter = if (side == 0) painter else rememberTrackArtwork(neighbor!!.trackRefId),
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
         }
     }
+}
+
+/** A drag inside a large cover can stay within its click bounds even when no neighbour is available. */
+private fun Modifier.cancelArtworkClickAfterDrag(): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        var dragged = false
+        do {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            dragged = dragged || event.changes.size != 1 || (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+            if (dragged && !change.pressed) change.consume()
+        } while (change.pressed)
+    }
+}
+
+internal fun Painter?.artworkAspectRatio(): Float {
+    val size = this?.intrinsicSize ?: return 1f
+    return if (size.width.isFinite() && size.height.isFinite() && size.width > 0f && size.height > 0f) {
+        size.width / size.height
+    } else 1f
 }

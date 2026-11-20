@@ -504,6 +504,8 @@ data class ListeningEventEntity(
     @ColumnInfo(name = "session_start_position_ms") val sessionStartPositionMs: Long? = null,
     @ColumnInfo(name = "session_end_position_ms") val sessionEndPositionMs: Long? = null,
     @ColumnInfo(name = "server_profile_id") val serverProfileId: String = "legacy-unscoped",
+    @ColumnInfo(name = "variation_surface") val variationSurface: String? = null,
+    @ColumnInfo(name = "variation_kind") val variationKind: String? = null,
 )
 
 @Entity(

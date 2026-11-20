@@ -52,7 +52,7 @@ import org.junit.Test
 class ProfilePairingRuntimeTest {
     @Test fun encryptedRootWithoutMarkersGuardsQrAndEveryLocalExitUntilScopedRotationDetach() = runBlocking {
         val fixture = Fixture()
-        val password = "portable guard fixture phrase".toCharArray()
+        val password = "portable guard fixture phrase!".toCharArray()
         val created = try {
             app.autplay.application.portableaccount.PortableAccountCrypto.create("guard_user", password, USER.value)
         } finally { password.fill('\u0000') }
@@ -124,7 +124,7 @@ class ProfilePairingRuntimeTest {
                     KEY_ALIAS, SESSION_ID, SESSION_FAMILY_ID, 0),
             ))
             val journal = SessionCredentialEnvelopeCodec.encode(SessionCredentialEnvelope(
-                accessToken = "journal-fixture", refreshToken = null, generation = 0, refreshPending = true,
+                accessToken = "journal-fixture!", refreshToken = null, generation = 0, refreshPending = true,
                 accountRecoveryRole = "SOURCE", accountRecoveryPending = "{}",
             ))
             fixture.credentials.write(slot, journal)
@@ -140,7 +140,7 @@ class ProfilePairingRuntimeTest {
         for (slot in CredentialJournalSlots.all + listOf(CredentialJournalSlots.trainingConsentProfile(PROFILE, USER.value, API_ORIGIN), ServerProfileId("ad5c0e5e-0000-8000-8000-000000000001"))) {
             for (owner in listOf(FirstBindCeremonyOwner.PUBLIC_ACCESS, FirstBindCeremonyOwner.SELF_DEVICE_PAIRING, FirstBindCeremonyOwner.ACCOUNT_RECOVERY)) {
                 val fixture = Fixture()
-                val original = "saved-journal-fixture".toByteArray()
+                val original = "saved-journal-fixture!".toByteArray()
                 fixture.credentials.write(slot, original)
                 assertTrue(fixture.firstBindGate.reserve(owner))
                 val snapshot = publicSnapshot().copy(serverProfileId = slot, expectedServerInstanceId = slot.value)
@@ -165,7 +165,7 @@ class ProfilePairingRuntimeTest {
             val checkpoint = requireNotNull(pending.settings.m5PendingExchangeCheckpoint).replace(PROFILE.value, slot.value)
             for (cancel in listOf(false, true)) {
                 val fixture = Fixture(initialSettings = pending.settings.copy(m5PendingExchangeCheckpoint = checkpoint))
-                val original = "saved-journal-fixture".toByteArray()
+                val original = "saved-journal-fixture!".toByteArray()
                 fixture.credentials.write(slot, original)
                 if (cancel) fixture.runtime.cancel() else fixture.runtime.recoverAndRefresh()
                 assertArrayEquals(original, fixture.credentials.read(slot))

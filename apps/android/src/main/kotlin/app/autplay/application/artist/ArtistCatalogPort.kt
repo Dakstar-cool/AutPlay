@@ -66,6 +66,7 @@ data class ArtistAppearance(
     val subjectId: ServerId,
     val title: String?,
     val localTarget: ArtistLocalTarget?,
+    val listenCount: Int = 0,
 )
 
 /** Local-first application seam; every read is scoped to a currently owned profile closure. */
@@ -88,6 +89,11 @@ interface ArtistCatalogPort {
 }
 
 class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatalogPort {
+    fun observeTrackArtists(profile: ServerProfileId, trackId: String): Flow<List<ArtistSummary>> =
+        database.catalogProjectionDao().observeTrackArtists(profile.value, trackId).map { rows ->
+            rows.map { it.toSummary(profile) }
+        }
+
     override suspend fun browse(profileId: ServerProfileId, limit: Int): List<ArtistSummary> {
         require(limit in 1..MAX_PAGE)
         return database.catalogProjectionDao().ownedArtists(profileId.value, limit).map {
@@ -162,12 +168,13 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
 
     override suspend fun appearances(key: ArtistKey, limit: Int): List<ArtistAppearance> {
         require(limit in 1..MAX_PAGE)
-        val links = database.catalogProjectionDao().ownedSubjectLinksForArtist(
+        val rows = database.catalogProjectionDao().ownedSubjectLinksForArtist(
             key.profileId.value,
             key.artistId.value,
             limit,
         )
-        if (links.isEmpty()) return emptyList()
+        if (rows.isEmpty()) return emptyList()
+        val links = rows.map { it.link }
         val recordingIds = links.asSequence().filter { it.subjectType == SUBJECT_RECORDING }
             .map { it.subjectServerId }.distinct().toList()
         val releaseIds = links.asSequence().filter { it.subjectType == SUBJECT_RELEASE }
@@ -191,7 +198,7 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
             )
                 .associateBy { checkNotNull(it.serverReleaseId) }
         }
-        return links.map { link ->
+        return rows.map { (link, plays) ->
             val trackRef = trackRefs[link.subjectServerId]
             val recording = recordings[link.subjectServerId]
             val release = releases[link.subjectServerId]
@@ -204,6 +211,7 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                     SUBJECT_RELEASE -> release?.title
                     else -> null
                 },
+                listenCount = plays,
                 localTarget = when (link.subjectType) {
                     SUBJECT_RECORDING -> trackRef?.let { ArtistLocalTarget.Track(it.localUserTrackRefId) }
                     SUBJECT_RELEASE -> release?.let { ArtistLocalTarget.Release(it.localReleaseId) }

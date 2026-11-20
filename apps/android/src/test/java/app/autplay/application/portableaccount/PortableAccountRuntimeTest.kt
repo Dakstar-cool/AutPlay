@@ -30,11 +30,82 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PortableAccountRuntimeTest {
+    @Test fun legacyLogoutUsesDeviceSessionAndKeepsBindingUntilServerConfirms() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            val h = Harness(server)
+            h.bindLegacy()
+            val bound = h.settings.settings.value
+            val profile = requireNotNull(bound.activeServerProfileId)
+            val session = requireNotNull(h.credentials.read(profile))
+            assertFalse(h.runtime.confirmLifecycle(RuntimeLifecycleAction.LOGOUT_CURRENT, "", charArrayOf()))
+            assertEquals(bound.m5Binding, h.settings.settings.value.m5Binding)
+            assertArrayEquals(session, h.credentials.read(profile))
+            h.lifecycleResult = PairingNetworkResult.Success(Unit)
+            assertTrue(h.runtime.confirmLifecycle(RuntimeLifecycleAction.LOGOUT_CURRENT, "", charArrayOf()))
+            assertNull(h.settings.settings.value.m5Binding)
+            assertNull(h.settings.settings.value.activeServerProfileId)
+            assertNull(h.credentials.read(profile))
+            assertNull(h.store.read())
+            assertEquals(2, h.lifecycleCalls.size)
+            assertEquals(h.lifecycleCalls[0], h.lifecycleCalls[1])
+            assertNull(h.lifecycleCalls[0].portableAuthorization)
+            session.fill(0)
+        }
+    }
+
+    @Test fun legacyLogoutCannotBypassPortableRootMarkerOrPendingEnrollment() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            for (guard in listOf("root", "marker", "pending")) {
+                val h = Harness(server)
+                h.bindLegacy()
+                val bound = h.settings.settings.value
+                when (guard) {
+                    "marker" -> h.settings.update(bound.copy(portableAccountId = bound.activeUserId!!.value))
+                    "pending" -> h.credentials.write(CredentialJournalSlots.portableEnrollment, "pending".toByteArray())
+                    else -> PortableAccountCrypto.create("fixture_owner", "fixture7!".toCharArray()).use { created ->
+                        h.credentials.write(CredentialJournalSlots.portableAccount,
+                            app.autplay.data.security.SessionCredentialEnvelopeCodec.encode(
+                                app.autplay.data.security.SessionCredentialEnvelope("portable-account", null, 0,
+                                    portableAccountDocument = created.document.encode().toString(Charsets.UTF_8))))
+                    }
+                }
+                h.lifecycleResult = PairingNetworkResult.Success(Unit)
+                assertFalse(guard, h.runtime.confirmLifecycle(RuntimeLifecycleAction.LOGOUT_CURRENT, "", charArrayOf()))
+                assertEquals(bound.m5Binding, h.settings.settings.value.m5Binding)
+                assertTrue(h.lifecycleCalls.isEmpty())
+            }
+        }
+    }
+
+    @Test fun signOutRequiresPasswordRetainsIdentityAndSurvivesRestart() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            val h = Harness(server)
+            val password = "fixture7!".toCharArray()
+            try {
+                assertTrue(h.runtime.create("local_owner", password))
+                val before = requireNotNull(h.store.read())
+                assertFalse(h.runtime.signOut("local_owner", "wrong!7".toCharArray()))
+                assertFalse(h.settings.settings.value.accountSignedOut)
+                assertTrue(h.runtime.signOut("local_owner", password))
+                assertTrue(h.settings.settings.value.accountSignedOut)
+                h.restart()
+                assertEquals(before.fields, h.store.read()?.fields)
+                assertFalse(h.runtime.signInLocal("other_owner", password))
+                assertTrue(h.settings.settings.value.accountSignedOut)
+                assertTrue(h.runtime.signInLocal("local_owner", password))
+                assertFalse(h.settings.settings.value.accountSignedOut)
+            } finally { password.fill('\u0000') }
+        }
+    }
+
     @Test fun uncertainEnrollmentReplaysExactlyAndAuthoritativeExpiryReleasesFirstBind(): Unit = runBlocking {
         MockWebServer().use { server ->
             server.start()
             val h = Harness(server)
-            val password = "portable runtime fixture phrase".toCharArray()
+            val password = "portable runtime fixture phrase!".toCharArray()
             try {
                 assertTrue(h.runtime.create("fixture_user", password))
                 val document = requireNotNull(h.store.read())
@@ -72,9 +143,9 @@ class PortableAccountRuntimeTest {
         MockWebServer().use { first -> MockWebServer().use { second ->
             first.start(); second.start()
             val h = Harness(first)
-            val firstPassword = "offline original fixture phrase".toCharArray()
-            val localPassword = "offline recovered fixture phrase".toCharArray()
-            val currentPassword = "online recovered fixture phrase".toCharArray()
+            val firstPassword = "offline original fixture phrase!".toCharArray()
+            val localPassword = "offline recovered fixture phrase!".toCharArray()
+            val currentPassword = "online recovered fixture phrase!".toCharArray()
             try {
                 assertTrue(h.runtime.create("fixture_user", firstPassword))
                 val original = requireNotNull(h.store.read())
@@ -160,8 +231,8 @@ class PortableAccountRuntimeTest {
         MockWebServer().use { server ->
             server.start()
             val h = Harness(server)
-            val oldPassword = "old recovery fixture phrase".toCharArray()
-            val newPassword = "new recovery fixture phrase".toCharArray()
+            val oldPassword = "old recovery fixture phrase!".toCharArray()
+            val newPassword = "new recovery fixture phrase!".toCharArray()
             val created = try { PortableAccountCrypto.create("fixture_user", oldPassword) }
                 finally { oldPassword.fill('\u0000') }
             created.use { old ->
@@ -216,6 +287,26 @@ class PortableAccountRuntimeTest {
         lateinit var pairing: ProfilePairingRuntime
         lateinit var runtime: PortableAccountRuntime
         private val serverId = java.util.UUID.randomUUID().toString()
+        private var legacySnapshot: PairingFlowSnapshot? = null
+        val lifecycleCalls = mutableListOf<LifecycleCommand>()
+        var lifecycleResult: PairingNetworkResult<Unit> = PairingNetworkResult.Failure("server_unavailable")
+
+        suspend fun bindLegacy() {
+            fun uuid() = java.util.UUID.randomUUID().toString()
+            val snapshot = PairingFlowSnapshot(uuid(), origin, origin, ServerProfileId(serverId), serverId, 1,
+                hash(keys.spki), app.autplay.domain.UserId(uuid()), app.autplay.domain.DeviceId(uuid()),
+                hash(keys.spki), null, uuid())
+            legacySnapshot = snapshot
+            assertTrue(gate.reserve(FirstBindCeremonyOwner.PUBLIC_ACCESS))
+            credentials.write(snapshot.serverProfileId, app.autplay.data.security.SessionCredentialEnvelopeCodec.encode(
+                app.autplay.data.security.SessionCredentialEnvelope("pending-account-registration", null, 0,
+                    refreshPending = true, publicAccessPendingRegistrationId = uuid(),
+                    publicAccessPendingCanonicalRequest = "e30", publicAccessPendingSuccessorRefreshToken = "r".repeat(43))))
+            assertTrue(pairing.completePublicAccountRegistration(snapshot, "fixture-key",
+                EnrollmentSession(requireNotNull(snapshot.expectedDeviceId), uuid(), uuid(), 0,
+                    "fixture-access".toByteArray(), ByteArray(32) { 1 }), keys.spki.copyOf()))
+            assertTrue(pairing.state.value.pairing is PairingState.Connected)
+        }
 
         suspend fun trust() { pairing.startDiscovery(origin).join(); pairing.confirmTrust() }
         fun restart() { gate = FirstBindCeremonyGate(); pairing = pairing(); runtime = runtime() }
@@ -240,14 +331,23 @@ class PortableAccountRuntimeTest {
         private val discovery = object : ProfilePairingPort {
             override suspend fun discovery(apiOrigin: String) = PairingNetworkResult.Success(DiscoveryDocument(
                 TrustedServerIdentity(serverId, 1, hash(keys.spki)), "Fixture", origin, origin, setOf(1), Instant.now().plusSeconds(300), keys.spki.copyOf()))
-            override suspend fun capabilities(profileId: ServerProfileId, snapshot: PairingFlowSnapshot) = PairingNetworkResult.Failure("unused")
+            override suspend fun capabilities(profileId: ServerProfileId, snapshot: PairingFlowSnapshot): PairingNetworkResult<CapabilityDocument> =
+                legacySnapshot?.let {
+                    PairingNetworkResult.Success(CapabilityDocument(CapabilityState(
+                        TrustedServerIdentity(serverId, 1, hash(keys.spki)), requireNotNull(it.expectedUserId),
+                        requireNotNull(it.expectedDeviceId), 1, 1, System.currentTimeMillis() + 300_000, emptySet()),
+                        "fixture".toByteArray(), "1".repeat(64)))
+                } ?: PairingNetworkResult.Failure("unused")
             override suspend fun exchange(request: EnrollmentExchangeCommand) = PairingNetworkResult.Failure("unused")
             override suspend fun createInvitation(profileId: ServerProfileId, operationId: String, expiresInSeconds: Int) = PairingNetworkResult.Failure("unused")
             override suspend fun cancelInvitation(profileId: ServerProfileId, invitationId: String, operationId: String) = PairingNetworkResult.Failure("unused")
             override suspend fun rotate(request: SessionRotationCommand) = PairingNetworkResult.Failure("unused")
             override suspend fun devices(profileId: ServerProfileId) = PairingNetworkResult.Failure("unused")
             override suspend fun sessions(profileId: ServerProfileId) = PairingNetworkResult.Failure("unused")
-            override suspend fun lifecycle(profileId: ServerProfileId, command: LifecycleCommand) = PairingNetworkResult.Failure("unused")
+            override suspend fun lifecycle(profileId: ServerProfileId, command: LifecycleCommand): PairingNetworkResult<Unit> {
+                lifecycleCalls += command
+                return lifecycleResult
+            }
         }
         init { pairing = pairing(); runtime = runtime() }
     }

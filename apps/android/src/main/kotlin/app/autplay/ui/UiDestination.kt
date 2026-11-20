@@ -29,8 +29,21 @@ public sealed class UiDestination(
     public data object Profile : UiDestination("profile", R.string.nav_profile, AutPlayIcon.Profile)
     public data object Settings : UiDestination("settings", R.string.nav_settings, AutPlayIcon.Settings)
     public data object PrivacyAndData : UiDestination("privacy-data", R.string.nav_privacy_data, AutPlayIcon.Privacy)
+    public data object SettingsAccount : UiDestination("settings-account", R.string.settings_account_devices, AutPlayIcon.Profile)
+    public data object SettingsPlayback : UiDestination("settings-playback", R.string.settings_sound_playback, AutPlayIcon.Play)
+    public data object SettingsMusic : UiDestination("settings-music", R.string.settings_phone_music, AutPlayIcon.Library)
+    public data object SettingsDownloads : UiDestination("settings-downloads", R.string.settings_downloads_network, AutPlayIcon.Download)
+    public data object SettingsAppearance : UiDestination("settings-appearance", R.string.settings_appearance_language, AutPlayIcon.Sun)
+    public data object SettingsAbout : UiDestination("settings-about", R.string.settings_about, AutPlayIcon.Settings)
+    public data object SettingsDiagnostics : UiDestination("settings-diagnostics", R.string.settings_diagnostics, AutPlayIcon.Server)
+
+    public val isSettingsDestination: Boolean
+        get() = this == Settings || this in settingsNavigation || this == SettingsDiagnostics
 
     public companion object {
+        public val settingsNavigation: List<UiDestination>
+            get() = listOf(SettingsAccount, SettingsPlayback, SettingsMusic, SettingsDownloads,
+                SettingsAppearance, PrivacyAndData, SettingsAbout)
         /** Exactly the three primary destinations required by the accepted compact contract. */
         public val compactNavigation: List<UiDestination>
             get() = listOf(Home, Search, Library)
@@ -68,6 +81,8 @@ public sealed class UiDestination(
                 Home, Search, Library, Playlists, History, Downloads, ImportReview,
                 NowPlaying, WaveRooms, SyncStatus, ServerFeatures, Profile, Settings,
                 PrivacyAndData,
+                SettingsAccount, SettingsPlayback, SettingsMusic, SettingsDownloads,
+                SettingsAppearance, SettingsAbout, SettingsDiagnostics,
             )
 
         public fun fromRoute(route: String): UiDestination? = all.firstOrNull { it.route == route }
@@ -98,6 +113,7 @@ public enum class AutPlayIcon {
     Repeat,
     Check,
     Favorite,
+    FavoriteFilled,
     ThumbUp,
     ThumbDown,
     Timer,

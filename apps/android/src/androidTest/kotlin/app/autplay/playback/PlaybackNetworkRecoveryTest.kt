@@ -1,0 +1,183 @@
+package app.autplay.playback
+
+import android.net.Uri
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.test.platform.app.InstrumentationRegistry
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
+import okio.Buffer
+import org.junit.Assert.*
+import org.junit.Test
+
+@UnstableApi
+class PlaybackNetworkRecoveryTest {
+    @Test fun failedSuccessorDoesNotInterruptTheCurrentTailAndRecoversAtItsOwnHead() = runBlocking {
+        val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val requests = AtomicInteger()
+        val failing = java.util.concurrent.atomic.AtomicBoolean(true)
+        val bytes = fixtureBytes()
+        try {
+            fixture.vaultServer(object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    requests.incrementAndGet()
+                    return if (failing.get()) MockResponse().setResponseCode(503) else audioResponse(request, bytes)
+                }
+            })
+            fixture.start(listOf("readable", "vault"), smooth = true)
+            fixture.await("successor preload fails while current plays") { requests.get() >= 3 }
+            assertTrue(fixture.main { fixture.controller!!.isPlaying })
+            assertNull(fixture.main { fixture.controller!!.playerError })
+            assertEquals(fixture.entries[0].value, fixture.main { fixture.controller!!.currentMediaItem!!.mediaId })
+            fixture.await("first session") { fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId != null }
+            val firstListen = requireNotNull(fixture.database.queueDao().activeSnapshotOnce()?.activeListeningEventId)
+            fixture.main { fixture.controller!!.seekTo(39_500) }
+            fixture.await("error belongs to successor") {
+                fixture.main { fixture.controller!!.currentMediaItem?.mediaId == fixture.entries[1].value && fixture.controller!!.playerError != null }
+            }
+            failing.set(false)
+            fixture.await("successor recovers", timeoutMs = 20_000) { fixture.main { fixture.controller!!.isPlaying } }
+            assertEquals(fixture.entries[1].value, fixture.main { fixture.controller!!.currentMediaItem!!.mediaId })
+            assertTrue(fixture.main { fixture.controller!!.currentPosition in 0..3_000 })
+            fixture.await("complete departing tail") { fixture.database.historyDao().event(firstListen)?.sessionEndPositionMs == 40_000L }
+        } finally { fixture.close() }
+    }
+
+    @Test fun tricklingStreamIsReopenedAfterStarvationWithoutWaitingForReadTimeout() = runBlocking {
+        val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val requests = AtomicInteger()
+        val bytes = fixtureBytes()
+        try {
+            fixture.vaultServer(object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val response = audioResponse(request, bytes)
+                    // Bytes keep arriving within the 15s read timeout, but cannot feed the decoder.
+                    return if (requests.incrementAndGet() == 1) response.throttleBody(8, 5, TimeUnit.SECONDS) else response
+                }
+            })
+            fixture.start(listOf("vault"))
+            fixture.await("starvation recovery", timeoutMs = 40_000) { fixture.main { fixture.controller?.isPlaying == true } }
+            assertTrue(requests.get() in 2..3)
+            assertEquals(fixture.entries[0].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
+        } finally { fixture.close() }
+    }
+
+    @Test fun repeatedFailuresExhaustTheServiceBudgetAndStopOpeningTheSource() = runBlocking {
+        val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val requests = AtomicInteger()
+        try {
+            fixture.vaultServer(object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    requests.incrementAndGet()
+                    return MockResponse().setResponseCode(503)
+                }
+            })
+            fixture.start(listOf("vault"))
+            fixture.await("bounded recovery exhaustion", timeoutMs = 60_000) {
+                PlaybackRuntimeState.state.value.unavailableReason == "NETWORK_RECOVERY_EXHAUSTED" &&
+                    fixture.main { fixture.controller?.playWhenReady == false }
+            }
+            assertEquals(3 * (1 + PlaybackRecoveryPolicy.MAX_ATTEMPTS), requests.get())
+            delay(2_000)
+            assertEquals(15, requests.get())
+        } finally { fixture.close() }
+    }
+
+    @Test fun terminalLoaderFailureRecoversTheSameEntryThroughFreshAuthorizedOpen() = runBlocking {
+        val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val requests = AtomicInteger()
+        val rangedRequests = AtomicInteger()
+        val bytes = fixtureBytes()
+        try {
+            fixture.vaultServer(object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    assertEquals("Bearer " + "a".repeat(64), request.getHeader("Authorization"))
+                    if (request.getHeader("Range") != null) rangedRequests.incrementAndGet()
+                    return if (requests.incrementAndGet() <= 3) MockResponse().setResponseCode(503)
+                    else audioResponse(request, bytes)
+                }
+            })
+            fixture.start(listOf("vault"), startPositionMs = 12_345)
+            fixture.await("terminal loader failure") { fixture.main { fixture.controller?.playerError != null } }
+            assertEquals(fixture.entries[0].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
+            fixture.await("service recovery") { fixture.main { fixture.controller?.isPlaying == true } }
+            assertTrue(requests.get() in 4..6)
+            assertEquals(fixture.entries[0].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
+            assertNull(fixture.main { fixture.controller?.playerError })
+            assertTrue(fixture.main { fixture.controller!!.currentPosition } >= 12_345)
+            assertTrue(rangedRequests.get() > 0)
+        } finally { fixture.close() }
+    }
+
+    @Test fun pauseStopProfileSwitchAndQueueReplacementCancelPendingRecovery() = runBlocking {
+        for (cancel in listOf("pause", "stop", "profile", "queue", "replacement")) {
+            val fixture = PlaybackServiceLifecycleTest.Fixture()
+            val requests = AtomicInteger()
+            try {
+                fixture.vaultServer(object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        requests.incrementAndGet()
+                        return MockResponse().setResponseCode(503)
+                    }
+                })
+                fixture.start(listOf("vault", "readable"))
+                fixture.await("error before $cancel") { fixture.main { fixture.controller?.playerError != null } }
+                when (cancel) {
+                    "pause" -> fixture.main { fixture.controller?.pause() }
+                    "stop" -> fixture.main { fixture.controller?.stop() }
+                    "profile" -> fixture.disconnectProfile()
+                    "queue" -> fixture.main { fixture.controller?.seekToNextMediaItem() }
+                    "replacement" -> fixture.owner.dispatch(PlaybackCommand.StartQueue(fixture.activate(listOf(1))))
+                }
+                val count = requests.get()
+                delay(2_500)
+                assertEquals("No stale opens after $cancel", count, requests.get())
+                if (cancel == "pause" || cancel == "stop") assertFalse(fixture.main { fixture.controller!!.isPlaying })
+                if (cancel == "queue" || cancel == "replacement") {
+                    assertEquals(fixture.entries[1].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
+                    fixture.await("local successor plays after $cancel") { fixture.main { fixture.controller!!.isPlaying } }
+                }
+            } finally { fixture.close() }
+        }
+    }
+
+    @Test fun forbiddenAndMissingAudioFailOnceWithoutServiceRetry() = runBlocking {
+        for (status in listOf(401, 403, 404)) {
+            val fixture = PlaybackServiceLifecycleTest.Fixture()
+            val requests = AtomicInteger()
+            try {
+                fixture.vaultServer(object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        requests.incrementAndGet()
+                        return MockResponse().setResponseCode(status)
+                    }
+                })
+                fixture.start(listOf("vault"))
+                fixture.await("HTTP $status failure") { fixture.main { fixture.controller?.playerError != null } }
+                delay(2_000)
+                assertEquals(1, requests.get())
+            } finally { fixture.close() }
+        }
+    }
+
+    private fun fixtureBytes(): ByteArray {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        return instrumentation.targetContext.contentResolver.openInputStream(
+            Uri.parse("content://${instrumentation.context.packageName}.readable/audio/tone"),
+        )!!.use { it.readBytes() }
+    }
+
+    private fun audioResponse(request: RecordedRequest, bytes: ByteArray): MockResponse {
+        val offset = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
+        return MockResponse().setResponseCode(if (offset == 0) 200 else 206)
+            .setHeader("Content-Type", "audio/wav")
+            .setHeader("Accept-Ranges", "bytes")
+            .apply { if (offset > 0) setHeader("Content-Range", "bytes $offset-${bytes.lastIndex}/${bytes.size}") }
+            .setBody(Buffer().write(bytes, offset, bytes.size - offset))
+    }
+}

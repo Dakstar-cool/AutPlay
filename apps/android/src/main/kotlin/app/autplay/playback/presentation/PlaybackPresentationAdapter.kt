@@ -124,6 +124,17 @@ class PlaybackPresentationAdapter(
         publishFromController()
     }
 
+    fun resumeIfPaused(snapshotId: String) {
+        val current = controller ?: return
+        val context = queueContextRepository.context.value as? ActiveQueueContext.Loaded ?: return
+        if (context.snapshotId == snapshotId && !current.isPlaying &&
+            gateFor(current, context, Player.COMMAND_PLAY_PAUSE) is PlaybackControlGate.Allowed
+        ) {
+            current.play()
+            publishFromController()
+        }
+    }
+
     /** No Wave failure/rejection path can fall through to a local Media3 action. */
     fun togglePlayPause() {
         val current = controller ?: return
@@ -174,6 +185,7 @@ class PlaybackPresentationAdapter(
     private fun connect() {
         if (!foreground || !dismissalRestored || controller != null || connecting) return
         connecting = true
+        publishFromController()
         val token = SessionToken(appContext, ComponentName(appContext, AutPlayPlaybackService::class.java))
         val future = MediaController.Builder(appContext, token).buildAsync()
         future.addListener(
@@ -221,7 +233,11 @@ class PlaybackPresentationAdapter(
             isLive = live,
             isSeekable = seekable,
             isPlaying = current?.isPlaying == true,
-            connection = if (current == null) PlaybackConnectionState.Disconnected else PlaybackConnectionState.Connected,
+            connection = when {
+                current != null -> PlaybackConnectionState.Connected
+                connecting -> PlaybackConnectionState.Connecting
+                else -> PlaybackConnectionState.Disconnected
+            },
             playbackStatus = when (current?.playbackState) {
                 Player.STATE_BUFFERING -> PlaybackStatus.Buffering
                 Player.STATE_READY -> PlaybackStatus.Ready

@@ -69,6 +69,16 @@ public class DesktopPortableRootStore(private val secure: DesktopSecureStateOwne
         }.whenComplete { _, _ -> owned.fill('\u0000') }
     }
 
+    /** Only a password-proven, server-supplied passport may initialize an absent local ROOT. */
+    public fun adoptFromLogin(snapshot: SecureControl, owner: SecureRecordOwner,
+        document: PortableAccountDocument, password: CharArray, ownershipCutoffMs: Long): CompletableFuture<SecureControl> {
+        PortableAccountCrypto.unlock(document, password).close()
+        val passport = document.encode()
+        val history = PortableAccountLineage(true, emptyList()).encode(document).toByteArray(Charsets.UTF_8)
+        return try { install(snapshot, owner, PortableRootPayload(passport, byteArrayOf(), history, ownershipCutoffMs, true), newOnly = true) }
+        finally { passport.fill(0); history.fill(0) }
+    }
+
     /** Offline rotation is allowed only before any server attempt, without any other owner. */
     public fun rotateOffline(snapshot: SecureControl, owner: SecureRecordOwner,
         replacement: CreatedPortableAccount): CompletableFuture<SecureControl> = secure.read(slot, snapshot).thenCompose { nullable ->
@@ -101,7 +111,9 @@ public class DesktopPortableRootStore(private val secure: DesktopSecureStateOwne
     public fun recoveryForExplicitExport(snapshot: SecureControl): CompletableFuture<SecretBytes> = secure.read(slot, snapshot).thenApply { nullable ->
         val stored = nullable ?: throw SecureStateFailure(SecureStateStatus.UNAVAILABLE)
         try {
-            val bytes = (stored.payload as? PortableRootPayload ?: throw SecureStateFailure(SecureStateStatus.CORRUPT)).recoveryCopy()
+            val root = stored.payload as? PortableRootPayload ?: throw SecureStateFailure(SecureStateStatus.CORRUPT)
+            secureRequire(root.hasRecoveryDocument, SecureStateStatus.UNAVAILABLE)
+            val bytes = root.recoveryCopy()
             try { secure.transientSecret(bytes) } finally { bytes.fill(0) }
         } finally { stored.close() }
     }
@@ -109,7 +121,7 @@ public class DesktopPortableRootStore(private val secure: DesktopSecureStateOwne
         val stored = nullable ?: throw SecureStateFailure(SecureStateStatus.UNAVAILABLE)
         try {
             val exact = (stored.payload as? PortableRootPayload ?: throw SecureStateFailure(SecureStateStatus.CORRUPT)).recoveryCopy()
-            try { secureRequire(exact.contentEquals(readback), SecureStateStatus.OUTCOME_PENDING) } finally { exact.fill(0) }
+            try { secureRequire(exact.isNotEmpty() && exact.contentEquals(readback), SecureStateStatus.OUTCOME_PENDING) } finally { exact.fill(0) }
             // Acknowledgment never clears predecessor material or conservative enrollment history.
             Unit
         } finally { stored.close() }

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_account_devices">Аккаунт и устройства</string>
+    <string name="settings_sound_playback">Звук и воспроизведение</string>
+    <string name="settings_phone_music">Музыка на телефоне</string>
+    <string name="settings_downloads_network">Загрузки и сеть</string>
+    <string name="settings_appearance_language">Оформление и язык</string>
+    <string name="settings_account_local_summary">Восстановление, устройства и личный сервер</string>
+    <string name="settings_account_connected_summary">Подключено · восстановление, устройства и синхронизация</string>
+    <string name="settings_sound_summary">Переходы, громкость и эквалайзер</string>
+    <string name="settings_music_summary">Добавить аудиофайл или выбрать папку</string>
+    <string name="settings_downloads_summary">Мобильный интернет и подготовка треков</string>
+    <string name="settings_appearance_summary">%1$s · %2$s</string>
+    <string name="settings_data_summary">Статистика прослушиваний и рекомендации</string>
+    <string name="settings_about_summary">Версия, перенос настроек и диагностика</string>
+    <string name="settings_room_downloads">Подготовка треков для совместного прослушивания</string>
+    <string name="settings_transfer_scope">Здесь переносятся параметры приложения. Файл восстановления аккаунта сохраните отдельно в разделе «Аккаунт и устройства».</string>
+    <string name="settings_diagnostics_summary">Технические сведения и доступ разработчика</string>
+    <string name="admission_account_conflict">Администратор одобрил другой аккаунт. Ваш аккаунт на телефоне сохранён. Отмените заявку, затем подключите свой аккаунт с паролем или выйдите из него, чтобы использовать аккаунт сервера.</string>
+    <string name="account_sign_out">Выйти из аккаунта</string>
+    <string name="account_sign_in">Войти в аккаунт</string>
+    <string name="account_sign_out_explanation">Вы выйдете на этом телефоне. Аккаунт и данные сохранятся. Для повторного входа потребуется пароль.</string>
+    <string name="account_session_failed">Не удалось выполнить действие. Проверьте пароль и завершите или отмените подключение. Аккаунт с данными нельзя удалить здесь.</string>
+    <string name="account_remove_empty_local">Удалить пустой локальный аккаунт</string>
+    <string name="account_remove_empty_explanation">Удалить новый аккаунт с этого телефона без возможности отмены. Это доступно только для аккаунта, который не подключался к серверу и не содержит музыку, плейлисты или историю. Подтвердите его паролем.</string>
+</resources>

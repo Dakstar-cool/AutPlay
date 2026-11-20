@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from autplay.domain.admin_views import AdminConfirmationTarget, AdminDashboard, AdminPage
+from autplay.domain.admin_views import (
+    AdminConfirmationTarget,
+    AdminDashboard,
+    AdminPage,
+    AdminSessionFilters,
+)
 from autplay.domain.auth import AccountRole
 from autplay.domain.web_admin import WebActor, WebAdminError
 from autplay.ports.admin_views import AdminViews
@@ -34,7 +39,13 @@ class AdminViewService:
         return self._views.confirmation_target(actor, action, target_id)
 
     def page(
-        self, actor: WebActor, surface: str, *, limit: int = 100, after: str | None = None
+        self,
+        actor: WebActor,
+        surface: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+        session_filters: AdminSessionFilters | None = None,
     ) -> AdminPage:
         self._authorize(actor)
         if not 1 <= limit <= 200:
@@ -46,7 +57,7 @@ class AdminViewService:
         if surface == "audit":
             return self._views.audit(actor, limit=limit, after=after)
         if surface == "sessions":
-            return self._views.sessions(actor, limit=limit, after=after)
+            return self._views.sessions(actor, limit=limit, after=after, filters=session_filters)
         if surface == "jobs":
             return self._views.jobs(actor, limit=limit, after=after)
         if surface == "imports":

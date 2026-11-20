@@ -2,6 +2,7 @@ package app.autplay.playback
 
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
+import app.autplay.AutPlayRuntime
 import app.autplay.application.download.DownloadIntentRepository
 import app.autplay.application.wave.WavePrefetchExecutor
 import app.autplay.application.wave.WaveSnapshot
@@ -22,7 +23,13 @@ class AndroidWaveSourceProbe(context: Context, database: AutPlayDatabase) : Wave
         context.applicationContext,
         database,
         applicationNonSecretSettingsStore(context.applicationContext),
-    )
+    ) { profileId, serverUserTrackRefId ->
+        AutPlayRuntime.serverPlaybackVariantId(
+            context.applicationContext,
+            profileId,
+            serverUserTrackRefId,
+        )
+    }
 
     override suspend fun resolve(localTrackRefId: String): WaveAvailability =
         when (val result = resolver.resolve(LocalId(localTrackRefId), System.currentTimeMillis())) {

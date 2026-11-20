@@ -116,6 +116,8 @@ internal fun MainAdaptiveShell(
                     likeEnabled = state.currentTrackRefId != null,
                     onLike = { state.currentTrackRefId?.let(actions.likeTrack) },
                     onDismiss = actions.dismissMiniPlayer,
+                    onPrevious = state.nowPlayingActions.previous,
+                    onNext = state.nowPlayingActions.next,
                 )
             }
         },
@@ -127,6 +129,7 @@ internal fun MainAdaptiveShell(
                     state = state.coreDetailState,
                     onPlayTrack = actions.playTrack,
                     onPlayPlaylistEntry = actions.playPlaylistEntry,
+                    onPlayReleaseEntry = state.coreRouteActions.playReleaseEntry,
                     onPlayNext = state.coreRouteActions.playNext,
                     onAddToQueue = state.coreRouteActions.addToQueue,
                     manualPlaylists = state.coreRouteActions.manualPlaylists,

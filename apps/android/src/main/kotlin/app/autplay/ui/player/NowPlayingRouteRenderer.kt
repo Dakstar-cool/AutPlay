@@ -27,6 +27,8 @@ internal data class NowPlayingRouteActions(
     val observingChanged: (Boolean) -> Unit,
     val queue: QueueEditorUiActions = QueueEditorUiActions(),
     val download: () -> Unit = {},
+    val artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
+    val openArtist: (String) -> Unit = {},
 )
 
 internal data class NowPlayingTasteUiState(
@@ -55,6 +57,8 @@ internal fun NowPlayingRouteRenderer(
 ) {
     NowPlayingScreen(
         state = state,
+        artists = actions.artists,
+        onOpenArtist = actions.openArtist,
         onTogglePlayPause = actions.togglePlayPause,
         onToggleShuffle = actions.toggleShuffle,
         onCycleRepeat = actions.cycleRepeat,

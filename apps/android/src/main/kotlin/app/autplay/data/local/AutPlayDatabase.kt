@@ -132,7 +132,7 @@ import kotlinx.coroutines.Dispatchers
         GuestWavePreflightEntity::class,
         GuestWaveQueueProjectionEntity::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -169,6 +169,12 @@ abstract class AutPlayDatabase : RoomDatabase() {
         val MIGRATION_15_16: Migration = SearchProjectionRepairMigration
         val MIGRATION_16_17: Migration = TrackMetadataMigration
         val MIGRATION_17_18: Migration = PortableAccountDataMigration
+        val MIGRATION_18_19: Migration = object : Migration(18, 19) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE listening_event ADD COLUMN variation_surface TEXT")
+                connection.execSQL("ALTER TABLE listening_event ADD COLUMN variation_kind TEXT")
+            }
+        }
 
         /** Opens the non-destructive database with bundled SQLite, WAL, and all migrations. */
         fun open(context: Context, name: String = DATABASE_NAME): AutPlayDatabase =
@@ -179,6 +185,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
+                .addMigrations(MIGRATION_18_19)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */

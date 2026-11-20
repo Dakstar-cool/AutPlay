@@ -202,7 +202,13 @@ def serve() -> None:
         TEMP / "client.private.json",
         {
             "origin": origin,
+            "stream_origin": origin,
             "tls_spki_b64": base64.b64encode(
+                tls.public_key().public_bytes(
+                    serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+            ).decode(),
+            "stream_tls_spki_b64": base64.b64encode(
                 tls.public_key().public_bytes(
                     serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
                 )
@@ -211,7 +217,7 @@ def serve() -> None:
             "identity_epoch": discovery["identity_epoch"],
             "identity_spki_b64": discovery["identity_public_key_spki_b64"],
             "public_id": "mac_ci_" + secrets.token_hex(6),
-            "password": secrets.token_urlsafe(36),
+            "password": secrets.token_urlsafe(36) + "!",
         },
     )
     uvicorn.run(
@@ -226,7 +232,7 @@ def serve() -> None:
 
 
 def exercise_clients(config: Path, password: str) -> list[str]:
-    """Four real process lifecycles with two isolated protected Keychains."""
+    """Real process lifecycles, including password-only login, with two protected Keychains."""
     assert sys.platform == "darwin" and os.environ.get("GITHUB_ACTIONS") == "true"
     canonical = Path.home() / "Library/Application Support/AutPlay"
     old_data = TEMP / "preexisting-runner-data"
@@ -274,8 +280,16 @@ def exercise_clients(config: Path, password: str) -> list[str]:
             community.run("security", "set-keychain-settings", "-lut", "3600", key)
             community.run("security", "unlock-keychain", "-p", password, key)
         passed = []
-        for phase, device in (("register", "a"), ("restart", "a"), ("login", "b"), ("pull", "a")):
+        for phase, device in (
+            ("register", "a"),
+            ("restart", "a"),
+            ("login", "b"),
+            ("restart-login", "b"),
+            ("pull", "a"),
+        ):
             if phase == "login":
+                # The recipient gets only its ID/password and independently pinned server target.
+                (TEMP / "recovery.private").unlink()
                 canonical.rename(TEMP / "data-a")
             if phase == "pull":
                 canonical.rename(TEMP / "data-b")
@@ -285,6 +299,11 @@ def exercise_clients(config: Path, password: str) -> list[str]:
             result = community.run(app / "Contents/MacOS/AutPlay", phase, config, timeout=360)
             if f"AUTPLAY_ACCOUNT_PROBE_PASSED {phase}" not in result.stdout:
                 raise RuntimeError("Missing production account acceptance marker")
+            if (
+                phase == "login"
+                and "ACCOUNT_PROBE_PASSWORD_LOGIN_WITHOUT_RECOVERY_PASSED" not in result.stdout
+            ):
+                raise RuntimeError("Missing password-only login and rejection evidence")
             passed.append(phase)
             print("Production Mac account acceptance passed: " + phase, flush=True)
         return passed
@@ -334,7 +353,9 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
         required = {
             "kind",
             "origin",
+            "stream_origin",
             "tls_spki_b64",
+            "stream_tls_spki_b64",
             "instance",
             "identity_epoch",
             "identity_spki_b64",
@@ -359,22 +380,23 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
             or target["backup_restore_verified"] is not True
         ):
             raise ValueError("deployment boundary")
-        origin = urlsplit(target["origin"])
-        if (
-            origin.scheme != "https"
-            or not origin.hostname
-            or origin.port != 9443
-            or origin.username is not None
-            or origin.password is not None
-            or origin.path
-            or origin.query
-            or origin.fragment
-            or not target["origin"].isascii()
-            or any(ord(c) <= 32 for c in target["origin"])
-            or "?" in target["origin"]
-            or "#" in target["origin"]
-        ):
-            raise ValueError("origin")
+        for key in ("origin", "stream_origin"):
+            origin = urlsplit(target[key])
+            if (
+                origin.scheme != "https"
+                or not origin.hostname
+                or origin.port != 9443
+                or origin.username is not None
+                or origin.password is not None
+                or origin.path
+                or origin.query
+                or origin.fragment
+                or not target[key].isascii()
+                or any(ord(c) <= 32 for c in target[key])
+                or "?" in target[key]
+                or "#" in target[key]
+            ):
+                raise ValueError("origin")
         if str(UUID(target["instance"])) != target["instance"]:
             raise ValueError("identity")
         if (
@@ -391,7 +413,7 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
         for key in ("deployment_receipt_sha256", "backup_restore_receipt_sha256"):
             if not re.fullmatch("[0-9a-f]{64}", target[key]):
                 raise ValueError("receipt")
-        for key in ("tls_spki_b64", "identity_spki_b64"):
+        for key in ("tls_spki_b64", "stream_tls_spki_b64", "identity_spki_b64"):
             value = base64.b64decode(target[key], validate=True)
             if not 32 <= len(value) <= 2048 or base64.b64encode(value).decode() != target[key]:
                 raise ValueError("public key")
@@ -401,6 +423,64 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
         return target
     except ValueError, TypeError, KeyError, OverflowError:
         raise ValueError("Invalid live acceptance target evidence") from None
+
+
+def verify_live_source(server_source: str, client_source: str, root: Path = ROOT) -> dict:
+    """Keep deployed server inputs exact while separately qualifying client-only changes."""
+    allowed = {
+        ".github/workflows/ci-macos-community.yml",
+        "scripts/macos_account_acceptance.py",
+        "apps/desktop/src/test/kotlin/app/autplay/desktop/CommunityAccountProbe.kt",
+        "tests/release/test_macos_live_acceptance.py",
+        "docs/operations/MACOS_COMMUNITY.md",
+    }
+
+    def git(*args: str) -> bytes:
+        return subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, check=True, timeout=30
+        ).stdout
+
+    try:
+        if not all(re.fullmatch("[0-9a-f]{40}", value) for value in (server_source, client_source)):
+            raise ValueError("source")
+        if git("rev-parse", "HEAD").decode().strip() != client_source:
+            raise ValueError("checkout")
+        git("merge-base", "--is-ancestor", server_source, client_source)
+        if git("diff", "--no-ext-diff", "--name-only", "HEAD", "--"):
+            raise ValueError("modified checkout")
+        changed = set(
+            filter(
+                None,
+                git(
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-renames",
+                    "--name-only",
+                    "-z",
+                    server_source,
+                    client_source,
+                    "--",
+                )
+                .decode()
+                .split("\0"),
+            )
+        )
+        client_changes = {
+            path for path in changed - allowed if path.startswith(("apps/desktop/", "shared/"))
+        }
+        if not changed - client_changes <= allowed:
+            raise ValueError("production source differs")
+    except ValueError, subprocess.SubprocessError:
+        raise RuntimeError(
+            "Live acceptance source does not match deployed production code"
+        ) from None
+    return {
+        "server_source": server_source,
+        "client_source": client_source,
+        "server_tree_equal": True,
+        "client_only_paths": sorted(client_changes),
+        "harness_only_paths": sorted(changed - client_changes),
+    }
 
 
 def live_acceptance() -> None:
@@ -420,15 +500,24 @@ def live_acceptance() -> None:
         raise RuntimeError("Live target evidence is too large")
     raw = target_path.read_bytes()
     target = validate_live_target(raw, datetime.now(UTC))
-    if target["server_source"] != os.environ["GITHUB_SHA"]:
-        raise RuntimeError("Live acceptance requires the exact deployed candidate source")
+    source_proof = verify_live_source(target["server_source"], os.environ["GITHUB_SHA"])
     TEMP.mkdir(mode=0o700)
     client = {
         key: target[key]
-        for key in ("origin", "tls_spki_b64", "instance", "identity_epoch", "identity_spki_b64")
+        for key in (
+            "origin",
+            "stream_origin",
+            "tls_spki_b64",
+            "stream_tls_spki_b64",
+            "instance",
+            "identity_epoch",
+            "identity_spki_b64",
+        )
     }
     # No owner ID/password input exists. Each attempt creates its own bounded synthetic account.
-    client.update(public_id="mac_live_" + secrets.token_hex(6), password=secrets.token_urlsafe(36))
+    client.update(
+        public_id="mac_live_" + secrets.token_hex(6), password=secrets.token_urlsafe(36) + "!"
+    )
     config = TEMP / "client.private.json"
     private_json(config, client)
     passed = exercise_clients(config, secrets.token_urlsafe(32))
@@ -436,7 +525,11 @@ def live_acceptance() -> None:
         "status": "passed",
         "scope": "LIVE_9443_SYNTHETIC_ACCOUNT",
         "source_commit": os.environ["GITHUB_SHA"],
+        "source_qualification": source_proof,
         "checks": passed,
+        "password_login_without_recovery": True,
+        "negative_login_preserves_local_state": True,
+        "password_login_restart_verified": True,
         "real_keychain": True,
         "real_https": True,
         "production_graph": True,
@@ -554,6 +647,9 @@ def acceptance() -> None:
                     "production_9443_verified": False,
                     "production_graph": True,
                     "checks": passed,
+                    "password_login_without_recovery": True,
+                    "negative_login_preserves_local_state": True,
+                    "password_login_restart_verified": True,
                     "real_keychain": True,
                     "real_https": True,
                     "journal": "unchanged v1 protocol",

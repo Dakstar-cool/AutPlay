@@ -57,6 +57,7 @@ public class DesktopAccountRuntimeActions(
             val command = intent.command
             val operation: CompletionStage<Unit>? = when (command) {
                 is DesktopAccountCommand.CreatePortable -> command.password.consume { runtime.createPortable(command.publicId, it) }
+                is DesktopAccountCommand.LoginPortable -> command.password.consume { runtime.loginPortable(command.publicId, it) }
                 is DesktopAccountCommand.Secret -> secretCommand(command)
                 is DesktopAccountCommand.Invoke -> when (command.action) {
                     DesktopAccountAction.Refresh -> runtime.reload()
@@ -81,6 +82,7 @@ public class DesktopAccountRuntimeActions(
             when (val command = intent.command) {
                 is DesktopAccountCommand.Secret -> command.clear()
                 is DesktopAccountCommand.CreatePortable -> command.password.clear()
+                is DesktopAccountCommand.LoginPortable -> command.password.clear()
                 is DesktopAccountCommand.Discover -> command.enteredOrigin.clear()
                 is DesktopAccountCommand.RecoveryPreview -> command.clear()
                 is DesktopAccountCommand.PinnedTransport -> command.clear()
@@ -99,7 +101,7 @@ public class DesktopAccountRuntimeActions(
         val state = current()
         return !closed.get() && state.scope == intent.scope && state.permits.any { it === intent.permit } &&
             intent.command.action == intent.permit.action && intent.command.targetId == intent.permit.targetId &&
-            (!intent.permit.requiresPassword || intent.command is DesktopAccountCommand.Secret)
+            intent.permit.acceptsCommand(intent.command)
     }
 
     private fun secretCommand(command: DesktopAccountCommand.Secret): CompletionStage<Unit>? = when (command.action) {

@@ -141,6 +141,28 @@ class ProfilePairingScreenTest {
     }
 
     @Test
+    fun legacyLogoutNeedsConfirmationWithoutInventingALocalPassword() {
+        val calls = AtomicInteger(0)
+        render(
+            ProfilePairingUiState(pairing = connectedState(), portableAccount = PortableAccountUiState(
+                app.autplay.application.portableaccount.PortableAccountStatus(error = "ACCOUNT_EXIT_UNAVAILABLE"),
+                true, false, null)),
+            ProfilePairingActions(confirmRemoteAction = { action, login, password ->
+                assertEquals(ProfileRemoteAction.LOGOUT_CURRENT, action)
+                assertEquals("", login)
+                assertTrue(password.isEmpty())
+                calls.incrementAndGet()
+                true
+            }),
+        )
+        compose.onNodeWithText(context.getString(R.string.profile_logout)).performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.profile_confirm)).assertIsEnabled()
+        compose.runOnIdle { assertEquals(0, calls.get()) }
+        compose.onNodeWithText(context.getString(R.string.profile_confirm)).performClick()
+        compose.runOnIdle { assertEquals(1, calls.get()) }
+    }
+
+    @Test
     fun connectedLogoutAllRequiresConfirmationAndSuppressesDuplicateAction() {
         val calls = AtomicInteger(0)
         val capturedPassword = AtomicReference<CharArray?>(null)

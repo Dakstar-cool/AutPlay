@@ -52,10 +52,18 @@ class RefreshingVaultAuthorizationProvider(
         val apiBaseUrl = configured.serverBaseUrl ?: return@runBlocking null
         val streamBaseUrl = configured.streamBaseUrl ?: return@runBlocking null
         val session = RefreshingSessionCredentials(apiBaseUrl.trimEnd('/') + "/api/v1", credentials, m5Rotation = m5Rotation)
-        val access = runCatching {
+        val access = try {
             if (rejectedGeneration == null) session.access(profileId)
             else session.refreshAfterRejection(profileId, rejectedGeneration)
-        }.getOrNull() ?: return@runBlocking null
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: IOException) {
+            // M5 can safely retry its idempotent pending rotation after transport failure.
+            // Legacy uncertain rotation remains SessionRequiredException and fails closed.
+            throw VaultAuthorizationTransportException(error)
+        } catch (_: Exception) {
+            return@runBlocking null
+        }
         VaultAuthorization(
             streamUri = (streamBaseUrl.trimEnd('/') + "/api/v1/stream/audio-variants/" + audioVariantId).toUri(),
             accessToken = access.token.toString(StandardCharsets.UTF_8),
@@ -84,7 +92,7 @@ class VaultPlaybackDataSource(
     override fun open(dataSpec: DataSpec): Long {
         val stable = parseStableUri(dataSpec.uri)
         val first = authorizationProvider.authorize(stable.profileId, stable.audioVariantId)
-            ?: throw IOException("VAULT_AUTHORIZATION_UNAVAILABLE")
+            ?: throw VaultAuthorizationUnavailableException()
         return tryOpen(dataSpec, first, allowRefresh = true, stable = stable)
     }
 

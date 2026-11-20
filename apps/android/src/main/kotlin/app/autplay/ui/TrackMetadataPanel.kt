@@ -29,26 +29,35 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
 @Composable
-internal fun rememberTrackArtwork(trackId: String?): Painter? {
+internal fun rememberTrackArtwork(trackId: String?): Painter? = rememberArtworkPainter(rememberTrackArtworkBitmap(trackId))
+
+@Composable
+internal fun rememberArtworkPainter(bitmap: android.graphics.Bitmap?): Painter? =
+    remember(bitmap) { bitmap?.let { BitmapPainter(it.asImageBitmap()) } }
+
+@Composable
+internal fun rememberTrackArtworkBitmap(trackId: String?): android.graphics.Bitmap? {
+    if (trackId == null) return null
     val context = LocalContext.current
     val settings by remember(context) { applicationNonSecretSettingsStore(context).settings }.collectAsState(initial = null)
-    val profile = settings?.activeServerProfileId?.value ?: "legacy-unscoped"
+    val activeSettings = settings ?: return null
+    val profile = activeSettings.activeServerProfileId?.value ?: "legacy-unscoped"
     val database = remember(context) { AutPlayRuntime.database(context) }
-    val art by remember(profile, trackId) { database.trackMetadataDao().observeArtwork(profile, trackId.orEmpty()) }.collectAsState(initial = null)
-    val eligibleArt = art?.takeIf { it.serverProfileId == profile }
-    val imageKey = "$profile/$trackId/${eligibleArt?.filePath}"
-    val loaded by produceState<Pair<String, android.graphics.Bitmap>?>(null, imageKey) {
-        value = null
-        value = withContext(Dispatchers.IO) {
-            eligibleArt?.filePath?.let { path ->
+    val art by key(database, profile, trackId) {
+        remember { database.trackMetadataDao().observeArtwork(profile, trackId) }.collectAsState(initial = null)
+    }
+    val path = art?.filePath ?: return null
+    return key(context, profile, trackId, path) {
+        produceState<android.graphics.Bitmap?>(initialValue = null) {
+            value = withContext(Dispatchers.IO) {
                 val file = File(path)
                 val root = File(context.filesDir, "metadata-art").canonicalPath + File.separator
-                if (file.canonicalPath.startsWith(root) && file.isFile && file.length() <= 2_097_152) BitmapFactory.decodeFile(path)?.let { imageKey to it } else null
+                if (file.canonicalPath.startsWith(root) && file.isFile && file.length() <= 2_097_152) {
+                    BitmapFactory.decodeFile(path)
+                } else null
             }
-        }
+        }.value
     }
-    val bitmap = loaded?.takeIf { it.first == imageKey }?.second
-    return remember(bitmap) { bitmap?.let { BitmapPainter(it.asImageBitmap()) } }
 }
 
 @Composable

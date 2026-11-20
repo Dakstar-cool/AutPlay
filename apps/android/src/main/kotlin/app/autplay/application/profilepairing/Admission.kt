@@ -44,6 +44,7 @@ sealed interface AdmissionState {
     data object Connected : AdmissionState
     data class Rejected(val checkpoint: AdmissionCheckpoint?) : AdmissionState
     data class Blocked(val checkpoint: AdmissionCheckpoint?) : AdmissionState
+    data class AccountConflict(val checkpoint: AdmissionCheckpoint) : AdmissionState
     data class Expired(val checkpoint: AdmissionCheckpoint?) : AdmissionState
     data object Cancelled : AdmissionState
     data object Unavailable : AdmissionState
@@ -231,7 +232,7 @@ class AdmissionRuntime(
     }
     fun confirmAccount() = scope.launch {
         val current = stateFlow.value as? AdmissionState.Approved ?: return@launch
-        if (!authorizeAccount(current.account.userId)) { stateFlow.value = AdmissionState.Blocked(current.checkpoint); return@launch }
+        if (!authorizeAccount(current.account.userId)) { stateFlow.value = AdmissionState.AccountConflict(current.checkpoint); return@launch }
         val bearer = pollBearer?.copyOf() ?: run { recover(current.checkpoint); return@launch }
         val alias = keyAlias(current.checkpoint.serverProfileId)
         val refresh = Base64.getUrlEncoder().withoutPadding().encode(

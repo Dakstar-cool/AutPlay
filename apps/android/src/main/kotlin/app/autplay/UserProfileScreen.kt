@@ -66,6 +66,9 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
         }
         ProfileFrontendScreen(profile, actions.profilePairing, showHero = false)
         OwnerProfileStatisticsCard(state.ownerStatisticsState, actions.refreshOwnerStatistics)
+        if (connected && app.autplay.ui.LocalDeveloperMode.current) {
+            SonaCollectionStatistics(state.settings, state.trainingConsent)
+        }
         if (!state.socialAvailable) {
             SocialPublicIdPanel(state.social, actions.social, serverAvailable = false)
         }

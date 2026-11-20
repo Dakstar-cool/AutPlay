@@ -59,6 +59,39 @@ object PortableDeviceContractV2 {
         expectedPurpose, ownDocument, devicePublicKeySpki, deviceName, appVersion,
         nextRefreshTokenSha256, bindingCommitId, now)
 
+    /** A trusted LOGIN challenge may supply an encrypted passport, never local ROOT authority. */
+    fun loginDocument(rawChallengeResult: ByteArray, trusted: TrustedM5Identity,
+        expectedPlatform: Platform, expectedPublicId: String, now: Instant): PortableAccountDocument = guarded {
+        val response = challengeResult(rawChallengeResult, trusted, expectedPlatform, Purpose.LOGIN, now)
+        val passport = response.getValue("account") as JsonObject
+        ensure(passport.text("public_id") == expectedPublicId, Failure.SCOPE_MISMATCH)
+        val bytes = validatePassport(passport)
+        try { PortableAccountDocument.parse(bytes) } finally { bytes.fill(0) }
+    }
+
+    private fun challengeResult(raw: ByteArray, trusted: TrustedM5Identity,
+        platform: Platform, purpose: Purpose, now: Instant): JsonObject {
+        val response = parse(raw, MAX_BYTES)
+        exact(response, versionMembers + setOf("challenge", "account"))
+        version(response, platform)
+        val challenge = response["challenge"] as? JsonObject ?: reject(Failure.INVALID_DOCUMENT)
+        exact(challenge, challengeMembers)
+        version(challenge, platform)
+        ensure(challenge.text("purpose") == purpose.name, Failure.SCOPE_MISMATCH)
+        nullMembers.forEach { ensure(challenge[it] === JsonNull, Failure.INVALID_DOCUMENT) }
+        uuid(challenge.text("challenge_id")); uuid(challenge.text("account_id"))
+        val passport = response["account"] as? JsonObject ?: reject(Failure.INVALID_DOCUMENT)
+        val bytes = validatePassport(passport)
+        try {
+            ensure(challenge.text("account_id") == passport.text("account_id") &&
+                hash(challenge.text("document_sha256")) == hex(sha256(bytes)), Failure.SCOPE_MISMATCH)
+        } finally { bytes.fill(0) }
+        trustedIdentity(challenge, trusted); nonce(challenge.text("nonce"))
+        val expires = time(challenge.text("expires_at"))
+        ensure(expires > now && expires < now.plusSeconds(180), Failure.EXPIRED)
+        return response
+    }
+
     /**
      * Sensitive passport-bearing request, without ROOT proof. No generated copy/serialization.
      * It can be signed ONCE. Keep the resulting SignedCommand for exact retries; never prepare,
@@ -117,31 +150,14 @@ object PortableDeviceContractV2 {
                 own: PortableAccountDocument, spki: ByteArray, name: String, version: String,
                 refreshHash: String, bindingId: String, now: Instant,
             ): PreparedRequest = guarded {
-                val response = parse(raw, MAX_BYTES)
-                exact(response, versionMembers + setOf("challenge", "account"))
-                version(response, platform)
-                val challenge = response["challenge"] as? JsonObject ?: reject(Failure.INVALID_DOCUMENT)
-                exact(challenge, challengeMembers)
-                version(challenge, platform)
-                ensure(challenge.text("purpose") == purpose.name, Failure.SCOPE_MISMATCH)
-                nullMembers.forEach { ensure(challenge[it] === JsonNull, Failure.INVALID_DOCUMENT) }
-                uuid(challenge.text("challenge_id"))
-                uuid(challenge.text("account_id"))
-                val passport = response["account"] as? JsonObject ?: reject(Failure.INVALID_DOCUMENT)
+                val response = challengeResult(raw, trusted, platform, purpose, now)
+                val challenge = response.getValue("challenge") as JsonObject
+                val passport = response.getValue("account") as JsonObject
                 val canonicalPassport = validatePassport(passport)
                 try {
                     val ownPassport = passportSnapshot(own)
                     try { ensure(ownPassport.contentEquals(canonicalPassport), Failure.SCOPE_MISMATCH) }
                     finally { ownPassport.fill(0) }
-                    ensure(challenge.text("account_id") == passport.text("account_id") &&
-                        hash(challenge.text("document_sha256")) == hex(sha256(canonicalPassport)), Failure.SCOPE_MISMATCH)
-                    trustedIdentity(challenge, trusted)
-                    nonce(challenge.text("nonce"))
-                    val expires = time(challenge.text("expires_at"))
-                    // Existing Android verifyChallenge policy: server TTL is 120s; client accepts
-                    // strictly (now, now+180s). No issued_at exists, so do not invent one or apply
-                    // negotiation's separate issued_at clock allowance to this challenge.
-                    ensure(expires > now && expires < now.plusSeconds(180), Failure.EXPIRED)
                     val device = spki.copyOf()
                     val encodedDevice = try { p256(device); Base64.getEncoder().encodeToString(device) }
                     finally { device.fill(0) }

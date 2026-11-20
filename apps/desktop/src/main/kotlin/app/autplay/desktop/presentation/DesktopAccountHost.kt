@@ -208,9 +208,8 @@ public class DesktopAccountHost(
         val owned = try { synchronized(gate) {
             val current = mutable.value
             if (closed || !attached || busy || current.scope != intent.scope ||
-                current.permits.none { it === intent.permit } || intent.permit.action != intent.command.action ||
-                intent.permit.targetId != intent.command.targetId || !used.add(intent.permit.id) ||
-                (intent.permit.requiresPassword && intent.command !is DesktopAccountCommand.Secret)) {
+                current.permits.none { it === intent.permit } || !intent.permit.acceptsCommand(intent.command) ||
+                !used.add(intent.permit.id)) {
                 clearInput(intent.command); return
             }
             val command = own(intent.command)
@@ -272,6 +271,7 @@ public class DesktopAccountHost(
                 catch (error: Exception) { first.fill('\u0000'); throw error }
             }
             is DesktopAccountCommand.CreatePortable -> Owned(command, command.password.consume { it.copyOf() })
+            is DesktopAccountCommand.LoginPortable -> Owned(command, command.password.consume { it.copyOf() })
             is DesktopAccountCommand.Discover -> Owned(command, command.enteredOrigin.consume { it.copyOf() })
             is DesktopAccountCommand.RecoveryPreview -> {
                 val account = command.accountId.consume { it.copyOf() }
@@ -312,6 +312,9 @@ public class DesktopAccountHost(
             is DesktopAccountCommand.CreatePortable -> {
                 runtime.createPortable(command.publicId, requireNotNull(input.first)).hostAwait()
                 lastLease = rootActivation.selected()
+            }
+            is DesktopAccountCommand.LoginPortable -> {
+                runtime.loginPortable(command.publicId, requireNotNull(input.first)).hostAwait()
             }
             is DesktopAccountCommand.Discover -> {
                 pregrantChoice = null; localReview = null; trust.discover(requireNotNull(input.first))
@@ -681,12 +684,13 @@ public class DesktopAccountHost(
         val rootRevision: Long?, val selfRole: DesktopSelfRole, val selfTarget: String?,
         val previewTarget: String?, val pendingTargets: Map<String, String>, val pendingActions: Map<String, DesktopAccountAction>,
         val pendingHandles: Map<String, DesktopPendingHandle>, val cancelHandles: Map<String, DesktopPendingHandle>,
-        val admissionSlot: String?, val admissionTarget: String?, val admissionAccount: String?, val trustedProfile: String?)
+        val admissionSlot: String?, val admissionTarget: String?, val admissionAccount: String?, val trustedProfile: String?,
+        val rootRecoveryAvailable: Boolean)
     private data class SelfFact(val slot: String, val target: String?, val role: DesktopSelfRole, val expires: Long?)
 
     private suspend fun refreshFacts(): Unit {
         val control = runtime.secure.snapshot().hostAwait()
-        var hasRoot = false; var rootRevision: Long? = null
+        var hasRoot = false; var rootRevision: Long? = null; var rootRecoveryAvailable = false
         var activeBinding: String? = null
         var bindingIntent: AccountUuid? = null
         var selfTarget: String? = null; var role = DesktopSelfRole.Source
@@ -702,7 +706,11 @@ public class DesktopAccountHost(
         control.selected.forEach { reference ->
             val record = runtime.secure.read(reference.slot, control).hostAwait() ?: return@forEach
             record.use {
-                if (record.payload is PortableRootPayload) { hasRoot = true; rootRevision = record.revision }
+                val portableRoot = record.payload as? PortableRootPayload
+                if (portableRoot != null) {
+                    hasRoot = true; rootRevision = record.revision
+                    rootRecoveryAvailable = portableRoot.hasRecoveryDocument
+                }
                 if (record.payload is SessionPayload && control.activeBinding == record.slot &&
                     record.owner.stage == SecureStage.ACTIVE && record.owner.boot == runtime.secure.boot &&
                     record.owner.authorityRevision == control.authorityRevision && !record.owner.detached && !record.owner.deletionVeto)
@@ -770,7 +778,7 @@ public class DesktopAccountHost(
         } else { selfExpiresAt = null; revealSelf = false }
         val next = Facts(control.authorityRevision, activeBinding, hasRoot, rootRevision, role,
             selfTarget, previewTarget, pending, pendingActions, pendingHandles, cancelHandles,
-            admissionSlot, admissionTarget, admissionAccount, trustedProfiles.singleOrNull())
+            admissionSlot, admissionTarget, admissionAccount, trustedProfiles.singleOrNull(), rootRecoveryAvailable)
         if (facts?.let { it.authorityRevision != next.authorityRevision || it.binding != next.binding } == true) {
             listConfirmed = false; listOwner = null; policyOwner = null; localReview = null; statisticsLease = null
             statisticsRuntime.invalidate(); deletion.retire()
@@ -855,11 +863,11 @@ public class DesktopAccountHost(
                 permit(DesktopAccountAction.CreatePortable); permit(DesktopAccountAction.ImportRecoveryFile)
             }
             if (captured.root) {
-                permit(DesktopAccountAction.ExportRecoveryFile)
+                if (captured.rootRecoveryAvailable) permit(DesktopAccountAction.ExportRecoveryFile)
                 permit(if (unlocked == null) DesktopAccountAction.UnlockPortable else DesktopAccountAction.LockPortable,
                     password = unlocked == null)
-                if (captured.binding == null && captured.pendingTargets.isEmpty()) permit(DesktopAccountAction.RestorePortable, password = true)
-                if (captured.pendingTargets.isEmpty()) {
+                if (captured.rootRecoveryAvailable && captured.binding == null && captured.pendingTargets.isEmpty()) permit(DesktopAccountAction.RestorePortable, password = true)
+                if (captured.rootRecoveryAvailable && captured.pendingTargets.isEmpty()) {
                     permit(DesktopAccountAction.PrepareRotation)
                     portable.previewId?.let { permit(DesktopAccountAction.RotateRoot, it, true) }
                 }
@@ -875,9 +883,8 @@ public class DesktopAccountHost(
                 permit(DesktopAccountAction.PreviewRecovery); permit(DesktopAccountAction.PreviewDeletion)
                 permit(DesktopAccountAction.ChooseServerRecoveryFile)
                 captured.trustedProfile?.let { permit(DesktopAccountAction.EnrollTrusted) }
-                if (captured.root) {
-                    permit(DesktopAccountAction.RegisterPortable, password = true); permit(DesktopAccountAction.LoginPortable, password = true)
-                }
+                if (captured.pendingTargets.isEmpty()) permit(DesktopAccountAction.LoginPortable, password = true)
+                if (captured.root) permit(DesktopAccountAction.RegisterPortable, password = true)
             }
             if (captured.binding != null) {
                 permit(DesktopAccountAction.RefreshDevices); permit(DesktopAccountAction.ReadPolicy)
@@ -960,7 +967,7 @@ public class DesktopAccountHost(
                 if (unlocked != null) DesktopAccountCondition.Ready else DesktopAccountCondition.Locked
             } else DesktopAccountCondition.Unavailable, runtime.state.value.publicId, null,
                 if (runtime.state.value.recoveryExportRequired) DesktopRecoveryFileStatus.ReadbackRequired else DesktopRecoveryFileStatus.None,
-                rotationPreviewId = portable.previewId),
+                rotationPreviewId = portable.previewId, recoveryAvailable = captured?.rootRecoveryAvailable == true),
             DesktopConnectionView(if (captured?.binding == null && captured?.pendingTargets?.isNotEmpty() == true)
                 DesktopAccountCondition.Pending else connection.condition,
                 issue(failure).takeIf { it != DesktopAccountIssue.None } ?: connection.issue,
@@ -1071,6 +1078,7 @@ public class DesktopAccountHost(
         fun clearInput(command: DesktopAccountCommand): Unit { when (command) {
             is DesktopAccountCommand.Secret -> command.clear()
             is DesktopAccountCommand.CreatePortable -> command.password.clear()
+            is DesktopAccountCommand.LoginPortable -> command.password.clear()
             is DesktopAccountCommand.Discover -> command.enteredOrigin.clear()
             is DesktopAccountCommand.RecoveryPreview -> command.clear()
             is DesktopAccountCommand.PinnedTransport -> command.clear()
@@ -1120,6 +1128,7 @@ public class DesktopAccountHost(
             AccountControlFailure.EXPIRED -> DesktopAccountIssue.Expired
             AccountControlFailure.UNSUPPORTED -> DesktopAccountIssue.Unsupported
             AccountControlFailure.AUTHENTICATION_REQUIRED -> DesktopAccountIssue.Reconnect
+            AccountControlFailure.AUTHENTICATION_FAILED -> DesktopAccountIssue.Authentication
             AccountControlFailure.TRUST_REQUIRED -> DesktopAccountIssue.IdentityChanged
             else -> DesktopAccountIssue.Retry
         }

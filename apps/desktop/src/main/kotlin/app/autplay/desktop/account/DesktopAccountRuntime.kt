@@ -72,6 +72,7 @@ public class DesktopAccountRuntime(
             val candidates = snapshot.selected.map { it.slot }
             var pending = 0
             var publicId: String? = null
+            var recoveryAvailable = false
             var active: SecureRecordOwner? = null
             fun read(index: Int): CompletableFuture<Unit> {
                 if (index == candidates.size) return CompletableFuture.completedFuture(Unit)
@@ -80,6 +81,7 @@ public class DesktopAccountRuntime(
                         when (val payload = record?.payload) {
                             is PendingPayload -> if (record.owner.stage != SecureStage.TERMINAL) pending++
                             is PortableRootPayload -> {
+                                recoveryAvailable = payload.hasRecoveryDocument
                                 val bytes = payload.passportCopy()
                                 try { publicId = PortableAccountDocument.parse(bytes).publicId } finally { bytes.fill(0) }
                             }
@@ -100,7 +102,7 @@ public class DesktopAccountRuntime(
                 mutable.value = DesktopAccountViewState(
                     phase = if (pending > 0 || (snapshot.activeBinding != null && active == null)) DesktopAccountPhase.OUTCOME_PENDING
                         else if (active != null) DesktopAccountPhase.CONNECTED else DesktopAccountPhase.LOCAL,
-                    busy = true, publicId = publicId, recoveryExportRequired = publicId != null && !exportAcknowledged,
+                    busy = true, publicId = publicId, recoveryExportRequired = recoveryAvailable && !exportAcknowledged,
                     pendingCount = pending, health = if (pending > 0) DesktopAccountHealth.PENDING else DesktopAccountHealth.UNKNOWN)
                 Unit
             }
@@ -300,54 +302,92 @@ public class DesktopAccountRuntime(
     /** REGISTER is explicit. Authentication failures never silently select registration or v1. */
     public fun connectPortable(password: CharArray, register: Boolean): CompletionStage<Unit> {
         val passwordCopy = password.copyOf()
+        return command { connectPortableActual(passwordCopy, register, null) }
+            .whenComplete { _, _ -> passwordCopy.fill('\u0000') }
+    }
+
+    /** Login uses the selected trusted server's passport and never requires a recovery archive. */
+    public fun loginPortable(publicId: String, password: CharArray): CompletionStage<Unit> {
+        val passwordCopy = password.copyOf()
         return command {
-            val server = requireServer(D1.Family.PORTABLE)
-            secure.snapshot().thenCompose { snapshot ->
-                controlRequire(snapshot.activeBinding == null && snapshot.firstBind == null && snapshot.reservations.isEmpty(), AccountControlFailure.CONFLICT)
-                secure.read(requireNotNull(SecureRecordKind.PORTABLE_ROOT.reserved), snapshot).thenCompose { record ->
-                    val stored = record ?: throw AccountControlException(AccountControlFailure.CONTEXT_CHANGED)
-                    val root = stored.payload as? PortableRootPayload ?: throw AccountControlException(AccountControlFailure.CONTEXT_CHANGED)
-                    val bytes = root.passportCopy()
-                    val document = try { PortableAccountDocument.parse(bytes) } finally { bytes.fill(0) }
+            val normalized = normalizeSocialPublicId(publicId)
+                ?: throw AccountControlException(AccountControlFailure.AUTHENTICATION_FAILED)
+            connectPortableActual(passwordCopy, false, normalized)
+        }.whenComplete { _, _ -> passwordCopy.fill('\u0000') }
+    }
+
+    private fun connectPortableActual(password: CharArray, register: Boolean, requestedId: String?): CompletableFuture<Unit> {
+        val server = requireServer(D1.Family.PORTABLE)
+        return secure.snapshot().thenCompose { snapshot ->
+            controlRequire(snapshot.activeBinding == null && snapshot.firstBind == null && snapshot.reservations.isEmpty(), AccountControlFailure.CONFLICT)
+            secure.read(requireNotNull(SecureRecordKind.PORTABLE_ROOT.reserved), snapshot).thenCompose { record ->
+                try {
+                    val local = record?.let {
+                        val root = it.payload as? PortableRootPayload ?: throw AccountControlException(AccountControlFailure.CONTEXT_CHANGED)
+                        val bytes = root.passportCopy()
+                        try { PortableAccountDocument.parse(bytes) } finally { bytes.fill(0) }
+                    }
+                    controlRequire(!register || local != null, AccountControlFailure.AUTHENTICATION_REQUIRED)
+                    val publicId = requestedId ?: local?.publicId ?: throw AccountControlException(AccountControlFailure.AUTHENTICATION_REQUIRED)
+                    controlRequire(local == null || local.publicId == publicId, AccountControlFailure.CONFLICT)
                     val challengeBody = SecureJson.encode(buildJsonObject {
                         put("contract_version", "v2"); put("schema_version", 2); put("platform", "MACOS")
-                        if (register) put("account", document.fields) else put("public_id", document.publicId)
+                        if (register) put("account", requireNotNull(local).fields) else put("public_id", publicId)
                     })
                     val challenge = if (register) AccountEndpoint.PORTABLE_REGISTER_CHALLENGE else AccountEndpoint.PORTABLE_LOGIN_CHALLENGE
                     val operation = UUID.randomUUID().toString(); val profile = UUID.randomUUID().toString()
                     val reservation = CompletionReservation(operation,
                         listOf(requireNotNull(SecureRecordKind.PORTABLE_COMMAND.reserved), profile, requireNotNull(SecureRecordKind.PORTABLE_ROOT.reserved)),
                         4, 4L * SecureStateLimits.VALUE)
-                    read(server.transport, challenge, challengeBody).thenCompose { response ->
-                        secure.reserveCompletion(snapshot, reservation, FirstBindOwner(operation, operation, SecureRole.RECIPIENT)).thenCompose { reserved ->
-                            secure.createNewKey(reserved, operation).thenCompose { key ->
-                                secure.snapshot().thenCompose { current ->
-                                    secure.publicKey(current, key.tag).thenCompose { spki ->
-                                        roots.unlock(current, passwordCopy).thenCompose { unlocked ->
-                                            val rawChallenge = response.bodyCopy(); val successor = freshSecret(32)
-                                            try {
-                                                val prepared = PortableDeviceContractV2.prepare(rawChallenge, server.identity,
-                                                    PortableDeviceContractV2.Platform.MACOS,
-                                                    if (register) PortableDeviceContractV2.Purpose.REGISTER else PortableDeviceContractV2.Purpose.LOGIN,
-                                                    document, spki, deviceName, appVersion, secureSha256(successor), operation, Instant.now())
-                                                val signed = try { unlocked.sign(prepared) } finally { prepared.close() }
-                                                val request = signed.transientWireCopy()
-                                                val expiry = try { Instant.parse(((SecureJson.parse(request, 16_384)["request"] as JsonObject)["challenge"] as JsonObject).string("expires_at")).epochSecond }
-                                                    finally { request.fill(0) }
-                                                val owner = pendingOwner(current, server, document.accountId, profile, operation, key, expiry)
-                                                try { custody.preparePortable(current, owner, signed, !register, successor) }
-                                                finally { signed.close() }
-                                            } finally { rawChallenge.fill(0); successor.fill(0); unlocked.close() }
-                                        }.whenComplete { _, _ -> spki.fill(0) }
-                                    }
+                    read(server.transport, challenge, challengeBody).exceptionallyCompose { failure ->
+                        val code = safeFailure(failure)
+                        CompletableFuture.failedFuture(AccountControlException(if (!register && code == AccountControlFailure.AUTHENTICATION_REQUIRED)
+                            AccountControlFailure.AUTHENTICATION_FAILED else code))
+                    }.thenCompose { response ->
+                        val rawChallenge = response.bodyCopy(); response.close()
+                        try {
+                            val document = if (register) requireNotNull(local) else PortableDeviceContractV2.loginDocument(
+                                rawChallenge, server.identity, PortableDeviceContractV2.Platform.MACOS, publicId, Instant.now())
+                            controlRequire(local == null || local.fields == document.fields, AccountControlFailure.CONFLICT)
+                            val adopted = if (local == null) roots.adoptFromLogin(snapshot,
+                                localOwner(snapshot, document.accountId, UUID.randomUUID().toString()), document, password, System.currentTimeMillis())
+                                .thenCompose { projection.activateLocalRoot() }.thenCompose { secure.snapshot() }.thenApply {
+                                    mutable.value = mutable.value.copy(publicId = document.publicId, recoveryExportRequired = false)
+                                    it
+                                } else CompletableFuture.completedFuture(snapshot)
+                            adopted.thenCompose { current ->
+                                // Authenticate before reserving a binding or creating its device key.
+                                roots.unlock(current, password).thenCompose { unlocked ->
+                                    secure.reserveCompletion(current, reservation, FirstBindOwner(operation, operation, SecureRole.RECIPIENT)).thenCompose { reserved ->
+                                        secure.createNewKey(reserved, operation).thenCompose { key ->
+                                            secure.snapshot().thenCompose { preparedControl ->
+                                                secure.publicKey(preparedControl, key.tag).thenCompose { spki ->
+                                                    val successor = freshSecret(32)
+                                                    try {
+                                                        val prepared = PortableDeviceContractV2.prepare(rawChallenge, server.identity,
+                                                            PortableDeviceContractV2.Platform.MACOS,
+                                                            if (register) PortableDeviceContractV2.Purpose.REGISTER else PortableDeviceContractV2.Purpose.LOGIN,
+                                                            document, spki, deviceName, appVersion, secureSha256(successor), operation, Instant.now())
+                                                        val signed = try { unlocked.sign(prepared) } finally { prepared.close() }
+                                                        val request = signed.transientWireCopy()
+                                                        val expiry = try { Instant.parse(((SecureJson.parse(request, 16_384)["request"] as JsonObject)["challenge"] as JsonObject).string("expires_at")).epochSecond }
+                                                            finally { request.fill(0) }
+                                                        val owner = pendingOwner(preparedControl, server, document.accountId, profile, operation, key, expiry)
+                                                        try { custody.preparePortable(preparedControl, owner, signed, !register, successor) }
+                                                        finally { signed.close() }
+                                                    } finally { successor.fill(0); spki.fill(0) }
+                                                }
+                                            }
+                                        }
+                                    }.whenComplete { _, _ -> unlocked.close() }
                                 }
-                            }
-                        }.whenComplete { _, _ -> response.close() }
+                            }.whenComplete { _, _ -> rawChallenge.fill(0) }
+                        } catch (failure: Exception) { rawChallenge.fill(0); throw failure }
                     }.thenCompose { ticket -> executeSession(ticket, if (register) AccountEndpoint.PORTABLE_REGISTER else AccountEndpoint.PORTABLE_LOGIN) }
-                        .whenComplete { _, _ -> challengeBody.fill(0); stored.close() }
-                }
+                        .whenComplete { _, _ -> challengeBody.fill(0); record?.close() }
+                } catch (failure: Exception) { record?.close(); throw failure }
             }
-        }.whenComplete { _, _ -> passwordCopy.fill('\u0000') }
+        }
     }
 
     /** Exact K original is resumed before dispatch; no nonce, signature or successor is recreated. */
@@ -894,6 +934,8 @@ internal fun safeFailure(error: Throwable): AccountControlFailure {
     repeat(4) { if (cause is java.util.concurrent.CompletionException && cause.cause != null) cause = requireNotNull(cause.cause) }
     return when (cause) {
         is AccountControlException -> (cause as AccountControlException).code
+        is IllegalArgumentException -> if (cause.message == "ACCOUNT_AUTHENTICATION_FAILED")
+            AccountControlFailure.AUTHENTICATION_FAILED else AccountControlFailure.TRANSPORT_UNAVAILABLE
         is SecureStateFailure -> when ((cause as SecureStateFailure).status) {
             SecureStateStatus.OUTCOME_PENDING -> AccountControlFailure.CONFLICT
             SecureStateStatus.CAPACITY_REQUIRED -> AccountControlFailure.CAPACITY

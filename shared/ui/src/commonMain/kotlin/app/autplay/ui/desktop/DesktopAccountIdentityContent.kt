@@ -35,7 +35,8 @@ internal fun DesktopPortableAccountContent(owner: DesktopAccountUiOwner, languag
         AccountButton(owner, DesktopAccountAction.Refresh, language)
     }
     AccountCard(DesktopAccountText.RecoveryCode, language) {
-        Text(DesktopAccountText.RecoveryFileHelp.text(language))
+        Text((if (state.publicId != null && !state.recoveryAvailable) DesktopAccountText.RecoveryUnavailable
+            else DesktopAccountText.RecoveryFileHelp).text(language))
         val fileText = when (state.recoveryFileStatus) {
             DesktopRecoveryFileStatus.None -> null
             DesktopRecoveryFileStatus.Choosing -> DesktopAccountText.FileChoosing
@@ -63,6 +64,29 @@ internal fun DesktopPortableAccountContent(owner: DesktopAccountUiOwner, languag
         state.reauthenticationId?.let { id ->
             AccountSecretForm(owner, DesktopAccountAction.Reauthenticate, language, DesktopAccountText.Password, targetId = id)
         }
+    }
+}
+
+@Composable
+private fun PortableLoginForm(owner: DesktopAccountUiOwner, language: DesktopLanguage): Unit {
+    var publicId by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    DisposableEffect(Unit) { onDispose { publicId = ""; password = "" } }
+    val available = owner.available(DesktopAccountAction.LoginPortable)
+    AccountCard(DesktopAccountText.Login, language) {
+        Text(DesktopAccountText.LoginHelp.text(language))
+        AccountStatus(owner.state.connection.condition, owner.state.connection.issue, language)
+        OutlinedTextField(publicId, { if (it.length <= 120) publicId = it }, enabled = available,
+            label = { Text(DesktopAccountText.PublicId.text(language)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(password, { if (it.length <= 16_384) password = it }, enabled = available,
+            label = { Text(DesktopAccountText.Password.text(language)) }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        AccountButton(owner, DesktopAccountAction.LoginPortable, language,
+            enabled = publicId.isNotBlank() && password.isNotEmpty(), command = {
+                val command = DesktopAccountCommand.LoginPortable(publicId, DesktopAccountSecret(password))
+                password = ""
+                command
+            })
     }
 }
 
@@ -134,6 +158,8 @@ internal fun DesktopAccountConnectionContent(owner: DesktopAccountUiOwner, langu
                 command = { DesktopAccountCommand.ConfirmTransport(review.id, api, stream, identity) })
         }
     } }
+    if (state.accountPublicId == null && owner.permit(DesktopAccountAction.LoginPortable, null) != null)
+        PortableLoginForm(owner, language)
     AccountCard(DesktopAccountText.Invitation, language) {
         state.localChoiceSummary?.let { Text(it) }
         AccountSecretForm(owner, DesktopAccountAction.SubmitInvitation, language, DesktopAccountText.Invitation)

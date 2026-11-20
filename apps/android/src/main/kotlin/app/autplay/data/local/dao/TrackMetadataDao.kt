@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TrackMetadataDao {
+    @Query("SELECT local_user_track_ref_id FROM track_metadata_projection WHERE server_profile_id = :profile AND local_user_track_ref_id IN (:ids) AND artwork_sha256 IS NOT NULL ORDER BY local_user_track_ref_id LIMIT 1")
+    suspend fun artworkTrack(profile: String, ids: List<String>): String?
+
     @Upsert suspend fun upsert(row: TrackMetadataEntity)
     @Upsert suspend fun upsertArtwork(row: MetadataArtworkEntity)
     @Query("SELECT * FROM track_metadata_projection WHERE server_profile_id=:profile AND local_user_track_ref_id=:track")

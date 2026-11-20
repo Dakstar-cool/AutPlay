@@ -23,6 +23,14 @@ class PortableAccountDataRepository(private val database: AutPlayDatabase) {
         check(existing.accountId == accountId && existing.ownerSinceMs == ownerSinceMs) { "ACCOUNT_SCOPE_IDENTITY_CONFLICT" }
     }
 
+    /** Metadata cleanup is permitted only while the selected local account has no user data. */
+    suspend fun removeEmptyLocalAccount(accountId: String): Unit = database.withWriteTransaction {
+        PortableAccountDataCodec.uuid(accountId)
+        check(!dao.hasDataBeforeLocalRemoval(accountId)) { "ACCOUNT_LOCAL_DATA_PRESENT" }
+        dao.removeEmptyLocalCursors(accountId)
+        dao.removeEmptyLocalScope(accountId)
+    }
+
     /** Paged read for account statistics: each logical listening record appears once. */
     suspend fun listeningPage(accountId: String, afterId: String = "", limit: Int = 32): List<PortableDataRecord> {
         PortableAccountDataCodec.uuid(accountId); require(limit in 1..32)
