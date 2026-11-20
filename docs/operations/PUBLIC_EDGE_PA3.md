@@ -15,6 +15,25 @@ SSH administration stays on Tailscale. Public SSH, TCP 80, UDP 443, PostgreSQL, 
 metrics, workers and raw API/stream ports are outside the public boundary. WAN Wave remains
 disabled.
 
+## Sona variation skip collection
+
+Open **Server → Sona collection** in Admin Web to set start and end times or stop
+the current collection. Use the time zone shown beside the date fields (normally UTC+03:00). An empty start begins collection now,
+and an empty end keeps it active until stopped. The PostgreSQL schedule is shared by
+the admin and mobile APIs and survives restarts. Starting again excludes the gap.
+
+Migration 0075 opens the first collection at migration time. Deployments with a
+previous schedule can pass both `AUTPLAY_SONA_SKIP_COLLECTION_START_MS` and
+`AUTPLAY_SONA_SKIP_COLLECTION_END_MS` (UTC Unix milliseconds) to the migration
+process to preserve that interval. The public-edge Compose overlay passes them through.
+
+During that window the Android profile can show skips and plays for covers, remixes
+and live recordings in the feed and personal wave. Each read of
+`GET /api/v1/privacy/shared-training/sona-variation-skips` requires a developer-approved
+device and the account's current, verified shared-training consent. Counts begin at
+the later of the window start and the current grant. The response is private and
+uncached. This diagnostic is separate from each account's ordinary recommendation ranking.
+
 ## Candidate topology
 
 ```text

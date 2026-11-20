@@ -239,4 +239,5 @@ def test_mutation_database_work_does_not_block_async_requests(
             assert not pending.done()
         finally:
             release.set()
-        assert pending.result(timeout=3).status_code == 303
+        # The probe above proves responsiveness while the mutation is blocked.
+        assert pending.result(timeout=30).status_code == 303

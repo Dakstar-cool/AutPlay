@@ -21,6 +21,7 @@ from autplay.domain.media_source import (
 from autplay.entrypoints.api import create_app
 from autplay.entrypoints.composition import build_media_source_authenticator
 from autplay.entrypoints.media_source_http import MediaSourceIngressMiddleware
+from autplay.ports.media_source import ElapsedMark
 from autplay.runtime.http import RequestRuntimeMiddleware
 from autplay.runtime.settings import ApiSettings
 from cryptography.hazmat.primitives import serialization
@@ -176,8 +177,11 @@ def test_m5_only_real_outer_commit_publishes_and_configuration_change_invalidate
     media: Harness,
     database_url: str,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = create_app(settings_for(media, database_url, tmp_path))
+    # Keep the prepared reply within its time window across both admission checks.
+    monkeypatch.setattr(app.state.media_source_clock, "mark", lambda: ElapsedMark(0, 0))
     with TestClient(app):
         pairing = app.state.profile_pairing_service
         cold = pairing.current_media_source_policy()

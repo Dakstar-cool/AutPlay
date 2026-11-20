@@ -286,6 +286,81 @@
           }
         }
       }
+    },
+    "/privacy/shared-training/sona-variation-skips": {
+      "get": {
+        "operationId": "getSonaVariationSkips",
+        "description": "Read the caller’s live report on a developer-approved device within the configured Sona collection window and current verified consent grant.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account-owned counts by surface and version. Omitted combinations have zero plays. Each skip counts as one play.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sona-variation-skips"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection is unavailable for this caller or device.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "no-store"
+                }
+              },
+              "Pragma": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string",
+                  "const": "Authorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/paths/~1privacy~1shared-training/get/responses/401"
+          },
+          "409": {
+            "$ref": "#/paths/~1privacy~1shared-training/get/responses/409"
+          },
+          "503": {
+            "$ref": "#/paths/~1privacy~1shared-training/get/responses/503"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -545,6 +620,67 @@
             }
           }
         ]
+      },
+      "sona-variation-skips": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "account_id",
+          "remaining_ms",
+          "variation_skips"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": 1
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "remaining_ms": {
+            "description": "Time the client may retain this live report before checking the current collection schedule again, bounded by the scheduled end.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "variation_skips": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "surface",
+                "kind",
+                "plays",
+                "skips"
+              ],
+              "properties": {
+                "surface": {
+                  "enum": [
+                    "home",
+                    "personal_wave"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "COVER",
+                    "REMIX",
+                    "LIVE"
+                  ]
+                },
+                "plays": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "skips": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

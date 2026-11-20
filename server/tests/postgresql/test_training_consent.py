@@ -2,7 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier, Event
 from time import monotonic, sleep
@@ -13,6 +13,7 @@ import pytest
 from autplay.adapters.filesystem.deletion_ledger import FilesystemDeletionLedger
 from autplay.adapters.filesystem.training_consent_ledger import FilesystemTrainingConsentLedger
 from autplay.adapters.postgresql.models.account import DeviceRow, UserAccountRow, UserSessionRow
+from autplay.adapters.postgresql.models.audit import AuditEventRow
 from autplay.adapters.postgresql.models.training_consent import (
     TrainingConsentOperationRow,
     TrainingConsentRow,
@@ -59,6 +60,187 @@ def command(pair: PairingHarness, decision: str, revision: int = 0) -> dict[str,
         "expected_revision": revision,
         "policy_version": 1,
     }
+
+
+def test_sona_skip_collection_checks_window_current_device_and_owner_consent(
+    pair: PairingHarness,
+) -> None:
+    from .test_social_s1c import _device_principal
+
+    sessions = sessionmaker(pair.engine, expire_on_commit=False)
+    now = int(datetime.now(UTC).timestamp() * 1000)
+
+    active = service(pair)
+    with sessions.begin() as session:
+        second = _device_principal(session, pair.actor.user_id, "Other phone", datetime.now(UTC))
+    second = replace(second, role=pair.actor.role)
+
+    def developer_mode(enabled: bool) -> None:
+        with sessions.begin() as session:
+            session.add(
+                AuditEventRow(
+                    actor_type="ADMIN",
+                    actor_user_id=pair.actor.user_id,
+                    action="profile.developer_mode_enabled"
+                    if enabled
+                    else "profile.developer_mode_disabled",
+                    target_type="DEVICE",
+                    target_id=pair.actor.device_id,
+                    metadata_sanitized={},
+                )
+            )
+
+    developer_mode(True)
+    with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+        active.sona_variation_skips(pair.actor)
+    active.decide(pair.actor, command(pair, "GRANTED"))
+
+    def window(start: int, end: int | None) -> None:
+        with sessions.begin() as session:
+            session.execute(
+                text("UPDATE ml.sona_collection_window SET starts_at=:start, ends_at=:end"),
+                {
+                    "start": datetime.fromtimestamp(start / 1000, UTC),
+                    "end": datetime.fromtimestamp(end / 1000, UTC) if end is not None else None,
+                },
+            )
+
+    assert active.sona_variation_skips(pair.actor)["remaining_ms"] == 15_000
+    for start, end in ((now - 6000, now - 3000), (now + 90_000, now + 120_000)):
+        window(start, end)
+        with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+            active.sona_variation_skips(pair.actor)
+    window(now - 60_000, now + 120_000)
+    with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+        active.sona_variation_skips(second)
+    report = active.sona_variation_skips(pair.actor)
+    assert report["account_id"] == str(pair.actor.user_id)
+    assert report["variation_skips"] == []
+    assert 0 < int(str(report["remaining_ms"])) <= 120_000
+    developer_mode(False)
+    with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+        active.sona_variation_skips(pair.actor)
+    developer_mode(True)
+    active.decide(second, command(pair, "WITHDRAWN", 1))
+    with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+        active.sona_variation_skips(pair.actor)
+
+
+def test_admin_schedule_controls_the_mobile_report_across_sessions(pair: PairingHarness) -> None:
+    import re
+
+    from autplay.adapters.postgresql.admin_commands import SqlAlchemyAdminCommandRepository
+    from autplay.adapters.postgresql.admin_views_runtime import SqlAlchemyAdminViewService
+    from autplay.adapters.postgresql.web_admin_uow import SqlAlchemyWebAdminUnitOfWorkFactory
+    from autplay.application.admin_commands import AdminCommandService
+    from autplay.application.sona_collection import SonaCollectionService
+    from autplay.application.web_admin import WebAdminService
+    from autplay.entrypoints.admin_web_http import create_admin_web_router
+    from autplay.runtime.web_security import WebCookieProfile
+    from autplay.web.renderer import AdminTemplateRenderer
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    sessions = sessionmaker(pair.engine, expire_on_commit=False)
+    admin = uuid4()
+    with sessions.begin() as session:
+        session.add(UserAccountRow(user_id=admin, display_name="Sona operator", role="ADMIN"))
+        session.add(
+            AuditEventRow(
+                actor_type="ADMIN",
+                action="profile.developer_mode_enabled",
+                target_type="DEVICE",
+                target_id=pair.actor.device_id,
+                metadata_sanitized={},
+            )
+        )
+    policy = service(pair)
+    policy.decide(pair.actor, command(pair, "GRANTED"))
+    web = WebAdminService(SqlAlchemyWebAdminUnitOfWorkFactory(sessions), csrf_secret=b"c" * 32)
+    credentials = web.login(web.begin_login(), web.issue_invitation(admin).bearer, b"r" * 32)
+    origin = "https://admin.test"
+    app = FastAPI()
+    app.include_router(
+        create_admin_web_router(
+            web=web,
+            views=SqlAlchemyAdminViewService(sessions),
+            commands=AdminCommandService(SqlAlchemyAdminCommandRepository(sessions)),
+            sona_collection=SonaCollectionService(sessions),
+            renderer=AdminTemplateRenderer(),
+            origin=origin,
+            source_secret=b"s" * 32,
+        )
+    )
+    path = "/admin/sona-collection"
+    with TestClient(app, base_url=origin, follow_redirects=False) as client:
+        assert client.get(path).status_code == 303
+        client.cookies.set(
+            WebCookieProfile.for_origin(origin).session_name, credentials.bearer.decode()
+        )
+        assert path in client.get("/admin/server").text
+
+        def form(action: str) -> dict[str, str]:
+            page = client.get(path + "?lang=en")
+            assert page.status_code == 200
+            found = re.search(f'action="{path}/{action}[^"]*">(.*?)</form>', page.text, re.S)
+            assert found is not None
+            return dict(re.findall(r'type="hidden" name="([^"]+)" value="([^"]+)"', found[1]))
+
+        headers = {"Origin": origin}
+        schedule = SonaCollectionService(sessions).get(credentials.actor)
+        page = client.get(path + "?lang=ru")
+        assert page.status_code == 200
+        assert "Сбор идёт" in page.text and "Без даты окончания" in page.text  # noqa: RUF001
+        assert f'datetime="{schedule.starts_at.astimezone(UTC).isoformat()}"' in page.text
+        moscow = timezone(timedelta(hours=3))
+        moscow_start = schedule.starts_at.astimezone(moscow).replace(tzinfo=None)
+        assert f'value="{moscow_start.isoformat(timespec="milliseconds")}"' in page.text
+        assert 'name="clock" value="UTC+03:00"' in page.text
+        assert schedule.ends_at is None
+        assert "Collection is active" in client.get(path + "?lang=en").text
+        assert policy.sona_variation_skips(pair.actor)["remaining_ms"] == 15_000
+        stale = form("save") | {"starts_at": "", "ends_at": ""}
+        stop = form("stop")
+        for bad_headers, bad_form in (
+            ({"Origin": "https://other.test"}, stop),
+            (headers, stop | {"csrf_token": "bad"}),
+        ):
+            assert (
+                client.post(path + "/stop", headers=bad_headers, data=bad_form).status_code == 403
+            )
+        for _ in range(2):
+            assert client.post(path + "/stop", headers=headers, data=stop).status_code == 303
+        with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+            service(pair).sona_variation_skips(pair.actor)
+        assert client.post(path + "/save", headers=headers, data=stale).status_code == 409
+        assert SonaCollectionService(sessions).get(credentials.actor).state == "stopped"
+
+        dates = form("save")
+        bad = dates | {"starts_at": "2030-01-02T12:00", "ends_at": "2030-01-01T12:00"}
+        invalid = client.post(path + "/save", headers=headers, data=bad)
+        assert invalid.status_code == 422 and bad["ends_at"] in invalid.text
+        tomorrow = datetime.now(UTC).date() + timedelta(days=1)
+        future = dates | {"starts_at": f"{tomorrow}T12:00", "ends_at": f"{tomorrow}T13:30"}
+        assert client.post(path + "/save", headers=headers, data=future).status_code == 303
+        scheduled = SonaCollectionService(sessions).get(credentials.actor)
+        assert scheduled.starts_at.hour == 9
+        assert scheduled.ends_at is not None and scheduled.ends_at.hour == 10
+        assert scheduled.state == "scheduled"
+        with pytest.raises(TrainingConsentError, match="sona_collection_unavailable"):
+            policy.sona_variation_skips(pair.actor)
+        assert client.post(path + "/stop", headers=headers, data=form("stop")).status_code == 303
+
+        restart = form("save") | {"starts_at": "2020-01-01T00:00", "ends_at": ""}
+        before = datetime.now(UTC)
+        assert client.post(path + "/save", headers=headers, data=restart).status_code == 303
+        reopened = SonaCollectionService(sessions).get(credentials.actor)
+        assert reopened.state == "active" and reopened.starts_at >= before - timedelta(seconds=1)
+        assert service(pair).sona_variation_skips(pair.actor)["remaining_ms"] == 15_000
+        with sessions.begin() as session:
+            session.execute(
+                text("UPDATE ml.sona_collection_window SET ends_at='9999-12-31 23:59:59+00'")
+            )
+        assert form("save")["clock"] == "UTC"
 
 
 def test_default_private_decision_replay_does_not_restore_old_grant(pair: PairingHarness) -> None:

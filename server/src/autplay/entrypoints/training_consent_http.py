@@ -81,7 +81,9 @@ def create_training_consent_router(
         try:
             return action()
         except TrainingConsentError as error:
-            status = 401 if error.code == "auth_attention_required" else 409
+            status = {"auth_attention_required": 401, "sona_collection_unavailable": 404}.get(
+                error.code, 409
+            )
             raise ApiError(error.code, "Consent operation unavailable.", status) from error
         except TrainingConsentEvidenceError as error:
             raise ApiError(
@@ -99,6 +101,11 @@ def create_training_consent_router(
     def get(request: Request) -> object:
         selected = available()
         return call(lambda: selected.get(principal(request)))
+
+    @router.get("/sona-variation-skips")
+    def sona_variation_skips(request: Request) -> object:
+        selected = available()
+        return call(lambda: selected.sona_variation_skips(principal(request)))
 
     @router.put("")
     async def decide(request: Request) -> object:

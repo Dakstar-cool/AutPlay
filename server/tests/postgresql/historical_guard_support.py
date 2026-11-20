@@ -21,7 +21,7 @@ REV39: Final = "0039_internet_ingest_lineage"
 REV40: Final = "0040_provider_staging"
 REV41: Final = "0041_provider_scratch"
 REV42: Final = "0042_provider_maintenance"
-CURRENT_HEAD: Final = "0074_device_deletion_v2"
+CURRENT_HEAD: Final = "0075_sona_collection_window"
 PAYLOAD = b"historical-provider-source-bytes-v1"
 HistoricalRevision = Literal[
     "0039_internet_ingest_lineage",

@@ -176,7 +176,11 @@ from .sync import (
     UserInteractionEventRow,
 )
 from .track_metadata import MetadataArtworkRow, TrackMetadataRevisionRow, TrackMetadataRow
-from .training_consent import TrainingConsentOperationRow, TrainingConsentRow
+from .training_consent import (
+    SonaCollectionWindowRow,
+    TrainingConsentOperationRow,
+    TrainingConsentRow,
+)
 from .training_work import (
     TrainingCheckpointRow,
     TrainingCleanupClaimRow,
@@ -230,6 +234,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     TrainingCleanupClaimRow,
     TrainingCheckpointRow,
     TrainingExecutionRow,
+    SonaCollectionWindowRow,
     TrainingConsentRow,
     TrainingConsentOperationRow,
     AccountDeletionHoldRow,
@@ -532,6 +537,7 @@ __all__ = (
     "SmartPlaylistRuleRow",
     "SocialOperationReceiptRow",
     "SocialRateWindowRow",
+    "SonaCollectionWindowRow",
     "SonaNativeCaptureRow",
     "SourceAuthorizationRow",
     "SourceObservationRow",

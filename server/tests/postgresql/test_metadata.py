@@ -24,9 +24,9 @@ from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 def test_complete_table_and_column_inventory() -> None:
     """Every reference table and column is present exactly once."""
     assert set(metadata.tables) == set(EXPECTED_TABLE_KEYS)
-    assert len(metadata.tables) == 182
+    assert len(metadata.tables) == 183
     assert sum(len(table.columns) for table in metadata.tables.values()) == EXPECTED_COLUMN_COUNT
-    assert EXPECTED_COLUMN_COUNT == 2098
+    assert EXPECTED_COLUMN_COUNT == 2103
     assert {
         key: len(table.columns) for key, table in metadata.tables.items()
     } == EXPECTED_TABLE_COLUMN_COUNTS
@@ -36,7 +36,7 @@ def test_complete_table_and_column_inventory() -> None:
 def test_all_rows_are_typed_mappers_without_relationship_behavior() -> None:
     """Mappings are storage rows, not a second domain model."""
     configure_mappers()
-    assert len(MAPPED_ROWS) == 182
+    assert len(MAPPED_ROWS) == 183
     assert {str(row.__table__) for row in MAPPED_ROWS} == set(EXPECTED_TABLE_KEYS)
     assert all(not list(sa_inspect(row).relationships) for row in MAPPED_ROWS)
 
@@ -119,6 +119,4 @@ def test_complete_mapping_definition_fingerprint() -> None:
     )
     fingerprint = hashlib.sha256("\n".join(statements).encode()).hexdigest()
 
-    # The combined Sona/0074 definition passed live Alembic zero-drift and head/base/head
-    # schema restoration gates before this fixed fingerprint was recorded.
-    assert fingerprint == "ac7eeb91dfe939897d4bca7c7f479899baed851140ab38fd480cda4a43239e7e"
+    assert fingerprint == "7ae6cdd5e1fe928561ad4bdaa3f91a83e3a8bdb69ce936c67c7fe4f894b98b22"

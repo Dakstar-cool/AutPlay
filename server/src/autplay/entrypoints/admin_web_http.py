@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Protocol
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
+from autplay.application.sona_collection import SonaCollectionService
 from autplay.application.web_admin import LoginChallenge
 from autplay.domain.admin_commands import AdminCommand
 from autplay.domain.admin_views import (
@@ -241,6 +242,7 @@ def create_admin_web_router(
     discovery_enabled: bool = False,
     acquisition_enabled: bool = False,
     discovery_automation_enabled: bool = False,
+    sona_collection: SonaCollectionService | None = None,
     device_admission: DeviceAdmissionWebHttp | None = None,
     passkeys_enabled: bool = False,
 ) -> APIRouter:
@@ -643,6 +645,138 @@ def create_admin_web_router(
             value = apply_admin_security_headers(RedirectResponse("/admin/login", status_code=303))
             cookies.clear_session(value)
             return value
+
+    schedule_zone = timezone(timedelta(hours=3))
+
+    def form_datetime(raw: str, zone: timezone) -> datetime | None:
+        if not raw:
+            return None
+        if len(raw) > 26 or raw[10:11] != "T":
+            raise ValueError("invalid local date")
+        value = datetime.fromisoformat(raw)
+        if value.tzinfo is not None:
+            raise ValueError("expected local time")
+        return value.replace(tzinfo=zone).astimezone(UTC)
+
+    def sona_page(
+        request: Request,
+        authenticated: AuthenticatedWebSession,
+        notice: str = "",
+        status: int = 200,
+        draft: Mapping[str, str] | None = None,
+    ) -> Response:
+        if sona_collection is None:
+            return admission_unavailable()
+        try:
+            window = sona_collection.get(authenticated.actor)
+        except WebAdminError, ValueError:
+            return error("forbidden", 403)
+
+        # A legacy end in the last three hours of year 9999 is only representable in UTC.
+        local_limit = datetime.max.replace(tzinfo=UTC) - timedelta(hours=3)
+        zone = (
+            UTC
+            if any(
+                date is not None and date > local_limit
+                for date in (window.starts_at, window.ends_at)
+            )
+            else schedule_zone
+        )
+
+        def field(name: str, value: datetime | None) -> str:
+            if draft is not None:
+                return draft.get(name, "")
+            if value is None or window.state not in {"active", "scheduled"}:
+                return ""
+            return value.astimezone(zone).replace(tzinfo=None).isoformat(timespec="milliseconds")
+
+        value = response(
+            render(
+                "sona_collection.html",
+                request,
+                authenticated=True,
+                navigation=admin_navigation("sona-collection"),
+                window=window,
+                field=field,
+                clock_label="UTC" if zone == UTC else "UTC+03:00",
+                notice=notice,
+                csrf_token=encode_request_integrity_token(authenticated.csrf),
+                save_id=str(uuid4()),
+                stop_id=str(uuid4()),
+            ),
+            status,
+        )
+        if authenticated.rotated_bearer is not None:
+            cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
+        return value
+
+    @router.get("/sona-collection")
+    def sona_collection_page(request: Request) -> Response:
+        authenticated = admission_safe_get(request)
+        if isinstance(authenticated, Response):
+            return authenticated
+        return sona_page(request, authenticated)
+
+    @router.post("/sona-collection/{action}")
+    async def update_sona_collection(action: str, request: Request) -> Response:
+        if sona_collection is None or action not in {"save", "stop"}:
+            return admission_unavailable()
+        fields = {"csrf_token", "operation_id", "revision"}
+        if action == "save":
+            fields.update(("starts_at", "ends_at", "clock"))
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset(fields),
+            )
+            operation_id = UUID(form["operation_id"])
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor,
+                decode_request_integrity_token(form["csrf_token"]),
+                operation_id,
+            )
+        except ValueError, WebAdminError:
+            return error("admin_command_unavailable", 403)
+        try:
+            zone = {"UTC": UTC, "UTC+03:00": schedule_zone}[form.get("clock", "UTC+03:00")]
+            start = form_datetime(form.get("starts_at", ""), zone)
+            end = form_datetime(form.get("ends_at", ""), zone)
+            revision = int(form["revision"])
+        except KeyError, ValueError, OverflowError:
+            return sona_page(request, authenticated, "sona_schedule_invalid", 422, draft=form)
+        try:
+            sona_collection.change(
+                authenticated.actor,
+                operation_id,
+                canonical_form_request_hash("POST", request.url.path, form),
+                revision,
+                stop=action == "stop",
+                starts_at=start,
+                ends_at=end,
+            )
+        except WebAdminError as exc:
+            if exc.code in {"sona_schedule_conflict", "sona_schedule_invalid"}:
+                return sona_page(
+                    request,
+                    authenticated,
+                    exc.code,
+                    409 if exc.code == "sona_schedule_conflict" else 422,
+                    draft=form if exc.code == "sona_schedule_invalid" else None,
+                )
+            return error("forbidden", 403)
+        except ValueError:
+            return error("forbidden", 403)
+        locale = resolve_locale(
+            request.query_params.get("lang"), request.headers.get("accept-language")
+        )
+        return apply_admin_security_headers(
+            RedirectResponse(f"/admin/sona-collection?lang={locale}", status_code=303)
+        )
 
     @router.get("/connection-requests")
     def connection_requests(request: Request) -> Response:

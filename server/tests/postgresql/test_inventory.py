@@ -500,6 +500,7 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_TABLES
         | PA2_TABLES
         | R1B_TABLES
+        | {("ml", "sona_collection_window")}
         | POST_0030_TABLES
         | PORTABLE_TABLES
         | NATIVE_CAPTURE_TABLES

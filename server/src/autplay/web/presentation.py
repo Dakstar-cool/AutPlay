@@ -47,6 +47,7 @@ _NAVIGATION: Final = (
     ("/admin/trusted-devices", "nav_trusted_devices", "trusted-devices"),
     ("/admin/passkeys", "nav_passkeys", "passkeys"),
     ("/admin/quotas", "nav_quotas", "quotas"),
+    ("/admin/sona-collection", "nav_sona_collection", "sona-collection"),
     ("/admin/vault", "nav_vault", "vault"),
     ("/admin/jobs", "nav_jobs", "jobs"),
     ("/admin/review", "nav_review", "review"),
@@ -76,7 +77,7 @@ _SECTIONS: Final = (
         ),
     ),
     ("music", "nav_music", ("jobs", "review", "discovery", "discovery-automation", "acquisition")),
-    ("server", "nav_server", ("quotas", "vault", "recovery", "audit")),
+    ("server", "nav_server", ("quotas", "vault", "sona-collection", "recovery", "audit")),
 )
 
 

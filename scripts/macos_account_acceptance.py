@@ -408,7 +408,7 @@ def validate_live_target(raw: bytes, now: datetime) -> dict:
             raise ValueError("source")
         if not re.fullmatch("sha256:[0-9a-f]{64}", target["server_image"]):
             raise ValueError("image")
-        if target["schema_head"] != "0074_device_deletion_v2":
+        if target["schema_head"] != "0075_sona_collection_window":
             raise ValueError("schema")
         for key in ("deployment_receipt_sha256", "backup_restore_receipt_sha256"):
             if not re.fullmatch("[0-9a-f]{64}", target[key]):
