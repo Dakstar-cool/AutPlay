@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -95,6 +96,7 @@ public fun HomePlaybackHero(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = {},
     onNext: () -> Unit = {},
+    secondaryAction: @Composable () -> Unit = {},
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
@@ -117,11 +119,18 @@ public fun HomePlaybackHero(
         Column(
             modifier = Modifier
                 .background(Brush.verticalGradient(listOf(palette[0].copy(alpha = 0.10f), Color.Transparent)))
-                .padding(start = 24.dp, top = topChromePadding + 12.dp, end = 24.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+                .padding(start = 24.dp, top = topChromePadding + 8.dp, end = 24.dp, bottom = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            HomeHeroHeader(localMode, togetherLabel, onOpenListenTogether)
+            val heading = stringResource(when {
+                state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
+                state.isPlaying -> R.string.home_hero_playing
+                state.hasActivePlayback -> R.string.home_hero_ready
+                localMode -> R.string.library_local_mode
+                else -> R.string.home_hero_personal_flow
+            })
+            HomeHeroHeader(heading, togetherLabel, onOpenListenTogether)
             HomeArtworkCarousel(
                 trackId = state.trackId,
                 title = title,
@@ -182,30 +191,82 @@ public fun HomePlaybackHero(
                     onClick = { state.trackId?.let(onLike) },
                 )
             }
-            Text(
-                stringResource(when {
-                    state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
-                    state.isPlaying -> R.string.home_hero_playing
-                    hasPlaybackTarget -> R.string.home_hero_ready
-                    else -> R.string.home_hero_empty
-                }),
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                color = if (state.isPlaying) colors.primary else colors.onSurfaceVariant,
-            )
+            secondaryAction()
         }
     }
 }
 
 
 @Composable
-private fun HomeHeroHeader(localMode: Boolean, togetherLabel: String, onOpen: () -> Unit) {
+internal fun HomeWaveStartHero(
+    localMode: Boolean,
+    enabled: Boolean,
+    onStart: () -> Unit,
+    onOpenListenTogether: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HomeHeroHeader(
+            stringResource(if (localMode) R.string.library_local_mode else R.string.home_hero_personal_flow),
+            stringResource(R.string.nav_wave_rooms),
+            onOpenListenTogether,
+        )
+        Surface(
+            onClick = onStart,
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().testTag("home-my-wave"),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = colors.surfaceContainerHigh,
+        ) {
+            Row(
+                Modifier.background(Brush.horizontalGradient(listOf(colors.primaryContainer, colors.surfaceContainerHigh)))
+                    .padding(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = if (enabled) colors.primary else colors.surfaceVariant,
+                ) {
+                    Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                        AutPlayPlatformIcon(AutPlayIcon.Play, null, Modifier.size(26.dp),
+                            if (enabled) colors.onPrimary else colors.onSurfaceVariant)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.home_my_wave_start), style = MaterialTheme.typography.titleLarge,
+                        color = colors.onSurface)
+                    Text(stringResource(if (enabled) R.string.home_my_wave_description else R.string.home_my_wave_locked),
+                        style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun HomeWaveShortcut(enabled: Boolean, onStart: () -> Unit) {
+    TextButton(onClick = onStart, enabled = enabled, modifier = Modifier.testTag("home-my-wave")) {
+        Text(stringResource(R.string.home_my_wave_start))
+    }
+    if (!enabled) {
+        Text(stringResource(R.string.home_my_wave_locked), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun HomeHeroHeader(label: String, togetherLabel: String, onOpen: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val fontScale = LocalDensity.current.fontScale
     Box(Modifier.fillMaxWidth()) {
         val heading: @Composable (Modifier) -> Unit = { modifier ->
             Text(
-                stringResource(if (localMode) R.string.library_local_mode else R.string.home_hero_personal_flow),
+                label,
                 modifier = modifier.testTag("home-hero-heading"),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.onSurfaceVariant,

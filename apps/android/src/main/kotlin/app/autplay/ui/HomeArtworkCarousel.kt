@@ -54,7 +54,7 @@ internal fun HomeArtworkCarousel(
     val openLabel = stringResource(R.string.home_hero_open_player)
     val unknownTitle = stringResource(R.string.player_nothing_playing)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val artworkSize = (maxWidth * 0.84f).coerceIn(160.dp, 320.dp)
+        val artworkSize = (maxWidth * 0.62f).coerceAtMost(208.dp)
         val widthPixels = with(LocalDensity.current) { maxWidth.toPx() }
         SideEffect { motion.width = widthPixels }
         Box(

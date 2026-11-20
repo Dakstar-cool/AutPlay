@@ -1,5 +1,9 @@
 package app.autplay
 
+import android.content.ContentValues
+import android.net.Uri
+import android.provider.MediaStore
+import androidx.test.filters.SdkSuppress
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
@@ -10,6 +14,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -36,6 +43,13 @@ import app.autplay.data.local.entity.RecordingProjectionEntity
 import app.autplay.data.local.entity.LibraryEntryEntity
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.data.settings.applicationNonSecretSettingsStore
+import app.autplay.application.importing.ContentUriInspector
+import app.autplay.application.library.LibraryVerticalSliceRepository
+import app.autplay.domain.LocalId
+import app.autplay.playback.PlaybackCommand
+import app.autplay.playback.PlaybackRuntimeState
+import app.autplay.playback.ServicePlaybackSessionOwner
+import app.autplay.ui.AppLanguage
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
@@ -53,6 +67,7 @@ class OfflineLibraryScreenTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private var scenario: ActivityScenario<MainActivity>? = null
+    private var waveSample: Uri? = null
 
     @Before
     fun setUp() = runBlocking {
@@ -72,7 +87,12 @@ class OfflineLibraryScreenTest {
 
     @After
     fun tearDown() = runBlocking {
+        if (waveSample != null) {
+            ServicePlaybackSessionOwner(context).dispatch(PlaybackCommand.Stop)
+            composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
+        }
         scenario?.close()
+        waveSample?.let { context.contentResolver.delete(it, null, null) }
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
         applicationNonSecretSettingsStore(context).update(
@@ -81,6 +101,72 @@ class OfflineLibraryScreenTest {
                 pendingPublicId = "activity_fixture",
             ),
         )
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 29)
+    fun homeStartsLocalWaveAndContinuesSameQueueAfterPause() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val trackId = LocalId.random()
+        val resolver = context.contentResolver
+        val metadata = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, "autplay-test-${trackId.value}.wav")
+            put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+            put(MediaStore.Audio.Media.IS_PENDING, 1)
+        }
+        val audio = requireNotNull(resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, metadata))
+        waveSample = audio
+        val fixture = Uri.parse("content://${instrumentation.context.packageName}.readable/audio/process-home")
+        requireNotNull(resolver.openInputStream(fixture)).use { input ->
+            requireNotNull(resolver.openOutputStream(audio)).use { output -> input.copyTo(output) }
+        }
+        resolver.update(audio, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
+        val language = AppLanguage.Russian
+        val strings = localizedAppContext(context, language)
+        runBlocking {
+            applicationNonSecretSettingsStore(context).update(NonSecretSettings(
+                appLanguage = language.storedValue, onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "activity_fixture",
+            ))
+            LibraryVerticalSliceRepository(AutPlayRuntime.database(context)).importUri(
+                binding = null, trackRefId = trackId, libraryEntryId = LocalId.random(),
+                audioStateId = LocalId.random(), changeId = LocalId.random(),
+                title = "First Light", artist = "AutPlay",
+                inspection = ContentUriInspector(resolver).inspect(audio.toString()),
+                persistedPermission = false, now = System.currentTimeMillis(),
+            )
+        }
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        val start = hasTestTag("home-my-wave") and isEnabled()
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(start).fetchSemanticsNodes().isNotEmpty() }
+        saveHomeScreenshot("home-wave-idle")
+        composeRule.onNode(start).assertIsDisplayed().performClick()
+        composeRule.waitUntil(20_000) { PlaybackRuntimeState.state.value.isPlaying }
+        val queueId = requireNotNull(PlaybackRuntimeState.state.value.queueSnapshotId)
+        val hero = hasAnyAncestor(hasTestTag("home-playback-hero"))
+        val currentTrack = hasText("First Light") and hero
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(currentTrack).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNode(currentTrack).assertIsDisplayed()
+        val pause = hasContentDescription(strings.getString(R.string.action_pause)) and hero
+        saveHomeScreenshot("home-wave-playing")
+        composeRule.onNode(pause).performScrollTo().performClick()
+        composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
+        val resume = hasText(strings.getString(R.string.home_continue_action))
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(resume)
+        saveHomeScreenshot("home-wave-continue")
+        composeRule.onNode(resume).performClick()
+        composeRule.waitUntil(10_000) { PlaybackRuntimeState.state.value.isPlaying }
+        composeRule.onNodeWithTag("now-playing-panel").assertIsDisplayed()
+        org.junit.Assert.assertEquals(queueId, PlaybackRuntimeState.state.value.queueSnapshotId)
+        org.junit.Assert.assertEquals(trackId.value, PlaybackRuntimeState.state.value.localUserTrackRefId)
+    }
+
+    private fun saveHomeScreenshot(name: String) {
+        if (InstrumentationRegistry.getArguments().getString("captureHome") != "true") return
+        val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        java.io.File(context.cacheDir, "$name.png").outputStream().use {
+            check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
+        image.recycle()
     }
 
     @Test

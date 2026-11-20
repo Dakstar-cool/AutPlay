@@ -98,6 +98,7 @@ import app.autplay.application.history.HistoryRepository
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatusRepository
 import app.autplay.application.download.DownloadIntentRepository
+import app.autplay.application.playback.ActiveQueueContext
 import app.autplay.application.playback.ActiveQueueContextRepository
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
@@ -213,6 +214,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import app.autplay.application.portableaccount.hasPortableAccountPendingEnrollment
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -1684,6 +1686,21 @@ private fun OfflineLibraryScreen(
         dislikeRecommendation = { coreCommandActions.recordHomeFeedback(it, "DISLIKED") },
         retryHome = { homeRetryNonce = !homeRetryNonce },
         resumeHomeQueue = ::resumeHomeQueue,
+        continueHomeQueue = {
+            val saved = homeActiveQueue
+            val active = playerState.context as? ActiveQueueContext.Loaded
+            if (saved != null && saved.queueSnapshotId == active?.snapshotId && myWaveAllowed()) {
+                if (playerState.mediaId != null && playbackState.queueSnapshotId == saved.queueSnapshotId) {
+                    playerAdapter.resumeIfPaused(saved.queueSnapshotId)
+                } else {
+                    myWaveScope.launch {
+                        runCatching { playbackOwner.dispatch(PlaybackCommand.StartQueue(LocalId(saved.queueSnapshotId))) }
+                            .onFailure { if (it is CancellationException) throw it else stableError = "PLAYBACK_UNAVAILABLE" }
+                    }
+                }
+            }
+            navigation.navigate(UiDestination.NowPlaying)
+        },
         startMyWave = coreCommandActions.startMyWave,
         myWaveAllowed = myWaveAllowed(),
         openHomePlaylist = ::openHomePlaylist,

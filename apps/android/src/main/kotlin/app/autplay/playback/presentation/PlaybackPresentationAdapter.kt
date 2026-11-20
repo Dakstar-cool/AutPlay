@@ -124,6 +124,17 @@ class PlaybackPresentationAdapter(
         publishFromController()
     }
 
+    fun resumeIfPaused(snapshotId: String) {
+        val current = controller ?: return
+        val context = queueContextRepository.context.value as? ActiveQueueContext.Loaded ?: return
+        if (context.snapshotId == snapshotId && !current.isPlaying &&
+            gateFor(current, context, Player.COMMAND_PLAY_PAUSE) is PlaybackControlGate.Allowed
+        ) {
+            current.play()
+            publishFromController()
+        }
+    }
+
     /** No Wave failure/rejection path can fall through to a local Media3 action. */
     fun togglePlayPause() {
         val current = controller ?: return

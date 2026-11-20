@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_my_wave_description">Включить подборку из вашей музыки.</string>
+    <string name="home_my_wave_start">Включить мою волну</string>
+    <string name="home_my_wave_description">Подборка из вашей медиатеки</string>
     <string name="home_my_wave_locked">Дождитесь готовности плеера или выйдите из совместного прослушивания.</string>
     <string name="home_my_wave_empty">Сейчас нет доступной музыки. Добавьте локальный трек, скачайте музыку или подключитесь к серверу.</string>
     <string name="home_my_wave_syncing">Библиотека синхронизируется. Попробуйте запустить воспроизведение, когда появятся первые треки.</string>
