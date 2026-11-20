@@ -16,7 +16,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -120,9 +119,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
         player = ExoPlayer.Builder(this, PlaybackRenderersFactory(this, audioPreferences))
             .setMediaSourceFactory(PlaybackMediaSourceFactory.create(this, ::onSourceTimeline))
-            .setLoadControl(DefaultLoadControl.Builder()
-                .setBufferDurationsMs(15_000, 50_000, 1_000, 2_000)
-                .build())
+            .setLoadControl(PlaybackTransitions.loadControl())
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)

@@ -58,7 +58,10 @@ class PlaybackGaplessTest {
                     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink =
                         PlaybackAudioSink.create(context, preferences, recording)
                 }
-                player.set(ExoPlayer.Builder(context, renderers).setMediaSourceFactory(PlaybackMediaSourceFactory.create(context)).build().also {
+                val builder = ExoPlayer.Builder(context, renderers)
+                    .setMediaSourceFactory(PlaybackMediaSourceFactory.create(context))
+                    .setLoadControl(PlaybackTransitions.loadControl())
+                player.set(builder.build().also {
                     it.volume = 0f
                     it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(PlaybackTransitions.preloadDurationUs(true)))
                     it.addListener(object : Player.Listener {
@@ -117,9 +120,12 @@ class PlaybackGaplessTest {
                         return PlaybackAudioSink.create(context, PlaybackAudioPreferences(), recording)
                     }
                 }
-                player.set(ExoPlayer.Builder(context, renderers).setMediaSourceFactory(PlaybackMediaSourceFactory.create(context)).build().also {
+                val builder = ExoPlayer.Builder(context, renderers)
+                    .setMediaSourceFactory(PlaybackMediaSourceFactory.create(context))
+                    .setLoadControl(PlaybackTransitions.loadControl())
+                player.set(builder.build().also {
                     it.volume = 0f
-                    it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(8_000_000))
+                    it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(PlaybackTransitions.preloadDurationUs(true)))
                     it.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(state: Int) {
                             if (state == Player.STATE_BUFFERING && readyOnce) rebuffers++

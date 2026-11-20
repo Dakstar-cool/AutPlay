@@ -707,7 +707,10 @@ public fun LibraryProductScreen(
             LibraryShortcutGrid(onSectionChange, onFilterChange, onOpenDownloads)
         }
         item(key = "library:sections") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(
+                modifier = Modifier.testTag("library-sections"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 items(listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists, LibrarySection.Review)) { section ->
                     AutPlayChip(
                         text = librarySectionLabel(section),

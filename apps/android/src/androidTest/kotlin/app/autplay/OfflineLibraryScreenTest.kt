@@ -8,9 +8,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
@@ -214,13 +212,14 @@ class OfflineLibraryScreenTest {
         database.close()
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        val settingsLabel = context.getString(R.string.action_open_settings)
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithContentDescription(settingsLabel).fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithContentDescription(settingsLabel).performClick()
-        composeRule.onNodeWithText(context.getString(R.string.settings_music_navigation)).performScrollTo().performClick()
-        composeRule.onNodeWithText(context.getString(R.string.nav_import_review)).performScrollTo().performClick()
+        openLibrary()
+        scrollLibraryTo(hasTestTag("library-sections"))
+        val reviewTab = hasText(context.getString(R.string.library_section_review)) and hasClickAction()
+        composeRule.onNodeWithTag("library-sections").performScrollToNode(reviewTab)
+        composeRule.onNode(reviewTab).performClick()
+        val openReview = hasText(context.getString(R.string.nav_import_review)) and hasClickAction()
+        scrollLibraryTo(openReview)
+        composeRule.onNode(openReview).performClick()
         val importSummary = context.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(importSummary).fetchSemanticsNodes().isNotEmpty()
