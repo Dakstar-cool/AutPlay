@@ -41,7 +41,6 @@
     <string name="home_hero_playing">Now playing</string>
     <string name="home_hero_ready">Ready to play</string>
     <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
-    <string name="home_hero_empty">Choose a local track to start your flow</string>
     <string name="home_context_collections">Made for the moment</string>
     <string name="home_context_collections_placeholder">Context mixes are coming soon. The categories below are a preview.</string>
     <string name="home_context_energy">High energy</string>
