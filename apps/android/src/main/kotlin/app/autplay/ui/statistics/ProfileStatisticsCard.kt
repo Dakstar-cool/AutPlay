@@ -101,6 +101,29 @@ fun OwnerProfileStatisticsCard(
 }
 
 @Composable
+internal fun SonaVariationSkipSection(counts: List<app.autplay.application.recommendation.VariationSkips>) {
+    RankingSection(stringResource(R.string.variation_skips_title), counts.none { it.plays > 0 },
+        stringResource(R.string.variation_skips_empty)) {
+        Text(stringResource(R.string.variation_skips_note), style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.variation_type), Modifier.weight(1.4f))
+            Text(stringResource(R.string.variation_feed), Modifier.weight(1f))
+            Text(stringResource(R.string.variation_wave), Modifier.weight(1f))
+        }
+        for ((kind, label) in listOf("COVER" to R.string.variation_covers, "REMIX" to R.string.variation_remixes, "LIVE" to R.string.variation_live)) {
+            Row(Modifier.fillMaxWidth()) {
+                Text(stringResource(label), Modifier.weight(1.4f))
+                for (surface in listOf("home", "personal_wave")) {
+                    val count = counts.firstOrNull { it.surface == surface && it.kind == kind }
+                    Text(if (count == null || count.plays == 0L) "—" else stringResource(R.string.variation_skips_count, count.skips, count.plays),
+                        Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RankingSection(title: String, empty: Boolean, emptyText: String, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })

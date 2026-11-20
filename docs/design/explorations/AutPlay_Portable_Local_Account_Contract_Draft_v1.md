@@ -25,8 +25,9 @@ and AES-256-GCM (nonce12, account/login/key/purpose AAD). The server receives an
 and canonical root proofs; it never receives the password or plaintext recovery code. Recovery uses
 a separate random 256-bit code. Password and recovery material stay in encrypted credential storage
 or transient secure-window UI, never ordinary DataStore, Room, WorkManager input, saved UI state,
-normal logs or owner data exports. Passwords accept 15..128 Unicode code points; trivial repeated
-values are rejected. Parsers reject unknown/duplicate fields and unsupported KDF parameters.
+normal logs or owner data exports. New or reset passwords accept 7..128 Unicode code points and require at least one Unicode
+punctuation or symbol character (whitespace does not count); trivial repeated values are rejected.
+Unlocking existing accounts does not apply the new composition rule, so older passphrases remain valid. Parsers reject unknown/duplicate fields and unsupported KDF parameters.
 
 Device keys, sessions and the pinned server identity remain separate authorities. Server attachment
 must not manufacture another personal identity. An imported root does not adopt unknown local data:

@@ -105,15 +105,16 @@ internal fun LegacySecondaryRouteRenderer(
     actions: LegacySecondaryRouteActions,
     contentPadding: PaddingValues,
 ) {
+    val scroll = androidx.compose.runtime.key(state.destination.route) { rememberScrollState() }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(contentPadding)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (state.destination !in listOf(UiDestination.Profile, UiDestination.Settings, UiDestination.PrivacyAndData)) {
+        if (state.destination != UiDestination.Profile && !state.destination.isSettingsDestination) {
             Text(text = stringResource(state.destination.labelRes), style = MaterialTheme.typography.headlineSmall)
         }
         when (state.view) {
@@ -191,7 +192,10 @@ internal fun LegacySecondaryRouteRenderer(
                 actions = actions.serverFeatures,
             )
             "Profile" -> UserProfileScreen(state, actions)
+            "SettingsAccount" -> ProfileFrontendScreen(state.profilePairing, actions.profilePairing, showHero = false)
             "Settings" -> SettingsFrontendScreen(
+                page = state.destination,
+                onChooseAudio = actions.importActions.chooseAudio,
                 settings = state.settings,
                 onUpdate = actions.updateSettings,
                 onAppLanguageChange = actions.changeAppLanguage,

@@ -29,7 +29,7 @@ class AdmissionRuntimeTest {
         assertTrue(runtime.state.value is AdmissionState.Approved)
         runtime.confirmAccount().join()
         assertEquals(0, port.exchangeCalls)
-        assertTrue(runtime.state.value is AdmissionState.Blocked)
+        assertTrue(runtime.state.value is AdmissionState.AccountConflict)
     }
 
     @Test fun sasMatchesTheSharedRfc8785Vector() {

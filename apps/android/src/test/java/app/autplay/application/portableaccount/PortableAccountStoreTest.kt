@@ -17,7 +17,7 @@ class PortableAccountStoreTest {
         val credentials = MemoryCredentials()
         val settings = MemorySettings()
         val store = PortableAccountStore(credentials, settings)
-        val password = "offline rotation fixture phrase".toCharArray()
+        val password = "offline rotation fixture phrase!".toCharArray()
         try {
             val previous = store.create("owner", password)
             assertTrue(store.canRotateOffline())
@@ -59,7 +59,7 @@ class PortableAccountStoreTest {
         val credentials = MemoryCredentials()
         val settings = MemorySettings()
         val store = PortableAccountStore(credentials, settings)
-        val password = "rootless recovery fixture phrase".toCharArray()
+        val password = "rootless recovery fixture phrase!".toCharArray()
         try {
             PortableAccountCrypto.create("owner", password).use { original ->
                 PortableRecoveryFile.create(original.document, original.recoveryCode).use { file ->
@@ -87,7 +87,7 @@ class PortableAccountStoreTest {
     @Test fun encryptedRootRecoversLostMarkersAndPersistsOneConservativeOwnershipCutoff() = runBlocking {
         val credentials = MemoryCredentials()
         val settings = MemorySettings()
-        val password = "local account fixture phrase".toCharArray()
+        val password = "local account fixture phrase!".toCharArray()
         try {
             PortableAccountCrypto.create("owner", password).use { created ->
                 val encoded = SessionCredentialEnvelopeCodec.encode(SessionCredentialEnvelope("portable-account", null, 0,
@@ -111,6 +111,25 @@ class PortableAccountStoreTest {
                 assertTrue(restarted.verify("owner", password))
             }
         } finally { password.fill('\u0000'); credentials.clear(CredentialJournalSlots.portableAccount) }
+    }
+
+    @Test fun emptyLocalRemovalRequiresPasswordAndNeverEnrolledLineage() = runBlocking {
+        val credentials = MemoryCredentials(); val settings = MemorySettings()
+        var cleaned: String? = null
+        val store = PortableAccountStore(credentials, settings) { cleaned = it }
+        val password = "fixture7!".toCharArray()
+        try {
+            val account = store.create("temporary", password)
+            assertTrue(runCatching { store.removeEmptyLocalAccount("temporary", "bad!123".toCharArray()) }.isFailure)
+            assertNull(cleaned)
+            store.removeEmptyLocalAccount("temporary", password)
+            assertEquals(account.accountId, cleaned)
+            assertNull(store.read()); assertNull(settings.settings.value.portableAccountId)
+            assertNull(settings.settings.value.pendingPublicId)
+            store.create("enrolled", password); store.markServerEnrollmentAttempted()
+            assertTrue(runCatching { store.removeEmptyLocalAccount("enrolled", password) }.isFailure)
+            assertNotNull(store.read())
+        } finally { password.fill('\u0000') }
     }
 
     private class MemorySettings : NonSecretSettingsStore {

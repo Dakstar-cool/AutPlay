@@ -1,6 +1,7 @@
 package app.autplay.playback
 
 import app.autplay.application.library.decoded
+import app.autplay.application.library.TrackMetadataRepository
 
 import android.content.Intent
 import androidx.core.net.toUri
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -78,6 +80,7 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var stopAfterQueueEntryId: String? = null
     private var sleepTimerGeneration = 0L
     private var queueGeneration = 0L
+    private var queueRestoreRequest = 0L
     private val resolutionJobs = mutableMapOf<String, Job>()
     private val resolvedQueueEntryIds = mutableSetOf<String>()
     private var queueEntryIndices: Map<String, Int> = emptyMap()
@@ -87,10 +90,11 @@ class AutPlayPlaybackService : MediaSessionService() {
     private val notificationTarget = MutableStateFlow<Pair<String?, String?>>(null to null)
     private var smoothTrackTransitions = false
     private val sourceTimelines = mutableMapOf<String, PlaybackSourceTimeline>()
-    private val cutDurationMs = mutableMapOf<String, Long>()
-    private var preservedHeadEntryId: String? = null
-    private var preservedTailEntryId: String? = null
-    private var applyingTransitionCuts = false
+    private val recovery = PlaybackRecoveryPolicy()
+    private var activePlaybackProfileId: String? = null
+    private val audioPreferences = PlaybackAudioPreferences()
+
+    private var accountSignedOut: Boolean? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -114,7 +118,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                 serverUserTrackRefId,
             )
         }
-        player = ExoPlayer.Builder(this)
+        player = ExoPlayer.Builder(this, PlaybackRenderersFactory(this, audioPreferences))
             .setMediaSourceFactory(PlaybackMediaSourceFactory.create(this, ::onSourceTimeline))
             .setLoadControl(DefaultLoadControl.Builder()
                 .setBufferDurationsMs(15_000, 50_000, 1_000, 2_000)
@@ -127,17 +131,23 @@ class AutPlayPlaybackService : MediaSessionService() {
                 true,
             )
             .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .also {
                 // Media3 schedules one successor only after the current item is buffered.
                 // This is a bounded sample preload, never a full-file download before play.
-                it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(8_000_000L))
+                it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(0))
                 it.addListener(PlayerListener())
             }
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(PlaybackNotification.sessionActivity(this))
             .setMediaButtonPreferences(PlaybackNotification.buttons(this, null, null, false))
-            .setCallback(AutPlaySessionCallback(packageName, ::handleNotificationFeedback))
+            .setCallback(AutPlaySessionCallback(packageName, ::handleNotificationFeedback, canUseAccount = { accountSignedOut == false }) { command ->
+                if (command == Player.COMMAND_STOP || command == Player.COMMAND_PLAY_PAUSE ||
+                    command == Player.COMMAND_SET_MEDIA_ITEM || command == Player.COMMAND_CHANGE_MEDIA_ITEMS ||
+                    command == Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM || command == Player.COMMAND_SEEK_TO_MEDIA_ITEM ||
+                    command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM || command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) recovery.cancel()
+            })
             .build()
         scope.launch {
             notificationTarget.collectLatest { (entryId, id) ->
@@ -159,11 +169,38 @@ class AutPlayPlaybackService : MediaSessionService() {
         scope.launch {
             applicationNonSecretSettingsStore(applicationContext).settings.collectLatest { settings ->
                 stateMutex.withLock {
+                    accountSignedOut = settings.accountSignedOut
+                    if (accountSignedOut == true) { recovery.cancel(); scheduledPlayJob?.cancel(); cancelWaveSynchronization(); player.pause() }
+                    val profileId = settings.activeServerProfileId?.value
+                    if (activePlaybackProfileId != profileId) recovery.cancel()
+                    activePlaybackProfileId = profileId
+                    audioPreferences.value = settings.playbackAudio
                     if (smoothTrackTransitions != settings.smoothTrackTransitions) {
-                        preserveCurrentCutPosition()
                         smoothTrackTransitions = settings.smoothTrackTransitions
-                        updateTransitionCuts()
+                        updatePreloadConfiguration()
                     }
+                }
+            }
+        }
+        scope.launch {
+            val metadataRepository = TrackMetadataRepository(applicationContext)
+            metadataTrack.collectLatest { id ->
+                val item = player.currentMediaItem ?: return@collectLatest
+                val uri = item.localConfiguration?.uri ?: return@collectLatest
+                if (id == null || uri.scheme != AndroidPlaybackSourceResolver.VAULT_SCHEME ||
+                    item.mediaMetadata.extras?.getString("local_user_track_ref_id") != id) return@collectLatest
+                val settings = applicationNonSecretSettingsStore(applicationContext).settings.first()
+                val profile = settings.activeServerProfileId ?: return@collectLatest
+                if (settings.accountSignedOut || profile.value != uri.authority) return@collectLatest
+                val binding = ClientEventBinding(settings.activeUserId ?: return@collectLatest,
+                    settings.deviceId ?: return@collectLatest, profile)
+                try {
+                    val api = AutPlayRuntime.serverFeatures(applicationContext, binding)
+                    metadataRepository.loadForPlayback(profile.value, id, api::trackMetadata, api::metadataArtwork)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    // Optional description fetch. Room observation and durable sync stay active.
                 }
             }
         }
@@ -173,6 +210,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                 val ref = withContext(Dispatchers.IO) { database.libraryDao().trackRef(id) } ?: return@collectLatest
                 combine(database.trackMetadataDao().observe(ref.serverProfileId, id),
                     database.trackMetadataDao().observeArtwork(ref.serverProfileId, id)) { metadata, art -> metadata to art }
+                    .distinctUntilChanged()
                     .collectLatest { (metadata, art) ->
                         val description = metadata?.decoded()
                         val bytes = withContext(Dispatchers.IO) { readArtwork(art?.filePath) }
@@ -191,6 +229,40 @@ class AutPlayPlaybackService : MediaSessionService() {
                             }
                         }
                     }
+            }
+        }
+        scope.launch {
+            val connectivity = getSystemService(android.net.ConnectivityManager::class.java)
+            var lastPosition = -1L
+            while (isActive) {
+                delay(1_000)
+                stateMutex.withLock {
+                    val position = sourcePositionMs()
+                    val ticket = recovery.tick(
+                        recoveryOwner(), SystemClock.elapsedRealtime(), position,
+                        player.playWhenReady, player.playbackState == Player.STATE_BUFFERING,
+                        player.isPlaying && position > lastPosition, connectivity.activeNetwork != null,
+                    )
+                    lastPosition = position
+                    if (recovery.takeExhaustion()) {
+                        player.pause()
+                        player.stop()
+                        publishRuntimeState(unavailableReason = "NETWORK_RECOVERY_EXHAUSTED")
+                    }
+                    if (ticket != null) {
+                        // Re-read after suspension: profile switches and queued commands revoke ownership.
+                        if (ticket.owner == recoveryOwner() && recovery.owns(ticket) && player.playWhenReady) {
+                            logicalSession?.let { checkpointCurrent(it, ticket.positionMs) }
+                            val settings = applicationNonSecretSettingsStore(applicationContext).settings.first()
+                            if (ticket.owner == recoveryOwner() && recovery.owns(ticket) && player.playWhenReady &&
+                                settings.activeServerProfileId?.value == ticket.owner.profileId) {
+                                // stop/prepare retain the current period and position without a synthetic seek.
+                                player.stop()
+                                player.prepare()
+                            }
+                        } else recovery.cancel()
+                    }
+                }
             }
         }
         scope.launch {
@@ -266,6 +338,16 @@ class AutPlayPlaybackService : MediaSessionService() {
         ) {
             return START_NOT_STICKY
         }
+        if (accountSignedOut == true && intent?.action in APP_COMMAND_ACTIONS && intent?.action !in setOf(ACTION_PAUSE, ACTION_STOP)) return START_NOT_STICKY
+        if (accountSignedOut == null && intent?.action in APP_COMMAND_ACTIONS) {
+            scope.launch {
+                accountSignedOut = applicationNonSecretSettingsStore(applicationContext).settings.first().accountSignedOut
+                onStartCommand(intent, flags, startId)
+            }
+            return START_NOT_STICKY
+        }
+        // Revoke before asynchronous Room work can wait behind a recovery checkpoint.
+        if (intent?.action in setOf(ACTION_START_QUEUE, ACTION_PREPARE_QUEUE, ACTION_REFRESH_QUEUE)) recovery.cancel()
         when (intent?.action) {
             ACTION_START_QUEUE -> scope.launch {
                 val requested = intent.getStringExtra(EXTRA_QUEUE_SNAPSHOT_ID)
@@ -286,7 +368,11 @@ class AutPlayPlaybackService : MediaSessionService() {
                 resume = true,
             )
             ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
-            ACTION_RESUME -> player.play()
+            ACTION_RESUME -> {
+                recovery.cancel()
+                settleCurrentSource(allowRetry = true)
+                player.play()
+            }
             ACTION_PAUSE -> {
                 cancelWaveSynchronization()
                 scheduledPlayJob?.cancel()
@@ -294,6 +380,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                 player.pause()
             }
             ACTION_STOP -> scope.launch {
+                recovery.cancel()
                 cancelWaveSynchronization()
                 scheduledPlayJob?.cancel()
                 scheduledPlayJob = null
@@ -303,7 +390,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     stopSelf()
                 }
             }
-            ACTION_SEEK -> player.seekTo(currentCutBounds().playerPosition(intent.getLongExtra(EXTRA_POSITION_MS, 0)))
+            ACTION_SEEK -> player.seekTo(intent.getLongExtra(EXTRA_POSITION_MS, 0).coerceAtLeast(0))
             ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE_ENABLED, false)
             ACTION_SET_REPEAT -> player.repeatMode = intent.getStringExtra(EXTRA_REPEAT_MODE).orEmpty().toMedia3RepeatMode()
             ACTION_SCHEDULED_PLAY -> {
@@ -397,8 +484,12 @@ class AutPlayPlaybackService : MediaSessionService() {
     }
 
     private suspend fun restoreQueue(autoplay: Boolean, requiredSnapshotId: String? = null) {
+        val request = ++queueRestoreRequest
         PlaybackShutdownPersistence.awaitPending()
         val plan = stateMutex.withLock {
+            // An older ambient restore must never overwrite a later explicit play/prepare command.
+            if (request != queueRestoreRequest) return@withLock null
+            audioPreferences.value = applicationNonSecretSettingsStore(applicationContext).settings.first().playbackAudio
             val queue = persistence.restoreActive() ?: return@withLock null
             if (!GuestQueueRestorePolicy.allows(queue.snapshot.queueType, requiredSnapshotId)) {
                 return@withLock null
@@ -419,9 +510,6 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             val index = queue.media.currentIndex.coerceIn(placeholders.indices)
             sourceTimelines.clear()
-            cutDurationMs.clear()
-            preservedHeadEntryId = placeholders[index].mediaId.takeIf { queue.media.currentPositionMs < PlaybackTransitionCuts.CUT_MS }
-            preservedTailEntryId = placeholders[index].mediaId
             player.setMediaItems(placeholders, index, queue.media.currentPositionMs)
             player.seekTo(index, queue.media.currentPositionMs)
             player.playWhenReady = autoplay
@@ -461,7 +549,6 @@ class AutPlayPlaybackService : MediaSessionService() {
             val generation = beginQueueGeneration()
             val retainedIds = queue.entries.map { it.queueEntryId }.toSet()
             sourceTimelines.keys.retainAll(retainedIds)
-            cutDurationMs.keys.retainAll(retainedIds)
             resolvedQueueEntryIds += retainedResolved.intersect(retainedIds)
             val index = queue.entries.indexOfFirst { it.queueEntryId == currentId }
             if (index < 0) return@withLock null
@@ -485,7 +572,9 @@ class AutPlayPlaybackService : MediaSessionService() {
                 )
             }
             player.shuffleModeEnabled = preservedShuffleEnabled
-            updateTransitionCuts()
+            if (player.playWhenReady) player.playerError?.let { error ->
+                recoveryOwner()?.let { recovery.error(it, SystemClock.elapsedRealtime(), isTransientPlaybackFailure(error)) }
+            }
             publishRuntimeState(unavailableReason = currentUnavailableReason())
             QueueResolutionPlan(queue, generation)
         }
@@ -515,19 +604,8 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
     }
 
-    private fun currentCutBounds(): PlaybackCutBounds = player.currentMediaItem.cutBounds()
-
-    private fun MediaItem?.cutBounds(): PlaybackCutBounds = this?.clippingConfiguration?.let {
-        PlaybackCutBounds(it.startPositionMs, it.endPositionMs.takeUnless { end -> end == C.TIME_END_OF_SOURCE })
-    } ?: PlaybackCutBounds()
-
-    private fun sourcePositionMs(): Long = currentCutBounds().sourcePosition(player.currentPosition)
+    private fun sourcePositionMs(): Long = player.currentPosition.coerceAtLeast(0)
         .coerceAtMost(sourceTimelines[player.currentMediaItem?.mediaId]?.durationMs ?: Long.MAX_VALUE)
-
-    private fun preserveCurrentCutPosition() {
-        preservedHeadEntryId = player.currentMediaItem?.mediaId.takeIf { sourcePositionMs() < PlaybackTransitionCuts.CUT_MS }
-        preservedTailEntryId = player.currentMediaItem?.mediaId
-    }
 
     /** Called by Media3's playback thread; all player mutation is dispatched to its app looper. */
     private fun onSourceTimeline(item: MediaItem, timeline: PlaybackSourceTimeline) {
@@ -541,79 +619,15 @@ class AutPlayPlaybackService : MediaSessionService() {
                     item.mediaMetadata.extras?.getString("queue_snapshot_id")) return@withLock
                 if (sourceTimelines[item.mediaId] == timeline) return@withLock
                 sourceTimelines[player.getMediaItemAt(index).mediaId] = timeline
-                // Anchor cut eligibility as well as its tail across frame-sized header/EOF
-                // refinements. Raw sourceTimelines remains authoritative for metrics.
-                val duration = timeline.durationMs
-                val previousDuration = cutDurationMs[item.mediaId]
-                if (duration == null) cutDurationMs.remove(item.mediaId)
-                else if (previousDuration == null ||
-                    kotlin.math.abs(duration - previousDuration) > CUT_DURATION_TOLERANCE_MS
-                ) cutDurationMs[item.mediaId] = duration
                 if (app.autplay.BuildConfig.DEBUG) android.util.Log.d("AutPlayPlayback",
                     "source_timeline durationMs=${timeline.durationMs} seekable=${timeline.seekable}")
-                updateTransitionCuts()
             }
-        }
-    }
-
-    /** Reconcile real source boundaries after resolution, mode/timer changes and queue edits. */
-    private fun updateTransitionCuts() {
-        if (!scope.isActive || applyingTransitionCuts || player.mediaItemCount == 0) return
-        applyingTransitionCuts = true
-        try {
-            val currentIndex = player.currentMediaItemIndex
-            val positionMs = sourcePositionMs()
-            // Only resolved sources can have cuts. A 5,000-entry queue must not cause
-            // thousands of Player/Bundle reads on every position/timeline callback.
-            val changes = resolvedQueueEntryIds.mapNotNull { id ->
-                val index = queueEntryIndices[id]?.takeIf { it < player.mediaItemCount } ?: return@mapNotNull null
-                val item = player.getMediaItemAt(index)
-                if (!item.isResolvedPlaybackSource()) return@mapNotNull null
-                val info = sourceTimelines[item.mediaId]
-                val durationForCuts = cutDurationMs[item.mediaId]
-                val nextIndex = if (player.repeatMode == Player.REPEAT_MODE_ONE) index
-                    else player.currentTimeline.takeUnless { it.isEmpty }
-                        ?.getNextWindowIndex(index, player.repeatMode, player.shuffleModeEnabled) ?: C.INDEX_UNSET
-                val bounds = PlaybackTransitionCuts.bounds(
-                    enabled = smoothTrackTransitions,
-                    queueType = restored?.snapshot?.queueType,
-                    durationMs = durationForCuts,
-                    seekable = info?.seekable == true,
-                    preserveHead = item.mediaId == preservedHeadEntryId,
-                    hasPlayableSuccessor = nextIndex in 0 until player.mediaItemCount &&
-                        player.getMediaItemAt(nextIndex).isResolvedPlaybackSource(),
-                    stopAfterItem = item.mediaId == stopAfterQueueEntryId,
-                    preserveTail = item.mediaId == preservedTailEntryId && index == currentIndex &&
-                        durationForCuts?.let { positionMs > it - PlaybackTransitionCuts.CUT_MS } == true,
-                )
-                val defaultStart = if (item.mediaId == preservedHeadEntryId && info == null) 0L
-                    else PlaybackTransitionCuts.defaultStartMs(smoothTrackTransitions, restored?.snapshot?.queueType)
-                if (bounds == item.cutBounds() &&
-                    (item.mediaMetadata.extras?.getLong(CUT_DEFAULT_POSITION_MS, 0) ?: 0) == defaultStart &&
-                    (item.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS, C.TIME_UNSET) ?: C.TIME_UNSET) ==
-                        (durationForCuts ?: C.TIME_UNSET)) null
-                else Triple(index, item, bounds to defaultStart)
-            }
-            for ((index, item, cut) in changes) {
-                val (bounds, defaultStart) = cut
-                val clipping = MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(bounds.startMs)
-                    .setEndPositionMs(bounds.endMs ?: C.TIME_END_OF_SOURCE)
-                    .build()
-                val extras = Bundle(item.mediaMetadata.extras ?: Bundle()).apply {
-                    putLong(CUT_DEFAULT_POSITION_MS, defaultStart)
-                    putLong(CUT_SOURCE_DURATION_MS, cutDurationMs[item.mediaId] ?: C.TIME_UNSET)
-                }
-                player.replaceMediaItem(index, item.buildUpon().setClippingConfiguration(clipping)
-                    .setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build())
-                if (index == currentIndex && bounds != item.cutBounds()) player.seekTo(index, bounds.playerPosition(positionMs))
-            }
-        } finally {
-            applyingTransitionCuts = false
         }
     }
 
     private fun beginQueueGeneration(): Long {
+        recovery.cancel()
+        updatePreloadConfiguration()
         cancelWaveSynchronization()
         scheduledPlayJob?.cancel()
         scheduledPlayJob = null
@@ -626,15 +640,19 @@ class AutPlayPlaybackService : MediaSessionService() {
         return queueGeneration
     }
 
+    private fun updatePreloadConfiguration() {
+        player.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(
+            PlaybackTransitions.preloadDurationUs(smoothTrackTransitions, restored?.snapshot?.queueType),
+        ))
+    }
+
     /** Bound speculative work even when a user skips repeatedly through a large queue. */
     private fun scheduleQueueResolution(queue: RestoredPlaybackQueue, generation: Long) {
         if (generation != queueGeneration) return
         val timeline = player.currentTimeline
         val indices = mutableListOf<Int>()
         var index = player.currentMediaItemIndex
-        // The preloaded next item's tail depends on its own successor. Resolve that
-        // source before next starts, so its arrival does not replace a playing clip.
-        // This is URI preflight only; Media3 still owns the single-successor preload.
+        // Bounded URI preflight; Media3 owns sample buffering and complete track boundaries.
         while (indices.size < 3 && index in queue.entries.indices && index !in indices) {
             indices += index
             index = if (index in 0 until timeline.windowCount) {
@@ -676,22 +694,10 @@ class AutPlayPlaybackService : MediaSessionService() {
                     val currentPositionMs = if (index == player.currentMediaItemIndex) {
                         sourcePositionMs()
                     } else null
-                    // A late-prepared successor must choose its real source head before audio starts.
-                    val defaultStart = if (entry.queueEntryId == preservedHeadEntryId) 0L
-                        else PlaybackTransitionCuts.defaultStartMs(smoothTrackTransitions, queue.snapshot.queueType)
-                    val extras = Bundle(resolution.item.mediaMetadata.extras ?: Bundle()).apply {
-                        putLong(CUT_DEFAULT_POSITION_MS, defaultStart)
-                    }
-                    player.replaceMediaItem(index, resolution.item.buildUpon().setMediaMetadata(
-                        resolution.item.mediaMetadata.buildUpon().setExtras(extras).build(),
-                    ).build())
-                    // A new source has a new period and would otherwise reset the current position.
-                    currentPositionMs?.let {
-                        val usePreparedDefault = defaultStart > 0 && it == 0L && entry.queueEntryId != preservedHeadEntryId
-                        player.seekTo(index, if (usePreparedDefault) C.TIME_UNSET else it)
-                    }
+                    player.replaceMediaItem(index, resolution.item)
+                    // Preserve explicit seek/restore; every new successor starts at its original head.
+                    currentPositionMs?.let { player.seekTo(index, it) }
                     resolvedQueueEntryIds += entry.queueEntryId
-                    updateTransitionCuts()
                     if (index == player.currentMediaItemIndex) {
                         metadataTrack.value = entry.localUserTrackRefId
                         notificationTarget.value = entry.queueEntryId to entry.localUserTrackRefId
@@ -700,7 +706,9 @@ class AutPlayPlaybackService : MediaSessionService() {
                             unavailableReason = resolution.unavailableReason,
                             title = resolution.title,
                         )
-                        settleCurrentSource()
+                        // A newly resolved source may replace an errored item or queue. This runs
+                        // once per entry/generation; callbacks for existing sources cannot retry it.
+                        settleCurrentSource(allowRetry = true)
                     }
                 }
             } catch (error: CancellationException) {
@@ -715,12 +723,13 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
     }
 
-    private fun settleCurrentSource() {
+    private fun settleCurrentSource(allowRetry: Boolean = false) {
         if (currentUnavailableReason() != null) {
             player.pause()
             player.stop()
             publishRuntimeState(unavailableReason = currentUnavailableReason())
-        } else if (player.currentMediaItem.isResolvedPlaybackSource() && player.playbackState == Player.STATE_IDLE) {
+        } else if (player.currentMediaItem.isResolvedPlaybackSource() && player.playbackState == Player.STATE_IDLE &&
+            (allowRetry || player.playerError == null)) {
             player.prepare()
         }
         publishRuntimeState(
@@ -1002,6 +1011,16 @@ class AutPlayPlaybackService : MediaSessionService() {
         )
     }
 
+    private fun recoveryOwner(): PlaybackRecoveryOwner? {
+        val item = player.currentMediaItem ?: return null
+        // Room playback must recover through its authoritative synchronization commands.
+        if (restored?.snapshot?.queueType !in ORDINARY_QUEUE_TYPES ||
+            item.localConfiguration?.uri?.scheme != AndroidPlaybackSourceResolver.VAULT_SCHEME) return null
+        val profile = item.localConfiguration?.uri?.authority ?: return null
+        if (profile != activePlaybackProfileId) return null
+        return PlaybackRecoveryOwner(queueGeneration, item.mediaId, profile)
+    }
+
     private fun publishRuntimeState(
         source: String? = PlaybackRuntimeState.state.value.source,
         unavailableReason: String? = PlaybackRuntimeState.state.value.unavailableReason,
@@ -1085,7 +1104,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     return@withLock
                 }
                 player.playbackParameters = PlaybackParameters(1f)
-                player.seekTo(currentCutBounds().playerPosition((SystemClock.elapsedRealtime() - anchor.startElapsedRealtimeMs).coerceAtLeast(0)))
+                player.seekTo((SystemClock.elapsedRealtime() - anchor.startElapsedRealtimeMs).coerceAtLeast(0))
                 player.play()
             }
             while (isActive) {
@@ -1110,7 +1129,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                             is DriftAction.Seek -> {
                                 waveSpeedResetJob?.cancel(); waveSpeedResetJob = null
                                 player.playbackParameters = PlaybackParameters(1f)
-                                player.seekTo(currentCutBounds().playerPosition(action.positionMs))
+                                player.seekTo(action.positionMs)
                             }
                             is DriftAction.Speed -> {
                                 player.playbackParameters = PlaybackParameters(action.multiplier)
@@ -1155,7 +1174,6 @@ class AutPlayPlaybackService : MediaSessionService() {
                 sleepTimerJob?.cancel()
                 stopAfterQueueEntryId = null
                 player.setPauseAtEndOfMediaItems(false)
-                updateTransitionCuts()
                 sleepTimerDeadlineElapsedRealtimeMs = deadline
                 publishRuntimeState()
                 sleepTimerJob = scope.launch {
@@ -1205,15 +1223,12 @@ class AutPlayPlaybackService : MediaSessionService() {
                 sleepTimerDeadlineElapsedRealtimeMs = null
                 stopAfterQueueEntryId = expectedQueueEntryId
                 player.setPauseAtEndOfMediaItems(true)
-                updateTransitionCuts()
                 publishRuntimeState()
             }
         }
     }
 
     private fun cancelSleepTimerLocked() {
-        // Clearing pause-at-end must not seek a completed full tail backwards into a cut.
-        if (stopAfterQueueEntryId != null) preservedTailEntryId = player.currentMediaItem?.mediaId
         ++sleepTimerGeneration
         sleepTimerJob?.cancel()
         sleepTimerJob = null
@@ -1221,15 +1236,18 @@ class AutPlayPlaybackService : MediaSessionService() {
         sleepTimerDeadlineElapsedRealtimeMs = null
         stopAfterQueueEntryId = null
         player.setPauseAtEndOfMediaItems(false)
-        updateTransitionCuts()
         if (changed) publishRuntimeState()
     }
 
     private inner class PlayerListener : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            val generation = queueGeneration
+            val playingEntryId = player.currentMediaItem?.mediaId
             scope.launch {
                 stateMutex.withLock {
                     if (isPlaying) {
+                        if (!player.isPlaying || generation != queueGeneration ||
+                            playingEntryId != player.currentMediaItem?.mediaId) return@withLock
                         if (ensureSession() != null && observedPlaybackStartedAtMs == null) {
                             observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
                         }
@@ -1242,29 +1260,20 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            val replacingCut = applyingTransitionCuts
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
-                preservedHeadEntryId = null
-                preservedTailEntryId = null
-            } else if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK && replacingCut) {
-                // Source replacement can synthesize SEEK for the same stable queue entry.
-                preservedHeadEntryId = preservedHeadEntryId?.takeIf { it == mediaItem?.mediaId }
-                preservedTailEntryId = preservedTailEntryId?.takeIf { it == mediaItem?.mediaId }
-            } else if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
-                preservedHeadEntryId = null
-                preservedTailEntryId = null
-            }
+            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) recovery.cancel()
             metadataTrack.value = mediaItem?.mediaMetadata?.extras?.getString("local_user_track_ref_id")
             notificationTarget.value = mediaItem?.mediaId to metadataTrack.value
             // Capture before later playlist edits or queued persistence can replace this occurrence.
             val departingMetrics = pendingTransitionMetrics
+            val generation = queueGeneration
             scope.launch {
                 stateMutex.withLock {
+                    if (generation != queueGeneration ||
+                        (mediaItem != null && mediaItem.mediaId !in queueEntryIndices)) return@withLock
                     val current = logicalSession
                     val isSameRestore = current?.queueEntryId?.value == mediaItem?.mediaId &&
-                        (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED ||
-                            replacingCut && reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK)
-                    // A clipping/metadata replacement during repeat must not consume the
+                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED
+                    // A metadata replacement during repeat must not consume the
                     // departing occurrence's metrics before the actual repeat is finalized.
                     val transitionMetrics = departingMetrics
                         ?.takeIf { !isSameRestore && it.queueEntryId == current?.queueEntryId?.value }
@@ -1275,9 +1284,13 @@ class AutPlayPlaybackService : MediaSessionService() {
                     if (current != null && !isSameRestore) finalizeCurrentLocked(transitionMetrics)
                     val queue = restored ?: return@withLock
                     scheduleQueueResolution(queue, queueGeneration)
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK && player.currentMediaItem?.mediaId == mediaItem?.mediaId) {
+                        // An explicit skip may leave a failed remote source for an already resolved local one.
+                        settleCurrentSource(allowRetry = true)
+                    }
                     if (player.isPlaying) {
                         if (ensureSession() != null) observedPlaybackStartedAtMs = SystemClock.elapsedRealtime()
-                    } else if (!isSameRestore && mediaItem != null) {
+                    } else if (!isSameRestore && mediaItem != null && player.currentMediaItem?.mediaId == mediaItem.mediaId) {
                         persistence.selectIdleEntry(
                             snapshotId = LocalId(queue.snapshot.queueSnapshotId),
                             entryId = LocalId(mediaItem.mediaId),
@@ -1298,6 +1311,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) recovery.cancel()
             if (oldPosition.mediaItem?.mediaId != newPosition.mediaItem?.mediaId ||
                 reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
                 val oldQueueEntryId = oldPosition.mediaItem?.mediaId
@@ -1305,9 +1319,9 @@ class AutPlayPlaybackService : MediaSessionService() {
                     pendingTransitionMetrics = PlayerMetricsSnapshot(
                         queueEntryId = oldQueueEntryId,
                         positionMs = if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
-                            oldPosition.mediaItem.cutBounds().endMs ?: sourceTimelines[oldQueueEntryId]?.durationMs
-                                ?: oldPosition.mediaItem.cutBounds().sourcePosition(oldPosition.positionMs)
-                            else oldPosition.mediaItem.cutBounds().sourcePosition(oldPosition.positionMs),
+                            sourceTimelines[oldQueueEntryId]?.durationMs
+                                ?: oldPosition.positionMs
+                            else oldPosition.positionMs,
                         durationMs = sourceTimelines[oldQueueEntryId]?.durationMs ?: lastPlayerMetrics
                             ?.takeIf { it.queueEntryId == oldQueueEntryId }
                             ?.durationMs,
@@ -1317,7 +1331,7 @@ class AutPlayPlaybackService : MediaSessionService() {
             if (reason != Player.DISCONTINUITY_REASON_SEEK) return
             scope.launch {
                 stateMutex.withLock {
-                    val positionMs = newPosition.mediaItem.cutBounds().sourcePosition(newPosition.positionMs)
+                    val positionMs = newPosition.positionMs
                     // A navigation seek belongs to the new session, never the departing item.
                     if (oldPosition.mediaItem?.mediaId != newPosition.mediaItem?.mediaId) return@withLock
                     val current = logicalSession
@@ -1342,7 +1356,6 @@ class AutPlayPlaybackService : MediaSessionService() {
                     }
                     checkpointPlayerStateLocked()
                     restored?.let { scheduleQueueResolution(it, queueGeneration) }
-                    updateTransitionCuts()
                     publishRuntimeState()
                 }
             }
@@ -1353,7 +1366,6 @@ class AutPlayPlaybackService : MediaSessionService() {
                 stateMutex.withLock {
                     checkpointPlayerStateLocked()
                     restored?.let { scheduleQueueResolution(it, queueGeneration) }
-                    updateTransitionCuts()
                     publishRuntimeState()
                 }
             }
@@ -1361,24 +1373,17 @@ class AutPlayPlaybackService : MediaSessionService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             capturePlayerMetrics()?.let { lastPlayerMetrics = it }
-            if (playbackState == Player.STATE_ENDED && !applyingTransitionCuts) scope.launch {
+            if (playbackState == Player.STATE_ENDED) scope.launch {
                 stateMutex.withLock {
-                    // Replacing clipping can briefly end the old source before its replacement
-                    // is prepared. Only finalize a queue that is still ended after that batch.
+                    // Only finalize if no queued command has replaced the ended queue.
                     if (player.playbackState == Player.STATE_ENDED) finalizeCurrentLocked(capturePlayerMetrics())
                 }
             }
             else scope.launch { stateMutex.withLock { publishRuntimeState() } }
         }
 
-        override fun onEvents(player: Player, events: Player.Events) {
-            // Individual callback arguments belong to the previous occurrence; mutate only after
-            // the complete event batch has captured its transition and seek checkpoints.
-            if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED,
-                    Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_PLAYBACK_STATE_CHANGED)) updateTransitionCuts()
-        }
-
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady) recovery.cancel()
             if (reason != Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) return
             scope.launch {
                 stateMutex.withLock {
@@ -1388,6 +1393,8 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            if (player.playerError !== error) return
+            recoveryOwner()?.let { recovery.error(it, SystemClock.elapsedRealtime(), isTransientPlaybackFailure(error)) }
             scope.launch {
                 stateMutex.withLock {
                     logicalSession?.let { checkpointCurrent(it, sourcePositionMs()) }
@@ -1465,7 +1472,6 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_SET_SESSION_TASTE_EXCLUDED,
         )
         private const val PERIODIC_CHECKPOINT_MS = 15_000L
-        private const val CUT_DURATION_TOLERANCE_MS = 100L
         private const val TRANSITION_VOLUME_UPDATE_MS = 50L
         private const val MAX_CHECKPOINT_DELTA_MS = 300_000L
         private val ORDINARY_QUEUE_TYPES = setOf("USER", "SEARCH", "LIBRARY", "PLAYLIST")
@@ -1489,7 +1495,16 @@ internal class AutPlaySessionCallback(
     private val feedback: (String, String?) -> ListenableFuture<SessionResult> = { _, _ ->
         Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
     },
+    private val canUseAccount: () -> Boolean = { true },
+    private val onPlayerCommand: (Int) -> Unit = {},
 ) : MediaSession.Callback {
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun onPlayerCommandRequest(session: MediaSession, controller: MediaSession.ControllerInfo, playerCommand: Int): Int {
+        if (!canUseAccount() || !isControllerAllowed(controller.packageName, controller.isTrusted)) return SessionError.ERROR_PERMISSION_DENIED
+        onPlayerCommand(playerCommand)
+        return SessionResult.RESULT_SUCCESS
+    }
+
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
@@ -1506,7 +1521,7 @@ internal class AutPlaySessionCallback(
         packageName == applicationPackage || trusted
 
     override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
-        if (!isControllerAllowed(controller.packageName, controller.isTrusted)) {
+        if (!canUseAccount() || !isControllerAllowed(controller.packageName, controller.isTrusted)) {
             return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
         }
         if (customCommand.customAction !in setOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE)) {

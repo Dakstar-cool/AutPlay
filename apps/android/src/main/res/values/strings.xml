@@ -21,18 +21,19 @@
     <string name="action_open_profile">Open profile</string>
     <string name="action_open_settings">Open settings</string>
 
-    <string name="onboarding_step">Step %1$d of %2$d</string>
-    <string name="onboarding_welcome_title">Music, yours first</string>
-    <string name="onboarding_welcome_body">AutPlay works with music on this phone. You can start locally and stay in control of your library.</string>
-    <string name="onboarding_library_title">Find, play, keep listening</string>
-    <string name="onboarding_library_body">Use My music to add tracks, Search to find them, and the player to keep your queue with you.</string>
-    <string name="onboarding_server_title">Add a personal server when you want</string>
-    <string name="onboarding_server_body">A personal server is optional. It can connect your own devices and enable shared listening, while local playback keeps working without it.</string>
-    <string name="onboarding_next">Continue</string>
-    <string name="onboarding_continue_local">Continue on this phone</string>
-    <string name="onboarding_connect_server">Connect personal server</string>
-    <string name="onboarding_local_note">No account, network, or folder access is needed for this introduction.</string>
-    <string name="onboarding_save_failed">Could not save your choice. Please try again.</string>
+    <string name="onboarding_welcome_title">Your local account</string>
+    <string name="onboarding_welcome_body">Your account keeps your history and playlists together. A password protects access to it.</string>
+    <string name="onboarding_continue_local">Create account and continue</string>
+    <string name="onboarding_local_note">No email or internet connection is required. You can connect a personal server later.</string>
+    <string name="onboarding_save_failed">Could not finish setup. Please try again.</string>
+    <string name="onboarding_required_fields">Complete the fields above to continue.</string>
+    <string name="onboarding_password_invalid">Use 7–128 characters, including at least one special character such as !, @ or _. A space does not count. Avoid common passwords or a single repeated character.</string>
+    <string name="onboarding_password_mismatch">Passwords do not match. Enter the same phrase in both fields.</string>
+    <string name="onboarding_saving">Finishing setup on this phone…</string>
+    <string name="home_first_track_title">Add your first track</string>
+    <string name="home_first_track_body">Choose an audio file from this phone to start listening. Your music works offline.</string>
+    <string name="local_audio_picker_hint">In the file chooser, use its menu to open Downloads or another folder.</string>
+    <string name="library_play_track">Play %1$s</string>
 
     <string name="home_my_wave">My Wave</string>
     <string name="home_hero_personal_flow">Your personal flow</string>
@@ -66,7 +67,6 @@
         <item quantity="other">%d items need attention</item>
     </plurals>
     <string name="home_recommendations">For you</string>
-    <string name="home_new_releases">New from artists in your collection</string>
     <string name="home_empty_recommendations">No locally available recommendations yet</string>
     <string name="home_empty_releases">No relevant new releases yet</string>
 
@@ -161,6 +161,7 @@
     <string name="detail_release_date">Release date</string>
 
     <string name="player_nothing_playing">Nothing playing</string>
+    <string name="player_preparing">Preparing playback…</string>
     <string name="player_unknown_artist">Unknown artist</string>
     <string name="player_buffering">Buffering</string>
     <string name="player_timeline_unknown">Timeline unavailable</string>
@@ -465,20 +466,15 @@
     <string name="settings_language">Application language</string>
     <string name="settings_language_russian">Russian</string>
     <string name="settings_language_english">English</string>
-    <string name="settings_appearance">Appearance</string>
     <string name="settings_theme_light">Light theme</string>
     <string name="settings_theme_dark">Dark theme</string>
-    <string name="settings_library_access">Music folder</string>
     <string name="settings_folder_not_selected">No music folder selected</string>
     <string name="settings_folder_selected">Music folder selected</string>
     <string name="settings_choose_folder">Choose music folder</string>
     <string name="settings_scan_folder">Scan folder again</string>
     <string name="settings_folder_privacy">This folder is used for library updates. Searching the phone requests separate access to audio files. You can revoke permissions in Android settings.</string>
-    <string name="settings_network">Personal server and shared listening</string>
-    <string name="settings_open_personal_server">Open personal server</string>
     <string name="settings_metered_downloads">Download tracks using mobile data</string>
-    <string name="settings_playback">Playback</string>
-    <string name="settings_smooth_track_transitions">Smooth track transitions</string>
+    <string name="settings_smooth_track_transitions">Preload the next track</string>
     <string name="settings_wave_prefetch_off">Do not prepare tracks in advance</string>
     <string name="settings_wave_prefetch_next">Prepare the next track</string>
     <string name="settings_wave_prefetch_three">Prepare the next three tracks</string>
@@ -572,7 +568,7 @@
     <string name="statistics_view">View statistics</string>
     <string name="settings_statistics_privacy">Statistics privacy</string>
     <string name="settings_statistics_share">Share listening statistics with friends</string>
-    <string name="settings_statistics_share_explanation">Off by default. Only confirmed friends on this personal server can see the bounded completed-day aggregate.</string>
+    <string name="settings_statistics_share_explanation">Off by default. Only confirmed friends on this personal server can see a limited summary of your listening for completed days.</string>
     <string name="settings_statistics_loading">Checking the server setting…</string>
     <string name="settings_statistics_updating">Waiting for server confirmation…</string>
     <string name="settings_statistics_unavailable_local">Connect a personal server to share statistics. Your own statistics remain available offline.</string>
@@ -638,4 +634,14 @@
     <string name="discovery_automation_pending_resolution">The previous command has an unknown outcome. Retry the same action or refresh server state before starting another.</string>
     <string name="discovery_automation_unsupported_mode">Unsupported server mode: %1$s</string>
     <string name="home_listen_together_short">Together</string>
+    <string name="variation_skips_title">Version skips during Sona collection</string>
+    <string name="variation_skips_empty">No version recommendations played in this period</string>
+    <string name="variation_skips_note" formatted="false">Skips / plays. A short listen is under 30 seconds or at most 20% of the track.</string>
+    <string name="variation_type">Version</string>
+    <string name="variation_feed">Feed</string>
+    <string name="variation_wave">Wave</string>
+    <string name="variation_covers">Covers</string>
+    <string name="variation_remixes">Remixes</string>
+    <string name="variation_live">Live</string>
+    <string name="variation_skips_count">%1$d / %2$d</string>
 </resources>

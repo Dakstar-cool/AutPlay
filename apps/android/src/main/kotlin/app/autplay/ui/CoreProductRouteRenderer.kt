@@ -16,6 +16,7 @@ import app.autplay.ui.playlist.ManualPlaylistUi
 internal data class CoreProductRouteActions(
     val openListenTogether: () -> Unit,
     val recommendationVisible: (String) -> Unit,
+    val playRecommendation: (String) -> Unit = {},
     val likeRecommendation: (String) -> Unit,
     val dislikeRecommendation: (String) -> Unit,
     val retryHome: () -> Unit,
@@ -81,12 +82,16 @@ internal fun CoreProductRouteRenderer(
             contentPadding = contentPadding,
             onOpenListenTogether = actions.openListenTogether,
             onRecommendationVisible = actions.recommendationVisible,
+            onPlayRecommendation = actions.playRecommendation,
+            recommendationPlaybackAllowed = actions.myWaveAllowed,
             onLike = actions.likeRecommendation,
             onDislike = actions.dislikeRecommendation,
             onRetry = actions.retryHome,
             onPlayTrack = actions.resumeHomeQueue,
             onStartMyWave = actions.startMyWave,
             myWaveAllowed = actions.myWaveAllowed,
+            onAddLocal = actions.addLocal,
+            importingLocalTrack = libraryState.importingLocalTrack,
             onOpenPlaylist = actions.openHomePlaylist,
             onOpenOffline = actions.openOffline,
             onOpenProblems = actions.openProblems,
@@ -99,6 +104,7 @@ internal fun CoreProductRouteRenderer(
             onPreviousTrack = onPreviousTrack,
             onNextTrack = onNextTrack,
             swipeTargets = homeSwipeTargets,
+            onOpenRelease = { actions.openDetail(DetailTarget(DetailKind.Release, it)) },
         )
         UiDestination.Search -> SearchProductScreen(
             state = searchState,

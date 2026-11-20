@@ -2,7 +2,6 @@
 <resources>
     <string name="ui_friends_refresh_public_id_label">Public ID (@name)</string>
     <string name="ui_friends_refresh_public_id_rules">3–24 Latin letters, digits or underscores. Uppercase and lowercase letters are equivalent.</string>
-    <string name="ui_friends_refresh_onboarding_pending">Choose a name to continue. Your music works offline; your server will reserve this ID when you connect. If it is taken, you can choose another.</string>
     <string name="ui_friends_refresh_my_id">My ID</string>
     <string name="ui_friends_refresh_id_confirmed">Reserved for your account on this server. Friends can find you by this exact ID.</string>
     <string name="ui_friends_refresh_id_pending">Not reserved yet. This name is a local choice until your server confirms it; local playback remains available.</string>

@@ -20,7 +20,7 @@ class PortablePasswordLoginTest {
     }
 
     @Test fun downloadedRootKeepsIdentityWithoutInventingRecoveryMaterial() {
-        val password = "existing account test password".toCharArray()
+        val password = "existing account test password!".toCharArray()
         PortableAccountCrypto.create("existing_account", password).use { created ->
             val passport = created.document.encode()
             val history = PortableAccountLineage(true, emptyList()).encode(created.document).toByteArray()
@@ -45,7 +45,7 @@ class PortablePasswordLoginTest {
     }
 
     @Test fun existingRecoveryArchiveRemainsExactAndMalformedArchiveIsRejected() {
-        val password = "existing account test password".toCharArray()
+        val password = "existing account test password!".toCharArray()
         PortableAccountCrypto.create("existing_account", password).use { created ->
             val passport = created.document.encode()
             val recovery = PortableRecoveryFile.encode(created.document, created.recoveryCode)

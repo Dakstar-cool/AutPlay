@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -20,6 +20,24 @@ class HomeMyWaveTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun emptyLocalLibraryOffersImportBeforePlayback() {
+        var imports = 0
+        var starts = 0
+        compose.setContent {
+            AutPlayTheme {
+                HomeProductScreen(
+                    state = HomeScreenUiState(true, false, false, emptyList(), emptyList(), localLibraryEmpty = true),
+                    contentPadding = PaddingValues(), onOpenListenTogether = {},
+                    onRecommendationVisible = {}, onLike = {}, onDislike = {},
+                    onAddLocal = { imports++ }, onStartMyWave = { starts++ },
+                )
+            }
+        }
+        compose.onNodeWithTag("home-add-first-track").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("home-my-wave").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, imports); assertEquals(0, starts) }
+    }
+
     @Test fun randomActionCanBeRepeatedAndDoesNotOpenListenTogether() {
         var starts = 0
         var together = 0
@@ -27,9 +45,9 @@ class HomeMyWaveTest {
         compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-my-wave"))
         compose.onNodeWithTag("home-my-wave").assertIsEnabled().performClick().performClick()
         compose.onNodeWithTag("home-product-list").performScrollToNode(
-            androidx.compose.ui.test.hasText(context.getString(R.string.home_my_wave_random)),
+            androidx.compose.ui.test.hasText(context.getString(R.string.home_my_wave_description)),
         )
-        compose.onNodeWithText(context.getString(R.string.home_my_wave_random)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.home_my_wave_description)).assertIsDisplayed()
         compose.runOnIdle { assertEquals(2, starts); assertEquals(0, together) }
     }
 

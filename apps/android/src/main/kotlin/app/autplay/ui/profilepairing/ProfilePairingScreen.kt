@@ -391,6 +391,8 @@ internal fun ProfilePairingScreen(
     pendingConfirmation?.let { action ->
         ProfileActionConfirmation(
             action = action,
+            passwordRequired = action != ProfileRemoteAction.LOGOUT_CURRENT ||
+                state.portableAccount?.status?.let { it.publicId != null } != false,
             accountLabel = state.accountLabel,
             deviceLabel = state.deviceLabel,
             onDismiss = { pendingConfirmation = null },
@@ -911,6 +913,7 @@ private fun ProfileActionButton(action: ProfileRemoteAction, pending: ProfileRem
 @Composable
 private fun ProfileActionConfirmation(
     action: ProfileRemoteAction,
+    passwordRequired: Boolean,
     accountLabel: String?,
     deviceLabel: String?,
     onDismiss: () -> Unit,
@@ -930,15 +933,18 @@ private fun ProfileActionConfirmation(
                 accountLabel?.let { Text(stringResource(R.string.profile_account_named, it)) }
                 deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
                 Text(stringResource(R.string.profile_local_data_preserved))
-                OutlinedTextField(value = login, onValueChange = { login = it.take(24) }, singleLine = true,
-                    label = { Text(stringResource(R.string.portable_account_login)) }, enabled = !busy)
-                OutlinedTextField(value = password, onValueChange = { password = it.take(256) }, singleLine = true,
-                    label = { Text(stringResource(R.string.portable_account_password)) }, enabled = !busy,
-                    visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-                if (failed) Text(stringResource(R.string.portable_account_auth_failed), color = MaterialTheme.colorScheme.error)
+                if (passwordRequired) {
+                    OutlinedTextField(value = login, onValueChange = { login = it.take(24) }, singleLine = true,
+                        label = { Text(stringResource(R.string.portable_account_login)) }, enabled = !busy)
+                    OutlinedTextField(value = password, onValueChange = { password = it.take(256) }, singleLine = true,
+                        label = { Text(stringResource(R.string.portable_account_password)) }, enabled = !busy,
+                        visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                }
+                if (failed) Text(stringResource(if (passwordRequired) R.string.portable_account_auth_failed
+                    else R.string.profile_server_unavailable), color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { Button(enabled = !busy && login.isNotBlank() && password.isNotEmpty(), onClick = {
+        confirmButton = { Button(enabled = !busy && (!passwordRequired || (login.isNotBlank() && password.isNotEmpty())), onClick = {
             busy = true
             val material = password.toCharArray()
             password = ""

@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Bounded, presentation-safe detail projections for M4.  This repository deliberately exposes
@@ -135,7 +137,7 @@ class CoreProductRepository(
         return combine(database.catalogProjectionDao().releasesForProfile(effectiveProfile(profileId), limit),
             metadataAlbums.observe(profileId)) { canonical, groups ->
             (groups.map { CoreReleaseSummary(it.group.stableId, it.group.title, it.group.albumArtist,
-                it.group.releaseDate, it.members.size) } +
+                it.group.releaseDate, it.members.size, it.members.firstOrNull()?.localUserTrackRefId) } +
                 canonical.map { CoreReleaseSummary(it.localReleaseId, it.title, it.displayArtist, it.releaseDateText) }).take(limit)
         }
     }
@@ -332,10 +334,10 @@ class CoreProductRepository(
         )
     }
 
-    private suspend fun resolveTrackRefs(ids: List<String>, profileId: String): Map<String, app.autplay.data.local.entity.UserTrackRefEntity> {
+    private suspend fun resolveTrackRefs(ids: List<String>, profileId: String): Map<String, app.autplay.data.local.entity.UserTrackRefEntity> = withContext(Dispatchers.Default) {
         val chunks = ids.distinct().chunked(MAX_IN_QUERY_BINDINGS)
         val metadata = chunks.flatMap { database.trackMetadataDao().forTracks(profileId, it) }.associateBy { it.localUserTrackRefId }
-        return chunks.flatMap { database.libraryDao().trackRefs(it, it.size) }
+        chunks.flatMap { database.libraryDao().trackRefs(it, it.size) }
             .filter { it.serverProfileId == profileId && it.deletedAtMs == null }.map { track ->
                 val values = metadata[track.localUserTrackRefId]?.decoded()
                 if (values == null) track else track.copy(rawTitle = values.text("title", track.rawTitle),
@@ -372,7 +374,8 @@ class CoreProductRepository(
 }
 
 data class CoreReleaseSummary(val stableId: String, val title: String, val artistName: String?,
-    val releaseDateText: String? = null, val ownedTrackCount: Int? = null)
+    val releaseDateText: String? = null, val ownedTrackCount: Int? = null,
+    val artworkTrackId: String? = null)
 data class CoreLibraryEntrySummary(
     val localLibraryEntryId: String,
     val localUserTrackRefId: String,

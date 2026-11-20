@@ -53,7 +53,9 @@ class PlaybackNotificationNavigationTest {
 
     private fun awaitPlayer() {
         compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(context.getString(R.string.player_collapse)).fetchSemanticsNodes().isNotEmpty() }
-        compose.onAllNodesWithText(context.getString(R.string.player_nothing_playing)).fetchSemanticsNodes().also { check(it.isNotEmpty()) }
+        compose.waitUntil(15_000) {
+            compose.onAllNodesWithText(context.getString(R.string.player_nothing_playing)).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.waitForIdle()
     }
 }

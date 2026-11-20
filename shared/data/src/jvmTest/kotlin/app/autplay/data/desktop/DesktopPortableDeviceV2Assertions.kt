@@ -38,7 +38,7 @@ internal fun desktopPortableDeviceV2Assertions(): Unit {
     val otherId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     val api = "https://api.example.invalid"
     val stream = "https://stream.example.invalid"
-    val password = "portable account strong password".toCharArray()
+    val password = "portable account strong password!".toCharArray()
     fun key(curve: String = "secp256r1") = KeyPairGenerator.getInstance("EC").run {
         initialize(ECGenParameterSpec(curve)); generateKeyPair()
     }

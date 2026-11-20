@@ -244,6 +244,38 @@ class PlaybackPersistenceRepositoryTest {
     }
 
     @Test
+    fun lateIdleSelectionCannotCrossQueuesOrEraseANewerListen() = runBlocking {
+        val trackId = id(81)
+        database.libraryDao().upsertTrackRef(track(trackId, uuid(82)))
+        val repository = PlaybackPersistenceRepository(database)
+        suspend fun activate(snapshot: LocalId, entry: LocalId) = repository.activateQueue(
+            snapshot, listOf(NewPlaybackQueueEntry(entry, trackId, "ORGANIC", "LOCAL_THEN_VAULT")),
+            "USER", null, null, "GENERAL", 100,
+        )
+        val oldQueue = id(83)
+        val oldEntry = id(84)
+        val newQueue = id(85)
+        val newEntry = id(86)
+        activate(oldQueue, oldEntry)
+        activate(newQueue, newEntry)
+        suspend fun select(queue: LocalId, entry: LocalId) =
+            repository.selectIdleEntry(queue, entry, 999, "OFF", "ALL", null, 110)
+
+        select(newQueue, oldEntry)
+        select(oldQueue, oldEntry)
+        assertEquals(0L, database.queueDao().snapshot(oldQueue.value)?.currentPositionMs)
+        assertEquals(0L, database.queueDao().snapshot(newQueue.value)?.currentPositionMs)
+        select(newQueue, newEntry)
+        assertEquals(999L, database.queueDao().snapshot(newQueue.value)?.currentPositionMs)
+        val session = repository.startSession(newEntry, 120, 115, null)
+        select(newQueue, newEntry)
+        val saved = requireNotNull(database.queueDao().activeSnapshotOnce())
+        assertEquals(newEntry.value, saved.currentEntryId)
+        assertEquals(120L, saved.currentPositionMs)
+        assertEquals(session.listeningEventId.value, saved.activeListeningEventId)
+    }
+
+    @Test
     fun pausedSelectionPersistsExactEntryWithoutInventingListeningSession() = runBlocking {
         val trackId = id(81)
         database.libraryDao().upsertTrackRef(track(trackId, uuid(82)))

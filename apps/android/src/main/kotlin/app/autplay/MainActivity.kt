@@ -225,7 +225,7 @@ internal const val BOOTSTRAP_LABEL = "AutPlay"
 internal const val ONBOARDING_REVISION = CURRENT_ONBOARDING_REVISION
 
 internal fun hasCompletedOnboarding(settings: NonSecretSettings): Boolean =
-    settings.onboardingRevision >= ONBOARDING_REVISION &&
+    !settings.accountSignedOut && settings.onboardingRevision >= ONBOARDING_REVISION &&
         settings.pendingPublicId?.let { app.autplay.application.social.normalizeSocialPublicId(it) == it } == true
 
 internal suspend fun completeOnboarding(
@@ -249,6 +249,7 @@ internal suspend fun completeOnboarding(
 class MainActivity : ComponentActivity() {
     private val pendingPublicAccountInvitation = MutableStateFlow<ByteArray?>(null)
     private val pendingPlaybackOpen = MutableStateFlow(false)
+    private var downloadResumeRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -262,14 +263,6 @@ class MainActivity : ComponentActivity() {
         )
         val playbackOwner = ServicePlaybackSessionOwner(applicationContext)
         val downloadRepository = DownloadIntentRepository(applicationContext, database)
-        // Media3 owns transfer execution, while Room keeps durable user intent.  Restart
-        // the service from a foreground app launch so an update/process death cannot
-        // strand REQUESTED rows before they reach Media3's download index.
-        DownloadService.sendResumeDownloads(
-            applicationContext,
-            AutPlayDownloadService::class.java,
-            false,
-        )
         val syncStatusRepository = SyncStatusRepository(database)
         val importRepository = LocalImportReviewRepository(database)
         val recommendationRepository = OfflineRecommendationRepository(database, syncScheduler = syncScheduler)
@@ -290,6 +283,21 @@ class MainActivity : ComponentActivity() {
                 pendingPublicAccountInvitation,
                 pendingPlaybackOpen,
             )
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || downloadResumeRequested || isFinishing || isDestroyed) return
+        // onCreate can run while Android still treats this process as background.
+        // Recover durable download intent only after the app's window is visible.
+        try {
+            DownloadService.sendResumeDownloads(applicationContext, AutPlayDownloadService::class.java, false)
+            downloadResumeRequested = true
+        } catch (error: IllegalStateException) {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
+                error !is android.app.BackgroundServiceStartNotAllowedException) throw error
+            // A concurrent background transition must not crash startup. Retry on next focus.
         }
     }
 
@@ -458,7 +466,7 @@ internal fun AutPlayBootstrap(
             }
             val portableAccountRuntime = remember(settingsStore, pairingCredentialStore, pairingDeviceKeys, pairingRuntime, pairingPort) {
                 app.autplay.application.portableaccount.PortableAccountRuntime(
-                    app.autplay.application.portableaccount.PortableAccountStore(pairingCredentialStore, settingsStore),
+                    app.autplay.application.portableaccount.PortableAccountStore(pairingCredentialStore, settingsStore, portableAccountData::removeEmptyLocalAccount),
                     settingsStore, pairingCredentialStore, pairingDeviceKeys, pairingRuntime, pairingPort, firstBindCeremonyGate,
                     { origin -> AutPlayRuntime.portableAccountPort(context, origin) }, android.os.Build.MODEL.ifBlank { "Android device" }, BuildConfig.VERSION_NAME,
                     beforeDisconnect = { profile, owner ->
@@ -655,7 +663,12 @@ internal fun AutPlayBootstrap(
             var onboardingCompletionRoute by rememberSaveable { mutableStateOf<String?>(null) }
             AutPlayTheme(appearanceFrom(settings)) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    if (!onboardingComplete) {
+                    if (settings.accountSignedOut) {
+                        app.autplay.ui.profilepairing.AccountSignInScreen(
+                            publicId = settings.pendingPublicId.orEmpty(),
+                            signIn = portableAccountRuntime::signInLocal,
+                        )
+                    } else if (!onboardingComplete) {
                         WelcomeOnboardingScreen(
                             initialPublicId = settings.pendingPublicId,
                             createAccount = portableAccountRuntime::create,
@@ -1160,6 +1173,12 @@ private fun OfflineLibraryScreen(
     val homePlaylists = repositorySnapshot.homePlaylists
     val homeActiveQueue = repositorySnapshot.activeQueue
     val syncStatus = repositorySnapshot.syncStatus
+    val waveLibrarySyncing = binding != null && syncStatus.lastErrorCode == null &&
+        syncStatus.bootstrapState in setOf("NOT_STARTED", "BOOTSTRAPPING", "RESET_REQUIRED")
+    LaunchedEffect(stableError, libraryEntries, binding) {
+        if (stableError == "MY_WAVE_EMPTY" && binding != null && myWaveNetworkAvailable(context) &&
+            libraryEntries.any { !it.removed && it.serverPlaybackCandidate }) stableError = null
+    }
     val importProfileId = repositorySnapshot.importProfileId
     val importJob = repositorySnapshot.importJob
     val importItems = repositorySnapshot.importItems
@@ -1236,8 +1255,8 @@ private fun OfflineLibraryScreen(
     LaunchedEffect(durableVaultUploads) {
         serverUiState = serverUiState.copy(
             uploadStatus = durableVaultUploads.firstOrNull()?.let { upload ->
-                "${upload.state} В· ${upload.remoteOffset}/${upload.expectedSize} bytes" +
-                    (upload.lastErrorCode?.let { " В· $it" } ?: "")
+                "${upload.state} · ${upload.remoteOffset}/${upload.expectedSize} bytes" +
+                    (upload.lastErrorCode?.let { " · $it" } ?: "")
             },
         )
     }
@@ -1400,9 +1419,9 @@ private fun OfflineLibraryScreen(
         }
     }
     val homeReleases = (
-        libraryReleases + activeHomeFeed?.recentRelevantReleases.orEmpty().map { release ->
-            CoreReleaseSummary(release.localReleaseId, release.title, release.artist)
-        }
+        activeHomeFeed?.recentRelevantReleases.orEmpty().map { release ->
+            CoreReleaseSummary(release.localReleaseId, release.title, release.artist, release.releaseDateText)
+        } + libraryReleases
     ).distinctBy(CoreReleaseSummary::stableId)
     val personalWaveRoomState by (waveCoordinator?.uiState ?: flowOf(app.autplay.application.wave.WaveUiState()))
         .collectAsState(initial = app.autplay.application.wave.WaveUiState())
@@ -1444,6 +1463,10 @@ private fun OfflineLibraryScreen(
         myWaveAllowed = { currentMyWaveAllowed() },
         myWaveCurrentBinding = { currentMyWaveBinding },
         myWaveScope = myWaveScope,
+        personalWaveQueue = remember(context) {
+            app.autplay.application.recommendation.PersonalWaveQueue(AutPlayRuntime.database(context))
+        },
+        fetchWave = { owner, wave -> AutPlayRuntime.serverFeatures(context, owner).recommendations(wave = wave) },
     )
     val manualPlaylistActions = playlistMutationActions.copy(
         playEntry = coreCommandActions.startPlaylistEntry,
@@ -1656,6 +1679,7 @@ private fun OfflineLibraryScreen(
     val coreRouteActions = CoreProductRouteActions(
         openListenTogether = { navigation.navigate(UiDestination.WaveRooms) },
         recommendationVisible = coreCommandActions.recordRecommendationVisibility,
+        playRecommendation = coreCommandActions.startRecommendation,
         likeRecommendation = { coreCommandActions.recordHomeFeedback(it, "LIKED") },
         dislikeRecommendation = { coreCommandActions.recordHomeFeedback(it, "DISLIKED") },
         retryHome = { homeRetryNonce = !homeRetryNonce },
@@ -1967,7 +1991,8 @@ private fun OfflineLibraryScreen(
         ownerStatisticsState = ownerStatisticsState,
         social = socialState,
         socialAvailable = socialRuntime != null,
-        stableError = stableError,
+        stableError = if (stableError == "MY_WAVE_EMPTY" && waveLibrarySyncing && myWaveNetworkAvailable(context))
+            "MY_WAVE_SYNCING" else stableError,
     )
     val legacySecondaryActions = buildLegacySecondaryRouteActions(
         scope = scope,
@@ -1991,7 +2016,24 @@ private fun OfflineLibraryScreen(
         context = context,
         profilePairingRuntime = pairingRuntime,
         selfPairingActions = selfPairingUi.actions,
-        portableAccountActions = portableAccountUi.actions,
+        portableAccountActions = portableAccountUi.actions.copy(
+            signOut = { login, password ->
+                if (admissionState is app.autplay.application.profilepairing.AdmissionState.Exchanging ||
+                    pairingRuntimeState.pairing is PairingState.ExchangingInvitation ||
+                    !portableAccountUi.runtime.store.verify(login, password)) false else {
+                    admissionRuntime.cancel().join()
+                    portableAccountUi.runtime.signOut(login, password)
+                }
+            },
+            removeEmptyLocalAccount = { login, password ->
+                if (admissionState is app.autplay.application.profilepairing.AdmissionState.Exchanging ||
+                    pairingRuntimeState.pairing is PairingState.ExchangingInvitation ||
+                    !portableAccountUi.runtime.store.verify(login, password)) false else {
+                    admissionRuntime.cancel().join()
+                    portableAccountUi.runtime.removeEmptyLocalAccount(login, password)
+                }
+            },
+        ),
         confirmProfileAction = { action, login, password ->
             portableAccountUi.runtime.confirmLifecycle(app.autplay.application.profilepairing.RuntimeLifecycleAction.valueOf(action.name), login, password)
         },
@@ -2352,8 +2394,12 @@ internal fun SettingsFrontendScreen(
     onRefreshDeveloperMode: () -> Unit,
     onNavigate: (UiDestination) -> Unit,
     trainingConsent: TrainingConsentUi = TrainingConsentUi(),
+    page: UiDestination = UiDestination.Settings,
+    onChooseAudio: () -> Unit = {},
 ) {
     SettingsProductScreen(
+        page = page,
+        onChooseAudio = onChooseAudio,
         settings = settings,
         onUpdate = onUpdate,
         onAppLanguageChange = onAppLanguageChange,
@@ -2415,7 +2461,10 @@ private fun legacyView(destination: UiDestination): String = when (destination) 
     UiDestination.SyncStatus -> "Sync"
     UiDestination.ServerFeatures -> "Server"
     UiDestination.Profile -> "Profile"
-    UiDestination.Settings, UiDestination.PrivacyAndData -> "Settings"
+    UiDestination.SettingsAccount -> "SettingsAccount"
+    UiDestination.Settings, UiDestination.PrivacyAndData, UiDestination.SettingsPlayback,
+    UiDestination.SettingsMusic, UiDestination.SettingsDownloads, UiDestination.SettingsAppearance,
+    UiDestination.SettingsAbout, UiDestination.SettingsDiagnostics -> "Settings"
 }
 
 internal fun appearanceFrom(settings: NonSecretSettings): AutPlayAppearance = AutPlayAppearance(

@@ -13,11 +13,13 @@ import app.autplay.TrainingConsentUi
 import app.autplay.application.trainingconsent.TRAINING_CONSENT_MAX_REVISION
 
 @Composable
-internal fun TrainingConsentCard(ui: TrainingConsentUi, inDialog: Boolean = false) {
+internal fun TrainingConsentCard(ui: TrainingConsentUi, inDialog: Boolean = false, expanded: Boolean = false) {
     if (inDialog) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TrainingConsentContent(ui)
         }
+    } else if (expanded) {
+        TrainingConsentContent(ui)
     } else {
         app.autplay.ui.PreferenceSection(
             title = stringResource(R.string.training_consent_title),

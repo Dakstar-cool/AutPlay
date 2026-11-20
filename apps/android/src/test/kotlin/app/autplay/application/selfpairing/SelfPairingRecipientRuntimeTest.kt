@@ -42,7 +42,7 @@ class SelfPairingRecipientRuntimeTest {
         assertEquals(0, h.calls)
         assertArrayEquals(pending, h.store.read(CredentialJournalSlots.portableEnrollment))
         h.store.clear(CredentialJournalSlots.portableEnrollment)
-        val password = "portable root guard fixture".toCharArray()
+        val password = "portable root guard fixture!".toCharArray()
         val created = try { app.autplay.application.portableaccount.PortableAccountCrypto.create("guard_user", password) }
             finally { password.fill('\u0000') }
         created.use {
@@ -303,7 +303,7 @@ class SelfPairingRecipientRuntimeTest {
             AccountRecoveryPendingStore(store).write(AccountRecoverySlot.SOURCE, saved)
         }
         suspend fun seedLegacyClaim() {
-            val alias = "autplay.self.pairing.fixture"
+            val alias = "autplay.self.pairing.fixture!"
             keys.ensure(alias)
             SelfPairingQr.parse(qr(), clock).use { qr ->
                 val secret = SelfPairingProof.secret()

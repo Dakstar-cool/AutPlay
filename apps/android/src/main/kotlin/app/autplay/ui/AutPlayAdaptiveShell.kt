@@ -350,7 +350,7 @@ private fun AutPlayTopBar(
                 Text(
                     stringResource(topBarTitle(destination)),
                     style = MaterialTheme.typography.titleLarge,
-                    maxLines = 1,
+                    maxLines = if (destination.isSettingsDestination) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -363,7 +363,7 @@ private fun AutPlayTopBar(
             }
         },
         actions = {
-            if (!immersive) {
+            if (!immersive && !destination.isSettingsDestination) {
                 AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
             }
         },

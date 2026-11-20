@@ -174,6 +174,7 @@ class PlaybackPresentationAdapter(
     private fun connect() {
         if (!foreground || !dismissalRestored || controller != null || connecting) return
         connecting = true
+        publishFromController()
         val token = SessionToken(appContext, ComponentName(appContext, AutPlayPlaybackService::class.java))
         val future = MediaController.Builder(appContext, token).buildAsync()
         future.addListener(
@@ -221,7 +222,11 @@ class PlaybackPresentationAdapter(
             isLive = live,
             isSeekable = seekable,
             isPlaying = current?.isPlaying == true,
-            connection = if (current == null) PlaybackConnectionState.Disconnected else PlaybackConnectionState.Connected,
+            connection = when {
+                current != null -> PlaybackConnectionState.Connected
+                connecting -> PlaybackConnectionState.Connecting
+                else -> PlaybackConnectionState.Disconnected
+            },
             playbackStatus = when (current?.playbackState) {
                 Player.STATE_BUFFERING -> PlaybackStatus.Buffering
                 Player.STATE_READY -> PlaybackStatus.Ready

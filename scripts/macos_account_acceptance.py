@@ -217,7 +217,7 @@ def serve() -> None:
             "identity_epoch": discovery["identity_epoch"],
             "identity_spki_b64": discovery["identity_public_key_spki_b64"],
             "public_id": "mac_ci_" + secrets.token_hex(6),
-            "password": secrets.token_urlsafe(36),
+            "password": secrets.token_urlsafe(36) + "!",
         },
     )
     uvicorn.run(
@@ -515,7 +515,9 @@ def live_acceptance() -> None:
         )
     }
     # No owner ID/password input exists. Each attempt creates its own bounded synthetic account.
-    client.update(public_id="mac_live_" + secrets.token_hex(6), password=secrets.token_urlsafe(36))
+    client.update(
+        public_id="mac_live_" + secrets.token_hex(6), password=secrets.token_urlsafe(36) + "!"
+    )
     config = TEMP / "client.private.json"
     private_json(config, client)
     passed = exercise_clients(config, secrets.token_urlsafe(32))

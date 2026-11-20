@@ -106,10 +106,14 @@ internal fun buildHomeScreenUiState(
         .toSet()
     return HomeScreenUiState(
     localMode = localMode,
+    localLibraryEmpty = libraryTracks.isEmpty(),
     likedTrackIds = libraryTracks.filter { it.loved }.map { it.stableId }.toSet(),
     recommendationLoading = recommendationLoading,
     offlineFallback = offlineFallback,
-    releases = releases.map { HomeReleaseUiItem(it.stableId, it.title, it.artistName ?: unknownArtist, it.releaseDateText) },
+    releases = releases.map {
+        HomeReleaseUiItem(it.stableId, it.title, it.artistName ?: unknownArtist, it.releaseDateText,
+            artworkTrackId = it.artworkTrackId, inLibrary = (it.ownedTrackCount ?: 0) > 0)
+    },
     recommendations = recommendations,
     continueListening = continueListening?.takeIf { it.localUserTrackRefId in playableTrackIds }?.let { queue ->
         HomeContinueUiItem(

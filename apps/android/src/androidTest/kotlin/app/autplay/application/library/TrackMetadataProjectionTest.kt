@@ -10,6 +10,55 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TrackMetadataProjectionTest {
+    @Test fun currentTrackReadsThroughMetadataAndArtworkCacheOnce() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "playback-metadata-cache.db"
+        context.deleteDatabase(name)
+        val db = AutPlayDatabase.open(context, name)
+        var artworkFile: java.io.File? = null
+        try {
+            val profile = "test-playback-metadata"
+            db.libraryDao().upsertTrackRef(UserTrackRefEntity("track", "server-track", null, null, "RESOLVED",
+                "Original", "Artist", null, null, null, "CLEAN", 1, 7, 1, 1, null, profile))
+            val image = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888)
+            val bytes = java.io.ByteArrayOutputStream().use {
+                image.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it)
+                it.toByteArray()
+            }
+            image.recycle()
+            val sha = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+            val repository = TrackMetadataRepository(context, db)
+            var textReads = 0
+            var coverReads = 0
+            suspend fun load(owner: String) = repository.loadForPlayback(owner, "track", { ref ->
+                assertEquals("server-track", ref)
+                textReads++
+                buildJsonObject {
+                    put("revision", 2); put("state", "READY"); put("artwork_sha256", sha)
+                    put("fields", buildJsonObject { put("title", "Selected track") })
+                }
+            }, { ref, digest ->
+                assertEquals("server-track", ref)
+                assertEquals(sha, digest)
+                coverReads++
+                bytes
+            })
+            load("another-profile")
+            assertEquals(0, textReads)
+            load(profile)
+            artworkFile = java.io.File(requireNotNull(db.trackMetadataDao().artwork(profile, sha)).filePath)
+            load(profile)
+            assertEquals(1, textReads)
+            assertEquals(1, coverReads)
+            assertEquals("Selected track", db.trackMetadataDao().get(profile, "track")!!.decoded().text("title"))
+            assertArrayEquals(bytes, artworkFile.readBytes())
+        } finally {
+            artworkFile?.delete()
+            db.close()
+            context.deleteDatabase(name)
+        }
+    }
+
     @Test fun profileRevisionAndExplicitClearSurviveReopen() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val name = "metadata-projection-proof.db"

@@ -85,9 +85,9 @@ internal fun rememberOfflineRepositorySnapshot(
         .collectAsState(initial = emptyList())
     val activeQueue by remember(coreRepository, profileId) { coreRepository.activeQueue(profileId) }
         .collectAsState(initial = null)
-    val syncStatus by (binding?.let(syncStatusRepository::observe) ?: flowOf(
-        SyncStatus(0, 0, 0, null, "STANDALONE"),
-    )).collectAsState(initial = SyncStatus(0, 0, 0, null, "LOADING"))
+    val syncStatus by remember(binding, syncStatusRepository) {
+        binding?.let(syncStatusRepository::observe) ?: flowOf(SyncStatus(0, 0, 0, null, "STANDALONE"))
+    }.collectAsState(initial = SyncStatus(0, 0, 0, null, "LOADING"))
     val importProfileId = profileId ?: LEGACY_PROFILE_ID
     val importJob by importRepository.observeLatestJob(importProfileId).collectAsState(initial = null)
     val importItems by (importJob?.let { importRepository.observeReviewItems(it.importJobId) }

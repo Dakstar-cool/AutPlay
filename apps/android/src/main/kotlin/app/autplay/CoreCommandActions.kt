@@ -9,6 +9,9 @@ import app.autplay.application.library.CoreLibraryEntrySummary
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
+import app.autplay.application.recommendation.PersonalWaveQueue
+import app.autplay.application.recommendation.PersonalWaveSession
+import app.autplay.application.server.ServerRecommendationResult
 import app.autplay.application.recommendation.HomeFeed
 import app.autplay.application.recommendation.HomeRecommendationItem
 import app.autplay.application.recommendation.OfflineRecommendationRepository
@@ -40,6 +43,7 @@ import kotlinx.coroutines.launch
 internal data class CoreCommandActions(
     val recordRecommendationVisibility: (String) -> Unit,
     val recordHomeFeedback: (String, String) -> Unit,
+    val startRecommendation: (String) -> Unit,
     val startTrack: (String, String, String, String?) -> Unit,
     val startMyWave: () -> Unit,
     val startSearchTrack: (String) -> Unit,
@@ -81,6 +85,8 @@ internal fun buildCoreCommandActions(
     myWaveAllowed: () -> Boolean,
     myWaveCurrentBinding: () -> ClientEventBinding?,
     myWaveScope: CoroutineScope,
+    personalWaveQueue: PersonalWaveQueue,
+    fetchWave: suspend (ClientEventBinding, PersonalWaveSession) -> ServerRecommendationResult,
 ): CoreCommandActions {
     fun recommendationFor(key: String): Pair<String, HomeRecommendationItem>? {
         val feed = activeHomeFeed() ?: return null
@@ -149,6 +155,32 @@ internal fun buildCoreCommandActions(
                 }
             }
         },
+        startRecommendation = play@{ key ->
+            val activeBinding = myWaveCurrentBinding() ?: return@play
+            if (!myWaveAllowed()) return@play
+            val (presentationId, item) = recommendationFor(key) ?: return@play
+            val impression = presentationResults[key] ?: return@play
+            val actionKey = "play:recommendation:$key"
+            if (!actionGate.begin(actionKey)) return@play
+            myWaveScope.launch {
+                try {
+                    val snapshotId = recommendationRepository.activatePresentedPlayback(
+                        activeBinding, LocalId(presentationId), item, impression.impressionEventId,
+                        System.currentTimeMillis(),
+                        isBindingActive = { myWaveCurrentBinding() == activeBinding && myWaveAllowed() },
+                    )
+                    if (myWaveCurrentBinding() == activeBinding && myWaveAllowed()) {
+                        playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    reportError("PLAYBACK_UNAVAILABLE")
+                } finally {
+                    actionGate.complete(actionKey)
+                }
+            }
+        },
         startTrack = { trackRefId, sourceOrigin, queueType, sourceContextId ->
             val actionKey = "play:$sourceOrigin:$trackRefId"
             if (actionGate.begin(actionKey)) scope.launch {
@@ -190,36 +222,17 @@ internal fun buildCoreCommandActions(
             myWaveScope.launch {
                 try {
                     runCatching {
-                        val entries = coreProductRepository.randomPlaybackCandidates(
-                            profileId, myWaveVaultAvailable(),
-                        ).map { id ->
-                            NewPlaybackQueueEntry(
-                                queueEntryId = LocalId.random(),
-                                trackRefId = LocalId(id),
-                                sourceOrigin = "HOME",
-                                sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                            )
-                        }
-                        if (myWaveCurrentBinding() != ownerBinding || !myWaveAllowed()) return@runCatching
-                        if (entries.isEmpty()) {
-                            reportError("MY_WAVE_EMPTY")
+                        val replacement = coreProductRepository.ordinaryPlaybackReplacementGuard(profileId)
+                            ?: return@runCatching
+                        val snapshotId = personalWaveQueue.start(
+                            ownerBinding, replacement, myWaveVaultAvailable(),
+                            stillActive = { myWaveCurrentBinding() == ownerBinding && myWaveAllowed() },
+                            fetch = fetchWave,
+                        )
+                        if (snapshotId == null) {
+                            if (myWaveCurrentBinding() == ownerBinding) reportError("MY_WAVE_EMPTY")
                             return@runCatching
                         }
-                        // Recheck after suspension: a room/profile may have changed since the tap.
-                        val replacementGuard = coreProductRepository.ordinaryPlaybackReplacementGuard(profileId)
-                            ?: return@runCatching
-                        if (!myWaveAllowed() || myWaveCurrentBinding() != ownerBinding) return@runCatching
-                        val snapshotId = LocalId.random()
-                        playbackRepository.activateQueue(
-                            snapshotId = snapshotId,
-                            entries = entries,
-                            queueType = "USER",
-                            sourceContextId = "MY_WAVE_RANDOM",
-                            serverProfileId = profileId,
-                            listeningContext = "GENERAL",
-                            nowMs = System.currentTimeMillis(),
-                            ordinaryReplacementGuard = replacementGuard,
-                        )
                         if (myWaveCurrentBinding() == ownerBinding && myWaveAllowed()) {
                             playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
                         }

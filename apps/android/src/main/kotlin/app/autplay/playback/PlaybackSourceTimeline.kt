@@ -4,30 +4,20 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.source.ClippingMediaSource
 import androidx.media3.exoplayer.source.ForwardingTimeline
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.WrappingMediaSource
 
 internal data class PlaybackSourceTimeline(val durationMs: Long?, val seekable: Boolean)
 
-internal const val CUT_DEFAULT_POSITION_MS = "transition_default_position_ms"
-internal const val CUT_SOURCE_DURATION_MS = "transition_source_duration_ms"
-
-/** Reports the actual source timeline before clipping, never the duration from file tags. */
+/** Reports the actual source timeline, never the duration from file tags. */
 @UnstableApi
 internal class PlaybackSourceTimelineFactory(
     private val delegate: MediaSource.Factory,
     private val onTimeline: (MediaItem, PlaybackSourceTimeline) -> Unit,
 ) : MediaSource.Factory by delegate {
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
-        val plainItem = mediaItem.buildUpon().setClippingConfiguration(MediaItem.ClippingConfiguration.UNSET).build()
-        val reporting = ReportingSource(delegate.createMediaSource(plainItem), mediaItem, onTimeline)
-        return if (mediaItem.clippingConfiguration == MediaItem.ClippingConfiguration.UNSET) reporting
-        else ClippingMediaSource.Builder(reporting)
-            .setStartPositionMs(mediaItem.clippingConfiguration.startPositionMs)
-            .setEndPositionMs(mediaItem.clippingConfiguration.endPositionMs)
-            .build()
+        return ReportingSource(delegate.createMediaSource(mediaItem), mediaItem, onTimeline)
     }
 }
 
@@ -42,12 +32,11 @@ private class ReportingSource(
     override fun getInitialTimeline(): Timeline? = mediaSource.initialTimeline?.let(::describedTimeline)
 
     override fun canUpdateMediaItem(mediaItem: MediaItem): Boolean =
-        item.clippingConfiguration == mediaItem.clippingConfiguration &&
-            mediaSource.canUpdateMediaItem(plain(mediaItem))
+        mediaSource.canUpdateMediaItem(mediaItem)
 
     override fun updateMediaItem(mediaItem: MediaItem) {
         item = mediaItem
-        mediaSource.updateMediaItem(plain(mediaItem))
+        mediaSource.updateMediaItem(mediaItem)
     }
 
     override fun onChildSourceInfoRefreshed(newTimeline: Timeline) {
@@ -59,7 +48,7 @@ private class ReportingSource(
                 seekable = window.isSeekable && !window.isLive,
             )
         } else PlaybackSourceTimeline(null, false)
-        // Re-preparing a clipped source starts with a placeholder; retain its learned bounds.
+        // A re-prepared source starts with a placeholder; retain its learned duration.
         info?.let { onTimeline(item, it) }
         refreshSourceInfo(describedTimeline(newTimeline))
     }
@@ -69,22 +58,8 @@ private class ReportingSource(
             super.getWindow(windowIndex, window, defaultPositionProjectionUs)
             val describedItem = item
             window.mediaItem = describedItem
-            val defaultMs = describedItem.mediaMetadata.extras?.getLong(CUT_DEFAULT_POSITION_MS, 0) ?: 0
-            // Use the same anchored duration as the service's cut eligibility, including
-            // for an unclipped successor around the six-second short-source boundary.
-            val cutDurationMs = describedItem.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS, window.durationMs)
-                ?: window.durationMs
-            if (defaultMs > 0 && timeline.windowCount == 1 && timeline.periodCount == 1 &&
-                window.isSeekable && !window.isLive && !window.isPlaceholder &&
-                cutDurationMs > defaultMs * 2) {
-                // Explicit initial/restore seeks still use their exact source position.
-                // Auto transitions (including repeat-one) use this prepared head boundary.
-                window.defaultPositionUs = defaultMs * 1_000
-            }
             return window
         }
     }
 
-    private fun plain(mediaItem: MediaItem): MediaItem =
-        mediaItem.buildUpon().setClippingConfiguration(MediaItem.ClippingConfiguration.UNSET).build()
 }

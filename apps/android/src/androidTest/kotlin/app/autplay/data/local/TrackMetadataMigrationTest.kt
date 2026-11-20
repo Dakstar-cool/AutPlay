@@ -15,6 +15,17 @@ class TrackMetadataMigrationTest {
     private val name = "track-metadata-migration.db"
     @After fun clean() { context.deleteDatabase(name) }
 
+    @Test fun oldListeningEventsRemainAvailableForVersionStatistics() = runBlocking {
+        val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), context.getDatabasePath(name), BundledSQLiteDriver(), AutPlayDatabase::class)
+        helper.createDatabase(18).use { db ->
+            db.execSQL("""INSERT INTO user_track_ref(local_user_track_ref_id,resolution_status,raw_title,sync_state,last_local_sequence,created_at_ms,updated_at_ms,server_profile_id) VALUES('track','UNRESOLVED','Song','CLEAN',0,1,1,'profile')""")
+            db.execSQL("""INSERT INTO listening_event(listening_event_id,local_user_track_ref_id,started_at_ms,played_ms,event_origin,context,explicit_feedback,excluded_from_taste,sync_state,created_at_ms,server_profile_id,recommendation_attribution_json) VALUES('play','track',1,1000,'RECOMMENDED','GENERAL','NONE',0,'CLEAN',2,'profile','{"surface":"home"}')""")
+        }
+        helper.runMigrationsAndValidate(19, listOf(AutPlayDatabase.MIGRATION_18_19)).use { db ->
+            assertEquals("home", value(db, "SELECT json_extract(recommendation_attribution_json,'$.surface') FROM listening_event WHERE variation_kind IS NULL AND variation_surface IS NULL"))
+        }
+    }
+
     @Test fun addsMetadataWithoutChangingTracksHistoryOrPendingIntents() = runBlocking {
         val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), context.getDatabasePath(name), BundledSQLiteDriver(), AutPlayDatabase::class)
         helper.createDatabase(16).use { db ->

@@ -49,7 +49,7 @@ class PlaybackLoadingRegressionTest {
 
     private suspend fun verifyXingQueue(audioFrames: Int) {
         val shortSource = audioFrames == 230
-        val expectedHeadMs = if (shortSource) 0L else 3_000L
+        val expectedHeadMs = 0L
         // First prove this exact decoder fixture produces distinct header/EOF durations
         // through the production extractor, rather than relying on inaccurate file tags.
         val bytes = XingAudioProvider.bytes(audioFrames)
@@ -95,7 +95,7 @@ class PlaybackLoadingRegressionTest {
             assertTrue(durationsUs.first() / 1_000 <= 6_000)
             assertTrue(exactDurationMs > 6_000)
         }
-        val expectedEndMs = if (shortSource) C.TIME_END_OF_SOURCE else durationsUs.first() / 1_000 - 3_000
+        val expectedEndMs = C.TIME_END_OF_SOURCE
 
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val provider = Uri.parse("content://${instrumentation.context.packageName}.xing")
@@ -131,9 +131,7 @@ class PlaybackLoadingRegressionTest {
                     preparationFailure("Source ${index + 1} reopened/reset: expected count=${completed.count} descriptor=${completed.descriptor}, " +
                         "actual count=${reads.getInt("sourceReads")} descriptor=${reads.getInt("latestDescriptor")}")
                 }
-                // The service may update a departed item's preservation policy.
-                // Its retained read count must still stay fixed, but its old cut
-                // no longer describes the current/future playback occurrence.
+                // Keep read counts fixed even after the item has departed.
                 if (index < player.currentMediaItemIndex) continue
                 if (player.currentTimeline.windowCount != 3) {
                     preparationFailure("Prepared queue lost its windows")
@@ -145,10 +143,10 @@ class PlaybackLoadingRegressionTest {
                 val end = if (index == 2) C.TIME_END_OF_SOURCE else expectedEndMs
                 if (window.isPlaceholder || item.clippingConfiguration.startPositionMs != start ||
                     item.clippingConfiguration.endPositionMs != end ||
-                    item.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS) != durationsUs.first() / 1_000) {
+                    window.durationMs !in (durationsUs.first() / 1_000)..exactDurationMs) {
                     preparationFailure("Source ${index + 1} changed final timeline: placeholder=${window.isPlaceholder} " +
                         "start=${item.clippingConfiguration.startPositionMs} end=${item.clippingConfiguration.endPositionMs} " +
-                        "anchored=${item.mediaMetadata.extras?.getLong(CUT_SOURCE_DURATION_MS)} currentSource=${player.currentMediaItemIndex + 1}")
+                        "duration=${window.durationMs} currentSource=${player.currentMediaItemIndex + 1}")
                 }
             }
         }
@@ -173,12 +171,11 @@ class PlaybackLoadingRegressionTest {
                 assertEquals(null, player.playerError)
                 assertTrue("Repeated source preparation", status("readOpens") <= 18)
                 player.isPlaying && player.currentMediaItemIndex == 0 &&
-                    player.currentMediaItem?.clippingConfiguration?.endPositionMs == expectedEndMs &&
-                    player.currentMediaItem?.mediaMetadata?.extras?.getLong(CUT_SOURCE_DURATION_MS) == durationsUs.first() / 1_000
+                    player.currentMediaItem?.clippingConfiguration?.endPositionMs == expectedEndMs
             } }
             fixture.main { fixture.controller!!.pause(); fixture.controller!!.volume = 0.35f }
             assertEquals(0L, fixture.main { fixture.controller!!.currentMediaItem!!.clippingConfiguration.startPositionMs })
-            val expectedMiddleDurationMs = if (shortSource) exactDurationMs else expectedEndMs - expectedHeadMs
+            val expectedMiddleDurationMs = exactDurationMs
             fixture.await("preloaded middle MP3 has its final bounds before it starts") { fixture.main {
                 val player = checkNotNull(fixture.controller)
                 val timeline = player.currentTimeline
@@ -234,7 +231,7 @@ class PlaybackLoadingRegressionTest {
             }
             val installedEnd = fixture.main { fixture.controller!!.currentMediaItem!!.clippingConfiguration.endPositionMs }
             // Several possible header/EOF cycles fit in this interval. A paused player
-            // must remain prepared, with the same cut and no new source reads.
+            // must remain prepared, with the same bounds and no new source reads.
             repeat(20) {
                 delay(50)
                 fixture.main {
@@ -287,8 +284,8 @@ class PlaybackLoadingRegressionTest {
                 })
                 player.play()
             }
-            // No seek/next command: advancing proves the actual clipped period ends.
-            fixture.await("natural transition to second MP3") { fixture.main {
+            // No seek/next command: advancing proves the complete original period ends.
+            fixture.await("natural transition to second MP3", timeoutMs = exactDurationMs + 5_000) { fixture.main {
                 val player = checkNotNull(fixture.controller)
                 assertEquals(null, player.playerError)
                 assertTrue("Repeated source preparation", status("readOpens") <= 18)
@@ -309,13 +306,13 @@ class PlaybackLoadingRegressionTest {
                         it.currentPositionMs in expectedHeadMs..(expectedHeadMs + 2_000)
                 } == true
             }
-            val expectedSessionEnd = if (shortSource) exactDurationMs else installedEnd
+            val expectedSessionEnd = exactDurationMs
             fixture.await("first listen finalized") {
                 fixture.database.historyDao().event(listen)?.sessionEndPositionMs == expectedSessionEnd
             }
             assertEquals(exactDurationMs, checkNotNull(fixture.database.historyDao().event(listen)).trackDurationMs)
             fixture.main { fixture.controller!!.play() }
-            fixture.await("natural transition through the middle MP3") { fixture.main {
+            fixture.await("natural transition through the middle MP3", timeoutMs = exactDurationMs + 5_000) { fixture.main {
                 assertEquals(null, fixture.controller!!.playerError)
                 fixture.controller!!.currentMediaItem?.mediaId == fixture.entries[2].value &&
                     fixture.controller!!.isPlaying
@@ -335,7 +332,7 @@ class PlaybackLoadingRegressionTest {
                 assertEquals(0.35f, fixture.controller!!.volume, 0.001f)
                 fixture.controller!!.play()
             }
-            fixture.await("final MP3 finishes without buffering loop") { fixture.main {
+            fixture.await("final MP3 finishes without buffering loop", timeoutMs = exactDurationMs + 5_000) { fixture.main {
                 assertEquals(null, fixture.controller!!.playerError)
                 fixture.controller!!.playbackState == Player.STATE_ENDED
             } }
@@ -393,7 +390,7 @@ class PlaybackLoadingRegressionTest {
         }
     }
 
-    @Test fun xingDurationWithoutSeekTableSupportsCutsBeforeDownloadingTheWholeFile() {
+    @Test fun xingDurationWithoutSeekTableSupportsSeekBeforeDownloadingTheWholeFile() {
         // MPEG1 Layer III, 128 kbps, 44.1 kHz stereo. Xing gives duration but no TOC.
         // The payload exercises extraction/seek-map selection, not an audio decoder.
         val frameSize = 417
@@ -426,10 +423,6 @@ class PlaybackLoadingRegressionTest {
         assertTrue(map.isSeekable)
         assertTrue(map.durationUs in 39_000_000L..41_000_000L)
         assertTrue("Preparation must not scan the full file", consumed < bytes.size / 10)
-        val bounds = PlaybackTransitionCuts.bounds(true, "USER", map.durationUs / 1_000,
-            map.isSeekable, preserveHead = false, hasPlayableSuccessor = true, stopAfterItem = false)
-        assertEquals(3_000L, bounds.startMs)
-        assertEquals(map.durationUs / 1_000 - 3_000, bounds.endMs)
         // Headerless, known-length CBR already works in Media3; do not regress it or
         // incorrectly diagnose all MP3 files without Xing/VBRI as unseekable.
         bytes.fill(0, 36, 48)

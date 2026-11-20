@@ -50,12 +50,52 @@ class ProfileStatisticsCardTest {
         compose.onNodeWithText(context.getString(R.string.profile_stats_refresh)).performClick()
         assertEquals(1, refreshes)
         compose.onNodeWithText(context.getString(R.string.profile_stats_listened_time)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.variation_skips_title)).assertDoesNotExist()
         compose.onNodeWithText("Jazz").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Local song").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_stats_top_artists)).performScrollTo().assertIsDisplayed()
         listOf(7, 30, 365).forEach { days ->
             compose.onNodeWithText(context.resources.getQuantityString(R.plurals.statistics_window_days, days, days)).assertDoesNotExist()
         }
+    }
+
+    @Test
+    fun sonaReportIsLiveOnlyAndDisappearsWhenConnectivityIsLost() {
+        val online = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val row = app.autplay.application.recommendation.VariationSkips("home", "REMIX", 5, 3)
+        val title = context.getString(R.string.variation_skips_title)
+        compose.setContent {
+            AutPlayTheme {
+                app.autplay.LiveSonaStatistics(online) {
+                    app.autplay.application.statistics.SonaVariationSkipReport(listOf(row), 60_000L)
+                }
+            }
+        }
+        compose.onNodeWithText(title).assertDoesNotExist()
+        compose.runOnIdle { online.value = true }
+        compose.onNodeWithText(context.getString(R.string.variation_skips_count, 3L, 5L)).assertIsDisplayed()
+        compose.runOnIdle { online.value = false }
+        compose.onNodeWithText(title).assertDoesNotExist()
+    }
+
+    @Test
+    fun reportExpiresWhileTheProfileStaysOpen() {
+        val online = kotlinx.coroutines.flow.MutableStateFlow(true)
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val title = context.getString(R.string.variation_skips_title)
+        compose.setContent {
+            AutPlayTheme {
+                app.autplay.LiveSonaStatistics(online) {
+                    check(reads.incrementAndGet() == 1) { "Collection has ended" }
+                    app.autplay.application.statistics.SonaVariationSkipReport(emptyList(), 1_500L)
+                }
+            }
+        }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(androidx.compose.ui.test.hasText(title)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(timeoutMillis = 5_000) { reads.get() >= 2 }
+        compose.onNodeWithText(title).assertDoesNotExist()
     }
 
     @Test

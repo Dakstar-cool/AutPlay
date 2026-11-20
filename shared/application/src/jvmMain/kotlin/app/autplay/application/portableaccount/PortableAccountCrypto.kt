@@ -268,8 +268,18 @@ object PortableAccountCrypto {
 
     fun validPassword(password: CharArray): Boolean {
         val count = Character.codePointCount(password, 0, password.size)
-        if (count !in 15..128) return false
+        if (count !in 7..128) return false
         if (password.all { it == password.first() }) return false
+        val hasSpecial = password.concatToString().codePoints().anyMatch { codePoint ->
+            Character.getType(codePoint) in setOf(
+                Character.CONNECTOR_PUNCTUATION.toInt(), Character.DASH_PUNCTUATION.toInt(),
+                Character.START_PUNCTUATION.toInt(), Character.END_PUNCTUATION.toInt(),
+                Character.INITIAL_QUOTE_PUNCTUATION.toInt(), Character.FINAL_QUOTE_PUNCTUATION.toInt(),
+                Character.OTHER_PUNCTUATION.toInt(), Character.MATH_SYMBOL.toInt(),
+                Character.CURRENCY_SYMBOL.toInt(), Character.MODIFIER_SYMBOL.toInt(), Character.OTHER_SYMBOL.toInt(),
+            )
+        }
+        if (!hasSpecial) return false
         return !password.concatToString().lowercase(java.util.Locale.ROOT).let {
             it in setOf("password123456789", "123456789012345", "qwertyuiopasdfgh", "passwordpassword")
         }
@@ -289,7 +299,8 @@ object PortableAccountCrypto {
     }
 
     fun unlock(document: PortableAccountDocument, password: CharArray): UnlockedPortableAccount {
-        require(Character.codePointCount(password, 0, password.size) in 15..128) { "ACCOUNT_AUTHENTICATION_FAILED" }
+        // Existing accounts retain their original password, including passphrases without symbols.
+        require(Character.codePointCount(password, 0, password.size) in 7..128) { "ACCOUNT_AUTHENTICATION_FAILED" }
         val key = derive(password, decode(document.text("password_salt_b64"), 16))
         return try { open(document, key, "password") } finally { key.fill(0) }
     }

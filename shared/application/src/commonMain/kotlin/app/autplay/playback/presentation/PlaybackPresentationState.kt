@@ -38,7 +38,7 @@ data class PlaybackPresentationState(
 val PlaybackPresentationState.canSeek: Boolean
     get() = seekEnabled && isSeekable && durationMs != null && !isLive
 
-enum class PlaybackConnectionState { Disconnected, Connected }
+enum class PlaybackConnectionState { Disconnected, Connecting, Connected }
 enum class PlaybackStatus { Idle, Buffering, Ready, Ended }
 enum class RepeatModePresentation { Off, One, All }
 enum class PlaybackSourcePresentation { Local, Download, Vault, Unknown }

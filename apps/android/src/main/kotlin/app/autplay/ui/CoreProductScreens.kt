@@ -100,6 +100,8 @@ public data class HomeReleaseUiItem(
     public val title: String,
     public val artist: String,
     public val dateText: String?,
+    public val artworkTrackId: String? = null,
+    public val inLibrary: Boolean = false,
 )
 
 public data class HomeRecommendationUiItem(
@@ -142,6 +144,7 @@ public data class HomeScreenUiState(
     public val problems: List<HomeProblemUiItem> = emptyList(),
     public val recommendationError: Boolean = false,
     public val likedTrackIds: Set<String> = emptySet(),
+    public val localLibraryEmpty: Boolean = false,
 )
 
 public data class SearchScreenUiState(
@@ -195,6 +198,8 @@ public fun HomeProductScreen(
     onDislike: (String) -> Unit,
     onRetry: () -> Unit = {},
     onPlayTrack: (String) -> Unit = {},
+    onPlayRecommendation: (String) -> Unit = {},
+    recommendationPlaybackAllowed: Boolean = true,
     onOpenPlaylist: (String) -> Unit = {},
     onOpenOffline: () -> Unit = {},
     onOpenProblems: () -> Unit = {},
@@ -209,6 +214,9 @@ public fun HomeProductScreen(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onStartMyWave: () -> Unit = {},
     myWaveAllowed: Boolean = true,
+    onOpenRelease: (String) -> Unit = {},
+    onAddLocal: () -> Unit = {},
+    importingLocalTrack: Boolean = false,
 ) {
     val heroState = buildHomePlaybackHeroUiState(
         homeState = state,
@@ -217,6 +225,7 @@ public fun HomeProductScreen(
         currentTrackLiked = currentTrackLiked,
     )
     val listState = rememberLazyListState()
+    val showFirstTrack = state.localMode && state.localLibraryEmpty && !heroState.hasActivePlayback
     Box(Modifier.fillMaxWidth().padding(contentPadding)) {
         LazyColumn(
             state = listState,
@@ -229,6 +238,22 @@ public fun HomeProductScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+        if (showFirstTrack) {
+            item(key = "home:first-track") {
+                AutPlayCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(stringResource(R.string.home_first_track_title), style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.home_first_track_body), style = MaterialTheme.typography.bodyLarge)
+                        Button(onClick = onAddLocal, enabled = !importingLocalTrack,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("home-add-first-track")) {
+                            Text(stringResource(if (importingLocalTrack) R.string.library_adding_local else R.string.library_add_local))
+                        }
+                        Text(stringResource(R.string.local_audio_picker_hint), style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        } else {
         item(key = "home:playback-hero") {
             BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth(),
@@ -257,11 +282,12 @@ public fun HomeProductScreen(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("home-my-wave"),
                 ) { Text(stringResource(R.string.home_my_wave)) }
                 Text(
-                    stringResource(if (myWaveAllowed) R.string.home_my_wave_random else R.string.home_my_wave_locked),
+                    stringResource(if (myWaveAllowed) R.string.home_my_wave_description else R.string.home_my_wave_locked),
                     style = MaterialTheme.typography.bodyMedium,
                     color = AutPlayTokens.colors.mutedText,
                 )
             }
+        }
         }
         if (state.offlineFallback) {
             item {
@@ -270,6 +296,9 @@ public fun HomeProductScreen(
                     stringResource(R.string.home_offline_fallback),
                 )
             }
+        }
+        item(key = "home:new-releases") {
+            HomeReleaseSection(releases = state.releases, onOpenRelease = onOpenRelease)
         }
         item(key = "home:contexts-heading") {
             AutPlaySectionHeader(stringResource(R.string.home_context_collections))
@@ -298,18 +327,6 @@ public fun HomeProductScreen(
                         )
                     }
                 }
-            }
-        }
-        item(key = "home:new-releases-heading") {
-            AutPlaySectionHeader(stringResource(R.string.home_new_releases))
-        }
-        if (state.releases.isEmpty()) {
-            item(key = "home:new-releases-empty") {
-                Text(stringResource(R.string.home_empty_releases), color = AutPlayTokens.colors.mutedText)
-            }
-        } else {
-            items(state.releases, key = HomeReleaseUiItem::id) { release ->
-                TrackRow(release.title, release.artist, release.dateText)
             }
         }
         state.continueListening?.let { item ->
@@ -376,6 +393,11 @@ public fun HomeProductScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(item.section, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                             TrackRow(item.title, item.artist, null, item.id)
+                            Button(
+                                enabled = item.feedbackEnabled && recommendationPlaybackAllowed,
+                                onClick = { onPlayRecommendation(item.id) },
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("home-recommendation-play"),
+                            ) { Text(stringResource(R.string.action_play)) }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     enabled = item.feedbackEnabled,
@@ -785,6 +807,12 @@ public fun LibraryProductScreen(
                 )
             }
         }
+        if (state.tracks.isEmpty()) {
+            item(key = "library:picker-help") {
+                Text(stringResource(R.string.local_audio_picker_hint), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         if (state.error) {
             item(key = "library:error") {
                 AutPlayStateSurface(
@@ -1127,62 +1155,72 @@ private fun LibraryTrackCard(
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            AutPlayArtwork(track.title, trackId = track.id)
+            Box {
+                AutPlayArtwork(track.title, trackId = track.id)
+                IconButton(onClick = { onPlay(track.id) }, modifier = Modifier.align(Alignment.Center).size(48.dp)) {
+                    Surface(shape = androidx.compose.foundation.shape.CircleShape,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)) {
+                        AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.library_play_track, track.title),
+                            Modifier.padding(4.dp).size(20.dp), MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
             Column(Modifier.weight(1f)) {
-                Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     track.artist ?: stringResource(R.string.library_unknown_artist),
                     color = AutPlayTokens.colors.mutedText,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            AutPlayIconButton(
-                icon = if (track.loved) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
-                labelRes = if (track.loved) R.string.action_liked else R.string.action_like,
-                onClick = { onLike(track.id) },
-                modifier = Modifier.testTag("library-like-${track.id}")
-                    .semantics { selected = track.loved },
-                tint = if (track.loved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
-            Box {
-                androidx.compose.material3.TextButton(
-                    onClick = { menuOpen = true },
-                    modifier = Modifier.heightIn(min = AutPlayTokens.dimensions.minimumTouchTarget)
-                        .testTag("library-actions-${track.id}"),
-                ) { Text(stringResource(R.string.ui_library_refresh_track_actions)) }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.queue_play_next)) },
-                        onClick = { menuOpen = false; onPlayNext(track.id) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.queue_add_to_end)) },
-                        onClick = { menuOpen = false; onAddToQueue(track.id) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.playlist_add_selected)) },
-                        enabled = canAddToPlaylist,
-                        onClick = { menuOpen = false; onAddToPlaylist(track.id) },
-                    )
-                    if (downloadsAvailable && !track.downloaded) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                AutPlayIconButton(
+                    icon = if (track.loved) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
+                    labelRes = if (track.loved) R.string.action_liked else R.string.action_like,
+                    onClick = { onLike(track.id) },
+                    modifier = Modifier.testTag("library-like-${track.id}").semantics { selected = track.loved },
+                    tint = if (track.loved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                Box {
+                    androidx.compose.material3.TextButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.heightIn(min = AutPlayTokens.dimensions.minimumTouchTarget)
+                            .testTag("library-actions-${track.id}"),
+                    ) { Text(stringResource(R.string.ui_library_refresh_track_actions)) }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_download)) },
-                            onClick = { menuOpen = false; onDownload(track.id) },
+                            text = { Text(stringResource(R.string.queue_play_next)) },
+                            onClick = { menuOpen = false; onPlayNext(track.id) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.queue_add_to_end)) },
+                            onClick = { menuOpen = false; onAddToQueue(track.id) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.playlist_add_selected)) },
+                            enabled = canAddToPlaylist,
+                            onClick = { menuOpen = false; onAddToPlaylist(track.id) },
+                        )
+                        if (downloadsAvailable && !track.downloaded) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_download)) },
+                                onClick = { menuOpen = false; onDownload(track.id) },
+                            )
+                        }
+                        if (track.permissionRevoked) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_choose_folder_again)) },
+                                onClick = { menuOpen = false; onRepairAccess() },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_remove)) },
+                            onClick = { menuOpen = false; onRemoveOrRestore(track.id) },
                         )
                     }
-                    if (track.permissionRevoked) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_choose_folder_again)) },
-                            onClick = { menuOpen = false; onRepairAccess() },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_remove)) },
-                        onClick = { menuOpen = false; onRemoveOrRestore(track.id) },
-                    )
                 }
             }
         }

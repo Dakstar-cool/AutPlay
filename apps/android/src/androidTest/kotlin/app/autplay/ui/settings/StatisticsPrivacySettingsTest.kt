@@ -87,12 +87,11 @@ class StatisticsPrivacySettingsTest {
                         statisticsSettings = state,
                         statisticsSettingsErrorCode = errorCode,
                         onStatisticsVisibilityChange = onChange,
-                        onNavigate = {},
+                        page = app.autplay.ui.UiDestination.PrivacyAndData, onNavigate = {},
                     )
                 }
             }
         }
-        compose.onNodeWithText(context.getString(R.string.settings_statistics_privacy)).performScrollTo().performClick()
     }
 
     private companion object {

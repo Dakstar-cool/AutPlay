@@ -1,6 +1,14 @@
 package app.autplay.ui
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
@@ -15,6 +23,7 @@ import app.autplay.R
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -22,6 +31,39 @@ import org.junit.Test
 class LibrarySearchRefreshTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun shortTrackTitleFitsAt375DpAndPlayAffordanceStartsThatTrack() {
+        val played = mutableListOf<String>()
+        val title = "First Light.wav"
+        compose.setContent {
+            AutPlayTheme {
+                Box(Modifier.width(375.dp)) {
+                    LibraryProductScreen(
+                        state = LibraryScreenUiState(true, listOf(CoreTrackUiItem("first", title, "Unknown artist"))),
+                        contentPadding = PaddingValues(), onAddLocal = {}, onSelect = { played += it },
+                        onRemoveOrRestore = {}, onLike = {},
+                    )
+                }
+            }
+        }
+        compose.onNodeWithTag("library-product-list").performScrollToNode(hasTestTag("library-track-first"))
+        compose.onNodeWithText(title, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
+                val layouts = mutableListOf<TextLayoutResult>()
+                assertTrue(action(layouts))
+                val layout = layouts.single()
+                val detail = "Title layout: ${layout.size}, paragraph ${layout.multiParagraph.width} x " +
+                    "${layout.multiParagraph.height}, ${layout.lineCount} lines, " +
+                    "widthOverflow=${layout.didOverflowWidth}, heightOverflow=${layout.didOverflowHeight}"
+                android.util.Log.i("FirstUsersLayout", detail)
+                assertTrue(detail, layout.lineCount > 0)
+                assertEquals(detail, title.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+                for (line in 0 until layout.lineCount) assertFalse(detail, layout.isLineEllipsized(line))
+            }
+        compose.onNodeWithContentDescription(context.getString(R.string.library_play_track, title)).performClick()
+        compose.runOnIdle { assertEquals(listOf("first"), played) }
+    }
 
     @Test
     fun connectedSearchDisplaysVaultEvenWhenOldSavedScopeWasOff() {

@@ -56,6 +56,18 @@ class PlaybackPlayerSurfacesTest {
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun restoringQueueShowsPreparationBeforeCurrentItemArrives() {
+        val state = androidx.compose.runtime.mutableStateOf(ordinaryState().copy(mediaId = null,
+            connection = app.autplay.playback.presentation.PlaybackConnectionState.Connected))
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(state.value, {}, {}, {}, {}, {}, {}, {}, {}, true, {})
+        } }
+        composeRule.onNodeWithText(context.getString(R.string.player_preparing)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.state_playback_unavailable_title)).assertDoesNotExist()
+        composeRule.runOnIdle { state.value = state.value.copy(context = ActiveQueueContext.Absent) }
+        composeRule.onNodeWithText(context.getString(R.string.player_nothing_playing)).assertIsDisplayed()
+    }
+
     @Test fun miniPlayerDownwardSwipeDismissesWithoutOpeningOrTogglingPlayback() {
         var dismissCalls = 0
         var openCalls = 0

@@ -34,6 +34,8 @@ internal data class PortableAccountUiState(val status: PortableAccountStatus, va
 internal data class PortableAccountActions(
     val create: suspend (String, CharArray) -> Boolean = { _, password -> password.fill('\u0000'); false },
     val connect: suspend (String, CharArray, Boolean) -> Boolean = { _, password, _ -> password.fill('\u0000'); false },
+    val removeEmptyLocalAccount: suspend (String, CharArray) -> Boolean = { _, _ -> false },
+    val signOut: suspend (String, CharArray) -> Boolean = { _, _ -> false },
     val exportRecovery: () -> Unit = {}, val retry: () -> Unit = {},
     val importRecovery: () -> Unit = {}, val clearRecoveryFile: () -> Unit = {},
     val recover: suspend (String, CharArray, CharArray) -> Boolean = { _, _, _ -> false },
@@ -53,14 +55,19 @@ internal fun PortableAccountCard(state: PortableAccountUiState, actions: Portabl
     var recoveryMode by remember { mutableStateOf(false) }
     var recoveryCode by remember { mutableStateOf("") }
     var exportedCode by remember { mutableStateOf("") }
+    var showSignOut by remember { mutableStateOf(false) }
+    var showRemoval by remember { mutableStateOf(false) }
     val hasAccount = status.publicId != null
     val needsPassword = !hasAccount || state.trustedServer || (state.bound && !status.serverCopyReady)
     SecureAccountWindow(needsPassword || recoveryMode || exportedCode.isNotEmpty())
+    if (showRemoval) AccountSignOutDialog(status.publicId.orEmpty(), false,
+        onDismiss = { showRemoval = false }, onConfirm = actions.removeEmptyLocalAccount, remove = true)
+    if (showSignOut) AccountSignOutDialog(status.publicId.orEmpty(), status.recoveryUnsaved,
+        onDismiss = { showSignOut = false }, onConfirm = actions.signOut)
     PreferenceSection(stringResource(R.string.portable_account_title), AutPlayIcon.Profile,
         stringResource(R.string.portable_account_summary), initiallyExpanded = !hasAccount || state.trustedServer || status.recoveryUnsaved) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             status.publicId?.let { Text("@$it", style = MaterialTheme.typography.titleMedium) }
-            Text(stringResource(R.string.portable_account_summary))
             if (status.recoveryUnsaved) {
                 Text(stringResource(R.string.portable_account_recovery_unsaved))
                 OutlinedButton(onClick = actions.exportRecovery, enabled = !working && !status.busy) { Text(stringResource(R.string.portable_account_save_recovery)) }
@@ -117,6 +124,14 @@ internal fun PortableAccountCard(state: PortableAccountUiState, actions: Portabl
                 }
                 if (state.trustedServer) Button(enabled = !working && !status.busy && normalizeSocialPublicId(login) != null && password.isNotEmpty(), onClick = { submit(true, hasAccount) }) {
                     Text(stringResource(if (hasAccount) R.string.portable_account_connect else R.string.portable_account_sign_in))
+                }
+            }
+            if (hasAccount && !status.pendingEnrollment) {
+                OutlinedButton(onClick = { showSignOut = true }, enabled = !working && !status.busy) {
+                    Text(stringResource(R.string.account_sign_out))
+                }
+                if (!state.bound) OutlinedButton(onClick = { showRemoval = true }, enabled = !working && !status.busy) {
+                    Text(stringResource(R.string.account_remove_empty_local))
                 }
             }
             if (!status.pendingEnrollment) {

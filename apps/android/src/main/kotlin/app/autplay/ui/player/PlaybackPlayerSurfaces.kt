@@ -48,11 +48,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -68,6 +73,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.application.playback.ActiveQueueContext
+import app.autplay.playback.presentation.PlaybackConnectionState
 import app.autplay.playback.presentation.PlaybackControlGate
 import app.autplay.playback.presentation.PlaybackControlLockReason
 import app.autplay.playback.presentation.PlaybackPresentationState
@@ -119,8 +126,8 @@ public fun PlaybackMiniPlayer(
     Box(
         Modifier.fillMaxWidth()
             .onSizeChanged { dismissMotion.travel = it.height.toFloat() }
-            .graphicsLayer { translationY = dismissMotion.offset }
             .playerCollapseGesture(dismiss, dismissMotion, animations)
+            .graphicsLayer { translationY = dismissMotion.offset }
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Surface(
@@ -241,10 +248,17 @@ public fun NowPlayingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                AutPlayStateSurface(
-                    AutPlayStateKind.PlaybackUnavailable,
-                    stringResource(R.string.player_nothing_playing),
-                )
+                val kind = when {
+                    state.context == ActiveQueueContext.Loading || state.connection == PlaybackConnectionState.Connecting ->
+                        AutPlayStateKind.Loading
+                    state.context == ActiveQueueContext.Absent -> AutPlayStateKind.Empty
+                    state.context is ActiveQueueContext.Loaded && state.context.queueType != "GUEST_WAVE" &&
+                        state.context.currentEntryId != null && state.connection == PlaybackConnectionState.Connected ->
+                        AutPlayStateKind.Loading
+                    else -> AutPlayStateKind.PlaybackUnavailable
+                }
+                AutPlayStateSurface(kind, stringResource(if (kind == AutPlayStateKind.Loading)
+                    R.string.player_preparing else R.string.player_nothing_playing))
             }
             IconButton(
                 onClick = { collapse?.invoke() },
@@ -258,7 +272,10 @@ public fun NowPlayingScreen(
     }
     val collapseMotion = rememberPlayerCollapseMotion()
     val animations = rememberSystemAnimationsEnabled()
-    val collapseGesture = Modifier.playerCollapseGesture(collapse, collapseMotion, animations)
+    val contentScroll = rememberScrollState()
+    var collapseInputCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var collapseHeaderBounds by remember { mutableStateOf(Rect.Zero) }
+    var collapseCoverBounds by remember { mutableStateOf(Rect.Zero) }
     val collapseTargetTop = LocalPlayerCollapseTargetTop.current
     var showSleepTimer by rememberSaveable { mutableStateOf(false) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
@@ -303,146 +320,158 @@ public fun NowPlayingScreen(
             )
         }
     }
-    BoxWithConstraints(
-        modifier
-            .fillMaxSize()
-            .graphicsLayer { translationY = collapseMotion.offset }
-            .background(MaterialTheme.colorScheme.background)
-            .testTag("now-playing-panel"),
+    Box(
+        modifier.fillMaxSize()
+            .onGloballyPositioned { collapseInputCoordinates = it }
+            .playerCollapseGesture(collapse, collapseMotion, animations, PointerEventPass.Initial) { position ->
+                val rootPosition = collapseInputCoordinates?.takeIf { it.isAttached }?.localToRoot(position)
+                contentScroll.value == 0 && rootPosition != null &&
+                    (collapseHeaderBounds.contains(rootPosition) || collapseCoverBounds.contains(rootPosition))
+            },
     ) {
-        val artworkWidth = maxWidth
-        val density = LocalDensity.current
-        val collapseTravel = with(density) {
-            (collapseTargetTop ?: (maxHeight - 88.dp)).coerceIn(0.dp, maxHeight).toPx()
-        }
-        SideEffect { collapseMotion.travel = collapseTravel }
-        Column(Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp).heightIn(min = 48.dp)
-                        .then(collapseGesture).testTag("player-collapse-header"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    IconButton(onClick = { collapse?.let { collapseMotion.collapse(animations, it) } }, enabled = collapse != null) {
-                        Icon(painterResource(R.drawable.ic_autplay_expand), stringResource(R.string.player_collapse))
-                    }
-                    Text(stringResource(R.string.nav_now_playing), style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.size(48.dp))
-                }
-                Box(Modifier.width(artworkWidth).then(collapseGesture).testTag("player-cover")) {
-                    NowPlayingArtworkCarousel(
-                        mediaId = mediaId,
-                        title = state.title ?: stringResource(R.string.player_nothing_playing),
-                        trackId = state.localTrackRefId,
-                        targets = swipeTargets,
-                        enabled = state.controls is PlaybackControlGate.Allowed,
-                        onPrevious = onPrevious,
-                        onNext = onNext,
-                        animations = animations,
-                    )
-                }
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
-                            Text(
-                                state.title ?: stringResource(R.string.player_nothing_playing),
-                                style = MaterialTheme.typography.headlineSmall,
-                                textAlign = TextAlign.Start,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                state.artist ?: stringResource(R.string.player_unknown_artist),
-                                color = AutPlayTokens.colors.mutedText,
-                                textAlign = TextAlign.Start,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        PreferenceIconButton(
-                            icon = AutPlayIcon.ThumbDown,
-                            labelRes = R.string.action_dislike,
-                            selected = preference == PlaybackPreferenceUiState.Disliked,
-                            enabled = feedbackEnabled,
-                            onClick = {
-                                if (preference == PlaybackPreferenceUiState.Disliked) onClearPreference() else onDislike()
-                            },
-                        )
-                        PreferenceIconButton(
-                            icon = AutPlayIcon.ThumbUp,
-                            labelRes = R.string.action_like,
-                            selected = preference == PlaybackPreferenceUiState.Liked,
-                            enabled = feedbackEnabled,
-                            onClick = {
-                                if (preference == PlaybackPreferenceUiState.Liked) onClearPreference() else onLike()
-                            },
-                        )
-                    }
-                    PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
-                    DirectControlMessage(state)
-                    val timerLabel = when {
-                            stopAfterCurrentTrackActive -> stringResource(R.string.player_sleep_timer_after_track_active)
-                            sleepTimerRemainingMinutes != null -> pluralStringResource(
-                                R.plurals.player_sleep_timer_active,
-                                sleepTimerRemainingMinutes,
-                                sleepTimerRemainingMinutes,
-                            )
-                            else -> stringResource(R.string.player_sleep_timer)
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (state.source == PlaybackSourcePresentation.Vault || downloadState != null) {
-                            Surface(
-                                onClick = onDownload,
-                                enabled = state.source == PlaybackSourcePresentation.Vault &&
-                                    downloadState !in setOf("COMPLETED", "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED"),
-                                color = Color.Transparent,
-                                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("player-download-track"),
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    AutPlayPlatformIcon(AutPlayIcon.Download, null, tint = MaterialTheme.colorScheme.primary)
-                                    Text(stringResource(when (downloadState) {
-                                        "COMPLETED" -> R.string.music_saved_offline
-                                        "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> R.string.music_downloading
-                                        else -> R.string.music_download_track
-                                    }), style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        } else Spacer(Modifier.weight(1f))
-                        IconButton(
-                            onClick = { showSleepTimer = true }, enabled = state.controls is PlaybackControlGate.Allowed,
-                            modifier = Modifier.testTag("player-sleep-timer").semantics { stateDescription = timerLabel },
-                        ) {
-                            AutPlayPlatformIcon(AutPlayIcon.Timer, stringResource(R.string.player_sleep_timer),
-                                tint = if (sleepTimerRemainingMinutes != null || stopAfterCurrentTrackActive)
-                                    MaterialTheme.colorScheme.primary else AutPlayTokens.colors.mutedText)
-                        }
-                        IconButton(onClick = { showQueue = true }, modifier = Modifier.testTag("player-open-queue")) {
-                            AutPlayPlatformIcon(AutPlayIcon.Playlist, stringResource(R.string.queue_editor_title),
-                                tint = AutPlayTokens.colors.mutedText)
-                        }
-                    }
-                    TasteExclusionControls(
-                        listenExcluded = listenExcludedFromTaste,
-                        sessionExcluded = sessionExcludedFromTaste,
-                        listenActionAvailable = listenTasteActionAvailable,
-                        sessionActionAvailable = sessionTasteActionAvailable,
-                        errorCode = tasteExclusionError,
-                        onSetListenExcluded = onSetCurrentListenTasteExcluded,
-                        onSetSessionExcluded = onSetSessionTasteExcluded,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
+        BoxWithConstraints(
+            Modifier.fillMaxSize()
+                .graphicsLayer { translationY = collapseMotion.offset }
+                .background(MaterialTheme.colorScheme.background)
+                .testTag("now-playing-panel"),
+        ) {
+            val artworkWidth = maxWidth
+            val density = LocalDensity.current
+            val collapseTravel = with(density) {
+                (collapseTargetTop ?: (maxHeight - 88.dp)).coerceIn(0.dp, maxHeight).toPx()
             }
-            PlayerTransportControls(state, swipeTargets, onToggleShuffle, onCycleRepeat, onPrevious, onNext, onTogglePlayPause)
+            SideEffect { collapseMotion.travel = collapseTravel }
+            Column(Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(contentScroll)
+                        .testTag("now-playing-scroll").padding(vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp).heightIn(min = 48.dp)
+                            .onGloballyPositioned { collapseHeaderBounds = it.boundsInRoot() }
+                            .testTag("player-collapse-header"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        IconButton(onClick = { collapse?.let { collapseMotion.collapse(animations, it) } }, enabled = collapse != null) {
+                            Icon(painterResource(R.drawable.ic_autplay_expand), stringResource(R.string.player_collapse))
+                        }
+                        Text(stringResource(R.string.nav_now_playing), style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.size(48.dp))
+                    }
+                    Box(Modifier.width(artworkWidth)
+                        .onGloballyPositioned { collapseCoverBounds = it.boundsInRoot() }.testTag("player-cover")) {
+                        NowPlayingArtworkCarousel(
+                            mediaId = mediaId,
+                            title = state.title ?: stringResource(R.string.player_nothing_playing),
+                            trackId = state.localTrackRefId,
+                            targets = swipeTargets,
+                            enabled = state.controls is PlaybackControlGate.Allowed,
+                            onPrevious = onPrevious,
+                            onNext = onNext,
+                            animations = animations,
+                        )
+                    }
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
+                                Text(
+                                    state.title ?: stringResource(R.string.player_nothing_playing),
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    textAlign = TextAlign.Start,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    state.artist ?: stringResource(R.string.player_unknown_artist),
+                                    color = AutPlayTokens.colors.mutedText,
+                                    textAlign = TextAlign.Start,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            PreferenceIconButton(
+                                icon = AutPlayIcon.ThumbDown,
+                                labelRes = R.string.action_dislike,
+                                selected = preference == PlaybackPreferenceUiState.Disliked,
+                                enabled = feedbackEnabled,
+                                onClick = {
+                                    if (preference == PlaybackPreferenceUiState.Disliked) onClearPreference() else onDislike()
+                                },
+                            )
+                            PreferenceIconButton(
+                                icon = AutPlayIcon.ThumbUp,
+                                labelRes = R.string.action_like,
+                                selected = preference == PlaybackPreferenceUiState.Liked,
+                                enabled = feedbackEnabled,
+                                onClick = {
+                                    if (preference == PlaybackPreferenceUiState.Liked) onClearPreference() else onLike()
+                                },
+                            )
+                        }
+                        PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
+                        DirectControlMessage(state)
+                        val timerLabel = when {
+                                stopAfterCurrentTrackActive -> stringResource(R.string.player_sleep_timer_after_track_active)
+                                sleepTimerRemainingMinutes != null -> pluralStringResource(
+                                    R.plurals.player_sleep_timer_active,
+                                    sleepTimerRemainingMinutes,
+                                    sleepTimerRemainingMinutes,
+                                )
+                                else -> stringResource(R.string.player_sleep_timer)
+                        }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            if (state.source == PlaybackSourcePresentation.Vault || downloadState != null) {
+                                Surface(
+                                    onClick = onDownload,
+                                    enabled = state.source == PlaybackSourcePresentation.Vault &&
+                                        downloadState !in setOf("COMPLETED", "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED"),
+                                    color = Color.Transparent,
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("player-download-track"),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        AutPlayPlatformIcon(AutPlayIcon.Download, null, tint = MaterialTheme.colorScheme.primary)
+                                        Text(stringResource(when (downloadState) {
+                                            "COMPLETED" -> R.string.music_saved_offline
+                                            "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> R.string.music_downloading
+                                            else -> R.string.music_download_track
+                                        }), style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            } else Spacer(Modifier.weight(1f))
+                            IconButton(
+                                onClick = { showSleepTimer = true }, enabled = state.controls is PlaybackControlGate.Allowed,
+                                modifier = Modifier.testTag("player-sleep-timer").semantics { stateDescription = timerLabel },
+                            ) {
+                                AutPlayPlatformIcon(AutPlayIcon.Timer, stringResource(R.string.player_sleep_timer),
+                                    tint = if (sleepTimerRemainingMinutes != null || stopAfterCurrentTrackActive)
+                                        MaterialTheme.colorScheme.primary else AutPlayTokens.colors.mutedText)
+                            }
+                            IconButton(onClick = { showQueue = true }, modifier = Modifier.testTag("player-open-queue")) {
+                                AutPlayPlatformIcon(AutPlayIcon.Playlist, stringResource(R.string.queue_editor_title),
+                                    tint = AutPlayTokens.colors.mutedText)
+                            }
+                        }
+                        TasteExclusionControls(
+                            listenExcluded = listenExcludedFromTaste,
+                            sessionExcluded = sessionExcludedFromTaste,
+                            listenActionAvailable = listenTasteActionAvailable,
+                            sessionActionAvailable = sessionTasteActionAvailable,
+                            errorCode = tasteExclusionError,
+                            onSetListenExcluded = onSetCurrentListenTasteExcluded,
+                            onSetSessionExcluded = onSetSessionTasteExcluded,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+                PlayerTransportControls(state, swipeTargets, onToggleShuffle, onCycleRepeat, onPrevious, onNext, onTogglePlayPause)
+            }
         }
     }
 }

@@ -63,8 +63,8 @@ android {
         applicationId = if (qaSideBySide) "app.autplay.qa" else "app.autplay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "1.0.10"
+        versionCode = 29
+        versionName = "1.0.11"
         releaseVersionCodeOverride?.let { versionCode = it }
         releaseVersionNameOverride?.let { versionName = it }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -173,6 +173,8 @@ dependencies {
     androidTestImplementation(libs.androidx.test.core.ktx)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    // Compose's older transitive Espresso uses InputManager.getInstance, removed in API 37.
+    androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.androidx.room3.testing)
     androidTestImplementation(libs.squareup.okhttp.mockwebserver)
 }

@@ -10,6 +10,7 @@ import app.autplay.AutPlayRuntime
 import app.autplay.application.search.refreshTrackSearch
 import app.autplay.application.server.ServerFeatureRepository
 import androidx.room3.withWriteTransaction
+import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.MetadataArtworkEntity
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -21,8 +22,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
-class TrackMetadataRepository(private val context: Context) {
-    private val database = AutPlayRuntime.database(context)
+class TrackMetadataRepository(
+    private val context: Context,
+    private val database: AutPlayDatabase = AutPlayRuntime.database(context),
+) {
+
+    /** Read through the cache for the current stream while ordinary library sync continues. */
+    internal suspend fun loadForPlayback(
+        profile: String,
+        track: String,
+        getMetadata: suspend (String) -> JsonObject,
+        getArtwork: suspend (String, String) -> ByteArray,
+    ) {
+        val ref = database.libraryDao().trackRef(track) ?: return
+        if (ref.serverProfileId != profile || ref.deletedAtMs != null) return
+        val serverId = ref.serverUserTrackRefId ?: return
+        val dao = database.trackMetadataDao()
+        var cached = dao.get(profile, track)
+        if (cached == null) {
+            project(profile, track, getMetadata(serverId))
+            cached = dao.get(profile, track)
+        }
+        val sha = cached?.artworkSha256 ?: return
+        if (dao.artwork(profile, sha) == null) storeArtwork(profile, getArtwork(serverId, sha), sha)
+    }
 
     suspend fun project(profile: String, track: String, root: JsonObject) {
         database.withWriteTransaction {

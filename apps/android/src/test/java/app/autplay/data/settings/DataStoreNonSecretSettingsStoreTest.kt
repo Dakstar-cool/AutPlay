@@ -37,6 +37,27 @@ class DataStoreNonSecretSettingsStoreTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
+    @Test fun audioPreferencesSurviveRecreationAndUnrelatedMutations() = runBlocking {
+        val file = temporaryFolder.root.resolve("audio.preferences_pb")
+        val expected = PlaybackAudioSettings("ALBUM", -3, true, true, listOf(-2, 3, 0, -4, 1))
+        val first = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(first, file)
+            assertEquals(PlaybackAudioSettings(), store.settings.first().playbackAudio)
+            store.mutate { it.copy(playbackAudio = expected) }
+            store.mutate { it.copy(appLanguage = "RU") }
+        } finally { first.coroutineContext[Job]?.cancelAndJoin() }
+        val second = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = hostPreferenceStore(second, file)
+            assertEquals(expected, store.settings.first().playbackAudio)
+            assertEquals("RU", store.settings.first().appLanguage)
+            store.mutate { it.copy(playbackAudio = it.playbackAudio.copy(replayGainMode = "FUTURE_MODE")) }
+            store.mutate { it.copy(downloadOnMeteredNetwork = true) }
+            assertEquals("FUTURE_MODE", store.settings.first().playbackAudio.replayGainMode)
+        } finally { second.coroutineContext[Job]?.cancelAndJoin() }
+    }
+
     @Test
     fun playbackPreferencesSurviveRecreationAndDismissalResetsOnlyOnNewPlay() = runBlocking {
         val file = temporaryFolder.root.resolve("playback.preferences_pb")

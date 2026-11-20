@@ -39,6 +39,8 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Bounded, payload-free state rendered by the Sync Status surface. */
 data class SyncStatus(
@@ -52,7 +54,7 @@ data class SyncStatus(
 
 /** Transport values deliberately retain unknown event strings for safe deferred persistence. */
 data class SyncAck(val eventId: String, val outcome: String, val errorCode: String? = null, val retryAfterMs: Long? = null, val retryable: Boolean = false, val originalOutcome: String? = null, val aggregateType: String? = null, val aggregateLocalId: String? = null, val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val redirectAliasServerId: String? = null, val redirectCanonicalServerId: String? = null)
-data class RemoteEvent(val eventId: String, val sequence: Long, val eventType: String, val schemaVersion: Int, val payloadJson: String, val aggregateType: String = "UNKNOWN", val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val operation: String = "UPSERT", val tombstoneId: String? = null, val retainUntilMs: Long? = null, val redirectServerId: String? = null)
+data class RemoteEvent(val eventId: String, val sequence: Long, val eventType: String, val schemaVersion: Int, val payloadJson: String, val aggregateType: String = "UNKNOWN", val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val operation: String = "UPSERT", val tombstoneId: String? = null, val retainUntilMs: Long? = null, val redirectServerId: String? = null, val publishedAtMs: Long? = null)
 data class PullPage(val nextCursor: String, val hasMore: Boolean, val events: List<RemoteEvent>)
 data class BootstrapPage(val snapshotId: String, val nextPageToken: String?, val snapshotCursor: String?, val hasMore: Boolean, val events: List<RemoteEvent>)
 
@@ -660,11 +662,31 @@ class SyncCoordinator(
         return true
     }
     private suspend fun applyListeningProjection(binding: ClientEventBinding, event: RemoteEvent): Boolean {
-        val track = payloadString(event.payloadJson, "local_user_track_ref_id") ?: return false
-        if (database.libraryDao().trackRef(track)?.serverProfileId != binding.serverProfileId.value) return false
-        if (database.historyDao().event(binding.serverProfileId.value, event.eventId) != null) return true
+        val profile = binding.serverProfileId.value
+        if (database.historyDao().event(profile, event.eventId) != null) return true
+        val library = database.libraryDao()
+        val serverRef = payloadString(event.payloadJson, "server_user_track_ref_id")
+        val track = serverRef?.let { library.trackRefByServerId(profile, it)?.localUserTrackRefId }
+            ?: payloadString(event.payloadJson, "local_user_track_ref_id")?.takeIf { local ->
+                val ref = library.trackRef(local)
+                ref?.serverProfileId == profile && (serverRef == null || ref.serverUserTrackRefId == serverRef)
+            } ?: return false
         val played = payloadLong(event.payloadJson, "played_ms") ?: return false
-        database.historyDao().insertOnce(app.autplay.data.local.entity.ListeningEventEntity(event.eventId, track, payloadString(event.payloadJson, "recording_id"), nowMs(), played, payloadLong(event.payloadJson, "track_duration_ms"), null, payloadString(event.payloadJson, "event_origin") ?: "ORGANIC", payloadString(event.payloadJson, "context") ?: "GENERAL", null, payloadString(event.payloadJson, "explicit_feedback") ?: "NONE", payloadBoolean(event.payloadJson, "excluded_from_taste") ?: false, "CLEAN", nowMs(), serverProfileId = binding.serverProfileId.value))
+        val received = nowMs()
+        val started = payloadLong(event.payloadJson, "started_at_ms") ?: event.publishedAtMs ?: received
+        val duration = payloadLong(event.payloadJson, "track_duration_ms")
+        val payload = Json.parseToJsonElement(event.payloadJson).jsonObject
+        val attribution = payload["recommendation"] as? JsonObject
+        val origin = payloadString(event.payloadJson, "event_origin") ?: "ORGANIC"
+        val surface = app.autplay.application.recommendation.variationSurface(origin,
+            attribution?.get("surface")?.jsonPrimitive?.contentOrNull, payloadString(event.payloadJson, "variation_surface") == "personal_wave")
+        database.historyDao().insertOnce(app.autplay.data.local.entity.ListeningEventEntity(
+            event.eventId, track, payloadString(event.payloadJson, "recording_id"), started, played, duration,
+            (payload["completion_ratio"] as? JsonPrimitive)?.doubleOrNull ?: duration?.takeIf { it > 0 }?.let { (played.toDouble() / it).coerceIn(0.0, 1.0) },
+            origin, payloadString(event.payloadJson, "context") ?: "GENERAL",
+            attribution?.get("recommendation_request_id")?.jsonPrimitive?.contentOrNull, payloadString(event.payloadJson, "explicit_feedback") ?: "NONE",
+            payloadBoolean(event.payloadJson, "excluded_from_taste") ?: false, "CLEAN", received, recommendationAttributionJson = attribution?.toString(), serverProfileId = profile,
+            variationSurface = surface, variationKind = payloadString(event.payloadJson, "variation_kind")))
         return true
     }
 

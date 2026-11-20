@@ -11,13 +11,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -101,45 +104,64 @@ internal fun rememberPlayerCollapseMotion(): PlayerCollapseMotion {
     return motion
 }
 
-/** Claim downward drags only, leaving upward scrolling and horizontal track gestures available. */
+/** Attach outside the moving layer so translated hit testing cannot drop pointer movement. */
+@Composable
 internal fun Modifier.playerCollapseGesture(
     onCollapse: (() -> Unit)?,
     motion: PlayerCollapseMotion,
     animations: Boolean,
-): Modifier = if (onCollapse == null) this else pointerInput(onCollapse, motion, animations) {
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false)
-        val velocity = VelocityTracker()
-        velocity.addPosition(down.uptimeMillis, down.position)
-        var distance = Offset.Zero
-        var claimed = false
-        var released = false
-        try {
-            while (true) {
-                val event = awaitPointerEvent()
-                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                if (change.isConsumed || event.changes.count { it.pressed } > 1) break
-                val delta = change.positionChange()
-                distance += delta
-                velocity.addPosition(change.uptimeMillis, change.position)
-                if (!claimed) {
-                    if (abs(distance.x) > viewConfiguration.touchSlop && abs(distance.x) >= abs(distance.y)) break
-                    if (distance.y < -viewConfiguration.touchSlop) break
-                    if (distance.y > viewConfiguration.touchSlop && distance.y > abs(distance.x) * 1.25f) {
-                        if (!motion.begin()) break
-                        claimed = true
-                        motion.drag(distance.y - viewConfiguration.touchSlop)
+    eventPass: PointerEventPass = PointerEventPass.Main,
+    canStart: (Offset) -> Boolean = { true },
+): Modifier {
+    val currentCollapse = rememberUpdatedState(onCollapse)
+    val currentCanStart = rememberUpdatedState(canStart)
+    if (onCollapse == null) return this
+    return pointerInput(motion, animations, eventPass) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = eventPass)
+            // A drag that starts in scrolled content belongs to that content for its whole lifetime.
+            if (!currentCanStart.value(down.position)) return@awaitEachGesture
+            val velocity = VelocityTracker()
+            // Include historical samples and keep velocity independent of local coordinate changes.
+            velocity.addPointerInputChange(down)
+            var distance = Offset.Zero
+            var claimed = false
+            var released = false
+            try {
+                while (true) {
+                    val event = awaitPointerEvent(eventPass)
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    if (change.isConsumed || event.changes.count { it.pressed } > 1) break
+                    val delta = change.positionChange()
+                    distance += delta
+                    velocity.addPointerInputChange(change)
+                    if (!claimed) {
+                        if (abs(distance.x) > viewConfiguration.touchSlop && abs(distance.x) >= abs(distance.y)) break
+                        if (distance.y < -viewConfiguration.touchSlop) break
+                        if (distance.y > viewConfiguration.touchSlop && distance.y > abs(distance.x) * 1.25f) {
+                            if (!motion.begin()) break
+                            claimed = true
+                            motion.drag(distance.y - viewConfiguration.touchSlop)
+                        }
+                    } else motion.drag(delta.y)
+                    if (claimed) change.consume()
+                    if (!change.pressed) {
+                        released = true
+                        if (claimed) motion.release(velocity.calculateVelocity().y, density, animations) {
+                            currentCollapse.value?.invoke()
+                        }
+                        break
                     }
-                } else motion.drag(delta.y)
-                if (claimed) change.consume()
-                if (!change.pressed) {
-                    released = true
-                    if (claimed) motion.release(velocity.calculateVelocity().y, density, animations, onCollapse)
-                    break
+                    if (!claimed && eventPass == PointerEventPass.Initial) {
+                        // Once a child owns a scroll/track gesture, do not take it over mid-drag.
+                        val finalChange = awaitPointerEvent(PointerEventPass.Final).changes
+                            .firstOrNull { it.id == down.id }
+                        if (finalChange == null || finalChange.isConsumed) break
+                    }
                 }
+            } finally {
+                if (claimed && !released) motion.cancel(animations)
             }
-        } finally {
-            if (claimed && !released) motion.cancel(animations)
         }
     }
 }

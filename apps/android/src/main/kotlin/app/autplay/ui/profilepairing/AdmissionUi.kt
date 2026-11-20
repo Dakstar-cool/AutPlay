@@ -51,6 +51,10 @@ internal fun AdmissionPanel(state: AdmissionUiState, actions: AdmissionActions) 
             AdmissionState.Connected -> Text(stringResource(R.string.admission_connected))
             is AdmissionState.Rejected -> Terminal(stringResource(R.string.admission_rejected), actions)
             is AdmissionState.Blocked -> Terminal(stringResource(R.string.admission_blocked), actions)
+            is AdmissionState.AccountConflict -> {
+                Text(stringResource(R.string.admission_account_conflict))
+                OutlinedButton(onClick = actions.cancel) { Text(stringResource(R.string.admission_cancel)) }
+            }
             is AdmissionState.Expired -> Terminal(stringResource(R.string.admission_expired), actions)
             AdmissionState.Cancelled -> Terminal(stringResource(R.string.admission_cancelled), actions)
             AdmissionState.Unavailable -> Terminal(stringResource(R.string.admission_unavailable), actions)

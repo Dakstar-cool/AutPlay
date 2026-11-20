@@ -22,6 +22,19 @@ class PortableAccountDataSyncTest {
     @Before fun setup() { context.deleteDatabase(name); db = AutPlayDatabase.open(context, name) }
     @After fun cleanup() { db.close(); context.deleteDatabase(name) }
 
+    @Test fun removalOnlyCleansEmptyLocalMetadataAndKeepsMusic() = runBlocking {
+        val repository = PortableAccountDataRepository(db)
+        val account = id(1)
+        repository.persistOwnership(account, null)
+        repository.removeEmptyLocalAccount(account)
+        assertNull(db.portableAccountDao().scope(PortableAccountDataRepository.STANDALONE_PROFILE))
+        repository.persistOwnership(account, null)
+        LocalLibraryCommandRepository(db).add(AddLocalTrackCommand(null, LocalId(id(50)), LocalId(id(51)), LocalId(id(52)), "Track", "Artist", 1))
+        assertTrue(runCatching { repository.removeEmptyLocalAccount(account) }.isFailure)
+        assertNotNull(db.libraryDao().trackRef(id(50)))
+        assertEquals(account, db.portableAccountDao().scope(PortableAccountDataRepository.STANDALONE_PROFILE)?.accountId)
+    }
+
     @Test fun aliasesCutoffsCrashRetryAndLastPageContinuationPreserveOneLogicalEvent() = runBlocking {
         val account = id(1); val profile = id(2)
         val repository = PortableAccountDataRepository(db)

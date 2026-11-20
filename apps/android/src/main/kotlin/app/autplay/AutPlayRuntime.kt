@@ -259,7 +259,7 @@ object AutPlayRuntime {
 
     private fun apiV1BaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api/v1"
 
-    internal fun accountStatisticsPort(context: Context, origin: String): app.autplay.application.statistics.AccountStatisticsPort =
+    internal fun accountStatisticsPort(context: Context, origin: String): app.autplay.application.statistics.OkHttpAccountStatisticsPort =
         app.autplay.application.statistics.OkHttpAccountStatisticsPort(apiV1BaseUrl(origin),
             AndroidKeystoreCredentialStore(context.applicationContext), rotation = m5Rotation(context))
 

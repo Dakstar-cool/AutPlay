@@ -1,5 +1,7 @@
 package app.autplay.application.server
 
+import app.autplay.application.recommendation.PersonalWaveSession
+import app.autplay.application.recommendation.LIKED_ORIGINAL_VERSION
 import app.autplay.data.security.CredentialStore
 import app.autplay.application.search.LibrarySearchKind
 import app.autplay.data.security.RefreshingSessionCredentials
@@ -108,6 +110,8 @@ data class ServerRecommendationItem(
     val score: Double,
     val reasonCode: String,
     val section: String,
+    val confirmedVariation: Boolean = false,
+    val frequentWaveSkips: Boolean = false,
 )
 
 data class ServerRecommendationResult(
@@ -485,8 +489,8 @@ class ServerFeatureRepository(
         )
     }
 
-    suspend fun recommendations(limit: Int = 25): ServerRecommendationResult =
-        recommendationRequest("/recommendations", limit)
+    suspend fun recommendations(limit: Int = 25, wave: PersonalWaveSession? = null): ServerRecommendationResult =
+        recommendationRequest("/recommendations", limit, wave)
 
     suspend fun homeRecommendations(limit: Int = 25): ServerRecommendationResult {
         require(limit in 1..100)
@@ -628,22 +632,37 @@ class ServerFeatureRepository(
         return authorized(Request.Builder().url(url).get().build()).jsonObject.requiredArray("items", limit)
     }
 
-    private suspend fun recommendationRequest(path: String, limit: Int): ServerRecommendationResult {
+    private suspend fun recommendationRequest(path: String, limit: Int, wave: PersonalWaveSession?): ServerRecommendationResult {
         require(limit in 1..100)
-        val root = authorized(
-            Request.Builder()
-                .url(apiBaseUrl + path)
-                .post(recommendationBody(limit).toRequestBody(JSON_MEDIA_TYPE))
+        suspend fun post(includeCalendar: Boolean): JsonObject = authorized(
+            Request.Builder().url(apiBaseUrl + path)
+                .post(recommendationBody(limit, wave, includeCalendar).toRequestBody(JSON_MEDIA_TYPE))
                 .build(),
         ).jsonObject
+        val root = try {
+            post(includeCalendar = true)
+        } catch (error: ServerFeatureHttpException) {
+            if (wave == null || error.status != 422) throw error
+            // Pre-pilot P11 accepts the same context, seed and limit in its original request shape.
+            post(includeCalendar = false)
+        }
+        if (wave != null) {
+            val requestId = root.requiredString("recommendation_request_id", UUID_TEXT_LENGTH)
+            require(root.requiredArray("items", limit).all {
+                it.requiredString("recommendation_request_id", UUID_TEXT_LENGTH) == requestId
+            }) { "SERVER_RESPONSE_INVALID" }
+        }
         return decodeRecommendationResult(root)
     }
 
-    private fun recommendationBody(limit: Int): String = buildJsonObject {
-        put("context", "GENERAL")
+    private fun recommendationBody(
+        limit: Int, wave: PersonalWaveSession? = null, includeCalendar: Boolean = true,
+    ): String = buildJsonObject {
+        put("context", wave?.mode ?: "GENERAL")
+        if (wave != null && includeCalendar) put("wave_session", wave.requestContext())
         put("limit", limit)
         put("exploration", 0.2)
-        put("seed", 0)
+        put("seed", wave?.id?.value?.hashCode() ?: 0)
         put("pipeline_key", "cpu-baseline")
         put("pipeline_version", JsonNull)
         put("shadow", false)
@@ -662,6 +681,8 @@ class ServerFeatureRepository(
         score = value.requiredDouble("score"),
         reasonCode = value.requiredString("reason_code", MAX_SHORT_TEXT),
         section = value.requiredString("section", MAX_SHORT_TEXT),
+        frequentWaveSkips = (value["reason_codes"] as? JsonArray)?.contains(JsonPrimitive("FREQUENT_WAVE_SKIPS")) == true,
+        confirmedVariation = (value["reason_codes"] as? JsonArray)?.contains(JsonPrimitive(LIKED_ORIGINAL_VERSION)) == true,
     )
 
     private suspend fun discoveryCommand(body: String) {

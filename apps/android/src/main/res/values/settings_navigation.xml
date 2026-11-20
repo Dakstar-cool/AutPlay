@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_account_devices">Account and devices</string>
+    <string name="settings_sound_playback">Sound and playback</string>
+    <string name="settings_phone_music">Music on this phone</string>
+    <string name="settings_downloads_network">Downloads and network</string>
+    <string name="settings_appearance_language">Appearance and language</string>
+    <string name="settings_account_local_summary">Recovery, devices and personal server</string>
+    <string name="settings_account_connected_summary">Connected · recovery, devices and sync</string>
+    <string name="settings_sound_summary">Transitions, volume and equalizer</string>
+    <string name="settings_music_summary">Add audio files or choose a folder</string>
+    <string name="settings_downloads_summary">Mobile data and preparing tracks</string>
+    <string name="settings_appearance_summary">%1$s · %2$s</string>
+    <string name="settings_data_summary">Listening statistics and recommendations</string>
+    <string name="settings_about_summary">Version, settings transfer and diagnostics</string>
+    <string name="settings_room_downloads">Prepare tracks for shared listening</string>
+    <string name="settings_transfer_scope">This transfers app preferences. Save your account recovery file separately in Account and devices.</string>
+    <string name="settings_diagnostics_summary">Technical details and developer access</string>
+    <string name="admission_account_conflict">The administrator approved a different account. Your account on this phone has been preserved. Cancel this request, then connect your account with its password or sign out before using the server account.</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_sign_in">Sign in</string>
+    <string name="account_sign_out_explanation">Sign out on this phone. Your account and data are kept. Enter your password to sign in again.</string>
+    <string name="account_session_failed">Could not complete the action. Check your password and finish or cancel any pending connection. An account with data cannot be removed here.</string>
+    <string name="account_remove_empty_local">Remove empty local account</string>
+    <string name="account_remove_empty_explanation">Permanently remove this newly created account from this phone. This is available only if it has never connected to a server and has no music, playlists or history. Enter its password to confirm.</string>
+</resources>

@@ -3,6 +3,8 @@ package app.autplay.application.playback
 import androidx.room3.withWriteTransaction
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.library.SliceMutationResult
+import app.autplay.application.recommendation.OfflineRecommendationRepository
+import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.P07PayloadCodec
 import app.autplay.data.local.AutPlayDatabase
@@ -185,6 +187,24 @@ class PlaybackPersistenceRepository(
             if (expectedSnapshotId != null && candidate?.queueSnapshotId != snapshot.queueSnapshotId) return@withWriteTransaction null
             val entry = requireNotNull(candidate) { "QUEUE_ENTRY_NOT_FOUND" }
             require(entry.queueSnapshotId == snapshot.queueSnapshotId)
+            val attribution = entry.recommendationAttributionJson?.let { Json.parseToJsonElement(it).jsonObject }
+            if (attribution?.get("surface")?.jsonPrimitive?.content == "personal_wave") {
+                if (ownerBinding == null || ownerBinding.serverProfileId != snapshot.serverProfileId) {
+                    return@withWriteTransaction null
+                }
+                val cursor = database.syncDao().cursor(ownerBinding.serverProfileId) ?: return@withWriteTransaction null
+                if (cursor.deviceId != ownerBinding.deviceId) return@withWriteTransaction null
+                val binding = ClientEventBinding(UserId(ownerBinding.userId), DeviceId(ownerBinding.deviceId),
+                    ServerProfileId(ownerBinding.serverProfileId), LocalId(cursor.journalEpoch))
+                val wave = PersonalWaveSession.restore(snapshot.sourceContextId, binding) ?: return@withWriteTransaction null
+                check(attribution.getValue("presentation_id").jsonPrimitive.content == wave.id.value)
+                val track = database.libraryDao().trackRef(entry.localUserTrackRefId)
+                if (track == null || track.deletedAtMs != null || track.serverProfileId != ownerBinding.serverProfileId ||
+                    track.serverRecordingId != attribution.getValue("recording_id").jsonPrimitive.content) {
+                    return@withWriteTransaction null
+                }
+                OfflineRecommendationRepository(database).recordWavePlaybackImpression(binding, attribution, nowMs)
+            }
             require(database.queueDao().beginActiveListenTasteExclusion(snapshot.queueSnapshotId, nowMs) == 1)
             val checkpoint = LogicalListeningSession.start(
                 toCore(entry),
@@ -341,27 +361,9 @@ class PlaybackPersistenceRepository(
         repeatMode: String,
         seed: Long?,
         nowMs: Long,
-    ) {
-        require(database.queueDao().entry(entryId.value)?.queueSnapshotId == snapshotId.value)
-        require(
-            database.queueDao().checkpoint(
-                snapshotId.value,
-                entryId.value,
-                positionMs.coerceAtLeast(0),
-                shuffleMode,
-                repeatMode,
-                seed,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                nowMs,
-            ) == 1,
-        )
-    }
+    ) = database.queueDao().selectIdleEntry(
+        snapshotId.value, entryId.value, positionMs.coerceAtLeast(0), shuffleMode, repeatMode, seed, nowMs,
+    )
 
     suspend fun finalizeSession(
         current: LogicalListeningCheckpoint,
@@ -393,6 +395,7 @@ class PlaybackPersistenceRepository(
             durationMs = finalized.durationMs,
             excluded = snapshot.sessionExcludedFromTaste || snapshot.activeListenExcludedFromTaste,
             origin = origin,
+            personalWaveFallback = origin == "WAVE" && PersonalWaveSession.isPersonalQueue(snapshot.sourceContextId),
             attributionJson = queueEntry.recommendationAttributionJson,
             context = snapshot.listeningContext,
             now = nowMs,

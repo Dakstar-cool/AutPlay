@@ -52,6 +52,12 @@ interface LibraryDao {
         SELECT u.local_user_track_ref_id
         FROM user_track_ref u
         WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+          AND (:onlyUnresolved = 0 OR u.server_recording_id IS NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM user_track_preference p
+              WHERE p.local_user_track_ref_id = u.local_user_track_ref_id AND p.server_profile_id = :profileId
+                AND (p.preference = 'DISLIKED' OR p.excluded_from_taste = 1)
+          )
           AND EXISTS (
               SELECT 1 FROM library_entry l
               WHERE l.local_user_track_ref_id = u.local_user_track_ref_id
@@ -77,7 +83,66 @@ interface LibraryDao {
         LIMIT :limit
         """,
     )
-    suspend fun randomPlaybackCandidates(profileId: String, vaultAvailable: Boolean, limit: Int): List<String>
+    suspend fun randomPlaybackCandidates(
+        profileId: String, vaultAvailable: Boolean, limit: Int, onlyUnresolved: Boolean = false,
+    ): List<String>
+
+    @Query(WAVE_RECORDINGS + """
+        WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+          AND u.local_user_track_ref_id IN (:refIds)
+        """)
+    suspend fun waveRecordings(profileId: String, refIds: List<String>): List<WaveRecordingRow>
+
+    @Query("""
+        SELECT local_user_track_ref_id AS refId, variation_kind AS kind,
+               coalesce(variation_surface, CASE WHEN event_origin = 'RECOMMENDED' AND json_valid(recommendation_attribution_json)
+                  THEN CASE json_extract(recommendation_attribution_json, '$.surface')
+                    WHEN 'home' THEN 'home' WHEN 'offline_pack' THEN 'home' WHEN 'personal_wave' THEN 'personal_wave' END END) AS surface,
+               count(*) AS plays, sum(CASE WHEN played_ms < 30000 OR completion_ratio <= 0.2 THEN 1 ELSE 0 END) AS skips
+        FROM listening_event
+        WHERE server_profile_id = :profile AND excluded_from_taste = 0 AND started_at_ms > :since AND started_at_ms <= :through
+          AND (event_origin = 'RECOMMENDED' OR (event_origin = 'WAVE' AND variation_surface = 'personal_wave'))
+          AND local_user_track_ref_id IN (:refs)
+        GROUP BY local_user_track_ref_id, kind, surface
+    """)
+    suspend fun variationOutcomes(profile: String, since: Long, through: Long, refs: List<String>): List<VariationOutcomeRow>
+
+    @Query(WAVE_RECORDINGS + """
+        WHERE u.server_profile_id = :profile AND u.local_user_track_ref_id IN (
+            SELECT local_user_track_ref_id FROM listening_event WHERE server_profile_id = :profile
+            AND started_at_ms > :since AND started_at_ms <= :through AND excluded_from_taste = 0
+            AND (event_origin = 'RECOMMENDED' OR (event_origin = 'WAVE' AND variation_surface = 'personal_wave')))
+        AND u.local_user_track_ref_id > :after ORDER BY u.local_user_track_ref_id LIMIT 200
+    """)
+    suspend fun variationHistoryRefs(profile: String, since: Long, through: Long, after: String): List<WaveRecordingRow>
+
+    @Query(WAVE_RECORDINGS + """
+        JOIN user_track_preference p ON p.local_user_track_ref_id = u.local_user_track_ref_id
+        WHERE u.server_profile_id = :profileId AND p.server_profile_id = :profileId
+          AND p.preference = 'LIKED' AND p.excluded_from_taste = 0
+          AND u.deleted_at_ms IS NULL AND COALESCE(r.is_deleted, 0) = 0
+          AND r.redirect_server_recording_id IS NULL AND p.local_user_track_ref_id > :after
+        ORDER BY p.local_user_track_ref_id LIMIT :limit
+        """)
+    suspend fun likedWaveRecordings(profileId: String, after: String, limit: Int): List<WaveRecordingRow>
+
+    @Query(WAVE_RECORDINGS + """
+        WHERE u.server_profile_id = :profileId AND u.local_user_track_ref_id > :after
+          AND u.local_user_track_ref_id IN (
+              SELECT local_user_track_ref_id FROM listening_event
+              WHERE server_profile_id = :profileId AND excluded_from_taste = 0 AND played_ms > 0
+                AND started_at_ms > :since AND started_at_ms <= :now
+              UNION
+              SELECT e.local_user_track_ref_id FROM queue_snapshot s
+              JOIN queue_entry e ON e.queue_snapshot_id = s.queue_snapshot_id AND e.queue_entry_id = s.current_entry_id
+              WHERE s.is_active = 1 AND COALESCE(s.server_profile_id, 'legacy-unscoped') = :profileId
+                AND s.active_listening_event_id IS NOT NULL AND s.active_session_observed_played_ms > 0
+                AND s.session_excluded_from_taste = 0 AND s.active_listen_excluded_from_taste = 0
+                AND s.active_session_started_at_ms > :since AND s.active_session_started_at_ms <= :now
+          )
+        ORDER BY u.local_user_track_ref_id LIMIT :limit
+    """)
+    suspend fun recentlyPlayedWaveRecordings(profileId: String, since: Long, now: Long, after: String, limit: Int): List<WaveRecordingRow>
 
     @Upsert suspend fun upsertTrackRef(row: UserTrackRefEntity)
     @Upsert suspend fun upsertTrackRefs(rows: List<UserTrackRefEntity>)
@@ -313,6 +378,17 @@ interface QueueDao {
     ): Int
     @Query("UPDATE queue_snapshot SET active_listen_excluded_from_taste = 0, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")
     suspend fun beginActiveListenTasteExclusion(snapshotId: String, nowMs: Long): Int
+    @Query("""
+        UPDATE queue_snapshot
+        SET current_entry_id = :entryId, current_position_ms = :positionMs, shuffle_mode = :shuffleMode,
+            repeat_mode = :repeatMode, seed = :seed, updated_at_ms = :nowMs
+        WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE' AND active_listening_event_id IS NULL
+          AND EXISTS (SELECT 1 FROM queue_entry WHERE queue_snapshot_id = :snapshotId AND queue_entry_id = :entryId)
+    """)
+    suspend fun selectIdleEntry(
+        snapshotId: String, entryId: String, positionMs: Long, shuffleMode: String,
+        repeatMode: String, seed: Long?, nowMs: Long,
+    )
     @Query("UPDATE queue_snapshot SET active_listen_excluded_from_taste = :excluded, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE' AND current_entry_id = :entryId AND active_listening_event_id = :eventId")
     suspend fun setActiveListenTasteExclusion(snapshotId: String, entryId: String, eventId: String, excluded: Boolean, nowMs: Long): Int
     @Query("UPDATE queue_snapshot SET session_excluded_from_taste = :excluded, updated_at_ms = :nowMs WHERE queue_snapshot_id = :snapshotId AND active_slot = 'ACTIVE'")

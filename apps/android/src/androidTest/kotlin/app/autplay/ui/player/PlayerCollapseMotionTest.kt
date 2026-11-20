@@ -25,8 +25,8 @@ class PlayerCollapseMotionTest {
         compose.setContent {
             motion = rememberPlayerCollapseMotion()
             SideEffect { motion.travel = 600f }
-            Box(Modifier.fillMaxSize().graphicsLayer { translationY = motion.offset }
-                .playerCollapseGesture(onCollapse, motion, true).testTag("panel"))
+            Box(Modifier.fillMaxSize().playerCollapseGesture(onCollapse, motion, true)
+                .graphicsLayer { translationY = motion.offset }.testTag("panel"))
         }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false

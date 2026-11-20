@@ -36,11 +36,10 @@ class PlaybackSettingsTest {
                     SettingsProductScreen(settings, { transform ->
                         settings = transform(settings)
                         latest = settings
-                    }, {}, {}, {}, {}, {}, onNavigate = {})
+                    }, {}, {}, {}, {}, {}, page = app.autplay.ui.UiDestination.SettingsPlayback, onNavigate = {})
                 }
             }
         }
-        compose.onNodeWithText(context.getString(R.string.settings_playback)).performScrollTo().performClick()
         val toggle = compose.onNodeWithContentDescription(context.getString(R.string.settings_smooth_track_transitions))
         toggle.performScrollTo().assertIsOff().performClick().assertIsOn()
         compose.runOnIdle {
