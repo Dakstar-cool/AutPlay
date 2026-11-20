@@ -989,31 +989,28 @@ class OfflineLibraryScreenTest {
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
         openLibrary()
-        scrollLibraryTo(hasTestTag("library-sections"))
-        val reviewTab = hasText(context.getString(R.string.library_section_review)) and hasClickAction()
-        composeRule.onNodeWithTag("library-sections").performScrollToNode(reviewTab)
+        val reviewTab = hasTestTag("library-tab-Review")
+        composeRule.onNodeWithTag("library-sections").assertIsDisplayed().performScrollToNode(reviewTab)
         composeRule.onNode(reviewTab).performClick()
-        val openReview = hasText(context.getString(R.string.nav_import_review)) and hasClickAction()
+        val openReview = hasText(defaultStrings.getString(R.string.nav_import_review)) and hasClickAction()
         scrollLibraryTo(openReview)
-        // Leave enough room above the bottom navigation for the button's touch target.
-        composeRule.onNodeWithTag("library-product-list").performTouchInput { swipeUp(startY = center.y) }
         composeRule.onNode(openReview).assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("library-product-list").assertDoesNotExist()
-        val importSummary = context.getString(R.string.import_summary, 1)
+        val importSummary = defaultStrings.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(importSummary).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(importSummary).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.import_review_item)).performScrollTo().performClick()
-        val conflict = context.getString(R.string.import_candidate_conflict)
+        composeRule.onNodeWithText(defaultStrings.getString(R.string.import_review_item)).performScrollTo().performClick()
+        val conflict = defaultStrings.getString(R.string.import_candidate_conflict)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(conflict).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onAllNodesWithText(conflict)[0]
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.import_accept_candidate, 1)).performScrollTo().performClick()
-        val resolvedSummary = context.getString(R.string.import_review_summary, 0, 1, 0, 0)
+        composeRule.onNodeWithText(defaultStrings.getString(R.string.import_accept_candidate, 1)).performScrollTo().performClick()
+        val resolvedSummary = defaultStrings.getString(R.string.import_review_summary, 0, 1, 0, 0)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(resolvedSummary).fetchSemanticsNodes().isNotEmpty()
         }
