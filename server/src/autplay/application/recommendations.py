@@ -741,6 +741,14 @@ class RecommendationService:
         if self._atomic_writer is not None:
             self._traces.ensure_pipeline(pipeline)
             request_id = self._ids()
+            write_original = getattr(self._atomic_writer, "capture_run_save_v3", None)
+            if write_original is not None and query.surface is RecommendationSurface.RECOMMENDATIONS and not query.shadow:
+                original: RecommendationResponse = write_original(
+                    original_request_id=request_id, query=query, request_time=now, capture_eligible=True,
+                    retained_until=now + self._snapshot_retention, pipeline=pipeline,
+                    build_response=lambda snapshot: self._serve(query, pipeline, snapshot, request_id, now, persist=False),
+                )
+                return original
             return self._atomic_writer.serve_atomic(
                 query,
                 retained_until=now + self._snapshot_retention,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -24,6 +25,12 @@ from autplay.domain.training_consent import TrainingConsentHistory, TrainingCons
 from autplay.ports.training_consent import TrainingConsentLedger
 
 MAX_REVISION = 9_007_199_254_740_991
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingCaptureGrant:
+    revision: int
+    receipt_sha256: str
 
 
 class TrainingConsentError(RuntimeError):

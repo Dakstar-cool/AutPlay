@@ -994,12 +994,14 @@ def build_sync_service(settings: ApiSettings, engine: Engine) -> SyncService:
 
 
 def build_recommendation_service(
-    engine: Engine, settings: ApiSettings | None = None
+    engine: Engine, settings: ApiSettings | None = None, *, principal: Principal | None = None
 ) -> RecommendationService:
     """Assemble the CPU-only P11 graph without embeddings or model dependencies."""
     sessions = sessionmaker(engine, class_=Session, expire_on_commit=False)
     capture = None
-    if settings is not None and settings.native_recommendation_capture_enabled:
+    pilot = settings is not None and settings.native_recommendation_v3_enabled
+    owner_pilot = pilot and settings is not None and principal is not None and principal.user_id == settings.native_recommendation_v3_owner_id
+    if settings is not None and (owner_pilot or (settings.native_recommendation_capture_enabled and not pilot)):
         from autplay.adapters.postgresql.sona_native_capture import SqlAlchemySonaNativeCapture
 
         consent = build_training_consent_service(settings, engine)
@@ -1008,9 +1010,24 @@ def build_recommendation_service(
         capture = SqlAlchemySonaNativeCapture(
             consent, catalogue_owner=settings.native_recommendation_v3_owner_id
         )
-    runtime = SqlAlchemyRecommendationRuntime(
-        sessions, native_capture=capture, snapshot_policy_version="2"
-    )
+    runtime: SqlAlchemyRecommendationRuntime
+    if owner_pilot and principal is not None and settings is not None:
+        from autplay.adapters.filesystem.training_consent_ledger_v3 import FilesystemTrainingConsentLedgerV3
+        from autplay.adapters.postgresql.native_p11_writer_v3 import SqlAlchemyNativeP11WriterV3
+        from autplay.application.training_consent_v3 import NativeTrainingConsentServiceV3
+
+        path = settings.training_consent_ledger_path
+        key = settings.training_consent_ledger_key
+        key_id = settings.training_consent_ledger_key_id
+        if path is None or key is None or key_id is None:
+            raise ValueError("native pilot requires independent consent evidence")
+        ledger = FilesystemTrainingConsentLedgerV3(path, key.get_secret_value().encode(), key_id)
+        runtime = SqlAlchemyNativeP11WriterV3(
+            sessions, identity=principal, snapshot_policy_version="2",
+            consent=NativeTrainingConsentServiceV3(ledger), catalogue_capture=capture,
+        )
+    else:
+        runtime = SqlAlchemyRecommendationRuntime(sessions, native_capture=capture, snapshot_policy_version="2")
     return RecommendationService(
         snapshots=runtime,
         traces=runtime,

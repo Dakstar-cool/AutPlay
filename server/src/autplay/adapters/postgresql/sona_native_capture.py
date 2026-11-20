@@ -130,6 +130,7 @@ class SqlAlchemySonaNativeCapture:
         revision: int,
         *,
         catalogue: tuple[SnapshotTrack, ...] | None = None,
+        require_complete_catalogue: bool = False,
     ) -> None:
         trace = response.request
         params = {
@@ -241,6 +242,8 @@ class SqlAlchemySonaNativeCapture:
             payload = rfc8785.dumps(document)
         if len(payload) > MAX_CAPTURE_BYTES:
             raise ValueError("sona_native_capture_envelope_over_cap")
+        if require_complete_catalogue and document.get("catalogue_status") != "COMPLETE":
+            raise ValueError("NATIVE_CATALOGUE_INCOMPLETE")
         session.execute(
             text(
                 "INSERT INTO ml.sona_native_capture "

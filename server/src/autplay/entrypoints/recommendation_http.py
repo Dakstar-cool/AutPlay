@@ -83,7 +83,8 @@ class RecommendationHttpService(Protocol):
 
 
 def create_recommendation_router(
-    service: RecommendationHttpService, *, authenticated: Callable[[Request], None]
+    service: RecommendationHttpService, *, authenticated: Callable[[Request], None],
+    service_for_principal: Callable[[Principal], RecommendationHttpService] | None = None,
 ) -> APIRouter:
     """Return owner-scoped serve, replay, home and offline-pack routes."""
     router = APIRouter(dependencies=[Depends(authenticated)])
@@ -92,7 +93,8 @@ def create_recommendation_router(
     def recommend(request: Request, body: RecommendationRequestBody) -> JSONResponse:
         principal = _principal(request)
         try:
-            response = service.recommend(
+            selected = service if service_for_principal is None else service_for_principal(principal)
+            response = selected.recommend(
                 _query(principal, body, RecommendationSurface.RECOMMENDATIONS),
                 pipeline_key=body.pipeline_key,
                 pipeline_version=body.pipeline_version,
@@ -158,7 +160,9 @@ def create_recommendation_router(
     @router.get("/recommendations/{request_id}", response_model=None)
     def exact_replay(request: Request, request_id: UUID) -> JSONResponse:
         try:
-            response = service.exact_replay(_principal(request).user_id, request_id)
+            principal = _principal(request)
+            selected = service if service_for_principal is None else service_for_principal(principal)
+            response = selected.exact_replay(principal.user_id, request_id)
         except RecommendationNotFound:
             raise ApiError(
                 "recommendation_not_found", "The recommendation request was not found.", 404
@@ -168,7 +172,9 @@ def create_recommendation_router(
     @router.post("/recommendations/{request_id}/replay", response_model=None)
     def algorithmic_replay(request: Request, request_id: UUID) -> JSONResponse:
         try:
-            response = service.algorithmic_replay(_principal(request).user_id, request_id)
+            principal = _principal(request)
+            selected = service if service_for_principal is None else service_for_principal(principal)
+            response = selected.algorithmic_replay(principal.user_id, request_id)
         except RecommendationNotFound:
             raise ApiError(
                 "recommendation_not_found", "The recommendation request was not found.", 404

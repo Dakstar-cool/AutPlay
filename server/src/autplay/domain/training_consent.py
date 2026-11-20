@@ -27,3 +27,31 @@ class TrainingConsentIntent:
 class TrainingConsentHistory:
     operations: Mapping[UUID, TrainingConsentIntent]
     latest: Mapping[str, TrainingConsentIntent]
+
+
+@dataclass(frozen=True)
+class SonaEventErasureIntent:
+    owner_tag: str
+    source_event_id: UUID
+    source_server_sequence: int
+    source_watermark: int
+    erasure_event_id: UUID
+    erased_at: datetime
+    ledger_sequence: int = 0
+    ledger_digest: str = ""
+    # Version-2 negative evidence, captured only from a verified feedback descendant.
+    feedback_parent_source_event_id: UUID | None = None
+    feedback_parent_ledger_sequence: int = 0
+    feedback_parent_ledger_digest: str = ""
+    source_event_type: str | None = None
+
+
+@dataclass(frozen=True)
+class CompactedErasureFloor:
+    """Independent owner floor; contains no expired event or aggregate identity."""
+
+    owner_tag: str
+    floor_sequence: int
+    recorded_at: datetime
+    ledger_sequence: int = 0
+    ledger_digest: str = ""

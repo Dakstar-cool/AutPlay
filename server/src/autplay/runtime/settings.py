@@ -79,6 +79,7 @@ _API_ENV_FIELDS: Final = {
     "account_deletion_enabled": "ACCOUNT_DELETION_ENABLED",
     "shared_training_consent_enabled": "SHARED_TRAINING_CONSENT_ENABLED",
     "native_recommendation_v3_owner_id": "NATIVE_RECOMMENDATION_V3_OWNER_ID",
+    "native_recommendation_v3_enabled": "NATIVE_RECOMMENDATION_V3_ENABLED",
     "native_recommendation_capture_enabled": "NATIVE_RECOMMENDATION_CAPTURE_ENABLED",
     "direct_vault_upload_enabled": "DIRECT_VAULT_UPLOAD_ENABLED",
     "admin_web_origin": "ADMIN_WEB_ORIGIN",
@@ -343,6 +344,7 @@ class ApiSettings(_ExplicitSettings):
     shared_training_consent_enabled: bool = False
     native_recommendation_capture_enabled: bool = False
     native_recommendation_v3_owner_id: UUID | None = None
+    native_recommendation_v3_enabled: bool = False
     # Transitional compatibility path for deployments whose reviewed resource
     # budget has not been initialized yet. It restores the pre-admission Vault
     # writer only when an operator opts in explicitly.
@@ -411,6 +413,10 @@ class ApiSettings(_ExplicitSettings):
             raise ValueError("portable accounts require a persistent profile identity")
         if self.native_recommendation_capture_enabled and not self.shared_training_consent_enabled:
             raise ValueError("native capture requires shared training consent enabled")
+        if self.native_recommendation_v3_enabled and (
+            self.native_recommendation_v3_owner_id is None or not self.shared_training_consent_enabled
+        ):
+            raise ValueError("native Source3 pilot requires a single owner and shared training consent")
         if self.shared_training_consent_enabled and self.training_consent_ledger_path is None:
             raise ValueError("shared training requires independent consent evidence")
         if self.account_deletion_enabled and not self.account_recovery_enabled:

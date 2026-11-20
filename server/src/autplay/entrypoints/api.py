@@ -559,7 +559,12 @@ def create_app(
     )
     api_router.include_router(
         create_recommendation_router(
-            recommendations, authenticated=bearer_authentication(authentication)
+            recommendations, authenticated=bearer_authentication(authentication),
+            service_for_principal=(
+                (lambda principal: build_recommendation_service(engine, resolved_settings, principal=principal)
+                 if principal.user_id == resolved_settings.native_recommendation_v3_owner_id else recommendations)
+                if recommendation_service is None and resolved_settings.native_recommendation_v3_enabled else None
+            ),
         )
     )
     api_router.include_router(

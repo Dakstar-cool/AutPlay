@@ -76,7 +76,7 @@ class SqlAlchemyRecommendationRuntime:
             return snapshot
 
     def _capture_in_session(
-        self, session: Session, user_id: UUID, *, retained_until: datetime
+        self, session: Session, user_id: UUID, *, retained_until: datetime, created_at: datetime | None = None
     ) -> RecommendationInputSnapshot:
         session.execute(
             text(_PURGE_EXPIRED_TEMPORAL_SNAPSHOTS_SQL),
@@ -131,6 +131,8 @@ class SqlAlchemyRecommendationRuntime:
             snapshot_document=document,
             retained_until=retained_until,
         )
+        if created_at is not None:
+            row.created_at = created_at
         session.add(row)
         session.flush()
         return RecommendationInputSnapshot(
@@ -223,7 +225,10 @@ class SqlAlchemyRecommendationRuntime:
             self._save_in_session(session, response)
             session.commit()
 
-    def _save_in_session(self, session: Session, response: RecommendationResponse) -> None:
+    def _save_in_session(
+        self, session: Session, response: RecommendationResponse, *, temporal_id: UUID | None = None,
+        temporal_digest: bytes | None = None, feature_digest: bytes | None = None,
+    ) -> None:
         trace = response.request
         pipeline = trace.pipeline
         # The ordinary P11 insert also runs on the historical schema during upgrades.
@@ -249,6 +254,11 @@ class SqlAlchemyRecommendationRuntime:
                 availability_snapshot_ref=trace.snapshot.availability_snapshot,
                 policy_snapshot_sha256=bytes.fromhex(trace.snapshot.policy_snapshot_sha256),
                 request_document=trace.canonical_request,
+                **({
+                    "recommendation_temporal_snapshot_id": temporal_id,
+                    "temporal_snapshot_sha256": temporal_digest,
+                    "adaptive_feature_policy_sha256": feature_digest,
+                } if temporal_id is not None else {}),
                 shadow=trace.query.shadow,
                 model_bundle_version=f"{pipeline.pipeline_key}:{pipeline.version}",
                 candidate_policy_version=_component_version(pipeline, "candidate_generator"),
@@ -310,33 +320,45 @@ class SqlAlchemyRecommendationRuntime:
             response = serve(snapshot)
             self._save_in_session(session, response)
             if capture is not None and revision is not None:
-                if capture.catalogue_owner == query.user_id and snapshot.policy_version == "2":
-                    # The database applies the ordinary V2 identity and audio predicates.
-                    # One extra row distinguishes a complete catalogue from overflow.
-                    rows = session.execute(
-                        text(_SNAPSHOT_SQL_V2),
-                        {"user_id": query.user_id, "limit": EXTENDED_CATALOGUE_TRACKS + 1},
-                    ).mappings()
-                    catalogue = tuple(_track_from_mapping(row) for row in rows)
-                    capture.save(session, response, snapshot, revision, catalogue=catalogue)
-                else:
-                    capture.save(session, response, snapshot, revision)
+                self._save_collection(session, response, snapshot, revision, capture)
             return response
+
+    def _save_collection(
+        self, session: Session, response: RecommendationResponse, snapshot: RecommendationInputSnapshot,
+        revision: int, capture: SqlAlchemySonaNativeCapture, *, require_complete_catalogue: bool = False,
+    ) -> None:
+        if capture.catalogue_owner == response.request.query.user_id and snapshot.policy_version == "2":
+            # The database applies the ordinary V2 identity and audio predicates.
+            # One extra row distinguishes a complete catalogue from overflow.
+            rows = session.execute(
+                text(_SNAPSHOT_SQL_V2),
+                {"user_id": response.request.query.user_id, "limit": EXTENDED_CATALOGUE_TRACKS + 1},
+            ).mappings()
+            catalogue = tuple(_track_from_mapping(row) for row in rows)
+            capture.save(session, response, snapshot, revision, catalogue=catalogue,
+                         require_complete_catalogue=require_complete_catalogue)
+        else:
+            capture.save(session, response, snapshot, revision)
 
     def exact(self, user_id: UUID, request_id: UUID) -> RecommendationResponse | None:
         """Return persisted response bytes semantically, never rerunning the pipeline."""
         with self._sessions() as session:
-            trace = self._trace(session, user_id, request_id)
-            if trace is None:
-                return None
-            rows = list(
-                session.scalars(
-                    select(RecommendationItemRow)
-                    .where(RecommendationItemRow.recommendation_request_id == request_id)
-                    .order_by(RecommendationItemRow.rank)
-                )
+            return self._exact_in_session(session, user_id, request_id)
+
+    def _exact_in_session(
+        self, session: Session, user_id: UUID, request_id: UUID
+    ) -> RecommendationResponse | None:
+        trace = self._trace(session, user_id, request_id)
+        if trace is None:
+            return None
+        rows = list(
+            session.scalars(
+                select(RecommendationItemRow)
+                .where(RecommendationItemRow.recommendation_request_id == request_id)
+                .order_by(RecommendationItemRow.rank)
             )
-            return RecommendationResponse(trace, tuple(_ranked_from_row(row) for row in rows))
+        )
+        return RecommendationResponse(trace, tuple(_ranked_from_row(row) for row in rows))
 
     def request(self, user_id: UUID, request_id: UUID) -> RecommendationRequestTrace | None:
         """Return one replay-complete owner-filtered request trace."""
