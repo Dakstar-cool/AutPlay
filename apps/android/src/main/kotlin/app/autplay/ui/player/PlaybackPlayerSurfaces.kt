@@ -248,12 +248,13 @@ public fun NowPlayingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
+                val queueContext = state.context
                 val kind = when {
-                    state.context == ActiveQueueContext.Loading || state.connection == PlaybackConnectionState.Connecting ->
+                    queueContext == ActiveQueueContext.Loading || state.connection == PlaybackConnectionState.Connecting ->
                         AutPlayStateKind.Loading
-                    state.context == ActiveQueueContext.Absent -> AutPlayStateKind.Empty
-                    state.context is ActiveQueueContext.Loaded && state.context.queueType != "GUEST_WAVE" &&
-                        state.context.currentEntryId != null && state.connection == PlaybackConnectionState.Connected ->
+                    queueContext == ActiveQueueContext.Absent -> AutPlayStateKind.Empty
+                    queueContext is ActiveQueueContext.Loaded && queueContext.queueType != "GUEST_WAVE" &&
+                        queueContext.currentEntryId != null && state.connection == PlaybackConnectionState.Connected ->
                         AutPlayStateKind.Loading
                     else -> AutPlayStateKind.PlaybackUnavailable
                 }
