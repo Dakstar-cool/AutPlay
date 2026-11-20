@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -207,6 +208,7 @@ public data class LibraryScreenUiState(
     public val error: Boolean = false,
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 public fun HomeProductScreen(
     state: HomeScreenUiState,
@@ -304,6 +306,29 @@ public fun HomeProductScreen(
                             onOpenListenTogether = onOpenListenTogether,
                             modifier = heroModifier,
                         )
+                    }
+                }
+            }
+        }
+        item(key = "home:contexts") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AutPlaySectionHeader(stringResource(R.string.home_context_collections))
+                Text(
+                    stringResource(R.string.home_context_collections_placeholder),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AutPlayTokens.colors.mutedText,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    listOf(
+                        R.string.home_context_energy,
+                        R.string.home_context_running,
+                        R.string.home_context_focus,
+                        R.string.home_context_evening,
+                    ).forEach { label ->
+                        AutPlayChip(text = stringResource(label), selected = false, enabled = false, onClick = {})
                     }
                 }
             }
