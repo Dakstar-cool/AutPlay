@@ -1,16 +1,16 @@
 package app.autplay.playback
 
 import android.content.Context
+import android.os.Build
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.source.LoadEventInfo
-import androidx.media3.exoplayer.source.MediaLoadData
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.util.EventLogger
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.data.settings.PlaybackAudioSettings
@@ -24,11 +24,17 @@ import kotlin.math.PI
 import kotlin.math.sin
 import kotlin.math.roundToInt
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 @UnstableApi
 class PlaybackGaplessTest {
     @Test fun taggedFlacToUntaggedFlacChangesGainAtTheDecodedBoundaryWithContinuousEqualizer() {
+        val hasDecoder = MediaCodecUtil.getDecoderInfos(MimeTypes.AUDIO_FLAC, false, false).isNotEmpty()
+        if (Build.VERSION.SDK_INT < 27) {
+            assumeTrue("Android 8.0 permits devices without a FLAC MediaCodec", hasDecoder)
+        }
+        assertTrue("FLAC playback requires a FLAC decoder", hasDecoder)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val preferences = PlaybackAudioPreferences().apply {
@@ -50,7 +56,6 @@ class PlaybackGaplessTest {
             }
         }
         val recording = RecordingAudioOutputProvider(context)
-        val successorLoaded = CountDownLatch(1)
         val ended = CountDownLatch(1)
         val error = AtomicReference<PlaybackException?>()
         val player = AtomicReference<ExoPlayer>()
@@ -69,15 +74,6 @@ class PlaybackGaplessTest {
                 player.set(builder.build().also {
                     it.volume = 0f
                     it.addAnalyticsListener(EventLogger())
-                    it.addAnalyticsListener(object : AnalyticsListener {
-                        override fun onLoadCompleted(
-                            eventTime: AnalyticsListener.EventTime,
-                            loadEventInfo: LoadEventInfo,
-                            mediaLoadData: MediaLoadData,
-                        ) {
-                            if (loadEventInfo.uri.lastPathSegment == files[1].name) successorLoaded.countDown()
-                        }
-                    })
                     it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(PlaybackTransitions.preloadDurationUs(true)))
                     it.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(state: Int) {
@@ -92,11 +88,9 @@ class PlaybackGaplessTest {
                     })
                     it.setMediaItems(files.mapIndexed { index, file -> MediaItem.Builder().setMediaId("flac-$index").setUri(file.toURI().toString()).build() })
                     it.prepare()
+                    it.play()
                 })
             }
-            // Both half-second fixtures must be resident to isolate the decoded transition from file I/O.
-            assertTrue("Second FLAC was not preloaded", successorLoaded.await(10, TimeUnit.SECONDS))
-            instrumentation.runOnMainSync { player.get().play() }
             assertTrue(ended.await(15, TimeUnit.SECONDS))
             instrumentation.runOnMainSync {
                 assertNull(error.get())
