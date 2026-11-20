@@ -219,7 +219,10 @@ class OfflineLibraryScreenTest {
         composeRule.onNode(reviewTab).performClick()
         val openReview = hasText(context.getString(R.string.nav_import_review)) and hasClickAction()
         scrollLibraryTo(openReview)
-        composeRule.onNode(openReview).performClick()
+        // Leave enough room above the bottom navigation for the button's touch target.
+        composeRule.onNodeWithTag("library-product-list").performTouchInput { swipeUp(startY = center.y) }
+        composeRule.onNode(openReview).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("library-product-list").assertDoesNotExist()
         val importSummary = context.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(importSummary).fetchSemanticsNodes().isNotEmpty()

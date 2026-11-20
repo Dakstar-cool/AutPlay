@@ -7,7 +7,11 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
+import androidx.media3.exoplayer.util.EventLogger
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.data.settings.PlaybackAudioSettings
 import java.io.File
@@ -46,6 +50,7 @@ class PlaybackGaplessTest {
             }
         }
         val recording = RecordingAudioOutputProvider(context)
+        val successorLoaded = CountDownLatch(1)
         val ended = CountDownLatch(1)
         val error = AtomicReference<PlaybackException?>()
         val player = AtomicReference<ExoPlayer>()
@@ -63,6 +68,16 @@ class PlaybackGaplessTest {
                     .setLoadControl(PlaybackTransitions.loadControl())
                 player.set(builder.build().also {
                     it.volume = 0f
+                    it.addAnalyticsListener(EventLogger())
+                    it.addAnalyticsListener(object : AnalyticsListener {
+                        override fun onLoadCompleted(
+                            eventTime: AnalyticsListener.EventTime,
+                            loadEventInfo: LoadEventInfo,
+                            mediaLoadData: MediaLoadData,
+                        ) {
+                            if (loadEventInfo.uri.lastPathSegment == files[1].name) successorLoaded.countDown()
+                        }
+                    })
                     it.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(PlaybackTransitions.preloadDurationUs(true)))
                     it.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(state: Int) {
@@ -77,17 +92,19 @@ class PlaybackGaplessTest {
                     })
                     it.setMediaItems(files.mapIndexed { index, file -> MediaItem.Builder().setMediaId("flac-$index").setUri(file.toURI().toString()).build() })
                     it.prepare()
-                    it.play()
                 })
             }
+            // Both half-second fixtures must be resident to isolate the decoded transition from file I/O.
+            assertTrue("Second FLAC was not preloaded", successorLoaded.await(10, TimeUnit.SECONDS))
+            instrumentation.runOnMainSync { player.get().play() }
             assertTrue(ended.await(15, TimeUnit.SECONDS))
             instrumentation.runOnMainSync {
                 assertNull(error.get())
                 assertEquals(1, transitions)
-                assertEquals(0, rebuffers)
             }
             assertArrayEquals(withAudioTrackStartupRamp(expected.array()), recording.received.toByteArray())
             assertEquals(1, recording.outputsCreated)
+            assertEquals("Unexpected buffering after the initial READY state", 0, rebuffers)
         } finally {
             instrumentation.runOnMainSync { player.get()?.release() }
             files.forEach { assertTrue(it.delete()) }
