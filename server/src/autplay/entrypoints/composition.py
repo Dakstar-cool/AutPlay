@@ -1005,7 +1005,9 @@ def build_recommendation_service(
         consent = build_training_consent_service(settings, engine)
         if consent is None:
             raise ValueError("native capture requires shared training consent authority")
-        capture = SqlAlchemySonaNativeCapture(consent)
+        capture = SqlAlchemySonaNativeCapture(
+            consent, catalogue_owner=settings.native_recommendation_v3_owner_id
+        )
     runtime = SqlAlchemyRecommendationRuntime(
         sessions, native_capture=capture, snapshot_policy_version="2"
     )

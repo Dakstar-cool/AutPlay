@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0075_sona_collection_window"
+EXPECTED_MIGRATION_HEAD: Final = "0109_sona_prod_privacy"
 
 
 @dataclass(frozen=True, slots=True)

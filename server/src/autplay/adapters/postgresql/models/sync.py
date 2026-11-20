@@ -47,6 +47,7 @@ class DeviceEventInboxRow(Base):
         BigInteger(),
         nullable=False,
     )
+    journal_epoch: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     event_type: Mapped[str] = mapped_column(
         Text(),
         nullable=False,
@@ -94,6 +95,10 @@ class DeviceEventInboxRow(Base):
         nullable=False,
     )
     terminal_ack: Mapped[JsonValue | None] = mapped_column(JSONB(), nullable=True)
+    ingress_validation_version: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("1")
+    )
+    normalized_payload_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint("event_id", name="device_event_inbox_pkey"),
@@ -131,14 +136,29 @@ class DeviceEventInboxRow(Base):
             name="fk_device_event_inbox_owner",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("device_id", "device_sequence", name="uq_device_event_sequence"),
+        UniqueConstraint(
+            "device_id", "journal_epoch", "device_sequence", name="uq_device_event_sequence"
+        ),
         CheckConstraint(
-            "apply_status IN ('RECEIVED', 'APPLIED', 'DUPLICATE', 'CONFLICT', 'REJECTED')",
+            "apply_status IN ('RECEIVED', 'APPLIED', 'DUPLICATE', 'CONFLICT', "
+            "'REJECTED', 'ERASED')",
             name="ck_device_event_apply_status",
         ),
         CheckConstraint(
             "octet_length(request_hash) = 32",
             name="ck_device_event_request_hash_len",
+        ),
+        CheckConstraint("ingress_validation_version IN (1,2)", name="ck_inbox_ingress_version"),
+        CheckConstraint(
+            "(ingress_validation_version=1 AND normalized_payload_sha256 IS NULL) OR "
+            "(ingress_validation_version=2 AND normalized_payload_sha256 IS NOT NULL "
+            "AND octet_length(normalized_payload_sha256)=32 AND payload='{}'::jsonb "
+            "AND schema_version=1 AND device_sequence BETWEEN 1 AND 9007199254740991 "
+            "AND ((apply_status='RECEIVED' AND terminal_ack IS NULL AND error_code IS NULL) "
+            "OR (apply_status='APPLIED' AND terminal_ack IS NOT NULL AND error_code IS NULL) "
+            "OR (apply_status='ERASED' AND terminal_ack IS NOT NULL "
+            "AND error_code='EVENT_ERASED')))",
+            name="ck_inbox_normalized_ingress",
         ),
         {"schema": "sync"},
     )
@@ -190,6 +210,12 @@ class SyncEventRow(Base):
     )
     operation: Mapped[str] = mapped_column(Text(), nullable=False, server_default=text("'UPSERT'"))
     server_row_version: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    ingress_validation_version: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("1")
+    )
+    ingress_device_sequence: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    ingress_journal_epoch: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    normalized_payload_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -224,6 +250,20 @@ class SyncEventRow(Base):
             name="sync_event_aggregate_type_check",
         ),
         UniqueConstraint("user_id", "event_id", name="uq_sync_event_user_event"),
+        CheckConstraint(
+            "ingress_validation_version IN (1,2)", name="ck_sync_event_ingress_version"
+        ),
+        CheckConstraint(
+            "(ingress_validation_version=1 AND ingress_device_sequence IS NULL "
+            "AND ingress_journal_epoch IS NULL AND normalized_payload_sha256 IS NULL) OR "
+            "(ingress_validation_version=2 AND origin_device_id IS NOT NULL "
+            "AND ingress_device_sequence IS NOT NULL "
+            "AND ingress_device_sequence BETWEEN 1 AND 9007199254740991 "
+            "AND ingress_journal_epoch IS NOT NULL AND normalized_payload_sha256 IS NOT NULL "
+            "AND octet_length(normalized_payload_sha256)=32 AND schema_version=1 "
+            "AND operation='UPSERT' AND server_row_version IS NOT NULL AND server_row_version=1)",
+            name="ck_sync_event_normalized_ingress",
+        ),
         ForeignKeyConstraint(
             ["user_id", "origin_device_id"],
             ["account.device.user_id", "account.device.device_id"],
@@ -297,6 +337,108 @@ class DeviceSyncCursorRow(Base):
     )
 
 
+class OwnerErasureFloorRow(Base):
+    """Highest expired typed erasure sequence retained without event identity."""
+
+    __tablename__ = "owner_erasure_floor"
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    floor_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    ledger_sequence: Mapped[int | None] = mapped_column(BigInteger())
+    ledger_digest: Mapped[bytes | None] = mapped_column(BYTEA())
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id"],
+            ["account.user_account.user_id"],
+            name="owner_erasure_floor_user_id_fkey",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("floor_sequence > 0", name="ck_owner_erasure_floor_positive"),
+        CheckConstraint(
+            "(ledger_sequence IS NULL AND ledger_digest IS NULL) OR "
+            "(ledger_sequence > 0 AND octet_length(ledger_digest)=32)",
+            name="ck_owner_erasure_floor_receipt",
+        ),
+        {"schema": "sync"},
+    )
+
+
+class DeviceErasureFloorRow(Base):
+    """Old epoch fence and explicit wipe/bootstrap state for a lagging device."""
+
+    __tablename__ = "device_erasure_floor"
+    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    floor_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    ledger_sequence: Mapped[int | None] = mapped_column(BigInteger())
+    ledger_digest: Mapped[bytes | None] = mapped_column(BYTEA())
+    invalidated_epoch: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    replacement_epoch: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    bootstrap_completed: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "device_id"],
+            ["account.device.user_id", "account.device.device_id"],
+            name="fk_device_erasure_floor_owner",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("floor_sequence > 0", name="ck_device_erasure_floor_positive"),
+        CheckConstraint(
+            "(ledger_sequence IS NULL AND ledger_digest IS NULL) OR "
+            "(ledger_sequence > 0 AND octet_length(ledger_digest)=32)",
+            name="ck_device_erasure_floor_receipt",
+        ),
+        CheckConstraint(
+            "replacement_epoch IS NULL OR replacement_epoch IS DISTINCT FROM invalidated_epoch",
+            name="ck_device_erasure_floor_new_epoch",
+        ),
+        CheckConstraint(
+            "NOT bootstrap_completed OR replacement_epoch IS NOT NULL",
+            name="ck_device_erasure_floor_bootstrap_epoch",
+        ),
+        {"schema": "sync"},
+    )
+
+
+class DeviceErasureInvalidatedEpochRow(Base):
+    """Permanent per-device journal epochs forbidden by signed floor receipts."""
+
+    __tablename__ = "device_erasure_invalidated_epoch"
+    device_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    journal_epoch: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    floor_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    ledger_sequence: Mapped[int] = mapped_column(BigInteger(), nullable=False)
+    ledger_digest: Mapped[bytes] = mapped_column(BYTEA(), nullable=False)
+    invalidated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "device_id"],
+            ["account.device.user_id", "account.device.device_id"],
+            name="fk_device_erasure_invalidated_epoch_owner",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "floor_sequence > 0", name="device_erasure_invalidated_epoch_floor_sequence_check"
+        ),
+        CheckConstraint(
+            "ledger_sequence > 0", name="device_erasure_invalidated_epoch_ledger_sequence_check"
+        ),
+        CheckConstraint(
+            "octet_length(ledger_digest)=32",
+            name="device_erasure_invalidated_epoch_ledger_digest_check",
+        ),
+        {"schema": "sync"},
+    )
+
+
 class TombstoneRow(Base):
     """Persistence row for ``sync.tombstone``."""
 
@@ -331,6 +473,8 @@ class TombstoneRow(Base):
         TIMESTAMP(timezone=True),
         nullable=False,
     )
+    projection_event_type: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    projection_schema_version: Mapped[int | None] = mapped_column(Integer(), nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint("tombstone_id", name="tombstone_pkey"),
@@ -362,6 +506,12 @@ class TombstoneRow(Base):
         CheckConstraint(
             "retain_until > deleted_at",
             name="ck_tombstone_retention",
+        ),
+        CheckConstraint(
+            "(projection_event_type IS NULL AND projection_schema_version IS NULL) OR "
+            "(projection_event_type IN ('RECOMMENDATION_INTERACTION_ERASED',"
+            "'LISTENING_EVENT_ERASED') AND projection_schema_version=2)",
+            name="ck_sona_erasure_tombstone_projection",
         ),
         {"schema": "sync"},
     )
@@ -488,7 +638,37 @@ class UserInteractionEventRow(Base):
     impression_interaction_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     payload: Mapped[JsonValue] = mapped_column(JSONB(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
-    __table_args__ = ({"schema": "library"},)
+    attribution_contract_version: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("1")
+    )
+    attribution_closed: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    __table_args__ = (
+        CheckConstraint(
+            "attribution_contract_version IN (1,2)", name="ck_interaction_attribution_version"
+        ),
+        CheckConstraint(
+            "attribution_contract_version=2 OR NOT attribution_closed",
+            name="ck_interaction_attribution_closed",
+        ),
+        CheckConstraint(
+            "attribution_contract_version=1 OR "
+            "(recording_id IS NOT NULL "
+            "AND presentation_id IS NOT NULL AND recommendation_request_id IS NULL "
+            "AND source_rank IS NULL AND impression_interaction_id IS NULL "
+            "AND ((event_type='RECOMMENDATION_IMPRESSION_RECORDED' "
+            'AND payload=\'{"interaction_type":"RECOMMENDATION_IMPRESSION_RECORDED"}\'::jsonb) '
+            "OR (event_type='RECOMMENDATION_FEEDBACK_RECORDED' AND payload IN ("
+            '\'{"interaction_type":"RECOMMENDATION_FEEDBACK_RECORDED",'
+            '"feedback_type":"SELECTED"}\'::jsonb,'
+            '\'{"interaction_type":"RECOMMENDATION_FEEDBACK_RECORDED",'
+            '"feedback_type":"DISMISSED"}\'::jsonb))))',
+            name="ck_interaction_attribution_v2",
+        ),
+        UniqueConstraint(
+            "user_id", "interaction_id", "recording_id", name="uq_interaction_owner_recording"
+        ),
+        {"schema": "library"},
+    )
 
 
 Index("ix_bootstrap_session_expiry", BootstrapSessionRow.expires_at)
@@ -507,6 +687,18 @@ Index(
 )
 
 Index(
+    "ix_device_erasure_floor_owner",
+    DeviceErasureFloorRow.user_id,
+    DeviceErasureFloorRow.device_id,
+)
+
+Index(
+    "ix_device_erasure_invalidated_epoch_owner",
+    DeviceErasureInvalidatedEpochRow.user_id,
+    DeviceErasureInvalidatedEpochRow.device_id,
+)
+
+Index(
     "ix_tombstone_retention",
     TombstoneRow.retain_until,
 )
@@ -520,9 +712,12 @@ Index(
 __all__ = (
     "BootstrapSessionRow",
     "BootstrapSnapshotItemRow",
+    "DeviceErasureFloorRow",
+    "DeviceErasureInvalidatedEpochRow",
     "DeviceEventInboxRow",
     "DeviceSyncCursorRow",
     "IdempotencyRecordRow",
+    "OwnerErasureFloorRow",
     "SyncEventRow",
     "TombstoneRow",
     "UserInteractionEventRow",

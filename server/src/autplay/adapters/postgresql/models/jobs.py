@@ -356,6 +356,25 @@ Index(
     JobRow.lease_deadline,
     postgresql_where=text("state = 'RUNNING'"),
 )
+Index(
+    "ix_m11_fair_job_owner",
+    JobRow.resource_wake_until.is_not(None).self_group().desc(),
+    JobRow.resource_waiting,
+    JobRow.user_id,
+    JobRow.priority,
+    JobRow.scheduled_at,
+    JobRow.created_at,
+    JobRow.job_id,
+    postgresql_where=text("state IN ('QUEUED', 'RETRY_WAIT') AND cancel_requested_at IS NULL"),
+)
+Index(
+    "ix_m11_auto_backlog_job",
+    JobRow.user_id,
+    JobRow.job_id,
+    postgresql_where=text(
+        "job_type = 'discovery.acquire' AND state IN ('QUEUED', 'RUNNING', 'RETRY_WAIT', 'PAUSED')"
+    ),
+)
 
 
 __all__ = (

@@ -225,8 +225,12 @@ class SqlAlchemyRecommendationRuntime:
     def _save_in_session(self, session: Session, response: RecommendationResponse) -> None:
         trace = response.request
         pipeline = trace.pipeline
-        session.add(
-            RecommendationRequestRow(
+        # The ordinary P11 insert also runs on the historical schema during upgrades.
+        # New serving columns have database defaults and need no RETURNING clause.
+        session.execute(
+            pg_insert(RecommendationRequestRow)
+            .inline()
+            .values(
                 recommendation_request_id=trace.recommendation_request_id,
                 user_id=trace.query.user_id,
                 context=trace.query.context,
@@ -257,27 +261,31 @@ class SqlAlchemyRecommendationRuntime:
                 created_at=trace.created_at,
             )
         )
-        session.flush()
-        for item in response.items:
-            session.add(
-                RecommendationItemRow(
-                    recommendation_request_id=trace.recommendation_request_id,
-                    rank=item.source_rank,
-                    recording_id=item.recording_id,
-                    score=Decimal(str(item.score)),
-                    candidate_sources=[value.source_key for value in item.contributions],
-                    explanation_code=item.reason_code,
-                    availability_snapshot={"snapshot_sha256": trace.snapshot.availability_snapshot},
-                    contributions=[_contribution_document(value) for value in item.contributions],
-                    reason_codes=list(item.reason_codes),
-                    item_provenance={
+        if response.items:
+            items = [
+                {
+                    "recommendation_request_id": trace.recommendation_request_id,
+                    "rank": item.source_rank,
+                    "recording_id": item.recording_id,
+                    "score": Decimal(str(item.score)),
+                    "candidate_sources": [value.source_key for value in item.contributions],
+                    "explanation_code": item.reason_code,
+                    "availability_snapshot": {
+                        "snapshot_sha256": trace.snapshot.availability_snapshot
+                    },
+                    "contributions": [
+                        _contribution_document(value) for value in item.contributions
+                    ],
+                    "reason_codes": list(item.reason_codes),
+                    "item_provenance": {
                         "artist_key": item.artist_key,
                         "release_key": item.release_key,
                         "section": item.section,
                     },
-                )
-            )
-        session.flush()
+                }
+                for item in response.items
+            ]
+            session.execute(pg_insert(RecommendationItemRow).inline(), items)
 
     def serve_atomic(
         self,
@@ -301,7 +309,17 @@ class SqlAlchemyRecommendationRuntime:
             response = serve(snapshot)
             self._save_in_session(session, response)
             if capture is not None and revision is not None:
-                capture.save(session, response, snapshot, revision)
+                if capture.catalogue_owner == query.user_id and snapshot.policy_version == "2":
+                    # The database applies the ordinary V2 identity and audio predicates.
+                    # One extra row distinguishes a complete catalogue from overflow.
+                    rows = session.execute(
+                        text(_SNAPSHOT_SQL_V2),
+                        {"user_id": query.user_id, "limit": _MAX_SNAPSHOT_TRACKS + 1},
+                    ).mappings()
+                    catalogue = tuple(_track_from_mapping(row) for row in rows)
+                    capture.save(session, response, snapshot, revision, catalogue=catalogue)
+                else:
+                    capture.save(session, response, snapshot, revision)
             return response
 
     def exact(self, user_id: UUID, request_id: UUID) -> RecommendationResponse | None:

@@ -62,6 +62,7 @@ class EmbeddingModelRow(Base):
         BYTEA(),
         nullable=False,
     )
+    artifact_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
     license_id: Mapped[str] = mapped_column(
         Text(),
         nullable=False,
@@ -186,6 +187,16 @@ class EmbeddingModelRow(Base):
         CheckConstraint(
             "octet_length(weights_sha256) = 32",
             name="ck_embedding_model_weights_hash_len",
+        ),
+        CheckConstraint(
+            "artifact_sha256 IS NULL OR octet_length(artifact_sha256)=32",
+            name="embedding_artifact_sha256_check",
+        ),
+        ForeignKeyConstraint(
+            ["artifact_sha256"],
+            ["ml.artifact.artifact_sha256"],
+            name="embedding_artifact_fkey",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "octet_length(manifest_sha256) = 32",
@@ -1003,6 +1014,9 @@ class RecommendationRequestRow(Base):
         server_default=text("'GENERAL'"),
     )
     surface: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    serving_contract_version: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("1")
+    )
     pipeline_key: Mapped[str | None] = mapped_column(Text(), nullable=True)
     pipeline_version: Mapped[str | None] = mapped_column(Text(), nullable=True)
     pipeline_manifest_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
@@ -1126,6 +1140,14 @@ class RecommendationRequestRow(Base):
             name="ck_recommendation_request_surface",
         ),
         CheckConstraint(
+            "serving_contract_version IN (1,2)", name="ck_native_served_request_version"
+        ),
+        CheckConstraint(
+            "serving_contract_version=1 OR (serving_contract_version=2 AND surface IS NOT NULL "
+            "AND surface IN ('recommendations','home','offline_pack'))",
+            name="ck_native_served_request_surface",
+        ),
+        CheckConstraint(
             "(pipeline_manifest_sha256 IS NULL OR octet_length(pipeline_manifest_sha256) = 32) "
             "AND (request_sha256 IS NULL OR octet_length(request_sha256) = 32) "
             "AND (input_snapshot_sha256 IS NULL OR octet_length(input_snapshot_sha256) = 32) "
@@ -1237,8 +1259,19 @@ class RecommendationItemRow(Base):
     item_provenance: Mapped[JsonValue] = mapped_column(
         JSONB(), nullable=False, server_default=text("'{}'::jsonb")
     )
+    score_units_e8: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    candidate_sources_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    availability_snapshot_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    contributions_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    reason_codes_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    item_provenance_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
+    baseline_item_sha256: Mapped[bytes | None] = mapped_column(BYTEA(), nullable=True)
 
     __table_args__ = (
+        CheckConstraint(
+            "score_units_e8 IS NULL OR score=score_units_e8::numeric/100000000",
+            name="ck_native_served_baseline_score",
+        ),
         ForeignKeyConstraint(
             ["recommendation_request_id"],
             ["ml.recommendation_request.recommendation_request_id"],
@@ -1380,6 +1413,10 @@ class OfflineRecommendationPackRow(Base):
 
     __tablename__ = "offline_recommendation_pack"
 
+    attribution_contract_version: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("1")
+    )
+
     offline_pack_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         nullable=False,
@@ -1435,6 +1472,15 @@ class OfflineRecommendationPackRow(Base):
 
     __table_args__ = (
         PrimaryKeyConstraint("offline_pack_id", name="offline_recommendation_pack_pkey"),
+        UniqueConstraint("user_id", "offline_pack_id", name="uq_native_pack_owner"),
+        CheckConstraint("attribution_contract_version IN (1,2)", name="ck_native_pack_version"),
+        CheckConstraint(
+            "attribution_contract_version=1 OR (recommendation_request_id IS NULL "
+            "AND device_id IS NOT NULL AND payload_version=2 AND payload_encoding='RAW_JSON' "
+            "AND octet_length(payload)<=2097152 AND payload_sha256=sha256(payload) "
+            "AND expires_at<=created_at+interval '7 days')",
+            name="ck_native_pack_v2",
+        ),
         ForeignKeyConstraint(
             ["user_id"],
             ["account.user_account.user_id"],

@@ -16,8 +16,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from autplay.application.recommendations import (
+    RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
     recommendation_input_snapshot_document,
     recommendation_snapshot_limit,
+)
+from autplay.application.sona_native_catalogue import (
+    COLLECTION_V2,
+    catalogue_document,
+    catalogue_matches_served,
 )
 from autplay.application.sona_shadow import recommendation_ranking_document
 from autplay.application.training_consent import TrainingConsentService
@@ -25,6 +31,7 @@ from autplay.domain.recommendations import (
     JsonValue,
     RecommendationInputSnapshot,
     RecommendationResponse,
+    SnapshotTrack,
 )
 
 MAX_SOURCE_FACTS = 10_000
@@ -102,7 +109,10 @@ WHERE p.user_id=:owner
 class SqlAlchemySonaNativeCapture:
     """Write only within the original recommendation transaction and proven grant."""
 
-    def __init__(self, consent: TrainingConsentService) -> None:
+    def __init__(
+        self, consent: TrainingConsentService, *, catalogue_owner: UUID | None = None
+    ) -> None:
+        self.catalogue_owner = catalogue_owner
         self._consent = consent
 
     def grant(self, session: Session, owner: UUID) -> int | None:
@@ -114,6 +124,8 @@ class SqlAlchemySonaNativeCapture:
         response: RecommendationResponse,
         snapshot: RecommendationInputSnapshot,
         revision: int,
+        *,
+        catalogue: tuple[SnapshotTrack, ...] | None = None,
     ) -> None:
         trace = response.request
         params = {
@@ -182,11 +194,35 @@ class SqlAlchemySonaNativeCapture:
             "candidate_policy_cap": recommendation_snapshot_limit(snapshot.policy_version),
             "source_fact_cap": MAX_SOURCE_FACTS,
         }
+        if catalogue is not None:
+            if trace.query.user_id != self.catalogue_owner or snapshot.policy_version != "2":
+                raise ValueError("native catalogue owner or policy mismatch")
+            document["schema"] = COLLECTION_V2
+            document["catalogue_count_lower_bound"] = len(catalogue)
+            document["catalogue"] = None
+            document["catalogue_sha256"] = None
+            if len(catalogue) > RECOMMENDATION_MAX_SNAPSHOT_TRACKS:
+                document["catalogue_status"] = "TRACK_LIMIT"
+            elif not catalogue_matches_served(catalogue, snapshot.tracks):
+                document["catalogue_status"] = "SERVING_WINDOW_MISMATCH"
+            else:
+                full = catalogue_document(
+                    trace.query.user_id, snapshot.reference.interaction_watermark, catalogue
+                )
+                raw_catalogue = rfc8785.dumps(full)
+                document["catalogue"] = full
+                document["catalogue_sha256"] = sha256(raw_catalogue).hexdigest()
+                document["catalogue_status"] = "COMPLETE"
         payload = rfc8785.dumps(document)
         if len(payload) > MAX_CAPTURE_BYTES:
             # Preserve the full P11 universe and an explicit rejected-source marker.
             document["source_facts"] = []
             document["collection_status"] = status = "SOURCE_LIMIT"
+            payload = rfc8785.dumps(document)
+        if len(payload) > MAX_CAPTURE_BYTES and catalogue is not None:
+            document["catalogue_status"] = "BYTE_LIMIT"
+            document["catalogue"] = None
+            document["catalogue_sha256"] = None
             payload = rfc8785.dumps(document)
         if len(payload) > MAX_CAPTURE_BYTES:
             raise ValueError("sona_native_capture_envelope_over_cap")

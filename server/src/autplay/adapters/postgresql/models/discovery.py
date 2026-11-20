@@ -908,6 +908,11 @@ Index(
     AcquisitionAttemptRow.created_at,
 )
 Index(
+    "ix_acquisition_attempt_auto_job",
+    AcquisitionAttemptRow.job_id,
+    postgresql_where=text("origin = 'AUTOMATIC'"),
+)
+Index(
     "ix_candidate_action_receipt_candidate",
     CandidateActionReceiptRow.candidate_id,
     CandidateActionReceiptRow.created_at,

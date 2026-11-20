@@ -422,6 +422,7 @@ class SyncService:
         same_sequence = session.scalar(
             select(DeviceEventInboxRow).where(
                 DeviceEventInboxRow.device_id == device_id,
+                DeviceEventInboxRow.journal_epoch == epoch,
                 DeviceEventInboxRow.device_sequence == normalized["device_sequence"],
             )
         )
@@ -440,6 +441,7 @@ class SyncService:
         inbox = DeviceEventInboxRow(
             event_id=normalized["event_id"],
             device_id=device_id,
+            journal_epoch=epoch,
             user_id=principal.user_id,
             device_sequence=normalized["device_sequence"],
             event_type=normalized["event_type"],

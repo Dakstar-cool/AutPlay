@@ -24,6 +24,7 @@ from autplay.application.adaptive_recommendations import (
     temporal_evidence_document,
 )
 from autplay.application.recommendations import (
+    RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
     RecommendationPipelineRunner,
     baseline_pipeline_definition,
     recommendation_availability_snapshot_document,
@@ -33,6 +34,11 @@ from autplay.application.recommendations import (
     request_document,
 )
 from autplay.application.sona import build_sona_inference_request
+from autplay.application.sona_native_catalogue import (
+    COLLECTION_V2,
+    catalogue_document,
+    catalogue_matches_served,
+)
 from autplay.application.sona_shadow import recommendation_ranking_document
 from autplay.application.sona_source_materialization import snapshot_track_from_document
 from autplay.application.sona_source_reconstruction import (
@@ -59,6 +65,7 @@ from autplay.domain.recommendations import (
     RecommendationQuery,
     RecommendationSnapshotRef,
     RecommendationSurface,
+    SnapshotTrack,
 )
 from autplay.domain.sona import (
     SONA_MAX_CANDIDATES,
@@ -102,6 +109,7 @@ class NativeCapture:
     baseline: RecommendationInputSnapshot
     facts: tuple[dict[str, Any], ...]
     blockers: tuple[str, ...]
+    catalogue: tuple[SnapshotTrack, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +168,7 @@ def decode_native_capture(
     doc = json.loads(row.payload)
     _require(isinstance(doc, dict) and rfc8785.dumps(doc) == row.payload, "NONCANONICAL_CAPTURE")
     _require(
-        doc["schema"] == "AUTPLAY_P11_NATIVE_COLLECTION_V1"
+        doc["schema"] in ("AUTPLAY_P11_NATIVE_COLLECTION_V1", COLLECTION_V2)
         and doc["producer"] == "ORIGINAL_REQUEST_TRANSACTION"
         and doc["quality_eligible"] is False
         and doc["admission_blocker"] == "TEMPORAL_SCHEMA2_DATASET_ADAPTER_REQUIRED",
@@ -240,6 +248,46 @@ def decode_native_capture(
     status = doc["collection_status"]
     _require(status in {"COLLECTED", "SOURCE_LIMIT", "SOURCE_PROVENANCE_GAP"}, "UNKNOWN_STATUS")
     blockers: set[str] = set()
+    catalogue = None
+    if doc["schema"] == COLLECTION_V2:
+        _require(
+            pipeline == baseline_pipeline_definition("2") and baseline.policy_version == "2",
+            "CATALOGUE_PIPELINE_MISMATCH",
+        )
+        count_bound = _integer(doc["catalogue_count_lower_bound"])
+        catalogue_status = doc["catalogue_status"]
+        if catalogue_status == "COMPLETE":
+            full = doc["catalogue"]
+            _require(
+                isinstance(full, dict)
+                and isinstance(full.get("tracks"), list)
+                and len(full["tracks"]) == count_bound <= RECOMMENDATION_MAX_SNAPSHOT_TRACKS,
+                "CATALOGUE_COUNT_MISMATCH",
+            )
+            catalogue = tuple(snapshot_track_from_document(t) for t in full["tracks"])
+            expected = catalogue_document(
+                query.user_id, baseline.reference.interaction_watermark, catalogue
+            )
+            _require(
+                full == expected and canonical_sha256(expected) == _digest(doc["catalogue_sha256"]),
+                "CATALOGUE_HASH_MISMATCH",
+            )
+            _require(
+                catalogue_matches_served(catalogue, baseline.tracks), "CATALOGUE_WINDOW_MISMATCH"
+            )
+        else:
+            _require(
+                catalogue_status in ("TRACK_LIMIT", "BYTE_LIMIT", "SERVING_WINDOW_MISMATCH")
+                and (
+                    count_bound == RECOMMENDATION_MAX_SNAPSHOT_TRACKS + 1
+                    if catalogue_status == "TRACK_LIMIT"
+                    else count_bound <= RECOMMENDATION_MAX_SNAPSHOT_TRACKS
+                )
+                and doc["catalogue"] is None
+                and doc["catalogue_sha256"] is None,
+                "CATALOGUE_STATUS_INVALID",
+            )
+            blockers.add("CATALOGUE_" + catalogue_status)
     if status == "SOURCE_LIMIT":
         blockers.add("SOURCE_LIMIT")
     else:
@@ -260,7 +308,7 @@ def decode_native_capture(
         blockers.add("NO_ELIGIBLE_CANDIDATES")
     if count > SONA_MAX_CANDIDATES:
         blockers.add("SONA_CANDIDATE_CAP_EXCEEDED")
-    return NativeCapture(row, doc, query, baseline, facts, tuple(sorted(blockers)))
+    return NativeCapture(row, doc, query, baseline, facts, tuple(sorted(blockers)), catalogue)
 
 
 def _validate_fact(capture: NativeCapture, fact: dict[str, Any]) -> None:

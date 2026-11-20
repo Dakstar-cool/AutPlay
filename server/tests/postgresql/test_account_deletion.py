@@ -112,6 +112,7 @@ def prepared(
         device = required(session.get(DeviceRow, pair.actor.device_id))
         device.public_key = public_spki(source_key)
         device.public_key_thumbprint_sha256 = hashlib.sha256(device.public_key).digest()
+        device.device_key_generation += 1
     body = request(
         pair,
         "request",

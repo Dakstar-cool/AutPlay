@@ -27,6 +27,7 @@ class IngestCleanupClaimRow(Base):
         ForeignKey("vault.audio_variant.audio_variant_id")
     )
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True))
+    checked_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     completed_execution_id: Mapped[UUID | None] = mapped_column(
         ForeignKey(
@@ -53,6 +54,12 @@ class IngestCleanupClaimRow(Base):
         ),
         Index(
             "ix_ingest_cleanup_pending", "claim_id", postgresql_where=text("completed_at IS NULL")
+        ),
+        Index(
+            "ix_ingest_cleanup_fair_pending",
+            text("checked_at NULLS FIRST"),
+            "claim_id",
+            postgresql_where=text("completed_at IS NULL"),
         ),
         {"schema": "vault"},
     )

@@ -18,6 +18,7 @@ from ipaddress import IPv4Address, ip_address, ip_network
 from pathlib import Path
 from typing import Any, ClassVar, Final, Self
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,6 +78,7 @@ _API_ENV_FIELDS: Final = {
     "account_recovery_enabled": "ACCOUNT_RECOVERY_ENABLED",
     "account_deletion_enabled": "ACCOUNT_DELETION_ENABLED",
     "shared_training_consent_enabled": "SHARED_TRAINING_CONSENT_ENABLED",
+    "native_recommendation_v3_owner_id": "NATIVE_RECOMMENDATION_V3_OWNER_ID",
     "native_recommendation_capture_enabled": "NATIVE_RECOMMENDATION_CAPTURE_ENABLED",
     "direct_vault_upload_enabled": "DIRECT_VAULT_UPLOAD_ENABLED",
     "admin_web_origin": "ADMIN_WEB_ORIGIN",
@@ -340,6 +342,7 @@ class ApiSettings(_ExplicitSettings):
     account_deletion_enabled: bool = False
     shared_training_consent_enabled: bool = False
     native_recommendation_capture_enabled: bool = False
+    native_recommendation_v3_owner_id: UUID | None = None
     # Transitional compatibility path for deployments whose reviewed resource
     # budget has not been initialized yet. It restores the pre-admission Vault
     # writer only when an operator opts in explicitly.

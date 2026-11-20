@@ -23,12 +23,14 @@ MODULE_SCHEMAS = (
     "social",
     "sync",
     "vault",
+    "wave",
 )
 
-EXPECTED_TABLE_COUNT = 176
-EXPECTED_EXPLICIT_INDEX_COUNT = 166
-EXPECTED_FUNCTION_COUNT = 71
-EXPECTED_TRIGGER_COUNT = 142
+# R15 inventory plus the production-only changes from 0060 to 0075.
+EXPECTED_TABLE_COUNT = 283
+EXPECTED_EXPLICIT_INDEX_COUNT = 258
+EXPECTED_FUNCTION_COUNT = 291
+EXPECTED_TRIGGER_COUNT = 387
 REFERENCE_P02_TABLE_COUNT = 79
 REFERENCE_P02_EXPLICIT_INDEX_COUNT = 77
 REFERENCE_P02_FUNCTION_COUNT = 21
@@ -73,9 +75,11 @@ def parse_reference_names(reference_path: Path) -> ReferenceNames:
     )
 
 
-def snapshot_schema(connection: Connection[Any]) -> SchemaSnapshot:
+def snapshot_schema(
+    connection: Connection[Any], *, module_schemas: tuple[str, ...] = MODULE_SCHEMAS
+) -> SchemaSnapshot:
     """Read a deterministic catalog snapshot without extension/internal objects."""
-    schemas = list(MODULE_SCHEMAS)
+    schemas = list(module_schemas)
     tables = tuple(
         connection.execute(
             """

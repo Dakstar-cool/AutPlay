@@ -65,12 +65,12 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0075_sona_collection_window"]
+    assert heads == ["0109_sona_prod_privacy"]
     assert heads == [EXPECTED_MIGRATION_HEAD]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 183
+    assert _object_count(database_harness, empty_database_name) == 283
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -78,7 +78,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 183
+    assert _object_count(database_harness, empty_database_name) == 283
 
 
 def test_sona_upgrade_imports_legacy_window_and_preserves_operator_stop(
@@ -221,6 +221,51 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0073_device_recovery_v2",
         "0074_device_deletion_v2",
         "0075_sona_collection_window",
+        "0061_ml_artifact_authority",
+        "0062_gpu_admission_authority",
+        "0063_sona_capture_authority",
+        "0064_face_artifact_activation",
+        "0065_release_watch_follows",
+        "0066_discovery_scan_schedule",
+        "0067_release_watch_auto_download",
+        "0068_face_timeline_work",
+        "0069_face_tombstone_outbox",
+        "0070_sync_erasure_floor",
+        "0071_face_signing_authority",
+        "0072_ml_step_up_register_hash",
+        "0073_face_projection_binding",
+        "0074_sync_erasure_receipt",
+        "0075_gpu_sona_binding",
+        "0076_face_source_invalidation",
+        "0077_m11_auto_backlog",
+        "0078_face_ref_lease",
+        "0079_face_source_replacement",
+        "0080_face_replacement_cancel",
+        "0081_face_work_incarnation",
+        "0082_face_source_mutation",
+        "0083_face_lifecycle_gc",
+        "0084_face_regeneration",
+        "0085_ml_serving_consent",
+        "0086_face_owner_purge",
+        "0087_normalized_sync_ingress",
+        "0088_ingest_offline_cleanup",
+        "0089_normalized_listen_accept",
+        "0090_ingest_startup_authority",
+        "0091_ingest_linux_owner",
+        "0092_native_served_authority",
+        "0093_native_causal_attribution",
+        "0094_native_feedback_attribution",
+        "0095_native_capture_closure",
+        "0096_native_listen_attribution",
+        "0097_native_atomic_capture",
+        "0098_native_listen_capture",
+        "0099_favorite_refresh_retry",
+        "0100_native_export_lifecycle",
+        "0101_native_offline_pack",
+        "0102_native_dataset_export",
+        "0107_m11_runtime",
+        "0108_m11_native_owner",
+        "0109_sona_prod_privacy",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 

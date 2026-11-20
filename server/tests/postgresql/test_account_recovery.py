@@ -500,6 +500,7 @@ def test_invalid_authority_cannot_consume_code(pair: PairingHarness, mutation: s
                     public_spki(pair.key),
                     digest,
                 )
+                device.device_key_generation += 1
             else:
                 session.add(
                     DeviceKeyBlockRow(

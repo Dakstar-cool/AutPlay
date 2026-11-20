@@ -13,10 +13,12 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKeyConstraint,
     Index,
+    Integer,
     Numeric,
     PrimaryKeyConstraint,
     SmallInteger,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP
@@ -410,6 +412,12 @@ class ListeningEventRow(Base):
         PG_UUID(as_uuid=True),
         nullable=True,
     )
+    attribution_contract_version: Mapped[int] = mapped_column(
+        Integer(), nullable=False, server_default=text("1")
+    )
+    attribution_closed: Mapped[bool] = mapped_column(
+        Boolean(), nullable=False, server_default=text("false")
+    )
     explicit_feedback: Mapped[str] = mapped_column(
         Text(),
         nullable=False,
@@ -489,8 +497,25 @@ class ListeningEventRow(Base):
             name="ck_listening_event_feedback",
         ),
         CheckConstraint(
-            "event_origin <> 'RECOMMENDED' OR recommendation_request_id IS NOT NULL",
+            "event_origin <> 'RECOMMENDED' OR "
+            "(attribution_contract_version=1 AND recommendation_request_id IS NOT NULL) OR "
+            "(attribution_contract_version=2 AND recommendation_request_id IS NULL)",
             name="ck_listening_event_recommendation_origin",
+        ),
+        CheckConstraint(
+            "attribution_contract_version IN (1,2)", name="ck_listen_attribution_version"
+        ),
+        CheckConstraint(
+            "attribution_contract_version=2 OR NOT attribution_closed",
+            name="ck_listen_attribution_closed",
+        ),
+        CheckConstraint(
+            "attribution_contract_version=1 OR (event_origin='RECOMMENDED' "
+            "AND recording_id IS NOT NULL AND recommendation_request_id IS NULL)",
+            name="ck_listen_attribution_v2",
+        ),
+        UniqueConstraint(
+            "user_id", "listening_event_id", "recording_id", name="uq_listen_owner_recording"
         ),
         {"schema": "library"},
     )

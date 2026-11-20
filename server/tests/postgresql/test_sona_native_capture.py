@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from threading import Event
@@ -12,6 +13,10 @@ from uuid import UUID, uuid4, uuid7
 
 import pytest
 import rfc8785
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
+
 from autplay.adapters.postgresql.models.sync import DeviceEventInboxRow, SyncEventRow
 from autplay.adapters.postgresql.recommendations import (
     SqlAlchemyOfflinePackRepository,
@@ -24,13 +29,16 @@ from autplay.adapters.postgresql.sona_native_capture import (
 from autplay.application.recommendations import (
     RecommendationService,
     StaticRecommendationVersionRegistry,
+    baseline_pipeline_definition,
+)
+from autplay.application.sona_native_dataset import (
+    NativeCaptureRow,
+    NativeDatasetRejected,
+    decode_native_capture,
 )
 from autplay.application.sona_shadow import recommendation_ranking_document
 from autplay.domain.recommendations import RecommendationQuery, RecommendationSurface
 from autplay.domain.training_consent import TrainingConsentEvidenceError
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session, sessionmaker
 
 from .conftest import DatabaseHarness
 from .test_adaptive_recommendation_runtime import _recording
@@ -41,15 +49,21 @@ from .test_training_consent import pair as pair
 
 
 def _runtime(
-    pair: PairingHarness, *, enabled: bool = True
+    pair: PairingHarness,
+    *,
+    enabled: bool = True,
+    version: str = "1",
+    catalogue_owner: UUID | None = None,
 ) -> tuple[RecommendationService, SqlAlchemySonaNativeCapture]:
     sessions = sessionmaker(pair.engine, expire_on_commit=False)
-    capture = SqlAlchemySonaNativeCapture(service(pair))
-    runtime = SqlAlchemyRecommendationRuntime(sessions, native_capture=capture if enabled else None)
+    capture = SqlAlchemySonaNativeCapture(service(pair), catalogue_owner=catalogue_owner)
+    runtime = SqlAlchemyRecommendationRuntime(
+        sessions, native_capture=capture if enabled else None, snapshot_policy_version=version
+    )
     return RecommendationService(
         snapshots=runtime,
         traces=runtime,
-        registry=StaticRecommendationVersionRegistry(),
+        registry=StaticRecommendationVersionRegistry(baseline_pipeline_definition(version)),
         ids=uuid7,
         clock=lambda: datetime.now(UTC),
         packs=SqlAlchemyOfflinePackRepository(runtime),
@@ -100,6 +114,7 @@ def _fact(
                 DeviceEventInboxRow(
                     **values,
                     device_id=pair.actor.device_id,
+                    journal_epoch=pair.actor.device_id,
                     device_sequence=sequence,
                     occurred_at=datetime.now(UTC),
                     apply_status="APPLIED",
@@ -429,3 +444,62 @@ def test_history_identity_is_frozen_outside_the_p11_candidate_list(pair: Pairing
     assert fact["listening_projection"]["played_ms"] == 1000
     assert fact["recording_context"]["recording_id"] == str(recording_id)
     assert fact["recording_context"]["artist_key"] == str(artist_id)
+
+
+@pytest.mark.parametrize("track_count,pilot", [(5000, True), (5001, True), (1, False)])
+def test_v2_catalogue_and_actual_served_input(
+    pair: PairingHarness, track_count: int, pilot: bool
+) -> None:
+    policy = service(pair)
+    policy.decide(pair.actor, command(pair, "GRANTED"))
+    with Session(pair.engine) as session, session.begin():
+        oldest = _seed_many_candidates(session, pair.actor, track_count)
+    recommendations, _ = _runtime(
+        pair, version="2", catalogue_owner=pair.actor.user_id if pilot else uuid4()
+    )
+    query = RecommendationQuery(pair.actor.user_id, RecommendationSurface.RECOMMENDATIONS, limit=9)
+    response = recommendations.recommend(query)
+    with Session(pair.engine) as session:
+        stored = session.execute(text("SELECT * FROM ml.sona_native_capture")).mappings().one()
+    row = NativeCaptureRow(
+        stored["request_id"],
+        stored["user_id"],
+        stored["consent_revision"],
+        stored["created_at"],
+        stored["retained_until"],
+        stored["payload"],
+        stored["payload_sha256"].hex(),
+    )
+    capture = decode_native_capture(row, current_revision=1, now=datetime.now(UTC))
+    assert response == recommendations.exact_replay(pair.actor.user_id, stored["request_id"])
+    assert (
+        response.items
+        == recommendations.algorithmic_replay(pair.actor.user_id, stored["request_id"]).items
+    )
+    assert (
+        capture.baseline.reference.input_snapshot_sha256
+        == response.request.snapshot.input_snapshot_sha256
+    )
+    assert len(capture.baseline.tracks) == min(track_count, 1024)
+    if not pilot:
+        assert capture.document["schema"] == "AUTPLAY_P11_NATIVE_COLLECTION_V1"
+        assert capture.catalogue is None
+        return
+    assert capture.document["quality_eligible"] is False
+    if track_count == 5001:
+        assert "CATALOGUE_TRACK_LIMIT" in capture.blockers
+        assert capture.catalogue is None
+        return
+    assert capture.catalogue is not None and len(capture.catalogue) == track_count
+    assert oldest in {t.recording_id for t in capture.catalogue}
+    assert oldest not in {t.recording_id for t in capture.baseline.tracks}
+    full = capture.document["catalogue"]
+    full["tracks"].reverse()
+    capture.document["catalogue_sha256"] = sha256(rfc8785.dumps(full)).hexdigest()
+    changed = rfc8785.dumps(capture.document)
+    with pytest.raises(NativeDatasetRejected, match="CATALOGUE_WINDOW_MISMATCH"):
+        decode_native_capture(
+            replace(row, payload=changed, payload_sha256=sha256(changed).hexdigest()),
+            current_revision=1,
+            now=datetime.now(UTC),
+        )
