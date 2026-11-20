@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
+import androidx.core.graphics.scale
 import app.autplay.ui.AutPlayTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,7 +53,7 @@ private fun readableTint(tint: Color, base: Color, strength: Float, foregrounds:
 internal fun dominantArtworkColor(bitmap: Bitmap): Color? {
     val width = minOf(bitmap.width, 32)
     val height = minOf(bitmap.height, 32)
-    val sample = Bitmap.createScaledBitmap(bitmap, width, height, true)
+    val sample = bitmap.scale(width, height, filter = true)
     val pixels = IntArray(width * height)
     sample.getPixels(pixels, 0, width, 0, 0, width, height)
     if (sample !== bitmap) sample.recycle()

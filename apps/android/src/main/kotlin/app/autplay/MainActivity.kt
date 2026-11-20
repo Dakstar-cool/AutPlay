@@ -1223,11 +1223,11 @@ private fun OfflineLibraryScreen(
         contextKey = detailContextKey,
         reportError = { stableError = it },
     )
-    var detailHistory by rememberSaveable(activeProfileId) { mutableStateOf(arrayListOf<String>()) }
+    var detailHistory by rememberSaveable(activeProfileId) { mutableStateOf<List<String>>(emptyList()) }
     fun closeCoreDetail() {
         selectedTrackRefId = null
         coreProductState.clearDetail()
-        detailHistory = arrayListOf()
+        detailHistory = emptyList()
     }
     fun backFromDetail() {
         val history = ArrayList(detailHistory)
@@ -1523,7 +1523,7 @@ private fun OfflineLibraryScreen(
         navigation.navigate(UiDestination.NowPlaying)
     }
     fun openHomePlaylist(stableId: String) {
-        detailHistory = arrayListOf()
+        detailHistory = emptyList()
         coreProductState.selectDetail(DetailTarget(DetailKind.Playlist, stableId))
         navigation.navigate(UiDestination.Library)
     }
@@ -1543,7 +1543,7 @@ private fun OfflineLibraryScreen(
                 }
                 if (destination == UiDestination.NowPlaying) add(UiDestination.NowPlaying.route)
             }
-        } else arrayListOf()
+        } else emptyList()
         detailHistory = history
         coreProductState.selectDetail(target)
         navigation.openLibraryDetail()

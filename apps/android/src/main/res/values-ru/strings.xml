@@ -42,22 +42,14 @@
     <string name="home_hero_ready">Готово к воспроизведению</string>
     <string name="home_hero_control_locked">Управление недоступно для текущего режима воспроизведения</string>
     <string name="home_context_collections">Подборки под момент</string>
-    <string name="home_context_collections_placeholder">Контекстные миксы появятся позже. Пока это предварительный набор категорий.</string>
-    <string name="home_context_energy">Энергичное</string>
-    <string name="home_context_running">Для бега</string>
-    <string name="home_context_focus">Сосредоточиться</string>
-    <string name="home_context_evening">Вечер</string>
     <string name="home_loading">Загружаем локальную Главную</string>
     <string name="home_offline_fallback">Офлайн-рекомендации показывают только музыку, доступную на этом устройстве.</string>
     <string name="home_continue_listening">Продолжить слушать</string>
     <string name="home_continue_action">Продолжить очередь</string>
     <string name="home_recently_played">Недавно прослушано</string>
     <string name="home_recently_added">Недавно добавлено</string>
-    <string name="home_recent_empty">Включите или добавьте локальную музыку — она появится здесь.</string>
     <string name="home_playlists">Плейлисты</string>
-    <string name="home_playlists_empty">Здесь появятся ваши плейлисты.</string>
     <string name="home_offline_ready">Доступно офлайн</string>
-    <string name="home_offline_empty">Завершённых офлайн-загрузок пока нет.</string>
     <string name="home_offline_open">Открыть офлайн-музыку</string>
     <string name="home_problems">Требует внимания</string>
     <string name="home_problems_open">Проверить</string>
@@ -68,7 +60,6 @@
         <item quantity="other">%d объекта требуют внимания</item>
     </plurals>
     <string name="home_recommendations">Для вас</string>
-    <string name="home_empty_recommendations">Пока нет доступных локальных рекомендаций</string>
     <string name="home_empty_releases">Пока нет подходящих новых релизов</string>
 
     <string name="search_hint">Поиск в медиатеке</string>
@@ -98,7 +89,6 @@
     <string name="library_favorites_shortcut">Избранное</string>
     <string name="library_favorites_empty">В избранном пока нет треков</string>
     <string name="library_sort_label">Сортировка</string>
-    <string name="library_filter_label">Фильтр</string>
     <string name="library_section_tracks">Треки</string>
     <string name="library_section_artists">Исполнители</string>
     <string name="library_section_albums">Альбомы</string>
@@ -109,10 +99,6 @@
     <string name="library_sort_recent">Недавно добавленные</string>
     <string name="library_sort_title">Название</string>
     <string name="library_sort_artist">Исполнитель</string>
-    <string name="library_filter_all">Все</string>
-    <string name="library_filter_loved">Любимые</string>
-    <string name="library_filter_downloaded">Загруженные</string>
-    <string name="library_filter_available">Доступные</string>
     <string name="library_filter_unavailable">Недоступные</string>
     <string name="library_artist_identity_unavailable">Для просмотра исполнителей нужен стабильный идентификатор. Эта сборка не объединяет исполнителей по отображаемому имени.</string>
     <string name="library_artists_loading">Загружаем исполнителей из доступного каталога…</string>
@@ -148,8 +134,6 @@
     <string name="player_more_options">Ещё</string>
     <string name="player_taste_exclusion_title">Настройки рекомендаций</string>
     <string name="player_collapse">Свернуть плеер</string>
-    <string name="player_section_expanded">Развернуто</string>
-    <string name="player_section_collapsed">Свернуто</string>
     <string name="player_exclude_listen_short">Исключить прослушивание</string>
     <string name="player_exclude_session_short">Исключить сессию</string>
     <string name="player_taste_listen_unavailable">Начните прослушивание, чтобы исключить текущий факт.</string>
@@ -174,7 +158,6 @@
     <string name="detail_resolution_confidence">Уверенность идентификации</string>
     <string name="detail_recording_kind">Тип записи</string>
     <string name="detail_recording_version">Версия</string>
-    <string name="detail_release_date">Дата выпуска</string>
 
     <string name="player_nothing_playing">Ничего не играет</string>
     <string name="player_preparing">Готовим трек к воспроизведению…</string>
