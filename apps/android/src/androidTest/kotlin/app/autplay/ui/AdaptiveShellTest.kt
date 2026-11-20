@@ -370,7 +370,7 @@ class AdaptiveShellTest {
         composeRule.onNodeWithTag("search-product-list")
             .performScrollToNode(hasTestTag("vault-result-remote-only"))
         composeRule.onNodeWithTag("vault-result-remote-only").assertHasNoClickAction()
-        composeRule.onNodeWithText(context.getString(R.string.search_vault_playback_unavailable)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.search_source_server_unavailable)).assertIsDisplayed()
     }
 
     @Test
@@ -426,7 +426,7 @@ class AdaptiveShellTest {
 
     @Test
     fun searchRestoresStableRowAnchorAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
         val searchState = mutableStateOf(SearchScreenUiState("query", emptyList(), searched = true))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -458,7 +458,7 @@ class AdaptiveShellTest {
 
     @Test
     fun searchRestoresStableRowAnchorWithNonzeroOffsetAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
         val searchState = mutableStateOf(SearchScreenUiState("query", emptyList(), searched = true))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -490,7 +490,7 @@ class AdaptiveShellTest {
 
     @Test
     fun libraryRestoresStableRowAnchorAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
         val libraryState = mutableStateOf(LibraryScreenUiState(localMode = true, tracks = emptyList()))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -527,7 +527,7 @@ class AdaptiveShellTest {
 
     @Test
     fun libraryRestoresStableRowAnchorWithNonzeroOffsetAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
         val libraryState = mutableStateOf(LibraryScreenUiState(localMode = true, tracks = emptyList()))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -714,16 +714,23 @@ class AdaptiveShellTest {
             }
         }
 
+        val list = composeRule.onNodeWithTag("collection-details")
+        composeRule.onNodeWithText("Canonical member").assertDoesNotExist()
+        composeRule.onNodeWithText(context.getString(R.string.detail_artist_info)).performClick()
+        list.performScrollToNode(hasText("Canonical member"))
         composeRule.onNodeWithText("Canonical member").performClick()
         composeRule.runOnIdle {
             assertEquals(DetailTarget(DetailKind.Artist, ARTIST_TWO), opened)
         }
+        list.performScrollToNode(hasText(context.getString(R.string.detail_artist_credit_unresolved)))
         composeRule.onNodeWithText(context.getString(R.string.detail_artist_credit_unresolved))
             .performScrollTo().assertIsDisplayed().assertHasNoClickAction()
-        composeRule.onNodeWithText("Owned release").performScrollTo().performClick()
+        list.performScrollToNode(hasText("Owned release"))
+        composeRule.onNodeWithText("Owned release").performClick()
         composeRule.runOnIdle {
             assertEquals(DetailTarget(DetailKind.Release, "local-release"), opened)
         }
+        list.performScrollToNode(hasText("Unknown relation"))
         composeRule.onNodeWithText("Unknown relation").performScrollTo()
             .assertIsDisplayed().assertHasNoClickAction()
     }

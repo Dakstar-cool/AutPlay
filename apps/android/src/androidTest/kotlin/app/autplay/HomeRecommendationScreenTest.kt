@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
@@ -18,6 +17,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.application.recommendation.OfflineRecommendationRepository
 import app.autplay.application.sync.ClientEventBinding
+import app.autplay.ui.AppLanguage
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.LibraryEntryEntity
 import app.autplay.data.local.entity.RecordingProjectionEntity
@@ -62,6 +62,7 @@ class HomeRecommendationScreenTest {
                 serverBaseUrl = "https://offline.test",
                 onboardingRevision = CURRENT_ONBOARDING_REVISION,
                 pendingPublicId = "activity_fixture",
+                appLanguage = AppLanguage.Russian.storedValue,
             ),
         )
         val db = AutPlayDatabase.open(context)
@@ -81,7 +82,7 @@ class HomeRecommendationScreenTest {
     @Test
     fun profileHomeShowsRelevantReleaseAndOfflineRecommendationWithoutDuplicateImpression() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        openHome()
+        waitForHome()
         scrollHomeTo(hasText("Relevant release"))
         composeRule.onNodeWithText("Relevant release").assertIsDisplayed()
         scrollHomeTo(hasTestTag("home-recommendation"))
@@ -90,8 +91,9 @@ class HomeRecommendationScreenTest {
             runBlocking { AutPlayRuntime.database(context).journalDao().eventCount() == 1 }
         }
 
+        saveUiScreenshot("track-row-recommendations")
         scenario?.recreate()
-        openHome()
+        waitForHome()
         scrollHomeTo(hasTestTag("home-recommendation"))
         composeRule.onAllNodesWithTag("home-recommendation")[0].performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -102,7 +104,7 @@ class HomeRecommendationScreenTest {
     @Test
     fun activeOwnerSwitchClearsPreviousHomeFeedBeforeRenderingNewOwner() = runBlocking {
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        openHome()
+        waitForHome()
         scrollHomeTo(hasTestTag("home-recommendation"))
 
         applicationNonSecretSettingsStore(context).update(
@@ -113,9 +115,14 @@ class HomeRecommendationScreenTest {
                 serverBaseUrl = "https://offline.test",
                 onboardingRevision = CURRENT_ONBOARDING_REVISION,
                 pendingPublicId = "activity_fixture",
+                appLanguage = AppLanguage.Russian.storedValue,
             ),
         )
-        scrollHomeTo(hasText(context.getString(R.string.home_empty_recommendations)))
+        val sectionTitle = localizedAppContext(context, AppLanguage.Russian).getString(R.string.home_recommendations)
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText(sectionTitle).fetchSemanticsNodes().isEmpty() &&
+                composeRule.onAllNodesWithTag("home-recommendation").fetchSemanticsNodes().isEmpty()
+        }
         assertTrue(composeRule.onAllNodesWithTag("home-recommendation").fetchSemanticsNodes().isEmpty())
         // The same recording remains in the local recently-added projection outside the
         // profile-owned recommendation card; standalone content must survive owner changes.
@@ -126,12 +133,10 @@ class HomeRecommendationScreenTest {
         Unit
     }
 
-    private fun openHome() {
-        val label = context.getString(R.string.nav_home)
+    private fun waitForHome() {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("home-product-list").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onAllNodesWithText(label)[0].performClick()
     }
 
     private fun scrollHomeTo(matcher: SemanticsMatcher) {

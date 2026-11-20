@@ -78,6 +78,12 @@
     <string name="search_vault_scope">Хранилище</string>
     <string name="search_vault_loading">Ищем в личном хранилище…</string>
     <string name="search_vault_empty">В личном хранилище ничего не найдено.</string>
+    <string name="search_source_both_offline">На телефоне и сервере · Офлайн</string>
+    <string name="search_source_phone_offline">На телефоне · Офлайн</string>
+    <string name="search_source_server_online">На сервере · Нужен интернет</string>
+    <string name="search_source_server_unavailable">На сервере · Здесь недоступно</string>
+    <string name="search_source_server_metadata">На сервере · Без офлайн-копии</string>
+    <string name="search_source_library_metadata">В медиатеке · Без офлайн-копии</string>
     <string name="search_vault_metadata_unavailable">Метаданные недоступны на этом устройстве</string>
     <string name="search_vault_playback_unavailable">Здесь недоступно</string>
     <string name="search_empty">Локальных результатов нет</string>
@@ -89,6 +95,8 @@
     <string name="library_add_local_success">Трек «%1$s» добавлен в локальную коллекцию</string>
     <string name="library_empty_body">Выберите папку с музыкой или добавьте локальный трек.</string>
     <string name="library_unknown_artist">Неизвестный исполнитель</string>
+    <string name="library_favorites_shortcut">Избранное</string>
+    <string name="library_favorites_empty">В избранном пока нет треков</string>
     <string name="library_sort_label">Сортировка</string>
     <string name="library_filter_label">Фильтр</string>
     <string name="library_section_tracks">Треки</string>
@@ -131,9 +139,14 @@
     <string name="action_pause">Пауза</string>
     <string name="action_previous">Назад</string>
     <string name="action_next">Далее</string>
+    <string name="player_previous_track">Предыдущий трек</string>
+    <string name="player_next_track">Следующий трек</string>
+    <string name="player_expand_artwork">Развернуть обложку на весь экран</string>
+    <string name="player_close_artwork">Закрыть полноэкранную обложку</string>
     <string name="action_like">Нравится</string>
     <string name="action_liked">Понравилось</string>
-    <string name="player_taste_exclusion_title">Профиль вкуса</string>
+    <string name="player_more_options">Ещё</string>
+    <string name="player_taste_exclusion_title">Настройки рекомендаций</string>
     <string name="player_collapse">Свернуть плеер</string>
     <string name="player_section_expanded">Развернуто</string>
     <string name="player_section_collapsed">Свернуто</string>
@@ -665,4 +678,11 @@
     <string name="variation_remixes">Ремиксы</string>
     <string name="variation_live">Концертные</string>
     <string name="variation_skips_count">%1$d / %2$d</string>
+    <string name="detail_collection_listen">Слушать</string>
+    <string name="detail_artist_popular">Вы часто слушаете</string>
+    <string name="detail_artist_more_tracks">Другие треки</string>
+    <string name="detail_finish_edit">Готово</string>
+    <string name="detail_open_artist">Открыть исполнителя</string>
+    <string name="detail_artist_info">Об исполнителе</string>
+    <string name="detail_hide_artist_info">Скрыть сведения</string>
 </resources>

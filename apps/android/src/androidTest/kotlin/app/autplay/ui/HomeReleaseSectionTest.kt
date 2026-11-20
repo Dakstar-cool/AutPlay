@@ -14,6 +14,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.unit.width
+import androidx.compose.ui.unit.height
+import app.autplay.R
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -41,7 +46,7 @@ class HomeReleaseSectionTest {
             if (it == 1) "Маяк" else "Исполнитель $it", "2026", inLibrary = it == 1)
     }
 
-    private fun render(dark: Boolean = false, fontScale: Float = 1f, items: List<HomeReleaseUiItem> = releases) {
+    private fun render(dark: Boolean = false, fontScale: Float = 1f, items: List<HomeReleaseUiItem> = releases, recentCount: Int = 15) {
         val configuration = Configuration(context.resources.configuration).apply { setLocale(Locale.forLanguageTag("ru")) }
         val localized = context.createConfigurationContext(configuration)
         compose.setContent {
@@ -52,7 +57,8 @@ class HomeReleaseSectionTest {
                     Surface(Modifier.width(360.dp), color = MaterialTheme.colorScheme.background) {
                         HomeProductScreen(
                             state = HomeScreenUiState(true, false, false, items, emptyList(),
-                                recentlyAdded = (1..15).map { HomeTrackUiItem("track-$it", "Track $it", "Artist") }),
+                                localLibraryEmpty = items.isEmpty() && recentCount == 0,
+                                recentlyAdded = (1..recentCount).map { HomeTrackUiItem("track-$it", "Track $it", "Artist") }),
                             contentPadding = PaddingValues(), onOpenListenTogether = {},
                             onRecommendationVisible = {}, onLike = {}, onDislike = {},
                             onOpenRelease = { opened += it },
@@ -61,13 +67,18 @@ class HomeReleaseSectionTest {
                 }
             }
         }
-        compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-releases-section"))
+        if (items.isNotEmpty()) compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-releases-section"))
     }
 
     @Test fun stripBrowsesWithoutOpeningOrDismissingAndAllOpensExactRelease() {
         render()
         compose.onNodeWithTag("home-release:release-1").assertIsDisplayed()
         compose.onNodeWithTag("home-release:release-2").assertIsDisplayed()
+        val card = compose.onNodeWithTag("home-release:release-1").getUnclippedBoundsInRoot()
+        assertTrue(card.width >= 120.dp && card.height > card.width)
+        val recent1 = compose.onNodeWithText("Track 1").getUnclippedBoundsInRoot()
+        val recent2 = compose.onNodeWithText("Track 2").getUnclippedBoundsInRoot()
+        assertTrue(recent1.left == recent2.left && recent2.top >= recent1.bottom)
         saveScreenshot("home-releases-light.png")
         val strip = compose.onNodeWithTag("home-release-strip")
         val initialOffset = strip.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange].value()
@@ -105,9 +116,17 @@ class HomeReleaseSectionTest {
         compose.runOnIdle { assertEquals(listOf("release-1"), opened) }
     }
 
-    @Test fun emptyFeedDoesNotOfferAnEmptyAllSheet() {
-        render(items = emptyList())
-        compose.onNodeWithTag("home-releases-empty").assertIsDisplayed()
+    @Test fun emptyHomeOffersImportAndHidesAllEmptyCollections() {
+        render(items = emptyList(), recentCount = 0)
+        compose.onNodeWithTag("home-add-first-track").assertIsDisplayed()
+        compose.onNodeWithTag("home-releases-section").assertDoesNotExist()
+        val configuration = Configuration(context.resources.configuration).apply { setLocale(Locale.forLanguageTag("ru")) }
+        val strings = context.createConfigurationContext(configuration)
+        for (label in listOf(R.string.home_context_collections, R.string.home_recently_added, R.string.home_recommendations,
+                R.string.home_playlists, R.string.home_offline_ready, R.string.home_empty_releases)) {
+            compose.onNodeWithText(strings.getString(label)).assertDoesNotExist()
+        }
+        saveScreenshot("home-empty-collections.png")
         compose.onNodeWithTag("home-releases-all").assertDoesNotExist()
     }
 

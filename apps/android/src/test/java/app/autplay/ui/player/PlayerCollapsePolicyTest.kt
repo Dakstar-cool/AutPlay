@@ -5,6 +5,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerCollapsePolicyTest {
+    @Test fun slowDragCanDismissACompactBarAtItsFullTravel() {
+        assertFalse(shouldCompletePlayerCollapse(53f, 54f, 0f, 1f))
+        assertTrue(shouldCompletePlayerCollapse(54f, 54f, 0f, 1f))
+    }
+
     @Test fun deliberateShortDragCommitsWithoutRequiringHalfTheScreen() {
         assertFalse(shouldCompletePlayerCollapse(95f, 600f, 0f, 1f))
         assertTrue(shouldCompletePlayerCollapse(96f, 600f, 0f, 1f))

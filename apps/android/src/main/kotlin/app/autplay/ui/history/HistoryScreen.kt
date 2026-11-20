@@ -1,19 +1,16 @@
 package app.autplay.ui.history
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -21,10 +18,9 @@ import androidx.compose.ui.unit.dp
 import app.autplay.R
 import app.autplay.application.history.HistoryCursor
 import app.autplay.application.history.HistoryItem
-import app.autplay.ui.AutPlayCard
+import app.autplay.ui.AutPlayTrackRow
 import app.autplay.ui.AutPlayStateKind
 import app.autplay.ui.AutPlayStateSurface
-import app.autplay.ui.AutPlayTokens
 import java.text.DateFormat
 import java.util.Date
 
@@ -79,33 +75,20 @@ fun HistoryScreen(state: HistoryUiState, actions: HistoryUiActions, contentPaddi
             }
         }
         items(state.items, key = HistoryItem::listeningEventId) { event ->
-            AutPlayCard(modifier = Modifier.testTag("history-${event.listeningEventId}")) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(event.title ?: stringResource(R.string.track_untitled), style = MaterialTheme.typography.titleMedium)
-                    Text(event.artist ?: stringResource(R.string.library_unknown_artist), color = AutPlayTokens.colors.mutedText)
-                    Text(
-                        stringResource(
-                            R.string.history_listened_at,
-                            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(event.startedAtMs)),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(stringResource(R.string.history_played_duration, formatPlayedDuration(event.playedMs)))
-                    if (event.excludedFromTaste) Text(stringResource(R.string.history_taste_excluded), color = AutPlayTokens.colors.mutedText)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            modifier = Modifier.testTag("history-play-${event.listeningEventId}"),
-                            onClick = { actions.play(event) },
-                        ) { Text(stringResource(R.string.action_play)) }
-                        Button(
-                            modifier = Modifier.testTag("history-open-${event.listeningEventId}"),
-                            onClick = { actions.open(event) },
-                        ) { Text(stringResource(R.string.action_open)) }
-                    }
+            val listenedAt = stringResource(R.string.history_listened_at,
+                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(event.startedAtMs)))
+            val duration = stringResource(R.string.history_played_duration, formatPlayedDuration(event.playedMs))
+            val exclusion = if (event.excludedFromTaste) stringResource(R.string.history_taste_excluded) else null
+            AutPlayTrackRow(
+                title = event.title ?: stringResource(R.string.track_untitled),
+                artist = event.artist,
+                trackId = event.localUserTrackRefId,
+                onPlay = { actions.play(event) },
+                detail = listOfNotNull(listenedAt, duration, exclusion).joinToString(" · "),
+                modifier = Modifier.testTag("history-${event.listeningEventId}"),
+            ) {
+                TextButton(onClick = { actions.open(event) }, modifier = Modifier.testTag("history-open-${event.listeningEventId}")) {
+                    Text(stringResource(R.string.action_open))
                 }
             }
         }

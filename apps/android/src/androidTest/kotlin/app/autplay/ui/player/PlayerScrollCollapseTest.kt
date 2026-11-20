@@ -35,7 +35,7 @@ class PlayerScrollCollapseTest {
         compose.setContent {
             AutPlayTheme {
                 CompositionLocalProvider(LocalPlayerCollapse provides { collapsed++ }) {
-                    Box(Modifier.size(360.dp, 500.dp)) {
+                    Box(Modifier.size(360.dp, 230.dp)) {
                         NowPlayingScreen(PlaybackPresentationState(mediaId = "track", title = "Long track", artist = "Artist"),
                             onTogglePlayPause = {}, onToggleShuffle = {}, onCycleRepeat = {},
                             onSeekBegin = {}, onSeekUpdate = {}, onSeekCommit = {}, onLike = {}, onDislike = {},

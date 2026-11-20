@@ -178,8 +178,8 @@ internal fun buildLibraryScreenUiState(
             )
         },
         artistBrowseState = artistBrowseState,
-        playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description) },
-        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount) },
+        playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description, artworkTrackId = it.artworkTrackId) },
+        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId) },
         reviewCount = reviewCount,
         importingLocalTrack = importingLocalTrack,
         lastImportedTitle = lastImportedTitle,

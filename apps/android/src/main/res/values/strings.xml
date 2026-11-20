@@ -76,6 +76,12 @@
     <string name="search_vault_scope">Vault</string>
     <string name="search_vault_loading">Searching your personal Vault…</string>
     <string name="search_vault_empty">No matching items in the personal Vault.</string>
+    <string name="search_source_both_offline">On device and server · Offline</string>
+    <string name="search_source_phone_offline">On device · Offline</string>
+    <string name="search_source_server_online">On server · Internet required</string>
+    <string name="search_source_server_unavailable">On server · Playback unavailable</string>
+    <string name="search_source_server_metadata">On server · No offline copy</string>
+    <string name="search_source_library_metadata">In library · No offline copy</string>
     <string name="search_vault_metadata_unavailable">Metadata unavailable on this device</string>
     <string name="search_vault_playback_unavailable">Unavailable here</string>
     <string name="search_empty">No local results</string>
@@ -87,6 +93,8 @@
     <string name="library_add_local_success">Added “%1$s” to the local collection</string>
     <string name="library_empty_body">Choose a music folder or add a local track to get started.</string>
     <string name="library_unknown_artist">Unknown artist</string>
+    <string name="library_favorites_shortcut">Favorites</string>
+    <string name="library_favorites_empty">No favorite tracks yet</string>
     <string name="library_sort_label">Sort</string>
     <string name="library_filter_label">Filter</string>
     <string name="library_section_tracks">Tracks</string>
@@ -127,9 +135,14 @@
     <string name="action_pause">Pause</string>
     <string name="action_previous">Previous</string>
     <string name="action_next">Next</string>
+    <string name="player_previous_track">Previous track</string>
+    <string name="player_next_track">Next track</string>
+    <string name="player_expand_artwork">View full-screen artwork</string>
+    <string name="player_close_artwork">Close full-screen artwork</string>
     <string name="action_like">Like</string>
     <string name="action_liked">Liked</string>
-    <string name="player_taste_exclusion_title">Taste Profile</string>
+    <string name="player_more_options">More options</string>
+    <string name="player_taste_exclusion_title">Recommendation settings</string>
     <string name="player_collapse">Collapse player</string>
     <string name="player_section_expanded">Expanded</string>
     <string name="player_section_collapsed">Collapsed</string>
@@ -643,4 +656,11 @@
     <string name="variation_remixes">Remixes</string>
     <string name="variation_live">Live</string>
     <string name="variation_skips_count">%1$d / %2$d</string>
+    <string name="detail_collection_listen">Listen</string>
+    <string name="detail_artist_popular">Your most played</string>
+    <string name="detail_artist_more_tracks">More tracks</string>
+    <string name="detail_finish_edit">Done</string>
+    <string name="detail_open_artist">Open artist</string>
+    <string name="detail_artist_info">About the artist</string>
+    <string name="detail_hide_artist_info">Hide artist details</string>
 </resources>

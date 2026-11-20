@@ -48,29 +48,26 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f).semantics { heading() },
                 style = MaterialTheme.typography.titleLarge)
-            if (releases.isNotEmpty()) {
-                TextButton(onClick = { showAll = true }, modifier = Modifier.testTag("home-releases-all")) {
-                    Text(stringResource(R.string.home_release_feed_all))
-                }
+            TextButton(onClick = { showAll = true }, modifier = Modifier.testTag("home-releases-all")) {
+                Text(stringResource(R.string.home_release_feed_all))
             }
         }
-        if (releases.isEmpty()) {
-            Text(stringResource(R.string.home_empty_releases), color = AutPlayTokens.colors.mutedText,
-                modifier = Modifier.testTag("home-releases-empty"))
-        } else {
-            val largeText = LocalDensity.current.fontScale >= 1.5f
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                // Two complete chips and a glimpse of the next; larger text gets more reading space.
-                val chipWidth = if (largeText) (maxWidth * 0.8f).coerceIn(200.dp, 300.dp)
-                    else ((maxWidth - 20.dp) / 2.15f).coerceIn(120.dp, 216.dp)
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().testTag("home-release-strip"),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp),
-                ) {
-                    items(releases, key = HomeReleaseUiItem::id) { release ->
-                        HomeReleaseChip(release, { onOpenRelease(release.id) }, Modifier.width(chipWidth))
-                    }
+        val largeText = LocalDensity.current.fontScale >= 1.5f
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val coverWidth = if (largeText) (maxWidth * 0.8f).coerceIn(200.dp, 300.dp)
+                else ((maxWidth - 20.dp) / 2.15f).coerceIn(120.dp, 216.dp)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().testTag("home-release-strip"),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(releases, key = HomeReleaseUiItem::id) { release ->
+                    CollectionCoverTile(
+                        title = release.title,
+                        artworkTrackId = release.artworkTrackId,
+                        subtitle = release.artist,
+                        caption = release.dateText?.takeIf { it.isNotBlank() },
+                        modifier = Modifier.width(coverWidth).testTag("home-release:${release.id}"),
+                    ) { onOpenRelease(release.id) }
                 }
             }
         }
@@ -91,10 +88,10 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(releases, key = HomeReleaseUiItem::id) { release ->
-                        HomeReleaseChip(release, {
+                        HomeReleaseListRow(release, {
                             showAll = false
                             onOpenRelease(release.id)
-                        }, Modifier.fillMaxWidth(), expanded = true)
+                        }, Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -103,11 +100,10 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
 }
 
 @Composable
-private fun HomeReleaseChip(
+private fun HomeReleaseListRow(
     release: HomeReleaseUiItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    expanded: Boolean = false,
 ) {
     Surface(
         onClick = onClick,
@@ -119,24 +115,28 @@ private fun HomeReleaseChip(
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AutPlayArtwork(release.title, size = if (expanded) 48.dp else 32.dp,
+                AutPlayArtwork(release.title, size = 48.dp,
                     trackId = release.artworkTrackId)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(release.title, style = MaterialTheme.typography.labelLarge,
-                        minLines = if (expanded) 1 else 2,
-                        maxLines = if (expanded) 3 else 2, overflow = TextOverflow.Ellipsis)
+                        maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(release.artist, style = MaterialTheme.typography.bodySmall,
                         color = AutPlayTokens.colors.mutedText,
-                        maxLines = if (expanded) 2 else 1, overflow = TextOverflow.Ellipsis)
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             Text(
-                release.dateText?.takeIf { it.isNotBlank() } ?: stringResource(
-                    if (release.inLibrary) R.string.home_release_in_library else R.string.home_release_known_artist),
+                releaseCaption(release),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
-                maxLines = if (expanded) 2 else 1, overflow = TextOverflow.Ellipsis,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
+
+@Composable
+private fun releaseCaption(release: HomeReleaseUiItem): String =
+    release.dateText?.takeIf { it.isNotBlank() } ?: stringResource(
+        if (release.inLibrary) R.string.home_release_in_library else R.string.home_release_known_artist,
+    )

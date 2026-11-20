@@ -78,8 +78,10 @@ class InternetMetadataDiscoveryUiTest {
         assertNotEquals(port.searches[0].operationId, port.searches[1].operationId)
         assertTrue(port.searches.all { it.query == "Performer Song (Live)" })
         assertTrue(work.requests.isEmpty())
-        compose.onNodeWithText(context.getString(R.string.music_add_vault)).performScrollTo().performClick()
-        compose.onNodeWithText(context.getString(R.string.music_add_download)).performScrollTo().performClick()
+        click("source-actions-source-candidate")
+        compose.onNodeWithText(context.getString(R.string.music_add_vault)).performClick()
+        click("source-actions-source-candidate")
+        compose.onNodeWithText(context.getString(R.string.music_add_download)).performClick()
         assertEquals(listOf(WorkRequest(BINDING.serverProfileId.value, "source-search", "source-candidate", false),
             WorkRequest(BINDING.serverProfileId.value, "source-search", "source-candidate", true)), work.requests.toList())
     }
@@ -98,11 +100,12 @@ class InternetMetadataDiscoveryUiTest {
             InternetMusicSearchSection("Performer Song", 1, LibrarySearchKind.Track, CONTEXT_ONE, InternetMusicUiSession(BINDING, port, work))
         } } }
         click("source-http-retry")
+        click("source-actions-candidate")
         waitTag("source-acquisition-retry")
         compose.onNodeWithText(context.getString(R.string.music_add_vault)).assertIsNotEnabled()
         compose.onNodeWithText(context.getString(R.string.music_add_download)).assertIsNotEnabled()
         assertEquals(port.searches[0], port.searches[1])
-        click("source-acquisition-retry")
+        compose.onNodeWithTag("source-acquisition-retry").performClick()
         compose.waitUntil(5_000) { port.searches.size == 3 }
         compose.onNodeWithText("Failed source").assertDoesNotExist()
         assertNotEquals(port.searches[1].operationId, port.searches[2].operationId)
@@ -130,7 +133,8 @@ class InternetMetadataDiscoveryUiTest {
         assertEquals(buildJsonObject { put("entity_type", "recording"); put("entity_id", RECORDING); put("release_id", JsonNull) }, port.selections.single())
         assertEquals(CONTEXT_ONE, port.searches.single().contextId)
         assertEquals("Performer Song (Live)", port.searches.single().query)
-        compose.onNodeWithText(context.getString(R.string.music_add_download)).performScrollTo().performClick()
+        click("source-actions-actual-candidate")
+        compose.onNodeWithText(context.getString(R.string.music_add_download)).performClick()
         assertEquals(listOf(WorkRequest(BINDING.serverProfileId.value, "artist-source", "actual-candidate", true)), work.requests.toList())
     }
 

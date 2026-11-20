@@ -53,6 +53,7 @@ internal data class CoreProductRouteActions(
     val changeSearchKind: (LibrarySearchKind) -> Unit = {},
     val startMyWave: () -> Unit = {},
     val myWaveAllowed: Boolean = true,
+    val playReleaseEntry: ((String) -> Unit)? = null,
 )
 
 @Composable
@@ -129,6 +130,7 @@ internal fun CoreProductRouteRenderer(
                 contentPadding = contentPadding,
                 onPlayTrack = actions.playTrack,
                 onPlayPlaylistEntry = actions.playPlaylistEntry,
+                onPlayReleaseEntry = actions.playReleaseEntry,
                 onPlayNext = actions.playNext,
                 onAddToQueue = actions.addToQueue,
                 manualPlaylists = actions.manualPlaylists,
