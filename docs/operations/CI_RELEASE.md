@@ -90,8 +90,8 @@ APK, a separately identified trusted-LAN APK, and a CPU-only `linux/amd64` serve
 The script runs the canonical gates, verifies both APK manifests and the retained development
 signer, exports the public certificate, creates and reloads the Docker image archive, runs the
 combined admin/mobile runtime smoke, requires the release-audit gate, and generates
-`release-manifest.json` and `SHA256SUMS`. Manual `gh release create --prerelease` uploads only the
-verified generated files.
+`release-manifest.json` and `SHA256SUMS` for the release evidence archive. The public download
+selection is described below.
 This local path is also the supported fallback when hosted CI minutes are unavailable. It does
 not push an image to a registry, perform production signing, or deploy/migrate a persistent
 target. Installation and pairing are documented in [`INSTALL_AND_PAIR.md`](INSTALL_AND_PAIR.md).
@@ -111,3 +111,32 @@ records `production_deployed=false` and blocks activation pending target accepta
 approval. The audit sub-package also retains its evidence-only boundary and never claims signing or
 deployment. No caller may rewrite either boundary into `PRODUCTION_RELEASE` merely because the
 local finalizer passed.
+
+## GitHub Release downloads
+
+Publish an approved draft with `scripts/github_release.py`. The public production downloads
+are the signed Android APK, the Mac Community DMG and one Sona server package for Linux x86-64.
+GitHub supplies the ZIP and tar.gz source archives from the version tag. The publisher labels the
+server download and links it separately in the release notes.
+
+1. Complete the existing signing, audit and target acceptance steps. Keep manifests, checksums,
+   dependency reports, verification JSON, logs and audit ZIPs in the release evidence directory
+   or the CI artifacts.
+2. Create the draft with its user-facing notes and the exact approved source commit. Push the
+   approved version tag before publishing. Give the publisher explicit paths to the verified
+   packages. The paths may be in separate directories.
+
+   ```sh
+   gh release create "$tag" --draft --verify-tag --target "$source_commit" --notes-file "$notes"
+   uv run --frozen python scripts/github_release.py publish "$tag" --source-commit "$source_commit" \
+     "$android_apk" "$macos_dmg" "$server_package"
+   ```
+
+3. The publisher checks the remote tag, the complete draft asset list and the uploaded SHA-256
+   digests before making the draft public. An unexpected attachment stops publication. Remove it
+   from the draft and rerun the same command. An interrupted upload can be retried with the
+   same files. For an approved prerelease, mark the draft with `--prerelease` and supply the
+   signed installers and server distribution selected for that release.
+4. Use `uv run --frozen python scripts/github_release.py check "$tag"` for a read-only check.
+   GitHub Actions runs the same check on release publication and edits. An administrator can
+   also run it after changing attachments through the GitHub UI.
