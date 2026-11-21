@@ -42,6 +42,11 @@
     <string name="home_hero_ready">Готово к воспроизведению</string>
     <string name="home_hero_control_locked">Управление недоступно для текущего режима воспроизведения</string>
     <string name="home_context_collections">Подборки под момент</string>
+    <string name="home_context_collections_placeholder">Контекстные миксы появятся позже. Пока это предварительный набор категорий.</string>
+    <string name="home_context_energy">Энергичное</string>
+    <string name="home_context_running">Для бега</string>
+    <string name="home_context_focus">Сосредоточиться</string>
+    <string name="home_context_evening">Вечер</string>
     <string name="home_loading">Загружаем локальную Главную</string>
     <string name="home_offline_fallback">Офлайн-рекомендации показывают только музыку, доступную на этом устройстве.</string>
     <string name="home_continue_listening">Продолжить слушать</string>

@@ -42,6 +42,11 @@
     <string name="home_hero_ready">Ready to play</string>
     <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
     <string name="home_context_collections">Made for the moment</string>
+    <string name="home_context_collections_placeholder">Context mixes are coming soon. The categories below are a preview.</string>
+    <string name="home_context_energy">High energy</string>
+    <string name="home_context_running">For running</string>
+    <string name="home_context_focus">Focus</string>
+    <string name="home_context_evening">Evening</string>
     <string name="home_loading">Loading your local Home feed</string>
     <string name="home_offline_fallback">Offline recommendations are shown only for music available on this device.</string>
     <string name="home_continue_listening">Continue listening</string>
