@@ -23,8 +23,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.R
@@ -44,7 +47,7 @@ internal fun AutPlayTrackRow(
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f) else AutPlayTokens.colors.raisedSurface,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else AutPlayTokens.colors.raisedSurface,
     ) {
         val playAction = if (onPlay == null) Modifier else Modifier.clickable(
             enabled = playEnabled,
@@ -53,13 +56,15 @@ internal fun AutPlayTrackRow(
             onClick = onPlay,
         )
         Row(
-            modifier.fillMaxWidth().then(playAction).padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            modifier.fillMaxWidth().then(playAction).semantics { if (selected) this.selected = true }.padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             AutPlayArtwork(title, Modifier.clearAndSetSemantics {}, size = 48.dp, trackId = trackId)
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    fontWeight = if (selected) FontWeight.Bold else null,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 Text(artist ?: stringResource(R.string.library_unknown_artist), style = MaterialTheme.typography.bodyMedium,
                     color = AutPlayTokens.colors.mutedText, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (!detail.isNullOrBlank()) {

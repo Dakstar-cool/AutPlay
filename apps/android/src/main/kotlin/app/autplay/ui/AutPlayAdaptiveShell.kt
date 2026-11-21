@@ -178,7 +178,11 @@ private fun PlayerCollapseShell(
             }
         }
         CompositionLocalProvider(LocalPlayerCollapseTargetTop provides targetTop) {
-            Scaffold(containerColor = Color.Transparent, snackbarHost = snackbarHost) { padding ->
+            Scaffold(
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                snackbarHost = snackbarHost,
+            ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)
                     .onGloballyPositioned { playerContentTopPx = it.positionInRoot().y }) {
                     routeContent(PaddingValues())

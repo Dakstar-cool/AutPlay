@@ -104,6 +104,11 @@ android {
         }
     }
 
+    // Compile the shared theme against AndroidX Compose on Android and JetBrains Compose on desktop.
+    sourceSets.named("main") {
+        kotlin.directories += "../../shared/ui/src/commonMain/kotlin/app/autplay/ui/theme"
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

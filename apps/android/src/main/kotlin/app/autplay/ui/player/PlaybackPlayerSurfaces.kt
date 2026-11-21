@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -131,6 +133,7 @@ public fun PlaybackMiniPlayer(
     val dismissMotion = rememberPlayerCollapseMotion()
     val animations = rememberSystemAnimationsEnabled()
     val dismiss = onDismiss.takeIf { state.dismissEnabled }
+    val miniColors = AutPlayTokens.colors.miniPlayerScheme
     Surface(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth()
@@ -139,8 +142,8 @@ public fun PlaybackMiniPlayer(
             .playerCollapseGesture(dismiss, dismissMotion, animations)
             .graphicsLayer { translationY = dismissMotion.offset }
             .testTag("persistent-mini-player"),
-        color = AutPlayTokens.colors.miniPlayerSurface,
-        contentColor = AutPlayTokens.colors.onMiniPlayer,
+        color = miniColors.secondaryContainer,
+        contentColor = miniColors.onSecondaryContainer,
     ) {
         Column {
             Row(
@@ -167,7 +170,7 @@ public fun PlaybackMiniPlayer(
                             Text(
                                 displayed.artist,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = AutPlayTokens.colors.onMiniPlayer.copy(alpha = 0.78f),
+                                color = miniColors.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -185,7 +188,7 @@ public fun PlaybackMiniPlayer(
                     AutPlayPlatformIcon(
                         if (liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
                         stringResource(if (liked) R.string.action_liked else R.string.action_like),
-                        tint = if (liked) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.onMiniPlayer,
+                        tint = if (liked) miniColors.primary else miniColors.onSecondaryContainer,
                     )
                 }
                 AutPlayIconButton(
@@ -195,7 +198,7 @@ public fun PlaybackMiniPlayer(
                     enabled = state.controls is PlaybackControlGate.Allowed,
                 )
             }
-            PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(2.dp))
+            PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(2.dp), miniColors)
         }
     }
 }
@@ -831,8 +834,8 @@ private fun PrimaryTransportButton(
     val label = stringResource(labelRes)
     Surface(
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        color = MaterialTheme.colorScheme.primaryFixedDim,
+        contentColor = MaterialTheme.colorScheme.onPrimaryFixed,
         shadowElevation = 8.dp,
     ) {
         IconButton(
@@ -916,18 +919,21 @@ private fun PlaybackTimeline(
 }
 
 @Composable
-private fun PlaybackProgressTrack(state: PlaybackPresentationState, modifier: Modifier) {
+private fun PlaybackProgressTrack(
+    state: PlaybackPresentationState,
+    modifier: Modifier,
+    colors: ColorScheme = MaterialTheme.colorScheme,
+) {
     val duration = state.durationMs?.takeIf { it > 0 } ?: 1L
     val played = (state.seekPreviewPositionMs ?: state.positionMs).coerceIn(0, duration).toFloat() / duration
     val buffered = state.bufferedPositionMs.coerceIn(0, duration).toFloat() / duration
-    val base = AutPlayTokens.colors.border
-    val bufferColor = MaterialTheme.colorScheme.primaryContainer
-    val playedColor = MaterialTheme.colorScheme.primary
     Canvas(modifier) {
         val radius = CornerRadius(size.height / 2f)
-        drawRoundRect(base, cornerRadius = radius)
-        drawRoundRect(bufferColor, size = size.copy(width = size.width * buffered), cornerRadius = radius)
-        drawRoundRect(playedColor, size = size.copy(width = size.width * played), cornerRadius = radius)
+        // The hairline keeps the unplayed range visible even on the steel mini-player surface.
+        drawRoundRect(colors.surfaceVariant, cornerRadius = radius)
+        drawLine(colors.outline, Offset(0f, center.y), Offset(size.width, center.y), strokeWidth = 1.dp.toPx())
+        drawRoundRect(colors.outlineVariant, size = size.copy(width = size.width * buffered), cornerRadius = radius)
+        drawRoundRect(colors.primary, size = size.copy(width = size.width * played), cornerRadius = radius)
     }
 }
 

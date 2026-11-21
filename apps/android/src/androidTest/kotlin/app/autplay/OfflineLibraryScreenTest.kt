@@ -78,6 +78,8 @@ import app.autplay.playback.PlaybackUiState
 import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackRuntimeState
 import app.autplay.playback.ServicePlaybackSessionOwner
+import app.autplay.ui.theme.AutPlayAccent
+import app.autplay.ui.theme.autPlayColorScheme
 import app.autplay.ui.AppLanguage
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
@@ -739,10 +741,9 @@ class OfflineLibraryScreenTest {
                 val b = background.luminance() + .05f
                 return maxOf(a, b) / minOf(a, b)
             }
-            val text = if (light) Color(0xFF181818) else Color(0xFFF4F3EF)
-            val muted = if (light) Color(0xFF706D68) else Color(0xFFB2B4BD)
-            org.junit.Assert.assertTrue("$label header: $header", contrast(text, header) >= 4.5f)
-            org.junit.Assert.assertTrue("$label controls: $footer", contrast(muted, footer) >= 4.5f)
+            val scheme = autPlayColorScheme(!light, AutPlayAccent.Coral)
+            org.junit.Assert.assertTrue("$label header: $header", contrast(scheme.onSurface, header) >= 4.5f)
+            org.junit.Assert.assertTrue("$label controls: $footer", contrast(scheme.onSurfaceVariant, footer) >= 4.5f)
             composeRule.onNodeWithTag("player-transport-controls").assertIsDisplayed()
             composeRule.onNodeWithContentDescription(strings.getString(R.string.player_seek_description)).assertIsDisplayed()
             saveUiScreenshot(label)
@@ -755,7 +756,7 @@ class OfflineLibraryScreenTest {
         checkBackdrop(true, "player-warm-light") { it.red - it.blue > .1f }
         next.performClick()
         awaitPlayback(noCover)
-        checkBackdrop(true, "player-no-cover") { it == Color(0xFFF6F3ED) }
+        checkBackdrop(true, "player-no-cover") { it == autPlayColorScheme(false, AutPlayAccent.Coral).background }
         Unit
     }
 

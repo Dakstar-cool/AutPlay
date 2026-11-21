@@ -71,7 +71,7 @@ internal enum class DesktopText(public val russian: String, public val english: 
     Dark("Тёмная", "Dark"),
     SystemAppearance("Системная", "System"),
     AccentPalette("Акцентный цвет", "Accent color"),
-    CoralAccent("Коралловый", "Coral"),
+    CoralAccent("Медный", "Copper"),
     VioletAccent("Фиолетовый", "Violet"),
     GreenAccent("Зелёный", "Green"),
     BlueAccent("Синий", "Blue"),

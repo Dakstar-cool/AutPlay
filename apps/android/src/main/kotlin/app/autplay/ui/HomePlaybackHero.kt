@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -100,7 +99,6 @@ public fun HomePlaybackHero(
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
-    val palette = remember(title) { playbackVisualPalette(title) }
     val togetherLabel = stringResource(R.string.nav_wave_rooms)
     val hasPlaybackTarget = state.hasActivePlayback || state.trackId != null
     val motion = rememberHomeCarouselMotion(state.playbackKey)
@@ -118,7 +116,7 @@ public fun HomePlaybackHero(
     ) {
         Column(
             modifier = Modifier
-                .background(Brush.verticalGradient(listOf(palette[0].copy(alpha = 0.10f), Color.Transparent)))
+                .background(Brush.verticalGradient(listOf(colors.secondaryContainer.copy(alpha = 0.28f), Color.Transparent)))
                 .padding(start = 24.dp, top = topChromePadding + 8.dp, end = 24.dp, bottom = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -171,8 +169,8 @@ public fun HomePlaybackHero(
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp)
                         .semantics { contentDescription = playLabel; role = Role.Button },
                     shape = CircleShape,
-                    color = if (canTogglePlayback) colors.primary else colors.surfaceContainerHigh,
-                    contentColor = if (canTogglePlayback) colors.onPrimary else colors.onSurfaceVariant,
+                    color = if (canTogglePlayback) colors.primaryFixedDim else colors.surfaceContainerHigh,
+                    contentColor = if (canTogglePlayback) colors.onPrimaryFixed else colors.onSurfaceVariant,
                 ) {
                     Row(
                         Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
@@ -230,11 +228,11 @@ internal fun HomeWaveStartHero(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = if (enabled) colors.primary else colors.surfaceVariant,
+                    color = if (enabled) colors.primaryFixedDim else colors.surfaceVariant,
                 ) {
                     Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
                         AutPlayPlatformIcon(AutPlayIcon.Play, null, Modifier.size(26.dp),
-                            if (enabled) colors.onPrimary else colors.onSurfaceVariant)
+                            if (enabled) colors.onPrimaryFixed else colors.onSurfaceVariant)
                     }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
