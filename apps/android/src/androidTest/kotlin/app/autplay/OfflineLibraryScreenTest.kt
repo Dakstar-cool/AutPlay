@@ -614,13 +614,20 @@ class OfflineLibraryScreenTest {
             composeRule.onNodeWithTag("library-tab-$section").performClick()
             val cards = entries.map { composeRule.onNodeWithTag(prefix + it.first) }
             composeRule.waitUntil(10_000) { composeRule.onAllNodesWithTag(prefix + entries[0].first).fetchSemanticsNodes().isNotEmpty() }
-            val bounds = cards.map { it.getUnclippedBoundsInRoot() }
-            org.junit.Assert.assertEquals(bounds[0].top, bounds[1].top)
-            org.junit.Assert.assertTrue(bounds[0].right <= bounds[1].left && bounds[2].top >= bounds[0].bottom)
+            val grid = composeRule.onNodeWithTag("library-product-list")
+            grid.performScrollToNode(hasTestTag(prefix + entries[0].first))
+            val first = cards[0].getUnclippedBoundsInRoot()
+            val second = cards[1].getUnclippedBoundsInRoot()
+            org.junit.Assert.assertEquals(first.top, second.top)
+            org.junit.Assert.assertTrue(first.right <= second.left)
+            grid.performScrollToNode(hasTestTag(prefix + entries[2].first))
+            cards[2].assertIsDisplayed()
+            org.junit.Assert.assertEquals(first.left, cards[2].getUnclippedBoundsInRoot().left)
             composeRule.onNodeWithTag("library-downloads").assertIsDisplayed()
             composeRule.onNodeWithTag("library-add").assertIsDisplayed()
             saveUiScreenshot(if (section == "Albums") "library-albums" else "library-playlists")
-            cards[1].performTouchInput { click() }
+            grid.performScrollToNode(hasTestTag(prefix + entries[1].first))
+            cards[1].assertIsDisplayed().performTouchInput { click() }
             composeRule.waitUntil(10_000) {
                 composeRule.onAllNodesWithTag("library-product-list").fetchSemanticsNodes().isEmpty() &&
                     composeRule.onAllNodesWithText(entries[1].second).fetchSemanticsNodes().isNotEmpty()

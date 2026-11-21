@@ -56,7 +56,7 @@ internal fun HomeWaveWheel(
     onPlay: (HomeWheelMix) -> Unit,
 ) {
     // Keep the visible order as soon as the listener engages, including across lazy item disposal.
-    var frozen by rememberSaveable { mutableStateOf<ArrayList<String>?>(null) }
+    var frozen by rememberSaveable { mutableStateOf<List<String>?>(null) }
     val choices = (frozen ?: order).map(cards::getValue)
     val initial = (Int.MAX_VALUE / 2 / choices.size) * choices.size
     val wheel = rememberLazyListState(initialFirstVisibleItemIndex = initial)
@@ -69,7 +69,7 @@ internal fun HomeWaveWheel(
         }
     }
     LaunchedEffect(wheel.isScrollInProgress, playing) {
-        if (frozen == null && (wheel.isScrollInProgress || playing)) frozen = ArrayList(order)
+        if (frozen == null && (wheel.isScrollInProgress || playing)) frozen = order.toList()
     }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -97,7 +97,7 @@ internal fun HomeWaveWheel(
                             .background(Brush.linearGradient(listOf(choice.tint, Color(0xFF242230)), start = Offset.Zero))
                             .then(if (selected) Modifier.border(2.dp, lerp(choice.tint, Color.White, .5f), CircleShape) else Modifier)
                             .selectable(selected, role = Role.RadioButton, onClick = {
-                                if (frozen == null) frozen = ArrayList(order)
+                                if (frozen == null) frozen = order.toList()
                                 scope.launch { wheel.animateScrollToItem(index) }
                             })
                             .heightIn(min = 84.dp).padding(horizontal = 6.dp, vertical = 14.dp),
@@ -114,7 +114,7 @@ internal fun HomeWaveWheel(
         Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
             if (mix != null) {
                 TextButton(enabled = playbackAllowed && !wheel.isScrollInProgress, onClick = {
-                    if (frozen == null) frozen = ArrayList(order)
+                    if (frozen == null) frozen = order.toList()
                     onPlay(mix)
                 }) {
                     Text(stringResource(R.string.home_wheel_play, stringResource(center.label)))

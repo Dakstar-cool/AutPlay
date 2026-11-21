@@ -15,10 +15,8 @@
     <string name="nav_sync_status">Sync status</string>
     <string name="nav_server_features">Personal server</string>
     <string name="nav_profile">Profile</string>
-    <string name="nav_settings">Settings</string>
     <string name="nav_privacy_data">Privacy and data</string>
     <string name="action_back">Back</string>
-    <string name="action_open_profile">Open profile</string>
     <string name="action_open_settings">Open settings</string>
 
     <string name="onboarding_welcome_title">Your local account</string>
@@ -30,7 +28,6 @@
     <string name="onboarding_password_invalid">Use 7–128 characters, including at least one special character such as !, @ or _. A space does not count. Avoid common passwords or a single repeated character.</string>
     <string name="onboarding_password_mismatch">Passwords do not match. Enter the same phrase in both fields.</string>
     <string name="onboarding_saving">Finishing setup on this phone…</string>
-    <string name="home_first_track_title">Add your first track</string>
     <string name="home_first_track_body">Choose an audio file from this phone to start listening. Your music works offline.</string>
     <string name="local_audio_picker_hint">In the file chooser, use its menu to open Downloads or another folder.</string>
     <string name="library_play_track">Play %1$s</string>
@@ -42,15 +39,12 @@
     <string name="home_hero_ready">Ready to play</string>
     <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
     <string name="home_context_collections">Made for the moment</string>
-    <string name="home_context_collections_placeholder">Context mixes are coming soon. The categories below are a preview.</string>
     <string name="home_context_energy">High energy</string>
     <string name="home_context_running">For running</string>
     <string name="home_context_focus">Focus</string>
     <string name="home_context_evening">Evening</string>
     <string name="home_loading">Loading your local Home feed</string>
     <string name="home_offline_fallback">Offline recommendations are shown only for music available on this device.</string>
-    <string name="home_continue_listening">Continue listening</string>
-    <string name="home_continue_action">Resume queue</string>
     <string name="home_recently_played">Recently played</string>
     <string name="home_recently_added">Recently added</string>
     <string name="home_playlists">Playlists</string>
@@ -83,7 +77,6 @@
     <string name="search_empty">No local results</string>
 
     <string name="library_title">My music</string>
-    <string name="library_local_mode">Stored on this phone and available offline</string>
     <string name="library_add_local">Add local track</string>
     <string name="library_adding_local">Adding local track…</string>
     <string name="library_add_local_success">Added “%1$s” to the local collection</string>

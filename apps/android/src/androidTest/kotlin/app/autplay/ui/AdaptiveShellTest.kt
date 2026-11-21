@@ -202,7 +202,7 @@ class AdaptiveShellTest {
         composeRule.onNodeWithTag("home-product-list")
             .performScrollToNode(hasText(context.getString(R.string.state_error_title)))
         composeRule.onNodeWithText(context.getString(R.string.state_error_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.action_retry)).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.action_retry)).performScrollTo().assertIsDisplayed().performClick()
         composeRule.onNodeWithText("retry-requested").assertIsDisplayed()
     }
 

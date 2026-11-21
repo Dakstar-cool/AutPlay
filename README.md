@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.12/autplay-1.0.12-production.apk">Android · 1.0.12</a> · <a href="https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.12/autplay-1.0.12-macos-arm64.dmg">Mac · 1.0.12 Community</a></strong><br>
+  <strong><a href="https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.13/autplay-1.0.13-production.apk">Android · 1.0.13</a> · <a href="https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.13/autplay-1.0.13-macos-arm64.dmg">Mac · 1.0.13 Community</a></strong><br>
   Android 8.0+ · Mac с Apple Silicon, macOS 13+<br>
   Русский и английский<br>
   <a href="#start">Начать слушать</a> · <a href="#account">Аккаунт</a> · <a href="#rooms">Слушать вместе</a> · <a href="#developers">Разработчикам</a>
@@ -37,18 +37,18 @@
 
 ## От установки до первого трека
 
-1. Скачайте [APK для Android](https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.12/autplay-1.0.12-production.apk)
-   или [DMG для macOS](https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.12/autplay-1.0.12-macos-arm64.dmg).
+1. Скачайте [APK для Android](https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.13/autplay-1.0.13-production.apk)
+   или [DMG для macOS](https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.13/autplay-1.0.13-macos-arm64.dmg).
 2. Установите APK на телефон или перенесите AutPlay из DMG в «Программы».
 3. Откройте библиотеку, добавьте локальный аудиофайл и нажмите воспроизведение.
    Для локальной музыки подключение к серверу не требуется.
 
-[Установка и обновление](docs/operations/GET_STARTED_1.0.12.md) ·
-[Что нового и SHA-256 файлов](https://github.com/Dakstar-cool/AutPlay/releases/tag/v1.0.12)
+[Установка и обновление](docs/operations/GET_STARTED_1.0.13.md) ·
+[Что нового и SHA-256 файлов](https://github.com/Dakstar-cool/AutPlay/releases/tag/v1.0.13)
 
 Android-обновление устанавливается поверх версии с той же подписью. Если подпись отличается,
 не удаляйте приложение с важными локальными данными. Для Mac Community особенности первого
-запуска и доступные функции перечислены в [инструкции](docs/operations/GET_STARTED_1.0.12.md#mac).
+запуска и доступные функции перечислены в [инструкции](docs/operations/GET_STARTED_1.0.13.md#mac).
 
 <a id="account"></a>
 
@@ -65,7 +65,7 @@ Android-обновление устанавливается поверх вер�
 Выход и отключение аккаунта на Android защищены проверкой ID и пароля. Если пароль потерян,
 используйте сохранённый файл или код восстановления.
 
-[Подключение аккаунта и восстановление](docs/operations/GET_STARTED_1.0.12.md#account)
+[Подключение аккаунта и восстановление](docs/operations/GET_STARTED_1.0.13.md#account)
 
 <a id="rooms"></a>
 
@@ -155,7 +155,7 @@ bash scripts/check-desktop.sh --package-macos
 Для комнат проверяйте клиент, сервер и [OpenAPI](contracts/openapi/v1/autplay-wave.openapi.json)
 согласованно: [сценарии проверки](docs/development/WAVE_ROOMS.md#checks).
 
-Android 1.0.12 использует `versionCode 35`. Для замены установленного подписанного APK
+Android 1.0.13 использует `versionCode 36`. Для замены установленного подписанного APK
 нужен тот же ключ выпуска. Собственная Mac-подпись настраивается отдельно от Android.
 Точные исходники, подписи и контрольные суммы опубликованных файлов указаны в релизе.
 

@@ -2,11 +2,9 @@
 <resources>
     <string name="section_expanded">Expanded</string>
     <string name="section_collapsed">Collapsed</string>
-    <string name="profile_my_music">My music</string>
     <string name="profile_friends">Friends</string>
     <string name="profile_friends_summary">Listen together and share your music</string>
     <string name="profile_friends_local">Connect a personal server to add friends and listen together.</string>
-    <string name="profile_account_devices">Account and devices</string>
     <string name="profile_account_devices_summary">Connection, devices and account security</string>
     <string name="profile_connect_optional">Connect a personal server</string>
     <string name="profile_connect_optional_summary">Optional: sync your collection and listen with friends</string>

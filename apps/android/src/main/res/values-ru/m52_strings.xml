@@ -2,11 +2,9 @@
 <resources>
     <string name="section_expanded">Развёрнуто</string>
     <string name="section_collapsed">Свёрнуто</string>
-    <string name="profile_my_music">Моя музыка</string>
     <string name="profile_friends">Друзья</string>
     <string name="profile_friends_summary">Слушайте вместе и делитесь музыкой</string>
     <string name="profile_friends_local">Подключите личный сервер, чтобы добавлять друзей и слушать вместе.</string>
-    <string name="profile_account_devices">Аккаунт и устройства</string>
     <string name="profile_account_devices_summary">Подключение, устройства и безопасность аккаунта</string>
     <string name="profile_connect_optional">Подключить личный сервер</string>
     <string name="profile_connect_optional_summary">По желанию: синхронизация коллекции и музыка с друзьями</string>

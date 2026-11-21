@@ -6,13 +6,10 @@
     <string name="settings_downloads_network">Downloads and network</string>
     <string name="settings_appearance_language">Appearance and language</string>
     <string name="settings_account_local_summary">Local mode</string>
-    <string name="settings_account_connected_summary">Connected · recovery, devices and sync</string>
     <string name="settings_sound_summary">Transitions, volume and equalizer</string>
     <string name="settings_music_summary">Files, folders and track downloads</string>
-    <string name="settings_downloads_summary">Mobile data and preparing tracks</string>
     <string name="settings_appearance_summary">%1$s · %2$s</string>
     <string name="settings_data_summary">Listening stats and recommendations</string>
-    <string name="settings_about_summary">Version, settings transfer and diagnostics</string>
     <string name="settings_room_downloads">Prepare tracks for My Wave and shared listening</string>
     <string name="settings_transfer_scope">This transfers app preferences. Save your account recovery file separately in Account and devices.</string>
     <string name="settings_diagnostics_summary">Technical details and developer access</string>

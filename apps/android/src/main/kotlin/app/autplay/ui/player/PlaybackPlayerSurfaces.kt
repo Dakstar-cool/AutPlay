@@ -463,7 +463,7 @@ private fun PlayerBody(
         val viewportHeight = constraints.maxHeight
         // Measure the text and timeline first so font size and optional actions determine the space for art.
         Layout(
-            modifier = Modifier.fillMaxSize().verticalScroll(scroll).testTag("now-playing-scroll"),
+            modifier = Modifier.fillMaxSize().testTag("now-playing-scroll").verticalScroll(scroll),
             content = {
                 val wash = remember(backdrop) { Brush.verticalGradient(listOf(backdrop.header, backdrop.surface)) }
                 Box(Modifier.fillMaxWidth().background(wash), contentAlignment = Alignment.Center) { artwork() }

@@ -52,8 +52,8 @@ class PlayerScrollCollapseTest {
         val panel = compose.onNodeWithTag("now-playing-panel")
         val top = panel.getUnclippedBoundsInRoot().top
         scroll.performTouchInput {
-            down(Offset(width / 2f, 80f))
-            moveBy(Offset(0f, 200f), delayMillis = 500)
+            down(Offset(width / 2f, height * 0.15f))
+            repeat(8) { moveBy(Offset(0f, height * 0.09f), delayMillis = 32) }
             up()
         }
         compose.waitForIdle()

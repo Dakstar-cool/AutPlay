@@ -57,6 +57,9 @@ class PlayerCollapseShellTest {
                     AutPlayAdaptiveShell(
                         selectedDestination = selected,
                         onDestinationSelected = { selected = it },
+                        playerReturnDestination = UiDestination.Library,
+                        canNavigateBack = true,
+                        onNavigateBack = { selected = UiDestination.Library },
                         nowPlayingBar = {
                             Box(Modifier.fillMaxWidth().height(80.dp).onGloballyPositioned {
                                 miniTopPx = it.positionInRoot().y
@@ -98,7 +101,7 @@ class PlayerCollapseShellTest {
         compose.onNodeWithContentDescription(context.getString(R.string.player_collapse)).assertIsDisplayed().performClick()
         compose.onNodeWithText("collapsed").assertIsDisplayed()
         compose.runOnIdle {
-            assertEquals(UiDestination.Home, current)
+            assertEquals(UiDestination.Library, current)
             assertEquals(expectedWidthClass, currentWidthClass)
             assertEquals(expectedMiniTop, miniTopPx, 2f)
         }

@@ -15,10 +15,8 @@
     <string name="nav_sync_status">Синхронизация</string>
     <string name="nav_server_features">Личный сервер</string>
     <string name="nav_profile">Профиль</string>
-    <string name="nav_settings">Настройки</string>
     <string name="nav_privacy_data">Приватность и данные</string>
     <string name="action_back">Назад</string>
-    <string name="action_open_profile">Открыть профиль</string>
     <string name="action_open_settings">Открыть настройки</string>
 
     <string name="onboarding_welcome_title">Ваш локальный аккаунт</string>
@@ -30,7 +28,6 @@
     <string name="onboarding_password_invalid">Используйте 7–128 символов, включая хотя бы один спецсимвол, например !, @ или _. Пробел не считается. Избегайте распространённых паролей и повторения одного символа.</string>
     <string name="onboarding_password_mismatch">Пароли не совпадают. Введите одинаковую фразу в обоих полях.</string>
     <string name="onboarding_saving">Завершаем настройку на этом телефоне…</string>
-    <string name="home_first_track_title">Добавьте первый трек</string>
     <string name="home_first_track_body">Выберите аудиофайл на телефоне и начните слушать. Ваша музыка работает без сети.</string>
     <string name="local_audio_picker_hint">В окне выбора файла откройте меню и выберите «Скачанные» или другую папку.</string>
     <string name="library_play_track">Воспроизвести %1$s</string>
@@ -42,15 +39,12 @@
     <string name="home_hero_ready">Готово к воспроизведению</string>
     <string name="home_hero_control_locked">Управление недоступно для текущего режима воспроизведения</string>
     <string name="home_context_collections">Подборки под момент</string>
-    <string name="home_context_collections_placeholder">Контекстные миксы появятся позже. Пока это предварительный набор категорий.</string>
     <string name="home_context_energy">Энергичное</string>
     <string name="home_context_running">Для бега</string>
     <string name="home_context_focus">Сосредоточиться</string>
     <string name="home_context_evening">Вечер</string>
     <string name="home_loading">Загружаем локальную Главную</string>
     <string name="home_offline_fallback">Офлайн-рекомендации показывают только музыку, доступную на этом устройстве.</string>
-    <string name="home_continue_listening">Продолжить слушать</string>
-    <string name="home_continue_action">Продолжить очередь</string>
     <string name="home_recently_played">Недавно прослушано</string>
     <string name="home_recently_added">Недавно добавлено</string>
     <string name="home_playlists">Плейлисты</string>
@@ -85,7 +79,6 @@
     <string name="search_empty">Локальных результатов нет</string>
 
     <string name="library_title">Моя музыка</string>
-    <string name="library_local_mode">Хранится на телефоне и доступна без сети</string>
     <string name="library_add_local">Добавить локальный трек</string>
     <string name="library_adding_local">Добавление локального трека…</string>
     <string name="library_add_local_success">Трек «%1$s» добавлен в локальную коллекцию</string>

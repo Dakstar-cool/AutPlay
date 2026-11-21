@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -99,7 +100,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
         setContent {
             var activeScreen by remember { mutableStateOf(screen) }
             var fixturePlaying by remember { mutableStateOf(screen == "mini-playing" || screen == "home") }
-            var fixturePositionMs by remember { mutableStateOf(64_000L) }
+            var fixturePositionMs by remember { mutableLongStateOf(64_000L) }
             var fixtureSeekPreviewMs by remember {
                 mutableStateOf(if (screen == "player-dragging") 140_000L else null)
             }

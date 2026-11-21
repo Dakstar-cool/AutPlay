@@ -6,13 +6,10 @@
     <string name="settings_downloads_network">Загрузки и сеть</string>
     <string name="settings_appearance_language">Оформление и язык</string>
     <string name="settings_account_local_summary">Локальный режим</string>
-    <string name="settings_account_connected_summary">Подключено · восстановление, устройства и синхронизация</string>
     <string name="settings_sound_summary">Переходы, громкость и эквалайзер</string>
     <string name="settings_music_summary">Файлы, папки и загрузка треков</string>
-    <string name="settings_downloads_summary">Мобильный интернет и подготовка треков</string>
     <string name="settings_appearance_summary">%1$s · %2$s</string>
     <string name="settings_data_summary">Статистика и рекомендации</string>
-    <string name="settings_about_summary">Версия, перенос настроек и диагностика</string>
     <string name="settings_room_downloads">Подготовка треков для «Моей волны» и совместного прослушивания</string>
     <string name="settings_transfer_scope">Здесь переносятся параметры приложения. Файл восстановления аккаунта сохраните отдельно в разделе «Аккаунт и устройства».</string>
     <string name="settings_diagnostics_summary">Технические сведения и доступ разработчика</string>
