@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -133,7 +134,11 @@ internal fun DesktopTransportButtons(input: DesktopTransportInput, language: Des
             Text(DesktopText.Previous.inLanguage(language))
         }
         val action = if (input.playback.isPlaying) DesktopTransportAction.PAUSE else DesktopTransportAction.PLAY
-        Button(onClick = { send(action) }, enabled = controls.playPause) {
+        Button(onClick = { send(action) }, enabled = controls.playPause,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primaryFixedDim,
+                contentColor = MaterialTheme.colorScheme.onPrimaryFixed,
+            )) {
             Text((if (input.playback.isPlaying) DesktopText.Pause else DesktopText.Play).inLanguage(language))
         }
         OutlinedButton(onClick = { send(DesktopTransportAction.NEXT) }, enabled = controls.next) {

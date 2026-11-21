@@ -33,6 +33,7 @@ import app.autplay.ui.AppLanguage
 import app.autplay.ui.AutPlayIcon
 import app.autplay.ui.AutPlayPlatformIcon
 import app.autplay.ui.AutPlayTokens
+import app.autplay.ui.PreferenceSurface
 import app.autplay.ui.UiDestination
 
 @Composable
@@ -51,18 +52,22 @@ internal fun SettingsProductScreen(
     onNavigate: (UiDestination) -> Unit,
     trainingConsent: app.autplay.TrainingConsentUi = app.autplay.TrainingConsentUi(),
     page: UiDestination = UiDestination.Settings,
+    profileName: String? = null,
+    accountSummary: String = stringResource(R.string.settings_account_local_summary),
     onChooseAudio: () -> Unit = {},
 ) {
     when (page) {
-        UiDestination.Settings -> Surface(
-            color = AutPlayTokens.colors.glassSurface,
-            shape = MaterialTheme.shapes.extraLarge,
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                UiDestination.settingsNavigation.forEachIndexed { index, destination ->
-                    SettingsNavigationRow(destination, settingsSummary(destination, settings)) { onNavigate(destination) }
-                    if (index < UiDestination.settingsNavigation.lastIndex) {
-                        HorizontalDivider(Modifier.padding(start = 52.dp), color = AutPlayTokens.colors.border)
+        UiDestination.Settings -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            ProfileNavigationCard(profileName) { onNavigate(UiDestination.Profile) }
+            PreferenceSurface {
+                Column {
+                    UiDestination.settingsNavigation.forEachIndexed { index, destination ->
+                        SettingsNavigationRow(destination, settingsSummary(destination, settings, accountSummary)) {
+                            onNavigate(destination)
+                        }
+                        if (index < UiDestination.settingsNavigation.lastIndex) {
+                            HorizontalDivider(Modifier.padding(start = 52.dp), color = AutPlayTokens.colors.border)
+                        }
                     }
                 }
             }
@@ -116,47 +121,51 @@ internal fun SettingsProductScreen(
                 onUpdate { current -> current.copy(playbackAudio = transform(current.playbackAudio)) }
             }
         }
-        UiDestination.SettingsMusic -> SettingsPageSurface {
-            Button(onClick = onChooseAudio, modifier = Modifier.fillMaxWidth().testTag("settings-add-audio")) {
-                Text(stringResource(R.string.library_add_local))
-            }
-            PhoneMusicTools(settings)
-            Text(
-                stringResource(
-                    if (settings.libraryRootTreeUri == null) R.string.settings_folder_not_selected
-                    else R.string.settings_folder_selected,
-                ),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(stringResource(R.string.settings_folder_privacy), color = AutPlayTokens.colors.mutedText)
-            Button(onClick = onChooseLibraryRoot, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.settings_choose_folder))
-            }
-            OutlinedButton(
-                onClick = onRescanLibraryRoot,
-                enabled = settings.libraryRootTreeUri != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(stringResource(R.string.settings_scan_folder)) }
-        }
-        UiDestination.SettingsDownloads -> SettingsPageSurface {
-            SettingsSwitchRow(
-                label = stringResource(R.string.settings_metered_downloads),
-                checked = settings.downloadOnMeteredNetwork,
-                onCheckedChange = { enabled ->
-                    onUpdate { current -> current.copy(downloadOnMeteredNetwork = enabled) }
-                },
-            )
-            HorizontalDivider()
-            Text(stringResource(R.string.settings_room_downloads), style = MaterialTheme.typography.titleSmall)
-            ChoiceColumn {
-                listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
-                    FilterChip(
-                        selected = settings.wavePrefetchMode == mode,
-                        onClick = { onUpdate { current -> current.copy(wavePrefetchMode = mode) } },
-                        label = { Text(settingsWavePrefetchLabel(mode)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+        UiDestination.SettingsMusic, UiDestination.SettingsDownloads -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SettingsPageSurface {
+                Text(stringResource(R.string.settings_downloads_network), style = MaterialTheme.typography.titleMedium)
+                SettingsSwitchRow(
+                    label = stringResource(R.string.settings_metered_downloads),
+                    checked = settings.downloadOnMeteredNetwork,
+                    onCheckedChange = { enabled ->
+                        onUpdate { current -> current.copy(downloadOnMeteredNetwork = enabled) }
+                    },
+                )
+                HorizontalDivider()
+                Text(stringResource(R.string.settings_room_downloads), style = MaterialTheme.typography.titleSmall)
+                ChoiceColumn {
+                    listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
+                        FilterChip(
+                            selected = settings.wavePrefetchMode == mode,
+                            onClick = { onUpdate { current -> current.copy(wavePrefetchMode = mode) } },
+                            label = { Text(settingsWavePrefetchLabel(mode)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
+            }
+            SettingsPageSurface {
+                Text(stringResource(R.string.settings_phone_music), style = MaterialTheme.typography.titleMedium)
+                Button(onClick = onChooseAudio, modifier = Modifier.fillMaxWidth().testTag("settings-add-audio")) {
+                    Text(stringResource(R.string.library_add_local))
+                }
+                PhoneMusicTools(settings)
+                Text(
+                    stringResource(
+                        if (settings.libraryRootTreeUri == null) R.string.settings_folder_not_selected
+                        else R.string.settings_folder_selected,
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(stringResource(R.string.settings_folder_privacy), color = AutPlayTokens.colors.mutedText)
+                Button(onClick = onChooseLibraryRoot, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.settings_choose_folder))
+                }
+                OutlinedButton(
+                    onClick = onRescanLibraryRoot,
+                    enabled = settings.libraryRootTreeUri != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.settings_scan_folder)) }
             }
         }
         UiDestination.PrivacyAndData -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -262,8 +271,35 @@ internal fun SettingsProductScreen(
 }
 
 @Composable
+private fun ProfileNavigationCard(profileName: String?, onClick: () -> Unit) {
+    PreferenceSurface {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth().testTag("settings-row-profile"),
+            color = androidx.compose.ui.graphics.Color.Transparent,
+        ) {
+            Row(
+                Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Surface(shape = androidx.compose.foundation.shape.CircleShape, color = AutPlayTokens.colors.softAccent) {
+                    AutPlayPlatformIcon(AutPlayIcon.Profile, null, Modifier.padding(13.dp).size(28.dp), MaterialTheme.colorScheme.primary)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(profileName ?: stringResource(R.string.nav_profile), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.settings_profile_summary), style = MaterialTheme.typography.bodyMedium,
+                        color = AutPlayTokens.colors.mutedText)
+                }
+                AutPlayPlatformIcon(AutPlayIcon.ChevronDown, null, Modifier.size(18.dp).rotate(-90f), AutPlayTokens.colors.mutedText)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsPageSurface(content: @Composable () -> Unit) {
-    app.autplay.ui.PreferenceSurface {
+    PreferenceSurface {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             content()
         }
@@ -290,17 +326,16 @@ private fun SettingsNavigationRow(destination: UiDestination, summary: String, o
 }
 
 @Composable
-private fun settingsSummary(destination: UiDestination, settings: NonSecretSettings): String = when (destination) {
-    UiDestination.SettingsAccount -> stringResource(if (settings.activeServerProfileId == null)
-        R.string.settings_account_local_summary else R.string.settings_account_connected_summary)
+private fun settingsSummary(destination: UiDestination, settings: NonSecretSettings, accountSummary: String): String = when (destination) {
+    UiDestination.SettingsAccount -> accountSummary
     UiDestination.SettingsPlayback -> stringResource(R.string.settings_sound_summary)
     UiDestination.SettingsMusic -> stringResource(R.string.settings_music_summary)
-    UiDestination.SettingsDownloads -> stringResource(R.string.settings_downloads_summary)
     UiDestination.SettingsAppearance -> stringResource(R.string.settings_appearance_summary,
         stringResource(if (settings.appearanceMode == "LIGHT") R.string.settings_theme_light else R.string.settings_theme_dark),
         stringResource(AppLanguage.fromStoredValue(settings.appLanguage).labelRes))
     UiDestination.PrivacyAndData -> stringResource(R.string.settings_data_summary)
-    else -> stringResource(R.string.settings_about_summary)
+    UiDestination.SettingsAbout -> stringResource(R.string.settings_app_version, app.autplay.BuildConfig.VERSION_NAME)
+    else -> ""
 }
 
 @Composable

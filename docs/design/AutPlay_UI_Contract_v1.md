@@ -138,8 +138,8 @@ AutPlay SHOULD feel calm, personal, warm and focused on owned music rather than 
 The interface preserves the concept's following visual anchors:
 
 - warm neutral background and elevated light surfaces;
-- dark mode with near-black background and restrained elevation;
-- coral as the default accent;
+- graphite and steel-blue surfaces in dark mode, with warm beige text;
+- copper for playback, the current track and primary actions;
 - rounded cards, panels, artwork and controls;
 - a prominent personalized Home hero;
 - artwork-led content hierarchy;
@@ -152,23 +152,19 @@ appear in the normal music experience. It MAY appear in an explicitly opened dia
 
 ### 5.2. Reference color tokens
 
-The following tokens preserve the concept direction. Implementations MAY adjust exact values to
-meet contrast, dynamic-color or display requirements while preserving the relationships.
+The [shared Material theme](../../shared/ui/src/commonMain/kotlin/app/autplay/ui/theme/AutPlayPalette.kt)
+owns the color roles for Android and desktop. Graphite and steel blue set the dark surface
+hierarchy. Beige carries primary text. Copper emphasizes playback and selection. Pine marks
+positive status, and muted violet is reserved for occasional secondary details such as the timer.
 
-| Token | Light | Dark |
-| --- | --- | --- |
-| Background | `#f6f3ed` | `#121212` |
-| Surface | `#ffffff` | `#1c1c1e` |
-| Raised surface | `#faf8f4` | `#262629` |
-| Primary text | `#181818` | `#f5f5f5` |
-| Muted text | `#706d68` | `#aaa7a3` |
-| Border | `#e5e0d8` | `#37373a` |
-| Default accent | `#ff5b35` | `#ff6b45` |
-| Soft accent | `#ffe2d7` | `#3c211b` |
-| Mini-player surface | `#24211f` | `#f1eee8` |
+Light mode uses warm pale surfaces with graphite text. Small accent labels and the played
+portion of the timeline use a copper tone selected for the surface. The filled playback button
+pairs the base copper with dark ink. Artwork may tint the expanded player within its foreground
+contrast limits.
 
-The product uses a fixed Coral accent; user accent selection is unavailable. Accent color MUST NOT
-be the only indicator of selection, failure, playback state or destructive risk.
+Android uses the fixed copper accent. Desktop keeps its existing accent choices and the stored
+`CORAL` value selects copper. Combine color with labels, glyphs or emphasis to identify
+selection, failure, playback state and destructive actions.
 
 ### 5.3. Shape, density and hierarchy
 

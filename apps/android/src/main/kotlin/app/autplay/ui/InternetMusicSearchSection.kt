@@ -92,32 +92,38 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                 val active = work.any { !it.isFinished }
                 val completed = work.any { it == WorkInfo.State.SUCCEEDED }
                 val failed = work.any { it == WorkInfo.State.FAILED }
-                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(candidate.title, style = MaterialTheme.typography.titleMedium)
-                        Text("${candidate.artist} · ${candidate.provider} · ${candidate.durationMs / 60000}:${(candidate.durationMs / 1000 % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.bodySmall)
-                        when {
-                            active -> Text(stringResource(R.string.music_internet_adding))
-                            completed -> Text(stringResource(R.string.music_internet_added))
-                            failed -> {
-                                Text(stringResource(R.string.music_internet_error), color = MaterialTheme.colorScheme.error)
-                                TextButton(onClick = { retrySearch(true) }, modifier = Modifier.testTag("source-acquisition-retry")) {
-                                    Text(stringResource(R.string.music_retry))
-                                }
-                            }
+                val status = when {
+                    active -> stringResource(R.string.music_internet_adding)
+                    completed -> stringResource(R.string.music_internet_added)
+                    failed -> stringResource(R.string.music_internet_error)
+                    else -> null
+                }
+                val duration = "${candidate.durationMs / 60000}:${(candidate.durationMs / 1000 % 60).toString().padStart(2, '0')}"
+                AutPlayTrackRow(
+                    title = candidate.title,
+                    artist = candidate.artist,
+                    trackId = null,
+                    onPlay = null,
+                    detail = listOfNotNull(candidate.provider, duration, status).joinToString(" · "),
+                ) {
+                    TrackActionsMenu(Modifier.testTag("source-actions-${candidate.id}")) { dismiss ->
+                        fun acquire(download: Boolean) {
+                            dismiss()
+                            val owner = profile ?: return
+                            if (session?.work != null) session.work.enqueue(owner.value, search.id, candidate.id, download)
+                            else InternetMusicWork.enqueue(context, owner.value, search.id, candidate.id, download)
                         }
-                        Button(enabled = !active && !completed && !failed && profile != null, modifier = Modifier.fillMaxWidth(), onClick = {
-                            profile?.let {
-                                if (session?.work != null) session.work.enqueue(it.value, search.id, candidate.id, false)
-                                else InternetMusicWork.enqueue(context, it.value, search.id, candidate.id, false)
-                            }
-                        }) { Text(stringResource(R.string.music_add_vault)) }
-                        OutlinedButton(enabled = !active && !failed && profile != null, modifier = Modifier.fillMaxWidth(), onClick = {
-                            profile?.let {
-                                if (session?.work != null) session.work.enqueue(it.value, search.id, candidate.id, true)
-                                else InternetMusicWork.enqueue(context, it.value, search.id, candidate.id, true)
-                            }
-                        }) { Text(stringResource(R.string.music_add_download)) }
+                        DropdownMenuItem(text = { Text(stringResource(R.string.music_add_vault)) },
+                            enabled = !active && !completed && !failed && profile != null, onClick = { acquire(false) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.music_add_download)) },
+                            enabled = !active && !failed && profile != null, onClick = { acquire(true) })
+                        if (failed) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.music_retry)) },
+                                modifier = Modifier.testTag("source-acquisition-retry"), onClick = {
+                                    dismiss()
+                                    retrySearch(true)
+                                })
+                        }
                     }
                 }
             }

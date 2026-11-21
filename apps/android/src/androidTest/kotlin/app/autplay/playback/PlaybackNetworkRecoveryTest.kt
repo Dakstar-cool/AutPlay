@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -17,6 +18,81 @@ import org.junit.Test
 
 @UnstableApi
 class PlaybackNetworkRecoveryTest {
+    @Test fun currentVariantLookupSurvivesShortServerOutageWithoutAnotherPlayCommand() = runBlocking {
+        val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val requests = AtomicInteger()
+        val bytes = fixtureBytes()
+        try {
+            fixture.vaultServer(object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.path.orEmpty().endsWith("/playback-variant")) {
+                        if (requests.incrementAndGet() <= 3) return MockResponse().setResponseCode(503)
+                        return MockResponse().setBody("""{"audio_variant_id":"${fixture.audioIds.first()}"}""")
+                    }
+                    return audioResponse(request, bytes)
+                }
+            })
+            fixture.start(listOf("remote"))
+            fixture.await("the original entry resumes after the server returns") { fixture.main { fixture.controller!!.isPlaying } }
+            assertEquals(fixture.entries.first().value, fixture.main { fixture.controller!!.currentMediaItem?.mediaId })
+            assertEquals(4, requests.get())
+        } finally { fixture.close() }
+    }
+
+    @Test fun preparedPersonalWavePlaysFromCachedHeadAndFetchesSuccessorDuringPlayback() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val fixture = PlaybackServiceLifecycleTest.Fixture()
+        val bytes = fixtureBytes()
+        val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String?>>()
+        var startedAt = 0L
+        try {
+            fixture.vaultServer(object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    requests.add(request.path.orEmpty() to request.getHeader("Range"))
+                    return audioResponse(request, bytes).setHeadersDelay(350, TimeUnit.MILLISECONDS)
+                }
+            })
+            val wave = app.autplay.application.recommendation.PersonalWaveSession.start(null)
+            fixture.start(listOf("vault", "vault"), sourceContextId = wave.queueContext(null)) {
+                val settings = app.autplay.data.settings.applicationNonSecretSettingsStore(context).settings.first()
+                app.autplay.warmPersonalWaveTracks(context, settings.copy(downloadOnMeteredNetwork = true),
+                    requireNotNull(settings.activeServerProfileId), fixture.tracks.take(2).map { app.autplay.domain.LocalId(it) })
+                assertEquals("bytes=0-262143", requests.single().second)
+                startedAt = android.os.SystemClock.elapsedRealtime()
+            }
+            fixture.await("prepared first track playing") {
+                fixture.main { fixture.controller!!.isPlaying && fixture.controller!!.currentPosition > 0 }
+            }
+            val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+            android.util.Log.i("AutPlayWaveTiming", "serviceToPlayingMs=$elapsed simulatedHeadersDelayMs=350")
+            fixture.await("successor audio requested before the first track ends") {
+                requests.any { (path, _) -> fixture.audioIds[1] in path }
+            }
+            assertEquals(0, fixture.main { fixture.controller!!.currentMediaItemIndex })
+            assertEquals(1, requests.count { (path, range) ->
+                fixture.audioIds[0] in path && (range == null || range.startsWith("bytes=0-"))
+            })
+            fixture.main { fixture.controller!!.seekTo(39_000) }
+            fixture.await("playing the tail") { fixture.main {
+                fixture.controller!!.isPlaying && fixture.controller!!.currentMediaItemIndex == 0 &&
+                    fixture.controller!!.currentPosition >= 39_000
+            } }
+            val rebuffers = AtomicInteger()
+            fixture.main {
+                fixture.controller!!.addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_BUFFERING) rebuffers.incrementAndGet()
+                    }
+                })
+            }
+            fixture.await("continuous play through the next head") {
+                fixture.main { fixture.controller!!.currentMediaItemIndex == 1 && fixture.controller!!.isPlaying }
+            }
+            assertTrue(fixture.main { fixture.controller!!.currentPosition < 2_000 })
+            assertEquals(0, rebuffers.get())
+        } finally { fixture.close() }
+    }
+
     @Test fun failedSuccessorDoesNotInterruptTheCurrentTailAndRecoversAtItsOwnHead() = runBlocking {
         val fixture = PlaybackServiceLifecycleTest.Fixture()
         val requests = AtomicInteger()

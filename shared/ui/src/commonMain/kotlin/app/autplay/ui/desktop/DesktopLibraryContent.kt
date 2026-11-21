@@ -865,7 +865,9 @@ internal fun DesktopLibraryContent(
                             .clickable(enabled = queueActionsEnabled, role = Role.Button,
                                 onClickLabel = DesktopText.Play.inLanguage(language)) { actOnView { callbacks.onSelectEntry(entry.id) } }.padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (entry.id == queue?.currentEntryId) "▶" else "♫", color = MaterialTheme.colorScheme.primary)
+                            val current = entry.id == queue?.currentEntryId
+                            Text(if (current) "▶" else "♫",
+                                color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             Column(Modifier.weight(1f)) {
                                 Text(track?.title ?: DesktopText.SourceMissing.inLanguage(language), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(track?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)

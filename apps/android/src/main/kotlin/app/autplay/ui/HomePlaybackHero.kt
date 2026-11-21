@@ -11,13 +11,19 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -70,7 +76,6 @@ public fun buildHomePlaybackHeroUiState(
     val fallback = homeState.continueListening?.let {
         HomeTrackUiItem(it.trackId, it.title, it.artist)
     } ?: homeState.recentlyPlayed.firstOrNull()
-        ?: homeState.recentlyAdded.firstOrNull()
     return HomePlaybackHeroUiState(
         trackId = fallback?.id,
         title = fallback?.title,
@@ -96,11 +101,9 @@ public fun HomePlaybackHero(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = {},
     onNext: () -> Unit = {},
-    secondaryAction: @Composable () -> Unit = {},
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
-    val palette = remember(title) { playbackVisualPalette(title) }
     val togetherLabel = stringResource(R.string.nav_wave_rooms)
     val hasPlaybackTarget = state.hasActivePlayback || state.trackId != null
     val motion = rememberHomeCarouselMotion(state.playbackKey)
@@ -112,150 +115,137 @@ public fun HomePlaybackHero(
         Unit
     }
     val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = modifier.fillMaxWidth().testTag("home-playback-hero"),
-        color = colors.background,
+    val bitmap = rememberTrackArtworkBitmap(state.trackId)
+    val coverTint = app.autplay.ui.player.rememberArtworkTint(bitmap) ?: colors.secondary
+    Column(
+        modifier = modifier.fillMaxWidth().testTag("home-playback-hero")
+            .waveGlow(coverTint, androidx.compose.ui.graphics.lerp(coverTint, colors.tertiary, .35f), colors.background)
+            .padding(start = 24.dp, end = 24.dp, top = topChromePadding + 6.dp, bottom = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .background(Brush.verticalGradient(listOf(palette[0].copy(alpha = 0.10f), Color.Transparent)))
-                .padding(start = 24.dp, top = topChromePadding + 8.dp, end = 24.dp, bottom = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        HomeHeroHeader(stringResource(when {
+            state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
+            state.isPlaying -> R.string.home_hero_playing
+            state.hasActivePlayback -> R.string.home_hero_ready
+            localMode -> R.string.home_wave_on_device
+            else -> R.string.home_hero_personal_flow
+        }), togetherLabel, onOpenListenTogether)
+        Spacer(Modifier.height(6.dp))
+        WaveHeadline(artist)
+        Spacer(Modifier.height(8.dp))
+        HomeArtworkCarousel(
+            title = title, targets = swipeTargets, motion = motion,
+            enabled = playbackAllowed && state.trackId != null, canOpen = hasPlaybackTarget,
+            onOpen = openTarget, onPrevious = onPrevious, onNext = onNext,
+            compactCover = true, artworkPainter = rememberArtworkPainter(bitmap),
+        )
+        Row(
+            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            val heading = stringResource(when {
-                state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
-                state.isPlaying -> R.string.home_hero_playing
-                state.hasActivePlayback -> R.string.home_hero_ready
-                localMode -> R.string.library_local_mode
-                else -> R.string.home_hero_personal_flow
-            })
-            HomeHeroHeader(heading, togetherLabel, onOpenListenTogether)
-            HomeArtworkCarousel(
-                trackId = state.trackId,
-                title = title,
-                targets = swipeTargets,
-                motion = motion,
-                enabled = playbackAllowed && state.trackId != null,
-                canOpen = hasPlaybackTarget,
-                onOpen = openTarget,
-                onPrevious = onPrevious,
-                onNext = onNext,
+            HeroIconButton(
+                icon = if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play,
+                label = playLabel, enabled = canTogglePlayback,
+                onClick = { if (state.hasActivePlayback) onTogglePlayPause() else state.trackId?.let(onPlayTrack) },
             )
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            Surface(
+                onClick = openTarget, enabled = hasPlaybackTarget,
+                modifier = Modifier.weight(1f), shape = CircleShape, color = colors.surfaceContainerHigh,
             ) {
-                Text(
-                    title, style = MaterialTheme.typography.headlineMedium, color = colors.onSurface,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    artist, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(
-                    onClick = {
-                        if (state.hasActivePlayback) onTogglePlayPause() else state.trackId?.let(onPlayTrack)
-                    },
-                    enabled = canTogglePlayback,
-                    modifier = Modifier.weight(1f).heightIn(min = 56.dp)
-                        .semantics { contentDescription = playLabel; role = Role.Button },
-                    shape = CircleShape,
-                    color = if (canTogglePlayback) colors.primary else colors.surfaceContainerHigh,
-                    contentColor = if (canTogglePlayback) colors.onPrimary else colors.onSurfaceVariant,
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AutPlayPlatformIcon(if (state.isPlaying) AutPlayIcon.Pause else AutPlayIcon.Play, null, Modifier.size(22.dp))
-                        Text(playLabel, style = MaterialTheme.typography.titleMedium)
-                    }
+                Box(Modifier.heightIn(min = 52.dp).padding(horizontal = 10.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center) {
+                    Text(title, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                HeroIconButton(
-                    icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
-                    label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
-                    enabled = state.trackId != null && !motion.busy,
-                    selected = state.liked,
-                    onClick = { state.trackId?.let(onLike) },
-                )
             }
-            secondaryAction()
+            HeroIconButton(
+                icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
+                label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
+                enabled = state.trackId != null && !motion.busy, selected = state.liked,
+                onClick = { state.trackId?.let(onLike) },
+            )
         }
     }
 }
 
-
 @Composable
 internal fun HomeWaveStartHero(
+    state: HomePlaybackHeroUiState,
     localMode: Boolean,
+    emptyLibrary: Boolean,
     enabled: Boolean,
     onStart: () -> Unit,
+    onLike: (String) -> Unit,
     onOpenListenTogether: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    val play = stringResource(R.string.action_play)
     Column(
-        modifier = modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier.fillMaxWidth().waveGlow(Color(0xFFD26539), Color(0xFFB85083), colors.background)
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        HomeHeroHeader(
-            stringResource(if (localMode) R.string.library_local_mode else R.string.home_hero_personal_flow),
-            stringResource(R.string.nav_wave_rooms),
-            onOpenListenTogether,
-        )
+        HomeHeroHeader(stringResource(if (localMode) R.string.home_wave_on_device else R.string.home_hero_personal_flow),
+            stringResource(R.string.nav_wave_rooms), onOpenListenTogether)
+        Spacer(Modifier.height(32.dp))
+        WaveHeadline(stringResource(R.string.home_my_wave))
         Surface(
-            onClick = onStart,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth().testTag("home-my-wave"),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = colors.surfaceContainerHigh,
+            onClick = onStart, enabled = enabled, shape = CircleShape,
+            color = if (enabled) colors.primary else colors.surfaceContainerHigh,
+            contentColor = if (enabled) colors.onPrimary else colors.onSurfaceVariant,
+            modifier = Modifier.size(84.dp).testTag("home-my-wave")
+                .semantics { contentDescription = play; role = Role.Button },
         ) {
-            Row(
-                Modifier.background(Brush.horizontalGradient(listOf(colors.primaryContainer, colors.surfaceContainerHigh)))
-                    .padding(20.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = if (enabled) colors.primary else colors.surfaceVariant,
-                ) {
-                    Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
-                        AutPlayPlatformIcon(AutPlayIcon.Play, null, Modifier.size(26.dp),
-                            if (enabled) colors.onPrimary else colors.onSurfaceVariant)
-                    }
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.home_my_wave_start), style = MaterialTheme.typography.titleLarge,
-                        color = colors.onSurface)
-                    Text(stringResource(if (enabled) R.string.home_my_wave_description else R.string.home_my_wave_locked),
-                        style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            Box(contentAlignment = Alignment.Center) { AutPlayPlatformIcon(AutPlayIcon.Play, null, Modifier.size(36.dp)) }
+        }
+        if (state.title != null) {
+            Surface(shape = CircleShape, color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.heightIn(min = 52.dp).padding(start = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(listOfNotNull(state.artist?.takeIf { it.isNotBlank() }, state.title).joinToString(" — "),
+                        Modifier.weight(1f).padding(vertical = 8.dp), textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (state.trackId != null) HeroIconButton(
+                        icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
+                        label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
+                        enabled = true, selected = state.liked, onClick = { onLike(state.trackId) },
+                    )
                 }
             }
         }
+        if (!enabled) Text(stringResource(if (emptyLibrary) R.string.home_first_track_body else R.string.home_my_wave_locked),
+            textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-internal fun HomeWaveShortcut(enabled: Boolean, onStart: () -> Unit) {
-    TextButton(onClick = onStart, enabled = enabled, modifier = Modifier.testTag("home-my-wave")) {
-        Text(stringResource(R.string.home_my_wave_start))
-    }
-    if (!enabled) {
-        Text(stringResource(R.string.home_my_wave_locked), style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun WaveHeadline(text: String) {
+    Text(text, Modifier.widthIn(max = 540.dp), textAlign = TextAlign.Center,
+        style = MaterialTheme.typography.displaySmall.copy(fontSize = 46.sp, lineHeight = 48.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
+        maxLines = 3, overflow = TextOverflow.Ellipsis)
+}
+
+private fun Modifier.waveGlow(accent: Color, secondary: Color, base: Color): Modifier = drawWithCache {
+    val intensity = if (base.luminance() < .5f) .74f else .36f
+    val warm = Brush.radialGradient(
+        0f to accent.copy(alpha = intensity), .34f to accent.copy(alpha = intensity * .76f), 1f to accent.copy(alpha = 0f),
+        center = Offset(size.width * .38f, size.height * .53f), radius = size.minDimension * .52f,
+    )
+    val halo = Brush.radialGradient(
+        listOf(secondary.copy(alpha = intensity * .72f), secondary.copy(alpha = 0f)),
+        center = Offset(size.width * .67f, size.height * .40f), radius = size.minDimension * .54f,
+    )
+    val edge = Brush.verticalGradient(0f to base, .16f to base.copy(alpha = 0f),
+        .82f to base.copy(alpha = 0f), 1f to base)
+    onDrawBehind {
+        drawRect(base)
+        drawRect(halo)
+        drawRect(warm)
+        drawRect(edge)
     }
 }
 

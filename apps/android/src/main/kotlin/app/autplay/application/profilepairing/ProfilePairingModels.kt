@@ -69,7 +69,11 @@ sealed interface PairingState {
     data class AwaitingTrust(val snapshot: PairingFlowSnapshot) : PairingState
     data class AwaitingConfirmation(val snapshot: PairingFlowSnapshot) : PairingState
     data class ExchangingInvitation(val snapshot: PairingFlowSnapshot) : PairingState
-    data class Connected(val snapshot: PairingFlowSnapshot, val capabilities: CapabilityState) : PairingState
+    data class Connected(
+        val snapshot: PairingFlowSnapshot,
+        val capabilities: CapabilityState,
+        val verifiedAtMs: Long = 0,
+    ) : PairingState
     data class Blocked(val code: PairingFailure) : PairingState
     data object Cancelled : PairingState
 }

@@ -1,6 +1,10 @@
 package app.autplay.ui.player
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.ui.HomeSwipeTargets
@@ -27,6 +31,8 @@ internal data class NowPlayingRouteActions(
     val observingChanged: (Boolean) -> Unit,
     val queue: QueueEditorUiActions = QueueEditorUiActions(),
     val download: () -> Unit = {},
+    val artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
+    val openArtist: (String) -> Unit = {},
 )
 
 internal data class NowPlayingTasteUiState(
@@ -52,9 +58,15 @@ internal fun NowPlayingRouteRenderer(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = actions.previous,
     onNext: () -> Unit = actions.next,
+    serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
 ) {
+    val network = LocalContext.current.getSystemService(android.net.ConnectivityManager::class.java)
+    val online by remember(network) { app.autplay.networkAvailability(network) }
+        .collectAsState(initial = network.activeNetwork != null)
     NowPlayingScreen(
         state = state,
+        artists = actions.artists,
+        onOpenArtist = actions.openArtist,
         onTogglePlayPause = actions.togglePlayPause,
         onToggleShuffle = actions.toggleShuffle,
         onCycleRepeat = actions.cycleRepeat,
@@ -86,6 +98,7 @@ internal fun NowPlayingRouteRenderer(
         queueActions = actions.queue,
         onDownload = actions.download,
         downloadState = downloadState,
+        serverConnection = if (online) serverConnection else PlayerServerConnection.Offline,
         modifier = modifier,
     )
 }

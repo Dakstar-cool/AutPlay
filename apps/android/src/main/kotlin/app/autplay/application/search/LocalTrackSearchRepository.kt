@@ -3,11 +3,14 @@ package app.autplay.application.search
 import app.autplay.data.local.AutPlayDatabase
 import androidx.room3.withReadTransaction
 import app.autplay.application.library.decoded
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 data class LocalTrackSearchResult(
     val localUserTrackRefId: String,
     val rawTitle: String?,
     val rawArtist: String?,
+    val serverUserTrackRefId: String? = null,
 )
 
 /** Bounded product search projection; raw queries never reach SQL and empty input never scans. */
@@ -15,6 +18,10 @@ class LocalTrackSearchRepository(
     private val database: AutPlayDatabase,
     private val queryBuilder: SafeFtsQueryBuilder = SafeFtsQueryBuilder(),
 ) {
+    fun offlineTrackIds(profileId: String?, trackIds: List<String>): Flow<List<String>> =
+        if (trackIds.isEmpty()) flowOf(emptyList())
+        else database.searchDao().offlineTrackIds(profileId ?: "legacy-unscoped", trackIds)
+
     suspend fun search(rawQuery: String, profileId: String? = null, limit: Int = DEFAULT_LIMIT,
         kind: LibrarySearchKind = LibrarySearchKind.All): List<LocalTrackSearchResult> = database.withReadTransaction {
         require(limit in 1..MAX_LIMIT)
@@ -30,6 +37,7 @@ class LocalTrackSearchRepository(
             val effective = metadata[track.localUserTrackRefId]?.decoded()
             LocalTrackSearchResult(
                 localUserTrackRefId = track.localUserTrackRefId,
+                serverUserTrackRefId = track.serverUserTrackRefId,
                 rawTitle = if (effective == null) track.rawTitle else effective.text("title", track.rawTitle),
                 rawArtist = if (effective == null) track.rawArtist else effective.text("artist", track.rawArtist),
             )

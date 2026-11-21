@@ -2,6 +2,7 @@ package app.autplay
 
 import android.content.Context
 import app.autplay.application.download.DownloadIntentRepository
+import app.autplay.application.library.CoreReleaseDetail
 import app.autplay.application.library.CorePlaylistDetail
 import app.autplay.application.library.CoreProductRepository
 import app.autplay.application.library.CoreTrackDetail
@@ -10,6 +11,7 @@ import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
 import app.autplay.application.recommendation.PersonalWaveQueue
+import app.autplay.application.recommendation.HomeWheelMix
 import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.server.ServerRecommendationResult
 import app.autplay.application.recommendation.HomeFeed
@@ -45,9 +47,10 @@ internal data class CoreCommandActions(
     val recordHomeFeedback: (String, String) -> Unit,
     val startRecommendation: (String) -> Unit,
     val startTrack: (String, String, String, String?) -> Unit,
-    val startMyWave: () -> Unit,
+    val startMyWave: (HomeWheelMix?) -> Unit,
     val startSearchTrack: (String) -> Unit,
-    val startVaultSearchTrack: (String) -> Unit,
+    val startVaultSearchTrack: (String, Set<String>) -> Unit,
+    val startReleaseEntry: (CoreReleaseDetail, String) -> Unit,
     val startPlaylistEntry: (String) -> Unit,
     val updateLibraryMembership: (String) -> Unit,
     val likeTrack: (String) -> Unit,
@@ -95,6 +98,31 @@ internal fun buildCoreCommandActions(
             recommendationKey(presentationId, it) == key
         } ?: return null
         return presentationId to item
+    }
+
+    fun playCollection(queueType: String, collectionId: String, rows: List<Pair<String, String>>, entryId: String) {
+        val selected = rows.indexOfFirst { it.first == entryId }
+        if (selected < 0) return
+        val actionKey = "play:$queueType:$collectionId:$entryId"
+        if (!actionGate.begin(actionKey)) return
+        val profileId = binding()?.serverProfileId?.value
+        scope.launch {
+            try {
+                runCatching {
+                    val entries = rows.map { (_, trackId) ->
+                        NewPlaybackQueueEntry(queueEntryId = LocalId.random(), trackRefId = LocalId(trackId),
+                            sourceOrigin = queueType, sourceAudioPolicy = "LOCAL_THEN_VAULT")
+                    }
+                    val snapshot = LocalId.random()
+                    playbackRepository.activateQueue(snapshotId = snapshot, entries = entries, queueType = queueType,
+                        sourceContextId = collectionId, serverProfileId = profileId, listeningContext = "GENERAL",
+                        nowMs = System.currentTimeMillis(), startEntryId = entries[selected].queueEntryId)
+                    playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshot))
+                }.onFailure { reportError("PLAYBACK_UNAVAILABLE") }
+            } finally {
+                actionGate.complete(actionKey)
+            }
+        }
     }
 
     return CoreCommandActions(
@@ -213,7 +241,7 @@ internal fun buildCoreCommandActions(
                 }
             }
         },
-        startMyWave = myWave@{
+        startMyWave = myWave@{ mix ->
             if (!myWaveAllowed()) return@myWave
             val actionKey = "play:my-wave"
             if (!actionGate.begin(actionKey)) return@myWave
@@ -227,10 +255,13 @@ internal fun buildCoreCommandActions(
                         val snapshotId = personalWaveQueue.start(
                             ownerBinding, replacement, myWaveVaultAvailable(),
                             stillActive = { myWaveCurrentBinding() == ownerBinding && myWaveAllowed() },
+                            mix = mix,
                             fetch = fetchWave,
                         )
                         if (snapshotId == null) {
-                            if (myWaveCurrentBinding() == ownerBinding) reportError("MY_WAVE_EMPTY")
+                            if (myWaveCurrentBinding() == ownerBinding) {
+                                reportError(if (mix == null) "MY_WAVE_EMPTY" else "WHEEL_MIX_EMPTY")
+                            }
                             return@runCatching
                         }
                         if (myWaveCurrentBinding() == ownerBinding && myWaveAllowed()) {
@@ -281,8 +312,10 @@ internal fun buildCoreCommandActions(
                 }
             }
         },
-        startVaultSearchTrack = vaultPlay@{ remoteLibraryEntryId ->
-            val orderedResults = vaultSearchResultStore.results.filter { it.playable }
+        startVaultSearchTrack = vaultPlay@{ remoteLibraryEntryId, offlineIds ->
+            val orderedResults = vaultSearchResultStore.results
+                .filter { it.playable || it.localUserTrackRefId in offlineIds }
+                .distinctBy { it.localUserTrackRefId }
             val selected = orderedResults.firstOrNull { it.remoteLibraryEntryId == remoteLibraryEntryId }
                 ?: return@vaultPlay
             val sessionId = searchSessionId() ?: LocalId.random().value.also(setSearchSessionId)
@@ -318,44 +351,14 @@ internal fun buildCoreCommandActions(
                 }
             }
         },
-        startPlaylistEntry = playlistPlay@{ localPlaylistEntryId ->
-            val detail = playlistDetail() ?: return@playlistPlay
-            val actionKey = "playlist:${detail.localPlaylistId}:$localPlaylistEntryId"
-            if (!actionGate.begin(actionKey)) return@playlistPlay
-            val generatedEntries = detail.entries.map { entry ->
-                entry.localPlaylistEntryId to NewPlaybackQueueEntry(
-                    queueEntryId = LocalId.random(),
-                    trackRefId = LocalId(entry.localUserTrackRefId),
-                    sourceOrigin = "PLAYLIST",
-                    sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                )
-            }
-            val startEntryId = generatedEntries.firstOrNull {
-                it.first == localPlaylistEntryId
-            }?.second?.queueEntryId
-            if (startEntryId == null) {
-                actionGate.complete(actionKey)
-                return@playlistPlay
-            }
-            scope.launch {
-                try {
-                    runCatching {
-                        val snapshotId = LocalId.random()
-                        playbackRepository.activateQueue(
-                            snapshotId = snapshotId,
-                            entries = generatedEntries.map { it.second },
-                            queueType = "PLAYLIST",
-                            sourceContextId = detail.localPlaylistId,
-                            serverProfileId = binding()?.serverProfileId?.value,
-                            listeningContext = "GENERAL",
-                            nowMs = System.currentTimeMillis(),
-                            startEntryId = startEntryId,
-                        )
-                        playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
-                    }.onFailure { reportError("PLAYBACK_UNAVAILABLE") }
-                } finally {
-                    actionGate.complete(actionKey)
-                }
+        startReleaseEntry = { detail, entryId ->
+            val rows = detail.tracks.mapNotNull { row -> row.localUserTrackRefId?.let { row.localReleaseTrackId to it } }
+            playCollection("LIBRARY", detail.localReleaseId, rows, entryId)
+        },
+        startPlaylistEntry = { entryId ->
+            playlistDetail()?.let { detail ->
+                val rows = detail.entries.filterNot { it.unavailable }.map { it.localPlaylistEntryId to it.localUserTrackRefId }
+                playCollection("PLAYLIST", detail.localPlaylistId, rows, entryId)
             }
         },
         updateLibraryMembership = membership@{ trackRefId ->
@@ -367,7 +370,12 @@ internal fun buildCoreCommandActions(
             scope.launch {
                 try {
                     runCatching {
-                        if (!entry.removed) {
+                        if (entry.localLibraryEntryId == null) {
+                            sliceRepository.setPlaybackPreference(
+                                binding(), LocalId(trackRefId), LocalId.random(), "NEUTRAL",
+                                null, System.currentTimeMillis(),
+                            )
+                        } else if (!entry.removed) {
                             sliceRepository.removeLibrary(
                                 binding(),
                                 LocalId(entry.localLibraryEntryId),

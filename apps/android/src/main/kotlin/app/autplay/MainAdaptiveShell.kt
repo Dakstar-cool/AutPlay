@@ -17,6 +17,7 @@ import app.autplay.ui.core.DetailTarget
 import app.autplay.ui.core.ListAnchor
 import app.autplay.ui.player.NowPlayingRouteActions
 import app.autplay.ui.player.NowPlayingRouteRenderer
+import app.autplay.ui.player.PlayerServerConnection
 import app.autplay.ui.player.NowPlayingTasteUiState
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.PlaybackPreferenceUiState
@@ -30,6 +31,7 @@ import app.autplay.ui.downloads.DownloadsUiActions
 
 internal data class MainAdaptiveShellState(
     val destination: UiDestination,
+    val previousDestination: UiDestination?,
     val unreadSyncConflicts: Int,
     val navigationCanGoBack: Boolean,
     val hasVisibleCoreDetail: Boolean,
@@ -60,6 +62,7 @@ internal data class MainAdaptiveShellState(
     val legacyState: LegacySecondaryRouteState,
     val legacyActions: LegacySecondaryRouteActions,
     val nowPlayingDownloadState: String? = null,
+    val playerConnection: PlayerServerConnection = PlayerServerConnection.Offline,
 )
 
 internal data class MainAdaptiveShellActions(
@@ -89,14 +92,13 @@ internal fun MainAdaptiveShell(
     androidx.compose.runtime.CompositionLocalProvider(app.autplay.ui.LocalDeveloperMode provides state.legacyState.settings.developerMode) {
     AutPlayAdaptiveShell(
         selectedDestination = state.destination,
+        playerReturnDestination = state.previousDestination ?: UiDestination.Home,
         onDestinationSelected = actions.navigate,
         unreadSyncConflicts = state.unreadSyncConflicts,
         canNavigateBack = state.hasVisibleCoreDetail || state.navigationCanGoBack,
         onNavigateBack = {
             if (state.hasVisibleCoreDetail) actions.closeCoreDetail() else actions.navigateBack()
         },
-        onProfileClick = { actions.navigate(UiDestination.Profile) },
-        onSettingsClick = { actions.navigate(UiDestination.Settings) },
         onNowPlayingClick = { actions.navigate(UiDestination.NowPlaying) },
         snackbarHost = {
             app.autplay.ui.CommandErrorBanner(state.legacyState.stableError, actions.dismissCommandError)
@@ -116,6 +118,8 @@ internal fun MainAdaptiveShell(
                     likeEnabled = state.currentTrackRefId != null,
                     onLike = { state.currentTrackRefId?.let(actions.likeTrack) },
                     onDismiss = actions.dismissMiniPlayer,
+                    onPrevious = state.nowPlayingActions.previous,
+                    onNext = state.nowPlayingActions.next,
                 )
             }
         },
@@ -127,6 +131,7 @@ internal fun MainAdaptiveShell(
                     state = state.coreDetailState,
                     onPlayTrack = actions.playTrack,
                     onPlayPlaylistEntry = actions.playPlaylistEntry,
+                    onPlayReleaseEntry = state.coreRouteActions.playReleaseEntry,
                     onPlayNext = state.coreRouteActions.playNext,
                     onAddToQueue = state.coreRouteActions.addToQueue,
                     manualPlaylists = state.coreRouteActions.manualPlaylists,
@@ -166,6 +171,7 @@ internal fun MainAdaptiveShell(
                 homeSwipeTargets = state.homeSwipeTargets,
             )
             UiDestination.NowPlaying -> NowPlayingRouteRenderer(
+                serverConnection = state.playerConnection,
                 downloadState = state.nowPlayingDownloadState,
                 state = state.playerState,
                 swipeTargets = state.homeSwipeTargets,
@@ -209,4 +215,4 @@ internal fun MainAdaptiveShell(
 }
 
 internal fun shouldShowPersistentPlayerChrome(destination: UiDestination, hasMedia: Boolean): Boolean =
-    hasMedia && destination != UiDestination.NowPlaying
+    hasMedia && destination != UiDestination.Home && destination != UiDestination.NowPlaying

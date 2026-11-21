@@ -20,6 +20,14 @@ class HomePlaybackHeroStateTest {
     }
 
     @Test
+    fun unplayedLibraryAdditionIsNotShownAsTheLastTrack() {
+        val home = homeState(null).copy(recentlyAdded = listOf(HomeTrackUiItem("new", "New", null)))
+        val result = buildHomePlaybackHeroUiState(home, PlaybackPresentationState(), null, false)
+        assertNull(result.trackId)
+        assertNull(result.title)
+    }
+
+    @Test
     fun activePlaybackWinsOverHomeFallback() {
         val result = buildHomePlaybackHeroUiState(
             homeState = homeState(

@@ -179,9 +179,7 @@ class ServerFeatureRepository(
     streamBaseUrl: String,
     private val profileId: ServerProfileId,
     private val credentials: CredentialStore,
-    client: OkHttpClient = OkHttpClient.Builder()
-        .callTimeout(Duration.ofSeconds(45))
-        .build(),
+    client: OkHttpClient = sharedClient,
     private val m5Rotation: M5SessionRotationClient? = null,
     private val beforeRequest: suspend () -> Unit = {},
 ) : InternetMetadataDiscoveryPort {
@@ -946,6 +944,8 @@ class ServerFeatureRepository(
     private data class HttpResult(val status: Int, val body: String?, val headers: Map<String, String>, val bytes: ByteArray? = null)
 
     private companion object {
+        // Per-request credentials stay on the request. Connections can span repository instances.
+        val sharedClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(45)).build()
         val JSON_MEDIA_TYPE = "application/json".toMediaType()
         val OFFSET_MEDIA_TYPE = "application/offset+octet-stream".toMediaType()
         val UUID_REGEX = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")

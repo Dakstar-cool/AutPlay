@@ -22,13 +22,14 @@ class HistoryScreenTest {
 
     @Test fun duplicateEventsRemainSeparateAndLoadMoreIsActionable() {
         var played: String? = null
+        var opened: String? = null
         var more = false
         val items = listOf(item("event-2"), item("event-1"))
         compose.setContent {
             AutPlayTheme {
                 HistoryScreen(
                     HistoryUiState(items = items, loading = false, nextCursor = HistoryCursor(1, "event-1")),
-                    HistoryUiActions(play = { played = it.listeningEventId }, loadMore = { more = true }),
+                    HistoryUiActions(play = { played = it.listeningEventId }, open = { opened = it.listeningEventId }, loadMore = { more = true }),
                     PaddingValues(),
                 )
             }
@@ -36,9 +37,12 @@ class HistoryScreenTest {
 
         compose.onNodeWithTag("history-event-2").assertIsDisplayed()
         compose.onNodeWithTag("history-event-1").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("history-play-event-1").performClick()
+        compose.onNodeWithTag("history-open-event-2").performClick()
+        compose.runOnIdle { assertEquals(null, played) }
+        compose.onNodeWithTag("history-event-1").performClick()
         compose.onNodeWithTag("history-load-more").performScrollTo().performClick()
         compose.runOnIdle {
+            assertEquals("event-2", opened)
             assertEquals("event-1", played)
             check(more)
         }

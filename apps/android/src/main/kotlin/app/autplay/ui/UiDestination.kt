@@ -27,28 +27,28 @@ public sealed class UiDestination(
     public data object SyncStatus : UiDestination("sync-status", R.string.nav_sync_status, AutPlayIcon.Sync)
     public data object ServerFeatures : UiDestination("server-features", R.string.nav_server_features, AutPlayIcon.Server)
     public data object Profile : UiDestination("profile", R.string.nav_profile, AutPlayIcon.Profile)
-    public data object Settings : UiDestination("settings", R.string.nav_settings, AutPlayIcon.Settings)
+    public data object Settings : UiDestination("settings", R.string.nav_profile_settings, AutPlayIcon.Profile)
     public data object PrivacyAndData : UiDestination("privacy-data", R.string.nav_privacy_data, AutPlayIcon.Privacy)
-    public data object SettingsAccount : UiDestination("settings-account", R.string.settings_account_devices, AutPlayIcon.Profile)
-    public data object SettingsPlayback : UiDestination("settings-playback", R.string.settings_sound_playback, AutPlayIcon.Play)
-    public data object SettingsMusic : UiDestination("settings-music", R.string.settings_phone_music, AutPlayIcon.Library)
-    public data object SettingsDownloads : UiDestination("settings-downloads", R.string.settings_downloads_network, AutPlayIcon.Download)
+    public data object SettingsAccount : UiDestination("settings-account", R.string.settings_account_devices, AutPlayIcon.Devices)
+    public data object SettingsPlayback : UiDestination("settings-playback", R.string.settings_sound_playback, AutPlayIcon.Settings)
+    public data object SettingsMusic : UiDestination("settings-music", R.string.settings_music_downloads, AutPlayIcon.Library)
+    public data object SettingsDownloads : UiDestination("settings-downloads", R.string.settings_music_downloads, AutPlayIcon.Library)
     public data object SettingsAppearance : UiDestination("settings-appearance", R.string.settings_appearance_language, AutPlayIcon.Sun)
-    public data object SettingsAbout : UiDestination("settings-about", R.string.settings_about, AutPlayIcon.Settings)
+    public data object SettingsAbout : UiDestination("settings-about", R.string.settings_about, AutPlayIcon.Info)
     public data object SettingsDiagnostics : UiDestination("settings-diagnostics", R.string.settings_diagnostics, AutPlayIcon.Server)
 
     public val isSettingsDestination: Boolean
-        get() = this == Settings || this in settingsNavigation || this == SettingsDiagnostics
+        get() = this == Settings || this in settingsNavigation || this == SettingsDiagnostics || this == SettingsDownloads
 
     public companion object {
         public val settingsNavigation: List<UiDestination>
-            get() = listOf(SettingsAccount, SettingsPlayback, SettingsMusic, SettingsDownloads,
+            get() = listOf(SettingsAccount, SettingsPlayback, SettingsMusic,
                 SettingsAppearance, PrivacyAndData, SettingsAbout)
         /** Exactly the three primary destinations required by the accepted compact contract. */
         public val compactNavigation: List<UiDestination>
             get() = listOf(Home, Search, Library)
 
-        /** Product destinations in rail order; Profile and Settings remain top-chrome actions. */
+        /** Product destinations in rail order; the avatar opens profile and settings. */
         public val railNavigation: List<UiDestination>
             get() = listOf(
                 Home,
@@ -103,6 +103,8 @@ public enum class AutPlayIcon {
     Sync,
     Server,
     Profile,
+    Devices,
+    Info,
     Settings,
     Privacy,
     Back,
@@ -114,6 +116,7 @@ public enum class AutPlayIcon {
     Check,
     Favorite,
     FavoriteFilled,
+    HeartOff,
     ThumbUp,
     ThumbDown,
     Timer,

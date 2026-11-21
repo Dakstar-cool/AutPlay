@@ -2,22 +2,13 @@ package app.autplay
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import app.autplay.application.profilepairing.PairingState
 import app.autplay.ui.AutPlayIcon
-import app.autplay.ui.AutPlayPlatformIcon
 import app.autplay.ui.AutPlayTokens
 import app.autplay.ui.PreferenceSection
 import app.autplay.ui.profilepairing.publicRegistrationBlocksOrdinaryFirstBind
@@ -48,33 +39,17 @@ internal fun UserProfileScreen(state: LegacySecondaryRouteState, actions: Legacy
     val profile = state.profilePairing
     val connected = profile.pairing is PairingState.Connected
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(AutPlayTokens.dimensions.sectionSpacing)) {
-        app.autplay.ui.PreferenceSurface {
-            Row(Modifier.fillMaxWidth().padding(AutPlayTokens.dimensions.screenPadding), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(shape = CircleShape, color = AutPlayTokens.colors.softAccent, contentColor = MaterialTheme.colorScheme.primary) {
-                    AutPlayPlatformIcon(AutPlayIcon.Profile, null, Modifier.padding(16.dp).size(30.dp))
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(profile.accountLabel ?: stringResource(R.string.profile_my_music), style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        if (connected) profile.serverLabel ?: stringResource(R.string.profile_connection_connected)
-                        else stringResource(R.string.profile_connection_local),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = AutPlayTokens.colors.mutedText,
-                    )
-                }
+        PreferenceSection(stringResource(R.string.profile_friends), AutPlayIcon.Wave, stringResource(R.string.profile_friends_summary)) {
+            if (state.socialAvailable) {
+                SocialPanel(state.social, actions.social)
+            } else {
+                Text(stringResource(R.string.profile_friends_local), color = AutPlayTokens.colors.mutedText)
+                SocialPublicIdPanel(state.social, actions.social, serverAvailable = false)
             }
         }
-        ProfileFrontendScreen(profile, actions.profilePairing, showHero = false)
         OwnerProfileStatisticsCard(state.ownerStatisticsState, actions.refreshOwnerStatistics)
         if (connected && app.autplay.ui.LocalDeveloperMode.current) {
             SonaCollectionStatistics(state.settings, state.trainingConsent)
-        }
-        if (!state.socialAvailable) {
-            SocialPublicIdPanel(state.social, actions.social, serverAvailable = false)
-        }
-        PreferenceSection(stringResource(R.string.profile_friends), AutPlayIcon.Wave, stringResource(R.string.profile_friends_summary)) {
-            if (state.socialAvailable) SocialPanel(state.social, actions.social)
-            else Text(stringResource(R.string.profile_friends_local), color = AutPlayTokens.colors.mutedText)
         }
     }
 }

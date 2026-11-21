@@ -2,7 +2,7 @@
 <resources>
     <string name="recovery_title">Восстановление аккаунта</string>
     <string name="recovery_new_account_incomplete">Настройка аккаунта не завершена. Создайте и сохраните TXT восстановления, чтобы закончить. Локальная музыка остаётся доступной.</string>
-    <string name="recovery_account_created">Аккаунт создан. Завершите настройку восстановления в профиле.</string>
+    <string name="recovery_account_created">Аккаунт создан. Настройте восстановление в разделе «Аккаунт и устройства».</string>
     <string name="recovery_working">Подключение…</string>
     <string name="recovery_save_required">Сохраните TXT восстановления в надёжном месте. Он понадобится, если вы потеряете доступ к устройствам.</string>
     <string name="recovery_existing_code">Код восстановления создан на другом устройстве. Сохраните тот файл или замените код здесь.</string>

@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.autplay.ui.AutPlayTokens
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -43,7 +44,7 @@ internal fun SleepTimerDial(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val primary = MaterialTheme.colorScheme.primary
+    val primary = AutPlayTokens.colors.timerAccent
     val track = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val textColor = MaterialTheme.colorScheme.onSurface

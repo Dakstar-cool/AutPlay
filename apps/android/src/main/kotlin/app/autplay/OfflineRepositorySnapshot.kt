@@ -14,12 +14,10 @@ import app.autplay.application.importing.LEGACY_PROFILE_ID
 import app.autplay.application.importing.LocalImportReviewRepository
 import app.autplay.application.library.CoreHomePlaylistSummary
 import app.autplay.application.library.CoreHomeTrackSummary
-import app.autplay.application.library.CoreLibraryEntrySummary
 import app.autplay.application.library.CoreLocalAudioSummary
 import app.autplay.application.library.CoreProductRepository
 import app.autplay.application.library.CoreReleaseSummary
 import app.autplay.application.library.CoreResumeQueueSummary
-import app.autplay.application.library.CoreTrackPreferenceSummary
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.SyncStatus
 import app.autplay.application.sync.SyncStatusRepository
@@ -32,7 +30,6 @@ internal data class OfflineRepositorySnapshot(
     val artists: List<ArtistSummary>,
     val playlists: List<CoreHomePlaylistSummary>,
     val releases: List<CoreReleaseSummary>,
-    val preferences: List<CoreTrackPreferenceSummary>,
     val historyCount: Int,
     val downloads: List<DownloadIntentPresentation>,
     val localAudio: List<CoreLocalAudioSummary>,
@@ -67,8 +64,6 @@ internal fun rememberOfflineRepositorySnapshot(
         .collectAsState(initial = emptyList())
     val releases by remember(coreRepository, profileId) { coreRepository.releases(profileId) }
         .collectAsState(initial = emptyList())
-    val preferences by remember(coreRepository, profileId) { coreRepository.preferences(profileId) }
-        .collectAsState(initial = emptyList())
     val historyCount by remember(coreRepository, profileId) { coreRepository.historyCount(profileId) }
         .collectAsState(initial = 0)
     val downloads by downloadRepository.observePresentation(profileId).collectAsState(initial = emptyList())
@@ -101,7 +96,6 @@ internal fun rememberOfflineRepositorySnapshot(
         artistBrowse.artists,
         playlists,
         releases,
-        preferences,
         historyCount,
         downloads,
         localAudio,

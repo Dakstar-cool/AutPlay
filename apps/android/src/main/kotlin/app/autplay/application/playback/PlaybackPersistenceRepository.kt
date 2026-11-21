@@ -468,9 +468,9 @@ class PlaybackPersistenceRepository(
         ServerProfileId(serverProfileId),
     )
 
-    private companion object {
-        const val MAX_QUEUE_ENTRIES = 10_000
-        const val MAX_STALE_SESSIONS = 100
-        val TOKEN_UPPER = Regex("^[A-Z][A-Z0-9_]{0,99}$")
+    companion object {
+        internal const val MAX_QUEUE_ENTRIES = 10_000
+        private const val MAX_STALE_SESSIONS = 100
+        private val TOKEN_UPPER = Regex("^[A-Z][A-Z0-9_]{0,99}$")
     }
 }

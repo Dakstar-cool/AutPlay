@@ -27,26 +27,7 @@ class CoreProductRepository(
     private val metadataAlbums = AlbumGroupRepository(database)
     fun libraryEntries(profileId: String?, limit: Int = 5_000): Flow<List<CoreLibraryEntrySummary>> {
         require(limit in 1..5_000)
-        val effectiveProfileId = effectiveProfile(profileId)
-        return combine(database.libraryDao().entriesForProfile(effectiveProfileId, limit), database.trackMetadataDao().changes(effectiveProfileId)) { entries, _ -> entries }.mapLatest { entries ->
-            val tracks = resolveTrackRefs(entries.map { it.localUserTrackRefId }, effectiveProfileId)
-            entries.map { entry ->
-                val track = tracks[entry.localUserTrackRefId]
-                CoreLibraryEntrySummary(
-                    localLibraryEntryId = entry.localLibraryEntryId,
-                    localUserTrackRefId = entry.localUserTrackRefId,
-                    title = track?.rawTitle,
-                    artistName = track?.rawArtist,
-                    addedAtMs = entry.addedAtMs,
-                    availabilityStatus = entry.availabilityStatus,
-                    removed = entry.removedAtMs != null,
-                    serverPlaybackCandidate = track?.serverUserTrackRefId != null &&
-                        track.serverRecordingId != null &&
-                        track.resolutionStatus == "RESOLVED" &&
-                        track.deletedAtMs == null,
-                )
-            }
-        }
+        return database.libraryDao().browseLibrary(effectiveProfile(profileId), limit)
     }
 
     fun recentlyAdded(profileId: String?, limit: Int = 12): Flow<List<CoreHomeTrackSummary>> {
@@ -85,8 +66,8 @@ class CoreProductRepository(
 
     fun playlists(profileId: String?, limit: Int = 200): Flow<List<CoreHomePlaylistSummary>> {
         require(limit in 1..500)
-        return database.playlistDao().activePlaylistsForProfile(effectiveProfile(profileId), limit).map { rows ->
-            rows.map { CoreHomePlaylistSummary(it.localPlaylistId, it.name, it.description) }
+        return database.playlistDao().libraryPlaylists(effectiveProfile(profileId), limit).map { rows ->
+            rows.map { (playlist, artworkTrackId) -> CoreHomePlaylistSummary(playlist.localPlaylistId, playlist.name, playlist.description, artworkTrackId) }
         }
     }
 
@@ -111,7 +92,7 @@ class CoreProductRepository(
     /** Sample the entire owner's library, independently of the bounded, sorted UI projection. */
     suspend fun randomPlaybackCandidates(profileId: String?, vaultAvailable: Boolean, limit: Int = 200): List<String> {
         require(limit in 1..200)
-        return database.libraryDao().randomPlaybackCandidates(effectiveProfile(profileId), vaultAvailable, limit)
+        return database.libraryDao().playbackCandidates(effectiveProfile(profileId), vaultAvailable, limit)
     }
 
     fun activeQueue(profileId: String?): Flow<CoreResumeQueueSummary?> =
@@ -138,7 +119,9 @@ class CoreProductRepository(
             metadataAlbums.observe(profileId)) { canonical, groups ->
             (groups.map { CoreReleaseSummary(it.group.stableId, it.group.title, it.group.albumArtist,
                 it.group.releaseDate, it.members.size, it.members.firstOrNull()?.localUserTrackRefId) } +
-                canonical.map { CoreReleaseSummary(it.localReleaseId, it.title, it.displayArtist, it.releaseDateText) }).take(limit)
+                canonical.map { (release, artworkTrackId) ->
+                    CoreReleaseSummary(release.localReleaseId, release.title, release.displayArtist, release.releaseDateText, artworkTrackId = artworkTrackId)
+                }).take(limit)
         }
     }
 
@@ -146,18 +129,10 @@ class CoreProductRepository(
         "track_metadata_projection", "user_track_ref", "library_entry", "release_projection", "release_track_projection", "recording_projection",
     ).map { }
 
-    fun preferences(profileId: String?, limit: Int = 2_000): Flow<List<CoreTrackPreferenceSummary>> {
-        require(limit in 1..5_000)
-        return database.libraryDao().preferencesForProfile(effectiveProfile(profileId), limit).map { rows ->
-            rows.map {
-                CoreTrackPreferenceSummary(
-                    stableId = it.localUserTrackRefId,
-                    loved = it.preference == "LIKED",
-                    disliked = it.preference == "DISLIKED",
-                )
-            }
-        }
-    }
+    fun trackPreference(profileId: String?, trackRefId: String): Flow<String?> =
+        database.libraryDao().observePreference(trackRefId).map { row ->
+            row?.takeIf { it.serverProfileId == effectiveProfile(profileId) }?.preference
+        }.distinctUntilChanged()
 
     fun localAudio(profileId: String?, limit: Int = 2_000): Flow<List<CoreLocalAudioSummary>> {
         require(limit in 1..5_000)
@@ -270,7 +245,7 @@ class CoreProductRepository(
                         title = member.title.orEmpty(), artistName = member.artistName.orEmpty(),
                         durationMs = member.durationMs, localUserTrackRefId = member.localUserTrackRefId,
                     )
-                })
+                }, collectionArtwork(profileId, album.members.map { it.localUserTrackRefId }))
         }
         val release = database.catalogProjectionDao().releaseForProfile(
             localReleaseId,
@@ -293,10 +268,18 @@ class CoreProductRepository(
             releaseDateText = release.releaseDateText,
             releaseType = release.releaseType,
             artworkRef = release.artworkRef,
+            artworkTrackId = collectionArtwork(profileId, trackRefsByRecording.values.map { it.localUserTrackRefId }),
             tracks = releaseTracks.map {
                 it.toDetailRow(recordings[it.localRecordingId], trackRefsByRecording[it.localRecordingId]?.localUserTrackRefId)
             },
         )
+    }
+
+    private suspend fun collectionArtwork(profileId: String?, trackIds: List<String>): String? {
+        for (ids in trackIds.chunked(MAX_IN_QUERY_BINDINGS)) {
+            database.trackMetadataDao().artworkTrack(effectiveProfile(profileId), ids)?.let { return it }
+        }
+        return null
     }
 
     suspend fun playlistDetail(localPlaylistId: String, profileId: String?): CorePlaylistDetail? {
@@ -317,6 +300,7 @@ class CoreProductRepository(
             name = playlist.name,
             description = playlist.description,
             playlistType = playlist.playlistType,
+            artworkTrackId = trackRefIds.firstOrNull { metadata[it]?.artworkSha256 != null },
             entries = entries.map { entry ->
                 val track = trackRefs[entry.localUserTrackRefId]
                 val recording = track?.localRecordingId?.let(recordings::get)
@@ -376,23 +360,14 @@ class CoreProductRepository(
 data class CoreReleaseSummary(val stableId: String, val title: String, val artistName: String?,
     val releaseDateText: String? = null, val ownedTrackCount: Int? = null,
     val artworkTrackId: String? = null)
-data class CoreLibraryEntrySummary(
-    val localLibraryEntryId: String,
-    val localUserTrackRefId: String,
-    val title: String?,
-    val artistName: String?,
-    val addedAtMs: Long,
-    val availabilityStatus: String,
-    val removed: Boolean,
-    val serverPlaybackCandidate: Boolean,
-)
+typealias CoreLibraryEntrySummary = app.autplay.data.local.dao.LibraryBrowseRow
 data class CoreHomeTrackSummary(
     val stableId: String,
     val title: String?,
     val artistName: String?,
     val occurredAtMs: Long,
 )
-data class CoreHomePlaylistSummary(val stableId: String, val title: String, val description: String?)
+data class CoreHomePlaylistSummary(val stableId: String, val title: String, val description: String?, val artworkTrackId: String? = null)
 data class CoreResumeQueueSummary(
     val queueSnapshotId: String,
     val localUserTrackRefId: String,
@@ -400,11 +375,6 @@ data class CoreResumeQueueSummary(
     val artistName: String?,
     val positionMs: Long,
     val queueType: String,
-)
-data class CoreTrackPreferenceSummary(
-    val stableId: String,
-    val loved: Boolean,
-    val disliked: Boolean = false,
 )
 data class CoreLocalAudioSummary(
     val stableId: String,
@@ -452,6 +422,7 @@ data class CoreReleaseDetail(
     val releaseType: String?,
     val artworkRef: String?,
     val tracks: List<CoreReleaseDetailTrack>,
+    val artworkTrackId: String? = null,
 )
 
 data class CoreReleaseDetailTrack(
@@ -472,6 +443,7 @@ data class CorePlaylistDetail(
     val description: String?,
     val playlistType: String,
     val entries: List<CorePlaylistDetailEntry>,
+    val artworkTrackId: String? = null,
 )
 
 data class CorePlaylistDetailEntry(

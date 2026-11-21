@@ -250,6 +250,21 @@ class SyncCoordinatorAcceptanceTest {
         } finally { job.cancelAndJoin() }
     }
 
+    @Test fun serverAvailabilityTracksConnectionFailureAndRecoveryWithNetworkStillPresent() = runBlocking {
+        seed(profile, "cursor-a")
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun pull(binding: ClientEventBinding, cursor: String?): PullPage {
+                throw java.net.ConnectException()
+            }
+        }
+        val status = SyncStatusRepository(db).observe(binding)
+        val failed = runCatching { SyncCoordinator(db, transport).run(binding) }.exceptionOrNull()
+        org.junit.Assert.assertTrue(failed is java.net.ConnectException)
+        org.junit.Assert.assertTrue(status.first().serverUnavailable)
+        SyncCoordinator(db, FakeTransport()).run(binding)
+        assertFalse(status.first().serverUnavailable)
+    }
+
     @Test fun sessionRequiredReleasesJournalWithoutConsumingRetryBudget() = runBlocking {
         seed(profile, "cursor-a")
         val event = pending(1)

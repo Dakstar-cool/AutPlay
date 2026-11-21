@@ -39,7 +39,7 @@ class HomeInteractionTest {
     private fun render() {
         compose.setContent {
             var liked by remember { mutableStateOf(false) }
-            var player by remember { mutableStateOf(PlaybackPresentationState(mediaId = "entry", title = "Current song", artist = "Current artist", controls = PlaybackControlGate.Allowed)) }
+            var player by remember { mutableStateOf(PlaybackPresentationState(mediaId = "entry", title = "Current song", artist = "Current artist", isPlaying = true, controls = PlaybackControlGate.Allowed)) }
             AutPlayTheme {
                 AutPlayAdaptiveShell(
                     selectedDestination = UiDestination.Home,
@@ -55,6 +55,7 @@ class HomeInteractionTest {
                         contentPadding = padding,
                         onOpenListenTogether = {}, onRecommendationVisible = {}, onLike = {}, onDislike = {},
                         playerState = player, currentTrackRefId = "track", currentTrackLiked = liked,
+                        onTogglePlayPause = { toggles++ },
                         onLikeHeroTrack = { liked = !liked },
                         onPreviousTrack = { previous++; player = player.copy(mediaId = "entry", title = "Current song") },
                         onNextTrack = { next++; player = player.copy(mediaId = "next", title = "Next song") },
@@ -76,25 +77,17 @@ class HomeInteractionTest {
         compose.runOnIdle { assertEquals(1, next); assertEquals(1, previous) }
     }
 
-    @Test fun headerAndBottomPlayerStayInPlaceAfterScrollingAndLikeCanBeRemoved() {
+    @Test fun avatarStaysInPlaceAndHomeProvidesTheOnlyTransport() {
         render()
-        val profile = compose.onNodeWithContentDescription(context.getString(R.string.action_open_profile))
-        val settings = compose.onNodeWithContentDescription(context.getString(R.string.action_open_settings))
-        val mini = compose.onNodeWithTag("persistent-mini-player")
-        val profileTop = profile.fetchSemanticsNode().boundsInRoot.top
-        val settingsTop = settings.fetchSemanticsNode().boundsInRoot.top
-        val miniTop = mini.fetchSemanticsNode().boundsInRoot.top
-        compose.onNodeWithTag("mini-player-like").performClick()
-        compose.onNode(hasContentDescription(context.getString(R.string.action_liked)) and hasAnyAncestor(hasTestTag("persistent-mini-player")), useUnmergedTree = true).assertExists()
-        compose.onNodeWithTag("mini-player-like").assertIsEnabled().performClick()
+        val profile = compose.onNodeWithContentDescription(context.getString(R.string.action_open_profile_settings))
+        val top = profile.fetchSemanticsNode().boundsInRoot.top
+        val hero = hasAnyAncestor(hasTestTag("home-playback-hero"))
+        compose.onNode(hasContentDescription(context.getString(R.string.action_like)) and hero).performClick()
+        compose.onNode(hasContentDescription(context.getString(R.string.action_liked)) and hero).performClick()
+        compose.onNode(hasContentDescription(context.getString(R.string.action_pause)) and hero).performClick()
         compose.onNodeWithTag("home-product-list").performScrollToNode(hasText("Recent 20"))
-        profile.assertIsDisplayed()
-        settings.assertIsDisplayed()
-        mini.assertIsDisplayed()
-        assertEquals(profileTop, profile.fetchSemanticsNode().boundsInRoot.top)
-        assertEquals(settingsTop, settings.fetchSemanticsNode().boundsInRoot.top)
-        assertEquals(miniTop, mini.fetchSemanticsNode().boundsInRoot.top)
-        compose.onNode(hasContentDescription(context.getString(R.string.action_play)) and hasAnyAncestor(hasTestTag("persistent-mini-player"))).performClick()
+        compose.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
+        assertEquals(top, profile.fetchSemanticsNode().boundsInRoot.top)
         compose.runOnIdle { assertEquals(1, toggles) }
     }
 }
