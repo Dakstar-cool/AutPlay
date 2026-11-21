@@ -63,8 +63,8 @@ android {
         applicationId = if (qaSideBySide) "app.autplay.qa" else "app.autplay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "1.0.11"
+        versionCode = 35
+        versionName = "1.0.12"
         releaseVersionCodeOverride?.let { versionCode = it }
         releaseVersionNameOverride?.let { versionName = it }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
