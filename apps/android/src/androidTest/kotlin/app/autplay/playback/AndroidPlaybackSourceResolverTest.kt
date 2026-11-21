@@ -133,6 +133,7 @@ class AndroidPlaybackSourceResolverTest {
             serverProfileId = uuid(99),
         )
         database.libraryDao().upsertTrackRef(track)
+        var lookupAttempts = 0
         val resolver = AndroidPlaybackSourceResolver(
             context,
             database,
@@ -140,6 +141,7 @@ class AndroidPlaybackSourceResolverTest {
         ) { requestedProfile, requestedTrackRefId ->
             assertEquals(profile, requestedProfile)
             assertEquals(serverTrackRefId, requestedTrackRefId)
+            if (++lookupAttempts == 1) throw java.net.SocketTimeoutException()
             variantId
         }
 
@@ -151,6 +153,19 @@ class AndroidPlaybackSourceResolverTest {
         assertEquals(SelectedAudioSource.VAULT_STREAM, result.value.source)
         assertEquals(profile.value, result.value.runtimeUri.authority)
         assertEquals(listOf("audio-variants", variantId), result.value.runtimeUri.pathSegments)
+        assertEquals(2, lookupAttempts)
+        suspend fun failure(error: Exception, attempts: Int, reason: PlaybackUnavailableReason) {
+            var calls = 0
+            val failing = AndroidPlaybackSourceResolver(context, database, applicationNonSecretSettingsStore(context)) { _, _ ->
+                calls++
+                throw error
+            }
+            val resolution = failing.resolve(LocalId(track.localUserTrackRefId), 31)
+            assertEquals(AndroidSourceResolution.Unavailable(reason), resolution)
+            assertEquals(attempts, calls)
+        }
+        failure(java.net.ConnectException(), 3, PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE)
+        failure(app.autplay.data.security.SessionRequiredException(), 1, PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)
     }
 
     private fun track(seed: Int) = UserTrackRefEntity(

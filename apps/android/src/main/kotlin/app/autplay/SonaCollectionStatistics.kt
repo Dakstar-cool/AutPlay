@@ -83,7 +83,7 @@ internal fun LiveSonaStatistics(online: Flow<Boolean>, load: suspend () -> SonaV
     report?.let { SonaVariationSkipSection(it.rows) }
 }
 
-private fun networkAvailability(manager: ConnectivityManager) = callbackFlow<Boolean> {
+internal fun networkAvailability(manager: ConnectivityManager) = callbackFlow<Boolean> {
     val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) { trySend(true) }
         override fun onLost(network: Network) { trySend(false) }

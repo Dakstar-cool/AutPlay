@@ -9,7 +9,6 @@ import app.autplay.application.library.CoreLibraryEntrySummary
 import app.autplay.application.library.CoreLocalAudioSummary
 import app.autplay.application.library.CoreReleaseSummary
 import app.autplay.application.library.CoreResumeQueueSummary
-import app.autplay.application.library.CoreTrackPreferenceSummary
 import app.autplay.ui.CoreCollectionUiItem
 import app.autplay.ui.CoreArtistUiItem
 import app.autplay.ui.CoreTrackUiItem
@@ -25,14 +24,11 @@ import app.autplay.ui.ArtistBrowseUiState
 internal fun buildLibraryTrackSummaries(
     entries: List<CoreLibraryEntrySummary>,
     audioStates: List<CoreLocalAudioSummary>,
-    preferences: List<CoreTrackPreferenceSummary>,
     downloadedTrackIds: Set<String>,
     serverConnected: Boolean,
     untitledTrack: String,
 ): List<CoreTrackSummary> {
     val audioByTrack = audioStates.groupBy(CoreLocalAudioSummary::stableId)
-    val lovedTrackIds = preferences.asSequence().filter(CoreTrackPreferenceSummary::loved)
-        .map(CoreTrackPreferenceSummary::stableId).toSet()
     return entries.asSequence().filterNot(CoreLibraryEntrySummary::removed).mapIndexed { index, entry ->
         val audio = audioByTrack[entry.localUserTrackRefId].orEmpty()
         val downloaded = entry.localUserTrackRefId in downloadedTrackIds
@@ -42,7 +38,7 @@ internal fun buildLibraryTrackSummaries(
             artist = entry.artistName,
             addedAtMs = entry.addedAtMs,
             sourceOrder = index,
-            loved = entry.localUserTrackRefId in lovedTrackIds,
+            loved = entry.loved,
             downloaded = downloaded,
             availability = resolveTrackAvailability(
                 entry.availabilityStatus,

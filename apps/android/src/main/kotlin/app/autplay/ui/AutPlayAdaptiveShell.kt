@@ -71,7 +71,7 @@ public fun AutPlayAdaptiveShell(
     unreadSyncConflicts: Int = 0,
     canNavigateBack: Boolean = false,
     onNavigateBack: () -> Unit = {},
-    onProfileClick: () -> Unit = { onDestinationSelected(UiDestination.Profile) },
+    playerReturnDestination: UiDestination = UiDestination.Home,
     onSettingsClick: () -> Unit = { onDestinationSelected(UiDestination.Settings) },
     onNowPlayingClick: () -> Unit = { onDestinationSelected(UiDestination.NowPlaying) },
     nowPlayingAvailable: Boolean = false,
@@ -102,6 +102,7 @@ public fun AutPlayAdaptiveShell(
                 if (canNavigateBack) onNavigateBack() else onDestinationSelected(UiDestination.Home)
             }) {
                 PlayerCollapseShell(
+                    returnDestination = playerReturnDestination,
                     widthClass = widthClass,
                     unreadSyncConflicts = unreadSyncConflicts,
                     nowPlayingBar = nowPlayingBar,
@@ -116,7 +117,6 @@ public fun AutPlayAdaptiveShell(
                 unreadSyncConflicts,
                 canNavigateBack,
                 onNavigateBack,
-                onProfileClick,
                 onSettingsClick,
                 onNowPlayingClick,
                 nowPlayingAvailable,
@@ -132,7 +132,6 @@ public fun AutPlayAdaptiveShell(
                 unreadSyncConflicts,
                 canNavigateBack,
                 onNavigateBack,
-                onProfileClick,
                 onSettingsClick,
                 onNowPlayingClick,
                 nowPlayingAvailable,
@@ -149,6 +148,7 @@ internal fun shouldUseDarkStatusBarIcons(lightTheme: Boolean): Boolean = lightTh
 
 @Composable
 private fun PlayerCollapseShell(
+    returnDestination: UiDestination,
     widthClass: UiWidthClass,
     unreadSyncConflicts: Int,
     nowPlayingBar: @Composable () -> Unit,
@@ -168,11 +168,11 @@ private fun PlayerCollapseShell(
                 .clearAndSetSemantics {},
         ) {
             Box(Modifier.fillMaxWidth().onGloballyPositioned { miniTopPx = it.positionInRoot().y }) {
-                nowPlayingBar()
+                if (returnDestination != UiDestination.Home) nowPlayingBar()
             }
             if (widthClass == UiWidthClass.Compact) {
                 HorizontalDivider(color = AutPlayTokens.colors.border.copy(alpha = 0.65f))
-                CompactNavigationBar(UiDestination.Home, unreadSyncConflicts, {})
+                CompactNavigationBar(returnDestination, unreadSyncConflicts, {})
             } else {
                 Box(Modifier.navigationBarsPadding())
             }
@@ -206,7 +206,6 @@ private fun CompactShell(
     unreadSyncConflicts: Int,
     canNavigateBack: Boolean,
     onNavigateBack: () -> Unit,
-    onProfileClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
     nowPlayingAvailable: Boolean,
@@ -221,7 +220,6 @@ private fun CompactShell(
                 selectedDestination,
                 canNavigateBack,
                 onNavigateBack,
-                onProfileClick,
                 onSettingsClick,
                 onNowPlayingClick,
                 nowPlayingAvailable,
@@ -229,7 +227,7 @@ private fun CompactShell(
         },
         bottomBar = {
             Column {
-                nowPlayingBar()
+                if (selectedDestination != UiDestination.Home) nowPlayingBar()
                 HorizontalDivider(color = AutPlayTokens.colors.border.copy(alpha = 0.65f))
                 CompactNavigationBar(selectedDestination, unreadSyncConflicts, onDestinationSelected)
             }
@@ -268,7 +266,6 @@ private fun RailShell(
     unreadSyncConflicts: Int,
     canNavigateBack: Boolean,
     onNavigateBack: () -> Unit,
-    onProfileClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
     nowPlayingAvailable: Boolean,
@@ -305,7 +302,6 @@ private fun RailShell(
                     selectedDestination,
                     canNavigateBack,
                     onNavigateBack,
-                    onProfileClick,
                     onSettingsClick,
                     onNowPlayingClick,
                     nowPlayingAvailable,
@@ -313,7 +309,7 @@ private fun RailShell(
             },
             bottomBar = {
                 Column {
-                    nowPlayingBar()
+                    if (selectedDestination != UiDestination.Home) nowPlayingBar()
                     Box(Modifier.navigationBarsPadding())
                 }
             },
@@ -342,7 +338,6 @@ private fun AutPlayTopBar(
     destination: UiDestination,
     canNavigateBack: Boolean,
     onNavigateBack: () -> Unit,
-    onProfileClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
     nowPlayingAvailable: Boolean,
@@ -363,12 +358,7 @@ private fun AutPlayTopBar(
             if (canNavigateBack && destination != UiDestination.Home) {
                 AutPlayIconButton(AutPlayIcon.Back, R.string.action_back, onNavigateBack)
             } else if (!immersive) {
-                AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile, onProfileClick)
-            }
-        },
-        actions = {
-            if (!immersive && !destination.isSettingsDestination) {
-                AutPlayIconButton(AutPlayIcon.Settings, R.string.action_open_settings, onSettingsClick)
+                AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile_settings, onSettingsClick)
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -428,7 +418,7 @@ private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
 }
 
 private fun topBarTitle(destination: UiDestination): Int = when (destination) {
-    UiDestination.Home -> R.string.home_my_wave
+    UiDestination.Home -> R.string.app_name
     UiDestination.Search -> R.string.nav_search
     UiDestination.Library -> R.string.library_title
     else -> destination.labelRes

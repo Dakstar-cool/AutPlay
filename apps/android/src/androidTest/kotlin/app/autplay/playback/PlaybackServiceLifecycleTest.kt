@@ -585,7 +585,8 @@ class PlaybackServiceLifecycleTest {
             settings.mutate { it.copy(activeServerProfileId = null, activeUserId = null, deviceId = null) }
         }
 
-        suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER", startPositionMs: Long = 0) {
+        suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER", startPositionMs: Long = 0,
+            sourceContextId: String? = null, beforePlayback: suspend () -> Unit = {}) {
             if (original == null) { original = settings.settings.first(); settings.update(NonSecretSettings()) }
             smoothTransitions(smooth)
             main { context.stopService(Intent(context, AutPlayPlaybackService::class.java)) }
@@ -613,21 +614,22 @@ class PlaybackServiceLifecycleTest {
                         "AVAILABLE", "USER_IMPORT", 640_044, null, null, 1, 1))
                 }
             }
-            val snapshot = activate(sources.indices.toList(), queueType)
+            val snapshot = activate(sources.indices.toList(), queueType, sourceContextId)
             if (startPositionMs > 0) PlaybackPersistenceRepository(database).selectIdleEntry(
                 snapshot, entries[0], startPositionMs, "OFF", "OFF", null, System.currentTimeMillis(),
             )
+            beforePlayback()
             owner.dispatch(PlaybackCommand.StartQueue(snapshot))
             connect()
         }
 
-        suspend fun activate(indices: List<Int>, queueType: String = "USER"): LocalId {
+        suspend fun activate(indices: List<Int>, queueType: String = "USER", sourceContextId: String? = null): LocalId {
             val snapshot = LocalId.random()
             if (snapshots.isNotEmpty()) indices.forEach { entries[it] = LocalId.random() }
             snapshots += snapshot.value
             PlaybackPersistenceRepository(database).activateQueue(snapshot,
                 indices.map { NewPlaybackQueueEntry(entries[it], LocalId(tracks[it]), "ORGANIC", "LOCAL_THEN_VAULT") },
-                queueType, null, null, "GENERAL", System.currentTimeMillis())
+                queueType, sourceContextId, null, "GENERAL", System.currentTimeMillis())
             return snapshot
         }
 

@@ -72,22 +72,27 @@ class RoutingPlaybackDataSource(
 
 @UnstableApi
 object PlaybackMediaSourceFactory {
-    internal fun create(
-        context: Context,
-        onTimeline: ((androidx.media3.common.MediaItem, PlaybackSourceTimeline) -> Unit)? = null,
-    ): androidx.media3.exoplayer.source.MediaSource.Factory {
+    internal fun cachedVault(context: Context): DataSource.Factory {
         val components = MediaDownloadComponents.get(context.applicationContext)
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(false)
             .setConnectTimeoutMs(10_000)
             .setReadTimeoutMs(15_000)
-        val cachedVault = cachedVaultDataSourceFactory(
-            components.downloadCache, components.streamCache,
-            VaultPlaybackDataSource.productionFactory(context, http),
+        return cachedVaultDataSourceFactory(
+            components.downloadCache, components.streamCache, VaultPlaybackDataSource.productionFactory(context, http),
         )
+    }
+
+    internal fun create(
+        context: Context,
+        onTimeline: ((androidx.media3.common.MediaItem, PlaybackSourceTimeline) -> Unit)? = null,
+    ): androidx.media3.exoplayer.source.MediaSource.Factory {
+        val cachedVault = cachedVault(context)
+        val local = DefaultDataSource.Factory(context, DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(false).setConnectTimeoutMs(10_000).setReadTimeoutMs(15_000))
         val routing = DataSource.Factory {
             // Local content already has durable storage; copying it into both caches delays reads.
-            RoutingPlaybackDataSource(DefaultDataSource.Factory(context, http), cachedVault)
+            RoutingPlaybackDataSource(local, cachedVault)
         }
         val delegate = DefaultMediaSourceFactory(routing, playbackExtractorsFactory())
             .setLoadErrorHandlingPolicy(PlaybackLoadErrorPolicy())
@@ -95,6 +100,25 @@ object PlaybackMediaSourceFactory {
         return ResolvingMediaSourceFactory(reporting)
     }
 }
+
+/** A short range uses the player's cache key and commits its span on close, even at EOF. */
+@UnstableApi
+internal suspend fun warmStreamPrefix(factory: DataSource.Factory, uri: Uri) =
+    kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
+        val source = factory.createDataSource()
+        var remaining = 256 * 1024
+        try {
+            source.open(DataSpec.Builder().setUri(uri).setLength(remaining.toLong()).build())
+            val buffer = ByteArray(16 * 1024)
+            while (remaining > 0 && !Thread.currentThread().isInterrupted) {
+                val count = source.read(buffer, 0, minOf(buffer.size, remaining))
+                if (count <= 0) break
+                remaining -= count
+            }
+        } finally {
+            source.close()
+        }
+    }
 
 @UnstableApi
 internal fun cachedVaultDataSourceFactory(

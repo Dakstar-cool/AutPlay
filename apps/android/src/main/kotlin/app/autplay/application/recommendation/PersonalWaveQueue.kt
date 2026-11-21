@@ -13,24 +13,83 @@ import app.autplay.data.security.BindingAuthorityWriteGate
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.domain.LocalId
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** One personal queue, whether the P11 order arrived just now or in an offline pack. */
 internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
+    private class Preparation(val owner: ClientEventBinding, val wave: PersonalWaveSession) {
+        val created = android.os.SystemClock.elapsedRealtime()
+        val result = CompletableDeferred<ServerRecommendationResult?>()
+    }
+
+    private var pending: Preparation? = null
+
+    private suspend fun newSession(profile: String?): PersonalWaveSession {
+        val previous = database.queueDao().activeSnapshotOnce()
+        return PersonalWaveSession.start(previous?.takeIf { it.serverProfileId == profile }?.listeningContext)
+    }
+
+    /** Owned by the visible Home screen. Only start() may activate a queue or record impressions. */
+    suspend fun prepare(
+        binding: ClientEventBinding,
+        fetch: suspend (ClientEventBinding, PersonalWaveSession) -> ServerRecommendationResult,
+        warmTracks: suspend (List<LocalId>) -> Unit,
+    ) {
+        val slot = Preparation(binding, newSession(binding.serverProfileId.value))
+        synchronized(this) { pending = slot }
+        try {
+            val result = fetchAvailable(binding, slot.wave, fetch) ?: return
+            val order = remoteOrder(result)
+            slot.result.complete(result)
+            if (order.items.isNotEmpty()) {
+                // A fresh installation can receive its server ranking before the first library sync.
+                val tracks = database.syncDao().observeCursor(binding.serverProfileId.value).map { cursor ->
+                    if (synchronized(this) { pending !== slot }) return@map emptyList()
+                    if (cursor?.deviceId != binding.deviceId.value ||
+                        (binding.journalEpoch != null && cursor.journalEpoch != binding.journalEpoch.value)) return@map null
+                    rankedEntries(binding, slot.wave, order, true, System.currentTimeMillis())
+                        .take(3).map { it.trackRefId }.takeIf { it.isNotEmpty() }
+                }.first { it != null }.orEmpty()
+                if (tracks.isNotEmpty()) warmTracks(tracks)
+            }
+            // Keep the selection available while this screen is visible. A later tap checks its age.
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            synchronized(this) { if (pending === slot) pending = null }
+            slot.result.complete(null)
+        }
+    }
+
     suspend fun start(
         binding: ClientEventBinding?,
         replacement: OrdinaryQueueReplacementGuard,
         online: Boolean,
         stillActive: () -> Boolean,
+        mix: HomeWheelMix? = null,
         fetch: suspend (ClientEventBinding, PersonalWaveSession) -> ServerRecommendationResult,
     ): LocalId? {
         val profile = binding?.serverProfileId?.value
-        val previous = database.queueDao().activeSnapshotOnce()
-        val previousMode = previous?.takeIf { it.serverProfileId == profile }?.listeningContext
-        val wave = PersonalWaveSession.start(previousMode)
-        val remote = if (online && binding != null) fetchAvailable(binding, wave, fetch) else null
+        if (mix != null && binding == null) return null
+        val current = if (mix == null) newSession(profile) else PersonalWaveSession.start("GENERAL")
+        val slot = if (mix != null) null else synchronized(this) {
+            pending.also { pending = null }?.takeIf {
+                online && it.owner == binding && it.wave.mode == current.mode &&
+                    it.wave.date == current.date && it.wave.hour == current.hour &&
+                    android.os.SystemClock.elapsedRealtime() - it.created < 120_000
+            }
+        }
+        val wave = slot?.wave ?: current
+        val remote = when {
+            mix != null -> null
+            slot != null -> slot.result.await()
+            online && binding != null -> fetchAvailable(binding, wave, fetch)
+            else -> null
+        }
         return BindingAuthorityWriteGate.serialized {
             check(stillActive()) { "WAVE_OWNER_CHANGED" }
             database.withWriteTransaction {
@@ -40,22 +99,19 @@ internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
                     it.copy(journalEpoch = LocalId(cursor.journalEpoch))
                 }
                 val now = System.currentTimeMillis()
-                val ranked = if (binding == null) null else remote?.let {
-                    require(it.replay == "served" && it.items.size <= OfflineRecommendationPackCodec.MAX_ITEMS)
-                    WaveOrder(LocalId(it.requestId), null, it.items.map { item ->
-                        WaveItem(LocalId(item.recordingId), item.sourceRank, item.section, item.confirmedVariation, item.frequentWaveSkips)
-                    })
-                } ?: cachedOrder(binding, now)
+                val ranked = if (binding == null) null else remote?.let(::remoteOrder) ?: cachedOrder(binding, now)
 
+                if (mix != null && ranked?.pack?.value != mix.packId) return@withWriteTransaction null
                 val recommended = if (ranked != null && binding != null) {
-                    rankedEntries(binding, wave, ranked, online && remote != null, now)
+                    rankedEntries(binding, wave, ranked, online && remote != null, now, mix)
                 } else emptyList()
+                if (mix != null && recommended.size < 2) return@withWriteTransaction null
                 val entries = recommended.ifEmpty {
                     val owner = profile ?: "legacy-unscoped"
                     val library = database.libraryDao()
-                    val sampled = library.randomPlaybackCandidates(
+                    val sampled = library.playbackCandidates(
                         owner, vaultAvailable = false, limit = 200,
-                        onlyUnresolved = remote != null,
+                        onlyUnresolved = remote != null, randomOrder = remote != null,
                     )
                     library.selectSongRefs(owner, sampled, now, wave = true,
                         confirmedVariationRecordings = ranked?.confirmedVariations.orEmpty(), lessFrequentRecordings = ranked?.lessFrequent.orEmpty()).map {
@@ -71,6 +127,13 @@ internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
                 wave.id
             }
         }
+    }
+
+    private fun remoteOrder(result: ServerRecommendationResult): WaveOrder {
+        require(result.replay == "served" && result.items.size <= OfflineRecommendationPackCodec.MAX_ITEMS)
+        return WaveOrder(LocalId(result.requestId), null, result.items.map { item ->
+            WaveItem(LocalId(item.recordingId), item.sourceRank, item.section, item.confirmedVariation, item.frequentWaveSkips)
+        })
     }
 
     private suspend fun fetchAvailable(
@@ -107,6 +170,7 @@ internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
 
     private suspend fun rankedEntries(
         binding: ClientEventBinding, wave: PersonalWaveSession, order: WaveOrder, vaultAvailable: Boolean, now: Long,
+        mix: HomeWheelMix? = null,
     ): List<NewPlaybackQueueEntry> {
         require(order.items.all { it.rank in 1..100 && SECTION.matches(it.section) })
         require(order.items.distinctBy { it.recording }.size == order.items.size)
@@ -114,7 +178,14 @@ internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
         val candidates = database.recommendationPackDao().localCandidates(
             binding.serverProfileId.value, binding.userId.value, order.items.map { it.recording.value }, 200,
         ).filter { (vaultAvailable || it.isLocallyAvailable) && !it.excludedFromTaste && it.preference != "DISLIKED" }
-        val byRecording = candidates.groupBy { it.recordingId }
+        val genreRefs = mix?.let {
+            val refs = candidates.map { row -> row.localUserTrackRefId }.filter(it.trackIds::contains)
+            database.trackMetadataDao().forTracks(binding.serverProfileId.value, refs)
+                .filter { row -> it.genre in HomeWheelRanking.cardGenres(row.payloadJson) }
+                .mapTo(hashSetOf()) { row -> row.localUserTrackRefId }
+        }
+        val byRecording = candidates.filter { genreRefs == null || it.localUserTrackRefId in genreRefs }
+            .groupBy { it.recordingId }
         val ranked = order.items.flatMap { item ->
             byRecording[item.recording.value].orEmpty().sortedByDescending { it.isLocallyAvailable }
                 .map { it.localUserTrackRefId to item }

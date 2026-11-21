@@ -50,7 +50,14 @@ data class SyncStatus(
     val lastSuccessAtMs: Long?,
     val bootstrapState: String,
     val lastErrorCode: String? = null,
-)
+) {
+    val serverUnavailable: Boolean get() {
+        val code = lastErrorCode ?: return false
+        if (code == "NETWORK_UNAVAILABLE" || code == "SESSION_REQUIRED") return true
+        val httpStatus = code.removePrefix("SYNC_HTTP_").toIntOrNull() ?: return false
+        return httpStatus == 401 || httpStatus == 403 || httpStatus == 408 || httpStatus in 500..599
+    }
+}
 
 /** Transport values deliberately retain unknown event strings for safe deferred persistence. */
 data class SyncAck(val eventId: String, val outcome: String, val errorCode: String? = null, val retryAfterMs: Long? = null, val retryable: Boolean = false, val originalOutcome: String? = null, val aggregateType: String? = null, val aggregateLocalId: String? = null, val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val redirectAliasServerId: String? = null, val redirectCanonicalServerId: String? = null)
@@ -86,7 +93,6 @@ class SyncCoordinator(
 
     suspend fun runForWorker(binding: ClientEventBinding): SyncRunOutcome {
         val cursor = requireCursor(binding)
-        database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), null))
         try {
             transport.bind(binding)
             database.withWriteTransaction {
@@ -131,6 +137,9 @@ class SyncCoordinator(
             afterSync(binding)
             return SyncRunOutcome.COMPLETE
         } catch (error: CancellationException) {
+            throw error
+        } catch (error: java.io.IOException) {
+            database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, "NETWORK_UNAVAILABLE", nowMs(), null))
             throw error
         } catch (error: IllegalStateException) {
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, error.message?.take(100), nowMs(), null))

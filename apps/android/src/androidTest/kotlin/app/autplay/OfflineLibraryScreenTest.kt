@@ -124,17 +124,7 @@ class OfflineLibraryScreenTest {
             composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
         }
         scenario?.close()
-        // Starting a queue for unavailable audio can also leave a service holding the fixture database.
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        instrumentation.runOnMainSync { context.stopService(Intent(context, AutPlayPlaybackService::class.java)) }
-        val manager = context.getSystemService(ActivityManager::class.java)
-        composeRule.waitUntil(10_000) {
-            @Suppress("DEPRECATION")
-            manager.getRunningServices(Int.MAX_VALUE).none { it.service.className == AutPlayPlaybackService::class.java.name }
-        }
-        instrumentation.waitForIdleSync()
-        PlaybackShutdownPersistence.awaitPending()
-        PlaybackRuntimeState.publish(PlaybackUiState())
+        stopPlaybackService()
         waveSamples.forEach { audio -> context.contentResolver.delete(audio, null, null) }
         AutPlayRuntime.closeDatabaseForTests()
         context.deleteDatabase("autplay.db")
@@ -146,26 +136,58 @@ class OfflineLibraryScreenTest {
         )
     }
 
+    private suspend fun stopPlaybackService() {
+        // Starting a queue for unavailable audio can also leave a service holding the fixture database.
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync { context.stopService(Intent(context, AutPlayPlaybackService::class.java)) }
+        val manager = context.getSystemService(ActivityManager::class.java)
+        composeRule.waitUntil(10_000) {
+            @Suppress("DEPRECATION")
+            manager.getRunningServices(Int.MAX_VALUE).none { it.service.className == AutPlayPlaybackService::class.java.name }
+        }
+        instrumentation.waitForIdleSync()
+        PlaybackShutdownPersistence.awaitPending()
+        PlaybackRuntimeState.publish(PlaybackUiState())
+    }
+
     @Test
     @SdkSuppress(minSdkVersion = 29)
     fun homeStartsLocalWaveAndContinuesSameQueueAfterPause() {
         val strings = localizedAppContext(context, AppLanguage.Russian)
-        val trackId = startLocalWave("First Light")
+        val title = "Ночной берег"
+        val trackId = importPlayableSample(title, artist = "Линия моря")
+        runBlocking { seedSunsetArtwork(context, AutPlayRuntime.database(context), "legacy-unscoped", trackId.value) }
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        val start = hasTestTag("home-my-wave") and isEnabled()
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(start).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNode(start).performClick()
+        composeRule.waitUntil(15_000) { PlaybackRuntimeState.state.value.isPlaying }
         val queueId = requireNotNull(PlaybackRuntimeState.state.value.queueSnapshotId)
         val hero = hasAnyAncestor(hasTestTag("home-playback-hero"))
-        val currentTrack = hasText("First Light") and hero
-        composeRule.waitUntil(10_000) { composeRule.onAllNodes(currentTrack).fetchSemanticsNodes().isNotEmpty() }
-        composeRule.onNode(currentTrack).assertIsDisplayed()
         val pause = hasContentDescription(strings.getString(R.string.action_pause)) and hero
-        saveUiScreenshot("home-wave-playing")
-        composeRule.onNode(pause).performScrollTo().performClick()
+        composeRule.onNode(pause).performClick()
         composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
-        val resume = hasText(strings.getString(R.string.home_continue_action))
-        composeRule.onNodeWithTag("home-product-list").performScrollToNode(resume)
-        saveUiScreenshot("home-wave-continue")
-        composeRule.onNode(resume).performClick()
-        composeRule.waitUntil(10_000) { PlaybackRuntimeState.state.value.isPlaying }
-        composeRule.onNodeWithTag("now-playing-panel").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
+        scenario?.close()
+        runBlocking { stopPlaybackService() }
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(start).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithText("Линия моря — $title").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-track-carousel").assertDoesNotExist()
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
+        saveUiScreenshot("home-review-ready")
+        composeRule.onNode(start).performClick()
+        composeRule.waitUntil(15_000) { PlaybackRuntimeState.state.value.isPlaying }
+        composeRule.onNode(pause).assertIsDisplayed()
+        composeRule.onNodeWithTag("home-track-carousel").assertIsDisplayed()
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
+        saveUiScreenshot("home-review-playing")
+        waitForNavigation(strings.getString(R.string.nav_search)).performClick()
+        composeRule.onNodeWithTag("persistent-mini-player").assertIsDisplayed()
+        saveUiScreenshot("home-review-mini")
+        waitForNavigation(strings.getString(R.string.nav_home)).performClick()
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
         org.junit.Assert.assertEquals(queueId, PlaybackRuntimeState.state.value.queueSnapshotId)
         org.junit.Assert.assertEquals(trackId.value, PlaybackRuntimeState.state.value.localUserTrackRefId)
     }
@@ -180,22 +202,27 @@ class OfflineLibraryScreenTest {
         val mini = hasAnyAncestor(hasTestTag("persistent-mini-player"))
         val pause = hasContentDescription(strings.getString(R.string.action_pause)) and mini
         val play = hasContentDescription(strings.getString(R.string.action_play)) and mini
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
+        waitForNavigation(strings.getString(R.string.nav_search)).performClick()
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(pause and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-        if (InstrumentationRegistry.getArguments().getString("captureHome") == "true") {
-            val navTop = composeRule.onNodeWithTag("compact-navigation").getUnclippedBoundsInRoot().top
-            val listBottom = composeRule.onNodeWithTag("home-product-list").getUnclippedBoundsInRoot().bottom
-            val titleWidth = composeRule.onNode(hasText(title) and mini, useUnmergedTree = true).getUnclippedBoundsInRoot().width
-            android.util.Log.i("MiniPlayerLayout", "aboveNavigation=${navTop - listBottom} titleWidth=$titleWidth")
-            saveUiScreenshot("mini-player")
-        }
-
+        saveUiScreenshot("mini-player")
         composeRule.onNode(pause).performTouchInput { click() }
         composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
-        composeRule.onNode(hasContentDescription(strings.getString(R.string.nav_library)) and hasClickAction()).performClick()
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
         composeRule.onNodeWithTag("library-product-list").assertIsDisplayed()
         val like = hasTestTag("mini-player-like")
         composeRule.onNode(like).performTouchInput { click() }
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(like and isSelected()).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithTag("library-favorites").performClick()
+        val libraryLike = hasTestTag("library-like-${trackId.value}") and isSelected()
+        scrollLibraryTo(libraryLike)
+        composeRule.onNode(libraryLike).assertIsDisplayed()
+        composeRule.onNode(libraryLike).performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText(strings.getString(R.string.library_favorites_empty)).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("library-favorites").performClick()
+        scrollLibraryTo(hasTestTag("library-track-${trackId.value}"))
         composeRule.onNode(play).performTouchInput { click() }
         composeRule.waitUntil(10_000) { PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput { click() }
@@ -295,7 +322,7 @@ class OfflineLibraryScreenTest {
     fun nowPlayingFitsAndSecondaryActionsWorkDuringPlayback() {
         val trackId = startLocalWave("Midnight Train Along the Coast and Beyond the Observatory")
         val strings = localizedAppContext(context, AppLanguage.Russian)
-        composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput { click() }
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.home_hero_open_player)).performClick()
         val panel = composeRule.onNodeWithTag("now-playing-panel").getUnclippedBoundsInRoot()
         val cover = composeRule.onNodeWithTag("player-cover").getUnclippedBoundsInRoot()
         val seek = composeRule.onNodeWithContentDescription(strings.getString(R.string.player_seek_description))
@@ -306,7 +333,7 @@ class OfflineLibraryScreenTest {
         org.junit.Assert.assertEquals(0f, scroll.maxValue(), 0f)
         org.junit.Assert.assertTrue(panel.top <= cover.top && cover.bottom <= timeline.top &&
             timeline.bottom <= transport.top && transport.bottom <= panel.bottom)
-        composeRule.onNodeWithTag("player-sleep-timer").assertDoesNotExist()
+        composeRule.onNodeWithTag("player-sleep-timer").assertIsDisplayed()
         composeRule.onNodeWithTag("player-recommendations").assertDoesNotExist()
         val like = hasContentDescription(strings.getString(R.string.action_like))
         composeRule.onNode(like).assertIsDisplayed().performTouchInput { click() }
@@ -321,12 +348,11 @@ class OfflineLibraryScreenTest {
         androidx.test.espresso.Espresso.pressBack()
         composeRule.onNodeWithTag("player-more").performTouchInput { click() }
         composeRule.onNodeWithTag("player-recommendations").assertIsDisplayed()
-        composeRule.onNodeWithTag("player-sleep-timer").assertIsDisplayed()
         saveUiScreenshot("now-playing-menu")
+        androidx.test.espresso.Espresso.pressBack()
         composeRule.onNodeWithTag("player-sleep-timer").performClick()
         composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
         composeRule.waitUntil(10_000) { PlaybackRuntimeState.state.value.sleepTimerDeadlineElapsedRealtimeMs != null }
-        composeRule.onNodeWithTag("player-more").performClick()
         composeRule.onNodeWithTag("player-sleep-timer").performClick()
         composeRule.onNodeWithText(strings.getString(R.string.player_sleep_timer_cancel)).performClick()
         composeRule.waitUntil(10_000) { PlaybackRuntimeState.state.value.sleepTimerDeadlineElapsedRealtimeMs == null }
@@ -341,7 +367,7 @@ class OfflineLibraryScreenTest {
     }
 
     @androidx.annotation.RequiresApi(29)
-    private fun importPlayableSample(title: String, binding: app.autplay.application.sync.ClientEventBinding? = null): LocalId {
+    private fun importPlayableSample(title: String, binding: app.autplay.application.sync.ClientEventBinding? = null, artist: String = "AutPlay"): LocalId {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val trackId = LocalId.random()
         val resolver = context.contentResolver
@@ -367,7 +393,7 @@ class OfflineLibraryScreenTest {
             LibraryVerticalSliceRepository(AutPlayRuntime.database(context)).importUri(
                 binding = binding, trackRefId = trackId, libraryEntryId = LocalId.random(),
                 audioStateId = LocalId.random(), changeId = LocalId.random(),
-                title = title, artist = "AutPlay",
+                title = title, artist = artist,
                 inspection = ContentUriInspector(resolver).inspect(audio.toString()),
                 persistedPermission = false, now = System.currentTimeMillis(),
             )
@@ -453,6 +479,34 @@ class OfflineLibraryScreenTest {
 
         openLibrary()
         assertSingleTrackVisible()
+    }
+
+    @Test
+    fun previouslyLikedTrackWithoutMembershipAppearsInBothListsAndCanBeRemoved() = runBlocking {
+        applicationNonSecretSettingsStore(context).update(
+            NonSecretSettings(onboardingRevision = CURRENT_ONBOARDING_REVISION, pendingPublicId = "activity_fixture"),
+        )
+        seedLibraryTrack("legacy-unscoped")
+        val database = AutPlayRuntime.database(context)
+        val liked = LocalId.random()
+        val sample = requireNotNull(database.libraryDao().trackRef(TRACK))
+        database.libraryDao().upsertTrackRef(sample.copy(localUserTrackRefId = liked.value, rawTitle = "Liked in player"))
+        LibraryVerticalSliceRepository(database).setPlaybackPreference(null, liked, LocalId.random(), "LIKED", null, 2)
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        openLibrary()
+        val row = hasTestTag("library-track-${liked.value}")
+        scrollLibraryTo(row)
+        composeRule.onNode(row).assert(hasText("Liked in player"))
+        composeRule.onNodeWithTag("library-favorites").performClick()
+        scrollLibraryTo(row)
+        composeRule.onNodeWithTag("library-track-$TRACK").assertDoesNotExist()
+        composeRule.onNodeWithTag("library-actions-${liked.value}").performClick()
+        composeRule.onNodeWithText(defaultStrings.getString(R.string.action_remove)).performClick()
+        scrollLibraryTo(hasText(defaultStrings.getString(R.string.library_favorites_empty)))
+        composeRule.onNodeWithTag("library-favorites").performClick()
+        assertSingleTrackVisible()
+        composeRule.onNode(row).assertDoesNotExist()
+        org.junit.Assert.assertEquals("NEUTRAL", database.libraryDao().preference(liked.value)?.preference)
     }
 
     @Test
@@ -863,7 +917,7 @@ class OfflineLibraryScreenTest {
             PlaybackRuntimeState.state.value.let { it.isPlaying && it.localUserTrackRefId in tracks }
         }
         val waveQueue = requireNotNull(PlaybackRuntimeState.state.value.queueSnapshotId)
-        shown("persistent-mini-player")
+        node("persistent-mini-player").assertDoesNotExist()
         saveUiScreenshot("journey-wave")
         val home = node("home-product-list")
         home.performScrollToNode(hasTestTag("home-recent"))
@@ -917,8 +971,8 @@ class OfflineLibraryScreenTest {
         shown("player-open-queue").performClick()
         shown("queue-editor")
         back()
-        shown("player-more").performClick()
         shown("player-sleep-timer")
+        shown("player-more").performClick()
         shown("player-recommendations")
         back()
         composeRule.waitUntil(10_000) {
@@ -1015,6 +1069,60 @@ class OfflineLibraryScreenTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(resolvedSummary).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    @Test
+    fun profileSettingsShareOneEntryAndReturnToTheirSource() = runBlocking {
+        val language = AppLanguage.Russian
+        applicationNonSecretSettingsStore(context).update(NonSecretSettings(
+            onboardingRevision = CURRENT_ONBOARDING_REVISION,
+            pendingPublicId = "meloman",
+            appLanguage = language.storedValue,
+        ))
+        val strings = localizedAppContext(context, language)
+        fun back() = composeRule.onNodeWithContentDescription(strings.getString(R.string.action_back)).performClick()
+        fun row(route: String) = composeRule.onNodeWithTag("settings-row-$route")
+        seedLibraryTrack("legacy-unscoped")
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithTag("library-sections").performScrollToNode(hasTestTag("library-tab-Albums"))
+        composeRule.onNodeWithTag("library-tab-Albums").performClick()
+        saveUiScreenshot("settings-entry")
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.action_open_profile_settings)).performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.action_open_settings)).assertDoesNotExist()
+        row("profile").assertTextContains("meloman")
+        row("settings-account").assertTextContains(strings.getString(R.string.settings_account_local_summary))
+        row("settings-downloads").assertDoesNotExist()
+        saveUiScreenshot("settings-hub")
+
+        row("profile").performClick()
+        composeRule.onNodeWithText(strings.getString(R.string.statistics_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(strings.getString(R.string.profile_friends)).assertExists()
+        composeRule.onNodeWithText(strings.getString(R.string.portable_account_title)).assertDoesNotExist()
+        saveUiScreenshot("settings-profile")
+        back()
+        row("settings-music").performScrollTo().performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.settings_metered_downloads)).assertIsDisplayed()
+        saveUiScreenshot("settings-music")
+        composeRule.onNodeWithTag("settings-add-audio").performScrollTo().assertIsDisplayed()
+        back()
+        row("settings-playback").performScrollTo().performClick()
+        composeRule.onNodeWithText(strings.getString(R.string.settings_smooth_track_transitions)).assertIsDisplayed()
+        saveUiScreenshot("settings-sound")
+        scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        row("profile").assertExists()
+        back()
+        composeRule.onNode(hasTestTag("library-tab-Albums") and isSelected()).assertIsDisplayed()
+
+        waitForNavigation(strings.getString(R.string.nav_home)).performClick()
+        composeRule.waitUntil(10_000) { composeRule.onAllNodesWithTag("home-listen-together").fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithTag("home-listen-together").performClick()
+        composeRule.onNodeWithTag("wave-connect").performClick()
+        composeRule.onNodeWithText(strings.getString(R.string.settings_account_devices)).assertIsDisplayed()
+        composeRule.onNodeWithText(strings.getString(R.string.portable_account_title)).assertExists()
+        back()
+        composeRule.onNodeWithTag("wave-connect").assertIsDisplayed()
+        Unit
     }
 
     private fun waitForNavigation(label: String) = composeRule.onNode(hasText(label) and hasClickAction()).also {

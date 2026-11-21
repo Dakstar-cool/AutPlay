@@ -11,6 +11,7 @@ import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.PlaybackPersistenceRepository
 import app.autplay.application.recommendation.PersonalWaveQueue
+import app.autplay.application.recommendation.HomeWheelMix
 import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.server.ServerRecommendationResult
 import app.autplay.application.recommendation.HomeFeed
@@ -46,7 +47,7 @@ internal data class CoreCommandActions(
     val recordHomeFeedback: (String, String) -> Unit,
     val startRecommendation: (String) -> Unit,
     val startTrack: (String, String, String, String?) -> Unit,
-    val startMyWave: () -> Unit,
+    val startMyWave: (HomeWheelMix?) -> Unit,
     val startSearchTrack: (String) -> Unit,
     val startVaultSearchTrack: (String, Set<String>) -> Unit,
     val startReleaseEntry: (CoreReleaseDetail, String) -> Unit,
@@ -240,7 +241,7 @@ internal fun buildCoreCommandActions(
                 }
             }
         },
-        startMyWave = myWave@{
+        startMyWave = myWave@{ mix ->
             if (!myWaveAllowed()) return@myWave
             val actionKey = "play:my-wave"
             if (!actionGate.begin(actionKey)) return@myWave
@@ -254,10 +255,13 @@ internal fun buildCoreCommandActions(
                         val snapshotId = personalWaveQueue.start(
                             ownerBinding, replacement, myWaveVaultAvailable(),
                             stillActive = { myWaveCurrentBinding() == ownerBinding && myWaveAllowed() },
+                            mix = mix,
                             fetch = fetchWave,
                         )
                         if (snapshotId == null) {
-                            if (myWaveCurrentBinding() == ownerBinding) reportError("MY_WAVE_EMPTY")
+                            if (myWaveCurrentBinding() == ownerBinding) {
+                                reportError(if (mix == null) "MY_WAVE_EMPTY" else "WHEEL_MIX_EMPTY")
+                            }
                             return@runCatching
                         }
                         if (myWaveCurrentBinding() == ownerBinding && myWaveAllowed()) {
@@ -366,7 +370,12 @@ internal fun buildCoreCommandActions(
             scope.launch {
                 try {
                     runCatching {
-                        if (!entry.removed) {
+                        if (entry.localLibraryEntryId == null) {
+                            sliceRepository.setPlaybackPreference(
+                                binding(), LocalId(trackRefId), LocalId.random(), "NEUTRAL",
+                                null, System.currentTimeMillis(),
+                            )
+                        } else if (!entry.removed) {
                             sliceRepository.removeLibrary(
                                 binding(),
                                 LocalId(entry.localLibraryEntryId),

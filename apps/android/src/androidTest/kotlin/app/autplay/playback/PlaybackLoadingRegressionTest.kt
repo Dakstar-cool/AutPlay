@@ -347,18 +347,18 @@ class PlaybackLoadingRegressionTest {
         }
     }
 
-    @Test fun playbackMissWritesOnlyStreamCacheAndReplaysWithoutUpstream() {
+    @Test fun playbackMissWritesOnlyStreamCacheAndReplaysWithoutUpstream() = runBlocking {
         val root = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
             "playback-cache-test-${UUID.randomUUID()}")
         val downloads = SimpleCache(File(root, "downloads"), NoOpCacheEvictor())
         val streams = SimpleCache(File(root, "streams"), LeastRecentlyUsedCacheEvictor(1_048_576))
-        val payload = ByteArray(65_536) { (it % 251).toByte() }
-        var upstreamOpens = 0
+        val payload = ByteArray(400_000) { (it % 251).toByte() }
+        val upstreamOffsets = mutableListOf<Long>()
         val upstream = DataSource.Factory {
             val bytes = ByteArrayDataSource(payload)
             object : DataSource by bytes {
                 override fun open(dataSpec: DataSpec): Long {
-                    upstreamOpens++
+                    upstreamOffsets.add(dataSpec.position)
                     return bytes.open(dataSpec)
                 }
             }
@@ -366,10 +366,14 @@ class PlaybackLoadingRegressionTest {
         val factory = cachedVaultDataSourceFactory(downloads, streams, upstream)
         val uri = Uri.parse("autplay-vault://test-profile/audio-variants/test-variant")
         try {
+            warmStreamPrefix(factory, uri)
+            assertEquals(256L * 1024, streams.cacheSpace)
+            assertEquals(0L, downloads.cacheSpace)
+            assertEquals(listOf(0L), upstreamOffsets)
             repeat(2) {
                 val source = factory.createDataSource()
                 try {
-                    assertEquals(payload.size.toLong(), source.open(DataSpec(uri)))
+                    source.open(DataSpec(uri))
                     val actual = java.io.ByteArrayOutputStream()
                     val buffer = ByteArray(4_096)
                     while (true) {
@@ -380,7 +384,7 @@ class PlaybackLoadingRegressionTest {
                     assertTrue(payload.contentEquals(actual.toByteArray()))
                 } finally { source.close() }
             }
-            assertEquals(1, upstreamOpens)
+            assertEquals(listOf(0L, 256L * 1024), upstreamOffsets)
             assertEquals(0L, downloads.cacheSpace)
             assertEquals(payload.size.toLong(), streams.cacheSpace)
         } finally {

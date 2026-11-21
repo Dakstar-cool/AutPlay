@@ -18,10 +18,13 @@ import kotlinx.coroutines.withContext
 internal data class PlayerArtworkBackdrop(val header: Color, val surface: Color)
 
 @Composable
+internal fun rememberArtworkTint(bitmap: Bitmap?): Color? = if (bitmap == null) null else key(bitmap) {
+    produceState<Color?>(null) { value = withContext(Dispatchers.Default) { dominantArtworkColor(bitmap) } }.value
+}
+
+@Composable
 internal fun rememberPlayerArtworkBackdrop(bitmap: Bitmap?): PlayerArtworkBackdrop {
-    val tint = if (bitmap == null) null else key(bitmap) {
-        produceState<Color?>(null) { value = withContext(Dispatchers.Default) { dominantArtworkColor(bitmap) } }.value
-    }
+    val tint = rememberArtworkTint(bitmap)
     val colors = MaterialTheme.colorScheme
     val muted = AutPlayTokens.colors.mutedText
     val base = colors.background

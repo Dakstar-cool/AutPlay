@@ -1,5 +1,7 @@
 package app.autplay.ui
 
+import app.autplay.application.recommendation.HomeWheelMix
+
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -154,6 +156,9 @@ public data class HomeScreenUiState(
     public val recommendationError: Boolean = false,
     public val likedTrackIds: Set<String> = emptySet(),
     public val localLibraryEmpty: Boolean = false,
+    public val wheelOrder: List<String> = app.autplay.application.recommendation.HomeWheelRanking.ring(java.time.LocalTime.now().hour),
+    public val wheelOwner: String = "",
+    public val wheelMixes: Map<String, HomeWheelMix> = emptyMap(),
 )
 
 public data class SearchScreenUiState(
@@ -234,11 +239,14 @@ public fun HomeProductScreen(
     onNextTrack: () -> Unit = {},
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onStartMyWave: () -> Unit = {},
+    onPlayWheelMix: (HomeWheelMix) -> Unit = {},
     myWaveAllowed: Boolean = true,
     onOpenRelease: (String) -> Unit = {},
     onAddLocal: () -> Unit = {},
     importingLocalTrack: Boolean = false,
-    onContinueListening: () -> Unit = { state.continueListening?.let { onPlayTrack(it.trackId) } },
+    onContinueListening: () -> Unit = {
+        (state.continueListening?.trackId ?: state.recentlyPlayed.firstOrNull()?.id)?.let(onPlayTrack)
+    },
 ) {
     val heroState = buildHomePlaybackHeroUiState(
         homeState = state,
@@ -246,8 +254,14 @@ public fun HomeProductScreen(
         currentTrackRefId = currentTrackRefId,
         currentTrackLiked = currentTrackLiked,
     )
+    val session = playerState.mediaId?.let { (playerState.context as? app.autplay.application.playback.ActiveQueueContext.Loaded)?.snapshotId ?: it }
+    var playedSession by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(session, playerState.isPlaying) {
+        if (session == null || playerState.isPlaying) playedSession = session
+    }
+    val showArtwork = heroState.hasActivePlayback && (playerState.isPlaying || playedSession == session)
     val listState = rememberLazyListState()
-    val showFirstTrack = state.localMode && state.localLibraryEmpty && !heroState.hasActivePlayback
+    val showFirstTrack = state.localMode && state.localLibraryEmpty && heroState.trackId == null && !heroState.hasActivePlayback
     Box(Modifier.fillMaxWidth().padding(contentPadding)) {
         LazyColumn(
             state = listState,
@@ -260,91 +274,54 @@ public fun HomeProductScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+        item(key = "home:playback-hero") {
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                val heroModifier = Modifier.requiredWidth(maxWidth + 40.dp)
+                if (showArtwork) {
+                    HomePlaybackHero(
+                        state = heroState,
+                        localMode = state.localMode,
+                        onOpenPlayer = onOpenPlayer,
+                        onPlayTrack = onPlayTrack,
+                        onTogglePlayPause = onTogglePlayPause,
+                        onLike = onLikeHeroTrack,
+                        onOpenListenTogether = onOpenListenTogether,
+                        modifier = heroModifier,
+                        swipeTargets = swipeTargets,
+                        onPrevious = onPreviousTrack,
+                        onNext = onNextTrack,
+                    )
+                } else {
+                    HomeWaveStartHero(
+                        localMode = state.localMode,
+                        state = heroState,
+                        enabled = if (heroState.hasActivePlayback) heroState.playPauseEnabled else myWaveAllowed && !showFirstTrack,
+                        emptyLibrary = showFirstTrack,
+                        onStart = when {
+                            heroState.hasActivePlayback -> onTogglePlayPause
+                            state.continueListening != null || heroState.trackId != null -> onContinueListening
+                            else -> onStartMyWave
+                        },
+                        onLike = onLikeHeroTrack,
+                        onOpenListenTogether = onOpenListenTogether,
+                        modifier = heroModifier,
+                    )
+                }
+            }
+        }
         if (showFirstTrack) {
             item(key = "home:first-track") {
-                AutPlayCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text(stringResource(R.string.home_first_track_title), style = MaterialTheme.typography.headlineMedium)
-                        Text(stringResource(R.string.home_first_track_body), style = MaterialTheme.typography.bodyLarge)
-                        Button(onClick = onAddLocal, enabled = !importingLocalTrack,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("home-add-first-track")) {
-                            Text(stringResource(if (importingLocalTrack) R.string.library_adding_local else R.string.library_add_local))
-                        }
-                        Text(stringResource(R.string.local_audio_picker_hint), style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        } else {
-            item(key = "home:playback-hero") {
-                BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val heroModifier = Modifier.requiredWidth(maxWidth + 40.dp)
-                    if (heroState.hasActivePlayback) {
-                        HomePlaybackHero(
-                            state = heroState,
-                            localMode = state.localMode,
-                            onOpenPlayer = onOpenPlayer,
-                            onPlayTrack = onPlayTrack,
-                            onTogglePlayPause = onTogglePlayPause,
-                            onLike = onLikeHeroTrack,
-                            onOpenListenTogether = onOpenListenTogether,
-                            modifier = heroModifier,
-                            swipeTargets = swipeTargets,
-                            onPrevious = onPreviousTrack,
-                            onNext = onNextTrack,
-                        ) {
-                            HomeWaveShortcut(myWaveAllowed, onStartMyWave)
-                        }
-                    } else {
-                        HomeWaveStartHero(
-                            localMode = state.localMode,
-                            enabled = myWaveAllowed,
-                            onStart = onStartMyWave,
-                            onOpenListenTogether = onOpenListenTogether,
-                            modifier = heroModifier,
-                        )
-                    }
+                Button(onClick = onAddLocal, enabled = !importingLocalTrack,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("home-add-first-track")) {
+                    Text(stringResource(if (importingLocalTrack) R.string.library_adding_local else R.string.library_add_local))
                 }
             }
         }
-        item(key = "home:contexts") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AutPlaySectionHeader(stringResource(R.string.home_context_collections))
-                Text(
-                    stringResource(R.string.home_context_collections_placeholder),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AutPlayTokens.colors.mutedText,
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    listOf(
-                        R.string.home_context_energy,
-                        R.string.home_context_running,
-                        R.string.home_context_focus,
-                        R.string.home_context_evening,
-                    ).forEach { label ->
-                        AutPlayChip(text = stringResource(label), selected = false, enabled = false, onClick = {})
-                    }
-                }
-            }
-        }
-        state.continueListening?.let { item ->
-            item(key = "home:continue:${item.trackId}") {
-                AutPlaySectionHeader(stringResource(R.string.home_continue_listening))
-            }
-            item(key = "home:continue-card:${item.trackId}") {
-                AutPlayCard(onClick = onContinueListening) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TrackRow(item.title, item.artist ?: stringResource(R.string.library_unknown_artist), item.positionText, item.trackId)
-                        Text(stringResource(R.string.home_continue_action), color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
+        item(key = "home:contexts:${state.wheelOwner}") {
+            HomeWaveWheel(state.wheelOrder, state.wheelMixes, myWaveAllowed, playerState.isPlaying, onPlayWheelMix)
         }
         if (state.offlineFallback) {
             item {

@@ -2,7 +2,7 @@
 <resources>
     <string name="recovery_title">Account recovery</string>
     <string name="recovery_new_account_incomplete">Account setup is incomplete. Create and save your recovery TXT to finish. Your local music remains available.</string>
-    <string name="recovery_account_created">Account created. Finish setting up recovery in your profile.</string>
+    <string name="recovery_account_created">Account created. Set up recovery in Account and devices.</string>
     <string name="recovery_working">Connecting…</string>
     <string name="recovery_save_required">Save the recovery TXT somewhere safe. You will need it if you lose access to your devices.</string>
     <string name="recovery_existing_code">A recovery code is configured on another device. Keep that file, or replace the code here.</string>

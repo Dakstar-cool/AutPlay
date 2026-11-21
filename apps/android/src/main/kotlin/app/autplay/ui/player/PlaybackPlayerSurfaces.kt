@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -241,6 +242,7 @@ public fun NowPlayingScreen(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
     onOpenArtist: (String) -> Unit = {},
+    serverConnected: Boolean = false,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -350,6 +352,7 @@ public fun NowPlayingScreen(
                 .testTag("now-playing-panel"),
         ) {
             val density = LocalDensity.current
+            val coverWidth = minOf(maxWidth * 0.77f, 440.dp)
             val collapseTravel = with(density) {
                 (collapseTargetTop ?: (maxHeight - 88.dp)).coerceIn(0.dp, maxHeight).toPx()
             }
@@ -371,12 +374,7 @@ public fun NowPlayingScreen(
                     IconButton(onClick = { sheet = PlayerSheet.Queue }, modifier = Modifier.testTag("player-open-queue")) {
                         AutPlayPlatformIcon(AutPlayIcon.Playlist, stringResource(R.string.queue_editor_title))
                     }
-                    PlayerMoreMenu(
-                        timerEnabled = state.controls is PlaybackControlGate.Allowed,
-                        remainingMinutes = sleepTimerRemainingMinutes,
-                        stopAfterTrack = stopAfterCurrentTrackActive,
-                        onSelect = { sheet = it },
-                    )
+                    PlayerMoreMenu { sheet = it }
                 }
                 PlayerBody(
                     modifier = Modifier.weight(1f),
@@ -393,71 +391,29 @@ public fun NowPlayingScreen(
                             onNext = onNext,
                             animations = animations,
                             onOpen = { viewingArtwork = true },
-                            modifier = Modifier.onGloballyPositioned {
+                            modifier = Modifier.widthIn(max = coverWidth).onGloballyPositioned {
                                 collapseCoverBounds = it.boundsInRoot()
-                                coverOnScreen = Rect(it.positionOnScreen(), it.size.toSize())
+                                val frame = Rect(it.positionOnScreen(), it.size.toSize())
+                                val ratio = artworkPainter.artworkAspectRatio()
+                                val width = minOf(frame.width, frame.height * ratio)
+                                val half = Offset(width / 2, width / ratio / 2)
+                                coverOnScreen = Rect(frame.center - half, frame.center + half)
                             }.graphicsLayer { alpha = if (viewingArtwork) 0f else 1f }.testTag("player-cover"),
                         )
                     },
                 ) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
-                                Text(
-                                    state.title ?: stringResource(R.string.player_nothing_playing),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    textAlign = TextAlign.Start,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                PlayerArtistLink(state.artist, artists, onOpenArtist)
-                            }
-                            PreferenceIconButton(
-                                icon = AutPlayIcon.ThumbDown,
-                                labelRes = R.string.action_dislike,
-                                selected = preference == PlaybackPreferenceUiState.Disliked,
-                                enabled = feedbackEnabled,
-                                onClick = {
-                                    if (preference == PlaybackPreferenceUiState.Disliked) onClearPreference() else onDislike()
-                                },
-                            )
-                            PreferenceIconButton(
-                                icon = AutPlayIcon.ThumbUp,
-                                labelRes = R.string.action_like,
-                                selected = preference == PlaybackPreferenceUiState.Liked,
-                                enabled = feedbackEnabled,
-                                onClick = {
-                                    if (preference == PlaybackPreferenceUiState.Liked) onClearPreference() else onLike()
-                                },
-                            )
-                        }
+                        Text(state.title ?: stringResource(R.string.player_nothing_playing),
+                            style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        PlayerArtistLink(state.artist, artists, onOpenArtist)
                         PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
                         DirectControlMessage(state)
-                        if (state.source == PlaybackSourcePresentation.Vault || downloadState != null) {
-                            Surface(
-                                onClick = onDownload,
-                                enabled = state.source == PlaybackSourcePresentation.Vault &&
-                                    downloadState !in setOf("COMPLETED", "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED"),
-                                color = Color.Transparent,
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-download-track"),
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    AutPlayPlatformIcon(AutPlayIcon.Download, null, tint = MaterialTheme.colorScheme.primary)
-                                    Text(stringResource(when (downloadState) {
-                                        "COMPLETED" -> R.string.music_saved_offline
-                                        "REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED" -> R.string.music_downloading
-                                        else -> R.string.music_download_track
-                                    }), style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
                     }
                 }
-                PlayerTransportControls(state, swipeTargets, onToggleShuffle, onCycleRepeat, onPrevious, onNext, onTogglePlayPause)
+                PlayerTransportControls(state, swipeTargets, onPrevious, onNext, onTogglePlayPause,
+                    preference, feedbackEnabled, onLike, onDislike, onClearPreference)
+                PlayerSecondaryControls(state, serverConnected, downloadState, onDownload, onToggleShuffle, onCycleRepeat,
+                    sleepTimerRemainingMinutes, stopAfterCurrentTrackActive, onTimer = { sheet = PlayerSheet.Timer })
             }
         }
     }
@@ -475,38 +431,13 @@ public fun NowPlayingScreen(
 private enum class PlayerSheet { Queue, Timer, Recommendations }
 
 @Composable
-private fun PlayerMoreMenu(
-    timerEnabled: Boolean,
-    remainingMinutes: Int?,
-    stopAfterTrack: Boolean,
-    onSelect: (PlayerSheet) -> Unit,
-) {
+private fun PlayerMoreMenu(onSelect: (PlayerSheet) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("player-more")) {
             Icon(painterResource(R.drawable.ic_autplay_more_vertical), stringResource(R.string.player_more_options))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = {
-                    Column {
-                        Text(stringResource(R.string.player_sleep_timer))
-                        val status = when {
-                            stopAfterTrack -> stringResource(R.string.player_sleep_timer_after_track_active)
-                            remainingMinutes != null -> pluralStringResource(R.plurals.player_sleep_timer_active, remainingMinutes, remainingMinutes)
-                            else -> null
-                        }
-                        if (status != null) Text(status, style = MaterialTheme.typography.bodySmall)
-                    }
-                },
-                leadingIcon = { AutPlayPlatformIcon(AutPlayIcon.Timer, null) },
-                enabled = timerEnabled,
-                onClick = {
-                    expanded = false
-                    onSelect(PlayerSheet.Timer)
-                },
-                modifier = Modifier.testTag("player-sleep-timer"),
-            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.player_taste_exclusion_title)) },
                 leadingIcon = { Icon(painterResource(R.drawable.ic_autplay_settings), null) },
@@ -540,7 +471,7 @@ private fun PlayerBody(
             },
         ) { (art, info), bounds ->
             val controls = info.measure(bounds.copy(minHeight = 0))
-            val coverHeight = (viewportHeight - controls.height).coerceAtLeast(80.dp.roundToPx())
+            val coverHeight = (viewportHeight - controls.height).coerceAtLeast(48.dp.roundToPx())
             val cover = art.measure(bounds.copy(minHeight = coverHeight, maxHeight = coverHeight))
             layout(bounds.maxWidth, cover.height + controls.height) {
                 cover.placeRelative(0, 0)
@@ -575,26 +506,23 @@ internal fun PlayerArtwork(
 private fun PlayerTransportControls(
     state: PlaybackPresentationState,
     swipeTargets: HomeSwipeTargets,
-    onToggleShuffle: () -> Unit,
-    onCycleRepeat: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onTogglePlayPause: () -> Unit,
+    preference: PlaybackPreferenceUiState,
+    feedbackEnabled: Boolean,
+    onLike: () -> Unit,
+    onDislike: () -> Unit,
+    onClearPreference: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp).testTag("player-transport-controls"),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("player-transport-controls"),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PlayerModeButton(
-            icon = AutPlayIcon.Shuffle,
-            label = stringResource(R.string.player_shuffle),
-            stateLabel = stringResource(if (state.shuffleModeEnabled) R.string.player_surface_shuffle_on else R.string.player_surface_shuffle_off),
-            active = state.shuffleModeEnabled,
-            enabled = state.shuffleEnabled,
-            onClick = onToggleShuffle,
-            tag = "player-shuffle",
-        )
+        val disliked = preference == PlaybackPreferenceUiState.Disliked
+        PreferenceIconButton(AutPlayIcon.HeartOff, R.string.action_dislike, disliked, feedbackEnabled,
+            if (disliked) onClearPreference else onDislike)
         AutPlayIconButton(AutPlayIcon.Previous, R.string.action_previous, onPrevious,
             enabled = (swipeTargets.previous != null || state.previousMediaId != null) && state.controls is PlaybackControlGate.Allowed)
         PrimaryTransportButton(
@@ -605,6 +533,26 @@ private fun PlayerTransportControls(
         )
         AutPlayIconButton(AutPlayIcon.Next, R.string.action_next, onNext,
             enabled = (swipeTargets.next != null || state.nextMediaId != null) && state.controls is PlaybackControlGate.Allowed)
+        val liked = preference == PlaybackPreferenceUiState.Liked
+        PreferenceIconButton(if (liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
+            R.string.action_like, liked, feedbackEnabled, if (liked) onClearPreference else onLike)
+    }
+}
+
+@Composable
+private fun PlayerSecondaryControls(
+    state: PlaybackPresentationState,
+    serverConnected: Boolean,
+    downloadState: String?,
+    onDownload: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    remainingMinutes: Int?,
+    stopAfterTrack: Boolean,
+    onTimer: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         PlayerModeButton(
             icon = AutPlayIcon.Repeat,
             label = stringResource(repeatLabel(state.repeatMode)),
@@ -615,6 +563,30 @@ private fun PlayerTransportControls(
             tag = "player-repeat",
             one = state.repeatMode == RepeatModePresentation.One,
         )
+        if (serverConnected) {
+            val saved = downloadState == "COMPLETED" || state.source == PlaybackSourcePresentation.Download
+            val pending = downloadState in setOf("REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED")
+            val description = stringResource(when {
+                saved -> R.string.music_saved_offline
+                pending -> R.string.music_downloading
+                else -> R.string.music_download_track
+            })
+            PlayerModeButton(if (saved) AutPlayIcon.Check else AutPlayIcon.Download, description, description,
+                active = saved || pending, enabled = !saved && !pending && state.source == PlaybackSourcePresentation.Vault,
+                onClick = onDownload, tag = "player-download-track")
+        } else {
+            PlayerModeButton(AutPlayIcon.Shuffle, stringResource(R.string.player_shuffle),
+                stringResource(if (state.shuffleModeEnabled) R.string.player_surface_shuffle_on else R.string.player_surface_shuffle_off),
+                state.shuffleModeEnabled, state.shuffleEnabled, onToggleShuffle, "player-shuffle")
+        }
+        val timerLabel = stringResource(R.string.player_sleep_timer)
+        val timerState = when {
+            stopAfterTrack -> stringResource(R.string.player_sleep_timer_after_track_active)
+            remainingMinutes != null -> pluralStringResource(R.plurals.player_sleep_timer_active, remainingMinutes, remainingMinutes)
+            else -> timerLabel
+        }
+        PlayerModeButton(AutPlayIcon.Timer, timerLabel, timerState, remainingMinutes != null || stopAfterTrack,
+            state.controls is PlaybackControlGate.Allowed, onTimer, "player-sleep-timer")
     }
 }
 

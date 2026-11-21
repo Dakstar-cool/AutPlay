@@ -46,7 +46,7 @@ internal fun NowPlayingArtworkCarousel(
         if (!enabled || motion.frozenTargets?.let { it != targets } == true) motion.cancel(animations)
     }
     val openLabel = stringResource(R.string.player_expand_artwork)
-    BoxWithConstraints(modifier.aspectRatio(painter.artworkAspectRatio())
+    BoxWithConstraints(modifier.aspectRatio(1f)
         .clickable(enabled = !motion.busy, onClickLabel = openLabel, role = Role.Button, onClick = onOpen)
         .cancelArtworkClickAfterDrag()) {
         val widthPixels = with(LocalDensity.current) { maxWidth.toPx() }

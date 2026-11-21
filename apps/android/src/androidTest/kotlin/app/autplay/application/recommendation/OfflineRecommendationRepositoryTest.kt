@@ -22,7 +22,13 @@ import app.autplay.domain.UserId
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.erdtman.jcs.JsonCanonicalizer
@@ -339,19 +345,31 @@ class OfflineRecommendationRepositoryTest {
     fun standaloneWaveStartsWithoutAProfileOrRecommendationAttribution() = runBlocking {
         val trackId = LocalId.random().value
         seedLocalTrack(database, "legacy-unscoped", trackId, LocalId.random().value, LocalId.random().value)
-        database.localAudioDao().upsertDownloadIntent(app.autplay.data.local.entity.DownloadIntentEntity(
+        val download = app.autplay.data.local.entity.DownloadIntentEntity(
             downloadIntentId = LocalId.random().value, localUserTrackRefId = trackId,
             serverAudioVariantId = LocalId.random().value, state = "COMPLETED",
             media3DownloadId = null, desiredStorageClass = "USER_DOWNLOAD", qualityPolicy = "ORIGINAL",
             sourcePolicy = "VAULT", failureCode = null, createdAtMs = NOW, updatedAtMs = NOW, completedAtMs = NOW,
+        )
+        database.localAudioDao().upsertDownloadIntent(download)
+        val newer = LocalId.random().value
+        val library = database.libraryDao()
+        library.upsertTrackRef(requireNotNull(library.trackRef(trackId)).copy(
+            localUserTrackRefId = newer, localRecordingId = null, serverRecordingId = LocalId.random().value, rawTitle = "Newer song",
+        ))
+        library.upsertEntry(requireNotNull(library.entry(LIBRARY_ENTRY)).copy(
+            localLibraryEntryId = LocalId.random().value, localUserTrackRefId = newer, addedAtMs = NOW + 1,
+        ))
+        database.localAudioDao().upsertDownloadIntent(download.copy(
+            downloadIntentId = LocalId.random().value, localUserTrackRefId = newer, serverAudioVariantId = LocalId.random().value,
         ))
         val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, null)
         val snapshot = requireNotNull(PersonalWaveQueue(database).start(null, guard, false, { true }) { _, _ ->
             error("standalone start attempted HTTP")
         })
-        val entry = database.queueDao().entries(snapshot.value, 1).single()
-        assertEquals(trackId, entry.localUserTrackRefId)
-        assertEquals(null, entry.recommendationAttributionJson)
+        val entries = database.queueDao().entries(snapshot.value, 10)
+        assertEquals(listOf(newer, trackId), entries.map { it.localUserTrackRefId })
+        assertTrue(entries.all { it.recommendationAttributionJson == null })
         assertEquals(0, database.journalDao().eventCount())
     }
 
@@ -487,6 +505,123 @@ class OfflineRecommendationRepositoryTest {
         // Other devices can still put this category over the account-wide threshold.
         assertTrue(dao.selectSongRefs(PROFILE, listOf(TRACK), now, wave = false, lessFrequentRecordings = setOf(RECORDING)).isEmpty())
     }
+
+    @Test fun homePreparationServesOnePlayAndLeavesHistoryUntouched() = runBlocking {
+        val queue = PersonalWaveQueue(database)
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+        val ready = CompletableDeferred<List<LocalId>>()
+        val served = CompletableDeferred<Unit>()
+        var requests = 0
+        var preparedId: LocalId? = null
+        suspend fun fetch(owner: ClientEventBinding, wave: PersonalWaveSession): app.autplay.application.server.ServerRecommendationResult {
+            assertEquals(BINDING, owner)
+            requests++
+            preparedId = wave.id
+            delay(750)
+            served.complete(Unit)
+            return servedTrack()
+        }
+        val preparation = launch { queue.prepare(BINDING, ::fetch) { ready.complete(it) } }
+        try {
+            withTimeout(10_000) { served.await() }
+            app.autplay.application.sync.SyncBindingInitializer(database).ensure(BINDING)
+            assertEquals(listOf(LocalId(TRACK)), withTimeout(10_000) { ready.await() })
+            assertEquals(null, database.queueDao().activeSnapshotOnce())
+            assertEquals(0, database.journalDao().eventCount())
+            val start = android.os.SystemClock.elapsedRealtime()
+            val first = requireNotNull(queue.start(BINDING, guard, true, { true }, fetch = ::fetch))
+            val warmMs = android.os.SystemClock.elapsedRealtime() - start
+            assertEquals(1, requests)
+            assertEquals(preparedId, first)
+            val secondStart = android.os.SystemClock.elapsedRealtime()
+            val second = queue.start(BINDING, guard.copy(snapshotId = first.value, queueType = "USER"), true, { true }, fetch = ::fetch)
+            val coldMs = android.os.SystemClock.elapsedRealtime() - secondStart
+            android.util.Log.i("AutPlayWaveTiming", "queueReady warmMs=$warmMs coldMs=$coldMs simulatedServerMs=750")
+            assertNotEquals(first, second)
+            assertEquals(2, requests)
+        } finally { preparation.cancelAndJoin() }
+    }
+
+    @Test fun playDuringHomeFetchSharesTheRequestWithoutWaitingForAudio() = runBlocking {
+        val queue = PersonalWaveQueue(database)
+        val requested = CompletableDeferred<LocalId>()
+        val release = CompletableDeferred<Unit>()
+        val preparation = launch {
+            queue.prepare(BINDING, { _, wave ->
+                requested.complete(wave.id)
+                release.await()
+                servedTrack()
+            }) { kotlinx.coroutines.awaitCancellation() }
+        }
+        try {
+            val id = withTimeout(10_000) { requested.await() }
+            val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+            val tapped = async { queue.start(BINDING, guard, true, { true }) { _, _ -> error("duplicate fetch") } }
+            delay(50)
+            assertFalse(tapped.isCompleted)
+            release.complete(Unit)
+            assertEquals(id, withTimeout(10_000) { tapped.await() })
+        } finally { preparation.cancelAndJoin() }
+    }
+
+    @Test fun dislikeAfterPreparationStillExcludesTheTrackAtPlayTime() = runBlocking {
+        app.autplay.application.sync.SyncBindingInitializer(database).ensure(BINDING)
+        val queue = PersonalWaveQueue(database)
+        val ready = CompletableDeferred<Unit>()
+        val preparation = launch { queue.prepare(BINDING, { _, _ -> servedTrack() }) { ready.complete(Unit) } }
+        try {
+            withTimeout(10_000) { ready.await() }
+            database.libraryDao().upsertPreference(UserTrackPreferenceEntity(
+                TRACK, "DISLIKED", null, false, "SYNCED", 0, System.currentTimeMillis(), PROFILE,
+            ))
+            val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+            assertEquals(null, queue.start(BINDING, guard, true, { true }) { _, _ -> error("duplicate fetch") })
+            assertEquals(null, database.queueDao().activeSnapshotOnce())
+            assertEquals(0, database.journalDao().eventCount())
+        } finally { preparation.cancelAndJoin() }
+    }
+
+    @Test fun wheelBuildsPlayableGenresOnlyFromTaggedRecommendationsAndRechecksBeforeReplacingQueue() = runBlocking {
+        val now = System.currentTimeMillis()
+        val second = LocalId.random().value
+        val third = LocalId.random().value
+        val secondRecording = LocalId.random().value
+        val thirdRecording = LocalId.random().value
+        seedLocalTrack(database, PROFILE, second, LocalId.random().value, secondRecording, "Northern Lights", LocalId.random().value)
+        seedLocalTrack(database, PROFILE, third, LocalId.random().value, thirdRecording, "Falling Leaves", LocalId.random().value)
+        suspend fun tag(id: String, genre: String) {
+            val json = """{"revision":1,"state":"READY","fields":{"genres":["$genre"]}}"""
+            database.trackMetadataDao().upsert(app.autplay.data.local.entity.TrackMetadataEntity(PROFILE, id, 1, json, null, now))
+        }
+        tag(TRACK, "Rock")
+        tag(second, "Рок")
+        tag(third, "Jazz")
+        val repository = OfflineRecommendationRepository(database)
+        repository.storeVerifiedPack(pack(expiresAtMs = now + 120_000,
+            recordings = listOf(RECORDING, secondRecording, thirdRecording)), BINDING, now)
+        val feed = repository.loadHomeFeed(BINDING, now)
+        val baseline = HomeWheelRanking.suggestions(database, PROFILE, feed)
+        assertEquals(setOf("rock"), baseline.mixes.keys)
+        val mix = baseline.mixes.getValue("rock")
+        assertEquals(setOf(TRACK, second), mix.trackIds)
+        val pref = UserTrackPreferenceEntity(TRACK, "LIKED", null, false, "SYNCED", 0, now, PROFILE)
+        database.libraryDao().upsertPreference(pref)
+        assertTrue(HomeWheelRanking.suggestions(database, PROFILE, feed).weights.getValue("rock") > baseline.weights.getValue("rock"))
+        assertTrue(HomeWheelRanking.suggestions(database, OTHER_PROFILE, feed).mixes.isEmpty())
+        val guard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(null, null, PROFILE)
+        val queue = PersonalWaveQueue(database)
+        val started = requireNotNull(queue.start(BINDING, guard, false, { true }, mix) { _, _ -> error("unexpected fetch") })
+        val playback = app.autplay.application.playback.PlaybackPersistenceRepository(database)
+        assertEquals(listOf(TRACK, second), requireNotNull(playback.restoreActive()).entries.map { it.localUserTrackRefId })
+        val next = guard.copy(snapshotId = started.value, queueType = "USER")
+        tag(second, "Jazz")
+        assertEquals(null, queue.start(BINDING, next, true, { true }, mix) { _, _ -> error("unexpected fetch") })
+        assertEquals(started.value, database.queueDao().activeSnapshotOnce()?.queueSnapshotId)
+    }
+
+    private fun servedTrack() = app.autplay.application.server.ServerRecommendationResult(REQUEST, "served", listOf(
+        app.autplay.application.server.ServerRecommendationItem(RECORDING, 1, 0.5, "BASELINE", "recommendations"),
+    ))
 
     @Test
     fun onlineWaveDefersRetitledRemixToTwentiethPositionAndPreservesItsSourceRank() = runBlocking {
@@ -712,6 +847,8 @@ class OfflineRecommendationRepositoryTest {
         track: String,
         localRecording: String,
         serverRecording: String,
+        title: String = "Local recommendation",
+        entryId: String = LIBRARY_ENTRY,
     ) {
         db.catalogProjectionDao().upsertRecordings(
             listOf(
@@ -719,8 +856,8 @@ class OfflineRecommendationRepositoryTest {
                     localRecordingId = localRecording,
                     serverRecordingId = serverRecording,
                     redirectServerRecordingId = null,
-                    title = "Local recommendation",
-                    normalizedTitle = "local recommendation",
+                    title = title,
+                    normalizedTitle = title.lowercase(),
                     displayArtist = "AutPlay Artist",
                     normalizedArtist = "autplay artist",
                     artistCreditJson = "{}",
@@ -741,7 +878,7 @@ class OfflineRecommendationRepositoryTest {
                 localRecordingId = localRecording,
                 serverRecordingId = serverRecording,
                 resolutionStatus = "RESOLVED",
-                rawTitle = "Local recommendation",
+                rawTitle = title,
                 rawArtist = "AutPlay Artist",
                 rawAlbum = null,
                 rawDurationMs = 180_000,
@@ -757,7 +894,7 @@ class OfflineRecommendationRepositoryTest {
         )
         db.libraryDao().upsertEntry(
             LibraryEntryEntity(
-                localLibraryEntryId = LIBRARY_ENTRY,
+                localLibraryEntryId = entryId,
                 serverLibraryEntryId = null,
                 localUserTrackRefId = track,
                 addedAtMs = NOW,
@@ -779,8 +916,12 @@ class OfflineRecommendationRepositoryTest {
         packId: String = PACK,
         requestId: String = REQUEST,
         expiresAtMs: Long = EXPIRES,
+        recordings: List<String> = listOf(RECORDING),
     ): RecommendationPackEntity {
-        val raw = """{"payload_version":1,"offline_pack_id":"$packId","recommendation_request_id":"$requestId","user_id":"$user","device_id":"$device","pipeline":{"key":"cpu_baseline","version":"cpu-v1","manifest_sha256":"${"a".repeat(64)}"},"input_snapshot_sha256":"${"b".repeat(64)}","catalog_snapshot":7,"availability_snapshot":"availability-7","created_at_ms":$CREATED,"expires_at_ms":$expiresAtMs,"request":{"schema_version":1,"canonicalization_version":1,"surface":"home","context":"GENERAL","limit":1,"exploration":0.1,"seed":42,"shadow":false},"items":[{"offline_pack_id":"$packId","recording_id":"$RECORDING","source_rank":1,"pack_position":1,"section":"for_you","score":1.0,"reason_code":"AFFINITY","reason_codes":["AFFINITY"],"contributions":[{"source_key":"library_affinity","source_version":"1","source_rank":1,"raw_score":1.0,"provenance":{"kind":"explicit"}}]}]}"""
+        val items = recordings.mapIndexed { index, recording ->
+            """{"offline_pack_id":"$packId","recording_id":"$recording","source_rank":${index + 1},"pack_position":${index + 1},"section":"for_you","score":1.0,"reason_code":"AFFINITY","reason_codes":["AFFINITY"],"contributions":[{"source_key":"library_affinity","source_version":"1","source_rank":1,"raw_score":1.0,"provenance":{"kind":"explicit"}}]}"""
+        }.joinToString(",")
+        val raw = """{"payload_version":1,"offline_pack_id":"$packId","recommendation_request_id":"$requestId","user_id":"$user","device_id":"$device","pipeline":{"key":"cpu_baseline","version":"cpu-v1","manifest_sha256":"${"a".repeat(64)}"},"input_snapshot_sha256":"${"b".repeat(64)}","catalog_snapshot":7,"availability_snapshot":"availability-7","created_at_ms":$CREATED,"expires_at_ms":$expiresAtMs,"request":{"schema_version":1,"canonicalization_version":1,"surface":"home","context":"GENERAL","limit":${recordings.size},"exploration":0.1,"seed":42,"shadow":false},"items":[$items]}"""
         val bytes = JsonCanonicalizer(raw).encodedString.toByteArray(StandardCharsets.UTF_8)
         return RecommendationPackEntity(
             offlinePackId = packId,

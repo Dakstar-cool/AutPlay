@@ -386,10 +386,9 @@ class PlaybackPlayerSurfacesTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).performScrollTo().performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).performClick()
         composeRule.runOnIdle { check(cleared) }
 
-        composeRule.onNodeWithTag("player-more").performClick()
         composeRule.onNodeWithTag("player-sleep-timer").performClick()
         composeRule.onNodeWithTag("sleep-timer-dial")
             .performSemanticsAction(SemanticsActions.SetProgress) { action -> action(37f) }
@@ -419,7 +418,6 @@ class PlaybackPlayerSurfacesTest {
             }
         }
 
-        composeRule.onNodeWithTag("player-more").performClick()
         composeRule.onNodeWithTag("player-sleep-timer").performClick()
         composeRule.onNodeWithTag("sleep-timer-after-track").performClick()
         composeRule.onNodeWithTag("sleep-timer-confirm").performClick()
@@ -555,22 +553,68 @@ class PlaybackPlayerSurfacesTest {
                         onSeekBegin = {}, onSeekUpdate = {}, onSeekCommit = {},
                         onLike = {}, onDislike = {}, feedbackEnabled = true, onObservingChanged = {},
                         modifier = Modifier.padding(contentPadding),
+                        serverConnected = true,
                     )
                 }
             }
         }
         val cover = composeRule.onNodeWithTag("player-cover").getUnclippedBoundsInRoot()
         val panel = composeRule.onNodeWithTag("now-playing-panel").getUnclippedBoundsInRoot()
-        org.junit.Assert.assertTrue(cover.width > 0.dp && cover.width <= panel.width)
+        org.junit.Assert.assertTrue(cover.width > 0.dp && cover.width <= panel.width * 0.78f)
+        assertEquals((panel.left + panel.width / 2).value, (cover.left + cover.width / 2).value, 1f)
         assertEquals(cover.width.value, cover.height.value, 1f)
         composeRule.onNodeWithTag("autplay-face").assertDoesNotExist()
         assertPlayerFits()
         composeRule.onNodeWithTag("player-download-track").assertIsDisplayed()
-        composeRule.onNodeWithTag("player-sleep-timer").assertDoesNotExist()
+        composeRule.onNodeWithTag("player-sleep-timer").assertIsDisplayed()
+        app.autplay.saveUiScreenshot("player-connected")
         composeRule.onNodeWithTag("player-recommendations").assertDoesNotExist()
         composeRule.onNodeWithTag("player-open-queue").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("queue-editor").assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.queue_editor_empty)).assertIsDisplayed()
+    }
+
+    @Test fun heartsFlankPlayAndConnectionSwitchesOnlyTheMiddleUtility() {
+        val online = androidx.compose.runtime.mutableStateOf(true)
+        val preference = androidx.compose.runtime.mutableStateOf(PlaybackPreferenceUiState.Neutral)
+        val calls = mutableListOf<String>()
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(state = ordinaryState().copy(source = PlaybackSourcePresentation.Vault),
+                onTogglePlayPause = {}, onToggleShuffle = { calls += "shuffle" }, onCycleRepeat = {},
+                onSeekBegin = {}, onSeekUpdate = {}, onSeekCommit = {},
+                onLike = { preference.value = PlaybackPreferenceUiState.Liked },
+                onDislike = { preference.value = PlaybackPreferenceUiState.Disliked },
+                onClearPreference = { preference.value = PlaybackPreferenceUiState.Neutral },
+                preference = preference.value, feedbackEnabled = true, onObservingChanged = {},
+                onDownload = { calls += "download" }, serverConnected = online.value)
+        } }
+        fun action(id: Int) = composeRule.onNodeWithContentDescription(context.getString(id))
+        val dislike = action(R.string.action_dislike)
+        val like = action(R.string.action_like)
+        val transport = listOf(dislike, action(R.string.action_previous), action(R.string.action_play),
+            action(R.string.action_next), like).map { it.getUnclippedBoundsInRoot() }
+        for ((a, b) in transport.zipWithNext()) {
+            org.junit.Assert.assertTrue(a.right <= b.left)
+            assertEquals((a.top + a.height / 2).value, (b.top + b.height / 2).value, 1f)
+        }
+        dislike.performClick().assertIsSelected()
+        like.performClick().assertIsSelected()
+        dislike.assertIsNotSelected()
+        like.performClick().assertIsNotSelected()
+        val download = composeRule.onNodeWithTag("player-download-track")
+        val middle = download.getUnclippedBoundsInRoot()
+        val repeat = composeRule.onNodeWithTag("player-repeat").getUnclippedBoundsInRoot()
+        val timer = composeRule.onNodeWithTag("player-sleep-timer").getUnclippedBoundsInRoot()
+        org.junit.Assert.assertTrue(transport[2].bottom <= middle.top && repeat.right <= middle.left && middle.right <= timer.left)
+        composeRule.onNodeWithText(context.getString(R.string.music_download_track)).assertDoesNotExist()
+        composeRule.onNodeWithTag("player-shuffle").assertDoesNotExist()
+        download.performClick()
+        composeRule.runOnIdle { online.value = false }
+        download.assertDoesNotExist()
+        val shuffle = composeRule.onNodeWithTag("player-shuffle")
+        assertEquals(middle, shuffle.getUnclippedBoundsInRoot())
+        shuffle.performClick()
+        composeRule.runOnIdle { assertEquals(listOf("download", "shuffle"), calls) }
     }
 
     @Test fun repeatAndShuffleExposeConfirmedStateAndKeepDisabledState() {

@@ -1,6 +1,10 @@
 package app.autplay.ui.player
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import app.autplay.playback.presentation.PlaybackPresentationState
 import app.autplay.ui.HomeSwipeTargets
@@ -54,7 +58,11 @@ internal fun NowPlayingRouteRenderer(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = actions.previous,
     onNext: () -> Unit = actions.next,
+    serverAvailable: Boolean = false,
 ) {
+    val network = LocalContext.current.getSystemService(android.net.ConnectivityManager::class.java)
+    val online by remember(network) { app.autplay.networkAvailability(network) }
+        .collectAsState(initial = network.activeNetwork != null)
     NowPlayingScreen(
         state = state,
         artists = actions.artists,
@@ -90,6 +98,7 @@ internal fun NowPlayingRouteRenderer(
         queueActions = actions.queue,
         onDownload = actions.download,
         downloadState = downloadState,
+        serverConnected = serverAvailable && online,
         modifier = modifier,
     )
 }

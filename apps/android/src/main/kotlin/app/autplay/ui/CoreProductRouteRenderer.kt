@@ -1,5 +1,7 @@
 package app.autplay.ui
 
+import app.autplay.application.recommendation.HomeWheelMix
+
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import app.autplay.playback.presentation.PlaybackPresentationState
@@ -51,6 +53,7 @@ internal data class CoreProductRouteActions(
     val manualPlaylists: List<ManualPlaylistUi> = emptyList(),
     val manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
     val changeSearchKind: (LibrarySearchKind) -> Unit = {},
+    val playWheelMix: (HomeWheelMix) -> Unit = {},
     val startMyWave: () -> Unit = {},
     val myWaveAllowed: Boolean = true,
     val playReleaseEntry: ((String) -> Unit)? = null,
@@ -92,6 +95,7 @@ internal fun CoreProductRouteRenderer(
             onPlayTrack = actions.resumeHomeQueue,
             onContinueListening = actions.continueHomeQueue,
             onStartMyWave = actions.startMyWave,
+            onPlayWheelMix = actions.playWheelMix,
             myWaveAllowed = actions.myWaveAllowed,
             onAddLocal = actions.addLocal,
             importingLocalTrack = libraryState.importingLocalTrack,

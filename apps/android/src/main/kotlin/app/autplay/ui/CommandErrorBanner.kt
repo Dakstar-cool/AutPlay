@@ -27,6 +27,7 @@ internal fun CommandErrorBanner(errorCode: String?, onDismiss: () -> Unit) {
     ) {
         Text(stringResource(when (errorCode) {
             "MY_WAVE_EMPTY" -> R.string.home_my_wave_empty
+            "WHEEL_MIX_EMPTY" -> R.string.home_wheel_unavailable
             "MY_WAVE_SYNCING" -> R.string.home_my_wave_syncing
             else -> R.string.action_failed_friendly
         }))

@@ -463,6 +463,20 @@ internal fun AutPlayBootstrap(
                 )
             }
             val pairingRuntimeState by pairingRuntime.state.collectAsState()
+            val pairingLifecycle = LocalLifecycleOwner.current.lifecycle
+            LaunchedEffect(pairingRuntime, pairingLifecycle, settings.m5Binding?.bindingCommitId, settings.accountSignedOut) {
+                if (settings.m5Binding == null || settings.accountSignedOut) return@LaunchedEffect
+                pairingLifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    var previouslyOffline = false
+                    networkAvailability(context.getSystemService(android.net.ConnectivityManager::class.java)).collect { online ->
+                        val reconnected = previouslyOffline && online
+                        previouslyOffline = !online
+                        if (reconnected && pairingRuntime.state.value.pairing == PairingState.Blocked(PairingFailure.SERVER_UNAVAILABLE)) {
+                            pairingRuntime.recoverAndRefresh()
+                        }
+                    }
+                }
+            }
             val portableAccountData = remember(context) {
                 app.autplay.application.portableaccount.PortableAccountDataRepository(AutPlayRuntime.database(context))
             }
@@ -676,7 +690,7 @@ internal fun AutPlayBootstrap(
                             createAccount = portableAccountRuntime::create,
                             existingAccount = { publicId ->
                                 completeOnboarding(settingsStore, publicId).also { completed ->
-                                    if (completed) onboardingCompletionRoute = UiDestination.Profile.route
+                                    if (completed) onboardingCompletionRoute = UiDestination.SettingsAccount.route
                                 }
                             },
                             onComplete = { destination, publicId ->
@@ -1028,9 +1042,9 @@ private fun OfflineLibraryScreen(
         onDispose { statisticsOwner.close() }
     }
     val artistCatalogPort = remember(context) { RoomArtistCatalogPort(AutPlayRuntime.database(context)) }
-    val libraryEntries by remember(coreProductRepository, activeProfileId) {
-        coreProductRepository.libraryEntries(activeProfileId)
-    }.collectAsState(initial = emptyList())
+    val libraryEntries by key(coreProductRepository, activeProfileId) {
+        remember { coreProductRepository.libraryEntries(activeProfileId) }.collectAsState(initial = emptyList())
+    }
     val activeQueueContextRepository = remember(context, scope) {
         ActiveQueueContextRepository.fromDatabase(AutPlayRuntime.database(context), scope)
     }
@@ -1164,7 +1178,6 @@ private fun OfflineLibraryScreen(
     )
     val playlists = repositorySnapshot.playlists
     val libraryReleases = repositorySnapshot.releases
-    val libraryPreferences = repositorySnapshot.preferences
     val historyCount = repositorySnapshot.historyCount
     val downloads = repositorySnapshot.downloads
     var pendingDownloadIntentId by remember { mutableStateOf<String?>(null) }
@@ -1415,6 +1428,27 @@ private fun OfflineLibraryScreen(
             feed.ownerUserId == binding.userId.value &&
             feed.ownerDeviceId == binding.deviceId.value
     }
+    val wheelOwner = listOf(coreBindingKey, binding?.userId?.value, binding?.deviceId?.value,
+        settings.m5Binding?.bindingCommitId).joinToString("|")
+    val wheelHour = remember(view, wheelOwner) { java.time.LocalTime.now().hour }
+    var wheelSuggestions by remember(wheelOwner) {
+        mutableStateOf(app.autplay.application.recommendation.HomeWheelSuggestions())
+    }
+    LaunchedEffect(view, wheelOwner, activeHomeFeed, homeRetryNonce) {
+        if (view == "Home") {
+            try {
+                wheelSuggestions = app.autplay.application.recommendation.HomeWheelRanking.suggestions(
+                    AutPlayRuntime.database(context), coreBindingKey, activeHomeFeed)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A missing local taste snapshot still leaves time-based suggestions available.
+            }
+        }
+    }
+    val wheelOrder = remember(wheelHour, wheelSuggestions.weights) {
+        app.autplay.application.recommendation.HomeWheelRanking.ring(wheelHour, wheelSuggestions.weights)
+    }
     val homeRecommendationSectionLabel = stringResource(R.string.home_recommendations)
     val homeRecommendations = activeHomeFeed?.recommendationSections.orEmpty().flatMap { (section, items) ->
         items.map { item ->
@@ -1452,7 +1486,29 @@ private fun OfflineLibraryScreen(
     )
     val currentMyWaveBinding by rememberUpdatedState(binding)
     val currentMyWaveAllowed by rememberUpdatedState(::myWaveAllowed)
-    val myWaveScope = key(binding, personalWaveRoomState.roomId) { rememberCoroutineScope() }
+    val personalWaveQueue = remember(context, binding, settings.m5Binding?.bindingCommitId,
+        settings.serverBaseUrl, settings.streamBaseUrl, personalWaveRoomState.roomId) {
+        app.autplay.application.recommendation.PersonalWaveQueue(AutPlayRuntime.database(context))
+    }
+    val myWaveScope = key(personalWaveQueue) { rememberCoroutineScope() }
+    val prepareWave = view == "Home" && binding != null && myWaveAllowed() && !settings.accountSignedOut
+    LaunchedEffect(personalWaveQueue, prepareWave, lifecycleOwner, settings.wavePrefetchMode, settings.downloadOnMeteredNetwork) {
+        if (!prepareWave) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            networkAvailability(context.getSystemService(android.net.ConnectivityManager::class.java)).collectLatest { connected ->
+                if (!connected || !myWaveNetworkAvailable(context)) return@collectLatest
+                try {
+                    personalWaveQueue.prepare(binding, { owner, wave ->
+                        AutPlayRuntime.serverFeatures(context, owner).recommendations(wave = wave)
+                    }) { tracks -> warmPersonalWaveTracks(context, settings, binding.serverProfileId, tracks) }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // The Play action can fetch afresh or select eligible offline entries.
+                }
+            }
+        }
+    }
     val coreCommandActions = buildCoreCommandActions(
         scope = scope,
         binding = { binding },
@@ -1462,7 +1518,10 @@ private fun OfflineLibraryScreen(
         recommendationRepository = recommendationRepository,
         sliceRepository = sliceRepository,
         setHomeFeed = { homeFeed = it },
-        reportError = { stableError = it },
+        reportError = { code ->
+            stableError = code
+            if (code == "WHEEL_MIX_EMPTY") homeRetryNonce = !homeRetryNonce
+        },
         playbackRepository = playbackRepository,
         playbackOwner = playbackOwner,
         searchResultStore = searchResultStore,
@@ -1483,9 +1542,7 @@ private fun OfflineLibraryScreen(
         myWaveAllowed = { currentMyWaveAllowed() },
         myWaveCurrentBinding = { currentMyWaveBinding },
         myWaveScope = myWaveScope,
-        personalWaveQueue = remember(context) {
-            app.autplay.application.recommendation.PersonalWaveQueue(AutPlayRuntime.database(context))
-        },
+        personalWaveQueue = personalWaveQueue,
         fetchWave = { owner, wave -> AutPlayRuntime.serverFeatures(context, owner).recommendations(wave = wave) },
     )
     val manualPlaylistActions = playlistMutationActions.copy(
@@ -1590,7 +1647,6 @@ private fun OfflineLibraryScreen(
     val allLibraryTrackSummaries = buildLibraryTrackSummaries(
         entries = libraryEntries,
         audioStates = localAudioStates,
-        preferences = libraryPreferences,
         downloadedTrackIds = downloadedTrackIds,
         serverConnected = binding != null,
         untitledTrack = untitledTrack,
@@ -1638,7 +1694,8 @@ private fun OfflineLibraryScreen(
         recommendationError = homeError,
         untitledTrack = untitledTrack,
         unknownArtist = stringResource(R.string.library_unknown_artist),
-    )
+    ).copy(wheelOrder = wheelOrder, wheelOwner = wheelOwner,
+        wheelMixes = wheelSuggestions.mixes)
     val libraryScreenState = buildLibraryScreenUiState(
         localMode = binding == null,
         tracks = allLibraryTrackSummaries,
@@ -1726,7 +1783,7 @@ private fun OfflineLibraryScreen(
         retryHome = { homeRetryNonce = !homeRetryNonce },
         resumeHomeQueue = ::resumeHomeQueue,
         continueHomeQueue = {
-            val saved = homeActiveQueue
+            val saved = homeActiveQueue?.takeIf { it.localUserTrackRefId == homeScreenState.continueListening?.trackId }
             val active = playerState.context as? ActiveQueueContext.Loaded
             if (saved != null && saved.queueSnapshotId == active?.snapshotId && myWaveAllowed()) {
                 if (playerState.mediaId != null && playbackState.queueSnapshotId == saved.queueSnapshotId) {
@@ -1738,9 +1795,12 @@ private fun OfflineLibraryScreen(
                     }
                 }
             }
-            navigation.navigate(UiDestination.NowPlaying)
+            if (saved == null && myWaveAllowed()) {
+                homeScreenState.recentlyPlayed.firstOrNull()?.let { coreCommandActions.startTrack(it.id, "HOME", "USER", null) }
+            }
         },
-        startMyWave = coreCommandActions.startMyWave,
+        playWheelMix = coreCommandActions.startMyWave,
+        startMyWave = { coreCommandActions.startMyWave(null) },
         myWaveAllowed = myWaveAllowed(),
         openHomePlaylist = ::openHomePlaylist,
         openOffline = ::openOfflineLibrary,
@@ -1855,7 +1915,10 @@ private fun OfflineLibraryScreen(
         },
     )
     val currentTrackPreference = playbackState.localUserTrackRefId?.let { trackRefId ->
-        libraryPreferences.firstOrNull { it.stableId == trackRefId }
+        key(coreProductRepository, activeProfileId, trackRefId) {
+            remember { coreProductRepository.trackPreference(activeProfileId, trackRefId) }
+                .collectAsState(initial = null).value
+        }
     }
     val sleepTimerRemainingMinutes = rememberSleepTimerRemainingMinutes(
         playbackState.sleepTimerDeadlineElapsedRealtimeMs,
@@ -1976,7 +2039,10 @@ private fun OfflineLibraryScreen(
         acceptInvitation = { socialRuntime?.acceptRoomInvitation(it) },
         cancelInvitation = { socialRuntime?.cancelRoomInvitation(it) },
     )
+    val serverAvailable = binding != null && !settings.accountSignedOut && !syncStatus.serverUnavailable &&
+        (settings.m5Binding == null || pairingRuntimeState.pairing is PairingState.Connected)
     val legacySecondaryState = LegacySecondaryRouteState(
+        serverAvailable = serverAvailable,
         destination = destination,
         view = view,
         playlists = playlists,
@@ -2146,15 +2212,14 @@ private fun OfflineLibraryScreen(
     )
     MainAdaptiveShell(
         state = MainAdaptiveShellState(
+            previousDestination = navigation.previousDestination,
             destination = destination,
             unreadSyncConflicts = syncStatus.deadLetters + syncStatus.conflicts,
             navigationCanGoBack = navigation.canNavigateBack,
             hasVisibleCoreDetail = hasVisibleCoreDetail,
             playerState = playerState,
             currentTrackRefId = playbackState.localUserTrackRefId,
-            currentTrackLiked = playbackState.localUserTrackRefId?.let { trackRefId ->
-                libraryPreferences.any { it.stableId == trackRefId && it.loved }
-            } == true,
+            currentTrackLiked = currentTrackPreference == "LIKED",
             coreDetailState = coreDetailUiState,
             selectedDetail = coreProductState.selectedDetail,
             homeState = homeScreenState,
@@ -2166,9 +2231,9 @@ private fun OfflineLibraryScreen(
             coreRouteActions = coreRouteActions,
             queueState = queueControls.state,
             nowPlayingFeedbackEnabled = playbackState.localUserTrackRefId != null,
-            nowPlayingPreference = when {
-                currentTrackPreference?.loved == true -> PlaybackPreferenceUiState.Liked
-                currentTrackPreference?.disliked == true -> PlaybackPreferenceUiState.Disliked
+            nowPlayingPreference = when (currentTrackPreference) {
+                "LIKED" -> PlaybackPreferenceUiState.Liked
+                "DISLIKED" -> PlaybackPreferenceUiState.Disliked
                 else -> PlaybackPreferenceUiState.Neutral
             },
             nowPlayingTaste = NowPlayingTasteUiState(
@@ -2181,6 +2246,7 @@ private fun OfflineLibraryScreen(
             sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
             stopAfterCurrentTrackActive = playbackState.stopAfterQueueEntryId == playbackState.queueEntryId,
             nowPlayingActions = nowPlayingRouteActions,
+            playerServerAvailable = serverAvailable,
             nowPlayingDownloadState = downloads.firstOrNull {
                 it.localUserTrackRefId == playbackState.localUserTrackRefId
             }?.state,
@@ -2444,6 +2510,8 @@ internal fun ProfileFrontendScreen(
 
 @Composable
 internal fun SettingsFrontendScreen(
+    profileName: String?,
+    accountSummary: String,
     settings: NonSecretSettings,
     onUpdate: ((NonSecretSettings) -> NonSecretSettings) -> Unit,
     onAppLanguageChange: (AppLanguage) -> Unit,
@@ -2462,6 +2530,8 @@ internal fun SettingsFrontendScreen(
 ) {
     SettingsProductScreen(
         page = page,
+        profileName = profileName,
+        accountSummary = accountSummary,
         onChooseAudio = onChooseAudio,
         settings = settings,
         onUpdate = onUpdate,

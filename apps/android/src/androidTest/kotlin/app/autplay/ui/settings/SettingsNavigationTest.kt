@@ -17,7 +17,7 @@ import org.junit.Test
 class SettingsNavigationTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun sevenRowsNavigateAndLocalAudioActionIsDirect() {
+    @Test fun profileAndSixSectionsNavigateAndLocalAudioActionIsDirect() {
         val page = mutableStateOf<UiDestination>(UiDestination.Settings)
         var audioRequests = 0
         compose.setContent {
@@ -28,7 +28,10 @@ class SettingsNavigationTest {
                 }
             }
         }
-        assertEquals(7, UiDestination.settingsNavigation.size)
+        compose.onNodeWithTag("settings-row-settings-downloads").assertDoesNotExist()
+        compose.onNodeWithTag("settings-row-profile").performClick()
+        compose.runOnIdle { assertEquals(UiDestination.Profile, page.value) }
+        assertEquals(6, UiDestination.settingsNavigation.size)
         UiDestination.settingsNavigation.forEach { destination ->
             compose.runOnIdle { page.value = UiDestination.Settings }
             compose.onNodeWithTag("settings-row-${destination.route}").performScrollTo().performClick()

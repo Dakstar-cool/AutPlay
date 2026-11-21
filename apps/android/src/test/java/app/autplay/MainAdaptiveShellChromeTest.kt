@@ -8,8 +8,8 @@ import org.junit.Test
 
 class MainAdaptiveShellChromeTest {
     @Test
-    fun homeKeepsTransportAvailableWhileItsHeroScrollsAway() {
-        assertTrue(shouldShowPersistentPlayerChrome(UiDestination.Home, hasMedia = true))
+    fun homeAlwaysUsesItsOwnTransport() {
+        assertFalse(shouldShowPersistentPlayerChrome(UiDestination.Home, hasMedia = true))
         assertFalse(shouldShowPersistentPlayerChrome(UiDestination.Home, hasMedia = false))
     }
 

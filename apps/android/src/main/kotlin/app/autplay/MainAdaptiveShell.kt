@@ -30,6 +30,7 @@ import app.autplay.ui.downloads.DownloadsUiActions
 
 internal data class MainAdaptiveShellState(
     val destination: UiDestination,
+    val previousDestination: UiDestination?,
     val unreadSyncConflicts: Int,
     val navigationCanGoBack: Boolean,
     val hasVisibleCoreDetail: Boolean,
@@ -60,6 +61,7 @@ internal data class MainAdaptiveShellState(
     val legacyState: LegacySecondaryRouteState,
     val legacyActions: LegacySecondaryRouteActions,
     val nowPlayingDownloadState: String? = null,
+    val playerServerAvailable: Boolean = false,
 )
 
 internal data class MainAdaptiveShellActions(
@@ -89,14 +91,13 @@ internal fun MainAdaptiveShell(
     androidx.compose.runtime.CompositionLocalProvider(app.autplay.ui.LocalDeveloperMode provides state.legacyState.settings.developerMode) {
     AutPlayAdaptiveShell(
         selectedDestination = state.destination,
+        playerReturnDestination = state.previousDestination ?: UiDestination.Home,
         onDestinationSelected = actions.navigate,
         unreadSyncConflicts = state.unreadSyncConflicts,
         canNavigateBack = state.hasVisibleCoreDetail || state.navigationCanGoBack,
         onNavigateBack = {
             if (state.hasVisibleCoreDetail) actions.closeCoreDetail() else actions.navigateBack()
         },
-        onProfileClick = { actions.navigate(UiDestination.Profile) },
-        onSettingsClick = { actions.navigate(UiDestination.Settings) },
         onNowPlayingClick = { actions.navigate(UiDestination.NowPlaying) },
         snackbarHost = {
             app.autplay.ui.CommandErrorBanner(state.legacyState.stableError, actions.dismissCommandError)
@@ -169,6 +170,7 @@ internal fun MainAdaptiveShell(
                 homeSwipeTargets = state.homeSwipeTargets,
             )
             UiDestination.NowPlaying -> NowPlayingRouteRenderer(
+                serverAvailable = state.playerServerAvailable,
                 downloadState = state.nowPlayingDownloadState,
                 state = state.playerState,
                 swipeTargets = state.homeSwipeTargets,
@@ -212,4 +214,4 @@ internal fun MainAdaptiveShell(
 }
 
 internal fun shouldShowPersistentPlayerChrome(destination: UiDestination, hasMedia: Boolean): Boolean =
-    hasMedia && destination != UiDestination.NowPlaying
+    hasMedia && destination != UiDestination.Home && destination != UiDestination.NowPlaying

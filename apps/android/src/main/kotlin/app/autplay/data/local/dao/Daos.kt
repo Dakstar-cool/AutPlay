@@ -17,6 +17,18 @@ data class ArtistAppearanceRow(@Embedded val link: CatalogArtistCreditLinkEntity
 data class LibraryReleaseRow(@Embedded val release: ReleaseProjectionEntity, val artworkTrackId: String?)
 data class LibraryPlaylistRow(@Embedded val playlist: PlaylistEntity, val artworkTrackId: String?)
 
+data class LibraryBrowseRow(
+    val localLibraryEntryId: String?,
+    val localUserTrackRefId: String,
+    val title: String?,
+    val artistName: String?,
+    val addedAtMs: Long,
+    val availabilityStatus: String,
+    val removed: Boolean,
+    val serverPlaybackCandidate: Boolean,
+    val loved: Boolean = false,
+)
+
 @Dao
 interface CatalogProjectionDao {
     @Upsert suspend fun upsertRecordings(rows: List<RecordingProjectionEntity>)
@@ -112,6 +124,39 @@ interface CatalogProjectionDao {
 
 @Dao
 interface LibraryDao {
+    /** Favorites also belong in My Music when they fall outside the recent library window. */
+    @Query("""
+        WITH recent AS (
+            SELECT local_user_track_ref_id FROM library_entry
+            WHERE server_profile_id = :profileId
+            ORDER BY added_at_ms DESC, local_user_track_ref_id LIMIT :limit
+        ), visible_refs AS (
+            SELECT local_user_track_ref_id FROM recent
+            UNION
+            SELECT local_user_track_ref_id FROM user_track_preference
+            WHERE server_profile_id = :profileId AND preference = 'LIKED'
+        )
+        SELECT l.local_library_entry_id AS localLibraryEntryId,
+               u.local_user_track_ref_id AS localUserTrackRefId,
+               CASE WHEN json_type(m.payload_json, '$.fields.title') IS NULL THEN u.raw_title
+                    ELSE json_extract(m.payload_json, '$.fields.title') END AS title,
+               CASE WHEN json_type(m.payload_json, '$.fields.artist') IS NULL THEN u.raw_artist
+                    ELSE json_extract(m.payload_json, '$.fields.artist') END AS artistName,
+               COALESCE(l.added_at_ms, p.updated_at_ms) AS addedAtMs,
+               COALESCE(l.availability_status, 'PENDING') AS availabilityStatus,
+               l.removed_at_ms IS NOT NULL AS removed,
+               (u.server_user_track_ref_id IS NOT NULL AND u.server_recording_id IS NOT NULL
+                    AND u.resolution_status = 'RESOLVED') AS serverPlaybackCandidate,
+               COALESCE(p.preference = 'LIKED', 0) AS loved
+        FROM visible_refs v JOIN user_track_ref u ON u.local_user_track_ref_id = v.local_user_track_ref_id
+        LEFT JOIN library_entry l ON l.local_user_track_ref_id = u.local_user_track_ref_id AND l.server_profile_id = :profileId
+        LEFT JOIN user_track_preference p ON p.local_user_track_ref_id = u.local_user_track_ref_id AND p.server_profile_id = :profileId
+        LEFT JOIN track_metadata_projection m ON m.local_user_track_ref_id = u.local_user_track_ref_id AND m.server_profile_id = :profileId
+        WHERE u.server_profile_id = :profileId AND u.deleted_at_ms IS NULL
+        ORDER BY addedAtMs DESC, localUserTrackRefId
+    """)
+    fun browseLibrary(profileId: String, limit: Int): Flow<List<LibraryBrowseRow>>
+
     @Query(
         """
         SELECT u.local_user_track_ref_id
@@ -144,12 +189,16 @@ interface LibraryDao {
               OR (:vaultAvailable = 1 AND u.server_user_track_ref_id IS NOT NULL
                   AND u.server_recording_id IS NOT NULL AND u.resolution_status = 'RESOLVED')
           )
-        ORDER BY RANDOM()
+        ORDER BY CASE WHEN :randomOrder THEN RANDOM() ELSE (
+            SELECT MAX(l.added_at_ms) FROM library_entry l WHERE l.local_user_track_ref_id = u.local_user_track_ref_id
+              AND l.server_profile_id = :profileId AND l.removed_at_ms IS NULL
+        ) END DESC, u.local_user_track_ref_id
         LIMIT :limit
         """,
     )
-    suspend fun randomPlaybackCandidates(
+    suspend fun playbackCandidates(
         profileId: String, vaultAvailable: Boolean, limit: Int, onlyUnresolved: Boolean = false,
+        randomOrder: Boolean = true,
     ): List<String>
 
     @Query(WAVE_RECORDINGS + """

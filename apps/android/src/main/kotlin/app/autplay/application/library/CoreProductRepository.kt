@@ -27,26 +27,7 @@ class CoreProductRepository(
     private val metadataAlbums = AlbumGroupRepository(database)
     fun libraryEntries(profileId: String?, limit: Int = 5_000): Flow<List<CoreLibraryEntrySummary>> {
         require(limit in 1..5_000)
-        val effectiveProfileId = effectiveProfile(profileId)
-        return combine(database.libraryDao().entriesForProfile(effectiveProfileId, limit), database.trackMetadataDao().changes(effectiveProfileId)) { entries, _ -> entries }.mapLatest { entries ->
-            val tracks = resolveTrackRefs(entries.map { it.localUserTrackRefId }, effectiveProfileId)
-            entries.map { entry ->
-                val track = tracks[entry.localUserTrackRefId]
-                CoreLibraryEntrySummary(
-                    localLibraryEntryId = entry.localLibraryEntryId,
-                    localUserTrackRefId = entry.localUserTrackRefId,
-                    title = track?.rawTitle,
-                    artistName = track?.rawArtist,
-                    addedAtMs = entry.addedAtMs,
-                    availabilityStatus = entry.availabilityStatus,
-                    removed = entry.removedAtMs != null,
-                    serverPlaybackCandidate = track?.serverUserTrackRefId != null &&
-                        track.serverRecordingId != null &&
-                        track.resolutionStatus == "RESOLVED" &&
-                        track.deletedAtMs == null,
-                )
-            }
-        }
+        return database.libraryDao().browseLibrary(effectiveProfile(profileId), limit)
     }
 
     fun recentlyAdded(profileId: String?, limit: Int = 12): Flow<List<CoreHomeTrackSummary>> {
@@ -111,7 +92,7 @@ class CoreProductRepository(
     /** Sample the entire owner's library, independently of the bounded, sorted UI projection. */
     suspend fun randomPlaybackCandidates(profileId: String?, vaultAvailable: Boolean, limit: Int = 200): List<String> {
         require(limit in 1..200)
-        return database.libraryDao().randomPlaybackCandidates(effectiveProfile(profileId), vaultAvailable, limit)
+        return database.libraryDao().playbackCandidates(effectiveProfile(profileId), vaultAvailable, limit)
     }
 
     fun activeQueue(profileId: String?): Flow<CoreResumeQueueSummary?> =
@@ -148,18 +129,10 @@ class CoreProductRepository(
         "track_metadata_projection", "user_track_ref", "library_entry", "release_projection", "release_track_projection", "recording_projection",
     ).map { }
 
-    fun preferences(profileId: String?, limit: Int = 2_000): Flow<List<CoreTrackPreferenceSummary>> {
-        require(limit in 1..5_000)
-        return database.libraryDao().preferencesForProfile(effectiveProfile(profileId), limit).map { rows ->
-            rows.map {
-                CoreTrackPreferenceSummary(
-                    stableId = it.localUserTrackRefId,
-                    loved = it.preference == "LIKED",
-                    disliked = it.preference == "DISLIKED",
-                )
-            }
-        }
-    }
+    fun trackPreference(profileId: String?, trackRefId: String): Flow<String?> =
+        database.libraryDao().observePreference(trackRefId).map { row ->
+            row?.takeIf { it.serverProfileId == effectiveProfile(profileId) }?.preference
+        }.distinctUntilChanged()
 
     fun localAudio(profileId: String?, limit: Int = 2_000): Flow<List<CoreLocalAudioSummary>> {
         require(limit in 1..5_000)
@@ -387,16 +360,7 @@ class CoreProductRepository(
 data class CoreReleaseSummary(val stableId: String, val title: String, val artistName: String?,
     val releaseDateText: String? = null, val ownedTrackCount: Int? = null,
     val artworkTrackId: String? = null)
-data class CoreLibraryEntrySummary(
-    val localLibraryEntryId: String,
-    val localUserTrackRefId: String,
-    val title: String?,
-    val artistName: String?,
-    val addedAtMs: Long,
-    val availabilityStatus: String,
-    val removed: Boolean,
-    val serverPlaybackCandidate: Boolean,
-)
+typealias CoreLibraryEntrySummary = app.autplay.data.local.dao.LibraryBrowseRow
 data class CoreHomeTrackSummary(
     val stableId: String,
     val title: String?,
@@ -411,11 +375,6 @@ data class CoreResumeQueueSummary(
     val artistName: String?,
     val positionMs: Long,
     val queueType: String,
-)
-data class CoreTrackPreferenceSummary(
-    val stableId: String,
-    val loved: Boolean,
-    val disliked: Boolean = false,
 )
 data class CoreLocalAudioSummary(
     val stableId: String,
