@@ -242,7 +242,7 @@ public fun NowPlayingScreen(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
     onOpenArtist: (String) -> Unit = {},
-    serverConnected: Boolean = false,
+    serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -412,7 +412,7 @@ public fun NowPlayingScreen(
                 }
                 PlayerTransportControls(state, swipeTargets, onPrevious, onNext, onTogglePlayPause,
                     preference, feedbackEnabled, onLike, onDislike, onClearPreference)
-                PlayerSecondaryControls(state, serverConnected, downloadState, onDownload, onToggleShuffle, onCycleRepeat,
+                PlayerSecondaryControls(state, serverConnection, downloadState, onDownload, onToggleShuffle, onCycleRepeat,
                     sleepTimerRemainingMinutes, stopAfterCurrentTrackActive, onTimer = { sheet = PlayerSheet.Timer })
             }
         }
@@ -542,7 +542,7 @@ private fun PlayerTransportControls(
 @Composable
 private fun PlayerSecondaryControls(
     state: PlaybackPresentationState,
-    serverConnected: Boolean,
+    serverConnection: PlayerServerConnection,
     downloadState: String?,
     onDownload: () -> Unit,
     onToggleShuffle: () -> Unit,
@@ -563,7 +563,7 @@ private fun PlayerSecondaryControls(
             tag = "player-repeat",
             one = state.repeatMode == RepeatModePresentation.One,
         )
-        if (serverConnected) {
+        if (serverConnection != PlayerServerConnection.Offline) {
             val saved = downloadState == "COMPLETED" || state.source == PlaybackSourcePresentation.Download
             val pending = downloadState in setOf("REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED")
             val description = stringResource(when {
@@ -572,7 +572,8 @@ private fun PlayerSecondaryControls(
                 else -> R.string.music_download_track
             })
             PlayerModeButton(if (saved) AutPlayIcon.Check else AutPlayIcon.Download, description, description,
-                active = saved || pending, enabled = !saved && !pending && state.source == PlaybackSourcePresentation.Vault,
+                active = saved || pending, enabled = serverConnection == PlayerServerConnection.Connected &&
+                    !saved && !pending && state.source == PlaybackSourcePresentation.Vault,
                 onClick = onDownload, tag = "player-download-track")
         } else {
             PlayerModeButton(AutPlayIcon.Shuffle, stringResource(R.string.player_shuffle),

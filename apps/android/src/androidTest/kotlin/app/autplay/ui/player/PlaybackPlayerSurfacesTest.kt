@@ -553,7 +553,7 @@ class PlaybackPlayerSurfacesTest {
                         onSeekBegin = {}, onSeekUpdate = {}, onSeekCommit = {},
                         onLike = {}, onDislike = {}, feedbackEnabled = true, onObservingChanged = {},
                         modifier = Modifier.padding(contentPadding),
-                        serverConnected = true,
+                        serverConnection = PlayerServerConnection.Connected,
                     )
                 }
             }
@@ -575,7 +575,7 @@ class PlaybackPlayerSurfacesTest {
     }
 
     @Test fun heartsFlankPlayAndConnectionSwitchesOnlyTheMiddleUtility() {
-        val online = androidx.compose.runtime.mutableStateOf(true)
+        val connection = androidx.compose.runtime.mutableStateOf(PlayerServerConnection.Checking)
         val preference = androidx.compose.runtime.mutableStateOf(PlaybackPreferenceUiState.Neutral)
         val calls = mutableListOf<String>()
         composeRule.setContent { AutPlayTheme {
@@ -586,7 +586,7 @@ class PlaybackPlayerSurfacesTest {
                 onDislike = { preference.value = PlaybackPreferenceUiState.Disliked },
                 onClearPreference = { preference.value = PlaybackPreferenceUiState.Neutral },
                 preference = preference.value, feedbackEnabled = true, onObservingChanged = {},
-                onDownload = { calls += "download" }, serverConnected = online.value)
+                onDownload = { calls += "download" }, serverConnection = connection.value)
         } }
         fun action(id: Int) = composeRule.onNodeWithContentDescription(context.getString(id))
         val dislike = action(R.string.action_dislike)
@@ -602,6 +602,10 @@ class PlaybackPlayerSurfacesTest {
         dislike.assertIsNotSelected()
         like.performClick().assertIsNotSelected()
         val download = composeRule.onNodeWithTag("player-download-track")
+        download.assertIsNotEnabled()
+        composeRule.onNodeWithTag("player-shuffle").assertDoesNotExist()
+        composeRule.runOnIdle { connection.value = PlayerServerConnection.Connected }
+        download.assertIsEnabled()
         val middle = download.getUnclippedBoundsInRoot()
         val repeat = composeRule.onNodeWithTag("player-repeat").getUnclippedBoundsInRoot()
         val timer = composeRule.onNodeWithTag("player-sleep-timer").getUnclippedBoundsInRoot()
@@ -609,7 +613,7 @@ class PlaybackPlayerSurfacesTest {
         composeRule.onNodeWithText(context.getString(R.string.music_download_track)).assertDoesNotExist()
         composeRule.onNodeWithTag("player-shuffle").assertDoesNotExist()
         download.performClick()
-        composeRule.runOnIdle { online.value = false }
+        composeRule.runOnIdle { connection.value = PlayerServerConnection.Offline }
         download.assertDoesNotExist()
         val shuffle = composeRule.onNodeWithTag("player-shuffle")
         assertEquals(middle, shuffle.getUnclippedBoundsInRoot())

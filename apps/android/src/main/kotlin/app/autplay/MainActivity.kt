@@ -164,6 +164,7 @@ import app.autplay.ui.AppLanguage
 import app.autplay.ui.UiDestination
 import app.autplay.ui.WelcomeOnboardingScreen
 import app.autplay.ui.player.PlaybackPreferenceUiState
+import app.autplay.ui.player.playerServerConnection
 import app.autplay.ui.player.NowPlayingTasteUiState
 import app.autplay.ui.history.HistoryUiActions
 import app.autplay.ui.history.HistoryUiState
@@ -2246,7 +2247,12 @@ private fun OfflineLibraryScreen(
             sleepTimerRemainingMinutes = sleepTimerRemainingMinutes,
             stopAfterCurrentTrackActive = playbackState.stopAfterQueueEntryId == playbackState.queueEntryId,
             nowPlayingActions = nowPlayingRouteActions,
-            playerServerAvailable = serverAvailable,
+            playerConnection = playerServerConnection(
+                signedInToServer = binding != null && !settings.accountSignedOut,
+                hasPairingCheckpoint = settings.m5Binding != null,
+                pairing = pairingRuntimeState.pairing,
+                sync = syncStatus,
+            ),
             nowPlayingDownloadState = downloads.firstOrNull {
                 it.localUserTrackRefId == playbackState.localUserTrackRefId
             }?.state,

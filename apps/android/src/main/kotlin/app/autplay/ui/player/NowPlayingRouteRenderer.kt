@@ -58,7 +58,7 @@ internal fun NowPlayingRouteRenderer(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = actions.previous,
     onNext: () -> Unit = actions.next,
-    serverAvailable: Boolean = false,
+    serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
 ) {
     val network = LocalContext.current.getSystemService(android.net.ConnectivityManager::class.java)
     val online by remember(network) { app.autplay.networkAvailability(network) }
@@ -98,7 +98,7 @@ internal fun NowPlayingRouteRenderer(
         queueActions = actions.queue,
         onDownload = actions.download,
         downloadState = downloadState,
-        serverConnected = serverAvailable && online,
+        serverConnection = if (online) serverConnection else PlayerServerConnection.Offline,
         modifier = modifier,
     )
 }

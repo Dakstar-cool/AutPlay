@@ -1,5 +1,9 @@
 package app.autplay.application.profilepairing
 
+import app.autplay.application.sync.SyncStatus
+import app.autplay.ui.player.PlayerServerConnection
+import app.autplay.ui.player.playerServerConnection
+
 import app.autplay.domain.DeviceId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.UserId
@@ -37,6 +41,21 @@ class ProfilePairingFoundationTest {
         // The transport and persisted credential use these identical ASCII bytes, not raw entropy.
         assertEquals(32, MessageDigest.getInstance("SHA-256").digest(token).size)
     }
+    @Test fun playerDistinguishesRestoringAConfiguredServerFromBeingOffline() {
+        val restoring = PairingState.ExchangingInvitation(snapshot())
+        val oldFailure = SyncStatus(0, 0, 0, null, "READY", "NETWORK_UNAVAILABLE", lastAttemptAtMs = 50)
+        val connected = PairingReducer.applyCapabilities(restoring, restoring.snapshot, capabilities().copy(expiresAtEpochMs = 500), null, 100)
+        fun status(pairing: PairingState, sync: SyncStatus = oldFailure) =
+            playerServerConnection(true, true, pairing, sync)
+        assertEquals(PlayerServerConnection.Checking, status(PairingState.NotConnected))
+        assertEquals(PlayerServerConnection.Checking, status(restoring))
+        assertEquals(PlayerServerConnection.Connected, status(connected))
+        assertEquals(PlayerServerConnection.Offline, status(connected, oldFailure.copy(lastAttemptAtMs = 110)))
+        assertEquals(PlayerServerConnection.Connected, status(connected, oldFailure.copy(lastErrorCode = null)))
+        assertEquals(PlayerServerConnection.Offline, status(PairingState.Blocked(PairingFailure.SERVER_UNAVAILABLE)))
+        assertEquals(PlayerServerConnection.Offline, playerServerConnection(false, false, PairingState.NotConnected, oldFailure))
+    }
+
     private fun snapshot() = PairingFlowSnapshot("10000000-0000-4000-8000-000000000001", "https://api.example", "https://stream.example", ServerProfileId("10000000-0000-4000-8000-000000000003"), "10000000-0000-4000-8000-000000000004", 1, "a".repeat(64), UserId("10000000-0000-4000-8000-000000000005"), DeviceId("10000000-0000-4000-8000-000000000006"), null, null, null)
     private fun capabilities() = CapabilityState(TrustedServerIdentity("10000000-0000-4000-8000-000000000004", 1, "a".repeat(64)), UserId("10000000-0000-4000-8000-000000000005"), DeviceId("10000000-0000-4000-8000-000000000006"), 1, 1, 1, emptySet())
     private fun assertFails(block: () -> Unit) { try { block(); throw AssertionError("expected failure") } catch (_: IllegalArgumentException) {} }

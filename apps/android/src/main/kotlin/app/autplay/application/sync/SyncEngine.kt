@@ -50,6 +50,7 @@ data class SyncStatus(
     val lastSuccessAtMs: Long?,
     val bootstrapState: String,
     val lastErrorCode: String? = null,
+    val lastAttemptAtMs: Long? = null,
 ) {
     val serverUnavailable: Boolean get() {
         val code = lastErrorCode ?: return false
@@ -768,7 +769,7 @@ class SyncStatusRepository(private val database: AutPlayDatabase) {
                 database.syncDao().observeRuntimeStatus(binding.serverProfileId.value),
             ) { pending, dead, conflicts, runtime ->
                 SyncStatus(pending, dead, conflicts, runtime?.lastSuccessAtMs ?: cursor.lastSyncAtMs,
-                    cursor.bootstrapState, runtime?.lastErrorCode)
+                    cursor.bootstrapState, runtime?.lastErrorCode, runtime?.lastAttemptAtMs)
             }
         }
 }

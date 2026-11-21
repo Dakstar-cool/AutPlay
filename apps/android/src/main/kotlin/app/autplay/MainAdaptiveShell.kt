@@ -17,6 +17,7 @@ import app.autplay.ui.core.DetailTarget
 import app.autplay.ui.core.ListAnchor
 import app.autplay.ui.player.NowPlayingRouteActions
 import app.autplay.ui.player.NowPlayingRouteRenderer
+import app.autplay.ui.player.PlayerServerConnection
 import app.autplay.ui.player.NowPlayingTasteUiState
 import app.autplay.ui.player.PlaybackMiniPlayer
 import app.autplay.ui.player.PlaybackPreferenceUiState
@@ -61,7 +62,7 @@ internal data class MainAdaptiveShellState(
     val legacyState: LegacySecondaryRouteState,
     val legacyActions: LegacySecondaryRouteActions,
     val nowPlayingDownloadState: String? = null,
-    val playerServerAvailable: Boolean = false,
+    val playerConnection: PlayerServerConnection = PlayerServerConnection.Offline,
 )
 
 internal data class MainAdaptiveShellActions(
@@ -170,7 +171,7 @@ internal fun MainAdaptiveShell(
                 homeSwipeTargets = state.homeSwipeTargets,
             )
             UiDestination.NowPlaying -> NowPlayingRouteRenderer(
-                serverAvailable = state.playerServerAvailable,
+                serverConnection = state.playerConnection,
                 downloadState = state.nowPlayingDownloadState,
                 state = state.playerState,
                 swipeTargets = state.homeSwipeTargets,
