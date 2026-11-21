@@ -604,7 +604,7 @@ public fun LibraryProductScreen(
         LibraryBrowseControls(displayState, onSectionChange, onFilterChange, onSortChange, onOpenDownloads, onAddLocal)
         val collections = displayState.section == LibrarySection.Albums || displayState.section == LibrarySection.Playlists
         LazyVerticalGrid(
-            columns = if (collections) GridCells.Adaptive(140.dp) else GridCells.Fixed(1),
+            columns = if (collections) GridCells.Adaptive(132.dp) else GridCells.Fixed(1),
             modifier = Modifier.fillMaxWidth().weight(1f).testTag("library-product-list"),
             state = gridState,
             contentPadding = PaddingValues(
