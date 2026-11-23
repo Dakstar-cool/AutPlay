@@ -53,7 +53,7 @@ private class DesktopDecodedArtwork(val identity: DesktopArtworkRenderIdentity, 
 
 /** Only immutable, already inspected artwork enters here. No filesystem or URI access. */
 @Composable
-internal fun DesktopArtworkView(trackId: String?, artwork: DesktopArtwork?, language: DesktopLanguage,
+public fun DesktopArtworkView(trackId: String?, artwork: DesktopArtwork?, language: DesktopLanguage,
     size: Dp = 64.dp) {
     DesktopArtworkImage(rememberDesktopArtworkBitmap(trackId, artwork), language, size, trackId.orEmpty())
 }

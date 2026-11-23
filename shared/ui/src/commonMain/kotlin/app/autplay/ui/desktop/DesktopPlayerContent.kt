@@ -278,7 +278,7 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
     tasteInput: DesktopTasteInput, tasteCallbacks: DesktopTasteCallbacks, isNavigationCurrent: () -> Boolean,
     isTasteNavigationCurrent: () -> Boolean, onTrackDetails: (String) -> Unit, onQueue: () -> Unit,
     modifier: Modifier = Modifier, smoothTrackTransitions: Boolean = false,
-    libraryCallbacks: DesktopLibraryCallbacks = DesktopLibraryCallbacks()) {
+    libraryCallbacks: DesktopLibraryCallbacks = DesktopLibraryCallbacks(), download: (@Composable (String) -> Unit)? = null) {
     val preparation = DesktopPlayerInput(library, input.playback, input.target, input.navigationRevision)
     val currentPreparation by rememberUpdatedState(preparation)
     val currentNavigation by rememberUpdatedState(isNavigationCurrent)
@@ -331,7 +331,7 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
             BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black).clickable(role = Role.Button,
                 onClickLabel = if (ru) "Закрыть обложку" else "Close artwork") { fullscreen = false },
                 contentAlignment = Alignment.Center) {
-                DesktopArtworkImage(bitmap, language, minOf(maxWidth, maxHeight), playback.title.orEmpty())
+                DesktopArtworkImage(bitmap, language, minOf(maxWidth, maxHeight), id.orEmpty())
             }
         }
     }
@@ -350,12 +350,12 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
             val queue = library?.queue
             val modeEnabled = fresh && queue?.id == input.target?.queueId && input.commandsEnabled && isNavigationCurrent()
             IconButton(enabled = modeEnabled && playback.shuffleEnabled, onClick = {
-                if (currentView === prepared && currentNavigation() && libraryCallbacks === currentOwner)
+                if (currentView === prepared && desktopPlayerViewIsCurrent(currentPreparation, prepared, currentNavigation()) && libraryCallbacks === currentOwner)
                     currentOwner.onShuffle(queue?.shuffleEnabled != true)
             }) { DesktopIcon(DesktopGlyph.Shuffle, DesktopText.Shuffle.inLanguage(language)) }
             DesktopTransportButtons(input, language, callbacks, legacy, false, isNavigationCurrent, scrollable = false)
             IconButton(enabled = modeEnabled && playback.repeatEnabled, onClick = {
-                if (currentView === prepared && currentNavigation() && libraryCallbacks === currentOwner)
+                if (currentView === prepared && desktopPlayerViewIsCurrent(currentPreparation, prepared, currentNavigation()) && libraryCallbacks === currentOwner)
                     currentOwner.onRepeat(when (queue?.repeatMode) { "OFF" -> "ALL"; "ALL" -> "ONE"; else -> "OFF" })
             }) { DesktopIcon(DesktopGlyph.Repeat, (if (ru) "Повтор" else "Repeat") + " · " + queue?.repeatMode.orEmpty()) }
             if (track != null) {
@@ -375,6 +375,7 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
                 Text(DesktopText.OpenQueue.inLanguage(language))
             }
         }
+        if (fresh && track != null && input.commandsEnabled) download?.invoke(track.id)
         if (!fresh) Text(DesktopText.UpdatingLibrary.inLanguage(language))
         DesktopSleepTimerControls(sleepTimer, !input.commandsEnabled, language, sleepTimerCallbacks)
         var tasteExpanded by remember { mutableStateOf(false) }

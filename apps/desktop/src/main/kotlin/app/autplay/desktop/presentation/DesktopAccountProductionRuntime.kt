@@ -88,6 +88,14 @@ internal class DesktopAccountProductionRuntime private constructor(
     var playbackController: DesktopPlaybackController? = null
         private set
     val libraryState: StateFlow<DesktopLibrarySnapshot>? get() = media?.library?.state
+    fun selectedMediaLease() = media?.admission?.selectedLeaseOrNull()
+    suspend fun playerPreference(lease: AccountLease, track: String, value: String) =
+        checkNotNull(hostMedia).setPlayerPreference(lease, AccountUuid(track), value)
+
+    suspend fun selectLocalForPlayback(expected: AccountLease) {
+        checkNotNull(hostMedia).selectStandalone { !closing.get() && issued.get() == expected }
+    }
+
     var binding: DesktopAccountWorkspaceBinding = DesktopAccountWorkspaceBinding.unavailable(DesktopAccountAvailability.Opening)
         private set
 
@@ -199,7 +207,12 @@ internal class DesktopAccountProductionRuntime private constructor(
                 }
             }, setHomeVisible = ::setHomeVisible, setCatalogVisible = ::setCatalogVisible,
             settleNavigation = ::settleNavigation, contextSettlement = settlementMutable, accountOwner = issued::get,
-            music = DesktopOnlineMusic(serviceOwner, issued::get, ::prepareNetworkMediaLease, mediaAdapter::playSelection))
+            music = DesktopOnlineMusic(serviceOwner, issued::get, ::prepareNetworkMediaLease, mediaAdapter::playSelection) { lease, id ->
+                check(mediaOwner.admission.selectedLeaseOrNull() == lease && mediaOwner.library.state.value.queue?.let { queue ->
+                    queue.entries.any { it.id == queue.currentEntryId && it.trackId == id.value }
+                } == true)
+                mediaAdapter.download(DesktopAccountTrackTarget(lease, id, null))
+            })
         controller.accounts.reload().hostAwait()
         accountObserver = work.launch {
             controller.accounts.state.drop(1).collect { state ->

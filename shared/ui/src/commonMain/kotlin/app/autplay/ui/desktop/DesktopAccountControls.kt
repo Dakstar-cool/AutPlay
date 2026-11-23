@@ -100,8 +100,11 @@ public fun DesktopAccountWorkspace(
     language: DesktopLanguage,
     modifier: Modifier = Modifier,
     sensitiveOutput: DesktopAccountSensitiveOutput? = null,
+    openDownloads: Boolean = false,
 ): Unit {
-    var route by remember(state.scope.lifetime) { mutableStateOf(DesktopAccountRoute.Portable) }
+    var route by remember(state.scope.lifetime, openDownloads) {
+        mutableStateOf(if (openDownloads) DesktopAccountRoute.Downloads else DesktopAccountRoute.Portable)
+    }
     val currentState = rememberUpdatedState(state)
     val currentActions = rememberUpdatedState(actions)
     val owner = remember(state, DesktopAccountSinkKey(actions), route, sensitiveOutput) {

@@ -28,6 +28,24 @@ data class SharedPlaylist(
             (it.recordingId == null || UUID.fromString(it.recordingId).toString() == it.recordingId) })
     }
 
+    fun encode(): ByteArray = buildJsonObject {
+        put("format", format)
+        put("token", token)
+        put("name", name)
+        put("description", JsonPrimitive(description))
+        putJsonArray("tracks") {
+            tracks.forEach { track ->
+                add(buildJsonObject {
+                    put("title", JsonPrimitive(track.title))
+                    put("artist", JsonPrimitive(track.artist))
+                    put("duration_ms", JsonPrimitive(track.durationMs))
+                    put("recording_id", JsonPrimitive(track.recordingId))
+                })
+            }
+        }
+        putJsonArray("entries") { entries.forEach { add(it) } }
+    }.toString().encodeToByteArray().also { require(it.size <= MAX_FILE_BYTES) }
+
     companion object {
         fun decode(bytes: ByteArray): SharedPlaylist {
             require(bytes.size <= MAX_FILE_BYTES)

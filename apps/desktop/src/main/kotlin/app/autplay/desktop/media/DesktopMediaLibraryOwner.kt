@@ -45,10 +45,10 @@ internal class DesktopMediaLibraryOwner(private val standalone: DesktopLibrarySt
         synchronized(gate) { selected.set(lease); mutable.value = view }
     }
 
-    suspend fun includeTarget(lease: AccountLease, id: AccountUuid, occurrenceId: AccountUuid?, retainQueue: Boolean): Unit {
+    suspend fun includeTarget(lease: AccountLease, id: AccountUuid, occurrenceId: AccountUuid?, retainQueue: Boolean, serverSelection: Boolean = false): Unit {
         mediaCheck(selected.get() == lease, MediaCode.OWNER_STALE, MediaStage.RESOLVE)
         occurrenceId?.let { requireOccurrence(lease, id, it) }
-        val target = track(lease, id)
+        val target = track(lease, id, serverSelection)
         mediaCheck(target.collectionState == "ACTIVE", MediaCode.INTENT_STALE, MediaStage.RESOLVE)
         synchronized(gate) {
             mediaCheck(selected.get() == lease, MediaCode.OWNER_STALE, MediaStage.RESOLVE)
@@ -98,7 +98,7 @@ internal class DesktopMediaLibraryOwner(private val standalone: DesktopLibrarySt
         throw mediaFailure(MediaCode.CAPACITY_EXCEEDED, MediaStage.RESOLVE)
     }
 
-    private suspend fun track(lease: AccountLease, id: AccountUuid): DesktopTrack {
+    private suspend fun track(lease: AccountLease, id: AccountUuid, serverSelection: Boolean = false): DesktopTrack {
         val context = catalog.readTrackContext(lease, id)
             ?: throw mediaFailure(MediaCode.RECONCILIATION_REQUIRED, MediaStage.RESOLVE)
         val row = context.track
@@ -107,8 +107,14 @@ internal class DesktopMediaLibraryOwner(private val standalone: DesktopLibrarySt
         mediaCheck(row.header.localId == id, MediaCode.RECONCILIATION_REQUIRED, MediaStage.RESOLVE)
         val member = context.library.any { !it.header.removed &&
             (it.detail as? AccountLocalDomainDetail.Library)?.trackId == id }
+        // Explicit authenticated search/recommendation selections are playable handles. They never
+        // create a library entry. A removed membership or an unconfirmed projection stays ineligible.
+        val serverPick = serverSelection && context.library.isEmpty() && !context.libraryHasMore &&
+            !row.header.hasConflict && row.header.serverId != null && row.header.snapshotConfirmed != false
+        val preference = domain.readTrackPreferences(lease, id).singleOrNull()?.takeUnless { it.header.removed }
+            ?.detail as? AccountLocalDomainDetail.Preference
         // Empty/zero byte facts are unobserved; resolver obtains independent J/K/file evidence.
         return DesktopTrack(id.value, detail.title.orEmpty(), detail.artist.orEmpty(), detail.durationMs,
-            "", 0, "NEUTRAL", if (!row.header.removed && member) "ACTIVE" else "REMOVED")
+            "", 0, preference?.rawPreference ?: "NEUTRAL", if (!row.header.removed && (member || serverPick)) "ACTIVE" else "REMOVED")
     }
 }

@@ -13,7 +13,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
+import app.autplay.desktop.presentation.DesktopWaveWheel
 import app.autplay.desktop.presentation.OnlineWave
+import app.autplay.desktop.presentation.DesktopAlbumsRail
+import app.autplay.desktop.presentation.indexLocalCollection
+import app.autplay.desktop.presentation.LocalMusicIndex
+import app.autplay.desktop.presentation.LocalRelease
+import app.autplay.desktop.presentation.DesktopLocalCollectionBrowser
 import app.autplay.desktop.presentation.OnlineMusicSearch
 import app.autplay.desktop.presentation.DesktopPlaylistTransfer
 import androidx.compose.runtime.LaunchedEffect
@@ -378,6 +384,10 @@ public class DesktopRuntime private constructor(
     private val productionAccounts: DesktopAccountProductionRuntime? = null,
     private val signedBundle: DesktopSignedBundle? = null,
 ) {
+    internal var musicCacheRoot: Path? = null
+        private set
+    internal var received: app.autplay.desktop.presentation.ReceivedPlaylists? = null
+        private set
     // Preserve the existing isolated host fixture constructor; production can inject the port.
     private constructor(store: DesktopLibraryStore, importer: DesktopImportPort,
         controller: DesktopPlaybackController, scope: CoroutineScope, settings: DesktopSettingsController) :
@@ -409,6 +419,7 @@ public class DesktopRuntime private constructor(
     public val lastImportProgress: StateFlow<DesktopImportProgress?> = mutableLastImportProgress
     private val mutableError: MutableStateFlow<String?> = MutableStateFlow(null)
     public val error: StateFlow<String?> = mutableError
+    internal val selectedPlayerLease get() = productionAccounts?.selectedMediaLease()
     internal val playbackLibrary get() = productionAccounts?.libraryState ?: store.state
     public val playerState: StateFlow<DesktopPlayerState> = controller.playerState
     public val history: DesktopHistoryController = DesktopHistoryController(
@@ -897,6 +908,20 @@ public class DesktopRuntime private constructor(
     public fun createPlaylist(name: String): Unit = mutate { store.createPlaylist(name) }
     public fun updateTrackMetadata(trackId: String, title: String, artist: String): Unit =
         mutate { store.updateTrackTextMetadata(trackId, title, artist) }
+    public fun playLocalTracks(ids: List<String>, type: String) {
+        val account = productionAccounts
+        val selected = account?.selectedMediaLease()
+        if (selected == null) controller.playTracks(ids, type)
+        else mutate { account.selectLocalForPlayback(selected); controller.playTracks(ids, type) }
+    }
+
+    internal fun playerPreference(track: String, value: String) {
+        val account = productionAccounts
+        val selected = account?.selectedMediaLease()
+        if (selected == null) setTrackPreference(track, value)
+        else mutate { account.playerPreference(selected, track, value) }
+    }
+
     public fun setTrackPreference(trackId: String, preference: String): Unit =
         mutate { store.setTrackPreference(trackId, preference) }
     public fun removeTrackFromCollection(trackId: String): Unit =
@@ -1036,6 +1061,8 @@ public class DesktopRuntime private constructor(
                 val playback = production?.playbackController ?: DesktopPlaybackController(store, audio, scope)
                 val runtime = DesktopRuntime(store, DesktopFileImporter(store, dataRoot), playback, scope, settings,
                     search, workspace, production, bundle)
+                runtime.musicCacheRoot = dataRoot.toRealPath()
+                runtime.received = app.autplay.desktop.presentation.ReceivedPlaylists(dataRoot.toRealPath())
                 runtimeOwner = runtime
                 bundle?.let { runtime.installSourceAccess(it, dataRoot) }
                 return runtime
@@ -1171,7 +1198,9 @@ public fun DesktopApp(
     }
     var section by remember { mutableStateOf(DesktopSection.Home) }
     var navigationRevision by remember { mutableStateOf(0L) }
+    var initialAlbum by remember(host) { mutableStateOf<LocalRelease?>(null) }
     var libraryKind by remember(host) { mutableStateOf(DesktopLibraryKind.Track) }
+    var downloadsRequested by remember(host) { mutableStateOf(false) }
     var accountsVisible by remember(host) { mutableStateOf(false) }
     var pendingNavigation by remember(host, chooserOwner) { mutableStateOf<DesktopNavigationIntent?>(null) }
     var navigationFailed by remember(host, chooserOwner) { mutableStateOf(false) }
@@ -1257,6 +1286,7 @@ public fun DesktopApp(
     }
     fun openAccounts(): Unit {
         if (navigationCurrent() && !lifecycleState.closing && accountWorkspace != null) {
+            downloadsRequested = false
             requestNavigation(section, libraryKind, true)
         }
     }
@@ -1338,7 +1368,7 @@ public fun DesktopApp(
                     }
                     if (accountAvailability == DesktopAccountAvailability.Available) {
                         DesktopAccountWorkspace(accountState, accountWorkspace.actions, language,
-                            Modifier.weight(1f).fillMaxWidth(), sensitiveOutput)
+                            Modifier.weight(1f).fillMaxWidth(), sensitiveOutput, openDownloads = downloadsRequested)
                         val target = accountPlayer?.target
                         TextButton(enabled = !lifecycleState.closing && target != null &&
                             accountPlayer?.playback?.controls == PlaybackControlGate.Allowed, onClick = {
@@ -1410,6 +1440,11 @@ public fun DesktopApp(
         if (navigationCurrent() && section == DesktopSection.History) host?.refreshHistory()
     }
     val library = host?.store?.state?.collectAsState()?.value
+    val showLocalCollections = section == DesktopSection.Home || section == DesktopSection.Library && catalogKind != null
+    val localIndex by androidx.compose.runtime.produceState<LocalMusicIndex?>(null, host?.store, library?.tracks, showLocalCollections) {
+        value = null
+        if (host != null && library != null && showLocalCollections) value = indexLocalCollection(host.store, library.tracks)
+    }
     val importing = host?.importing?.collectAsState()?.value ?: false
     val importReview = host?.importReview?.collectAsState()?.value ?: DesktopImportReviewState()
     val savedImports = host?.savedImports?.state?.collectAsState()?.value ?: DesktopSavedImportsState()
@@ -1554,7 +1589,7 @@ public fun DesktopApp(
         ),
         libraryCallbacks = DesktopLibraryCallbacks(
             onImport = { command { it.importSelected(chooserOwner) } }, onCancelImport = { command { it.cancelImport() } },
-            onPlayTracks = { ids, type -> command { it.controller.playTracks(ids, type) } },
+            onPlayTracks = { ids, type -> command { it.playLocalTracks(ids, type) } },
             onContinueQueue = { queue, entry, session -> command { it.controller.resumeCurrentQueue(queue, entry, session) } },
             onEnqueue = { track -> command { it.controller.enqueue(track) } }, onSelectEntry = { entry -> command { it.controller.selectEntry(entry) } },
             onRemoveEntry = { entry -> command { it.controller.removeEntry(entry) } }, onCreatePlaylist = { name -> command { it.createPlaylist(name) } },
@@ -1614,13 +1649,32 @@ public fun DesktopApp(
         sourceAccessActions = host?.sources?.actions,
         onResumeSourceAccess = { expected -> command { it.resumeRememberedSources(expected) } },
         onOpenAccount = if (accountWorkspace != null) ({ openAccounts() }) else null,
+        onPlayerPreference = { track, value -> command { it.playerPreference(track, value) } },
         playbackLibrary = host?.playbackLibrary?.collectAsState()?.value ?: library,
         serverSearch = if (music != null && musicLease != null) ({
-            key(music, musicLease) { OnlineMusicSearch(music, musicLease, language) }
+            key(music, musicLease) { OnlineMusicSearch(music, musicLease, language, host?.musicCacheRoot) }
         }) else null,
         playlistTransfer = if (host != null && library != null) ({ playlist ->
-            key(host, musicLease) { DesktopPlaylistTransfer(chooserOwner, host.store, library, playlist, music, musicLease, language) }
+            key(host, musicLease) { DesktopPlaylistTransfer(chooserOwner, host.store, library, playlist, host.received, music, musicLease, language) }
         }) else null,
+        homeAlbums = localIndex?.let { entries -> ({
+            DesktopAlbumsRail(entries, language) { album ->
+                if (navigationCurrent() && !lifecycleState.closing) {
+                    initialAlbum = album
+                    requestNavigation(DesktopSection.Library, DesktopLibraryKind.Album, false)
+                }
+            }
+        }) },
+        onOpenDownloads = if (accountHomeAvailable) ({
+            if (navigationCurrent() && !lifecycleState.closing) {
+                downloadsRequested = true
+                requestNavigation(section, libraryKind, true)
+            }
+        }) else null,
+        playerDownload = if (music != null && musicLease != null && host?.selectedPlayerLease == musicLease) ({ id ->
+            key(musicLease, id) { app.autplay.desktop.presentation.PlayerDownload(music, musicLease, id, language) }
+        }) else null,
+        homeWheel = { key(music, musicLease) { DesktopWaveWheel(music, musicLease, language) } },
         homeAccountContent = if (accountHomeState != null) ({
             if (music != null && musicLease != null) key(music, musicLease) { OnlineWave(music, musicLease, language) }
             DesktopAccountHomePreview(accountHomeState, language, ::openAccounts)
@@ -1628,12 +1682,26 @@ public fun DesktopApp(
         libraryKind = libraryKind,
         onLibraryKindChange = { next ->
             if (navigationCurrent() && !lifecycleState.closing && libraryKind != next) {
+                initialAlbum = null
                 requestNavigation(section, next, false)
             }
         },
-        libraryCatalogContent = if (accountCatalogState != null && catalogKind != null && accountWorkspace != null) ({
-            DesktopLibraryCatalogBrowser(accountCatalogState, accountWorkspace.actions, catalogKind, language,
-                isNavigationCurrent = { navigationCurrent() && accountCatalogVisible && !lifecycleState.closing })
+        libraryCatalogContent = if (host != null && library != null && catalogKind != null) ({
+            val hasCatalog = accountCatalogState?.catalog?.currentAccountScopeId != null && accountWorkspace != null
+            var accountTab by remember(catalogKind, hasCatalog) { mutableStateOf(hasCatalog && initialAlbum == null) }
+            if (hasCatalog) androidx.compose.foundation.layout.Row {
+                listOf(false, true).forEach { remote ->
+                    androidx.compose.material3.FilterChip(selected = accountTab == remote, onClick = { accountTab = remote },
+                        label = { Text(if (remote) (if (language == DesktopLanguage.Russian) "Аккаунт" else "Account")
+                            else (if (language == DesktopLanguage.Russian) "На устройстве" else "On this device")) })
+                }
+            }
+            if (accountTab && accountCatalogState != null && accountWorkspace != null) {
+                DesktopLibraryCatalogBrowser(accountCatalogState, accountWorkspace.actions, catalogKind, language,
+                    isNavigationCurrent = { navigationCurrent() && accountCatalogVisible && !lifecycleState.closing })
+            } else DesktopLocalCollectionBrowser(localIndex, catalogKind, initialAlbum.takeIf { catalogKind == DesktopCatalogKind.Album }, language) { ids ->
+                command { it.playLocalTracks(ids, "LIBRARY") }
+            }
         }) else null,
     )
 }

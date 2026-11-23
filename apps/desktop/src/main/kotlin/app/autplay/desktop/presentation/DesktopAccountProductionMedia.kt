@@ -87,9 +87,30 @@ internal class DesktopAccountProductionMedia(
         requireLease(lease)
         if (prepareNetworkLease(lease) != lease) changed()
         select(lease)
-        for (id in ids.distinct()) runtime.library.includeTarget(lease, id, null, retainQueue = false)
+        for (id in ids.distinct()) runtime.library.includeTarget(lease, id, null, retainQueue = false, serverSelection = true)
         requireLease(lease)
         controller.playTracks(ids.map { it.value }, queueType)
+    }
+
+    suspend fun setPlayerPreference(lease: AccountLease, id: AccountUuid, value: String): Unit = serial.withLock {
+        require(value in setOf("NEUTRAL", "LIKED", "DISLIKED"))
+        requireLease(lease)
+        check(runtime.admission.selectedLeaseOrNull() == lease && !runtime.admission.isRetired())
+        val domain = checkNotNull(account.domain)
+        val track = checkNotNull(domain.readExact(lease, AccountProjectionKind.TRACK, id))
+        val choices = domain.readTrackPreferences(lease, id)
+        val old = choices.singleOrNull()
+        check(choices.size <= 1 && listOfNotNull(track, old).all {
+            !it.header.removed && !it.header.hasConflict && it.header.snapshotConfirmed != false &&
+                (it.header.rawProjectionState == null || it.header.rawProjectionState == "COMPLETE")
+        })
+        val prior = old?.detail as? AccountLocalDomainDetail.Preference
+        val prefId = old?.header?.localId ?: AccountUuid.random()
+        domain.mutateReviewed(lease, AccountDomainChange(AccountUuid.random(), System.currentTimeMillis(),
+            AccountDomainCommand.Preference(prefId, id, value, prior?.excludedFromTaste ?: false)),
+            AccountDomainReview(listOf(AccountDomainExpected(AccountProjectionKind.TRACK, id, track.header),
+                AccountDomainExpected(AccountProjectionKind.PREFERENCE, prefId, old?.header))))
+        runtime.library.includeTarget(lease, id, null, retainQueue = true, serverSelection = true)
     }
 
     override suspend fun download(target: DesktopAccountTrackTarget): Unit = serial.withLock {

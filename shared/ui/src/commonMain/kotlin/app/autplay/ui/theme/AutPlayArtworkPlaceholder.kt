@@ -15,7 +15,7 @@ import app.autplay.ui.theme.Twilight
 
 /** Deterministic graphic sleeve for missing artwork, never a fetched or inferred album cover. */
 @Composable
-internal fun AutPlayArtworkPlaceholder(seed: String, modifier: Modifier = Modifier) {
+public fun AutPlayArtworkPlaceholder(seed: String, modifier: Modifier = Modifier) {
     val (base, print, ink, paper) = remember(seed) { playbackVisualPalette(seed) }
     val variant = remember(seed) { seed.hashCode().ushr(1) % 3 }
     Canvas(modifier.testTag("artwork-placeholder")) {

@@ -15,6 +15,7 @@ import java.awt.Component
 import java.awt.EventQueue
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -82,15 +83,69 @@ private fun exportPlaylist(file: Path, bytes: ByteArray) {
     } finally { Files.deleteIfExists(temp) }
 }
 
+/** A saved share is metadata only and can be opened again after more audio has been imported. */
+internal data class ReceivedTitle(val token: String, val name: String, val count: Int)
+
+internal class ReceivedPlaylists(private val root: Path) {
+    private fun folder(): Path {
+        val dir = root.resolve("received-playlists")
+        if (!Files.exists(dir, NOFOLLOW_LINKS)) Files.createDirectories(dir)
+        check(Files.isDirectory(dir, NOFOLLOW_LINKS) && dir.toRealPath().parent == root)
+        return dir
+    }
+
+    private fun read(file: Path): SharedPlaylist {
+        check(Files.isRegularFile(file, NOFOLLOW_LINKS))
+        return Files.newInputStream(file, NOFOLLOW_LINKS).use { SharedPlaylist.decode(it.readNBytes(SharedPlaylist.MAX_FILE_BYTES + 1)) }
+    }
+
+    fun save(playlist: SharedPlaylist) {
+        val dir = folder()
+        val file = dir.resolve(playlist.token + ".autplaylist")
+        if (Files.exists(file, NOFOLLOW_LINKS)) {
+            check(read(file) == playlist)
+            return
+        }
+        val temp = Files.createTempFile(dir, ".incoming-", ".tmp")
+        try {
+            Files.write(temp, playlist.encode())
+            // Publish a complete closed file, with no overwrite even for simultaneous imports.
+            try { Files.createLink(file, temp) }
+            catch (_: java.nio.file.FileAlreadyExistsException) { check(read(file) == playlist) }
+        } finally { Files.deleteIfExists(temp) }
+    }
+
+    fun open(token: String): SharedPlaylist {
+        require(UUID.fromString(token).toString() == token)
+        return read(folder().resolve(token + ".autplaylist")).also { check(it.token == token) }
+    }
+
+    fun page(index: Int): List<ReceivedTitle> {
+        require(index >= 0)
+        val paths = Files.list(folder()).use { files ->
+            files.filter { it.fileName.toString().matches(Regex("[0-9a-f-]{36}\\.autplaylist")) }
+                .sorted().skip(index * 12L).limit(13).toList()
+        }
+        return paths.map { path ->
+            val document = open(path.fileName.toString().removeSuffix(".autplaylist"))
+            ReceivedTitle(document.token, document.name, document.entries.size)
+        }
+    }
+}
+
 @Composable
 internal fun DesktopPlaylistTransfer(owner: Component?, store: DesktopLibraryStore, library: DesktopLibrarySnapshot,
-    selected: DesktopPlaylist?, music: DesktopOnlineMusic?, lease: AccountLease?, language: DesktopLanguage) {
+    selected: DesktopPlaylist?, received: ReceivedPlaylists?, music: DesktopOnlineMusic?, lease: AccountLease?, language: DesktopLanguage) {
     val ru = language == DesktopLanguage.Russian
     val scope = rememberCoroutineScope()
     var review by remember { mutableStateOf<PlaylistReview?>(null) }
     var share by remember { mutableStateOf<DesktopPlaylist?>(null) }
     var url by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var showSaved by remember { mutableStateOf(false) }
+    var savedPage by remember { mutableIntStateOf(0) }
+    var revision by remember { mutableIntStateOf(0) }
+    var saved by remember { mutableStateOf<List<ReceivedTitle>>(emptyList()) }
     var feedback by remember { mutableStateOf<String?>(null) }
     fun run(action: suspend () -> Unit) {
         if (busy) return
@@ -103,6 +158,12 @@ internal fun DesktopPlaylistTransfer(owner: Component?, store: DesktopLibrarySto
             finally { busy = false }
         }
     }
+    LaunchedEffect(received, revision, showSaved, savedPage) {
+        saved = emptyList()
+        if (showSaved && received != null) try { saved = withContext(Dispatchers.IO) { received.page(savedPage) } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { feedback = if (ru) "Не удалось прочитать полученные плейлисты" else "Could not read received playlists" }
+    }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(enabled = !busy, onClick = { run {
             val file = choosePlaylist(owner, false, ru) ?: return@run
@@ -111,6 +172,9 @@ internal fun DesktopPlaylistTransfer(owner: Component?, store: DesktopLibrarySto
                 reviewPlaylist(SharedPlaylist.decode(bytes), store.state.value)
             }
         } }) { Text(if (ru) "Импорт .autplaylist" else "Import .autplaylist") }
+        if (received != null) TextButton(onClick = { showSaved = !showSaved }) {
+            Text(if (ru) "Полученные плейлисты" else "Received playlists")
+        }
         if (selected != null) {
             TextButton(enabled = !busy, onClick = { run {
                 val file = choosePlaylist(owner, true, ru) ?: return@run
@@ -122,13 +186,40 @@ internal fun DesktopPlaylistTransfer(owner: Component?, store: DesktopLibrarySto
             }
         }
     }
+    if (showSaved) {
+        saved.take(12).forEach { snapshot ->
+            TextButton(enabled = !busy, onClick = { run {
+                review = withContext(Dispatchers.IO) { reviewPlaylist(checkNotNull(received).open(snapshot.token), store.state.value) }
+            } }) { Text("${snapshot.name} · ${snapshot.count}") }
+        }
+        Row {
+            if (savedPage > 0) TextButton(onClick = { savedPage-- }) { Text(if (ru) "Назад" else "Back") }
+            if (saved.size > 12) TextButton(onClick = { savedPage++ }) { Text(if (ru) "Далее" else "Next") }
+        }
+    }
     if (busy) LinearProgressIndicator()
     feedback?.let { Text(it) }
     review?.let { next ->
         val tracks = next.matches.filterNotNull()
         AlertDialog(onDismissRequest = { if (!busy) review = null }, title = { Text(next.file.name) }, text = {
-            Text(if (ru) "Найдено в вашей музыке: ${tracks.size} из ${next.matches.size}. Пропущено: ${next.missing}."
-                else "Matched in your music: ${tracks.size} of ${next.matches.size}. Skipped: ${next.missing}.")
+            Column {
+            Text(if (ru) "Найдено в вашей музыке: ${tracks.size} из ${next.matches.size}. Недоступно: ${next.missing}."
+                else "Matched in your music: ${tracks.size} of ${next.matches.size}. Unavailable: ${next.missing}.")
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 220.dp)) {
+                items(next.file.entries.size) { index ->
+                    val item = next.file.tracks[next.file.entries[index]]
+                    Text("${index + 1}. " + listOfNotNull(item.artist, item.title).joinToString(" — "),
+                        color = if (next.matches[index] == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            if (received != null) TextButton(enabled = !busy, onClick = { run {
+                withContext(Dispatchers.IO) { received.save(next.file) }
+                review = null
+                revision++
+                showSaved = true
+                feedback = if (ru) "Сохранён полный список треков" else "Saved the complete track list"
+            } }) { Text(if (ru) "Сохранить весь список" else "Save complete list") }
+            }
         }, confirmButton = { TextButton(enabled = !busy && (tracks.isNotEmpty() || next.matches.isEmpty()), onClick = { run {
             store.importPlaylist(next.copyId, next.file.name, next.file.description, tracks)
             review = null

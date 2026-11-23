@@ -482,9 +482,19 @@ internal fun DesktopLibraryContent(
                 val visible = if (fresh) prepared.matches else emptyList()
                 val queueType = if (input.query.isBlank()) "LIBRARY" else "SEARCH"
                 var filtersExpanded by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = preferenceFilter == DesktopTrackPreferenceFilter.LIKED, onClick = {
+                    if (isInputCurrent()) {
+                        preferenceFilter = if (preferenceFilter == DesktopTrackPreferenceFilter.LIKED)
+                            DesktopTrackPreferenceFilter.ALL else DesktopTrackPreferenceFilter.LIKED
+                        trackPage = 0; viewRevision += 1; clearMultiSelectionForFilter()
+                    }
+                }, leadingIcon = { DesktopIcon(DesktopGlyph.Like, null) },
+                    label = { Text(if (language == DesktopLanguage.Russian) "Избранное" else "Favorites") })
                 TextButton(onClick = { filtersExpanded = !filtersExpanded }) {
                     DesktopIcon(DesktopGlyph.Settings, null)
                     Text(if (language == DesktopLanguage.Russian) "Фильтры и действия" else "Filters and actions")
+                }
                 }
                 if (filtersExpanded) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),

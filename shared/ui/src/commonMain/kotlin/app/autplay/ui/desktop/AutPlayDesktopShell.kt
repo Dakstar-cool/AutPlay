@@ -1,6 +1,8 @@
 package app.autplay.ui.desktop
 
 import androidx.compose.foundation.clickable
+import app.autplay.application.desktop.DesktopTransportAction
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.background
@@ -128,9 +130,14 @@ public fun AutPlayDesktopShell(
     libraryKind: DesktopLibraryKind = DesktopLibraryKind.Track,
     onLibraryKindChange: ((DesktopLibraryKind) -> Unit)? = null,
     libraryCatalogContent: (@Composable () -> Unit)? = null,
+    playerDownload: (@Composable (String) -> Unit)? = null,
+    onOpenDownloads: (() -> Unit)? = null,
+    homeAlbums: (@Composable () -> Unit)? = null,
+    homeWheel: (@Composable () -> Unit)? = null,
     serverSearch: (@Composable () -> Unit)? = null,
     playlistTransfer: (@Composable (app.autplay.application.desktop.DesktopPlaylist?) -> Unit)? = null,
     playbackLibrary: DesktopLibrarySnapshot? = library,
+    onPlayerPreference: (String, String) -> Unit = libraryCallbacks.onSetTrackPreference,
 ) {
     // Read these holders inside content lambdas, so strong skipping cannot retain an equal old owner.
     val currentLifecycleState by rememberDesktopBrowseReference(lifecycleState)
@@ -200,7 +207,8 @@ public fun AutPlayDesktopShell(
     )
     val transportInput = DesktopTransportInput(playerState, presentation, playbackAdapterAvailable,
         desktopTransportCommandsEnabled(playerState, library, reopenRequired), section, navigationAtInput)
-    val tasteInput = DesktopTasteInput(tasteState, library, section, navigationAtInput, revisionAtInput, reopenRequired)
+    val latestTransport by rememberUpdatedState(transportInput)
+    val tasteInput = DesktopTasteInput(tasteState, playbackLibrary, section, navigationAtInput, revisionAtInput, reopenRequired)
     val isTasteNavigationCurrent: () -> Boolean = {
         isNavigationCurrent() && trackSelectionRevision == revisionAtInput && !restartRequired
     }
@@ -225,7 +233,11 @@ public fun AutPlayDesktopShell(
             }
         }
     }
-    val currentTrack = if (trackView.input == trackInput) trackView.currentTrack else null
+    val currentTrack = remember(playbackLibrary?.tracks, presentation.localTrackRefId) {
+        playbackLibrary?.tracks?.firstOrNull { it.id == presentation.localTrackRefId }
+    }
+    val currentPlaybackLibrary by rememberDesktopBrowseReference(playbackLibrary)
+    val currentPlayerPreference by rememberUpdatedState(onPlayerPreference)
     val navigate: (DesktopSection) -> Unit = { destination ->
         if (destination != section) {
             selectedTrackId = null
@@ -248,7 +260,7 @@ public fun AutPlayDesktopShell(
                         importReviewState.phase, importActions, language,
                         isNavigationCurrent = { isNavigationCurrent() && trackSelectionRevision == revisionAtInput })
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        if (!compact) Sidebar(section, language, navigate)
+                        if (!compact) Sidebar(section, language, navigate, serverSearch != null)
                         Column(
                             Modifier.weight(1f).fillMaxHeight().padding(if (compact) 12.dp else 24.dp),
                             verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -290,6 +302,11 @@ public fun AutPlayDesktopShell(
                                     }
                                 }
                             }
+                            if (section == DesktopSection.Library && onOpenDownloads != null) {
+                                TextButton(enabled = !currentLifecycleState.closing, onClick = {
+                                    if (isNavigationCurrent()) onOpenDownloads()
+                                }) { Text(if (language == DesktopLanguage.Russian) "Загрузки" else "Downloads") }
+                            }
                             if (section == DesktopSection.Search && serverSearch != null) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf(false, true).forEach { remote ->
@@ -313,7 +330,7 @@ public fun AutPlayDesktopShell(
                                     }, onQueue = { if (isNavigationCurrent()) navigate(DesktopSection.Queue) },
                                     modifier = Modifier.weight(1f).fillMaxWidth(),
                                     smoothTrackTransitions = preferencesState?.value?.smoothTrackTransitions == true,
-                                    libraryCallbacks = guardedLibraryCallbacks)
+                                    libraryCallbacks = guardedLibraryCallbacks.copy(onSetTrackPreference = onPlayerPreference), download = playerDownload)
                             } else if (section == DesktopSection.Home) {
                                 DesktopHomeContent(library, presentation, playbackAdapterAvailable, language,
                                     guardedLibraryCallbacks, importActive, importResult, errorCode, reopenRequired,
@@ -328,7 +345,14 @@ public fun AutPlayDesktopShell(
                                         selectedTrackId = it
                                     }, modifier = Modifier.weight(1f).fillMaxWidth(),
                                     importActionLabel = importActionLabel, importCancelEnabled = importCancelEnabled,
-                                    accountContent = homeAccountContent, metadata = metadataState)
+                                    accountContent = homeAccountContent, homeWheel = homeWheel, homeAlbums = homeAlbums, metadata = metadataState, playingTrack = currentTrack,
+                                    toggleEnabled = transportInput.controls(false).playPause,
+                                    togglePlayback = {
+                                        val action = if (presentation.isPlaying) DesktopTransportAction.PAUSE else DesktopTransportAction.PLAY
+                                        dispatchDesktopTransport(transportInput, latestTransport, action, null, isNavigationCurrent(), false,
+                                            transportCallbacks, playbackCallbacks)
+                                    }, preferTrack = onPlayerPreference,
+                                    artworkGesture = Modifier.desktopSkipGesture(transportInput, transportCallbacks, playbackCallbacks, false, isNavigationCurrent))
                             } else if (section == DesktopSection.History) {
                                 DesktopHistoryContent(historyState, library, language, historyCallbacks, libraryCallbacks,
                                     playbackAdapterAvailable && presentation.connection == PlaybackConnectionState.Connected,
@@ -354,7 +378,7 @@ public fun AutPlayDesktopShell(
                                     else -> section
                                 }
                                 key(sourceSection, libraryKind) {
-                                DesktopLibraryContent(sourceSection, library, language, importActive, importResult,
+                                DesktopLibraryContent(sourceSection, if (section == DesktopSection.Queue) playbackLibrary ?: library else library, language, importActive, importResult,
                                     errorCode, guardedLibraryCallbacks, presentation.shuffleEnabled && presentation.repeatEnabled,
                                     playbackAdapterAvailable && presentation.connection == PlaybackConnectionState.Connected,
                                     reopenRequired, onTrackDetails = {
@@ -389,8 +413,22 @@ public fun AutPlayDesktopShell(
                                 DesktopSection.Queue -> MutedText(DesktopText.EmptyQueue.inLanguage(language))
                                 DesktopSection.History -> MutedText(DesktopText.EmptyHistory.inLanguage(language))
                                 DesktopSection.Settings -> {
-                                    MutedText(DesktopText.SettingsSubtitle.inLanguage(language))
-                                    if (sourceAccessState != null && sourceAccessActions != null) {
+                                    val ru = language == DesktopLanguage.Russian
+                                    var settingsPage by remember { mutableStateOf(0) }
+                                    val pages = if (ru) listOf("Оформление", "Музыка", "Профиль", "Приложение")
+                                        else listOf("Appearance", "Music", "Profile", "Application")
+                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        pages.forEachIndexed { index, label ->
+                                            FilterChip(selected = settingsPage == index, onClick = { settingsPage = index }, label = { Text(label) })
+                                        }
+                                    }
+                                    if (settingsPage == 2 && onOpenAccount != null) OutlinedButton(onClick = onOpenAccount) {
+                                        Text(if (ru) "Открыть аккаунты" else "Open accounts")
+                                    }
+                                    if (settingsPage == 1 && onOpenDownloads != null) OutlinedButton(onClick = onOpenDownloads) {
+                                        Text(if (ru) "Загрузки" else "Downloads")
+                                    }
+                                    if (settingsPage == 1 && sourceAccessState != null && sourceAccessActions != null) {
                                         if (sourceAccessState.fenced && !currentLifecycleState.closing && onResumeSourceAccess != null) {
                                             OutlinedButton(onClick = {
                                                 if (isNavigationCurrent() && !currentLifecycleState.closing)
@@ -402,11 +440,11 @@ public fun AutPlayDesktopShell(
                                         DesktopSourceAccessControls(sourceAccessState, sourceAccessActions, language,
                                             isNavigationCurrent = { isNavigationCurrent() && !currentLifecycleState.closing })
                                     }
-                                    DesktopLifecycleControls(currentLifecycleState, currentLifecycleCallbacks, language,
+                                    if (settingsPage == 3) DesktopLifecycleControls(currentLifecycleState, currentLifecycleCallbacks, language,
                                         navigationAtInput, isNavigationCurrent)
-                                    DesktopSettingsControls(language, themeMode, accentPalette, preferencesState,
+                                    if (settingsPage == 0 || settingsPage == 3) DesktopSettingsControls(language, themeMode, accentPalette, preferencesState,
                                         preferencesTransfer, preferencesCallbacks, onLanguageChange, onThemeChange,
-                                        modifier = Modifier.weight(1f).fillMaxWidth())
+                                        modifier = Modifier.weight(1f).fillMaxWidth(), transferOnly = settingsPage == 3)
                                 }
                             }
                         }
@@ -422,8 +460,8 @@ public fun AutPlayDesktopShell(
                             canLike = !reopenRequired && !lifecycleState.closing,
                             onPreference = { track, value ->
                                 if (isNavigationCurrent() && currentLibrary === library && !currentReopenRequired &&
-                                    trackView === currentTrackView && libraryCallbacks === currentLibraryCallbacks) {
-                                    currentLibraryCallbacks.onSetTrackPreference(track.id, value)
+                                    currentPlaybackLibrary === playbackLibrary && currentPlayerPreference === onPlayerPreference) {
+                                    onPlayerPreference(track.id, value)
                                 }
                             })
                     }
@@ -463,7 +501,7 @@ private fun CompactNavigation(section: DesktopSection, language: DesktopLanguage
 }
 
 @Composable
-private fun Sidebar(section: DesktopSection, language: DesktopLanguage, onSectionChange: (DesktopSection) -> Unit) {
+private fun Sidebar(section: DesktopSection, language: DesktopLanguage, onSectionChange: (DesktopSection) -> Unit, connected: Boolean) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(
             Modifier.width(208.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -505,7 +543,7 @@ private fun Sidebar(section: DesktopSection, language: DesktopLanguage, onSectio
                 }
             }
             Spacer(Modifier.height(16.dp))
-            MutedText(DesktopText.LocalOnly.inLanguage(language))
+            MutedText(if (connected) (if (language == DesktopLanguage.Russian) "Подключено к Sona" else "Connected to Sona") else DesktopText.LocalOnly.inLanguage(language))
         }
     }
 }

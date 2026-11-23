@@ -1,5 +1,13 @@
 package app.autplay.ui.desktop
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -160,6 +168,13 @@ internal fun DesktopHomeContent(
     importActionLabel: String? = null,
     importCancelEnabled: Boolean = importing,
     accountContent: (@Composable () -> Unit)? = null,
+    homeAlbums: (@Composable () -> Unit)? = null,
+    homeWheel: (@Composable () -> Unit)? = null,
+    playingTrack: DesktopTrack? = null,
+    toggleEnabled: Boolean = false,
+    togglePlayback: () -> Unit = {},
+    preferTrack: (String, String) -> Unit = { _, _ -> },
+    artworkGesture: Modifier = Modifier,
     metadata: DesktopMetadataState = DesktopMetadataState(),
 ) {
     val input = DesktopHomeInput(library)
@@ -189,26 +204,49 @@ internal fun DesktopHomeContent(
         val colors = MaterialTheme.colorScheme
         val enabled = fresh && prepared.waveIds.isNotEmpty() && !reopenRequired && adapterAvailable &&
             playback.connection == PlaybackConnectionState.Connected
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.surface) {
-            Column(Modifier.fillMaxWidth().background(Brush.radialGradient(listOf(
-                Color(0xFFD26539).copy(alpha = if (colors.background.luminance() < .5f) .48f else .24f),
-                colors.background))).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (ru) "На устройстве" else "On this device", style = MaterialTheme.typography.labelMedium)
-                Text(if (ru) "Моя волна" else "My wave", style = MaterialTheme.typography.headlineLarge)
-                Surface(onClick = {
-                    if (isViewCurrent() && !currentReopen && currentAdapter &&
-                        currentPlayback.connection == PlaybackConnectionState.Connected && prepared.waveIds.isNotEmpty()) {
-                        currentCallbacks.onPlayTracks(prepared.waveIds, "USER")
+        var played by remember(playback.mediaId) { mutableStateOf(false) }
+        LaunchedEffect(playback.mediaId, playback.isPlaying) { if (playback.isPlaying) played = true }
+        val showCover = playback.mediaId != null && (playback.isPlaying || played)
+        val startWave = {
+            if (isViewCurrent() && !currentReopen && currentAdapter &&
+                currentPlayback.connection == PlaybackConnectionState.Connected && prepared.waveIds.isNotEmpty()) {
+                currentCallbacks.onPlayTracks(prepared.waveIds, "USER")
+            }
+        }
+        Column(Modifier.fillMaxWidth().waveGlow(
+            if (showCover) colors.secondary else Color(0xFFD26539),
+            if (showCover) colors.tertiary else Color(0xFFB85083), colors.background).padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (showCover) (if (ru) "Сейчас играет" else "Now playing")
+                else (if (ru) "На устройстве" else "On this device"), style = MaterialTheme.typography.labelMedium)
+            Text(if (showCover) playback.artist.orEmpty() else (if (ru) "Моя волна" else "My wave"),
+                style = MaterialTheme.typography.displaySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (showCover) {
+                Box(artworkGesture.clickable { if (isNavigationCurrent()) onNavigate(DesktopSection.Player) }) {
+                    DesktopArtworkView(playback.localTrackRefId, metadata.artworks[playback.localTrackRefId], language, 164.dp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(enabled = toggleEnabled, onClick = togglePlayback) {
+                        DesktopIcon(if (playback.isPlaying) DesktopGlyph.Pause else DesktopGlyph.Play,
+                            (if (playback.isPlaying) DesktopText.Pause else DesktopText.Play).inLanguage(language))
                     }
-                }, enabled = enabled, shape = CircleShape, color = colors.primaryFixedDim,
-                    contentColor = colors.onPrimaryFixed, modifier = Modifier.size(64.dp)) {
+                    Text(playback.title.orEmpty(), Modifier.widthIn(max = 360.dp), maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
+                    if (playingTrack != null) DesktopLikeButton(playingTrack, language, !reopenRequired) {
+                        if (isNavigationCurrent() && currentPlayback.localTrackRefId == playingTrack.id) preferTrack(playingTrack.id, it)
+                    }
+                }
+                OutlinedButton(enabled = enabled, onClick = startWave) { Text(if (ru) "Включить мою волну" else "Start my wave") }
+            } else {
+                Surface(onClick = startWave, enabled = enabled, shape = CircleShape, color = colors.primary,
+                    contentColor = colors.onPrimary, modifier = Modifier.size(84.dp)) {
                     Box(contentAlignment = Alignment.Center) { DesktopIcon(DesktopGlyph.Play, if (ru) "Включить мою волну" else "Start my wave") }
                 }
                 if (fresh && prepared.waveIds.isEmpty()) Text(if (ru) "Нет подходящих локальных треков" else "No eligible local tracks",
                     style = MaterialTheme.typography.bodySmall)
             }
         }
+        homeWheel?.invoke()
         if (!fresh) Text(DesktopText.UpdatingLibrary.inLanguage(language), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         if (fresh && prepared.currentTrack != null) {
             val track = prepared.currentTrack
@@ -262,34 +300,48 @@ internal fun DesktopHomeContent(
         }
         if (accountContent != null) accountContent()
         else Text(DesktopText.HomeServerUnavailable.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+        homeAlbums?.invoke()
         if (fresh && prepared.recent.isNotEmpty()) {
             Text(DesktopText.HomeRecent.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-            Text(DesktopText.HistoryPlayHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
             prepared.recent.forEach { row ->
                 key(row.event.id) {
                     val track = row.track
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(track?.title ?: DesktopText.TrackUnavailable.inLanguage(language), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(desktopHistoryTasteAnnotation(row.event, language), style = MaterialTheme.typography.bodySmall)
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { if (isViewCurrent()) onTrackDetails(row.event.trackId) },
-                                modifier = Modifier.semantics { contentDescription = "${DesktopText.TrackDetails.inLanguage(language)}: ${track?.title ?: DesktopText.Unknown.inLanguage(language)}" }) {
-                                Text(DesktopText.TrackDetails.inLanguage(language))
-                            }
-                            OutlinedButton(onClick = {
-                                if (isViewCurrent() && !currentReopen && currentAdapter &&
-                                    currentPlayback.connection == PlaybackConnectionState.Connected && desktopTrackIsActive(track)) {
-                                    currentCallbacks.onPlayTracks(listOf(row.event.trackId), "LIBRARY")
-                                }
-                            }, enabled = !reopenRequired && adapterAvailable &&
-                                playback.connection == PlaybackConnectionState.Connected && desktopTrackIsActive(track),
-                                modifier = Modifier.semantics { contentDescription = "${DesktopText.Play.inLanguage(language)}: ${track?.title ?: DesktopText.Unknown.inLanguage(language)}" }) {
-                                Text(DesktopText.Play.inLanguage(language))
-                            }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        DesktopArtworkView(track?.id, metadata.artworks[track?.id], language, 44.dp)
+                        Column(Modifier.weight(1f).clickable { if (isViewCurrent()) onTrackDetails(row.event.trackId) }) {
+                            Text(track?.title ?: DesktopText.TrackUnavailable.inLanguage(language), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track?.artist.orEmpty(), maxLines = 1, style = MaterialTheme.typography.bodySmall)
                         }
+                        IconButton(enabled = !reopenRequired && adapterAvailable &&
+                            playback.connection == PlaybackConnectionState.Connected && desktopTrackIsActive(track),
+                            onClick = {
+                                if (isViewCurrent() && !currentReopen && currentAdapter && desktopTrackIsActive(track))
+                                    currentCallbacks.onPlayTracks(listOf(row.event.trackId), "LIBRARY")
+                            }) { DesktopIcon(DesktopGlyph.Play, DesktopText.Play.inLanguage(language)) }
                     }
                 }
             }
         }
+    }
+}
+
+private fun Modifier.waveGlow(accent: Color, secondary: Color, base: Color): Modifier = drawWithCache {
+    val intensity = if (base.luminance() < .5f) .74f else .36f
+    val warm = Brush.radialGradient(
+        0f to accent.copy(alpha = intensity), .34f to accent.copy(alpha = intensity * .76f), 1f to accent.copy(alpha = 0f),
+        center = Offset(size.width * .38f, size.height * .53f), radius = size.minDimension * .52f,
+    )
+    val halo = Brush.radialGradient(
+        listOf(secondary.copy(alpha = intensity * .72f), secondary.copy(alpha = 0f)),
+        center = Offset(size.width * .67f, size.height * .40f), radius = size.minDimension * .54f,
+    )
+    val edge = Brush.verticalGradient(0f to base, .16f to base.copy(alpha = 0f),
+        .82f to base.copy(alpha = 0f), 1f to base)
+    onDrawBehind {
+        drawRect(base)
+        drawRect(halo)
+        drawRect(warm)
+        drawRect(edge)
     }
 }
