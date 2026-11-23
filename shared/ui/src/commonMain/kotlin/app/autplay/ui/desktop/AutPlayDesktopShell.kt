@@ -254,11 +254,13 @@ public fun AutPlayDesktopShell(
                     if (compact) CompactNavigation(section, language, navigate)
                     DesktopLifecycleClosingStatus(currentLifecycleState, language)
                     DesktopImportReviewControls(importReviewState, importActions, reopenRequired, language, mappingReview = importMapping != null)
-                    if (section == DesktopSection.Library || savedImportsState.open || importActive) DesktopSavedImportsControls(DesktopSavedImportsInput(savedImportsState, importMapping,
+                    val savedImportControls: @Composable () -> Unit = { DesktopSavedImportsControls(DesktopSavedImportsInput(savedImportsState, importMapping,
                         savedImportsCallbacks, library, section, navigationAtInput, revisionAtInput,
                         reopenRequired || lifecycleState.closing, importActive || importReconciliationRequired), importJobProgress,
                         importReviewState.phase, importActions, language,
-                        isNavigationCurrent = { isNavigationCurrent() && trackSelectionRevision == revisionAtInput })
+                        isNavigationCurrent = { isNavigationCurrent() && trackSelectionRevision == revisionAtInput }) }
+                    val showingImport = savedImportsState.open || importActive
+                    if (showingImport) savedImportControls()
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         if (!compact) Sidebar(section, language, navigate, serverSearch != null)
                         Column(
@@ -302,7 +304,7 @@ public fun AutPlayDesktopShell(
                                     }
                                 }
                             }
-                            if (section == DesktopSection.Library && onOpenDownloads != null) {
+                            if (section == DesktopSection.Library && libraryKind != DesktopLibraryKind.Track && onOpenDownloads != null) {
                                 TextButton(enabled = !currentLifecycleState.closing, onClick = {
                                     if (isNavigationCurrent()) onOpenDownloads()
                                 }) { Text(if (language == DesktopLanguage.Russian) "Загрузки" else "Downloads") }
@@ -394,7 +396,8 @@ public fun AutPlayDesktopShell(
                                     importActionLabel = importActionLabel, importCancelEnabled = importCancelEnabled,
                                     navigationRevision = navigationAtInput, queueEditorOwner = libraryCallbacks,
                                     queueEditor = playerState?.queueEditor ?: DesktopQueueEditorState(), textSearch = textSearch,
-                                    searchScreen = section == DesktopSection.Search, metadata = metadataState, playlistTransfer = playlistTransfer)
+                                    searchScreen = section == DesktopSection.Search, metadata = metadataState, playlistTransfer = playlistTransfer, savedImports = if (showingImport) null else savedImportControls,
+                                    onOpenDownloads = onOpenDownloads)
                                 }
                             } else when (section) {
                                 DesktopSection.Home -> Unit

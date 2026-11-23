@@ -128,6 +128,8 @@ internal fun DesktopLibraryContent(
     queueEditor: DesktopQueueEditorState = DesktopQueueEditorState(),
     textSearch: DesktopTextSearchPort? = null,
     searchScreen: Boolean = false,
+    savedImports: (@Composable () -> Unit)? = null,
+    onOpenDownloads: (() -> Unit)? = null,
     playlistTransfer: (@Composable (app.autplay.application.desktop.DesktopPlaylist?) -> Unit)? = null,
     metadata: DesktopMetadataState = DesktopMetadataState(),
 ) {
@@ -441,10 +443,7 @@ internal fun DesktopLibraryContent(
                                 Text(DesktopText.CancelImport.inLanguage(language))
                             }
                         }
-                        Text(DesktopText.LibrarySubtitle.inLanguage(language), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text(DesktopText.DropFiles.inLanguage(language), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 importResult?.let {
                     if (!importing && (!reopenRequired || desktopImportWasCancelled(it, errorCode))) {
@@ -470,7 +469,6 @@ internal fun DesktopLibraryContent(
                 }, singleLine = true,
                     leadingIcon = { DesktopIcon(DesktopGlyph.Search, null) },
                     label = { Text(DesktopText.Search.inLanguage(language)) }, modifier = Modifier.fillMaxWidth().focusRequester(focus))
-                Text(DesktopText.LocalSearchHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
                 DesktopSearchFailure(prepared.searchError.takeIf { fresh }, language, enabled = !reopenRequired,
                     onRetry = { if (isViewCurrent() && !currentReopenRequired) viewRevision += 1 },
                     onReset = {
@@ -491,12 +489,20 @@ internal fun DesktopLibraryContent(
                     }
                 }, leadingIcon = { DesktopIcon(DesktopGlyph.Like, null) },
                     label = { Text(if (language == DesktopLanguage.Russian) "Избранное" else "Favorites") })
+                if (!searchScreen && onOpenDownloads != null) OutlinedButton(onClick = {
+                    if (isInputCurrent()) onOpenDownloads()
+                }) { Text(if (language == DesktopLanguage.Russian) "Загрузки" else "Downloads") }
                 TextButton(onClick = { filtersExpanded = !filtersExpanded }) {
                     DesktopIcon(DesktopGlyph.Settings, null)
                     Text(if (language == DesktopLanguage.Russian) "Фильтры и действия" else "Filters and actions")
                 }
                 }
                 if (filtersExpanded) {
+                    if (!searchScreen) {
+                        savedImports?.invoke()
+                        Text(DesktopText.DropFiles.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(DesktopText.LocalSearchHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(DesktopText.CollectionFilter.inLanguage(language), style = MaterialTheme.typography.labelMedium)
@@ -624,8 +630,8 @@ internal fun DesktopLibraryContent(
                 }
                 if (fresh && prepared.allPlayOverflow) Text(DesktopText.WholeResultQueueLimit.inLanguage(language)
                     .replace("{limit}", DesktopLocalLimits.MAX_QUEUE_ENTRIES.toString()))
-                Text(DesktopText.PagePlaybackBoundary.inLanguage(language), style = MaterialTheme.typography.bodySmall)
-                DesktopBrowsePager(prepared.page, DesktopText.Library.inLanguage(language), language, fresh) { next ->
+                if (prepared.page.pages > 1) Text(DesktopText.PagePlaybackBoundary.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                if (prepared.page.pages > 1) DesktopBrowsePager(prepared.page, DesktopText.Library.inLanguage(language), language, fresh) { next ->
                     if (isViewCurrent() && next != trackPage) { trackPage = next; browseRevision += 1 }
                 }
                 if (fresh && prepared.searchError == null && visible.isEmpty() && library.tracks.isNotEmpty()) Text(DesktopText.NoResults.inLanguage(language))
