@@ -323,9 +323,6 @@ internal fun DesktopSettingsControls(
                 Text("${DesktopText.SmoothTransitions.inLanguage(language)}: " +
                     "${desktopSettingsBooleanLabel(preferences.value.smoothTrackTransitions, language)} → " +
                     desktopSettingsBooleanLabel(preview.smoothTrackTransitions, language))
-            }
-            }
-            if (transferOnly && stored != null) {
                 Text(DesktopText.RetainedSettings.inLanguage(language))
                 val beforeRetained = desktopRetainedSettings(preferences.value, language)
                 desktopRetainedSettings(preview, language).forEachIndexed { index, (field, after) ->
