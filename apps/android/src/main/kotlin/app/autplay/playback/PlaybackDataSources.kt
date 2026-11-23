@@ -2,18 +2,24 @@ package app.autplay.playback
 
 import android.content.Context
 import android.net.Uri
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpUtil
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.CacheKeyFactory
+import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp3.Mp3Extractor
 import app.autplay.download.MediaDownloadComponents
+import java.io.IOException
 
 /** Delegates only stable Vault URIs to auth-aware HTTP; local content stays in Android providers. */
 @UnstableApi
@@ -130,12 +136,60 @@ internal fun cachedVaultDataSourceFactory(
         .setCache(streamCache)
         .setUpstreamDataSourceFactory(upstream)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-    return CacheDataSource.Factory()
+    val downloads = CacheDataSource.Factory()
         .setCache(downloadCache)
         .setUpstreamDataSourceFactory(streaming)
         // Only DownloadManager may write durable bytes. Playback misses belong to the LRU.
         .setCacheWriteDataSinkFactory(null)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    return DataSource.Factory { VaultFileDataSource(downloads.createDataSource(), streamCache, upstream) }
+}
+
+/** Preserve the immutable file size when a speculative range is the first cached span. */
+@UnstableApi
+private class VaultFileDataSource(
+    private val cached: CacheDataSource,
+    private val streamCache: Cache,
+    private val upstream: DataSource.Factory,
+) : DataSource by cached {
+    override fun open(dataSpec: DataSpec): Long {
+        val length = cached.open(dataSpec)
+        val key = CacheKeyFactory.DEFAULT.buildCacheKey(dataSpec)
+        val range = cached.responseHeaders.entries.firstOrNull { it.key.equals("Content-Range", true) }
+            ?.value?.firstOrNull()
+        val total = try { HttpUtil.getDocumentSize(range) } catch (_: NumberFormatException) { C.LENGTH_UNSET.toLong() }
+        if (total > 0) rememberLength(key, total)
+        if (length != C.LENGTH_UNSET.toLong()) return length
+
+        val saved = ContentMetadata.getContentLength(streamCache.getContentMetadata(key))
+        if (saved >= dataSpec.position) return saved - dataSpec.position
+        if (!streamCache.isCached(key, dataSpec.position, 1) && !cached.cache.isCached(key, dataSpec.position, 1)) return length
+
+        // Older installations can have a prefix with no length. HEAD uses the same Vault
+        // authorization as playback and fetches no audio. Cached bytes still play when offline.
+        val probe = upstream.createDataSource()
+        val size = try {
+            try {
+                probe.open(dataSpec.buildUpon().setHttpMethod(DataSpec.HTTP_METHOD_HEAD)
+                    .setPosition(0).setLength(C.LENGTH_UNSET.toLong()).build())
+            } finally { probe.close() }
+        } catch (e: IOException) {
+            if (Thread.currentThread().isInterrupted) throw e
+            return length
+        }
+        if (size <= dataSpec.position) return length
+        rememberLength(key, size)
+        return size - dataSpec.position
+    }
+
+    private fun rememberLength(key: String, size: Long) {
+        if (ContentMetadata.getContentLength(streamCache.getContentMetadata(key)) == size) return
+        try {
+            streamCache.applyContentMetadataMutations(key, ContentMetadataMutations.setContentLength(ContentMetadataMutations(), size))
+        } catch (_: Cache.CacheException) {
+            // Cache metadata is optional for the current play.
+        }
+    }
 }
 
 /** Keep native CBR/Xing/VBRI seeking; index only MP3 files whose seek table is missing. */

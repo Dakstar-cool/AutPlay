@@ -20,6 +20,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.platform.app.InstrumentationRegistry
@@ -86,6 +88,29 @@ class LibrarySearchRefreshTest {
             }
         compose.onNodeWithText(title).performClick()
         compose.runOnIdle { assertEquals(listOf("first"), played) }
+    }
+
+    @Test
+    fun reachingEndOfVaultLoadsMoreAndKeepsEarlierMatches() {
+        val initial = (1..100).map { VaultSearchUiItem("id-$it", "Track $it", "Artist", "VAULT", "VAULT", true) }
+        val state = mutableStateOf(SearchScreenUiState("Track", emptyList(), searched = true, vaultAvailable = true,
+            vaultSearched = true, vaultResults = initial, vaultNextCursor = "next"))
+        compose.setContent {
+            AutPlayTheme {
+                SearchProductScreen(state.value, PaddingValues(), {}, {}, {}, onMoreVault = {
+                    state.value = state.value.copy(vaultNextCursor = null, vaultResults = initial +
+                        VaultSearchUiItem("last", "Last track", "Artist", "VAULT", "VAULT", true))
+                })
+            }
+        }
+        val list = compose.onNodeWithTag("search-product-list")
+        list.performScrollToNode(hasTestTag("vault-result-id-100"))
+        list.performTouchInput { swipeUp() }
+        compose.waitUntil(8000) { state.value.vaultNextCursor == null }
+        list.performScrollToNode(hasTestTag("vault-result-last"))
+        compose.onNodeWithTag("vault-result-last").assertIsDisplayed()
+        list.performScrollToNode(hasTestTag("vault-result-id-1"))
+        compose.onNodeWithTag("vault-result-id-1").assertIsDisplayed()
     }
 
     @Test

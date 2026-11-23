@@ -16,17 +16,19 @@ import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.security.SessionRequiredException
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import java.time.Instant
+import kotlinx.serialization.json.*
 import kotlinx.coroutines.CancellationException
 
 private data class DiscoveryScope(val query: String, val kind: LibrarySearchKind, val request: Int,
     val profile: String?, val user: String?, val device: String?)
-private data class SelectedCatalogueTrack(val card: InternetMetadataDiscoveryCard, val attempt: Int)
+private data class SelectedCatalogueTrack(val card: InternetMetadataDiscoveryCard, val attempt: Int, val playlist: Boolean = false)
 private data class AdmittedCatalogueLookup(val query: String, val contextId: String, val request: Int)
 
 /** Separate catalogue navigation. Only a user-selected track starts the existing source search. */
 @Composable
 internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearchKind, request: Int,
-    session: InternetMusicUiSession? = null) {
+    session: InternetMusicUiSession? = null, onPlaylistTrack: ((String) -> Unit)? = null,
+    initialTarget: InternetMetadataBrowseTarget? = null, initialCard: InternetMetadataDiscoveryCard? = null) {
     val context = LocalContext.current
     val settings by remember { applicationNonSecretSettingsStore(context).settings }.collectAsState(initial = null)
     val profile = if (session != null) session.binding?.serverProfileId else settings?.activeServerProfileId
@@ -34,7 +36,9 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
     val device = if (session != null) session.binding?.deviceId else settings?.deviceId
     val scope = DiscoveryScope(query.trim().take(200), kind, request, profile?.value, user?.value, device?.value)
     val currentScope by rememberUpdatedState(scope)
-    var target by remember(scope) { mutableStateOf<InternetMetadataBrowseTarget?>(null) }
+    var target by remember(scope, initialTarget) { mutableStateOf(initialTarget) }
+    var releases by remember(scope) { mutableStateOf(false) }
+    var parentArtist by remember(scope) { mutableStateOf<InternetMetadataBrowseTarget?>(null) }
     var offset by remember(scope) { mutableIntStateOf(0) }
     var retry by remember(scope) { mutableIntStateOf(0) }
     var page by remember(scope) { mutableStateOf<InternetMetadataDiscoveryPage?>(null) }
@@ -47,8 +51,21 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
     var contextError by remember(scope) { mutableStateOf<String?>(null) }
     var admitted by remember(scope) { mutableStateOf<AdmittedCatalogueLookup?>(null) }
 
-    LaunchedEffect(scope, target, offset, retry) {
+    LaunchedEffect(scope, target, offset) {
+        val release = target?.takeIf { it.entity == InternetMetadataDiscoveryEntity.RELEASE }
+        if (session == null && release != null && profile != null && user != null) {
+            val key = "${user.value}:RELEASE:${release.entityId}:false:$offset"
+            AutPlayRuntime.database(context).catalogProjectionDao().catalogPageTimestamp(profile.value, key)
+                .collect { if (it == 0L) retry++ }
+        }
+    }
+
+    LaunchedEffect(scope, target, releases, offset, retry) {
         val expectedTarget = target
+        if (initialCard != null) {
+            cards = listOf(initialCard)
+            return@LaunchedEffect
+        }
         val expectedOffset = offset
         loading = false
         pageError = null
@@ -59,19 +76,33 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
             LibrarySearchKind.Album -> InternetMetadataDiscoveryKind.ALBUM
             else -> return@LaunchedEffect
         }
+        val cache = if (session == null) AutPlayRuntime.database(context).catalogProjectionDao() else null
+        val key = user.value + ":" + if (expectedTarget != null) "${expectedTarget.entity}:${expectedTarget.entityId}:$releases:$expectedOffset"
+                  else "search:${discoveryKind.wireValue}:$expectedOffset:${scope.query}"
+        fun show(response: InternetMetadataDiscoveryPage) {
+            cards = (if (expectedOffset == 0) response.items else cards + response.items).distinctBy { it.id }
+            page = response
+        }
         loading = true
         try {
+            val cached = cache?.catalogPage(profile.value, key)
+            if (cached != null) {
+                show(InternetMetadataDiscoveryCodec.decode(cached.document))
+                if (retry == 0 && System.currentTimeMillis() - cached.observedAtMs in 0 until 3_600_000L) return@LaunchedEffect
+            }
             val server = session?.client ?: AutPlayRuntime.serverFeatures(context, ClientEventBinding(user, device, profile))
             val response = when (expectedTarget?.entity) {
-                InternetMetadataDiscoveryEntity.ARTIST -> server.discoveryArtistTracks(expectedTarget.entityId, offset = expectedOffset)
+                InternetMetadataDiscoveryEntity.ARTIST -> if (releases)
+                    server.discoveryArtistReleases(expectedTarget.entityId, offset = expectedOffset)
+                    else server.discoveryArtistTracks(expectedTarget.entityId, offset = expectedOffset)
                 InternetMetadataDiscoveryEntity.RELEASE -> server.discoveryReleaseTracks(expectedTarget.entityId, offset = expectedOffset)
                 else -> server.discoverMusic(scope.query, discoveryKind, offset = expectedOffset)
             }
             check(response.offset == expectedOffset && response.limit == 25) { "SERVER_RESPONSE_INVALID" }
             if (currentScope == scope && target == expectedTarget && offset == expectedOffset) {
-                // Occurrences retain their release-track ID, including repeated recordings.
-                cards = (if (expectedOffset == 0) response.items else cards + response.items).distinctBy { it.id }
-                page = response
+                show(response)
+                cache?.putCatalogPage(app.autplay.data.local.entity.CatalogPage(profile.value, key, response.rawPayload.toString(), System.currentTimeMillis()))
+                cache?.trimCatalogPages(profile.value)
             }
         } catch (error: CancellationException) { throw error
         } catch (error: Exception) {
@@ -90,12 +121,18 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
         val identities = MusicCatalogueContextRequest.fromCard(selection.card) ?: return@LaunchedEffect
         contextLoading = true
         try {
-            val receipt = (session?.client ?: AutPlayRuntime.serverFeatures(context, ClientEventBinding(user, device, profile)))
-                .createMusicCatalogueContext(identities)
+            val server = session?.client ?: AutPlayRuntime.serverFeatures(context, ClientEventBinding(user, device, profile))
+            val receipt = server.createMusicCatalogueContext(identities)
             check(receipt.matches(identities)) { "SERVER_RESPONSE_INVALID" }
             val contextId = receipt.admissionContextId(Instant.now()) ?: throw IllegalStateException("CONTEXT_EXPIRED")
             if (currentScope == scope && target == expectedTarget && selected == selection) {
-                admitted = AdmittedCatalogueLookup(lookup.searchQuery, contextId, selection.attempt)
+                if (selection.playlist) {
+                    val reference = server.catalogueTrackReference(contextId)
+                    val localId = reference.localTarget(AutPlayRuntime.database(context), profile.value)
+                    if (currentScope == scope && target == expectedTarget && selected == selection) onPlaylistTrack?.invoke(localId)
+                } else {
+                    admitted = AdmittedCatalogueLookup(lookup.searchQuery, contextId, selection.attempt)
+                }
             }
         } catch (error: CancellationException) { throw error
         } catch (error: Exception) {
@@ -105,12 +142,28 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
         }
     }
 
+    val offlineMbids = remember { mutableStateListOf<String>() }
+    LaunchedEffect(scope, cards) {
+        offlineMbids.clear()
+        if (profile != null && session == null) {
+            val mbids = cards.mapNotNull { it.recordingId }.distinct()
+            val dao = AutPlayRuntime.database(context).searchDao()
+            if (mbids.isNotEmpty()) {
+                kotlinx.coroutines.flow.combine(mbids.chunked(500).map { dao.offlineCatalogueRecordings(profile.value, it) }) {
+                    chunks -> chunks.flatMap { it }
+                }.collect { offlineMbids.clear(); offlineMbids.addAll(it) }
+            }
+        }
+    }
     Column(Modifier.fillMaxWidth().testTag("internet-metadata-discovery"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(stringResource(R.string.music_catalogue_title), style = MaterialTheme.typography.titleLarge)
         Text(stringResource(R.string.music_catalogue_metadata_only), style = MaterialTheme.typography.bodySmall)
-        if (target != null) TextButton(modifier = Modifier.testTag("catalogue-back"), onClick = {
-            target = null; offset = 0; cards = emptyList(); page = null; selected = null; admitted = null
+        if (target != null && target != initialTarget) TextButton(modifier = Modifier.testTag("catalogue-back"), onClick = {
+            target = parentArtist ?: initialTarget; releases = parentArtist != null; parentArtist = null; offset = 0; cards = emptyList(); page = null; selected = null; admitted = null
         }) { Text(stringResource(R.string.music_catalogue_back)) }
+        if (session == null) target?.let { subject ->
+            CatalogDownloadAction(if (subject.entity == InternetMetadataDiscoveryEntity.ARTIST) "artist" else "release", subject.entityId)
+        }
         when {
             profile == null || user == null || device == null -> Text(stringResource(R.string.music_need_server))
             loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -120,22 +173,46 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
             }
             page != null && cards.isEmpty() -> Text(stringResource(R.string.music_internet_empty))
         }
-        cards.forEach { card ->
+        if (target?.entity == InternetMetadataDiscoveryEntity.RELEASE) {
+            val count = page?.rawPayload?.get("vault_count")?.jsonPrimitive?.intOrNull
+            if (count != null) Text(stringResource(R.string.catalogue_vault_count, count, page?.totalCount ?: 0))
+        }
+        if (target?.entity == InternetMetadataDiscoveryEntity.RELEASE && session == null) {
+            val cover = rememberCatalogCover(target?.entityId)
+            if (cover != null) AutPlayArtwork(scope.query, size = 124.dp, painter = cover)
+        }
+        cards.forEachIndexed { index, card ->
             Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth().testTag("catalogue-card-${card.id}")) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (index < 4 && card.browseTarget?.entity == InternetMetadataDiscoveryEntity.RELEASE && session == null) {
+                        AutPlayArtwork(card.title, size = 72.dp, painter = rememberCatalogCover(card.entityId))
+                    }
                     Text(card.title, style = MaterialTheme.typography.titleMedium)
                     card.artist?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                     listOfNotNull(card.releaseDate, card.country, card.disambiguation).takeIf { it.isNotEmpty() }
                         ?.let { Text(it.joinToString(" · "), style = MaterialTheme.typography.bodySmall) }
                     card.discNumber?.let { Text(stringResource(R.string.music_catalogue_disc, it), style = MaterialTheme.typography.bodySmall) }
                     card.trackNumber?.let { Text(stringResource(R.string.music_catalogue_track, it), style = MaterialTheme.typography.bodySmall) }
+                    if (card.recordingId in offlineMbids) Text(stringResource(R.string.catalogue_on_phone), style = MaterialTheme.typography.bodySmall)
+                    if (card.rawPayload["vault_available"]?.jsonPrimitive?.booleanOrNull == true) {
+                        Text(stringResource(R.string.catalogue_in_vault), style = MaterialTheme.typography.bodySmall)
+                    }
                     card.recordingTitle?.takeIf { it != card.title }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     card.browseTarget?.let { browse ->
                         TextButton(modifier = Modifier.testTag("catalogue-browse-${card.id}"), enabled = !loading, onClick = {
+                            parentArtist = target?.takeIf { it.entity == InternetMetadataDiscoveryEntity.ARTIST }; releases = false
                             target = browse; offset = 0; cards = emptyList(); page = null; selected = null; admitted = null
                         }) { Text(stringResource(R.string.music_catalogue_browse)) }
+                        if (browse.entity == InternetMetadataDiscoveryEntity.ARTIST) TextButton(onClick = {
+                            parentArtist = null; target = browse; releases = true; offset = 0
+                            cards = emptyList(); page = null; selected = null; admitted = null
+                        }) { Text(stringResource(R.string.library_section_albums)) }
                     }
+                    if (session == null && card.trackLookup != null) card.recordingId?.let { CatalogDownloadAction("recording", it) }
+                    if (card.trackLookup != null && onPlaylistTrack != null) TextButton(enabled = !contextLoading, onClick = {
+                        selectionSequence++; selected = SelectedCatalogueTrack(card, selectionSequence, playlist = true)
+                    }) { Text(stringResource(R.string.catalogue_add_to_playlist)) }
                     if (card.trackLookup != null) TextButton(modifier = Modifier.testTag("catalogue-source-${card.id}"), enabled = !contextLoading, onClick = {
                         selectionSequence++; selected = SelectedCatalogueTrack(card, selectionSequence); admitted = null
                     }) { Text(stringResource(R.string.music_catalogue_find_source)) }

@@ -20,7 +20,10 @@ class LocalTrackSearchRepository(
 ) {
     fun offlineTrackIds(profileId: String?, trackIds: List<String>): Flow<List<String>> =
         if (trackIds.isEmpty()) flowOf(emptyList())
-        else database.searchDao().offlineTrackIds(profileId ?: "legacy-unscoped", trackIds)
+        else {
+            val pages = trackIds.chunked(500).map { database.searchDao().offlineTrackIds(profileId ?: "legacy-unscoped", it) }
+            if (pages.size == 1) pages.single() else kotlinx.coroutines.flow.combine(pages) { it.flatMap { page -> page } }
+        }
 
     suspend fun search(rawQuery: String, profileId: String? = null, limit: Int = DEFAULT_LIMIT,
         kind: LibrarySearchKind = LibrarySearchKind.All): List<LocalTrackSearchResult> = database.withReadTransaction {
@@ -28,12 +31,18 @@ class LocalTrackSearchRepository(
         val match = queryBuilder.build(rawQuery, kind) ?: return@withReadTransaction emptyList()
         val ids = profileId?.let { database.searchDao().searchForProfile(match, it, limit) }
             ?: database.searchDao().searchLegacy(match, limit)
-        if (ids.isEmpty()) return@withReadTransaction emptyList()
         val records = database.libraryDao().trackRefs(ids, limit).associateBy { it.localUserTrackRefId }
-        val metadata = database.trackMetadataDao().forTracks(profileId ?: "legacy-unscoped", ids)
+        val profile = profileId ?: "legacy-unscoped"
+        val credited = if (kind == LibrarySearchKind.Artist || kind == LibrarySearchKind.All) {
+            val prefix = rawQuery.take(256).trim().replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            database.catalogProjectionDao().tracksForArtistName(profile, "$prefix%", limit)
+        } else emptyList()
+        val ordered = (ids.mapNotNull(records::get) + credited)
+            .distinctBy { it.serverRecordingId ?: it.localUserTrackRefId }.take(limit)
+        if (ordered.isEmpty()) return@withReadTransaction emptyList()
+        val metadata = database.trackMetadataDao().forTracks(profile, ordered.map { it.localUserTrackRefId })
             .associateBy { it.localUserTrackRefId }
-        // FTS order is the ranking contract; an IN query must not be allowed to change it.
-        ids.mapNotNull(records::get).map { track ->
+        return@withReadTransaction ordered.map { track ->
             val effective = metadata[track.localUserTrackRefId]?.decoded()
             LocalTrackSearchResult(
                 localUserTrackRefId = track.localUserTrackRefId,

@@ -13,7 +13,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import rfc8785
-from sqlalchemy import func, select, text
+from sqlalchemy import String, exists, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,20 +22,31 @@ from autplay.adapters.postgresql.catalogue_context import PostgresCatalogueConte
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.library_runtime import LibraryRepository
 from autplay.adapters.postgresql.models import (
+    AudioVariantRow,
     JobRow,
     LibraryEntryRow,
     SyncEventRow,
+    UploadSessionRow,
     UserTrackRefRow,
 )
 from autplay.adapters.postgresql.models.internet_music import (
     InternetAcquisitionRow,
     InternetSearchRow,
 )
+from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
 from autplay.adapters.postgresql.resource_authority import ResourceAuthorityGate
 from autplay.adapters.postgresql.resource_limits import lock_resource_admission
+from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
+from autplay.adapters.postgresql.vault_track_match import (
+    attach_published_match,
+    owned_match,
+    same_track,
+)
 from autplay.application.job_worker import JobExecutionContext, JobLeaseLost, JobResourceWait
 from autplay.application.music_library import MusicError, MusicLibraryService
 from autplay.application.sync import _acquire_sync_owner_publish_lock
+from autplay.application.vault_uploads import VaultNotFoundError, VaultPrincipal
+from autplay.domain.acquisition_policy import MAX_TRACK_SECONDS
 from autplay.domain.auth import AccountRole, Principal
 from autplay.domain.jobs import (
     JobCancellationRequested,
@@ -44,10 +55,12 @@ from autplay.domain.jobs import (
     RetryableJobError,
     TerminalJobError,
 )
+from autplay.domain.music_search import SEARCH_POLICY
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.ports.jobs import EnqueueJob
 
 INTERNET_ACQUIRE_JOB = JobKey("music.internet.acquire", 1)
+_PENDING_JOBS = ("QUEUED", "RUNNING", "RETRY_WAIT", "PAUSED")
 
 
 class InternetMusicService:
@@ -101,7 +114,7 @@ class InternetMusicService:
                     retryable=True,
                 )
         try:
-            candidates = self.provider.search(query)
+            candidates = [dict(item, policy=SEARCH_POLICY) for item in self.provider.search(query)]
         except Exception as error:
             raise MusicError(
                 "music_search_unavailable",
@@ -140,7 +153,14 @@ class InternetMusicService:
             )
             return self._search_view(row)
 
-    def select(self, principal: Principal, search_id: UUID, candidate_id: str) -> dict[str, Any]:
+    def select(
+        self,
+        principal: Principal,
+        search_id: UUID,
+        candidate_id: str,
+        *,
+        recording_mbid: UUID | None = None,
+    ) -> dict[str, Any]:
         with self.sessions.begin() as session:
             lock_resource_admission(session)
             now = session.scalar(select(func.clock_timestamp()))
@@ -166,6 +186,10 @@ class InternetMusicService:
                 )
             )
             if existing is not None:
+                if existing.selected_snapshot.get("policy") != SEARCH_POLICY:
+                    raise MusicError(
+                        "music_search_expired", "Search again for a studio track.", 409
+                    )
                 self._restore_ready(session, principal, existing)
                 return self._status_view(session, existing)
             if search.expires_at <= datetime.now(UTC):
@@ -179,25 +203,85 @@ class InternetMusicService:
                 raise MusicError(
                     "music_candidate_not_found", "Select a result from this search.", 404
                 )
-            # Exact provider identity may reuse this owner's prior verified or active selection.
-            # This does not infer recording identity from names or a cross-owner content hash.
-            previous = session.scalar(
+            if candidate.get("policy") != SEARCH_POLICY:
+                raise MusicError("music_search_expired", "Search again for a studio track.", 409)
+            # After handoff the provider job can be complete while Vault still owns the bytes.
+            pending_ingest = exists(
+                select(UploadSessionRow.upload_session_id)
+                .join(JobRow, JobRow.job_id == UploadSessionRow.job_id)
+                .where(
+                    UploadSessionRow.source_internet_acquisition_id
+                    == InternetAcquisitionRow.acquisition_id,
+                    UploadSessionRow.upload_session_id == InternetAcquisitionRow.upload_id,
+                    UploadSessionRow.state.in_(("SEALED", "PROCESSING", "COMMIT_PREPARED")),
+                    JobRow.state.in_(_PENDING_JOBS),
+                )
+                .correlate(InternetAcquisitionRow)
+            )
+            exact_source = (InternetAcquisitionRow.candidate_id == candidate_id) & (
+                InternetAcquisitionRow.selected_snapshot["provider"].astext == candidate["provider"]
+            )
+            previous_selections = session.scalars(
                 select(InternetAcquisitionRow)
                 .join(JobRow, JobRow.job_id == InternetAcquisitionRow.job_id)
                 .where(
                     InternetAcquisitionRow.user_id == principal.user_id,
-                    InternetAcquisitionRow.candidate_id == candidate_id,
-                    InternetAcquisitionRow.selected_snapshot["provider"].astext
-                    == candidate["provider"],
-                    (InternetAcquisitionRow.state == "READY")
-                    | JobRow.state.in_(("QUEUED", "RUNNING", "RETRY_WAIT")),
+                    ((InternetAcquisitionRow.state == "READY") & exact_source)
+                    | (
+                        (InternetAcquisitionRow.selected_snapshot["policy"].astext == SEARCH_POLICY)
+                        & InternetAcquisitionRow.state.not_in(("READY", "FAILED"))
+                        & (
+                            JobRow.state.in_(_PENDING_JOBS)
+                            | ((JobRow.state == "COMPLETED") & pending_ingest)
+                        )
+                    ),
                 )
-                .order_by(InternetAcquisitionRow.created_at.desc())
-                .limit(1)
+                .order_by(exact_source.desc(), InternetAcquisitionRow.created_at.desc())
             )
-            if previous is not None:
-                self._restore_ready(session, principal, previous)
-                return self._status_view(session, previous)
+            for previous in previous_selections:
+                if recording_mbid is not None:
+                    original = PostgresCatalogueContextRepository(session).for_acquisition(
+                        principal.user_id, previous.acquisition_id
+                    )
+                    if (
+                        original is None
+                        or original.card.recording_mbid != recording_mbid
+                        or previous.candidate_id != candidate_id
+                        or previous.selected_snapshot.get("provider") != candidate["provider"]
+                    ):
+                        continue
+                if (previous.candidate_id, previous.selected_snapshot.get("provider")) != (
+                    candidate_id,
+                    candidate["provider"],
+                ) and not same_track(previous.selected_snapshot, candidate):
+                    continue
+                # Older completed selections can be identified by a fresh studio result
+                # once the original audio is still playable and its duration agrees.
+                if previous.selected_snapshot.get(
+                    "policy"
+                ) != SEARCH_POLICY and not self._playable_source(
+                    session,
+                    principal.user_id,
+                    previous.user_track_ref_id,
+                    previous.audio_variant_id,
+                    candidate["duration_ms"],
+                ):
+                    continue
+                status = self._status_view(session, previous)
+                if status["state"] != "FAILED":
+                    self._restore_ready(session, principal, previous)
+                    return status
+            saved = None
+            if recording_mbid is None:
+                saved = self._imported_source(session, principal.user_id, candidate)
+                if saved is None:
+                    saved = owned_match(session, principal.user_id, candidate)
+            if saved is None and recording_mbid is None:
+                saved = attach_published_match(
+                    session, VaultPrincipal(principal.user_id, principal.device_id), candidate
+                )
+                if saved is not None:
+                    self._ensure_vault_entry(session, principal, saved[0], create=True)
             count = session.scalar(
                 select(func.count())
                 .select_from(InternetAcquisitionRow)
@@ -207,7 +291,7 @@ class InternetMusicService:
                     JobRow.state.in_(("QUEUED", "RUNNING", "RETRY_WAIT")),
                 )
             )
-            if count is not None and count >= 20:
+            if saved is None and count is not None and count >= 20:
                 raise MusicError(
                     "music_queue_full", "Wait for current downloads to finish.", 429, retryable=True
                 )
@@ -222,6 +306,11 @@ class InternetMusicService:
                     idempotency_key=f"{search_id}:{candidate_id}",
                 )
             )
+            if saved is not None:
+                # Persist a pollable receipt. The job is already complete at commit, so
+                # no worker can claim it or contact the provider.
+                completed = session.get_one(JobRow, job.job_id)
+                completed.state, completed.completed_at = "COMPLETED", now
             row = InternetAcquisitionRow(
                 acquisition_id=identity,
                 user_id=principal.user_id,
@@ -233,11 +322,67 @@ class InternetMusicService:
                 candidate_id=candidate_id,
                 selected_snapshot=candidate,
                 job_id=job.job_id,
-                state="QUEUED",
+                state="READY" if saved else "QUEUED",
+                user_track_ref_id=saved[0] if saved else None,
+                audio_variant_id=saved[1] if saved else None,
             )
             session.add(row)
             session.flush()
             return self._view(row)
+
+    @staticmethod
+    def _imported_source(
+        session: Session, owner_id: UUID, candidate: dict[str, Any]
+    ) -> tuple[UUID, UUID] | None:
+        source_id, provider = candidate["candidate_id"], candidate["provider"]
+        evidence = TrackMetadataRow.document["acquisition_evidence"]
+        imported = (
+            select(UserTrackRefRow.user_track_ref_id, AudioVariantRow.audio_variant_id)
+            .join(
+                TrackMetadataRow,
+                TrackMetadataRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+            )
+            .join(AudioVariantRow, AudioVariantRow.recording_id == UserTrackRefRow.recording_id)
+            .where(
+                UserTrackRefRow.user_id == owner_id,
+                UserTrackRefRow.deleted_at.is_(None),
+                evidence["provider"].astext == provider.upper(),
+                evidence["source_id"].astext == source_id,
+                TrackMetadataRow.document["audio_variant_id"].astext
+                == AudioVariantRow.audio_variant_id.cast(String),
+            )
+        )
+        for ref_id, variant_id in session.execute(imported):
+            if InternetMusicService._playable_source(
+                session, owner_id, ref_id, variant_id, candidate["duration_ms"]
+            ):
+                return ref_id, variant_id
+        return None
+
+    @staticmethod
+    def _playable_source(
+        session: Session,
+        owner_id: UUID,
+        ref_id: UUID | None,
+        variant_id: UUID | None,
+        expected_ms: int,
+    ) -> bool:
+        if ref_id is None or variant_id is None:
+            return False
+        try:
+            playable = PostgresVaultRuntime(session).resolve_owner_playback_variant(
+                owner_id, ref_id
+            )
+        except VaultNotFoundError:
+            return False
+        if playable != variant_id:
+            return False
+        duration = session.get_one(AudioVariantRow, variant_id).duration_ms
+        return (
+            duration is not None
+            and 0 < duration <= MAX_TRACK_SECONDS * 1000
+            and abs(duration - expected_ms) <= max(3000, expected_ms * 0.02)
+        )
 
     def status(self, principal: Principal, identity: UUID) -> dict[str, Any]:
         with self.sessions() as session:
@@ -250,7 +395,13 @@ class InternetMusicService:
     def _restore_ready(session: Session, principal: Principal, row: InternetAcquisitionRow) -> None:
         if row.state != "READY":
             return
-        ref = session.get(UserTrackRefRow, row.user_track_ref_id)
+        InternetMusicService._ensure_vault_entry(session, principal, row.user_track_ref_id)
+
+    @staticmethod
+    def _ensure_vault_entry(
+        session: Session, principal: Principal, ref_id: UUID | None, *, create: bool = False
+    ) -> None:
+        ref = session.get(UserTrackRefRow, ref_id) if ref_id else None
         if ref is None or ref.deleted_at is not None:
             raise MusicError("music_track_removed", "The track needs library review.", 409)
         entry = session.scalar(
@@ -263,44 +414,81 @@ class InternetMusicService:
             .limit(1)
             .with_for_update()
         )
-        if entry is None:
+        if entry is None and not create:
             raise MusicError("music_track_removed", "The track needs library review.", 409)
-        if entry.removed_at is not None:
+        if entry is None:
+            identity = LibraryRepository(session).add_library_entry(
+                principal,
+                library_entry_id=uuid4(),
+                user_track_ref_id=ref.user_track_ref_id,
+                source="SEARCH",
+                availability_status="VAULT",
+                now=datetime.now(UTC),
+            )
+            entry = session.get_one(LibraryEntryRow, identity)
+        elif entry.removed_at is not None:
             LibraryRepository(session).restore_library_entry(
                 principal,
                 entry.library_entry_id,
                 base_version=entry.row_version,
                 now=datetime.now(UTC),
             )
-            session.execute(
-                insert(SyncEventRow)
-                .values(
-                    event_id=uuid5(
-                        NAMESPACE_URL, f"music-restore:{entry.library_entry_id}:{entry.row_version}"
-                    ),
-                    user_id=principal.user_id,
-                    origin_device_id=None,
-                    event_type="LIBRARY_ENTRY_UPSERTED",
-                    schema_version=1,
-                    aggregate_type="LIBRARY_ENTRY",
-                    aggregate_id=entry.library_entry_id,
-                    payload={
-                        "server_user_track_ref_id": str(ref.user_track_ref_id),
-                        "source": entry.source,
-                        "availability_status": entry.availability_status,
-                        "removed_at_ms": None,
-                    },
-                    operation="UPSERT",
-                    server_row_version=entry.row_version,
-                )
-                .on_conflict_do_nothing(index_elements=[SyncEventRow.event_id])
+        else:
+            return
+        session.execute(
+            insert(SyncEventRow)
+            .values(
+                event_id=uuid5(
+                    NAMESPACE_URL, f"music-restore:{entry.library_entry_id}:{entry.row_version}"
+                ),
+                user_id=principal.user_id,
+                origin_device_id=None,
+                event_type="LIBRARY_ENTRY_UPSERTED",
+                schema_version=1,
+                aggregate_type="LIBRARY_ENTRY",
+                aggregate_id=entry.library_entry_id,
+                payload={
+                    "server_user_track_ref_id": str(ref.user_track_ref_id),
+                    "source": entry.source,
+                    "availability_status": entry.availability_status,
+                    "removed_at_ms": None,
+                },
+                operation="UPSERT",
+                server_row_version=entry.row_version,
             )
+            .on_conflict_do_nothing(index_elements=[SyncEventRow.event_id])
+        )
 
     def _status_view(self, session: Session, row: InternetAcquisitionRow) -> dict[str, Any]:
         result = self._view(row)
+        if row.state == "READY":
+            if row.upload_id is None and row.user_track_ref_id is not None:
+                try:
+                    playable = PostgresVaultRuntime(session).resolve_playback_variant(
+                        VaultPrincipal(row.user_id, row.device_id), row.user_track_ref_id
+                    )
+                except VaultNotFoundError:
+                    playable = None
+                if playable is None or playable != row.audio_variant_id:
+                    result.update(
+                        state="FAILED", error_code="music_track_removed", audio_variant_id=None
+                    )
+            return result
         job = session.get(JobRow, row.job_id)
-        if row.state != "READY" and job is not None and job.state in {"FAILED", "CANCELLED"}:
-            result.update(state="FAILED", error_code="music_acquisition_failed")
+        failed = job is not None and job.state in {"FAILED", "CANCELLED"}
+        if row.state == "PROCESSING" and row.upload_id is not None:
+            upload = session.get(UploadSessionRow, row.upload_id)
+            if (
+                upload
+                and upload.source_internet_acquisition_id == row.acquisition_id
+                and upload.job_id
+            ):
+                ingest_job = session.get(JobRow, upload.job_id)
+                failed = failed or (
+                    ingest_job is not None and ingest_job.state in {"FAILED", "CANCELLED"}
+                )
+        if failed:
+            result.update(state="FAILED", error_code=row.error_code or "music_acquisition_failed")
         return result
 
     @staticmethod
@@ -308,7 +496,11 @@ class InternetMusicService:
         return {
             "contract_version": "internet-music-v1",
             "search_id": str(row.search_id),
-            "candidates": row.candidates,
+            "candidates": [
+                {key: value for key, value in item.items() if key != "policy"}
+                for item in row.candidates
+                if item.get("policy") == SEARCH_POLICY
+            ],
         }
 
     @staticmethod
@@ -333,6 +525,10 @@ class InternetMusicHandler:
             row = self._locked(session, identity, context)
             if row.state == "READY":
                 return
+            if row.selected_snapshot.get("policy") != SEARCH_POLICY:
+                row.state, row.error_code = "FAILED", "provider_track_policy_rejected"
+                session.commit()
+                raise TerminalJobError("provider_track_policy_rejected")
             principal = Principal(row.user_id, row.device_id, UUID(int=0), AccountRole.USER)
             # Worker authority is rechecked against live account/device state on every attempt.
             active = session.scalar(

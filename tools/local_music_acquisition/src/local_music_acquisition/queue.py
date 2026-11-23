@@ -281,6 +281,8 @@ def _process(
         state.update(state="downloaded")
     elif outcome.status == "not_found":
         state.update(state="not_found")
+    elif outcome.status == "invalid_input":
+        state.update(state="needs_review")
     elif outcome.deferred:
         # attempts is also the staging sequence. Credit only an explicitly deferred
         # result, never a last error string that could hide a real earlier failure.

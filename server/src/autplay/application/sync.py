@@ -59,6 +59,7 @@ _MAX_PULL: Final = 500
 _EVENT_INSERT_BATCH: Final = 500
 _BOOTSTRAP_INSERT_BATCH: Final = 1_000
 _OWNER_RECORDING_PAGE_SIZE: Final = 100
+CATALOG_EDITION_V1: Final = "CATALOG_EDITION_V1"
 CATALOG_ARTIST_ID_V1: Final = "CATALOG_ARTIST_ID_V1"
 _CATALOG_AGGREGATES: Final = frozenset(
     {"ARTIST", "ARTIST_CREDIT", "RECORDING_ARTIST_CREDIT", "RELEASE_ARTIST_CREDIT"}
@@ -183,6 +184,7 @@ class CatalogArtistSyncPublisher:
         ):
             recording_scope = None
         projections = _catalog_artist_projections(session, owner_user_id, recording_scope)
+        projections.extend(_edition_tracks(session, owner_user_id, recording_scope))
         for projection in projections:
             # A release's source row_version can stay unchanged while this owner's
             # reachable recording closure changes.  Bind event identity to the full
@@ -201,6 +203,7 @@ class CatalogArtistSyncPublisher:
                     "user_id": owner_user_id,
                     "origin_device_id": None,
                     "event_type": {
+                        "EDITION_TRACK": "CATALOG_EDITION_TRACK_UPSERTED",
                         "ARTIST": "CATALOG_ARTIST_UPSERTED",
                         "ARTIST_CREDIT": "CATALOG_ARTIST_CREDIT_UPSERTED",
                         "RECORDING_ARTIST_CREDIT": "CATALOG_RECORDING_CREDIT_LINK_UPSERTED",
@@ -738,6 +741,8 @@ class SyncService:
             if operation == "UPSERT" and isinstance(row, PlaylistEntryRow)
             else event["payload"]
         )
+        if isinstance(row, UserTrackRefRow) and event["payload"].get("shared_playlist_id"):
+            published_payload = {**published_payload, "resolution_status": "CATALOG_ONLY"}
         session.add(
             SyncEventRow(
                 event_id=event["event_id"],
@@ -838,6 +843,10 @@ class SyncService:
         if kind == "USER_TRACK_REF_CREATED":
             if base is not None:
                 raise _ProjectionConflict
+            shared_id = _uuid_optional(payload, "shared_playlist_id")
+            track_index = _optional_int(payload, "shared_track_index")
+            if shared_id is not None and (track_index is None or not 0 <= track_index < 10_000):
+                raise ValueError("shared_track_index")
             row = UserTrackRefRow(
                 user_track_ref_id=aggregate_id,
                 user_id=principal.user_id,
@@ -850,6 +859,41 @@ class SyncService:
                 updated_at=now,
             )
             session.add(row)
+            if shared_id is not None:
+                # Only a catalog identity verified when publishing can attach import evidence.
+                # A portable copy from another server still retains its descriptive metadata.
+                session.flush()
+                session.execute(
+                    text("""
+                    INSERT INTO playlist.imported_track_reference
+                        (user_track_ref_id, source_recording_id)
+                    VALUES (:ref, (SELECT CAST(
+                        ((document->'tracks')->CAST(:idx AS integer))->>'recording_id' AS uuid)
+                        FROM playlist.shared_snapshot WHERE token=:share))
+                """),
+                    {"ref": aggregate_id, "share": shared_id, "idx": track_index},
+                )
+                external_id = session.scalar(
+                    text("""
+                    SELECT x.external_reference_id FROM playlist.shared_snapshot s
+                    JOIN identity.external_reference x ON x.external_id =
+                        ((s.document->'tracks')->CAST(:idx AS integer))->>'recording_mbid'
+                    JOIN identity.source_provider sp USING(provider_id)
+                    WHERE s.token=:share AND sp.provider_key='musicbrainz' AND sp.deleted_at IS NULL
+                      AND x.external_entity_type='RECORDING' AND x.deleted_at IS NULL
+                """),
+                    {"share": shared_id, "idx": track_index},
+                )
+                if external_id:
+                    from autplay.adapters.postgresql.models import UserTrackRefExternalReferenceRow
+
+                    session.add(
+                        UserTrackRefExternalReferenceRow(
+                            user_track_ref_id=aggregate_id,
+                            external_reference_id=external_id,
+                            relation_role="IMPORT_EVIDENCE",
+                        )
+                    )
             nested_entry_id = _uuid_optional(payload, "library_entry_local_id")
             if (
                 nested_entry_id is not None
@@ -991,7 +1035,7 @@ class SyncService:
             ref_id = _uuid_optional_alias(payload, "user_track_ref_id", "local_user_track_ref_id")
             if ref_id is None:
                 raise ValueError("track ref required")
-            _owned_row(session, UserTrackRefRow, ref_id, principal)
+            ref_id = _resolve_track_ref(session, principal, event).user_track_ref_id
             position_key, rebalanced_entries = _playlist_position(
                 session, playlist.playlist_id, payload, aggregate_id
             )
@@ -1009,6 +1053,24 @@ class SyncService:
         else:
             if entry.playlist_id != playlist.playlist_id:
                 raise _ProjectionConflict
+            if kind == "PLAYLIST_ENTRY_MOVED" and base is None and event["local_identity_only"]:
+                # An offline move can follow its own creation before Android receives the ACK.
+                # Only an ACK for this device and entry can supply the missing base version.
+                prior_ack = session.scalar(
+                    select(DeviceEventInboxRow.terminal_ack)
+                    .where(
+                        DeviceEventInboxRow.user_id == principal.user_id,
+                        DeviceEventInboxRow.device_id == principal.device_id,
+                        DeviceEventInboxRow.aggregate_type == "PLAYLIST_ENTRY",
+                        DeviceEventInboxRow.aggregate_id == aggregate_id,
+                        DeviceEventInboxRow.aggregate_local_id == event["aggregate_local_id"],
+                        DeviceEventInboxRow.apply_status == "APPLIED",
+                        DeviceEventInboxRow.device_sequence < event["device_sequence"],
+                    )
+                    .order_by(DeviceEventInboxRow.device_sequence.desc())
+                    .limit(1)
+                )
+                base = prior_ack.get("server_row_version") if isinstance(prior_ack, dict) else None
             _require_version(entry, base)
             entry.position_key, rebalanced_entries = _playlist_position(
                 session, playlist.playlist_id, payload, aggregate_id
@@ -1034,6 +1096,12 @@ class SyncService:
             cursor = session.get(DeviceSyncCursorRow, device_id)
             if cursor is None or cursor.journal_epoch != epoch:
                 raise SyncError("JOURNAL_RESET_REQUIRED")
+            if CATALOG_EDITION_V1 in _capabilities(body):
+                from autplay.adapters.postgresql.shared_catalog import (
+                    refresh_playlist_catalog_handles,
+                )
+
+                refresh_playlist_catalog_handles(session, principal.user_id)
             rows = list(
                 session.scalars(
                     select(SyncEventRow)
@@ -1072,7 +1140,11 @@ class SyncService:
             "events": [
                 _server_event(row, tombstones.get(row.event_id))
                 for row in page
-                if _catalog_enabled(body) or row.aggregate_type not in _CATALOG_AGGREGATES
+                if (_catalog_enabled(body) or row.aggregate_type not in _CATALOG_AGGREGATES)
+                and (
+                    row.aggregate_type != "EDITION_TRACK"
+                    or CATALOG_EDITION_V1 in _capabilities(body)
+                )
             ],
             "server_time": _iso(_now()),
         }
@@ -1106,6 +1178,7 @@ class SyncService:
                     session,
                     principal.user_id,
                     include_catalog_artist=_catalog_enabled(body),
+                    include_editions=CATALOG_EDITION_V1 in _capabilities(body),
                 )
                 snapshot_rows = [
                     {
@@ -1359,6 +1432,7 @@ def _event(principal: Principal, device_id: UUID, value: dict[str, Any]) -> dict
         "aggregate_local_id": _uuid(value, "aggregate_local_id"),
         "server_profile_id": _uuid_optional(value, "server_profile_id"),
         "aggregate_id": server_id or _uuid(value, "aggregate_local_id"),
+        "local_identity_only": server_id is None,
         "base_version": value["base_server_row_version"]
         if isinstance(value["base_server_row_version"], int)
         else None,
@@ -1773,7 +1847,11 @@ def _aggregate(row: SyncEventRow) -> dict[str, Any]:
 
 
 def _bootstrap_projections(
-    session: Session, user_id: UUID, *, include_catalog_artist: bool = False
+    session: Session,
+    user_id: UUID,
+    *,
+    include_catalog_artist: bool = False,
+    include_editions: bool = False,
 ) -> list[tuple[str, UUID, int, Any]]:
     """Materialize live owner projections, never replaying patch event payloads."""
     values: list[tuple[str, UUID, int, Any]] = []
@@ -1788,6 +1866,9 @@ def _bootstrap_projections(
             .where(UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None))
         )
     }
+    from autplay.adapters.postgresql.shared_catalog import playlist_catalog_handles
+
+    catalog_handles = playlist_catalog_handles(session, user_id) if include_editions else {}
     for ref_row in session.scalars(
         select(UserTrackRefRow).where(
             UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None)
@@ -1807,6 +1888,7 @@ def _bootstrap_projections(
                     "album": ref_row.raw_album,
                     "duration_ms": ref_row.raw_duration_ms,
                     "resolution_status": ref_row.resolution_status,
+                    **catalog_handles.get(ref_row.user_track_ref_id, {}),
                     **(
                         {"metadata_v1": metadata_by_ref[ref_row.user_track_ref_id]}
                         if ref_row.user_track_ref_id in metadata_by_ref
@@ -1923,8 +2005,92 @@ def _bootstrap_projections(
             (item.aggregate_type, item.aggregate_id, item.row_version, item.payload)
             for item in _catalog_artist_projections(session, user_id)
         )
+    if include_editions:
+        values.extend(
+            (item.aggregate_type, item.aggregate_id, item.row_version, item.payload)
+            for item in _edition_tracks(session, user_id)
+        )
     values.sort(key=lambda value: (value[0], str(value[1])))
     return values
+
+
+def _edition_tracks(
+    session: Session,
+    user_id: UUID,
+    recording_scope: tuple[UUID, ...] | None = None,
+) -> list[CatalogArtistProjection]:
+    """One bounded projection per owned disc position, including repeat appearances."""
+    if recording_scope == ():
+        return []
+    scope_filter = "" if recording_scope is None else "AND t.recording_id = ANY(:recordings)"
+    rows = session.execute(
+        text(f"""
+        SELECT t.release_track_id, t.row_version, t.recording_id, t.title, t.sequence_no,
+               t.number_text, t.duration_ms, m.position AS disc, r.release_id, r.release_group_id,
+               r.title AS album, r.release_date, r.date_precision, r.status AS release_status,
+                 g.primary_type,
+               ac.display_name AS album_artist, tc.display_name AS track_artist,
+               coalesce(r.deleted_at, m.deleted_at, t.deleted_at) AS deleted_at,
+               (SELECT min(x.external_id) FROM identity.external_reference x
+                JOIN identity.source_provider p USING(provider_id)
+                WHERE x.release_id=r.release_id AND lower(p.provider_key)='musicbrainz'
+                  AND upper(x.external_entity_type)='RELEASE' AND x.deleted_at IS NULL
+                  AND p.deleted_at IS NULL HAVING count(DISTINCT x.external_id)=1) AS release_mbid
+        FROM catalog.release_track t JOIN catalog.medium m USING(medium_id)
+        JOIN catalog.release r USING(release_id)
+          JOIN catalog.release_group g USING(release_group_id)
+        JOIN catalog.artist_credit ac ON ac.artist_credit_id=r.artist_credit_id
+        JOIN catalog.artist_credit tc ON tc.artist_credit_id=t.artist_credit_id
+        WHERE EXISTS (SELECT FROM library.user_track_ref u WHERE u.recording_id=t.recording_id
+                      AND u.user_id=:owner AND u.deleted_at IS NULL) {scope_filter}
+    """),
+        {"owner": user_id, "recordings": recording_scope and list(recording_scope)},
+    ).mappings()
+    projections = []
+    for row in rows:
+        date = row["release_date"]
+        date_text = date.isoformat() if date else None
+        if date_text and row["date_precision"] in ("YEAR", "MONTH"):
+            date_text = date_text[: 4 if row["date_precision"] == "YEAR" else 7]
+        payload = {
+            key: str(row[key])
+            for key in (
+                "release_track_id",
+                "release_id",
+                "release_group_id",
+                "recording_id",
+            )
+        }
+        details = {
+            key: row[key]
+            for key in (
+                "title",
+                "sequence_no",
+                "number_text",
+                "duration_ms",
+                "disc",
+                "album",
+                "primary_type",
+                "release_status",
+                "album_artist",
+                "track_artist",
+                "release_mbid",
+            )
+        }
+        projections.append(
+            CatalogArtistProjection(
+                "EDITION_TRACK",
+                row["release_track_id"],
+                row["row_version"],
+                {
+                    **payload,
+                    **details,
+                    "release_date": date_text,
+                    "deleted_at": _iso(row["deleted_at"]) if row["deleted_at"] else None,
+                },
+            )
+        )
+    return projections
 
 
 def _capabilities(body: dict[str, Any]) -> set[str]:
@@ -1932,7 +2098,7 @@ def _capabilities(body: dict[str, Any]) -> set[str]:
     values = body.get("capabilities", [])
     if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
         return set()
-    return {item for item in values if item == CATALOG_ARTIST_ID_V1}
+    return {item for item in values if item in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1)}
 
 
 def _catalog_enabled(body: dict[str, Any]) -> bool:

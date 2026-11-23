@@ -165,6 +165,13 @@ class ArtistIdProjectionTest {
 
             val port = RoomArtistCatalogPort(db)
             val profileOne = ServerProfileId(PROFILE_ONE)
+            // Catalog handles acquired for playback alone do not populate My Music.
+            assertTrue(port.browse(profileOne, 10).isEmpty())
+            for (trackId in listOf("local-track-1-new", "local-track-2")) {
+                db.libraryDao().upsertPreference(app.autplay.data.local.entity.UserTrackPreferenceEntity(
+                    trackId, "LIKED", null, false, "CLEAN", 0, 1, PROFILE_ONE,
+                ))
+            }
             val browse = port.observeBrowse(profileOne, 10).first()
             assertEquals(listOf(ARTIST_ONE, ARTIST_TWO), browse.map { it.key.artistId.value })
             assertEquals(listOf("Same", "Same"), browse.map { it.name })
@@ -173,13 +180,13 @@ class ArtistIdProjectionTest {
             val appearances = port.appearances(ArtistKey(profileOne, ArtistId(ARTIST_ONE)), 10)
             assertEquals(
                 setOf(
-                    ArtistLocalTarget.Track("local-track-1-new"),
+                    ArtistLocalTarget.Track("local-track-1"),
                     ArtistLocalTarget.Track("local-track-2"),
                     ArtistLocalTarget.Release("local-release-1"),
                 ),
                 appearances.mapNotNull { it.localTarget }.toSet(),
             )
-            assertNull(appearances.single { it.subjectId.value == RELEASE_HIDDEN }.localTarget)
+            assertNull(appearances.single { it.subjectId?.value == RELEASE_HIDDEN }.localTarget)
             assertEquals(
                 CREDIT_ONE,
                 port.subjectCredits(profileOne, "RECORDING", ServerId(RECORDING_ONE), 10).single().creditId.value,
@@ -187,9 +194,40 @@ class ArtistIdProjectionTest {
             assertTrue(
                 port.subjectCredits(profileOne, "RECORDING", ServerId(RECORDING_PRIVATE), 10).isEmpty(),
             )
+            // Removing disambiguation must preserve both independently addressable artists.
+            catalog.upsertArtists(listOf(
+                artist("local-artist-1", PROFILE_ONE, ARTIST_ONE, "Same", null),
+                artist("local-artist-2", PROFILE_ONE, ARTIST_TWO, " SAME ", null),
+            ))
+            assertEquals(listOf(ARTIST_ONE, ARTIST_TWO), port.browse(profileOne, 10).map { it.key.artistId.value })
+            assertEquals(listOf(RECORDING_TWO), port.appearances(ArtistKey(profileOne, ArtistId(ARTIST_TWO)), 10).map { it.subjectId?.value })
         } finally {
             db.close()
         }
+    }
+
+    @Test fun likedTrackWithoutCatalogCreditCreatesAnArtistAndPlayableTrack() = runBlocking {
+        val db = AutPlayDatabase.open(ApplicationProvider.getApplicationContext(), "liked-artist-${System.nanoTime()}.db")
+        try {
+            val library = db.libraryDao()
+            val profile = ServerProfileId(PROFILE_ONE)
+            val row = track("liked-local", "local-recording", RECORDING_ONE, PROFILE_ONE)
+                .copy(localRecordingId = null, serverRecordingId = null, rawArtist = "ГРОТ", rawTitle = "Магия возраста")
+            val liked = app.autplay.data.local.entity.UserTrackPreferenceEntity(
+                row.localUserTrackRefId, "LIKED", null, false, "SYNCED", 0, 10, PROFILE_ONE)
+            library.upsertTrackRef(row)
+            library.upsertPreference(liked)
+            val port = RoomArtistCatalogPort(db)
+            val artist = port.observeBrowse(profile, 10).first().single()
+            assertEquals("ГРОТ", artist.name)
+            assertEquals(artist, port.detail(artist.key, 10, 10)?.summary)
+            val song = port.appearances(artist.key, 10).single()
+            assertEquals("Магия возраста", song.title)
+            assertEquals(ArtistLocalTarget.Track("liked-local"), song.localTarget)
+            assertTrue(port.browse(ServerProfileId(PROFILE_TWO), 10).isEmpty())
+            library.upsertPreference(liked.copy(preference = "NEUTRAL", updatedAtMs = 11))
+            assertTrue(port.observeBrowse(profile, 10).first().isEmpty())
+        } finally { db.close() }
     }
 
     private fun recording(localId: String, serverId: String, title: String) = RecordingProjectionEntity(

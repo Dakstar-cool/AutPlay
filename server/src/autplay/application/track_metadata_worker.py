@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import exists, select
@@ -32,6 +33,14 @@ from autplay.domain.track_metadata import (
 )
 from autplay.domain.vault import MediaValidationError
 from autplay.ports.track_metadata import MetadataByteWork, MetadataProviderError
+
+
+def _review_document(candidate: MetadataCandidate) -> dict[str, Any]:
+    # A subsequent selection hydrates its exact release again.
+    document = asdict(candidate)
+    for key in ("recording_members", "track_members", "release_members"):
+        document.pop(key)
+    return document
 
 
 class TrackMetadataHandler:
@@ -262,12 +271,12 @@ class TrackMetadataHandler:
                 generation,
                 context,
                 state="REVIEW" if candidates else "NOT_FOUND",
-                candidates=[asdict(item) for item in candidates],
+                candidates=[_review_document(item) for item in candidates],
                 album_group=native_group,
                 expected_acquisition_sha256=self._acquisition_sha256,
             )
             return
-        if not chosen.release_hydrated:
+        if not chosen.release_hydrated or (selection and not chosen.release_members):
             chosen = self.provider.release(chosen)
         if not selection and not chosen.exact_for(query):
             self.freeze_renewals()
@@ -276,7 +285,7 @@ class TrackMetadataHandler:
                 generation,
                 context,
                 state="REVIEW",
-                candidates=[asdict(chosen)],
+                candidates=[_review_document(chosen)],
                 album_group=native_group,
                 expected_acquisition_sha256=self._acquisition_sha256,
             )
@@ -302,8 +311,9 @@ class TrackMetadataHandler:
             fields=chosen.fields,
             evidence=evidence,
             explicit_selection=bool(selection),
-            candidates=[asdict(item) for item in candidates],
+            candidates=[_review_document(item) for item in candidates],
             album_group=group_document,
+            catalog_candidate=chosen,
             clear_album_group=True,
             expected_acquisition_sha256=self._acquisition_sha256,
         )
@@ -330,9 +340,10 @@ class TrackMetadataHandler:
             evidence=evidence,
             artwork=artwork,
             explicit_selection=False,
-            candidates=[asdict(item) for item in candidates],
+            candidates=[_review_document(item) for item in candidates],
             state="READY",
             album_group=group_document,
+            catalog_candidate=chosen,
             error_code=artwork_error.code if artwork_error else None,
             expected_acquisition_sha256=self._acquisition_sha256,
             clear_album_group=True,

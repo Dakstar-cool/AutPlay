@@ -1,6 +1,7 @@
 """Immutable owner-scoped lookup context and original source-search request binding."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -71,3 +72,34 @@ class InternetSearchContextRow(Base):
     user_id: Mapped[UUID] = mapped_column()
     context_id: Mapped[UUID | None] = mapped_column()
     request_sha256: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class CatalogBrowsePageRow(Base):
+    __tablename__ = "browse_page"
+    __table_args__ = (
+        CheckConstraint(
+            "length(page_key) BETWEEN 1 AND 200 AND jsonb_typeof(document)='object'",
+            name="browse_page_document_check",
+        ),
+        {"schema": "catalog"},
+    )
+    page_key: Mapped[str] = mapped_column(primary_key=True)
+    document: Mapped[dict[str, object]] = mapped_column(JSONB)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CatalogDownloadRow(Base):
+    __tablename__ = "catalog_download"
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(document)='object'", name="catalog_download_document_check"),
+        Index("catalog_download_owner_idx", "user_id", "updated_at"),
+        {"schema": "discovery"},
+    )
+    operation_id: Mapped[UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("account.user_account.user_id", ondelete="CASCADE")
+    )
+    document: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )

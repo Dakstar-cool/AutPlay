@@ -11,21 +11,28 @@ import app.autplay.data.local.entity.*
 import app.autplay.domain.LocalId
 
 internal data class CollectionPageFixture(val album: String, val serverAlbum: String, val albumEntries: List<String>,
-    val recordings: List<String>, val playlist: String, val playlistEntries: List<String>)
+    val recordings: List<String>, val playlist: String, val playlistEntries: List<String>, val artistIds: List<String>)
 
-internal suspend fun seedCollectionPages(context: Context, db: AutPlayDatabase, profile: String, tracks: List<String>, titles: List<String>): CollectionPageFixture {
+internal suspend fun seedCollectionPages(context: Context, db: AutPlayDatabase, profile: String, tracks: List<String>, titles: List<String>,
+    artistNames: List<String> = listOf("AutPlay"), seedPlaylist: Boolean = true, serverRecordings: List<String>? = null): CollectionPageFixture {
     fun id() = LocalId.random().value
     val catalog = db.catalogProjectionDao()
-    val artist = id()
+    val artists = artistNames.map { id() }
     val credit = id()
     val album = id()
     val serverAlbum = id()
-    val recordings = tracks.map { id() }
+    val recordings = serverRecordings ?: tracks.map { id() }
+    require(recordings.size == tracks.size)
     val albumEntries = tracks.map { id() }
-    val name = "AutPlay"
-    catalog.upsertArtists(listOf(ArtistProjectionEntity(id(), profile, artist, name, null, null, null, null, null, 1, 1)))
+    val name = artistNames.joinToString(" & ")
+    catalog.upsertArtists(artistNames.mapIndexed { i, label ->
+        ArtistProjectionEntity(id(), profile, artists[i], label, null, null, null, null, null, 1, 1)
+    })
     catalog.upsertArtistCredits(listOf(ArtistCreditProjectionEntity(id(), profile, credit, name, 1, 1)))
-    catalog.upsertArtistCreditNames(listOf(ArtistCreditNameProjectionEntity(id(), profile, credit, artist, 1, name, "", "PRIMARY")))
+    catalog.upsertArtistCreditNames(artistNames.mapIndexed { i, label ->
+        ArtistCreditNameProjectionEntity(id(), profile, credit, artists[i], i + 1, label,
+            if (i < artistNames.lastIndex) " & " else "", "PRIMARY")
+    })
     catalog.upsertReleases(listOf(ReleaseProjectionEntity(album, serverAlbum, null, "Ночной берег", name, "2026", "ALBUM", null, 1, 1, false)))
     suspend fun link(type: String, subject: String, recording: String) {
         val scope = id()
@@ -50,6 +57,7 @@ internal suspend fun seedCollectionPages(context: Context, db: AutPlayDatabase, 
     // Only the second song has embedded artwork. Both collection headers should choose it.
     seedSunsetArtwork(context, db, profile, tracks.last())
     val playlist = id()
+    if (!seedPlaylist) return CollectionPageFixture(album, serverAlbum, albumEntries, recordings, playlist, emptyList(), artists)
     db.playlistDao().upsertPlaylist(PlaylistEntity(playlist, null, "В дорогу", "Ночная подборка", "PRIVATE", "MANUAL",
         null, null, "LOCAL_ONLY", null, 0, 1, 1, null, profile))
     val entries = listOf(tracks[0], tracks[1], tracks[0]).mapIndexed { index, track ->
@@ -58,7 +66,7 @@ internal suspend fun seedCollectionPages(context: Context, db: AutPlayDatabase, 
         db.playlistDao().upsertEntry(PlaylistEntryEntity(entryId, null, playlist, track, order, order, null, 1, "LOCAL_ONLY", null, 0, null, profile))
         entryId
     }
-    return CollectionPageFixture(album, serverAlbum, albumEntries, recordings, playlist, entries)
+    return CollectionPageFixture(album, serverAlbum, albumEntries, recordings, playlist, entries, artists)
 }
 
 internal suspend fun seedSunsetArtwork(context: Context, db: AutPlayDatabase, profile: String, trackId: String, warm: Boolean = false) {

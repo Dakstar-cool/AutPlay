@@ -125,11 +125,14 @@ def test_native_sidecar_uses_same_full_extraction_as_selected_audio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ytdlp = importlib.import_module("yt_dlp")
-    info = {
+    info: dict[str, Any] = {
         "id": "abcdefghijk",
-        "track": "Song (Live)",
+        "track": "Studio Song",
+        "duration": 180,
         "artist": "Artist",
-        "requested_downloads": [{"id": "abcdefghijk", "url": "opaque-selected-audio"}],
+        "requested_downloads": [
+            {"id": "abcdefghijk", "url": "opaque-selected-audio", "vcodec": "none"}
+        ],
     }
     calls: list[str] = []
 
@@ -152,6 +155,7 @@ def test_native_sidecar_uses_same_full_extraction_as_selected_audio(
     configured_options = options(require_token_provider=True)
     monkeypatch.setattr(provider_media, "options", lambda **kwargs: configured_options)
     monkeypatch.setattr(ytdlp, "YoutubeDL", Extractor)
+    monkeypatch.setattr(provider_media, "current_song_duration", lambda _: 181)
     monkeypatch.setattr(
         provider_media,
         "stream_format",
@@ -162,7 +166,111 @@ def test_native_sidecar_uses_same_full_extraction_as_selected_audio(
     assert provider_media.main() == 0
     assert calls == ["https://www.youtube.com/watch?v=abcdefghijk"]
     assert (tmp_path / "audio.marker").read_text() == "opaque-selected-audio"
-    assert (tmp_path / SOURCE_METADATA_FILE).read_text().find("Song (Live)") >= 0
+    assert "Studio Song" in (tmp_path / SOURCE_METADATA_FILE).read_text()
+    monkeypatch.setattr(provider_media, "stream_format", lambda *_: pytest.fail("blocked bytes"))
+    info["album"] = "Live at Wembley"
+    assert (
+        provider_media.main()
+        == provider_media.MEDIA_ERROR_EXIT_CODES["provider_track_policy_rejected"]
+    )
+    del info["album"]
+    info["requested_downloads"].append(dict(info["requested_downloads"][0]))
+    assert (
+        provider_media.main()
+        == provider_media.MEDIA_ERROR_EXIT_CODES["provider_format_unsupported"]
+    )
+
+
+def test_studio_track_with_only_progressive_mp4_outputs_just_its_audio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfdbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("FFmpeg tools are required for the media fixture")
+    source = tmp_path / "studio.mp4"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=s=32x32:d=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=2",
+            "-c:v",
+            "mpeg4",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(source),
+        ],
+        check=True,
+        timeout=15,
+    )
+    fields = {
+        "url": "https://example.test/studio.mp4",
+        "format_id": "18",
+        "ext": "mp4",
+        "acodec": "mp4a.40.2",
+        "vcodec": "mp4v",
+        "protocol": "https",
+    }
+    payload = source.read_bytes()
+    declared_size = len(payload)
+
+    class Response(io.BytesIO):
+        status = 200
+
+        @property
+        def headers(self) -> dict[str, str]:
+            return {"Content-Length": str(declared_size)}
+
+    with importlib.import_module("yt_dlp").YoutubeDL(options()) as ydl:
+
+        def open_media(request: Any) -> Response:
+            assert request.url == fields["url"]
+            return Response(payload)
+
+        monkeypatch.setattr(ydl, "urlopen", open_media)
+        monkeypatch.setattr(provider_media, "validated_ffmpeg", lambda: ffmpeg)
+
+        def select(formats: list[dict[str, str]]) -> dict[str, Any]:
+            result = ydl.process_ie_result(
+                {"id": "abcdefghijk", "title": "Studio song", "formats": formats},
+                download=False,
+            )
+            assert isinstance(result, dict)
+            return result
+
+        audio = dict(fields, format_id="140", vcodec="none")
+        assert select([fields, audio])["format_id"] == "140"
+        selected = select([fields])
+        assert selected["format_id"] == "18"
+        capfdbinary.readouterr()
+        stream_format(ydl, selected)
+        output = tmp_path / "vault.audio"
+        output.write_bytes(capfdbinary.readouterr().out)
+        track = FfprobeInspector(ffprobe).inspect(output, single_audio=True)
+        assert track.codec == "aac" and 1900 <= track.duration_ms <= 2200
+        declared_size += 1
+        with pytest.raises(ProviderMediaError, match="provider_download_failed"):
+            stream_format(ydl, selected)
+        for invalid in (
+            dict(fields, has_drm=True),
+            dict(fields, acodec="none"),
+            dict(fields, fragments=[{}]),
+            dict(fields, is_live=True),
+        ):
+            with pytest.raises(ProviderMediaError, match="provider_format_unsupported"):
+                stream_format(ydl, invalid)
 
 
 def _pinned_windows_media_tools() -> tuple[str, str]:

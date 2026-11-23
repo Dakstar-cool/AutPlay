@@ -18,11 +18,11 @@ import app.autplay.R
 @Composable
 internal fun CollectionDetailHeader(
     title: String, subtitle: String?, date: String?, count: Int, artworkTrackId: String?,
-    onListen: (() -> Unit)?, onOpenArtist: (() -> Unit)? = null, secondaryAction: (@Composable () -> Unit)? = null,
+    onListen: (() -> Unit)?, catalogCoverId: String? = null, onOpenArtist: (() -> Unit)? = null, secondaryAction: (@Composable () -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AutPlayArtwork(title, Modifier.testTag("collection-artwork"), size = 124.dp, trackId = artworkTrackId)
+            AutPlayArtwork(title, Modifier.testTag("collection-artwork"), size = 124.dp, trackId = artworkTrackId, painter = if (artworkTrackId == null) rememberCatalogCover(catalogCoverId) else null)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
                 if (!subtitle.isNullOrBlank()) {
@@ -48,7 +48,7 @@ internal fun CollectionDetailHeader(
 }
 
 @Composable
-internal fun CollectionTrackRow(number: String, title: String, artist: String?, durationMs: Long?, onPlay: (() -> Unit)?, tag: String) {
+internal fun CollectionTrackRow(number: String, title: String, artist: String?, durationMs: Long?, onPlay: (() -> Unit)?, tag: String, onAdd: (() -> Unit)? = null) {
     Surface(onClick = { onPlay?.invoke() }, enabled = onPlay != null, modifier = Modifier.fillMaxWidth().testTag(tag),
         color = AutPlayTokens.colors.raisedSurface, shape = MaterialTheme.shapes.medium) {
         Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 6.dp),

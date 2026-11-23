@@ -31,7 +31,8 @@ public data class MetadataAlbumMember(
 public class AlbumGroupRepository(private val database: AutPlayDatabase) {
     /** Invalidation includes membership deletion and equal-timestamp metadata changes. */
     public fun observe(profileId: String?): Flow<List<MetadataAlbum>> =
-        database.invalidationTracker.createFlow("track_metadata_projection", "user_track_ref", "library_entry")
+        database.invalidationTracker.createFlow("track_metadata_projection", "user_track_ref", "library_entry",
+            "user_track_preference", "playlist", "playlist_entry")
             .mapLatest { snapshot(profileId) }.distinctUntilChanged()
 
     /** Full membership is independent of the bounded UI track list. Each SQL batch is bounded. */

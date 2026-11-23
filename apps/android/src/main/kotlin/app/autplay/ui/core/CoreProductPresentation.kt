@@ -39,6 +39,7 @@ internal fun buildLibraryTrackSummaries(
             addedAtMs = entry.addedAtMs,
             sourceOrder = index,
             loved = entry.loved,
+            canRemove = entry.localLibraryEntryId != null || entry.loved,
             downloaded = downloaded,
             availability = resolveTrackAvailability(
                 entry.availabilityStatus,
@@ -157,6 +158,7 @@ internal fun buildLibraryScreenUiState(
             permissionRevoked = item.availability == TrackAvailability.PermissionRevoked,
             downloaded = item.downloaded,
             loved = item.loved,
+            canRemove = item.canRemove,
         )
     }
     return LibraryScreenUiState(

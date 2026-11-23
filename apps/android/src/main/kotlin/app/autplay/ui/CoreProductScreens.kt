@@ -34,6 +34,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -46,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +84,7 @@ public data class CoreTrackUiItem(
     public val permissionRevoked: Boolean = false,
     public val downloaded: Boolean = false,
     public val loved: Boolean = false,
+    public val canRemove: Boolean = true,
 )
 
 public data class CoreCollectionUiItem(
@@ -176,6 +179,8 @@ public data class SearchScreenUiState(
     public val kind: LibrarySearchKind = LibrarySearchKind.All,
     public val offlineTrackIds: Set<String> = emptySet(),
     public val serverLinkedTrackIds: Set<String> = emptySet(),
+    public val vaultNextCursor: String? = null,
+    public val vaultPageError: Boolean = false,
 ) {
     internal val serverPlaybackByTrack = if (vaultAvailable) {
         vaultResults.mapNotNull { row -> row.localTrackId?.let { it to row.playable } }
@@ -195,6 +200,7 @@ public data class VaultSearchUiItem(
     public val availability: String,
     public val playable: Boolean,
     public val localTrackId: String? = null,
+    public val durationMs: Long? = null,
 )
 
 public data class LibraryScreenUiState(
@@ -298,17 +304,22 @@ public fun HomeProductScreen(
                     HomeWaveStartHero(
                         localMode = state.localMode,
                         state = heroState,
-                        enabled = if (heroState.hasActivePlayback) heroState.playPauseEnabled else myWaveAllowed && !showFirstTrack,
+                        enabled = myWaveAllowed && !showFirstTrack,
                         emptyLibrary = showFirstTrack,
-                        onStart = when {
-                            heroState.hasActivePlayback -> onTogglePlayPause
-                            state.continueListening != null || heroState.trackId != null -> onContinueListening
-                            else -> onStartMyWave
-                        },
+                        onStart = onStartMyWave,
+                        onResume = if (heroState.hasActivePlayback) onTogglePlayPause else onContinueListening,
                         onLike = onLikeHeroTrack,
                         onOpenListenTogether = onOpenListenTogether,
                         modifier = heroModifier,
                     )
+                }
+            }
+        }
+        if (showArtwork) {
+            item(key = "home:start-wave") {
+                OutlinedButton(onClick = onStartMyWave, enabled = myWaveAllowed,
+                    modifier = Modifier.fillMaxWidth().testTag("home-my-wave")) {
+                    Text(stringResource(R.string.home_my_wave))
                 }
             }
         }
@@ -427,12 +438,22 @@ public fun SearchProductScreen(
     onSearch: () -> Unit,
     onPlay: (String) -> Unit,
     onPlayVault: (String) -> Unit = {},
+    playlistVaultTarget: suspend (String) -> String? = { null },
     onRetry: () -> Unit = {},
     onVaultScopeChange: (Boolean) -> Unit = {},
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
     onSearchKindChange: (LibrarySearchKind) -> Unit = {},
+    onPlayAcquired: ((String) -> Unit)? = null,
+    onMoreVault: () -> Unit = {},
+    manualPlaylists: List<ManualPlaylistUi> = emptyList(),
+    manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
 ) {
+    val addScope = androidx.compose.runtime.rememberCoroutineScope()
+    var playlistTrackId by rememberSaveable { mutableStateOf<String?>(null) }
+    playlistTrackId?.let { track ->
+        AddTrackToPlaylistDialog(track, manualPlaylists, manualPlaylistActions, { playlistTrackId = null })
+    }
     var internetRequest by rememberSaveable(state.kind, state.query) { androidx.compose.runtime.mutableIntStateOf(0) }
     var internetQuery by rememberSaveable(state.kind, state.query) { mutableStateOf("") }
     val listContextKey = "search:${state.kind.wireValue}:${state.query.trim().replace(Regex("\\s+"), " ")}:${state.vaultAvailable}"
@@ -527,6 +548,18 @@ public fun SearchProductScreen(
                 }
             }
         }
+        if (state.vaultAvailable && (state.searched || state.vaultSearched)) {
+            item(key = "search:internet-action") {
+                OutlinedButton(onClick = { internetQuery = state.query; internetRequest++ }) {
+                    Text(stringResource(R.string.music_search_internet))
+                }
+            }
+        }
+        if (internetRequest > 0 && internetQuery == state.query) {
+            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest, state.kind,
+                vaultTracks = state.vaultResults, onPlayVault = onPlayVault, onPlayAcquired = onPlayAcquired,
+                onPlaylistTrack = { playlistTrackId = it }) }
+        }
         items(state.results, key = { "$SEARCH_RESULT_PREFIX${it.id}" }) { track ->
             val offline = track.id in state.offlineTrackIds
             val serverPlayable = state.serverPlaybackByTrack[track.id]
@@ -537,6 +570,7 @@ public fun SearchProductScreen(
                 detail = stringResource(searchSourceLabel(offline, server, serverPlayable)),
                 emphasizeDetail = offline,
                 modifier = Modifier.testTag("local-result-${track.id}"),
+                actions = { AddToPlaylistMenu { playlistTrackId = track.id } },
             )
         }
         items(state.distinctVaultResults, key = { "$SEARCH_VAULT_RESULT_PREFIX${it.id}" }) { track ->
@@ -549,17 +583,23 @@ public fun SearchProductScreen(
                 detail = stringResource(searchSourceLabel(offline, server = true, playable = track.playable)),
                 emphasizeDetail = offline,
                 modifier = Modifier.testTag("vault-result-${track.id}"),
+                actions = {
+                    AddToPlaylistMenu {
+                        if (track.localTrackId != null) playlistTrackId = track.localTrackId
+                        else addScope.launch { playlistTrackId = playlistVaultTarget(track.id) }
+                    }
+                },
             )
         }
-        if (state.vaultAvailable && (state.searched || state.vaultSearched)) {
-            item(key = "search:internet-action") {
-                OutlinedButton(onClick = { internetQuery = state.query; internetRequest++ }) {
-                    Text(stringResource(R.string.music_search_internet))
+        state.vaultNextCursor?.let { cursor ->
+            item(key = "search:vault-more") {
+                if (state.vaultPageError) {
+                    OutlinedButton(onClick = onMoreVault) { Text(stringResource(R.string.action_retry)) }
+                } else {
+                    LaunchedEffect(cursor) { onMoreVault() }
+                    LinearProgressIndicator(Modifier.fillMaxWidth().testTag("vault-next-page"))
                 }
             }
-        }
-        if (internetRequest > 0 && internetQuery == state.query) {
-            item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest, state.kind) }
         }
     }
 }
@@ -602,6 +642,7 @@ public fun LibraryProductScreen(
     }
     Column(Modifier.fillMaxSize().padding(top = contentPadding.calculateTopPadding() + 4.dp)) {
         LibraryBrowseControls(displayState, onSectionChange, onFilterChange, onSortChange, onOpenDownloads, onAddLocal)
+        if (displayState.section == LibrarySection.Playlists) ImportPlaylistAction()
         val collections = displayState.section == LibrarySection.Albums || displayState.section == LibrarySection.Playlists
         LazyVerticalGrid(
             columns = if (collections) GridCells.Adaptive(132.dp) else GridCells.Fixed(1),
@@ -652,7 +693,6 @@ public fun LibraryProductScreen(
                             track, onSelect, onRemoveOrRestore, onLike,
                             onPlayNext, onAddToQueue, onDownload, onRepairAccess,
                             onAddToPlaylist = { addTrackToPlaylistId = it },
-                            canAddToPlaylist = manualPlaylists.isNotEmpty(),
                             downloadsAvailable = !state.localMode,
                         )
                     }
@@ -722,11 +762,6 @@ public fun LibraryProductScreen(
             playlists = manualPlaylists,
             actions = manualPlaylistActions,
             onDismiss = { addTrackToPlaylistId = null },
-            text = ManualPlaylistText(
-                selectPlaylist = stringResource(R.string.playlist_select_target),
-                add = stringResource(R.string.playlist_add_selected),
-                cancel = stringResource(R.string.action_cancel),
-            ),
         )
     }
 
@@ -750,7 +785,7 @@ private fun LazyGridScope.collectionItems(
     }
     gridItems(collections, key = { "$keyPrefix${it.id}" }) { collection ->
         val count = collection.itemCount?.let { pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, it, it) }
-        val subtitle = listOfNotNull(collection.subtitle?.takeIf { it.isNotBlank() }, count).joinToString(" · ")
+        val subtitle = listOfNotNull(collection.subtitle?.takeIf { it.isNotBlank() }, count).joinToString(" В· ")
         CollectionCoverTile(collection.title, collection.artworkTrackId, subtitle, Modifier.testTag("$keyPrefix${collection.id}")) {
             onOpenCollection(section, collection.id)
         }
@@ -790,9 +825,10 @@ private fun searchListKeys(state: SearchScreenUiState): List<String> = buildList
             !state.loading && !state.vaultLoading && !state.error && !state.vaultError
         ) add("search:empty")
     }
+    if (state.vaultAvailable && (state.searched || state.vaultSearched)) add("search:internet-action")
     state.results.forEach { add("$SEARCH_RESULT_PREFIX${it.id}") }
     state.distinctVaultResults.forEach { add("$SEARCH_VAULT_RESULT_PREFIX${it.id}") }
-    if (state.vaultAvailable && (state.searched || state.vaultSearched)) add("search:internet-action")
+    if (state.vaultNextCursor != null) add("search:vault-more")
 }
 
 private fun libraryListKeys(state: LibraryScreenUiState): List<String> = buildList {
@@ -882,7 +918,6 @@ private fun LibraryTrackCard(
     onDownload: (String) -> Unit,
     onRepairAccess: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
-    canAddToPlaylist: Boolean,
     downloadsAvailable: Boolean,
 ) {
     AutPlayTrackRow(
@@ -911,7 +946,6 @@ private fun LibraryTrackCard(
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.playlist_add_selected)) },
-                enabled = canAddToPlaylist,
                 onClick = { dismiss(); onAddToPlaylist(track.id) },
             )
             if (downloadsAvailable && !track.downloaded) {
@@ -926,10 +960,12 @@ private fun LibraryTrackCard(
                     onClick = { dismiss(); onRepairAccess() },
                 )
             }
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_remove)) },
-                onClick = { dismiss(); onRemoveOrRestore(track.id) },
-            )
+            if (track.canRemove) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_remove)) },
+                    onClick = { dismiss(); onRemoveOrRestore(track.id) },
+                )
+            }
         }
     }
 }

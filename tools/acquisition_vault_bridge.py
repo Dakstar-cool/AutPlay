@@ -40,6 +40,7 @@ class Receipt:
     signature: tuple[int, int]
     completed_at_ns: int = 0
     source_metadata: dict[str, object] | None = None
+    policy_reasons: tuple[str, ...] = ()
 
     @property
     def metadata_sha256(self) -> str:
@@ -138,6 +139,19 @@ def read_receipt(path: Path, root: Path) -> Receipt:
         ensure_ascii=False,
         sort_keys=True,
     ).encode()
+    from autplay.domain.acquisition_policy import track_review_reasons
+
+    source = metadata_evidence(doc.get("source_metadata"), doc["provider"])
+    native_fields = source.get("fields") if source else None
+    labels = [title, fields["album"]]
+    if isinstance(native_fields, dict):
+        labels.extend([native_fields.get("title"), native_fields.get("album")])
+    reasons = track_review_reasons(seconds, *labels)
+    if doc["provider"] == "yt_dlp" and (
+        not isinstance(native_fields, dict)
+        or not all(native_fields.get(key) for key in ("title", "artist", "album"))
+    ):
+        reasons += ("unverified_youtube_recording",)
     return Receipt(
         path,
         audio,
@@ -147,7 +161,8 @@ def read_receipt(path: Path, root: Path) -> Receipt:
         payload,
         (stat.st_size, stat.st_mtime_ns),
         path.stat().st_mtime_ns,
-        metadata_evidence(doc.get("source_metadata"), doc["provider"]),
+        source,
+        reasons,
     )
 
 
@@ -180,14 +195,13 @@ class Backend:
     """Reuse owner-scoped application commands, fenced ingest and sync publication."""
 
     def __init__(self, owner: UUID, *, provision: bool = False) -> None:
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-
         from autplay.application.imports import ImportService
         from autplay.domain.resource_admission import LocalBridgeClaim
         from autplay.entrypoints.composition import build_vault_http_service
         from autplay.entrypoints.resource_composition import ResourceIoRuntime
         from autplay.runtime.settings import load_api_settings
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
 
         settings = load_api_settings()
         self.engine = create_engine(
@@ -264,10 +278,9 @@ class Backend:
         return Principal(self.owner, self.device, UUID(int=0), AccountRole.OWNER)
 
     def advance(self, receipt: Receipt, checkpoint: dict[str, Any]) -> dict[str, Any]:
-        from sqlalchemy import select
-
         from autplay.adapters.postgresql.library_runtime import LibraryRepository
         from autplay.adapters.postgresql.models import ImportEntryRow, LibraryEntryRow
+        from sqlalchemy import select
 
         state = dict(checkpoint)
         if "import_id" not in state:
@@ -367,14 +380,13 @@ class Backend:
             return {**state, "state": "INGESTING"}
         if upload.state not in {"COMMITTED", "REUSED"}:
             raise ReceiptError("upload_" + upload.state.lower())
-        from sqlalchemy.dialects.postgresql import insert
-
         from autplay.adapters.postgresql.models import (
             RecordingCanonicalVariantRow,
             SyncEventRow,
             UploadSessionRow,
         )
         from autplay.application.sync import CatalogArtistSyncPublisher
+        from sqlalchemy.dialects.postgresql import insert
 
         with self.sessions() as session:
             committed = session.get(UploadSessionRow, upload_id)
@@ -586,6 +598,8 @@ def advance_checkpoint(
     """Advance an isolated identity; retry state never mutates another receipt."""
     if previous.get("state") == "PUBLISHED":
         return advance_metadata_checkpoint(backend, receipt, previous)
+    if receipt.policy_reasons:
+        return {**previous, "state": "NEEDS_REVIEW", "error": receipt.policy_reasons[0]}
     if previous.get("retry_at", 0) > time.time():
         return previous
     try:

@@ -5,11 +5,17 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.catalogue_context import PostgresCatalogueContextRepository
+from autplay.adapters.postgresql.confirmed_edition import musicbrainz_reference
+from autplay.adapters.postgresql.models import (
+    SyncEventRow,
+    UserTrackRefExternalReferenceRow,
+    UserTrackRefRow,
+)
 from autplay.adapters.postgresql.models.catalogue_context import InternetCatalogueContextRow
 from autplay.adapters.postgresql.resource_authority import ResourceAuthorityGate
 from autplay.adapters.postgresql.resource_limits import lock_resource_admission
@@ -119,6 +125,84 @@ class CatalogueContextService:
                 "availability": "METADATA_ONLY",
                 "acquisition_allowed": False,
                 "lookup_metadata": context.card.document(),
+            }
+
+    def track_reference(self, principal: Principal, context_id: UUID) -> dict[str, object]:
+        """Materialize the owner's playlist target from a verified metadata receipt."""
+        with self.sessions.begin() as session:
+            _acquire_sync_owner_publish_lock(session, principal.user_id)
+            context = PostgresCatalogueContextRepository(session).load(
+                principal.user_id, context_id, admission=True
+            )
+            card = context.card
+            external = musicbrainz_reference(session, "RECORDING", str(card.recording_mbid))
+            linked = select(UserTrackRefExternalReferenceRow.user_track_ref_id).where(
+                UserTrackRefExternalReferenceRow.external_reference_id
+                == external.external_reference_id
+            )
+            identity: ColumnElement[bool] = UserTrackRefRow.user_track_ref_id.in_(linked)
+            if external.recording_id is not None:
+                identity = or_(identity, UserTrackRefRow.recording_id == external.recording_id)
+            ref = session.scalar(
+                select(UserTrackRefRow)
+                .where(
+                    UserTrackRefRow.user_id == principal.user_id,
+                    UserTrackRefRow.deleted_at.is_(None),
+                    identity,
+                )
+                .order_by(UserTrackRefRow.user_track_ref_id)
+                .limit(1)
+            )
+            if ref is None:
+                ref = UserTrackRefRow(
+                    user_id=principal.user_id,
+                    raw_title=card.recording_title or card.title,
+                    raw_artist=card.artist,
+                    raw_album=card.album,
+                    raw_duration_ms=card.duration_ms,
+                )
+                session.add(ref)
+                session.flush()
+                session.add(
+                    UserTrackRefExternalReferenceRow(
+                        user_track_ref_id=ref.user_track_ref_id,
+                        external_reference_id=external.external_reference_id,
+                        relation_role="IMPORT_EVIDENCE",
+                    )
+                )
+                session.add(
+                    SyncEventRow(
+                        user_id=principal.user_id,
+                        event_type="USER_TRACK_REF_PATCHED",
+                        aggregate_type="USER_TRACK_REF",
+                        aggregate_id=ref.user_track_ref_id,
+                        schema_version=1,
+                        server_row_version=ref.row_version,
+                        payload={
+                            "title": ref.raw_title,
+                            "artist": ref.raw_artist,
+                            "album": ref.raw_album,
+                            "duration_ms": ref.raw_duration_ms,
+                            "resolution_status": ref.resolution_status,
+                        },
+                    )
+                )
+            from autplay.adapters.postgresql.shared_catalog import playlist_catalog_handles
+
+            session.flush()
+            handle = playlist_catalog_handles(session, principal.user_id).get(
+                ref.user_track_ref_id, {}
+            )
+            return {
+                "user_track_ref_id": str(ref.user_track_ref_id),
+                "row_version": ref.row_version,
+                "recording_id": str(ref.recording_id) if ref.recording_id else None,
+                "title": ref.raw_title or card.title,
+                "artist": ref.raw_artist,
+                "album": ref.raw_album,
+                "duration_ms": ref.raw_duration_ms,
+                "resolution_status": ref.resolution_status,
+                **handle,
             }
 
     @staticmethod

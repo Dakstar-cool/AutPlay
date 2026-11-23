@@ -73,15 +73,15 @@ def test_title_only_verified_channel_requires_full_recording_tags() -> None:
                 "artist": self.artist,
                 "track": "Song",
                 "duration": 233,
+                "categories": ["Music"],
+                "album": "Studio Album",
             }
 
     good = Metadata("Artist")
     assert _find_with_metadata(good, [entry], artist="Artist", title="Song")["duration"] == 233
     assert _find_with_metadata(Metadata("Other"), [entry], artist="Artist", title="Song") is None
     assert (
-        _find_with_metadata(
-            good, [entry | {"channel_is_verified": False}], artist="Artist", title="Song"
-        )
+        _find_with_metadata(good, [entry | {"ie_key": "Generic"}], artist="Artist", title="Song")
         is None
     )
     assert good.calls == 1

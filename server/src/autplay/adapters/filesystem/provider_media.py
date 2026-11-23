@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from autplay.adapters.media.tools import SubprocessExecutableRunner
+from autplay.adapters.youtube_music_catalog import current_song_duration
+from autplay.domain.acquisition_policy import track_review_reasons
 from autplay.domain.track_metadata import (
     MAX_SOURCE_METADATA_BYTES,
     sanitize_source_metadata,
@@ -137,6 +140,7 @@ MEDIA_ERROR_EXIT_CODES = {
     "provider_format_unsupported": 24,
     "provider_runtime_unsupported": 25,
     "provider_download_failed": 26,
+    "provider_track_policy_rejected": 27,
 }
 
 
@@ -239,10 +243,8 @@ def options(*, require_token_provider: bool = False) -> dict[str, Any]:
             "1",
             "--file-access-retries",
             "1",
-            "--match-filters",
-            "!is_live & duration<=7200",
             "--format",
-            "bestaudio/best",
+            "bestaudio/best[ext=mp4][protocol=https][acodec^=mp4a]",
             "--output",
             "-",
         ]
@@ -262,8 +264,68 @@ def options(*, require_token_provider: bool = False) -> dict[str, Any]:
     return params
 
 
+def _stream_mp4_audio(ydl: Any, info: dict[str, Any]) -> None:
+    """Read one complete progressive MP4 through the configured provider transport."""
+    request = importlib.import_module("yt_dlp.networking").Request
+    headers = dict(info.get("http_headers") or {})
+    if any(key.lower() == "range" for key in headers):
+        raise ProviderMediaError("provider_format_unsupported")
+    headers["Accept-Encoding"] = "identity"
+    command = [
+        validated_ffmpeg(),
+        "-nostdin",
+        "-v",
+        "error",
+        "-xerror",
+        "-protocol_whitelist",
+        "pipe",
+        "-f",
+        "mov",
+        "-i",
+        "pipe:0",
+        "-map",
+        "0:a:0",
+        "-c:a",
+        "copy",
+        "-f",
+        "adts",
+        "pipe:1",
+    ]
+    # FFmpeg receives only stdin. yt-dlp owns the proxy, headers and HTTP framing.
+    with ydl.urlopen(request(info["url"], headers=headers)) as response:
+        length = response.headers.get("Content-Length")
+        if (
+            response.status != 200
+            or response.headers.get("Content-Range")
+            or not length
+            or not length.isdecimal()
+        ):
+            raise ProviderMediaError("provider_download_failed")
+        size = int(length)
+        if size > 2 * 1024**3:
+            raise ProviderMediaError("provider_download_too_large")
+        if size == 0 or (info.get("filesize") is not None and info["filesize"] != size):
+            raise ProviderMediaError("provider_download_failed")
+        with subprocess.Popen(command, stdin=subprocess.PIPE) as remux:
+            assert remux.stdin is not None
+            try:
+                with remux.stdin:
+                    remaining = size
+                    while remaining:
+                        block = response.read(min(65536, remaining))
+                        if not block:
+                            raise ProviderMediaError("provider_download_failed")
+                        remux.stdin.write(block)
+                        remaining -= len(block)
+                if remux.wait(timeout=15) != 0:
+                    raise ProviderMediaError("provider_download_failed")
+            finally:
+                if remux.poll() is None:
+                    remux.kill()
+
+
 def stream_format(ydl: Any, info: dict[str, Any]) -> None:
-    """Download exactly one selected audio format with no downloader fallback."""
+    """Write only audio from the selected format to the bounded Vault writer."""
     ffmpeg = importlib.import_module("yt_dlp.downloader.external").FFmpegFD
     if (
         info.get("requested_formats")
@@ -273,6 +335,17 @@ def stream_format(ydl: Any, info: dict[str, Any]) -> None:
     ):
         raise ProviderMediaError("provider_format_unsupported")
     codec = str(info.get("acodec", "")).split(".")[0]
+    if info.get("vcodec") not in {None, "none"}:
+        if (
+            info.get("protocol") != "https"
+            or urlsplit(info.get("url", "")).scheme != "https"
+            or info.get("fragments")
+            or info.get("ext") != "mp4"
+            or codec not in {"aac", "mp4a"}
+        ):
+            raise ProviderMediaError("provider_format_unsupported")
+        _stream_mp4_audio(ydl, info)
+        return
     container = {"aac": "adts", "mp4a": "adts", "opus": "ogg"}.get(codec)
     info = dict(info, to_stdout=True)
     if container is None:
@@ -350,22 +423,43 @@ def main() -> int:
     ytdlp = importlib.import_module("yt_dlp")
     try:
         with ytdlp.YoutubeDL(options(require_token_provider=True)) as ydl:
+            try:
+                catalog_seconds = current_song_duration(sys.argv[1])
+            except Exception as error:
+                raise ProviderMediaError("provider_download_failed") from error
+            if catalog_seconds is None:
+                raise ProviderMediaError("provider_track_policy_rejected")
             info = ydl.extract_info(
                 "https://www.youtube.com/watch?v=" + sys.argv[1], download=False
             )
-            if not isinstance(info, dict) or info.get("_type", "video") != "video":
-                return 2
+            if not isinstance(info, dict) or info.get("id") != sys.argv[1]:
+                raise ProviderMediaError("provider_track_policy_rejected")
+            seconds = info.get("duration")
+            if (
+                info.get("_type", "video") != "video"
+                or info.get("live_status") not in {None, "not_live"}
+                or info.get("is_live")
+                or not isinstance(seconds, (int, float))
+                or isinstance(seconds, bool)
+                or abs(seconds - catalog_seconds) > max(3, 0.02 * catalog_seconds)
+                or track_review_reasons(
+                    seconds, info.get("title"), info.get("track"), info.get("album")
+                )
+            ):
+                raise ProviderMediaError("provider_track_policy_rejected")
             selected = info.get("requested_downloads") or [info]
-            if len(selected) != 1:
-                return 2
+            if len(selected) != 1 or not selected[0].get("vcodec"):
+                raise ProviderMediaError("provider_format_unsupported")
+            if selected[0].get("id", sys.argv[1]) != sys.argv[1]:
+                raise ProviderMediaError("provider_track_policy_rejected")
             stream_format(ydl, selected[0])
             write_source_metadata(info, sys.argv[1])
         return 0
     except ProviderMediaError as error:
         return MEDIA_ERROR_EXIT_CODES[error.code]
-    except ytdlp.utils.DownloadError as error:
+    except (ytdlp.utils.DownloadError, ytdlp.networking.exceptions.RequestError) as error:
         return MEDIA_ERROR_EXIT_CODES[classify_download_error(error)]
-    except ValueError, OSError:
+    except ValueError, OSError, subprocess.TimeoutExpired:
         return MEDIA_ERROR_EXIT_CODES["provider_download_failed"]
 
 

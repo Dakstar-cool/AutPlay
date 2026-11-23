@@ -87,7 +87,7 @@ def test_edited_policy_blocks_downgrade_even_with_no_admissions(
     with database_harness.connect(empty_database_name) as connection:
         connection.execute("UPDATE account.resource_quota_policy SET revision=2,default_devices=3")
         head_before = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head_before == ("0075_sona_collection_window",)
+        assert head_before == ("0078_playlist_snapshots",)
         purge_before = connection.execute(
             "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
         ).fetchone()

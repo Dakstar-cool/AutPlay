@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.unit.width
 import androidx.compose.ui.test.assertCountEquals
@@ -663,6 +665,59 @@ class OfflineLibraryScreenTest {
         composeRule.waitUntil(15_000) {
             PlaybackRuntimeState.state.value.let { it.isPlaying && it.localUserTrackRefId == track.value }
         }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 29)
+    fun jointArtistPickerOpensAbovePlayerAndQueueWithoutChangingPlayback() = runBlocking {
+        val binding = app.autplay.application.sync.ClientEventBinding(
+            UserId(LocalId.random().value), DeviceId(LocalId.random().value), ServerProfileId(PROFILE))
+        val artists = listOf("SVRGN", "RAGETRAIN")
+        val titles = listOf("BASS PESADÃO", "Second recording")
+        val tracks = titles.map { importPlayableSample(it, binding, artists.joinToString(" & ")).value }
+        val db = AutPlayRuntime.database(context)
+        val fixture = seedCollectionPages(context, db, PROFILE, tracks, titles, artists)
+        val strings = localizedAppContext(context, AppLanguage.Russian)
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        fun tap(tag: String) {
+            composeRule.waitUntil(15_000) { composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+            composeRule.onNodeWithTag(tag).performClick()
+        }
+        fun assertPicker() {
+            val row = hasTestTag("player-artist-${fixture.artistIds[1]}") and hasAnyAncestor(isDialog())
+            composeRule.waitUntil(10_000) { composeRule.onAllNodes(row).fetchSemanticsNodes().isNotEmpty() }
+            composeRule.onNode(row).assertIsDisplayed()
+            composeRule.onNodeWithTag("player-artist-${fixture.artistIds[0]}").assertIsDisplayed()
+        }
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        tap("library-track-${tracks[0]}")
+        composeRule.waitUntil(15_000) { PlaybackRuntimeState.state.value.let { it.isPlaying && it.localUserTrackRefId == tracks[0] } }
+        val queue = requireNotNull(db.queueDao().activeSnapshotOnce())
+        tap("mini-player-open-artists")
+        assertPicker()
+        androidx.test.espresso.Espresso.pressBack()
+        composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput {
+            click(Offset(10f, center.y))
+        }
+        tap("player-open-artist")
+        assertPicker()
+        androidx.test.espresso.Espresso.pressBack()
+        tap("player-open-queue")
+        tap("queue-open-artists")
+        assertPicker()
+        saveUiScreenshot("joint-artists-over-queue")
+        androidx.test.espresso.Espresso.pressBack()
+        tap("queue-open-artists")
+        assertPicker()
+        tap("player-artist-${fixture.artistIds[1]}")
+        val heading = hasText("RAGETRAIN") and isHeading()
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(heading).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNode(heading).assertIsDisplayed()
+        composeRule.onNodeWithTag("player-artist-picker").assertDoesNotExist()
+        val after = requireNotNull(db.queueDao().activeSnapshotOnce())
+        org.junit.Assert.assertEquals(queue.queueSnapshotId, after.queueSnapshotId)
+        org.junit.Assert.assertEquals(queue.currentEntryId, after.currentEntryId)
+        org.junit.Assert.assertTrue(PlaybackRuntimeState.state.value.let { it.isPlaying && it.localUserTrackRefId == tracks[0] })
     }
 
     @Test

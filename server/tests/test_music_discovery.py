@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from uuid import uuid4
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
+from unittest.mock import Mock
+from uuid import UUID, uuid4
 
 import pytest
+from autplay.adapters.postgresql.catalog_pages import CatalogPageCache
 from autplay.application.music_discovery import MusicDiscoveryService
 from autplay.application.music_library import MusicError
 from autplay.domain.auth import AccountRole, Principal
@@ -100,6 +102,9 @@ class Provider:
             raise self.error
         return MusicDiscoveryPage((), limit, offset, 0, 0)
 
+    def artist_releases(self, artist_id: object, *, limit: int, offset: int) -> MusicDiscoveryPage:
+        return self.search(str(artist_id), MusicDiscoveryKind.ARTIST, limit=limit, offset=offset)
+
     def artist_tracks(self, artist_id: object, *, limit: int, offset: int) -> MusicDiscoveryPage:
         return self.search(str(artist_id), MusicDiscoveryKind.ARTIST, limit=limit, offset=offset)
 
@@ -160,3 +165,77 @@ def test_provider_errors_are_not_fake_empty_successes(
         service.search(owner, "Artist", MusicDiscoveryKind.ARTIST)
     assert error.value.status_code == status and error.value.code == public_code
     assert error.value.retryable is False
+
+
+def test_official_artist_releases_advance_over_filtered_editions() -> None:
+    from autplay.adapters.public_music_search import MusicBrainzDiscoveryProvider
+
+    artist, release, group = uuid4(), uuid4(), uuid4()
+
+    class Http:
+        def json(self, url: str) -> dict[str, object]:
+            assert f"artist={artist}" in url and "status=official" in url
+            return {
+                "release-count": 3,
+                "release-offset": 0,
+                "releases": [
+                    {
+                        "id": str(release),
+                        "title": "Joint edition",
+                        "date": "2026-05",
+                        "status": "Official",
+                        "release-group": {"id": str(group), "primary-type": "Single"},
+                    },
+                    {"id": str(uuid4()), "title": "Demo", "status": "Bootleg"},
+                ],
+            }
+
+    page = MusicBrainzDiscoveryProvider(Http()).artist_releases(artist, limit=2, offset=0)
+    assert page.view()["next_offset"] == 2
+    assert [(row.release_id, row.release_date, row.release_group_id) for row in page.items] == [
+        (release, "2026-05", group),
+    ]
+
+
+def test_ranking_failure_preserves_artist_identity_and_skips_unrelated_recordings() -> None:
+    import json
+
+    artist, recording, internal, unrelated = (uuid4() for _ in range(4))
+    owner = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
+
+    def artist_recordings(owner_id: UUID, artist_id: UUID) -> tuple[str, dict[str, str]]:
+        assert (owner_id, artist_id) == (owner.user_id, artist)
+        return str(artist), {str(recording): str(internal)}
+
+    def read(key: str, loader: Callable[[], dict[str, object]]) -> dict[str, object]:
+        return loader()
+
+    cache = Mock(spec_set=CatalogPageCache)
+    cache.artist_recordings.side_effect = artist_recordings
+    cache.read.side_effect = read
+
+    def read_public(principal: Principal, url: str) -> bytes:
+        assert principal == owner and url.endswith(str(artist))
+        return json.dumps(
+            [
+                {
+                    "artist_mbids": [str(artist)],
+                    "recording_mbid": str(recording),
+                    "total_listen_count": 19,
+                },
+                {
+                    "artist_mbids": [str(artist)],
+                    "recording_mbid": str(unrelated),
+                    "total_listen_count": 90,
+                },
+            ]
+        ).encode()
+
+    service = MusicDiscoveryService(lambda _: nullcontext(Provider()), cache, read_public)
+    ranked = service.artist_ranking(owner, artist)
+    assert ranked["counts"] == {str(internal): 19}
+    assert ranked["library_recordings"] == {str(recording): str(internal)}
+    assert ranked["recording_counts"] == {str(recording): 19, str(unrelated): 90}
+    service.read_public = lambda *_: None
+    unavailable = service.artist_ranking(owner, artist)
+    assert unavailable["artist_mbid"] == str(artist) and unavailable["ranking_available"] is False

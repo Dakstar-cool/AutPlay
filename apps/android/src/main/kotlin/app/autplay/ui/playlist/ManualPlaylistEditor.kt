@@ -1,5 +1,7 @@
 package app.autplay.ui.playlist
 
+import app.autplay.R
+import androidx.compose.ui.res.stringResource
 import app.autplay.ui.AutPlayDialog
 
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -50,6 +53,7 @@ public data class ManualPlaylistActions(
     public val removeEntry: (entryId: String) -> Unit = {},
     public val moveEntryBefore: (entryId: String, beforeEntryId: String?) -> Unit = { _, _ -> },
     public val playEntry: (entryId: String) -> Unit = {},
+    public val createWithTrack: (operationId: String, name: String, description: String?, trackRefId: String) -> Unit = { _, _, _, _ -> },
 )
 
 public data class ManualPlaylistText(
@@ -70,6 +74,25 @@ public data class ManualPlaylistText(
     public val play: String = "Play",
 )
 
+@Composable
+internal fun localizedPlaylistText() = ManualPlaylistText(
+        create = stringResource(R.string.playlist_create),
+        rename = stringResource(R.string.playlist_rename),
+        delete = stringResource(R.string.playlist_delete),
+        cancel = stringResource(R.string.action_cancel),
+        save = stringResource(R.string.action_save),
+        add = stringResource(R.string.playlist_add_selected),
+        remove = stringResource(R.string.action_remove),
+        moveUp = stringResource(R.string.playlist_move_up),
+        moveDown = stringResource(R.string.playlist_move_down),
+        name = stringResource(R.string.playlist_name),
+        description = stringResource(R.string.playlist_description),
+        selectPlaylist = stringResource(R.string.playlist_select_target),
+        confirmDelete = stringResource(R.string.playlist_confirm_delete),
+        empty = stringResource(R.string.playlist_empty),
+        play = stringResource(R.string.action_play),
+    )
+
 public fun normalizeManualPlaylistMetadata(name: String, description: String?): ManualPlaylistMetadata? {
     val normalizedName = name.trim()
     val normalizedDescription = description?.trim()?.takeIf(String::isNotEmpty)
@@ -89,7 +112,7 @@ public fun ManualPlaylistEditor(
     playlist: ManualPlaylistUi,
     actions: ManualPlaylistActions,
     modifier: Modifier = Modifier,
-    text: ManualPlaylistText = ManualPlaylistText(),
+    text: ManualPlaylistText = localizedPlaylistText(),
 ) {
     var metadataDialog by remember(playlist.playlistId) { mutableStateOf(false) }
     var deleteDialog by remember(playlist.playlistId) { mutableStateOf(false) }
@@ -169,14 +192,30 @@ public fun AddTrackToPlaylistDialog(
     playlists: List<ManualPlaylistUi>,
     actions: ManualPlaylistActions,
     onDismiss: () -> Unit,
-    text: ManualPlaylistText = ManualPlaylistText(),
+    text: ManualPlaylistText = localizedPlaylistText(),
 ) {
-    var selectedId by remember(playlists) { mutableStateOf<String?>(null) }
+    val operationId = rememberSaveable(trackRefId) { java.util.UUID.randomUUID().toString() }
+    var creating by rememberSaveable(trackRefId) { mutableStateOf(false) }
+    var selectedId by rememberSaveable(trackRefId) { mutableStateOf<String?>(null) }
+    if (creating) {
+        PlaylistMetadataDialog(
+            initialName = "", initialDescription = null,
+            confirmLabel = stringResource(R.string.playlist_create_and_add),
+            cancelLabel = text.cancel, nameLabel = text.name, descriptionLabel = text.description,
+            onDismiss = { creating = false },
+            onConfirm = { metadata ->
+                actions.createWithTrack(operationId, metadata.name, metadata.description, trackRefId)
+                onDismiss()
+            },
+        )
+        return
+    }
     AutPlayDialog(
         onDismissRequest = onDismiss,
         title = { Text(text.selectPlaylist) },
         text = {
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                item { OutlinedButton(onClick = { creating = true }) { Text(text.create) } }
                 items(playlists, key = ManualPlaylistUi::playlistId) { playlist ->
                     Row(
                         modifier = Modifier.fillMaxWidth().testTag("playlist-target-${playlist.playlistId}"),
@@ -190,7 +229,7 @@ public fun AddTrackToPlaylistDialog(
         },
         confirmButton = {
             Button(
-                enabled = selectedId != null,
+                enabled = playlists.any { it.playlistId == selectedId },
                 onClick = { selectedId?.let { actions.addTrack(it, trackRefId) }; onDismiss() },
             ) { Text(text.add) }
         },
@@ -202,7 +241,7 @@ public fun AddTrackToPlaylistDialog(
 public fun CreateManualPlaylistDialog(
     actions: ManualPlaylistActions,
     onDismiss: () -> Unit,
-    text: ManualPlaylistText = ManualPlaylistText(),
+    text: ManualPlaylistText = localizedPlaylistText(),
 ) {
     PlaylistMetadataDialog(
         initialName = "",
@@ -224,13 +263,13 @@ public fun ManualPlaylistHub(
     actions: ManualPlaylistActions,
     modifier: Modifier = Modifier,
     onOpenPlaylist: (String) -> Unit = {},
-    text: ManualPlaylistText = ManualPlaylistText(),
+    text: ManualPlaylistText = localizedPlaylistText(),
 ) {
     var createDialog by remember { mutableStateOf(false) }
     var addDialog by remember { mutableStateOf(false) }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { createDialog = true }) { Text(text.create) }
-        if (selectedTrackRefId != null && playlists.isNotEmpty()) {
+        if (selectedTrackRefId != null) {
             OutlinedButton(onClick = { addDialog = true }) { Text(text.add) }
         }
         if (playlists.isNotEmpty()) {
@@ -267,8 +306,8 @@ private fun PlaylistMetadataDialog(
     onDismiss: () -> Unit,
     onConfirm: (ManualPlaylistMetadata) -> Unit,
 ) {
-    var name by remember(initialName) { mutableStateOf(initialName) }
-    var description by remember(initialDescription) { mutableStateOf(initialDescription.orEmpty()) }
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var description by rememberSaveable(initialDescription) { mutableStateOf(initialDescription.orEmpty()) }
     val metadata = normalizeManualPlaylistMetadata(name, description)
     AutPlayDialog(
         onDismissRequest = onDismiss,

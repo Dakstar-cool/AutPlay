@@ -24,9 +24,9 @@ from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 def test_complete_table_and_column_inventory() -> None:
     """Every reference table and column is present exactly once."""
     assert set(metadata.tables) == set(EXPECTED_TABLE_KEYS)
-    assert len(metadata.tables) == 183
+    assert len(metadata.tables) == 187
     assert sum(len(table.columns) for table in metadata.tables.values()) == EXPECTED_COLUMN_COUNT
-    assert EXPECTED_COLUMN_COUNT == 2103
+    assert EXPECTED_COLUMN_COUNT == 2115
     assert {
         key: len(table.columns) for key, table in metadata.tables.items()
     } == EXPECTED_TABLE_COLUMN_COUNTS
@@ -36,7 +36,7 @@ def test_complete_table_and_column_inventory() -> None:
 def test_all_rows_are_typed_mappers_without_relationship_behavior() -> None:
     """Mappings are storage rows, not a second domain model."""
     configure_mappers()
-    assert len(MAPPED_ROWS) == 183
+    assert len(MAPPED_ROWS) == 187
     assert {str(row.__table__) for row in MAPPED_ROWS} == set(EXPECTED_TABLE_KEYS)
     assert all(not list(sa_inspect(row).relationships) for row in MAPPED_ROWS)
 
@@ -71,8 +71,7 @@ def test_explicit_index_inventory_and_no_python_defaults() -> None:
     """All reference indexes are mapped and defaults remain database-owned."""
     indexes = {index.name for table in metadata.tables.values() for index in table.indexes}
     assert indexes == EXPECTED_EXPLICIT_INDEX_NAMES
-    # Complete ORM registry: 162 baseline + four D1 indexes + two Sona indexes.
-    assert len(indexes) == 168
+    assert len(indexes) == 169
     assert all(
         column.default is None for table in metadata.tables.values() for column in table.columns
     )
@@ -119,4 +118,4 @@ def test_complete_mapping_definition_fingerprint() -> None:
     )
     fingerprint = hashlib.sha256("\n".join(statements).encode()).hexdigest()
 
-    assert fingerprint == "7ae6cdd5e1fe928561ad4bdaa3f91a83e3a8bdb69ce936c67c7fe4f894b98b22"
+    assert fingerprint == "b9fa36fe02a801e2c40c74bf35c46048ee32bacdba0686efc3473dcd529397f9"

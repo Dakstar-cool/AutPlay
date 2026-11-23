@@ -72,6 +72,7 @@ internal fun buildCoreCommandActions(
     playbackOwner: PlaybackSessionOwner,
     searchResultStore: SearchResultStore<LocalTrackSearchResult>,
     vaultSearchResultStore: SearchResultStore<VaultSearchResult>,
+    prepareVaultQueue: suspend (ClientEventBinding, List<VaultSearchResult>) -> List<Pair<String, String>>,
     searchSessionId: () -> String?,
     setSearchSessionId: (String) -> Unit,
     playlistDetail: () -> CorePlaylistDetail?,
@@ -312,40 +313,34 @@ internal fun buildCoreCommandActions(
                 }
             }
         },
-        startVaultSearchTrack = vaultPlay@{ remoteLibraryEntryId, offlineIds ->
-            val orderedResults = vaultSearchResultStore.results
+        startVaultSearchTrack = vaultPlay@{ id, offlineIds ->
+            val owner = binding() ?: return@vaultPlay
+            val results = vaultSearchResultStore.results
                 .filter { it.playable || it.localUserTrackRefId in offlineIds }
-                .distinctBy { it.localUserTrackRefId }
-            val selected = orderedResults.firstOrNull { it.remoteLibraryEntryId == remoteLibraryEntryId }
-                ?: return@vaultPlay
+                .distinctBy { it.remoteUserTrackRefId }
+            val selectedIndex = results.indexOfFirst { it.remoteLibraryEntryId == id }
+            if (selectedIndex < 0) return@vaultPlay
+            val selected = results[selectedIndex]
+            val firstIndex = selectedIndex / VaultSearchProjector.MAX_RESULTS * VaultSearchProjector.MAX_RESULTS
+            val queueRows = results.subList(firstIndex, minOf(firstIndex + VaultSearchProjector.MAX_RESULTS, results.size))
             val sessionId = searchSessionId() ?: LocalId.random().value.also(setSearchSessionId)
-            val actionKey = "vault-search-play:$sessionId:$remoteLibraryEntryId"
+            val actionKey = "vault-search-play:$sessionId:$id"
             if (!actionGate.begin(actionKey)) return@vaultPlay
-            val entries = orderedResults.map { result ->
-                result.remoteLibraryEntryId to NewPlaybackQueueEntry(
-                    queueEntryId = LocalId.random(),
-                    trackRefId = LocalId(checkNotNull(result.localUserTrackRefId)),
-                    sourceOrigin = "SEARCH",
-                    sourceAudioPolicy = "LOCAL_THEN_VAULT",
-                )
-            }
-            val startEntryId = entries.first { it.first == selected.remoteLibraryEntryId }.second.queueEntryId
             scope.launch {
                 try {
-                    runCatching {
-                        val snapshotId = LocalId.random()
-                        playbackRepository.activateQueue(
-                            snapshotId = snapshotId,
-                            entries = entries.map { it.second },
-                            queueType = "SEARCH",
-                            sourceContextId = sessionId,
-                            serverProfileId = binding()?.serverProfileId?.value,
-                            listeningContext = "GENERAL",
-                            nowMs = System.currentTimeMillis(),
-                            startEntryId = startEntryId,
-                        )
-                        playbackOwner.dispatch(PlaybackCommand.StartQueue(snapshotId))
-                    }.onFailure { reportError("PLAYBACK_UNAVAILABLE") }
+                    val queue = if (selected.localUserTrackRefId in offlineIds) {
+                        queueRows.mapNotNull { row -> row.localUserTrackRefId?.let { row.remoteLibraryEntryId to it } }
+                    } else {
+                        prepareVaultQueue(owner, queueRows)
+                    }
+                    if (binding() == owner && searchSessionId() == sessionId) {
+                        check(queue.any { it.first == id })
+                        playCollection("SEARCH", sessionId, queue, id)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    reportError("PLAYBACK_UNAVAILABLE")
                 } finally {
                     actionGate.complete(actionKey)
                 }
@@ -362,33 +357,25 @@ internal fun buildCoreCommandActions(
             }
         },
         updateLibraryMembership = membership@{ trackRefId ->
-            val entry = libraryEntries().firstOrNull {
-                it.localUserTrackRefId == trackRefId
-            } ?: return@membership
+            val fromDetail = selectedDetail() == DetailTarget(DetailKind.Track, trackRefId)
             val actionKey = "library:$trackRefId"
             if (!actionGate.begin(actionKey)) return@membership
             scope.launch {
                 try {
                     runCatching {
-                        if (entry.localLibraryEntryId == null) {
-                            sliceRepository.setPlaybackPreference(
-                                binding(), LocalId(trackRefId), LocalId.random(), "NEUTRAL",
-                                null, System.currentTimeMillis(),
+                        val owner = binding()
+                        val entry = coreProductRepository.libraryEntryForTrack(trackRefId, owner?.serverProfileId?.value)
+                        val now = System.currentTimeMillis()
+                        when {
+                            entry != null && entry.removedAtMs == null -> sliceRepository.removeLibrary(
+                                owner, LocalId(entry.localLibraryEntryId), LocalId.random(), now,
                             )
-                        } else if (!entry.removed) {
-                            sliceRepository.removeLibrary(
-                                binding(),
-                                LocalId(entry.localLibraryEntryId),
-                                LocalId.random(),
-                                System.currentTimeMillis(),
+                            fromDetail && entry != null -> sliceRepository.restoreLibrary(
+                                owner, LocalId(entry.localLibraryEntryId), LocalId.random(), now,
                             )
-                        } else {
-                            sliceRepository.restoreLibrary(
-                                binding(),
-                                LocalId(entry.localLibraryEntryId),
-                                LocalId.random(),
-                                System.currentTimeMillis(),
-                            )
+                            libraryEntries().any { it.localUserTrackRefId == trackRefId && it.loved } ->
+                                sliceRepository.setPlaybackPreference(owner, LocalId(trackRefId), LocalId.random(), "NEUTRAL", null, now)
+                            else -> Unit
                         }
                     }.onSuccess {
                         setLibraryError(false)
@@ -484,7 +471,7 @@ internal fun buildSearchCommandActions(
     resultStore: SearchResultStore<LocalTrackSearchResult>,
     vaultResultStore: SearchResultStore<VaultSearchResult>,
     searchRepository: LocalTrackSearchRepository,
-    vaultProjector: VaultSearchProjector,
+    vaultPager: VaultSearchPager,
     state: SearchActionState,
     reportError: (String) -> Unit,
 ): SearchCommandActions {
@@ -542,9 +529,7 @@ internal fun buildSearchCommandActions(
         if (SearchScope.Vault in activeScopes && activeBinding != null) {
             scope.launch {
                 runCatching {
-                    AutPlayRuntime.serverFeatures(context, activeBinding).searchLibrary(request.normalizedQuery, limit = 100, kind = request.kind)
-                }.mapCatching { rows ->
-                    vaultProjector.project(activeBinding.serverProfileId.value, rows)
+                    vaultPager.first(activeBinding, request)
                 }.onSuccess { rows ->
                     if (generation.accepts(request) && vaultResultStore.accept(request, rows)) {
                         state.setVaultResults(vaultResultStore.results)

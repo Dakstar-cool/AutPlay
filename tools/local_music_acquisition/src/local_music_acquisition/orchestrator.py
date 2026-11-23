@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .acquisition_policy import track_review_reasons
 from .models import (
     PROVIDER_MISS_CODES,
     AcquiredArtifact,
@@ -257,6 +258,13 @@ def _download_item(
 ) -> TrackOutcome:
     if item.error_code is not None:
         return TrackOutcome(item.row_number, "invalid_input", None, False, item.error_code)
+    reasons = track_review_reasons(
+        item.expected_duration_seconds if item.expected_duration_seconds is not None else 1,
+        item.title,
+        item.album,
+    )
+    if reasons:
+        return TrackOutcome(item.row_number, "invalid_input", None, False, reasons[0])
 
     last_miss: _Attempt | None = None
     last_failure: _Attempt | None = None

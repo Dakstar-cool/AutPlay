@@ -50,6 +50,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -126,6 +128,7 @@ public fun PlaybackMiniPlayer(
     onDismiss: (() -> Unit)? = null,
     onPrevious: (() -> Unit)? = null,
     onNext: (() -> Unit)? = null,
+    onChooseArtists: (() -> Unit)? = null,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -170,6 +173,11 @@ public fun PlaybackMiniPlayer(
                             )
                             Text(
                                 displayed.artist,
+                                modifier = if (onChooseArtists == null || displayed.id != state.mediaId) Modifier else
+                                    Modifier.testTag("mini-player-open-artists").clickable(
+                                        onClickLabel = stringResource(R.string.library_section_artists),
+                                        onClick = onChooseArtists,
+                                    ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = miniColors.onSurfaceVariant,
                                 maxLines = 1,
@@ -242,7 +250,9 @@ public fun NowPlayingScreen(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
     onOpenArtist: (String) -> Unit = {},
+    onAddToPlaylist: (() -> Unit)? = null,
     serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
+    onChooseArtists: (() -> Unit)? = null,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -294,6 +304,14 @@ public fun NowPlayingScreen(
     var collapseCoverBounds by remember { mutableStateOf(Rect.Zero) }
     var coverOnScreen by remember { mutableStateOf(Rect.Zero) }
     var viewingArtwork by rememberSaveable { mutableStateOf(false) }
+    var localArtistPicker by rememberSaveable(mediaId) { mutableStateOf(false) }
+    val openArtists: () -> Unit = {
+        when (artists.size) {
+            0 -> Unit
+            1 -> onOpenArtist(artists.single().key.artistId.value)
+            else -> if (onChooseArtists == null) localArtistPicker = true else onChooseArtists()
+        }
+    }
     val collapseTargetTop = LocalPlayerCollapseTargetTop.current
     var sheet by rememberSaveable { mutableStateOf<PlayerSheet?>(null) }
     sheet?.let { selectedSheet ->
@@ -306,6 +324,9 @@ public fun NowPlayingScreen(
         ) {
             when (selectedSheet) {
                 PlayerSheet.Queue -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                    if (artists.size > 1) androidx.compose.material3.TextButton(
+                        onClick = openArtists, modifier = Modifier.testTag("queue-open-artists"),
+                    ) { Text(stringResource(R.string.catalog_current_track_artists)) }
                     QueueEditorPanel(queueState, queueActions)
                 }
                 PlayerSheet.Timer -> SleepTimerSheet(
@@ -374,7 +395,7 @@ public fun NowPlayingScreen(
                     IconButton(onClick = { sheet = PlayerSheet.Queue }, modifier = Modifier.testTag("player-open-queue")) {
                         AutPlayPlatformIcon(AutPlayIcon.Playlist, stringResource(R.string.queue_editor_title))
                     }
-                    PlayerMoreMenu { sheet = it }
+                    PlayerMoreMenu(onAddToPlaylist) { sheet = it }
                 }
                 PlayerBody(
                     modifier = Modifier.weight(1f),
@@ -405,7 +426,7 @@ public fun NowPlayingScreen(
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(state.title ?: stringResource(R.string.player_nothing_playing),
                             style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        PlayerArtistLink(state.artist, artists, onOpenArtist)
+                        PlayerArtistLink(state.artist, artists, openArtists)
                         PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
                         DirectControlMessage(state)
                     }
@@ -426,18 +447,28 @@ public fun NowPlayingScreen(
             onClosed = { viewingArtwork = false },
         )
     }
+    if (localArtistPicker && onChooseArtists == null && artists.size > 1) {
+        PlayerArtistPicker(artists, { localArtistPicker = false }) {
+            localArtistPicker = false
+            onOpenArtist(it)
+        }
+    }
 }
 
 private enum class PlayerSheet { Queue, Timer, Recommendations }
 
 @Composable
-private fun PlayerMoreMenu(onSelect: (PlayerSheet) -> Unit) {
+private fun PlayerMoreMenu(onAddToPlaylist: (() -> Unit)?, onSelect: (PlayerSheet) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("player-more")) {
             Icon(painterResource(R.drawable.ic_autplay_more_vertical), stringResource(R.string.player_more_options))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (onAddToPlaylist != null) DropdownMenuItem(
+                text = { Text(stringResource(R.string.playlist_add_selected)) },
+                onClick = { expanded = false; onAddToPlaylist() },
+            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.player_taste_exclusion_title)) },
                 leadingIcon = { Icon(painterResource(R.drawable.ic_autplay_settings), null) },
@@ -944,23 +975,47 @@ private fun formatDuration(valueMs: Long): String {
 }
 
 @Composable
-private fun PlayerArtistLink(name: String?, artists: List<app.autplay.application.artist.ArtistSummary>, open: (String) -> Unit) {
-    var expanded by remember(artists) { mutableStateOf(false) }
-    Box {
-        val link = if (artists.isEmpty()) Modifier else Modifier
-            .testTag("player-open-artist")
-            .clickable(onClickLabel = stringResource(R.string.detail_open_artist)) {
-                if (artists.size == 1) open(artists.single().key.artistId.value) else expanded = true
-            }
-        Text(name ?: artists.singleOrNull()?.name ?: stringResource(R.string.player_unknown_artist),
-            modifier = link, color = if (artists.isEmpty()) AutPlayTokens.colors.mutedText else MaterialTheme.colorScheme.primary,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (expanded) androidx.compose.material3.DropdownMenu(expanded = true, onDismissRequest = { expanded = false }) {
+private fun PlayerArtistLink(
+    name: String?, artists: List<app.autplay.application.artist.ArtistSummary>, onClick: () -> Unit,
+) {
+    val link = if (artists.isEmpty()) Modifier else Modifier.testTag("player-open-artist")
+        .clickable(onClickLabel = stringResource(R.string.detail_open_artist), onClick = onClick)
+    Text(name ?: artists.singleOrNull()?.name ?: stringResource(R.string.player_unknown_artist),
+        modifier = link, color = if (artists.isEmpty()) AutPlayTokens.colors.mutedText else MaterialTheme.colorScheme.primary,
+        maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun PlayerArtistPicker(
+    artists: List<app.autplay.application.artist.ArtistSummary>,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = AutPlayTokens.colors.raisedSurface,
+        modifier = Modifier.testTag("player-artist-picker"),
+    ) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            Text(stringResource(R.string.library_section_artists), style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() })
             artists.forEach { artist ->
-                androidx.compose.material3.DropdownMenuItem(text = { Text(artist.name) }, onClick = {
-                    expanded = false
-                    open(artist.key.artistId.value)
-                })
+                val id = artist.key.artistId.value
+                Row(
+                    Modifier.fillMaxWidth().testTag("player-artist-$id")
+                        .clickable(role = androidx.compose.ui.semantics.Role.Button,
+                            onClickLabel = stringResource(R.string.detail_open_artist)) { onSelect(id) }.padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AutPlayArtwork(artist.name, Modifier.clearAndSetSemantics {}, size = 48.dp)
+                    Column {
+                        Text(artist.name)
+                        artist.disambiguation?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
             }
         }
     }

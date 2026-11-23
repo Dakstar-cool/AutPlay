@@ -176,12 +176,13 @@ internal fun HomeWaveStartHero(
     emptyLibrary: Boolean,
     enabled: Boolean,
     onStart: () -> Unit,
+    onResume: () -> Unit,
     onLike: (String) -> Unit,
     onOpenListenTogether: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    val play = stringResource(R.string.action_play)
+    val play = stringResource(R.string.home_my_wave)
     Column(
         modifier.fillMaxWidth().waveGlow(Color(0xFFD26539), Color(0xFFB85083), colors.background)
             .padding(horizontal = 24.dp, vertical = 12.dp),
@@ -203,8 +204,13 @@ internal fun HomeWaveStartHero(
         }
         if (state.title != null) {
             Surface(shape = CircleShape, color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.heightIn(min = 52.dp).padding(start = 16.dp, end = 4.dp),
+                Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
+                    HeroIconButton(
+                        icon = AutPlayIcon.Play, label = stringResource(R.string.action_continue),
+                        enabled = if (state.hasActivePlayback) state.playPauseEnabled else enabled,
+                        onClick = onResume,
+                    )
                     Text(listOfNotNull(state.artist?.takeIf { it.isNotBlank() }, state.title).joinToString(" — "),
                         Modifier.weight(1f).padding(vertical = 8.dp), textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)

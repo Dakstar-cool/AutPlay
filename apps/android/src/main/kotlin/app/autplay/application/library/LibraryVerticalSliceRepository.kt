@@ -141,9 +141,95 @@ class LibraryVerticalSliceRepository(
         now = now,
     )
 
-    suspend fun createPlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult {
+    suspend fun createPlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult =
+        database.withWriteTransaction { writePlaylist(binding, playlistId, changeId, name, description, now) }
+            .also { scheduleSync(binding, it) }
+
+    /** The operation ID is generated once by the chooser and survives recreation. */
+    suspend fun createPlaylistWithTrack(
+        binding: ClientEventBinding?, operationId: LocalId, name: String, description: String?, trackRefId: LocalId, now: Long,
+    ): LocalId {
+        fun childId(kind: String) = LocalId(UUID.nameUUIDFromBytes("playlist:${operationId.value}:$kind".toByteArray()).toString())
+        val entryId = childId("entry")
+        val result = database.withWriteTransaction {
+            val existing = database.playlistDao().entry(entryId.value)
+            if (existing != null) {
+                ensureOwned(binding, existing.serverProfileId)
+                check(existing.localPlaylistId == operationId.value && existing.localUserTrackRefId == trackRefId.value)
+                SliceMutationResult(childId("add"), binding != null, existing.lastLocalSequence)
+            } else {
+                writePlaylist(binding, operationId, childId("create"), name, description, now)
+                writePlaylistEntry(binding, operationId, entryId, trackRefId, childId("add"), null, null, now)
+            }
+        }
+        scheduleSync(binding, result)
+        return operationId
+    }
+
+    suspend fun saveSharedPlaylist(
+        binding: ClientEventBinding?, playlistId: LocalId, snapshot: SharedPlaylist, now: Long,
+    ): LocalId {
+        fun child(key: String) = LocalId(UUID.nameUUIDFromBytes(
+            "shared-playlist:${playlistId.value}:$key".toByteArray()).toString())
+        // Standalone intents with the same timestamp are materialized in change-ID order.
+        // Keep parent creation and the append order stable when a local recipient later signs in.
+        val changeSeed = UUID.fromString(child("changes").value)
+        fun change(order: Int) = LocalId(UUID(changeSeed.mostSignificantBits,
+            (changeSeed.leastSignificantBits and -65536L) or order.toLong()).toString())
+        val profile = binding?.serverProfileId?.value ?: LEGACY_PROFILE_ID
+        val result = database.withWriteTransaction {
+            val existing = database.playlistDao().playlist(playlistId.value)
+            if (existing != null) {
+                ensureOwned(binding, existing.serverProfileId)
+                return@withWriteTransaction SliceMutationResult(change(0), binding != null, existing.lastLocalSequence)
+            }
+            val created = writePlaylist(binding, playlistId, change(0), snapshot.name, snapshot.description, now)
+            val refs = snapshot.tracks.mapIndexed { index, track ->
+                val known = track.recordingId?.let { database.libraryDao().trackRefByRecording(profile, it) }
+                if (known != null) return@mapIndexed known
+                val id = child("track-$index")
+                val payload = kotlinx.serialization.json.buildJsonObject {
+                    put("title", JsonPrimitive(track.title))
+                    put("artist", JsonPrimitive(track.artist))
+                    put("duration_ms", JsonPrimitive(track.durationMs?.takeIf { it > 0 }))
+                    put("shared_playlist_id", JsonPrimitive(snapshot.token))
+                    put("shared_track_index", JsonPrimitive(index))
+                }.toString()
+                writeMutation(binding, change(1 + index), "USER_TRACK_REF_CREATED", "USER_TRACK_REF",
+                    id, now, { payload }) { sequence, bound ->
+                    database.libraryDao().upsertTrackRef(UserTrackRefEntity(
+                        id.value, null, null, null, "CATALOG_ONLY", track.title, track.artist, null,
+                        track.durationMs, null, sync(bound), null, sequence, now, now, null, profile))
+                }
+                checkNotNull(database.libraryDao().trackRef(id.value))
+            }
+            val entryIds = snapshot.entries.indices.map { child("entry-$it").value }
+            val positions = PlaylistPositionKeys.rebalance(entryIds)
+            snapshot.entries.forEachIndexed { index, trackIndex ->
+                val entryId = LocalId(entryIds[index])
+                val ref = refs[trackIndex]
+                val payload = kotlinx.serialization.json.buildJsonObject {
+                    put("local_playlist_entry_id", JsonPrimitive(entryId.value))
+                    put("local_playlist_id", JsonPrimitive(playlistId.value))
+                    if (ref.serverUserTrackRefId == null) put("local_user_track_ref_id", JsonPrimitive(ref.localUserTrackRefId))
+                    else put("user_track_ref_id", JsonPrimitive(ref.serverUserTrackRefId))
+                }.toString()
+                writeMutation(binding, change(1 + snapshot.tracks.size + index), "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY",
+                    entryId, now, { payload }) { sequence, bound ->
+                    val position = positions.getValue(entryId.value)
+                    database.playlistDao().insertEntry(PlaylistEntryEntity(entryId.value, null, playlistId.value,
+                        ref.localUserTrackRefId, position, position, null, now, sync(bound), null, sequence, null, profile))
+                }
+            }
+            created
+        }
+        scheduleSync(binding, result)
+        return playlistId
+    }
+
+    private suspend fun writePlaylist(binding: ClientEventBinding?, playlistId: LocalId, changeId: LocalId, name: String, description: String?, now: Long): SliceMutationResult {
         val metadata = validatedPlaylistMetadata(name, description)
-        return mutate(binding, changeId, "PLAYLIST_CREATED", "PLAYLIST", playlistId, now, "{\"description\":${metadata.description?.let(::q) ?: "null"},\"name\":${q(metadata.name)}}") { sequence, bound ->
+        return writeMutation(binding, changeId, "PLAYLIST_CREATED", "PLAYLIST", playlistId, now, { "{\"description\":${metadata.description?.let(::q) ?: "null"},\"name\":${q(metadata.name)}}" }) { sequence, bound ->
             database.playlistDao().insertPlaylist(
                 PlaylistEntity(
                     playlistId.value, null, metadata.name, metadata.description, "PRIVATE", "MANUAL", null, null,
@@ -172,15 +258,35 @@ class LibraryVerticalSliceRepository(
             database.playlistDao().upsertEntries(entries.map { it.copy(removedAtMs = now, activePositionKey = null, syncState = sync(bound), lastLocalSequence = sequence) })
         }
 
-    suspend fun addPlaylistEntry(binding: ClientEventBinding?, playlistId: LocalId, entryId: LocalId, trackRefId: LocalId, changeId: LocalId, beforeEntryId: LocalId?, attributionJson: String?, now: Long): SliceMutationResult {
+    suspend fun addPlaylistEntry(binding: ClientEventBinding?, playlistId: LocalId, entryId: LocalId, trackRefId: LocalId, changeId: LocalId, beforeEntryId: LocalId?, attributionJson: String?, now: Long): SliceMutationResult =
+        database.withWriteTransaction {
+            writePlaylistEntry(binding, playlistId, entryId, trackRefId, changeId, beforeEntryId, attributionJson, now)
+        }.also { scheduleSync(binding, it) }
+
+    private suspend fun writePlaylistEntry(binding: ClientEventBinding?, playlistId: LocalId, entryId: LocalId, trackRefId: LocalId, changeId: LocalId, beforeEntryId: LocalId?, attributionJson: String?, now: Long): SliceMutationResult {
         val attribution = attributionJson?.let(::validateAttribution)
-        val payload = "{\"attribution\":${attribution ?: "null"},\"before_local_playlist_entry_id\":${beforeEntryId?.let { q(it.value) } ?: "null"},\"local_playlist_entry_id\":${q(entryId.value)},\"local_playlist_id\":${q(playlistId.value)},\"local_user_track_ref_id\":${q(trackRefId.value)}}"
-        return mutate(binding, changeId, "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY", entryId, now, payload) { sequence, bound ->
-            val playlist = database.playlistDao().playlist(playlistId.value) ?: missing()
-            ensureOwned(binding, playlist.serverProfileId)
-            if (playlist.deletedAtMs != null) removed()
-            val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
-            ensureOwned(binding, track.serverProfileId)
+        val dao = database.playlistDao()
+        val playlist = dao.playlist(playlistId.value) ?: missing()
+        ensureOwned(binding, playlist.serverProfileId)
+        if (playlist.deletedAtMs != null) removed()
+        val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
+        ensureOwned(binding, track.serverProfileId)
+        if (track.deletedAtMs != null) removed()
+        val payload = kotlinx.serialization.json.buildJsonObject {
+            put("attribution", attribution?.let(Json::parseToJsonElement) ?: kotlinx.serialization.json.JsonNull)
+            put("local_playlist_entry_id", JsonPrimitive(entryId.value))
+            if (playlist.serverPlaylistId == null) put("local_playlist_id", JsonPrimitive(playlistId.value))
+            if (track.serverUserTrackRefId == null) put("local_user_track_ref_id", JsonPrimitive(trackRefId.value))
+            put("before_local_playlist_entry_id", JsonPrimitive(beforeEntryId?.value))
+            playlist.serverPlaylistId?.let { put("playlist_id", JsonPrimitive(it)) }
+            track.serverUserTrackRefId?.let { put("user_track_ref_id", JsonPrimitive(it)) }
+            beforeEntryId?.let { before ->
+                val target = dao.entry(before.value) ?: missing()
+                require(target.localPlaylistId == playlistId.value && target.removedAtMs == null)
+                target.serverPlaylistEntryId?.let { put("before_playlist_entry_id", JsonPrimitive(it)) }
+            }
+        }.toString()
+        return writeMutation(binding, changeId, "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY", entryId, now, { payload }) { sequence, bound ->
             val active = database.playlistDao().activeEntryList(playlistId.value, MAX_PLAYLIST_ENTRIES)
             if (active.size >= MAX_PLAYLIST_ENTRIES) tooMany()
             val index = beforeEntryId?.let { id -> active.indexOfFirst { it.localPlaylistEntryId == id.value }.takeIf { it >= 0 } } ?: active.size
@@ -211,7 +317,12 @@ class LibraryVerticalSliceRepository(
         }
 
     suspend fun reorderPlaylistEntry(binding: ClientEventBinding?, entryId: LocalId, beforeEntryId: LocalId?, changeId: LocalId, now: Long): SliceMutationResult =
-        mutate(binding, changeId, "PLAYLIST_ENTRY_MOVED", "PLAYLIST_ENTRY", entryId, now, "{\"before_local_playlist_entry_id\":${beforeEntryId?.let { q(it.value) } ?: "null"}}") { sequence, bound ->
+        mutate(binding, changeId, "PLAYLIST_ENTRY_MOVED", "PLAYLIST_ENTRY", entryId, now, {
+            val before = beforeEntryId?.let { database.playlistDao().entry(it.value) ?: missing() }
+            val key = if (before?.serverPlaylistEntryId != null) "before_playlist_entry_id" else "before_local_playlist_entry_id"
+            val value = before?.serverPlaylistEntryId ?: beforeEntryId?.value
+            kotlinx.serialization.json.buildJsonObject { put(key, JsonPrimitive(value)) }.toString()
+        }) { sequence, bound ->
             val row = database.playlistDao().entry(entryId.value) ?: missing()
             ensureOwned(binding, row.serverProfileId)
             if (row.removedAtMs != null) removed()
@@ -327,30 +438,30 @@ class LibraryVerticalSliceRepository(
         return mutate(binding, changeId, eventType, aggregateType, aggregateId, now, { rawPayload }, aggregate)
     }
 
-    private suspend fun mutate(binding: ClientEventBinding?, changeId: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, now: Long, rawPayload: suspend () -> String, aggregate: suspend (Long, Boolean) -> Unit): SliceMutationResult {
+    private suspend fun mutate(binding: ClientEventBinding?, changeId: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, now: Long, rawPayload: suspend () -> String, aggregate: suspend (Long, Boolean) -> Unit): SliceMutationResult =
+        database.withWriteTransaction { writeMutation(binding, changeId, eventType, aggregateType, aggregateId, now, rawPayload, aggregate) }
+            .also { scheduleSync(binding, it) }
+
+    private suspend fun writeMutation(binding: ClientEventBinding?, changeId: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, now: Long, rawPayload: suspend () -> String, aggregate: suspend (Long, Boolean) -> Unit): SliceMutationResult {
         require(now >= 0)
-        val result = database.withWriteTransaction {
-            val payload = P07PayloadCodec.canonicalize(rawPayload())
-            val lineage = binding?.let { resolveLineage(it, now) }
-            val sequence = lineage?.let { database.journalDao().allocateSequence(it.lineageId) } ?: 0L
-            // Capture the observed remote version before the local row becomes DIRTY. Existing
-            // journal records are immutable; a dependent pre-ACK edit remains null and is later
-            // surfaced as POLICY_REVIEW rather than being rewritten or silently discarded.
-            val baseVersion = lineage?.let { observedVersion(aggregateType, aggregateId.value) }
-            aggregate(sequence, lineage != null)
-            failureInjector.afterAggregateWrite()
-            if (lineage == null) {
-                database.journalDao().insertOutbox(LocalMutationOutboxEntity(changeId.value, eventType, 1, aggregateType, aggregateId.value, payload, now, "UNMATERIALIZED"))
-                SliceMutationResult(changeId, false, null)
-            } else {
-                val resolvedBinding = checkNotNull(binding)
-                markMaterializedDomain(eventType, aggregateType, aggregateId.value, payload, sequence, resolvedBinding.serverProfileId.value)
-                database.journalDao().insert(journal(lineage, resolvedBinding, changeId, eventType, aggregateType, aggregateId, sequence, payload, now, baseVersion))
-                SliceMutationResult(changeId, true, sequence)
-            }
+        val payload = P07PayloadCodec.canonicalize(rawPayload())
+        val lineage = binding?.let { resolveLineage(it, now) }
+        val sequence = lineage?.let { database.journalDao().allocateSequence(it.lineageId) } ?: 0L
+        // Capture the observed remote version before the local row becomes DIRTY. Existing
+        // journal records are immutable. An offline move keeps its null base; the server
+        // checks the preceding device ACK for that entry before applying the move.
+        val baseVersion = lineage?.let { observedVersion(aggregateType, aggregateId.value) }
+        aggregate(sequence, lineage != null)
+        failureInjector.afterAggregateWrite()
+        return if (lineage == null) {
+            database.journalDao().insertOutbox(LocalMutationOutboxEntity(changeId.value, eventType, 1, aggregateType, aggregateId.value, payload, now, "UNMATERIALIZED"))
+            SliceMutationResult(changeId, false, null)
+        } else {
+            val resolvedBinding = checkNotNull(binding)
+            markMaterializedDomain(eventType, aggregateType, aggregateId.value, payload, sequence, resolvedBinding.serverProfileId.value)
+            database.journalDao().insert(journal(lineage, resolvedBinding, changeId, eventType, aggregateType, aggregateId, sequence, payload, now, baseVersion))
+            SliceMutationResult(changeId, true, sequence)
         }
-        scheduleSync(binding, result)
-        return result
     }
 
     private fun validateAttribution(raw: String): String {
@@ -431,9 +542,14 @@ class LibraryVerticalSliceRepository(
         if (existing == null) database.syncDao().upsertCursor(SyncCursorEntity(binding.serverProfileId.value, lineage.lineageId, lineage.deviceId, lineage.journalEpoch, null, 0, 0, null, "NOT_STARTED", null, now))
     }
 
-    private fun journal(lineage: JournalLineageEntity, binding: ClientEventBinding, id: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, sequence: Long, payload: String, now: Long, baseVersion: Long?): OfflineJournalEventEntity {
-        val hash = P04ClientEventHasher.sha256(P04ClientEventHashInput(id, id.value, binding.copy(userId = UserId(lineage.userId), deviceId = DeviceId(lineage.deviceId)), sequence, eventType, aggregateType, aggregateId, null, baseVersion, Instant.ofEpochMilli(now).toString(), payload))
-        return OfflineJournalEventEntity(id.value, lineage.lineageId, id.value, lineage.userId, lineage.deviceId, binding.serverProfileId.value, sequence, eventType, 1, aggregateType, aggregateId.value, null, baseVersion, payload, hash, now, "PENDING", 0, null, null, null, null, null)
+    private suspend fun journal(lineage: JournalLineageEntity, binding: ClientEventBinding, id: LocalId, eventType: String, aggregateType: String, aggregateId: LocalId, sequence: Long, payload: String, now: Long, baseVersion: Long?): OfflineJournalEventEntity {
+        val serverId = when (aggregateType) {
+            "PLAYLIST" -> database.playlistDao().playlist(aggregateId.value)?.serverPlaylistId
+            "PLAYLIST_ENTRY" -> database.playlistDao().entry(aggregateId.value)?.serverPlaylistEntryId
+            else -> null
+        }
+        val hash = P04ClientEventHasher.sha256(P04ClientEventHashInput(id, id.value, binding.copy(userId = UserId(lineage.userId), deviceId = DeviceId(lineage.deviceId)), sequence, eventType, aggregateType, aggregateId, serverId, baseVersion, Instant.ofEpochMilli(now).toString(), payload))
+        return OfflineJournalEventEntity(id.value, lineage.lineageId, id.value, lineage.userId, lineage.deviceId, binding.serverProfileId.value, sequence, eventType, 1, aggregateType, aggregateId.value, serverId, baseVersion, payload, hash, now, "PENDING", 0, null, null, null, null, null)
     }
 
     private suspend fun observedVersion(aggregateType: String, aggregateId: String): Long? = when (aggregateType) {

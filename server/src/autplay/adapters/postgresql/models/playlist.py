@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -21,6 +22,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
 from .types import JsonValue
+
+
+class SharedPlaylistSnapshotRow(Base):
+    __tablename__ = "shared_snapshot"
+    __table_args__ = (
+        CheckConstraint("octet_length(version_key) = 32", name="shared_snapshot_version_key_check"),
+        CheckConstraint("jsonb_typeof(document) = 'object'", name="shared_snapshot_document_check"),
+        {"schema": "playlist"},
+    )
+    token: Mapped[UUID] = mapped_column(primary_key=True)
+    version_key: Mapped[bytes] = mapped_column(BYTEA, unique=True)
+    document: Mapped[dict[str, object]] = mapped_column(JSONB)
+
+
+class ImportedTrackReferenceRow(Base):
+    __tablename__ = "imported_track_reference"
+    __table_args__ = ({"schema": "playlist"},)
+    user_track_ref_id: Mapped[UUID] = mapped_column(
+        ForeignKey("library.user_track_ref.user_track_ref_id", ondelete="CASCADE"), primary_key=True
+    )
+    source_recording_id: Mapped[UUID | None] = mapped_column()
 
 
 class PlaylistRow(Base):
@@ -265,7 +287,9 @@ Index(
 
 
 __all__ = (
+    "ImportedTrackReferenceRow",
     "PlaylistEntryRow",
     "PlaylistRow",
+    "SharedPlaylistSnapshotRow",
     "SmartPlaylistRuleRow",
 )

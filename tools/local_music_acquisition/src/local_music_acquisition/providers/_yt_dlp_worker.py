@@ -12,11 +12,13 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from yt_dlp import YoutubeDL
 from yt_dlp.globals import plugin_dirs
 from yt_dlp.utils import DownloadError
 
+from ..acquisition_policy import track_review_reasons
 from ..audio_validation import audio_duration
 from ..matching import SEARCH_LIMIT
 from ..preflight import node_status
@@ -132,26 +134,19 @@ def _find_exact(entries: object, *, artist: str, title: str) -> dict[str, object
 def _find_with_metadata(
     ydl: Any, entries: object, *, artist: str, title: str
 ) -> dict[str, object] | None:
-    exact = _find_exact(entries, artist=artist, title=title)
-    if exact is not None or not isinstance(entries, list):
-        return exact
-    hydrated = 0
-    for entry in entries[:SEARCH_LIMIT]:
-        if not isinstance(entry, dict) or entry.get("channel_is_verified") is not True:
+    if not isinstance(entries, list):
+        return None
+    for entry in entries[:5]:
+        if not isinstance(entry, dict) or entry.get("ie_key") != "Youtube":
             continue
-        # A verified channel is a discovery hint, not sufficient download identity.
-        hint = {**entry, "artist": entry.get("uploader"), "track": entry.get("title")}
-        if _find_exact([hint], artist=artist, title=title) is None:
+        video_id = entry.get("id")
+        if not isinstance(video_id, str) or not _VIDEO_ID.fullmatch(video_id):
             continue
-        detail = ydl.extract_info(f"https://www.youtube.com/watch?v={entry['id']}", download=False)
-        hydrated += 1
-        if isinstance(detail, dict) and detail.get("id") == entry.get("id"):
-            # Require actual recording tags for title-only publications.
-            tags = {"artist": detail.get("artist"), "track": detail.get("track")}
-            if candidate_matches(tags, artist=artist, title=title):
-                return _find_exact([detail], artist=artist, title=title)
-        if hydrated >= 3:
-            break
+        detail = _find_url(
+            ydl, f"https://www.youtube.com/watch?v={video_id}", artist=artist, title=title
+        )
+        if detail is not None:
+            return detail
     return None
 
 
@@ -161,6 +156,25 @@ def _find_url(ydl: Any, url: str, *, artist: str, title: str) -> dict[str, objec
         raise ValueError("source_url_invalid")
     detail = ydl.extract_info(canonical, download=False)
     if not isinstance(detail, dict) or detail.get("id") != canonical.split("v=")[-1]:
+        return None
+    seconds = detail.get("duration")
+    if (
+        not isinstance(seconds, (int, float))
+        or isinstance(seconds, bool)
+        or detail.get("categories") != ["Music"]
+        or detail.get("is_live")
+        or detail.get("live_status") not in {None, "not_live"}
+        or not isinstance(detail.get("album"), str)
+        or not detail["album"].strip()
+        or not candidate_matches(
+            {"artist": detail.get("artist"), "track": detail.get("track")},
+            artist=artist,
+            title=title,
+        )
+        or track_review_reasons(
+            seconds, detail.get("title"), detail.get("track"), detail.get("album")
+        )
+    ):
         return None
     return _find_exact([detail], artist=artist, title=title)
 
@@ -205,7 +219,10 @@ def _download_track(request: dict[str, object]) -> dict[str, object]:
                 selected = _find_url(ydl, source_url, artist=artist, title=title)
             else:
                 search = ydl.extract_info(
-                    f"ytsearch{SEARCH_LIMIT}:{artist} - {title}", download=False
+                    "https://music.youtube.com/search?"
+                    + urlencode({"q": f"{artist} - {title}"})
+                    + "#songs",
+                    download=False,
                 )
                 selected = _find_with_metadata(
                     ydl,
@@ -234,7 +251,7 @@ def _download_track(request: dict[str, object]) -> dict[str, object]:
                 "bestaudio[protocol=https]/bestaudio[protocol=http]/"
                 "bestaudio[protocol=m3u8_native]/bestaudio[protocol=http_dash_segments]"
                 if request.get("proxy_url")
-                else "bestaudio/best"
+                else "bestaudio"
             ),
             "outtmpl": str(temporary / "%(id)s.%(ext)s"),
             "max_filesize": max_bytes,
@@ -251,12 +268,7 @@ def _download_track(request: dict[str, object]) -> dict[str, object]:
         }
         try:
             with YoutubeDL(download_options) as ydl:
-                if source_url is not None:
-                    downloaded_info = ydl.process_ie_result(selected, download=True)
-                else:
-                    downloaded_info = ydl.extract_info(
-                        f"https://www.youtube.com/watch?v={video_id}", download=True
-                    )
+                downloaded_info = ydl.process_ie_result(selected, download=True)
         except DownloadError:
             return {"status": "failed", "code": "download_failed"}
         candidates = [

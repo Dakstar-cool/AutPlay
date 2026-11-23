@@ -32,7 +32,12 @@ from .catalog import (
     WorkRow,
 )
 from .catalog_execution import CatalogExecutionRow
-from .catalogue_context import InternetCatalogueContextRow, InternetSearchContextRow
+from .catalogue_context import (
+    CatalogBrowsePageRow,
+    CatalogDownloadRow,
+    InternetCatalogueContextRow,
+    InternetSearchContextRow,
+)
 from .device_compatibility import DeviceCapabilityRevisionRow
 from .discovery import (
     AcquisitionAttemptRow,
@@ -102,8 +107,10 @@ from .ml import (
 )
 from .orphan_object_claim import OrphanObjectClaimRow
 from .playlist import (
+    ImportedTrackReferenceRow,
     PlaylistEntryRow,
     PlaylistRow,
+    SharedPlaylistSnapshotRow,
     SmartPlaylistRuleRow,
 )
 from .portable_account import (
@@ -270,6 +277,8 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     TrackMetadataRevisionRow,
     TrackMetadataRow,
     InternetSearchRow,
+    CatalogBrowsePageRow,
+    CatalogDownloadRow,
     InternetCatalogueContextRow,
     InternetSearchContextRow,
     InternetAcquisitionRow,
@@ -365,6 +374,8 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     LibraryEntryRow,
     UserTrackPreferenceRow,
     PlaylistRow,
+    ImportedTrackReferenceRow,
+    SharedPlaylistSnapshotRow,
     PlaylistEntryRow,
     SmartPlaylistRuleRow,
     VaultObjectRow,
@@ -436,8 +447,10 @@ __all__ = (
     "BulkOperationRow",
     "CalibratorReleaseRow",
     "CandidateActionReceiptRow",
+    "CatalogBrowsePageRow",
     "CatalogChangeItemRow",
     "CatalogChangeSetRow",
+    "CatalogDownloadRow",
     "CatalogExecutionRow",
     "DeviceAdmissionExchangeReceiptRow",
     "DeviceAdmissionRateWindowRow",
@@ -471,6 +484,7 @@ __all__ = (
     "IdempotencyRecordRow",
     "ImportEntryRow",
     "ImportJobRow",
+    "ImportedTrackReferenceRow",
     "IngestCleanupClaimRow",
     "IngestCleanupExecutionRow",
     "IngestExecutionRow",
@@ -534,6 +548,7 @@ __all__ = (
     "SelfPairingRateRow",
     "ServerInstanceRow",
     "SessionRotationReceiptRow",
+    "SharedPlaylistSnapshotRow",
     "SmartPlaylistRuleRow",
     "SocialOperationReceiptRow",
     "SocialRateWindowRow",

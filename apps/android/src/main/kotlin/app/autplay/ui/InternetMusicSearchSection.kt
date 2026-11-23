@@ -7,11 +7,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import app.autplay.AutPlayRuntime
 import app.autplay.R
+import app.autplay.application.server.InternetMusicCandidate
 import app.autplay.application.server.InternetMusicSearch
 import app.autplay.application.server.InternetSourceSearchSession
 import app.autplay.application.search.LibrarySearchKind
@@ -19,7 +22,7 @@ import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.work.InternetMusicWork
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
 
 private data class InternetSourceRequestKey(val query: String, val request: Int, val kind: LibrarySearchKind,
     val profile: String?, val user: String?, val device: String?, val contextId: String?)
@@ -27,9 +30,13 @@ private data class InternetSourceRequestKey(val query: String, val request: Int,
 @Composable
 internal fun InternetMusicSearchSection(query: String, request: Int, kind: LibrarySearchKind = LibrarySearchKind.All,
     catalogueContextId: String? = null, session: InternetMusicUiSession? = null,
-    onCatalogueContextExpired: (() -> Unit)? = null) {
+    onCatalogueContextExpired: (() -> Unit)? = null,
+    vaultTracks: List<VaultSearchUiItem> = emptyList(),
+    onPlayVault: ((String) -> Unit)? = null,
+    onPlayAcquired: ((String) -> Unit)? = null,
+    onPlaylistTrack: ((String) -> Unit)? = null) {
     if (kind == LibrarySearchKind.Artist || kind == LibrarySearchKind.Album) {
-        InternetMetadataDiscoverySection(query, kind, request, session)
+        InternetMetadataDiscoverySection(query, kind, request, session, onPlaylistTrack)
         return
     }
     val context = LocalContext.current
@@ -84,28 +91,52 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
         }
         result?.let { search ->
             search.candidates.forEach { candidate ->
-                val work by remember(search.id, candidate.id, session?.work) {
+                val work by remember(profile, search.id, candidate.id, session?.work) {
                     session?.work?.states(search.id, candidate.id)
-                        ?: WorkManager.getInstance(context).getWorkInfosByTagFlow(InternetMusicWork.tag(search.id, candidate.id))
-                            .map { infos -> infos.map { it.state } }
-                }.collectAsState(initial = emptyList())
-                val active = work.any { !it.isFinished }
-                val completed = work.any { it == WorkInfo.State.SUCCEEDED }
-                val failed = work.any { it == WorkInfo.State.FAILED }
+                        ?: profile?.let { observeInternetMusicWork(context, it.value, search.id, candidate.id) }
+                        ?: flowOf(InternetMusicWorkStatus())
+                }.collectAsState(initial = InternetMusicWorkStatus())
+                val active = work.states.any { !it.isFinished }
+                val completed = WorkInfo.State.SUCCEEDED in work.states
+                val failed = WorkInfo.State.FAILED in work.states && !completed
+                val downloading = work.downloadState in setOf("REQUESTED", "QUEUED", "DOWNLOADING")
                 val status = when {
                     active -> stringResource(R.string.music_internet_adding)
+                    downloading -> stringResource(R.string.music_device_downloading)
+                    work.downloadState == "COMPLETED" -> stringResource(R.string.music_device_ready)
+                    work.downloadState == "PAUSED" -> stringResource(R.string.music_device_paused)
+                    work.downloadState == "FAILED" -> stringResource(R.string.music_device_failed)
                     completed -> stringResource(R.string.music_internet_added)
-                    failed -> stringResource(R.string.music_internet_error)
+                    failed -> stringResource(R.string.music_internet_add_failed)
                     else -> null
                 }
                 val duration = "${candidate.durationMs / 60000}:${(candidate.durationMs / 1000 % 60).toString().padStart(2, '0')}"
+                val vaultTrack = remember(candidate, vaultTracks) { matchingVaultTrack(candidate, vaultTracks) }
+                val acquiredId = work.localTrackId
+                val play: (() -> Unit)? = when {
+                    vaultTrack != null && onPlayVault != null -> ({ onPlayVault(vaultTrack.id) })
+                    acquiredId != null && onPlayAcquired != null -> ({ onPlayAcquired(acquiredId) })
+                    else -> null
+                }
                 AutPlayTrackRow(
                     title = candidate.title,
                     artist = candidate.artist,
-                    trackId = null,
-                    onPlay = null,
+                    trackId = vaultTrack?.localTrackId,
+                    onPlay = play,
                     detail = listOfNotNull(candidate.provider, duration, status).joinToString(" · "),
+                    emphasizeDetail = completed && !active && !downloading && work.downloadState !in setOf("FAILED", "PAUSED"),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 ) {
+                    if (active || downloading) {
+                        CircularProgressIndicator(Modifier.size(20.dp).testTag("source-progress-${candidate.id}"), strokeWidth = 2.dp)
+                    } else if (completed && work.downloadState !in setOf("FAILED", "PAUSED")) {
+                        AutPlayPlatformIcon(AutPlayIcon.Check, null, Modifier.size(22.dp).testTag("source-ready-${candidate.id}"), tint = AutPlayTokens.colors.success)
+                    }
+                    if (play != null) {
+                        IconButton(onClick = play) {
+                            AutPlayPlatformIcon(AutPlayIcon.Play, stringResource(R.string.library_play_track, candidate.title))
+                        }
+                    }
                     TrackActionsMenu(Modifier.testTag("source-actions-${candidate.id}")) { dismiss ->
                         fun acquire(download: Boolean) {
                             dismiss()
@@ -116,7 +147,7 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                         DropdownMenuItem(text = { Text(stringResource(R.string.music_add_vault)) },
                             enabled = !active && !completed && !failed && profile != null, onClick = { acquire(false) })
                         DropdownMenuItem(text = { Text(stringResource(R.string.music_add_download)) },
-                            enabled = !active && !failed && profile != null, onClick = { acquire(true) })
+                            enabled = !active && !failed && !downloading && work.downloadState !in setOf("COMPLETED", "PAUSED") && profile != null, onClick = { acquire(true) })
                         if (failed) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.music_retry)) },
                                 modifier = Modifier.testTag("source-acquisition-retry"), onClick = {
@@ -128,5 +159,15 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                 }
             }
         }
+    }
+}
+
+internal fun matchingVaultTrack(candidate: InternetMusicCandidate, tracks: List<VaultSearchUiItem>): VaultSearchUiItem? {
+    fun key(text: String?) = text?.trim()?.replace(Regex("\\s+"), " ")?.lowercase(java.util.Locale.ROOT)
+    if (candidate.durationMs <= 0 || candidate.title.isBlank() || candidate.artist.isBlank()) return null
+    return tracks.singleOrNull { row ->
+        val duration = row.durationMs ?: return@singleOrNull false
+        row.playable && duration > 0 && kotlin.math.abs(duration - candidate.durationMs) <= 2_000 &&
+            key(row.title) == key(candidate.title) && key(row.artist) == key(candidate.artist)
     }
 }

@@ -21,6 +21,7 @@ from autplay.adapters.postgresql.models import (
 )
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.domain.discovery import DiscoveryError
+from autplay.domain.music_search import SEARCH_POLICY
 from autplay.domain.resource_admission import ResourceAdmissionError
 
 
@@ -61,6 +62,7 @@ def require_internet_ingest_authority(
     )
     if (
         source is None
+        or (source.state != "READY" and source.selected_snapshot.get("policy") != SEARCH_POLICY)
         or source.user_id != upload.user_id
         or source.upload_id != upload.upload_session_id
         or source.user_track_ref_id is None

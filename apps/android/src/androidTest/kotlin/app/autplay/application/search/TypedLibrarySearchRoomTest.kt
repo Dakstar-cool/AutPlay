@@ -128,6 +128,26 @@ class TypedLibrarySearchRoomTest {
         assertEquals(emptyList<String>(), repository.offlineTrackIds("owner", emptyList()).first())
     }
 
+    @Test fun unsyncedVaultResultPlaysWithoutCreatingMembershipOrDownload() = runBlocking {
+        val track = RemoteLibraryEntry("publication", "remote-ref", "SERVER_CATALOG", "VAULT", 1,
+            catalogId = "publication", recordingId = "recording", title = "Server song", artist = "Singer", durationMs = 180000)
+        val projector = VaultSearchProjector(db)
+        val hits = projector.project("owner", listOf(track))
+        assertTrue(hits.single().playable)
+        assertEquals("Server song", hits.single().title)
+        assertNull(hits.single().localUserTrackRefId)
+        assertTrue(projector.playbackRows("owner", hits, emptySet()).isEmpty())
+        val queue = projector.playbackRows("owner", hits, setOf("remote-ref"))
+        val localId = queue.single().second
+        assertEquals("remote-ref", db.libraryDao().trackRef(localId)?.serverUserTrackRefId)
+        assertEquals(180000L, db.libraryDao().trackRef(localId)?.rawDurationMs)
+        assertEquals(queue, projector.playbackRows("owner", hits, setOf("remote-ref")))
+        assertTrue(LocalTrackSearchRepository(db).offlineTrackIds("owner", listOf(localId)).first().isEmpty())
+        assertNull(db.libraryDao().trackRefByServerId("other", "remote-ref"))
+        db.libraryDao().upsertTrackRef(db.libraryDao().trackRef(localId)!!.copy(deletedAtMs = 1))
+        assertTrue(projector.playbackRows("owner", hits, setOf("remote-ref")).isEmpty())
+    }
+
     private suspend fun seed(id: String, owner: String = "owner", title: String, artist: String?, album: String?,
         rawAlbum: String? = "Raw album") {
         db.withWriteTransaction {

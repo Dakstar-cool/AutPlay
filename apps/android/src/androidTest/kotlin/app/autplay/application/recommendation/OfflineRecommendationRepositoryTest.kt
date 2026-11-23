@@ -619,6 +619,37 @@ class OfflineRecommendationRepositoryTest {
         assertEquals(started.value, database.queueDao().activeSnapshotOnce()?.queueSnapshotId)
     }
 
+    @Test fun startingWaveReplacesFiveFavoritesWithTheRankedCatalogQueue() = runBlocking {
+        val library = database.libraryDao()
+        val template = requireNotNull(library.trackRef(TRACK))
+        val favorites = List(5) { i ->
+            val id = LocalId.random()
+            library.upsertTrackRef(template.copy(localUserTrackRefId = id.value, localRecordingId = null,
+                serverRecordingId = LocalId.random().value, rawTitle = "Favorite $i"))
+            library.upsertPreference(UserTrackPreferenceEntity(id.value, "LIKED", null, false, "SYNCED", 0, NOW, PROFILE))
+            app.autplay.application.playback.NewPlaybackQueueEntry(LocalId.random(), id, "LIBRARY", "LOCAL_THEN_VAULT")
+        }
+        val previous = LocalId.random()
+        val player = app.autplay.application.playback.PlaybackPersistenceRepository(database)
+        player.activateQueue(previous, favorites, "LIBRARY", "favorites", PROFILE, "GENERAL", NOW)
+        // Synced catalog handles are playable online without an entry in the owner's library.
+        val catalog = List(25) { i ->
+            val track = LocalId.random().value
+            val recording = LocalId.random().value
+            library.upsertTrackRef(template.copy(localUserTrackRefId = track, localRecordingId = null,
+                serverRecordingId = recording, serverUserTrackRefId = LocalId.random().value, rawTitle = "Catalog song $i"))
+            track to app.autplay.application.server.ServerRecommendationItem(recording, i + 1, 1.0, "BASELINE", "recommendations")
+        }
+        val replacement = app.autplay.application.playback.OrdinaryQueueReplacementGuard(previous.value, "LIBRARY", PROFILE)
+        val wave = PersonalWaveQueue(database).start(BINDING, replacement, true, { true }) { _, _ ->
+            app.autplay.application.server.ServerRecommendationResult(REQUEST, "served", catalog.map { it.second })
+        }
+        val restored = requireNotNull(player.restoreActive())
+        assertEquals(requireNotNull(wave).value, restored.snapshot.queueSnapshotId)
+        assertEquals(catalog.map { it.first }, restored.entries.map { it.localUserTrackRefId })
+        assertEquals("OFF", restored.snapshot.repeatMode)
+    }
+
     private fun servedTrack() = app.autplay.application.server.ServerRecommendationResult(REQUEST, "served", listOf(
         app.autplay.application.server.ServerRecommendationItem(RECORDING, 1, 0.5, "BASELINE", "recommendations"),
     ))

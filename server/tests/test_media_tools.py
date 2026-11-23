@@ -18,6 +18,13 @@ from autplay.domain.vault import MediaToolOutputError, MediaToolTimeoutError, Me
 from autplay.ports.vault import ProcessResult
 
 
+def test_provider_probe_rejects_audio_muxed_with_video() -> None:
+    raw = b'{"streams":[{"codec_type":"audio"},{"codec_type":"video"}]}'
+    probe = FfprobeInspector("ffprobe", runner=FakeRunner(ProcessResult(0, raw, b"")))
+    with pytest.raises(MediaValidationError):
+        probe.inspect(Path("input"), single_audio=True)
+
+
 class FakeRunner:
     def __init__(self, result: ProcessResult | Exception) -> None:
         self._result = result

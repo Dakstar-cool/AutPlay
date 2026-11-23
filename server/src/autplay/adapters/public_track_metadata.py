@@ -32,10 +32,35 @@ from autplay.ports.track_metadata import MetadataProviderError
 USER_AGENT = "AutPlay/0.3.7 (personal music library; https://github.com/Dakstar-cool/AutPlay)"
 
 
+def is_cover_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    host = parsed.hostname or ""
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or parsed.port not in {None, 443}
+    ):
+        return False
+    if host == "coverartarchive.org":
+        return bool(re.fullmatch(r"/release/[0-9a-f-]{36}/front-250", parsed.path))
+    return (host == "archive.org" or host.endswith(".archive.org")) and bool(
+        re.fullmatch(r"/(?:download|[0-9]+/items)/mbid-[0-9a-f-]{36}/[a-zA-Z0-9._%-]+", parsed.path)
+    )
+
+
 def validate_public_url(url: str, *, artwork: bool = False) -> None:
     parsed = urlsplit(url)
     host = parsed.hostname or ""
     allowed = host in {"musicbrainz.org", "coverartarchive.org", "api.acoustid.org"}
+    if host == "api.listenbrainz.org":
+        allowed = (
+            bool(
+                re.fullmatch(r"/1/popularity/top-recordings-for-artist/[0-9a-f-]{36}", parsed.path)
+            )
+            and not parsed.query
+        )
     if artwork:
         allowed = allowed or host == "archive.org" or host.endswith(".archive.org")
     if (
@@ -74,8 +99,45 @@ class PublicMetadataHttp:
             headers={"User-Agent": USER_AGENT},
         )
 
+    def cover_hop(self, url: str) -> bytes | None:
+        """Fetch exactly one thumbnail hop under its own retained catalogue grant."""
+        validate_public_url(url, artwork=True)
+        try:
+            with (
+                self.gate(),
+                self.client.stream(
+                    "GET", url, headers={"Accept": "image/jpeg,image/png"}
+                ) as response,
+            ):
+                if response.status_code == 404:
+                    return None
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("Location")
+                    if not location or len(location) > 2048:
+                        raise MetadataProviderError("metadata_response_invalid", retryable=False)
+                    return json.dumps({"redirect": urljoin(url, location)}).encode()
+                if response.status_code != 200:
+                    raise MetadataProviderError(
+                        "metadata_provider_unavailable",
+                        retryable=response.status_code in {429, 503} or response.status_code >= 500,
+                    )
+                data = bytearray()
+                for chunk in response.iter_bytes(65536):
+                    data.extend(chunk)
+                    if len(data) > 1048576:
+                        raise MetadataProviderError("metadata_response_too_large", retryable=False)
+                if not (
+                    data.startswith(bytes.fromhex("ffd8ff"))
+                    or data.startswith(bytes.fromhex("89504e470d0a1a0a"))
+                ):
+                    raise MetadataProviderError("metadata_artwork_invalid", retryable=False)
+                return bytes(data)
+        except httpx2.HTTPError as exc:
+            raise MetadataProviderError("metadata_network_unavailable") from exc
+
     def get(self, url: str, *, artwork: bool = False, post: bytes | None = None) -> bytes | None:
-        limit = 4194304 if artwork else 1048576
+        ranking = urlsplit(url).hostname == "api.listenbrainz.org"
+        limit = 4_194_304 if artwork or ranking else 1_048_576
         for _ in range(5):
             validate_public_url(url, artwork=artwork)
             headers = {"Accept": "image/*" if artwork else "application/json"}
@@ -145,6 +207,50 @@ def _credit(value: Any) -> str:
         for item in value
         if isinstance(item, dict)
     ).strip()[:500]
+
+
+def _credit_members(value: Any) -> tuple[dict[str, str], ...]:
+    """A flat label or a partial provider credit cannot establish any artist identity."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 100:
+        return ()
+    members = []
+    prior_join = ""
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(artist := item.get("artist"), dict):
+            return ()
+        try:
+            identity = str(UUID(str(artist.get("id"))))
+        except ValueError:
+            return ()
+        name = artist.get("name")
+        credited = item.get("name") or name
+        join = item.get("joinphrase", "")
+        if not all(
+            isinstance(field, str) and len(field) <= 1000 for field in (name, credited, join)
+        ):
+            return ()
+        if (
+            not isinstance(name, str)
+            or not isinstance(credited, str)
+            or not name.strip()
+            or not credited.strip()
+        ):
+            return ()
+        members.append(
+            {
+                "mbid": identity,
+                "name": name,
+                "credited_name": credited,
+                "join_phrase": join,
+                "role": "FEATURED"
+                if prior_join.strip().casefold() in {"feat.", "feat", "ft.", "ft", "featuring"}
+                else "PRIMARY",
+            }
+        )
+        prior_join = join
+    if len("".join(m["credited_name"] + m["join_phrase"] for m in members)) > 2000:
+        return ()
+    return tuple(members)
 
 
 def _fields(raw: dict[str, Any]) -> MetadataFields:
@@ -445,6 +551,15 @@ class MusicBrainzMetadataProvider:
             recording_disambiguation=disambiguation,
             recording_title=recording_title,
             mb_release_track_id=release_track_id,
+            recording_members=_credit_members(
+                matches[0][1].get("recording", {}).get("artist-credit")
+            )
+            if not ambiguous
+            else (),
+            release_members=_credit_members(data.get("artist-credit")),
+            track_members=_credit_members(matches[0][1].get("artist-credit"))
+            if not ambiguous
+            else (),
         )
 
     def cover(self, release_id: str) -> bytes | None:

@@ -31,11 +31,13 @@ from autplay.application.backup_control import (
     BackupControlService,
     parse_backup_targets,
 )
+from autplay.application.catalog_downloads import CatalogDownloads
 from autplay.application.catalogue_context import CatalogueContextService
 from autplay.application.discovery_automation import DiscoveryAutomationService
 from autplay.application.guest_room import GuestRoomService
 from autplay.application.internet_music import InternetMusicService
 from autplay.application.music_discovery import MusicDiscoveryService
+from autplay.application.playlist_shares import PlaylistShares
 from autplay.application.profile_pairing import ProfilePairingService
 from autplay.application.public_access import PublicAccessService
 from autplay.application.sona_collection import SonaCollectionService
@@ -128,6 +130,7 @@ from autplay.entrypoints.metadata_http import create_metadata_router
 from autplay.entrypoints.music_catalogue_context_http import create_catalogue_context_router
 from autplay.entrypoints.music_discovery_http import create_music_discovery_router
 from autplay.entrypoints.music_http import create_music_router
+from autplay.entrypoints.playlist_share_http import create_playlist_share_router
 from autplay.entrypoints.portable_account_http import create_portable_account_router
 from autplay.entrypoints.privacy_deletion import DeletionEvidenceRuntime
 from autplay.entrypoints.profile_pairing_http import create_profile_pairing_router
@@ -278,7 +281,13 @@ def create_app(
                 with catalogue_http_factory(principal) as http:
                     yield MusicBrainzDiscoveryProvider(http)
 
-            music_discovery = music_discovery or MusicDiscoveryService(provider_factory)
+            from autplay.adapters.postgresql.catalog_pages import CatalogPageCache
+
+            music_discovery = music_discovery or MusicDiscoveryService(
+                provider_factory,
+                CatalogPageCache(sessionmaker(engine, class_=Session, expire_on_commit=False)),
+                read_public=catalog.work.get,
+            )
             catalogue_context = catalogue_context or CatalogueContextService(
                 sessionmaker(engine, class_=Session, expire_on_commit=False), catalogue_http_factory
             )
@@ -355,6 +364,12 @@ def create_app(
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
     api_router.include_router(
+        create_playlist_share_router(
+            PlaylistShares(sessionmaker(engine, expire_on_commit=False)),
+            bearer_authentication(authentication),
+        )
+    )
+    api_router.include_router(
         create_catalog_view_router(
             authentication, catalog_view_database, configure_sessions=deletion_evidence.configure
         )
@@ -376,11 +391,12 @@ def create_app(
             authenticated=bearer_authentication(authentication),
         )
     )
+    internet_sources = InternetMusicService(
+        sessionmaker(engine, class_=Session, expire_on_commit=False), uploads
+    )
     api_router.include_router(
         create_music_router(
-            InternetMusicService(
-                sessionmaker(engine, class_=Session, expire_on_commit=False), uploads
-            ),
+            internet_sources,
             authenticated=bearer_authentication(authentication),
             internet_enabled=resolved_settings.internet_music_enabled,
         )
@@ -388,6 +404,14 @@ def create_app(
     api_router.include_router(
         create_music_discovery_router(
             music_discovery,
+            downloads=CatalogDownloads(
+                sessionmaker(engine, class_=Session, expire_on_commit=False),
+                music_discovery,
+                catalogue_context,
+                internet_sources,
+            )
+            if music_discovery and catalogue_context
+            else None,
             authenticated=bearer_authentication(authentication),
             enabled=resolved_settings.internet_music_enabled,
         )

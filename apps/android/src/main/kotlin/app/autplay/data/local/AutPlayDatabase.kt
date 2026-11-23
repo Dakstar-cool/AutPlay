@@ -90,6 +90,8 @@ import kotlinx.coroutines.Dispatchers
         CatalogArtistCreditLinkEntity::class,
         CatalogArtistCreditLinkOwnerEntity::class,
         ReleaseTrackProjectionEntity::class,
+        app.autplay.data.local.entity.CatalogEditionTrack::class,
+        app.autplay.data.local.entity.CatalogPage::class,
         UserTrackRefEntity::class,
         UserTrackExternalRefEntity::class,
         LibraryEntryEntity::class,
@@ -132,7 +134,7 @@ import kotlinx.coroutines.Dispatchers
         GuestWavePreflightEntity::class,
         GuestWaveQueueProjectionEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -176,6 +178,22 @@ abstract class AutPlayDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_19_20: Migration = object : Migration(19, 20) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("""CREATE TABLE IF NOT EXISTS catalog_page (profile TEXT NOT NULL, pageKey TEXT NOT NULL,
+                    document TEXT NOT NULL, observedAtMs INTEGER NOT NULL, PRIMARY KEY(profile, pageKey))""")
+                connection.execSQL("""CREATE TABLE IF NOT EXISTS catalog_edition_track (
+                    profile TEXT NOT NULL, trackId TEXT NOT NULL, releaseId TEXT NOT NULL, recordingId TEXT NOT NULL,
+                    releaseGroupId TEXT NOT NULL, releaseMbid TEXT, album TEXT NOT NULL, albumArtist TEXT NOT NULL,
+                    releaseType TEXT NOT NULL, releaseDate TEXT, disc INTEGER NOT NULL, position INTEGER NOT NULL,
+                    numberText TEXT, title TEXT NOT NULL, artist TEXT NOT NULL, durationMs INTEGER,
+                    deleted INTEGER NOT NULL, version INTEGER NOT NULL, sequence INTEGER NOT NULL, releaseStatus TEXT,
+                    PRIMARY KEY(profile, trackId))""")
+                connection.execSQL("CREATE INDEX index_catalog_edition_track_profile_releaseId ON catalog_edition_track(profile, releaseId)")
+                connection.execSQL("CREATE INDEX index_catalog_edition_track_profile_recordingId ON catalog_edition_track(profile, recordingId)")
+            }
+        }
+
         /** Opens the non-destructive database with bundled SQLite, WAL, and all migrations. */
         fun open(context: Context, name: String = DATABASE_NAME): AutPlayDatabase =
             Room.databaseBuilder<AutPlayDatabase>(
@@ -185,7 +203,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
-                .addMigrations(MIGRATION_18_19)
+                .addMigrations(MIGRATION_18_19, MIGRATION_19_20)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */

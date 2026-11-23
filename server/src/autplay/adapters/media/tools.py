@@ -237,7 +237,7 @@ class FfprobeInspector:
         self._timeout_seconds = timeout_seconds
         self._max_output_bytes = max_output_bytes
 
-    def inspect(self, path: Path) -> AudioTechnicalMetadata:
+    def inspect(self, path: Path, *, single_audio: bool = False) -> AudioTechnicalMetadata:
         """Run ffprobe with explicit JSON output and reject malformed/non-audio results."""
 
         result = self._runner.run(
@@ -261,6 +261,12 @@ class FfprobeInspector:
         streams = document.get("streams")
         if not isinstance(streams, list):
             raise MediaToolOutputError()
+        if single_audio and (
+            len(streams) != 1
+            or not isinstance(streams[0], dict)
+            or streams[0].get("codec_type") != "audio"
+        ):
+            raise MediaValidationError()
         audio_stream = next(
             (
                 stream

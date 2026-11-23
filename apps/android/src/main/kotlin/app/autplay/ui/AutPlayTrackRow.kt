@@ -100,3 +100,13 @@ internal fun TrackActionsMenu(
         }
     }
 }
+
+@Composable
+internal fun AddToPlaylistMenu(onAdd: () -> Unit) {
+    TrackActionsMenu { dismiss ->
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text(stringResource(R.string.playlist_add_selected)) },
+            onClick = { dismiss(); onAdd() },
+        )
+    }
+}

@@ -1,5 +1,7 @@
 package app.autplay.ui.core
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import app.autplay.application.search.LibrarySearchKind
@@ -48,7 +50,7 @@ public class SearchGenerationGuard(initialGeneration: Long = 0L) {
 /** Keeps visible rows bound to exactly one immutable Search request key. */
 public class SearchResultStore<T> {
     private var active: SearchRequestKey? = null
-    public var results: List<T> = emptyList()
+    public var results: List<T> by androidx.compose.runtime.mutableStateOf(emptyList())
         private set
 
     public fun start(key: SearchRequestKey) {
@@ -109,6 +111,10 @@ public enum class LibraryFilter {
 public enum class DetailKind {
     Track,
     Artist,
+    ArtistTracks,
+    ArtistAlbums,
+    CatalogRelease,
+    CatalogArtistTracks,
     Release,
     Playlist,
 }
@@ -246,6 +252,7 @@ public data class CoreTrackSummary(
     public val loved: Boolean,
     public val downloaded: Boolean,
     public val availability: TrackAvailability,
+    public val canRemove: Boolean = true,
 )
 
 public fun filterAndSortTracks(

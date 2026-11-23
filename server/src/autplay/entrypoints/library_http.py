@@ -7,10 +7,10 @@ import binascii
 import json
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Protocol, cast
+from typing import Annotated, Protocol, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.responses import JSONResponse
 
 from autplay.adapters.postgresql.models import (
@@ -48,6 +48,23 @@ class LibraryQueryService(Protocol):
         before: datetime | None = None,
         before_id: UUID | None = None,
     ) -> Sequence[object]: ...
+    def search_playback(
+        self, principal: Principal, query: str, limit: int, kind: MusicSearchKind
+    ) -> list[dict[str, object]]: ...
+
+    def search_playback_page(
+        self,
+        principal: Principal,
+        query: str,
+        limit: int,
+        kind: MusicSearchKind,
+        cursor: str | None,
+    ) -> tuple[list[dict[str, object]], str | None]: ...
+
+    def prepare_search_playback(
+        self, principal: Principal, publications: list[UUID]
+    ) -> list[str]: ...
+
     def query_search(
         self,
         principal: Principal,
@@ -85,11 +102,26 @@ def create_library_router(
         q: str = Query(min_length=1, max_length=200),
         limit: int = Query(50, ge=1, le=100),
         kind: MusicSearchKind = MusicSearchKind.ALL,
+        include_catalog: bool = False,
+        paged: bool = False,
+        cursor: str | None = Query(default=None, max_length=2048),
     ) -> JSONResponse:
         try:
             query = normalize_music_query(q)
         except LibraryCommandError:
             raise ApiError("search_query_invalid", "The search query is invalid.", 422) from None
+        if include_catalog and paged:
+            try:
+                items, following = service.search_playback_page(
+                    _principal(request), query, limit, kind, cursor
+                )
+            except LibraryCommandError:
+                raise ApiError("cursor_invalid", "The cursor is invalid.", 422) from None
+            return JSONResponse(
+                {"items": items, "next_cursor": following}, headers={"Cache-Control": "no-store"}
+            )
+        if include_catalog:
+            return _page(service.search_playback(_principal(request), query, limit, kind))
         # Keep default calls compatible with existing query-service adapters.
         rows = (
             service.query_search(_principal(request), query, limit)
@@ -97,6 +129,14 @@ def create_library_router(
             else service.query_search(_principal(request), query, limit, kind=kind)
         )
         return _page([_entry(cast(LibraryEntryRow, row)) for row in rows])
+
+    @router.post("/search/playback", response_model=None)
+    def prepare_playback(
+        request: Request,
+        publications: Annotated[list[UUID], Body(embed=True, min_length=1, max_length=100)],
+    ) -> JSONResponse:
+        refs = service.prepare_search_playback(_principal(request), publications)
+        return JSONResponse({"refs": refs}, headers={"Cache-Control": "no-store"})
 
     @router.get("/playlists", response_model=None)
     def playlists(

@@ -1,0 +1,14 @@
+<resources>
+    <string name="playlist_share">Поделиться плейлистом</string>
+    <string name="playlist_share_permanent">Любой, у кого есть ссылка, сможет открыть эту версию даже после изменения или удаления плейлиста.</string>
+    <string name="playlist_share_link">Создать ссылку</string>
+    <string name="playlist_share_needs_server">Для создания ссылки подключите профиль к серверу.</string>
+    <string name="playlist_share_error">Не удалось создать ссылку. Проверьте соединение и попробуйте ещё раз.</string>
+    <string name="playlist_import_file">Открыть файл плейлиста</string>
+    <string name="playlist_invalid_file">Не удалось открыть файл как плейлист AutPlay.</string>
+    <string name="playlist_save_count">Треков в этой версии: %1$d</string>
+    <string name="playlist_save_copy">Сохранить копию</string>
+    <string name="playlist_copy_saved">Плейлист сохранён</string>
+    <string name="playlist_save_error">Не удалось сохранить плейлист. Попробуйте ещё раз.</string>
+    <string name="playlist_copy_no_audio">В вашей библиотеке нет доступного аудио</string>
+</resources>

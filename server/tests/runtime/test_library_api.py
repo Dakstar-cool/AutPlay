@@ -216,7 +216,10 @@ def test_search_rejects_invalid_bounds_kinds_and_unauthenticated_queries() -> No
 
 def test_internet_search_retains_track_only_request_and_selection_boundary() -> None:
     service = Mock(spec=InternetMusicService)
-    service.search.return_value = {"contract_version": "internet-music-v1", "candidates": []}
+    service.search.return_value = {
+        "contract_version": "internet-music-v1",
+        "candidates": list(range(25)),
+    }
 
     def authenticated(request: Request) -> None:
         request.state.principal = _OWNER
@@ -229,7 +232,17 @@ def test_internet_search_retains_track_only_request_and_selection_boundary() -> 
     )
     body = {"query": "Artist Album", "operation_id": str(uuid4())}
     with TestClient(app) as client:
-        assert client.post("/api/v1/music/internet/search", json=body).status_code == 200
+        assert (
+            len(client.post("/api/v1/music/internet/search", json=body).json()["candidates"]) == 5
+        )
+        assert (
+            len(
+                client.post("/api/v1/music/internet/search?limit=25", json=body).json()[
+                    "candidates"
+                ]
+            )
+            == 25
+        )
         for kind in MusicSearchKind:
             response = client.post(
                 "/api/v1/music/internet/search", json={**body, "kind": kind.value}
@@ -240,5 +253,5 @@ def test_internet_search_retains_track_only_request_and_selection_boundary() -> 
             json={"search_id": str(uuid4()), "candidate_id": str(uuid4())},
         )
         assert response.status_code == 422
-    service.search.assert_called_once()
+    assert service.search.call_count == 2
     service.select.assert_not_called()

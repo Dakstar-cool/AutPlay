@@ -68,7 +68,7 @@ class HomeMyWaveTest {
         compose.runOnIdle { assertEquals(0, starts) }
     }
 
-    @Test fun playResumesDisplayedTrackAndKeepsControlsInTheHero() {
+    @Test fun waveStartsItsOwnQueueAndDisplayedTrackCanBeResumedSeparately() {
         var waveStarts = 0
         var resumes = 0
         var toggles = 0
@@ -88,8 +88,9 @@ class HomeMyWaveTest {
         compose.onNodeWithText("Artist — Saved track").assertIsDisplayed()
         compose.onNodeWithTag("home-track-carousel").assertDoesNotExist()
         compose.onNodeWithTag("home-my-wave").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription(context.getString(R.string.action_continue)).performClick()
         compose.runOnIdle {
-            assertEquals(0, waveStarts)
+            assertEquals(1, waveStarts)
             assertEquals(1, resumes)
             player.value = PlaybackPresentationState(
                 mediaId = "wave-entry", title = "Wave track", artist = "Wave artist",
@@ -101,9 +102,10 @@ class HomeMyWaveTest {
         compose.onNodeWithContentDescription(context.getString(R.string.action_pause)).performScrollTo().performClick()
         compose.runOnIdle { player.value = player.value.copy(isPlaying = false) }
         compose.onNodeWithContentDescription(context.getString(R.string.action_play)).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("home-my-wave").assertDoesNotExist()
+        compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-my-wave"))
+        compose.onNodeWithTag("home-my-wave").performClick()
         compose.runOnIdle {
-            assertEquals(0, waveStarts)
+            assertEquals(2, waveStarts)
             assertEquals(1, resumes)
             assertEquals(1, toggles)
         }

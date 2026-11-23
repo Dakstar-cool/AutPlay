@@ -71,6 +71,25 @@ def published(value):
     }
 
 
+def test_unpublished_live_receipt_is_held_before_upload(tmp_path):
+    value = receipt(tmp_path)
+    state = {"state": "NEW", "signature": list(value.signature)}
+    assert bridge.advance_checkpoint(None, value, state) == {
+        **state,
+        "state": "NEEDS_REVIEW",
+        "error": "live_performance_label",
+    }
+
+
+def test_standalone_acquisition_and_server_package_the_same_track_policy():
+    root = Path(__file__).resolve().parents[2]
+    server = root / "server/src/autplay/domain/acquisition_policy.py"
+    portable = (
+        root / "tools/local_music_acquisition/src/local_music_acquisition/acquisition_policy.py"
+    )
+    assert server.read_text(encoding="utf-8") == portable.read_text(encoding="utf-8")
+
+
 def test_evidence_only_change_preserves_exact_audio_import_identity(tmp_path):
     old = receipt(tmp_path)
     native = receipt(tmp_path, evidence())

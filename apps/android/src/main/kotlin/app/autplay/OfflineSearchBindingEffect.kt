@@ -27,7 +27,7 @@ internal fun RefreshSearchOnBindingEffect(
     resultStore: SearchResultStore<LocalTrackSearchResult>,
     vaultResultStore: SearchResultStore<VaultSearchResult>,
     repository: LocalTrackSearchRepository,
-    vaultProjector: VaultSearchProjector,
+    vaultPager: VaultSearchPager,
     setResults: (List<LocalTrackSearchResult>) -> Unit,
     setLoading: (Boolean) -> Unit,
     setError: (Boolean) -> Unit,
@@ -78,9 +78,7 @@ internal fun RefreshSearchOnBindingEffect(
         }
         setVaultLoading(true)
         runCatching {
-            AutPlayRuntime.serverFeatures(context, binding).searchLibrary(request.normalizedQuery, limit = 100, kind = request.kind)
-        }.mapCatching { rows ->
-            vaultProjector.project(binding.serverProfileId.value, rows)
+            vaultPager.first(binding, request)
         }.onSuccess { rows ->
             if (generation.accepts(request) && vaultResultStore.accept(request, rows)) {
                 setVaultResults(vaultResultStore.results)

@@ -466,6 +466,14 @@ internal fun buildManualPlaylistActions(
             }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_CREATE_UNAVAILABLE") }
         }
     },
+    createWithTrack = { operationId, name, description, trackId ->
+        val owner = binding()
+        scope.launch {
+            runCatching {
+                sliceRepository.createPlaylistWithTrack(owner, LocalId(operationId), name, description, LocalId(trackId), System.currentTimeMillis())
+            }.onSuccess { onChanged() }.onFailure { reportError("PLAYLIST_CREATE_UNAVAILABLE") }
+        }
+    },
     rename = { playlistId, name, description ->
         scope.launch {
             runCatching {

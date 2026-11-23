@@ -70,6 +70,33 @@ class LibraryService:
                 principal, query=query, limit=limit, kind=kind
             )
 
+    def search_playback(
+        self, principal: Principal, query: str, limit: int, kind: MusicSearchKind
+    ) -> list[dict[str, object]]:
+        from autplay.adapters.postgresql.playback_search import search_playback
+
+        with self._sessions() as session:
+            return search_playback(session, principal, query, limit, kind)
+
+    def search_playback_page(
+        self,
+        principal: Principal,
+        query: str,
+        limit: int,
+        kind: MusicSearchKind,
+        cursor: str | None,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        from autplay.adapters.postgresql.playback_search import search_playback_page
+
+        with self._sessions() as session:
+            return search_playback_page(session, principal, query, limit, kind, cursor)
+
+    def prepare_search_playback(self, principal: Principal, publications: list[UUID]) -> list[str]:
+        from autplay.adapters.postgresql.playback_search import prepare_playback
+
+        with self._sessions() as session, session.begin():
+            return prepare_playback(session, principal.user_id, publications)
+
     # These are deliberately application commands, not HTTP writes. P09 sync is their transport.
     def create_unresolved(self, principal: Principal, command: CreateUnresolvedTrack) -> UUID:
         with self._sessions() as session:

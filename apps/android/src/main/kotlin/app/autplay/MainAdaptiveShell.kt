@@ -118,6 +118,7 @@ internal fun MainAdaptiveShell(
                     likeEnabled = state.currentTrackRefId != null,
                     onLike = { state.currentTrackRefId?.let(actions.likeTrack) },
                     onDismiss = actions.dismissMiniPlayer,
+                    onChooseArtists = state.nowPlayingActions.chooseArtists.takeIf { state.nowPlayingActions.artists.size > 1 },
                     onPrevious = state.nowPlayingActions.previous,
                     onNext = state.nowPlayingActions.next,
                 )
