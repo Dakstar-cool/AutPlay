@@ -5,6 +5,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -98,7 +99,7 @@ class PlaybackNetworkRecoveryTest {
     @Test fun failedSuccessorDoesNotInterruptTheCurrentTailAndRecoversAtItsOwnHead() = runBlocking {
         val fixture = PlaybackServiceLifecycleTest.Fixture()
         val requests = AtomicInteger()
-        val failing = java.util.concurrent.atomic.AtomicBoolean(true)
+        val failing = AtomicBoolean(true)
         val bytes = fixtureBytes()
         try {
             fixture.vaultServer(object : Dispatcher() {
@@ -170,21 +171,31 @@ class PlaybackNetworkRecoveryTest {
         val fixture = PlaybackServiceLifecycleTest.Fixture()
         val requests = AtomicInteger()
         val rangedRequests = AtomicInteger()
+        val audioAvailable = AtomicBoolean(false)
+        val invalidAuthorization = AtomicBoolean(false)
         val bytes = fixtureBytes()
         try {
             fixture.vaultServer(object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
-                    assertEquals("Bearer " + "a".repeat(64), request.getHeader("Authorization"))
-                    if (request.getHeader("Range") != null) rangedRequests.incrementAndGet()
-                    return if (requests.incrementAndGet() <= 3) MockResponse().setResponseCode(503)
-                    else audioResponse(request, bytes)
+                    if (request.getHeader("Authorization") != "Bearer " + "a".repeat(64)) {
+                        invalidAuthorization.set(true)
+                        return MockResponse().setResponseCode(401)
+                    }
+                    if (request.method == "GET") {
+                        requests.incrementAndGet()
+                        if (request.getHeader("Range") != null) rangedRequests.incrementAndGet()
+                    }
+                    return if (audioAvailable.get()) audioResponse(request, bytes) else MockResponse().setResponseCode(503)
                 }
             })
             fixture.start(listOf("vault"), startPositionMs = 12_345)
             fixture.await("terminal loader failure") { fixture.main { fixture.controller?.playerError != null } }
             assertEquals(fixture.entries[0].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
+            assertTrue("Loader did not exhaust its HTTP attempts", requests.get() >= 3)
+            audioAvailable.set(true)
             fixture.await("service recovery") { fixture.main { fixture.controller?.isPlaying == true } }
             assertTrue(requests.get() in 4..6)
+            assertFalse("Audio opened without the fixture credential", invalidAuthorization.get())
             assertEquals(fixture.entries[0].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
             assertNull(fixture.main { fixture.controller?.playerError })
             assertTrue(fixture.main { fixture.controller!!.currentPosition } >= 12_345)
@@ -231,7 +242,7 @@ class PlaybackNetworkRecoveryTest {
             try {
                 fixture.vaultServer(object : Dispatcher() {
                     override fun dispatch(request: RecordedRequest): MockResponse {
-                        requests.incrementAndGet()
+                        if (request.method == "GET") requests.incrementAndGet()
                         return MockResponse().setResponseCode(status)
                     }
                 })

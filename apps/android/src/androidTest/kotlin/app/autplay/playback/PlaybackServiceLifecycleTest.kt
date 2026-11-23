@@ -577,7 +577,21 @@ class PlaybackServiceLifecycleTest {
 
         suspend fun vaultServer(dispatcher: Dispatcher) {
             original = settings.settings.first()
-            val mock = MockWebServer().also { it.dispatcher = dispatcher; it.start() }
+            val audioPaths = audioIds.map { "/api/v1/stream/audio-variants/$it" }.toSet()
+            val variantPath = "/api/v1/vault/user-tracks/${ids[9]}/playback-variant"
+            val mock = MockWebServer()
+            // The same origin receives background API traffic while this profile is active.
+            mock.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.requestUrl?.encodedPath.orEmpty()
+                    val audio = path in audioPaths && (request.method == "GET" || request.method == "HEAD")
+                    if (audio || (path == variantPath && request.method == "GET")) {
+                        return dispatcher.dispatch(request)
+                    }
+                    return MockResponse().setResponseCode(404)
+                }
+            }
+            mock.start()
             server = mock
             val origin = mock.url("/").toString().trimEnd('/')
             settings.update(NonSecretSettings(activeServerProfileId = profile,
