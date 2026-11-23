@@ -43,12 +43,14 @@ class PlaybackNetworkRecoveryTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val fixture = PlaybackServiceLifecycleTest.Fixture()
         val bytes = fixtureBytes()
-        val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String?>>()
+        val audioReads = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String?>>()
         var startedAt = 0L
         try {
             fixture.vaultServer(object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
-                    requests.add(request.path.orEmpty() to request.getHeader("Range"))
+                    if (request.method == "GET") {
+                        audioReads.add(request.path.orEmpty() to request.getHeader("Range"))
+                    }
                     return audioResponse(request, bytes).setHeadersDelay(350, TimeUnit.MILLISECONDS)
                 }
             })
@@ -57,7 +59,7 @@ class PlaybackNetworkRecoveryTest {
                 val settings = app.autplay.data.settings.applicationNonSecretSettingsStore(context).settings.first()
                 app.autplay.warmPersonalWaveTracks(context, settings.copy(downloadOnMeteredNetwork = true),
                     requireNotNull(settings.activeServerProfileId), fixture.tracks.take(2).map { app.autplay.domain.LocalId(it) })
-                assertEquals("bytes=0-262143", requests.single().second)
+                assertEquals("bytes=0-262143", audioReads.single().second)
                 startedAt = android.os.SystemClock.elapsedRealtime()
             }
             fixture.await("prepared first track playing") {
@@ -66,10 +68,10 @@ class PlaybackNetworkRecoveryTest {
             val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
             android.util.Log.i("AutPlayWaveTiming", "serviceToPlayingMs=$elapsed simulatedHeadersDelayMs=350")
             fixture.await("successor audio requested before the first track ends") {
-                requests.any { (path, _) -> fixture.audioIds[1] in path }
+                audioReads.any { (path, _) -> fixture.audioIds[1] in path }
             }
             assertEquals(0, fixture.main { fixture.controller!!.currentMediaItemIndex })
-            assertEquals(1, requests.count { (path, range) ->
+            assertEquals(1, audioReads.count { (path, range) ->
                 fixture.audioIds[0] in path && (range == null || range.startsWith("bytes=0-"))
             })
             fixture.main { fixture.controller!!.seekTo(39_000) }
@@ -249,11 +251,15 @@ class PlaybackNetworkRecoveryTest {
     }
 
     private fun audioResponse(request: RecordedRequest, bytes: ByteArray): MockResponse {
-        val offset = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
-        return MockResponse().setResponseCode(if (offset == 0) 200 else 206)
-            .setHeader("Content-Type", "audio/wav")
-            .setHeader("Accept-Ranges", "bytes")
-            .apply { if (offset > 0) setHeader("Content-Range", "bytes $offset-${bytes.lastIndex}/${bytes.size}") }
-            .setBody(Buffer().write(bytes, offset, bytes.size - offset))
+        val response = MockResponse().setHeader("Content-Type", "audio/wav").setHeader("Accept-Ranges", "bytes")
+        if (request.method == "HEAD") return response.setHeader("Content-Length", bytes.size)
+        val range = request.getHeader("Range")?.removePrefix("bytes=")
+        val start = range?.substringBefore('-')?.toIntOrNull() ?: 0
+        val end = (range?.substringAfter('-')?.toIntOrNull() ?: bytes.lastIndex).coerceAtMost(bytes.lastIndex)
+        if (start !in 0..end) return response.setResponseCode(416).setHeader("Content-Range", "bytes */${bytes.size}")
+        if (range != null) {
+            response.setResponseCode(206).setHeader("Content-Range", "bytes $start-$end/${bytes.size}")
+        }
+        return response.setBody(Buffer().write(bytes, start, end - start + 1))
     }
 }

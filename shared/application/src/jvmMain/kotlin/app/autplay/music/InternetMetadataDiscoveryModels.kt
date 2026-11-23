@@ -26,8 +26,7 @@ enum class InternetMetadataDiscoveryEntity(val wireValue: String) {
     }
 }
 
-@ConsistentCopyVisibility
-data class InternetMetadataBrowseTarget internal constructor(
+data class InternetMetadataBrowseTarget(
     val entity: InternetMetadataDiscoveryEntity,
     val entityId: String,
 )
@@ -209,6 +208,8 @@ object InternetMetadataDiscoveryCodec {
         )
     }
 }
+
+fun catalogueUuid(value: String): String = MetadataDiscoveryJson.uuid(value)
 
 /** Shared strict primitives keep decoder failures stable and never include personal payloads. */
 internal object MetadataDiscoveryJson {

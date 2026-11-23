@@ -316,6 +316,11 @@ class PlaybackServiceLifecycleTest {
         try {
             fixture.start(listOf("readable"), smooth = true)
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+            fixture.await("initial listening session persisted") {
+                fixture.database.queueDao().activeSnapshotOnce()?.let {
+                    it.currentEntryId == fixture.entries[0].value && it.activeListeningEventId != null
+                } == true
+            }
             fixture.main { fixture.controller?.pause(); fixture.controller?.repeatMode = Player.REPEAT_MODE_ONE }
             fixture.owner.dispatch(PlaybackCommand.SeekTo(39_800))
             fixture.await { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 39_800L } }

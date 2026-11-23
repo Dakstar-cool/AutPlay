@@ -221,7 +221,7 @@ class ServerFeatureRepository(
     suspend fun metadataBackfill(): Int = musicPost("/music/metadata/backfill", JsonObject(emptyMap())).requiredInt("queued")
 
     suspend fun catalogCover(id: String): ByteArray {
-        MetadataDiscoveryJson.uuid(id)
+        catalogueUuid(id)
         return checkNotNull(authorizedRaw(Request.Builder().url("$apiBaseUrl/music/discovery/releases/$id/cover").get().build(),
             expectBody = true, binary = true).bytes)
     }
@@ -241,7 +241,7 @@ class ServerFeatureRepository(
     }
 
     override suspend fun searchInternetMusic(query: String, operationId: String, catalogueContextId: String?): InternetMusicSearch {
-        catalogueContextId?.let(MetadataDiscoveryJson::uuid)
+        catalogueContextId?.let(::catalogueUuid)
         val root = musicPost("/music/internet/search?limit=25", buildJsonObject {
             put("query", query); put("operation_id", operationId)
             catalogueContextId?.let { put("catalogue_context_id", it) }
@@ -298,7 +298,7 @@ class ServerFeatureRepository(
         discoveryTracks("releases", id, limit, offset)
 
     private suspend fun discoveryTracks(collection: String, id: String, limit: Int, offset: Int, resource: String = "tracks"): InternetMetadataDiscoveryPage {
-        MetadataDiscoveryJson.uuid(id)
+        catalogueUuid(id)
         require(limit in 1..50 && offset in 0..1_000_000)
         val url = "$apiBaseUrl/music/discovery/$collection/$id/$resource".toHttpUrl().newBuilder()
             .addQueryParameter("limit", limit.toString()).addQueryParameter("offset", offset.toString()).build()
@@ -309,15 +309,15 @@ class ServerFeatureRepository(
         InternetMetadataDiscoveryCodec.decode(authorizedRaw(request, expectBody = true).body ?: error("SERVER_RESPONSE_INVALID"))
 
     suspend fun catalogDownloadPreview(operation: String, kind: String, id: String, alternatives: Boolean): JsonObject {
-        MetadataDiscoveryJson.uuid(operation)
-        MetadataDiscoveryJson.uuid(id)
+        catalogueUuid(operation)
+        catalogueUuid(id)
         return musicPost("/music/discovery/downloads/preview", buildJsonObject {
             put("operation_id", operation); put("target_kind", kind); put("entity_id", id); put("alternatives", alternatives)
         })
     }
 
     suspend fun catalogDownload(operation: String, action: String): JsonObject {
-        MetadataDiscoveryJson.uuid(operation)
+        catalogueUuid(operation)
         val path = "/music/discovery/downloads/$operation"
         return when (action) {
             "status" -> authorized(Request.Builder().url(apiBaseUrl + path).get().build()).jsonObject
@@ -327,17 +327,17 @@ class ServerFeatureRepository(
     }
 
     suspend fun artistRanking(artistId: String): JsonObject {
-        MetadataDiscoveryJson.uuid(artistId)
+        catalogueUuid(artistId)
         val result = authorized(Request.Builder().url("$apiBaseUrl/music/discovery/library-artists/$artistId/ranking").get().build()).jsonObject
         check(result.requiredString("source", 30) == "ListenBrainz")
         return result
     }
 
     override suspend fun catalogueTrackReference(contextId: String): CatalogueTrackReference {
-        MetadataDiscoveryJson.uuid(contextId)
+        catalogueUuid(contextId)
         val root = musicPost("/music/discovery/contexts/$contextId/track-reference", buildJsonObject {})
-        return CatalogueTrackReference(MetadataDiscoveryJson.uuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
-            root.requiredLong("row_version"), root.optionalString("recording_id", UUID_TEXT_LENGTH)?.let(MetadataDiscoveryJson::uuid),
+        return CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
+            root.requiredLong("row_version"), root.optionalString("recording_id", UUID_TEXT_LENGTH)?.let(::catalogueUuid),
             root.requiredString("title", 2000), root.optionalString("artist", 2000), root.optionalString("album", 2000),
             root["duration_ms"]?.jsonPrimitive?.longOrNull, root.requiredString("resolution_status", 80))
     }
