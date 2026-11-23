@@ -1,5 +1,8 @@
 package app.autplay.desktop.presentation
 
+import app.autplay.application.recommendation.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.update
 import app.autplay.application.desktop.DesktopLibrarySnapshot
 import app.autplay.application.desktop.DesktopWaveTrack
 import app.autplay.application.desktop.DesktopWaveRecommendation
@@ -22,18 +25,28 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.*
 
 internal data class VaultHit(val ref: AccountUuid, val publication: AccountUuid?, val title: String, val artist: String, val available: Boolean)
+internal data class SavedHomeTrack(val id: String, val title: String, val artist: String?)
+internal data class SavedHome(val stale: Boolean, val items: List<SavedHomeTrack>, val validUntilMs: Long)
 internal data class VaultPage(val items: List<VaultHit>, val next: String?)
 internal data class WaveCalendar(val id: AccountUuid = AccountUuid.random(), val start: LocalDateTime = LocalDateTime.now())
 internal data class ArtistCatalogue(val mbid: AccountUuid, val counts: Map<String, Long>)
 internal data class MusicBrowse(val query: String, val kind: String, val entity: AccountUuid? = null, val releases: Boolean = false)
-internal data class CatalogJob(val id: AccountUuid, val phase: String, val counts: Map<String, Int>)
+internal sealed interface PlaylistTrackTarget {
+    data class Local(val id: AccountUuid) : PlaylistTrackTarget
+    data class Vault(val hit: VaultHit) : PlaylistTrackTarget
+    data class Catalogue(val selection: MusicCatalogueContextRequest) : PlaylistTrackTarget
+}
+
+internal data class CatalogJob(val id: AccountUuid, val phase: String, val counts: Map<String, Int>, val issues: List<Pair<String, String>> = emptyList())
 
 internal class DesktopOnlineMusic(
     private val services: DesktopAccountServices,
+    private val packs: DesktopRecommendationPacks,
+    private val work: CoroutineScope,
     private val current: () -> AccountLease?,
     private val renew: suspend (AccountLease) -> AccountLease,
-    private val play: suspend (AccountLease, List<AccountUuid>, String) -> Unit,
-    private val startWave: suspend (AccountLease, List<DesktopWaveTrack>, suspend () -> List<DesktopWaveTrack>) -> Unit,
+    private val play: suspend (AccountLease, List<AccountUuid>, String, Int) -> Unit,
+    private val startWave: suspend (AccountLease, List<DesktopWaveTrack>, Int, suspend () -> List<DesktopWaveTrack>) -> Unit,
     private val download: suspend (AccountLease, AccountUuid) -> Unit,
 ) {
     private fun requireOwner(lease: AccountLease) = check(current() == lease) { "ACCOUNT_SCOPE_CHANGED" }
@@ -60,14 +73,21 @@ internal class DesktopOnlineMusic(
         val response = request(lease, DomainRoute.VaultSearch(query.trim(), cursor))
         val rows = response.getValue("items").jsonArray
         require(rows.size <= 50)
-        return VaultPage(rows.map { item ->
+        val hits = rows.map { item ->
             val row = item.jsonObject
             VaultHit(AccountUuid(DomainJson.text(row, "user_track_ref_id", 36)),
                 row["catalog_id"]?.jsonPrimitive?.contentOrNull?.let(::AccountUuid),
                 row["title"]?.jsonPrimitive?.contentOrNull.orEmpty().take(2048),
                 row["artist"]?.jsonPrimitive?.contentOrNull.orEmpty().take(2048),
                 row["availability_status"]?.jsonPrimitive?.contentOrNull in setOf("VAULT", "LOCAL"))
-        }, response["next_cursor"]?.jsonPrimitive?.contentOrNull?.also { require(it.length in 1..2048) })
+        }
+        val missing = hits.filterNot { it.available }.map { it.ref }
+        val local = if (missing.isEmpty()) emptyMap() else checkNotNull(services.store.catalog).resolveMusicTargets(lease, missing, false)
+        val media = checkNotNull(services.store.media)
+        val playable = local.filterValues { media.readTrackCopies(lease, it, null, 1).isNotEmpty() }.keys
+        requireOwner(lease)
+        return VaultPage(hits.map { if (it.ref in playable) it.copy(available = true) else it },
+            response["next_cursor"]?.jsonPrimitive?.contentOrNull?.also { require(it.length in 1..2048 && it != cursor) })
     }
 
     private val coverSlots = kotlinx.coroutines.sync.Semaphore(2)
@@ -136,12 +156,16 @@ internal class DesktopOnlineMusic(
         val directory = cache?.takeIf { target.entity != null }?.let { catalogDir(it, lease) }
         val file = directory?.resolve("${target.kind}-${target.entity?.value}-${target.releases}-$offset.json")
         requireOwner(lease)
-        if (savedOnly) {
+        suspend fun savedPage(): Pair<InternetMetadataDiscoveryPage, Boolean> {
             val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cachedFile(checkNotNull(file)) }
             requireOwner(lease)
             return InternetMetadataDiscoveryCodec.decode(saved.getValue("document").jsonObject) to true
         }
-        val result = request(lease, route)
+        if (savedOnly) return savedPage()
+        val result = try { request(lease, route) } catch (failure: Exception) {
+            if (!retryableMusicRequest(failure) || file == null || !Files.isRegularFile(file, NOFOLLOW_LINKS)) throw failure
+            return savedPage()
+        }
         val page = InternetMetadataDiscoveryCodec.decode(result)
         if (directory != null && file != null && page.knownActionsAllowed) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
@@ -162,6 +186,9 @@ internal class DesktopOnlineMusic(
         return page to false
     }
 
+    val catalogDownloads = DesktopCatalogDownloads(work, current, ::downloadPreview, ::downloadAction,
+        { lease -> requireOwner(lease); services.sync.runPass(lease) })
+
     suspend fun downloadPreview(lease: AccountLease, operation: AccountUuid, kind: String, id: AccountUuid, alternatives: Boolean): CatalogJob {
         require(kind in setOf("artist", "release", "recording"))
         return job(operation, request(lease, DomainRoute.DownloadPreview(), buildJsonObject {
@@ -174,22 +201,45 @@ internal class DesktopOnlineMusic(
 
     private fun job(id: AccountUuid, value: JsonObject): CatalogJob {
         val phase = DomainJson.text(value, "phase", 50)
+        require(phase in setOf("discovery", "inspect", "preview", "downloading", "complete"))
         val counts = value.getValue("counts").jsonObject
+        val issues = (value["issues"] as? JsonArray).orEmpty().take(100).map { item ->
+            val row = item.jsonObject
+            DomainJson.text(row, "title", 2048) to DomainJson.text(row, "reason", 128)
+        }
         return CatalogJob(id, phase, listOf("vault", "queued", "available", "missing", "failed").associateWith {
             counts[it]?.jsonPrimitive?.intOrNull?.also { n -> require(n >= 0) } ?: 0
-        })
+        }, issues)
     }
 
-    suspend fun stream(lease: AccountLease, hit: VaultHit) {
-        val expected = hit.publication?.let { publication ->
-            val result = request(lease, DomainRoute.PreparePlayback(), buildJsonObject {
-                putJsonArray("publications") { add(publication.value) }
-            })
-            val refs = result.getValue("refs").jsonArray
-            check(refs.size == 1)
-            AccountUuid(refs.single().jsonPrimitive.content)
-        } ?: hit.ref
-        play(lease, listOf(trackByReference(lease, expected)), "SEARCH")
+    suspend fun stream(lease: AccountLease, hit: VaultHit, page: List<VaultHit>) {
+        requireOwner(lease)
+        val catalog = checkNotNull(services.store.catalog)
+        val media = checkNotNull(services.store.media)
+        val rows = page.distinctBy { it.ref }
+        require(rows.size <= 50 && hit in rows)
+        val refs = rows.map { it.ref }
+        val initial = catalog.resolveMusicTargets(lease, refs, false)
+        val local = initial.filterValues { media.readTrackCopies(lease, it, null, 1).isNotEmpty() }
+        val targets = if (hit.ref in local) local else {
+            val publications = rows.filter { it.available }.mapNotNull { it.publication }.distinct()
+            val granted = if (publications.isEmpty()) emptySet() else {
+                val result = request(lease, DomainRoute.PreparePlayback(), buildJsonObject {
+                    putJsonArray("publications") { publications.forEach { add(it.value) } }
+                })
+                val authorized = result.getValue("refs").jsonArray
+                require(authorized.size <= publications.size)
+                authorized.mapTo(hashSetOf()) { AccountUuid(it.jsonPrimitive.content) }
+            }
+            val allowed = rows.filter { it.ref in local || it.available && (it.publication == null || it.ref in granted) }.map { it.ref }
+            if (allowed.any { it !in initial }) services.sync.runPass(lease)
+            catalog.resolveMusicTargets(lease, allowed, false)
+        }
+        val queue = refs.mapNotNull { targets[it] }.distinct()
+        val selected = queue.indexOf(targets[hit.ref])
+        check(selected >= 0) { "SYNC_REQUIRED" }
+        requireOwner(lease)
+        play(lease, queue, "SEARCH", selected)
     }
 
     private suspend fun trackByReference(lease: AccountLease, expected: AccountUuid): AccountUuid {
@@ -211,15 +261,32 @@ internal class DesktopOnlineMusic(
             rows.lastOrNull()?.header?.localId?.takeIf { rows.size == 25 }
     }
 
-    suspend fun appendCatalogueTrack(lease: AccountLease, selection: MusicCatalogueContextRequest, playlist: AccountLocalDomainRow,
+    suspend fun appendPlaylistTrack(lease: AccountLease, target: PlaylistTrackTarget, playlist: AccountLocalDomainRow,
         operation: AccountUuid, entry: AccountUuid, timestamp: Long) {
         requireOwner(lease)
         check(editable(playlist) && (playlist.detail as? AccountLocalDomainDetail.Playlist)?.rawType == "MANUAL")
-        val receipt = MusicCatalogueContextCodec.decode(request(lease, DomainRoute.CatalogueContext(), selection.document()))
-        check(receipt.matches(selection))
-        val admitted = AccountUuid(checkNotNull(receipt.admissionContextId(java.time.Instant.now())))
-        val ref = AccountUuid(DomainJson.text(request(lease, DomainRoute.CatalogueTrack(admitted)), "user_track_ref_id", 36))
-        val trackId = trackByReference(lease, ref)
+        val trackId = when (target) {
+            is PlaylistTrackTarget.Local -> target.id
+            is PlaylistTrackTarget.Vault -> {
+                val hit = target.hit
+                val existing = resolve(lease, listOf(hit.ref), false).singleOrNull()
+                if (existing == null && hit.publication != null) {
+                    val grant = request(lease, DomainRoute.PreparePlayback(), buildJsonObject {
+                        putJsonArray("publications") { add(hit.publication.value) }
+                    })
+                    check(grant.getValue("refs").jsonArray.singleOrNull()?.jsonPrimitive?.content == hit.ref.value)
+                }
+                existing ?: trackByReference(lease, hit.ref)
+            }
+            is PlaylistTrackTarget.Catalogue -> {
+                val selection = target.selection
+                val receipt = MusicCatalogueContextCodec.decode(request(lease, DomainRoute.CatalogueContext(), selection.document()))
+                check(receipt.matches(selection))
+                val admitted = AccountUuid(checkNotNull(receipt.admissionContextId(java.time.Instant.now())))
+                val ref = AccountUuid(DomainJson.text(request(lease, DomainRoute.CatalogueTrack(admitted)), "user_track_ref_id", 36))
+                trackByReference(lease, ref)
+            }
+        }
         val domain = checkNotNull(services.store.domain)
         val track = checkNotNull(domain.readExact(lease, AccountProjectionKind.TRACK, trackId))
         check(editable(track))
@@ -242,16 +309,160 @@ internal class DesktopOnlineMusic(
             ?.members.orEmpty().sortedBy { it.position }.distinctBy { it.artistId }
     }
 
-    suspend fun artistCatalogue(lease: AccountLease, artist: AccountUuid): ArtistCatalogue? {
-        val row = request(lease, DomainRoute.ArtistRanking(artist))
-        val mbid = row["artist_mbid"]?.jsonPrimitive?.contentOrNull?.let(::AccountUuid) ?: return null
-        val counts = row["recording_counts"]?.jsonObject.orEmpty().mapValues { (_, count) ->
-            count.jsonPrimitive.long.also { require(it >= 0) }
+    suspend fun artistCatalogue(lease: AccountLease, artist: AccountUuid, cache: Path?): ArtistCatalogue? {
+        requireOwner(lease)
+        val file = cache?.let { catalogDir(it, lease).resolve("ranking-${artist.value}.json") }
+        val saved = withContext(Dispatchers.IO) {
+            if (file == null || !Files.isRegularFile(file, NOFOLLOW_LINKS)) null
+            else try { cachedFile(file) } catch (_: IllegalArgumentException) { null }
         }
-        return ArtistCatalogue(mbid, counts)
+        fun ranking(row: JsonObject): ArtistCatalogue? {
+            val mbid = row["artist_mbid"]?.jsonPrimitive?.contentOrNull?.let(::AccountUuid) ?: return null
+            return ArtistCatalogue(mbid, row["recording_counts"]?.jsonObject.orEmpty().mapValues { (_, count) ->
+                count.jsonPrimitive.long.also { require(it >= 0) }
+            })
+        }
+        val previous = saved?.get("document") as? JsonObject
+        val now = System.currentTimeMillis()
+        requireOwner(lease)
+        if (previous != null && now - (saved["saved_ms"]?.jsonPrimitive?.longOrNull ?: 0L) in 0 until 3_600_000L)
+            return ranking(previous)
+        val live = try { request(lease, DomainRoute.ArtistRanking(artist)) } catch (failure: Exception) {
+            if (!retryableMusicRequest(failure) || previous == null) throw failure
+            requireOwner(lease)
+            return ranking(previous)
+        }
+        val row = if (live["ranking_available"] == JsonPrimitive(false) && previous != null &&
+            previous["artist_mbid"] == live["artist_mbid"]) JsonObject(live + previous.filterKeys { it == "recording_counts" }) else live
+        val result = ranking(row)
+        if (file != null) withContext(Dispatchers.IO) {
+            try {
+                Files.createDirectories(file.parent)
+                check(safeFolder(file.parent))
+                val temp = Files.createTempFile(file.parent, ".ranking-", ".tmp")
+                try {
+                    Files.writeString(temp, buildJsonObject { put("document", row); put("saved_ms", now) }.toString())
+                    requireOwner(lease)
+                    Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                } finally { Files.deleteIfExists(temp) }
+            } catch (_: java.io.IOException) { /* Online metadata is still available. */ }
+        }
+        requireOwner(lease)
+        return result
+    }
+
+    private suspend fun packScope(lease: AccountLease): PackScope {
+        requireOwner(lease)
+        val witness = services.session.capture(lease)
+        val preparation = checkNotNull(witness.owner.accountProjection).preparation
+        return PackScope(lease.storeId, lease.scopeId, RecommendationPackOwner(lease.profileId.value,
+            checkNotNull(preparation.scope.remote).userId.value, checkNotNull(preparation.binding).deviceId.value))
+    }
+
+    private val refreshes = mutableMapOf<Pair<AccountLease, String>, Job>()
+    val packRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    fun schedulePack(lease: AccountLease, mode: String) {
+        val key = lease to mode
+        synchronized(refreshes) {
+            if (refreshes[key]?.isActive == true) return
+            val job = work.launch(start = CoroutineStart.LAZY) {
+                val now = System.currentTimeMillis()
+                val (binding, saved) = try {
+                    val owner = packScope(lease)
+                    owner to packs.read(owner, mode, now)
+                } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { return@launch }
+                if (saved != null && now - saved.createdAtMs in 0 until 86_400_000L && saved.expiresAtMs - now > 3_600_000L) return@launch
+                var waitMs = 30_000L
+                repeat(6) { attempt ->
+                    if (current() != lease) return@launch
+                    try {
+                        val document = request(lease, DomainRoute.RecommendationPack(), buildJsonObject {
+                            put("context", mode); put("limit", 25); put("ttl_days", 7)
+                            put("exploration", 0.2); put("seed", 0); put("pipeline_key", "cpu-baseline"); put("shadow", false)
+                        })
+                        requireOwner(lease)
+                        packs.store(binding, mode, document, System.currentTimeMillis()) { current() == lease }
+                        packRevision.update { it + 1 }
+                        return@launch
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        if (!retryableMusicRequest(failure) || attempt == 5) return@launch
+                    }
+                    delay(waitMs); waitMs *= 2
+                }
+            }
+            refreshes[key] = job
+            job.invokeOnCompletion { synchronized(refreshes) { refreshes.remove(key, job) } }
+            job.start()
+        }
+    }
+
+    private suspend fun protectedCachedPack(lease: AccountLease, context: String,
+        expiry: OfflinePackExpiryPolicy): DecodedOfflinePack? = withContext(Dispatchers.IO) {
+        val owner = packScope(lease)
+        val pack = packs.read(owner, context, System.currentTimeMillis(), expiry)
+        requireOwner(lease)
+        pack
+    }
+
+    suspend fun cachedWave(lease: AccountLease, context: String): List<DesktopWaveTrack> {
+        val pack = protectedCachedPack(lease, context, OfflinePackExpiryPolicy.FreshOnly) ?: return emptyList()
+        return packTracks(lease, pack, wave = true)
+    }
+
+    private suspend fun packTracks(lease: AccountLease, pack: DecodedOfflinePack, wave: Boolean): List<DesktopWaveTrack> {
+        val skipHint = if (wave) "FREQUENT_WAVE_SKIPS" else "FREQUENT_HOME_SKIPS"
+        val recentHints = System.currentTimeMillis() - pack.createdAtMs in 0 until 86_400_000L
+        return selectWave(lease, pack.items.map {
+            DesktopWaveRecommendation(pack.recommendationRequestId, it.recordingId, it.sourceRank, it.section, pack.request.context, pack.offlinePackId,
+                if (wave) "personal_wave" else "home")
+        }, true, pack.items.filter { "LIKED_ORIGINAL_VERSION" in it.reasonCodes }.mapTo(hashSetOf()) { it.recordingId },
+            pack.items.filter { recentHints && skipHint in it.reasonCodes }.mapTo(hashSetOf()) { it.recordingId }, wave)
+    }
+
+    suspend fun savedHome(lease: AccountLease): SavedHome? {
+        val pack = protectedCachedPack(lease, "GENERAL", OfflinePackExpiryPolicy.AllowStaleLocalOnly(86_400_000L)) ?: return null
+        val tracks = packTracks(lease, pack, wave = false)
+        val domain = checkNotNull(services.store.domain)
+        val counts = mutableMapOf<String, Int>()
+        val rows = tracks.mapNotNull {
+            val track = domain.readExact(lease, AccountProjectionKind.TRACK, AccountUuid(it.trackId))?.detail as? AccountLocalDomainDetail.Track
+                ?: return@mapNotNull null
+            val artist = track.artist.orEmpty().trim().lowercase(java.util.Locale.ROOT)
+            val count = counts.getOrDefault(artist, 0)
+            if (count >= 2) return@mapNotNull null
+            counts[artist] = count + 1
+            SavedHomeTrack(it.trackId, track.title.orEmpty(), track.artist)
+        }
+        requireOwner(lease)
+        return SavedHome(pack.isStale, rows, pack.expiresAtMs + if (pack.isStale) 86_400_001L else 0L)
+    }
+
+    suspend fun playSavedHomeTrack(lease: AccountLease, track: String) {
+        val home = savedHome(lease) ?: error("PACK_EXPIRED")
+        val eligible = home.items.map { AccountUuid(it.id) }
+        val index = eligible.indexOf(AccountUuid(track))
+        check(index >= 0)
+        if (home.stale) play(lease, eligible, "LIBRARY", index) else {
+            val pack = protectedCachedPack(lease, "GENERAL", OfflinePackExpiryPolicy.FreshOnly) ?: error("PACK_EXPIRED")
+            val batch = packTracks(lease, pack, wave = false).associateBy { it.trackId }
+            val items = eligible.mapNotNull { batch[it.value] }
+            val position = items.indexOfFirst { it.trackId == track }
+            check(position >= 0)
+            startWave(lease, items, position) { emptyList() }
+        }
     }
 
     suspend fun rankedWave(lease: AccountLease, context: String, session: WaveCalendar = WaveCalendar()): List<DesktopWaveTrack> {
+        return try { onlineWave(lease, context, session) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            if (!retryableMusicRequest(failure)) throw failure
+            cachedWave(lease, context).ifEmpty { throw failure }
+        }
+    }
+
+    private suspend fun onlineWave(lease: AccountLease, context: String, session: WaveCalendar): List<DesktopWaveTrack> {
         require(context in setOf("GENERAL", "WORK", "SLEEP"))
         val now = session.start
         val query = buildJsonObject {
@@ -267,32 +478,36 @@ internal class DesktopOnlineMusic(
         val requestId = AccountUuid(DomainJson.text(result, "recommendation_request_id", 36))
         val items = result.getValue("items").jsonArray
         require(items.size <= 50)
+        val confirmed = hashSetOf<String>()
+        val reduced = hashSetOf<String>()
         val ranked = items.map { item ->
             val row = item.jsonObject
             require(AccountUuid(DomainJson.text(row, "recommendation_request_id", 36)) == requestId)
             val recording = AccountUuid(DomainJson.text(row, "recording_id", 36))
             val rank = DomainJson.number(row, "source_rank").also { require(it in 1..1000) }.toInt()
+            val reasons = (row["reason_codes"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            if ("LIKED_ORIGINAL_VERSION" in reasons) confirmed.add(recording.value)
+            if ("FREQUENT_WAVE_SKIPS" in reasons) reduced.add(recording.value)
             val section = row["section"]?.jsonPrimitive?.contentOrNull?.also { require(it.matches(Regex("[a-z][a-z0-9_]{0,99}"))) }
             DesktopWaveRecommendation(requestId.value, recording.value, rank, section, context)
         }.sortedBy { it.sourceRank }.distinctBy { it.recordingId }
+        schedulePack(lease, context)
+        return selectWave(lease, ranked, false, confirmed, reduced, wave = true)
+    }
+
+    private suspend fun selectWave(lease: AccountLease, ranked: List<DesktopWaveRecommendation>, offline: Boolean,
+        confirmed: Set<String>, reduced: Set<String>, wave: Boolean): List<DesktopWaveTrack> {
         val recordingIds = ranked.map { AccountUuid(it.recordingId) }
         val catalog = checkNotNull(services.store.catalog)
         var selected = catalog.resolveMusicTargets(lease, recordingIds, true)
-        if (selected.isEmpty() && ranked.isNotEmpty()) {
+        if (!offline && selected.isEmpty() && ranked.isNotEmpty()) {
             services.sync.runPass(lease)
             selected = catalog.resolveMusicTargets(lease, recordingIds, true)
         }
         requireOwner(lease)
+        if (selected.isEmpty() && offline) return emptyList()
         check(selected.isNotEmpty()) { "NO_PLAYABLE_RECOMMENDATIONS" }
-        val domain = checkNotNull(services.store.domain)
-        return ranked.mapNotNull { recommendation ->
-            val id = selected[AccountUuid(recommendation.recordingId)] ?: return@mapNotNull null
-            val excluded = domain.readTrackPreferences(lease, id).any { row ->
-                val pref = row.detail as? AccountLocalDomainDetail.Preference
-                return@any !row.header.removed && (pref?.rawPreference == "DISLIKED" || pref?.excludedFromTaste == true)
-            }
-            if (excluded) null else DesktopWaveTrack(id.value, recommendation)
-        }
+        return selectAccountWave(services.store, lease, ranked, selected, offline, confirmed, reduced, wave).also { requireOwner(lease) }
     }
 
     private suspend fun trackGenres(lease: AccountLease, id: AccountUuid): Set<String> {
@@ -325,10 +540,16 @@ internal class DesktopOnlineMusic(
         session: WaveCalendar = WaveCalendar()) {
         requireOwner(lease)
         val context = checkNotNull(tracks.firstOrNull()?.recommendation) { "NO_PLAYABLE_RECOMMENDATIONS" }.context
-        startWave(lease, tracks) {
+        startWave(lease, tracks, 0) {
             val ranked = rankedWave(lease, context, session)
             if (genre == null) ranked else wheelMix(lease, genre, ranked)
         }
+    }
+
+    suspend fun playSavedWave(lease: AccountLease, context: String) {
+        val tracks = cachedWave(lease, context)
+        check(tracks.isNotEmpty()) { "NO_SAVED_TRACKS" }
+        startWave(lease, tracks, 0) { cachedWave(lease, context) }
     }
 
     suspend fun downloadCurrent(lease: AccountLease, track: String) {
@@ -353,6 +574,22 @@ internal class DesktopOnlineMusic(
         services.session.revalidate(witness)
         val token = AccountUuid(DomainJson.text(root, "token", 36))
         return witness.server.transport.api.toASCIIString() + "/api/v1/playlist-shares/" + token.value
+    }
+}
+
+internal fun retryableMusicRequest(error: Exception): Boolean {
+    var cause: Throwable = error
+    while (cause is java.util.concurrent.CompletionException || cause is java.util.concurrent.ExecutionException) {
+        cause = cause.cause ?: return false
+    }
+    return when (cause) {
+        is DesktopSyncException -> cause.failure in setOf(DesktopSyncFailure.RETRY_LATER, DesktopSyncFailure.UNAVAILABLE)
+        is app.autplay.desktop.account.AccountControlException -> cause.code in setOf(
+            app.autplay.desktop.account.AccountControlFailure.DEADLINE,
+            app.autplay.desktop.account.AccountControlFailure.SERVER_UNAVAILABLE,
+            app.autplay.desktop.account.AccountControlFailure.TRANSPORT_UNAVAILABLE)
+        is java.net.SocketException, is java.net.UnknownHostException, is java.net.SocketTimeoutException -> true
+        else -> false
     }
 }
 

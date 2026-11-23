@@ -105,10 +105,13 @@ class DesktopQueueAcceptanceTest {
                 try { kotlinx.coroutines.awaitCancellation() } finally { cancelled.complete(Unit) }
             }
             withTimeout(5_000) { started.await() }
-            controller.playTracks(listOf(first), "PLAYLIST")
+            controller.playTracks(listOf(first, second), "SEARCH", startIndex = 1)
             withTimeout(5_000) { cancelled.await() }
-            eventually("manual playlist owns playback") {
-                fixture.store.state.value.queue?.let { it.queueType == "PLAYLIST" && it.entries.map { row -> row.trackId } == listOf(first) } == true
+            eventually("selected search result owns playback in the original page order") {
+                fixture.store.state.value.queue?.let { queue ->
+                    queue.queueType == "SEARCH" && queue.entries.map { it.trackId } == listOf(first, second) &&
+                        queue.entries[1].id == queue.currentEntryId
+                } == true
             }
         }
     }

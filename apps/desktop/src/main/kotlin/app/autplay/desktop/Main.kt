@@ -1050,7 +1050,7 @@ public class DesktopRuntime private constructor(
                 // Retain the exact immutable public bundle identity for this runtime's entire lifetime.
                 val bundle = if (normalMac) readDesktopSignedBundle() else null
                 val production = if (normalMac && bundle?.identity != null) DesktopAccountProductionRuntime.open(
-                    bundle, store, scope, audio, { DesktopAudioOwnerArbiter.createLocalEngine(nativeHelper()) },
+                    bundle, store, scope, dataRoot.toRealPath(), audio, { DesktopAudioOwnerArbiter.createLocalEngine(nativeHelper()) },
                     settings.preferences.value.value.downloadOnMeteredNetwork, initializeAccounts,
                     language = { if (settings.preferences.value.value.appLanguage == "RU") DesktopLanguage.Russian else DesktopLanguage.English },
                     fenceSources = { runtimeOwner?.fenceSourcesForAccount() },
@@ -1219,6 +1219,9 @@ public fun DesktopApp(
     val music = accountWorkspace?.music
     val musicLease = if (displayedScope != null && accountHomeAvailable && contextReady && windowVisible && !lifecycleState.closing)
         accountWorkspace.accountOwner()?.takeIf { it.sessionFamily != null } else null
+    LaunchedEffect(music, musicLease) {
+        if (music != null && musicLease != null) music.catalogDownloads.restore(musicLease)
+    }
     val accountHomeState = if (accountHomeVisible) accountWorkspace?.state?.collectAsState()?.value else null
     val catalogKind = when (libraryKind) {
         DesktopLibraryKind.Artist -> DesktopCatalogKind.Artist
@@ -1679,6 +1682,13 @@ public fun DesktopApp(
             key(musicLease, id) {
                 app.autplay.desktop.presentation.PlayerArtistPicker(music, musicLease, id, host.musicCacheRoot, language)
                 app.autplay.desktop.presentation.PlayerDownload(music, musicLease, id, language)
+            }
+        }) else if (host != null && library != null && host.selectedPlayerLease == null) ({ id ->
+            key(id) {
+                if (library.tracks.any { it.id == id && it.collectionState == "ACTIVE" })
+                    app.autplay.desktop.presentation.LocalPlayerPlaylists(library.playlists, language) { playlist ->
+                        command { runtime -> if (runtime.selectedPlayerLease == null) runtime.addToPlaylist(playlist, id) }
+                    }
             }
         }) else null,
         homeWheel = { key(music, musicLease) { DesktopWaveWheel(music, musicLease, language) } },

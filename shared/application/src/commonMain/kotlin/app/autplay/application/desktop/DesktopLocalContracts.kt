@@ -29,7 +29,7 @@ data class DesktopPlaylist(
     val description: String? = null,
 )
 data class DesktopWaveRecommendation(val requestId: String, val recordingId: String, val sourceRank: Int,
-    val section: String?, val context: String)
+    val section: String?, val context: String, val offlinePackId: String? = null, val surface: String = "personal_wave")
 data class DesktopWaveTrack(val trackId: String, val recommendation: DesktopWaveRecommendation? = null)
 data class DesktopQueueEntry(val id: String, val trackId: String, val recommendation: DesktopWaveRecommendation? = null)
 

@@ -45,6 +45,7 @@ internal sealed class DomainRoute(val method: String, val path: String, val requ
         init { require(query.isNotBlank() && query.length <= 200 && (cursor == null || cursor.length in 1..2048)) }
     }
     class PreparePlayback : DomainRoute("POST", "/library/search/playback", 8192, 8192)
+    class RecommendationPack : DomainRoute("POST", "/recommendation-packs", 4096, 720_896)
     class Recommendations : DomainRoute("POST", "/recommendations", 4096, 1_048_576)
     class SharePlaylist : DomainRoute("POST", "/playlist-shares", 8_388_608, 16_384)
     class Discover(kind: String, query: String, offset: Int) : DomainRoute("GET", "/music/discovery/search", 0, 1_048_576,

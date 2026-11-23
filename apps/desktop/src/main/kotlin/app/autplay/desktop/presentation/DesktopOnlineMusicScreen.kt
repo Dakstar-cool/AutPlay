@@ -22,7 +22,8 @@ import app.autplay.ui.desktop.DesktopLanguage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.prefs.Preferences
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 
 internal enum class MusicSource(val ru: String, val en: String) {
     Vault("Vault", "Vault"), Artists("Исполнители", "Artists"), Albums("Альбомы", "Albums")
@@ -100,6 +101,19 @@ internal fun OnlineWave(service: DesktopOnlineMusic, lease: AccountLease, langua
     val ru = language == DesktopLanguage.Russian
     var busy by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
+    val revision by service.packRevision.collectAsState()
+    var saved by remember(lease) { mutableStateOf<SavedHome?>(null) }
+    LaunchedEffect(service, lease) {
+        while (true) { service.schedulePack(lease, "GENERAL"); delay(86_400_000L) }
+    }
+    LaunchedEffect(service, lease, revision) {
+        while (true) {
+            saved = try { service.savedHome(lease) }
+            catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            val expiry = saved?.validUntilMs ?: break
+            delay((expiry - System.currentTimeMillis()).coerceAtLeast(1))
+        }
+    }
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(if (ru) "Моя волна · Sona" else "My wave · Sona", style = MaterialTheme.typography.titleLarge)
@@ -120,6 +134,33 @@ internal fun OnlineWave(service: DesktopOnlineMusic, lease: AccountLease, langua
                 }) { Text(label) }
             }
         }
+        val home = saved
+        if (home != null && home.items.isNotEmpty()) {
+            Text(if (home.stale) (if (ru) "На устройстве из прошлой подборки" else "Downloaded from a previous mix")
+                else (if (ru) "Сохранённые рекомендации" else "Saved recommendations"))
+            home.items.take(6).forEach { track ->
+                TextButton(enabled = !busy, onClick = {
+                    if (!busy) {
+                        busy = true; failed = false
+                        scope.launch {
+                            try { service.playSavedHomeTrack(lease, track.id) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { failed = true } finally { busy = false }
+                        }
+                    }
+                }) { Text(listOfNotNull(track.title, track.artist).joinToString(" · ")) }
+            }
+        }
+        if (home != null && !home.stale && home.items.isNotEmpty()) TextButton(enabled = !busy, onClick = {
+            if (!busy) {
+                busy = true; failed = false
+                scope.launch {
+                    try { service.playSavedWave(lease, "GENERAL") }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { failed = true } finally { busy = false }
+                }
+            }
+        }) { Text(if (ru) "Слушать офлайн" else "Play offline") }
         if (busy) LinearProgressIndicator()
         if (failed) Text(if (ru) "Не удалось запустить волну Sona. Проверьте подключение и синхронизацию."
             else "Could not start the Sona mix. Check your connection and sync.")
@@ -159,7 +200,7 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
     var error by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf<AccountUuid?>(null) }
     var download by remember { mutableStateOf<Pair<String, AccountUuid>?>(null) }
-    var playlistTrack by remember { mutableStateOf<MusicCatalogueContextRequest?>(null) }
+    var playlistTrack by remember { mutableStateOf<PlaylistTrackTarget?>(null) }
     var rankedCards by remember(target) { mutableStateOf<List<InternetMetadataDiscoveryCard>?>(null) }
     var incomplete by remember(target) { mutableStateOf(false) }
     var offset by remember { mutableIntStateOf(0) }
@@ -180,7 +221,7 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
                 val (page, offline) = service.discover(lease, value, offset, cache, savedOnly)
                 discovery = page
                 cached = offline
-                if (target == initial && !value.releases && ranking.isNotEmpty() && rankedCards == null) {
+                if (target == initial && initial != null && rankedCards == null) {
                     val rows = page.items.toMutableList()
                     var last = page
                     while (last.nextOffset != null) {
@@ -193,7 +234,9 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
                         last = following
                     }
                     incomplete = incomplete || last.truncated
-                    rankedCards = rows.distinctBy { it.id }.sortedByDescending { ranking[it.recordingId] ?: 0L }
+                    val order = if (value.releases) compareByDescending<InternetMetadataDiscoveryCard> { it.releaseDate.orEmpty() }
+                        else compareByDescending { ranking[it.recordingId] ?: 0L }
+                    rankedCards = rows.distinctBy { it.id }.sortedWith(order.thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }.thenBy { it.entityId })
                 }
             }
         } catch (e: CancellationException) { throw e }
@@ -241,17 +284,21 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
     Column(Modifier.fillMaxWidth().weight(1f, false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         page?.items?.forEach { hit -> key(hit.publication, hit.ref) {
             ListItem(headlineContent = { Text(hit.title) }, supportingContent = { Text(hit.artist) },
-                trailingContent = { TextButton(enabled = playing == null && hit.available, onClick = {
+                trailingContent = { Row {
+                    TextButton(enabled = playing == null, onClick = { playlistTrack = PlaylistTrackTarget.Vault(hit) }) {
+                        Text(if (ru) "В плейлист" else "Add to playlist")
+                    }
+                    TextButton(enabled = playing == null && hit.available, onClick = {
                     if (playing == null) {
                         playing = hit.ref
                         scope.launch {
-                            try { service.stream(lease, hit) }
+                            try { service.stream(lease, hit, page.items) }
                             catch (e: CancellationException) { throw e }
                             catch (_: Exception) { error = true }
                             finally { playing = null }
                         }
                     }
-                }) { Text(if (ru) "Слушать" else "Play") } })
+                }) { Text(if (ru) "Слушать" else "Play") } } })
         } }
         if (cards != null) (ranked?.drop(offset)?.take(30) ?: cards.items).forEach { card -> key(card.id) {
             val browse = card.browseTarget
@@ -264,7 +311,11 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
                     if (card.knownEntity == app.autplay.application.server.InternetMetadataDiscoveryEntity.RELEASE)
                         ReleaseCover(service, lease, card.entityId)
                 }, headlineContent = { Text(card.title) },
-                supportingContent = { Text(listOfNotNull(card.artist, card.disambiguation, card.releaseDate).joinToString(" · ")) },
+                supportingContent = {
+                    val guest = initial?.entity?.value?.let { JsonPrimitive(it) in (card.rawPayload["guest_artist_ids"] as? JsonArray).orEmpty() } == true
+                    Text(listOfNotNull(card.artist, card.disambiguation, card.releaseDate,
+                        if (guest) (if (ru) "Приглашённый исполнитель" else "Guest appearance") else null).joinToString(" · "))
+                },
                 trailingContent = {
                     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         if (browse != null) {
@@ -277,7 +328,7 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
                             TextButton(onClick = { drill(false) }) { Text(if (ru) "Треки" else "Tracks") }
                         }
                         if (cards.knownActionsAllowed && card.trackLookup != null) TextButton(onClick = {
-                            playlistTrack = MusicCatalogueContextRequest.fromCard(card)
+                            playlistTrack = MusicCatalogueContextRequest.fromCard(card)?.let(PlaylistTrackTarget::Catalogue)
                         }) { Text(if (ru) "В плейлист" else "Add to playlist") }
                         if (targetDownload != null) TextButton(onClick = { download = targetDownload }) {
                             Text(if (ru) "Загрузить" else "Download")
@@ -302,7 +353,7 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
 
 
 @Composable
-private fun CataloguePlaylistDialog(service: DesktopOnlineMusic, lease: AccountLease, selection: MusicCatalogueContextRequest,
+private fun CataloguePlaylistDialog(service: DesktopOnlineMusic, lease: AccountLease, selection: PlaylistTrackTarget,
     ru: Boolean, close: () -> Unit) {
     val scope = rememberCoroutineScope()
     var after by remember { mutableStateOf<AccountUuid?>(null) }
@@ -356,7 +407,7 @@ private fun CataloguePlaylistDialog(service: DesktopOnlineMusic, lease: AccountL
                 if (!saving) {
                     saving = true; error = false
                     scope.launch {
-                        try { service.appendCatalogueTrack(lease, selection, row, operation, entry, timestamp); saved = true }
+                        try { service.appendPlaylistTrack(lease, selection, row, operation, entry, timestamp); saved = true }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { error = true }
                         finally { saving = false }
@@ -407,7 +458,7 @@ private fun ArtistDiscography(service: DesktopOnlineMusic, lease: AccountLease, 
     var albums by remember { mutableStateOf(false) }
     LaunchedEffect(lease, artist, attempt) {
         loading = true; error = false
-        try { catalogue = service.artistCatalogue(lease, artist) }
+        try { catalogue = service.artistCatalogue(lease, artist, cache) }
         catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { error = true }
         finally { loading = false }
     }
@@ -452,35 +503,17 @@ private fun ReleaseCover(service: DesktopOnlineMusic, lease: AccountLease, id: S
 @Composable
 private fun CatalogDownloadDialog(service: DesktopOnlineMusic, lease: AccountLease, kind: String,
     id: AccountUuid, ru: Boolean, close: () -> Unit) {
-    val scope = rememberCoroutineScope()
     var alternatives by remember { mutableStateOf(false) }
-    val prefs = remember(lease.scopeId, id, kind) { Preferences.userRoot().node("app/autplay/catalog/${lease.scopeId.value}/$kind/${id.value}") }
-    val slot = if (alternatives) "all" else "standard"
-    var state by remember(slot) { mutableStateOf<CatalogJob?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember(slot) { mutableStateOf(false) }
-    fun run(start: Boolean) {
-        if (busy) return
-        busy = true; error = false
-        scope.launch {
-            try {
-                val saved = prefs.get(slot, null)?.let(::AccountUuid)
-                val op = saved ?: AccountUuid.random().also { prefs.put(slot, it.value); prefs.flush() }
-                var job = if (saved == null || state == null) service.downloadPreview(lease, op, kind, id, alternatives)
-                    else service.downloadAction(lease, op, "status")
-                state = job
-                if (start && job.phase == "preview") job = service.downloadAction(lease, op, "start")
-                state = job
-                var steps = 0
-                while (job.phase in setOf("discovery", "inspect", "downloading") && steps++ < 45) {
-                    if (job.phase == "downloading" && job.counts["available"] == 0) delay(4000)
-                    job = service.downloadAction(lease, op, "advance")
-                    state = job
-                }
-            } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { error = true }
-            finally { busy = false }
-        }
+    val target = remember(kind, id, alternatives) { CatalogTarget(kind, id, alternatives) }
+    val downloads = service.catalogDownloads
+    val states by downloads.states.collectAsState()
+    val progress = states[lease to target]
+    val state = progress?.job
+    val busy = progress?.running == true
+    val error = progress?.error == true
+    LaunchedEffect(lease, target) {
+        if (progress == null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { downloads.hasOperation(lease, target) })
+            downloads.submit(lease, target)
     }
     AlertDialog(onDismissRequest = close, title = { Text(if (ru) "Загрузка в Vault" else "Download to Vault") },
         text = {
@@ -495,6 +528,14 @@ private fun CatalogDownloadDialog(service: DesktopOnlineMusic, lease: AccountLea
                         else "In Vault: ${counts["vault"]} · Queued: ${counts["queued"]} · Available: ${counts["available"]}")
                     Text(if (ru) "Отсутствуют или не загружены: ${counts.getValue("missing") + counts.getValue("failed")}"
                         else "Missing or failed: ${counts.getValue("missing") + counts.getValue("failed")}")
+                    job.issues.take(12).forEach { (title, reason) ->
+                        val label = when (reason) {
+                            "source_not_found" -> if (ru) "Источник не найден" else "Source not found"
+                            "catalogue_match_evidence_missing" -> if (ru) "Совпадение не подтверждено" else "Match unconfirmed"
+                            else -> if (ru) "Не удалось загрузить" else "Download failed"
+                        }
+                        Text("$title · $label", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 if (busy) LinearProgressIndicator()
                 if (error) Text(if (ru) "Не удалось обновить загрузку" else "Could not update download")
@@ -502,8 +543,7 @@ private fun CatalogDownloadDialog(service: DesktopOnlineMusic, lease: AccountLea
         }, confirmButton = {
             val start = state?.phase == "preview"
             TextButton(enabled = !busy, onClick = {
-                if (state?.phase == "complete") { prefs.remove(slot); state = null }
-                run(start)
+                downloads.submit(lease, target, start, restart = state?.phase == "complete")
             }) {
                 Text(if (start) (if (ru) "Начать" else "Start") else (if (ru) "Проверить" else "Check"))
             }
@@ -513,6 +553,9 @@ private fun CatalogDownloadDialog(service: DesktopOnlineMusic, lease: AccountLea
 @Composable
 internal fun PlayerDownload(service: DesktopOnlineMusic, lease: AccountLease, id: String, language: DesktopLanguage) {
     val ru = language == DesktopLanguage.Russian
+    var chooser by remember { mutableStateOf(false) }
+    TextButton(onClick = { chooser = true }) { Text(if (ru) "В плейлист" else "Add to playlist") }
+    if (chooser) CataloguePlaylistDialog(service, lease, PlaylistTrackTarget.Local(AccountUuid(id)), ru) { chooser = false }
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var requested by remember { mutableStateOf(false) }
@@ -532,4 +575,19 @@ internal fun PlayerDownload(service: DesktopOnlineMusic, lease: AccountLease, id
         error -> if (ru) "Повторить загрузку" else "Retry download"
         else -> if (ru) "Скачать на устройство" else "Download to device"
     }) }
+}
+
+@Composable
+internal fun LocalPlayerPlaylists(playlists: List<app.autplay.application.desktop.DesktopPlaylist>, language: DesktopLanguage,
+    add: (String) -> Unit) {
+    if (playlists.isEmpty()) return
+    val ru = language == DesktopLanguage.Russian
+    var open by remember { mutableStateOf(false) }
+    TextButton(onClick = { open = true }) { Text(if (ru) "В плейлист" else "Add to playlist") }
+    if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(if (ru) "В плейлист" else "Add to playlist") },
+        text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+            playlists.forEach { playlist ->
+                TextButton(onClick = { open = false; add(playlist.id) }) { Text(playlist.name) }
+            }
+        } }, confirmButton = { TextButton(onClick = { open = false }) { Text(if (ru) "Закрыть" else "Close") } })
 }

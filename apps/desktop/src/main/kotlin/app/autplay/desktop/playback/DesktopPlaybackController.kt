@@ -395,19 +395,19 @@ public class DesktopPlaybackController(
         }
     }
 
-    public fun playTracks(trackIds: List<String>, queueType: String = "LIBRARY"): Unit {
+    public fun playTracks(trackIds: List<String>, queueType: String = "LIBRARY", startIndex: Int = 0): Unit {
         if (trackIds.size > DesktopLocalLimits.MAX_QUEUE_ENTRIES) {
             dispatch { setError("QUEUE_LIMIT") }
             return
         }
         // Caller-owned mutable lists must not alter a queued request after its size was admitted.
         val selectedIds = trackIds.take(DesktopLocalLimits.MAX_QUEUE_ENTRIES + 1)
-        dispatch { replaceQueue(selectedIds, queueType) }
+        dispatch { replaceQueue(selectedIds, queueType, startIndex = startIndex) }
     }
 
-    internal fun playWave(rows: List<DesktopWaveTrack>, next: suspend () -> List<DesktopWaveTrack>) {
+    internal fun playWave(rows: List<DesktopWaveTrack>, startIndex: Int = 0, next: suspend () -> List<DesktopWaveTrack>) {
         val batch = rows.take(200)
-        dispatch { replaceQueue(batch.map { it.trackId }, "USER", wave = batch, nextWave = next) }
+        dispatch { replaceQueue(batch.map { it.trackId }, "USER", wave = batch, nextWave = next, startIndex = startIndex) }
     }
 
     private fun refillWave() {
@@ -447,7 +447,7 @@ public class DesktopPlaybackController(
     }
 
     private suspend fun replaceQueue(trackIds: List<String>, queueType: String, copy: DesktopMediaCopySelection? = null,
-        wave: List<DesktopWaveTrack>? = null, nextWave: (suspend () -> List<DesktopWaveTrack>)? = null): Unit {
+        wave: List<DesktopWaveTrack>? = null, nextWave: (suspend () -> List<DesktopWaveTrack>)? = null, startIndex: Int = 0): Unit {
         if (trackIds.size > DesktopLocalLimits.MAX_QUEUE_ENTRIES) {
             setError("QUEUE_LIMIT")
             return
@@ -456,10 +456,10 @@ public class DesktopPlaybackController(
             setError("UNSUPPORTED_QUEUE_MODE")
             return
         }
-        if (trackIds.isEmpty() || copy == null && !admitCollectionTracks(trackIds, libraryState.value)) return
+        if (startIndex !in trackIds.indices || copy == null && !admitCollectionTracks(trackIds, libraryState.value)) return
         val entries = trackIds.mapIndexed { index, id -> DesktopQueueEntry(newId(), id, wave?.get(index)?.recommendation) }
         val previous = queue
-        val candidate = newSession(DesktopQueue(newId(), entries, entries.first().id, queueType))
+        val candidate = newSession(DesktopQueue(newId(), entries, entries[startIndex].id, queueType))
         mediaCopyQueue = copy?.let { candidate.id to it }
         // Storage rechecks new entry/track mappings in its transaction. A removal after this
         // snapshot must refuse selection before the old native owner or timer is changed.

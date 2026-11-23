@@ -83,21 +83,21 @@ internal class DesktopAccountProductionMedia(
             queueType = if (target.occurrenceId == null) "LIBRARY" else "PLAYLIST")
     }
 
-    internal suspend fun playSelection(lease: AccountLease, ids: List<AccountUuid>, queueType: String): Unit = serial.withLock {
-        require(ids.size in 1..200 && queueType in setOf("USER", "SEARCH"))
+    internal suspend fun playSelection(lease: AccountLease, ids: List<AccountUuid>, queueType: String, startIndex: Int): Unit = serial.withLock {
+        require(ids.size in 1..200 && startIndex in ids.indices && queueType in setOf("USER", "SEARCH", "LIBRARY"))
         requireLease(lease)
-        if (prepareNetworkLease(lease) != lease) changed()
+        if (ids.any { journal.readTrackCopies(lease, it, null, 1).isEmpty() } && prepareNetworkLease(lease) != lease) changed()
         select(lease)
         for (id in ids.distinct()) runtime.library.includeTarget(lease, id, null, retainQueue = false, serverSelection = true)
         requireLease(lease)
-        controller.playTracks(ids.map { it.value }, queueType)
+        controller.playTracks(ids.map { it.value }, queueType, startIndex)
     }
 
-    internal suspend fun playWave(lease: AccountLease, tracks: List<DesktopWaveTrack>,
+    internal suspend fun playWave(lease: AccountLease, tracks: List<DesktopWaveTrack>, startIndex: Int,
         next: suspend () -> List<DesktopWaveTrack>): Unit = serial.withLock {
         require(tracks.size in 1..200)
         requireLease(lease)
-        if (prepareNetworkLease(lease) != lease) changed()
+        if (tracks.any { it.recommendation?.offlinePackId == null } && prepareNetworkLease(lease) != lease) changed()
         select(lease)
         suspend fun include(rows: List<DesktopWaveTrack>, retain: Boolean) {
             for (track in rows.distinctBy { it.trackId })
@@ -105,7 +105,7 @@ internal class DesktopAccountProductionMedia(
             requireLease(lease)
         }
         include(tracks, false)
-        controller.playWave(tracks) {
+        controller.playWave(tracks, startIndex) {
             requireLease(lease)
             val rows = next()
             serial.withLock {

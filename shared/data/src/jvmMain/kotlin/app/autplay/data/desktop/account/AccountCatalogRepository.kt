@@ -164,6 +164,37 @@ internal class AccountCatalogRepository(private val owner:AccountRepositoryOwner
     override suspend fun readPlaylist(lease:AccountLease,playlistId:AccountUuid):AccountLocalDomainRow? = owner.read(lease){sql,_->
         AccountLocalDomainReader.read(sql,lease.scopeId,AccountProjectionKind.PLAYLIST,null,1,playlistId).singleOrNull()
     }
+    override suspend fun recordingRefs(lease: AccountLease, recording: AccountUuid, after: AccountUuid?, limit: Int): List<AccountUuid> =
+        owner.read(lease) { sql, _ ->
+            require(limit in 1..100)
+            sql.query("""SELECT p.local_id FROM j_account_projection_visibility p JOIN j_track_detail d
+                ON d.scope_id=p.scope_id AND d.track_ref_id=p.local_id
+                WHERE p.scope_id=? AND p.aggregate_type='USER_TRACK_REF' AND p.effective_deleted=0
+                AND d.recording_id=? AND p.local_id>? ORDER BY p.local_id LIMIT ?""", lease.scopeId, recording, after?.value.orEmpty(), limit) {
+                AccountUuid(it.getText(0))
+            }
+        }
+
+    override suspend fun waveListens(lease: AccountLease, since: Long, through: Long): List<AccountWaveListen> =
+        owner.read(lease) { sql, _ ->
+            // The local checkpoint retains the start time even before the server echoes a listen.
+            sql.query("""SELECT track_id,started_ms,played_ms,completion_ratio,surface FROM (
+                SELECT c.track_id,c.started_ms,c.played_ms,l.completion_ratio,
+                    json_extract(CAST(l.recommendation AS TEXT),'$.surface') AS surface
+                FROM j_playback_checkpoint c LEFT JOIN j_listening l ON l.scope_id=c.scope_id AND l.listening_id=c.listening_id
+                WHERE c.scope_id=? AND c.excluded=0 AND c.started_ms>? AND c.started_ms<=?
+                UNION ALL
+                SELECT l.track_ref_id,unixepoch(l.source_created_at)*1000,l.played_ms,l.completion_ratio,
+                    json_extract(CAST(l.recommendation AS TEXT),'$.surface')
+                FROM j_listening l WHERE l.scope_id=? AND l.excluded_from_taste=0
+                AND unixepoch(l.source_created_at)*1000>? AND unixepoch(l.source_created_at)*1000<=?
+                AND NOT EXISTS(SELECT 1 FROM j_playback_checkpoint c WHERE c.scope_id=l.scope_id AND c.listening_id=l.listening_id)
+            ) ORDER BY started_ms DESC""", lease.scopeId, since, through, lease.scopeId, since, through) {
+                AccountWaveListen(AccountUuid(it.getText(0)), it.getLong(1), it.getLong(2),
+                    if (it.isNull(3)) null else it.getDouble(3), sql.nullable(it, 4))
+            }
+        }
+
     override suspend fun resolveMusicTargets(lease: AccountLease, ids: List<AccountUuid>, recording: Boolean): Map<AccountUuid, AccountUuid> =
         owner.read(lease) { sql, _ ->
             require(ids.size <= 200)

@@ -8,8 +8,10 @@ fun DesktopWaveRecommendation.attribution(): JsonObject = buildJsonObject {
     put("recording_id", recordingId)
     put("source_rank", sourceRank)
     section?.let { put("section_key", it) }
-    put("source", "online")
-    put("surface", "personal_wave")
+    put("source", if (offlinePackId == null) "online" else "offline_pack")
+    offlinePackId?.let { put("offline_pack_id", it) }
+    require(surface in setOf("home", "personal_wave"))
+    put("surface", surface)
 }
 
 fun DesktopWaveRecommendation.queueDocument(): JsonObject {
@@ -23,5 +25,6 @@ fun restoredWaveRecommendation(row: JsonObject): DesktopWaveRecommendation {
     require(context in setOf("GENERAL", "WORK", "SLEEP"))
     return DesktopWaveRecommendation(row.getValue("recommendation_request_id").jsonPrimitive.content,
         row.getValue("recording_id").jsonPrimitive.content, row.getValue("source_rank").jsonPrimitive.int,
-        row["section_key"]?.jsonPrimitive?.content, context)
+        row["section_key"]?.jsonPrimitive?.content, context, row["offline_pack_id"]?.jsonPrimitive?.content,
+        row.getValue("surface").jsonPrimitive.content)
 }
