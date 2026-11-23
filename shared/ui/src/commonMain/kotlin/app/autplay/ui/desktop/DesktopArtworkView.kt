@@ -1,5 +1,7 @@
 package app.autplay.ui.desktop
 
+import app.autplay.ui.AutPlayArtworkPlaceholder
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -53,7 +55,7 @@ private class DesktopDecodedArtwork(val identity: DesktopArtworkRenderIdentity, 
 @Composable
 internal fun DesktopArtworkView(trackId: String?, artwork: DesktopArtwork?, language: DesktopLanguage,
     size: Dp = 64.dp) {
-    DesktopArtworkImage(rememberDesktopArtworkBitmap(trackId, artwork), language, size)
+    DesktopArtworkImage(rememberDesktopArtworkBitmap(trackId, artwork), language, size, trackId.orEmpty())
 }
 
 /** Decode only the latest supplied cache entry, outside any retained outgoing visual scene. */
@@ -85,13 +87,11 @@ internal fun rememberDesktopArtworkBitmap(trackId: String?, artwork: DesktopArtw
 
 /** Passive drawing only; a retained scene never owns a decoder or a command. */
 @Composable
-internal fun DesktopArtworkImage(bitmap: ImageBitmap?, language: DesktopLanguage, size: Dp) {
+internal fun DesktopArtworkImage(bitmap: ImageBitmap?, language: DesktopLanguage, size: Dp, seed: String = "") {
+    val modifier = Modifier.size(size).clip(MaterialTheme.shapes.medium)
     if (bitmap != null) {
-        Image(bitmap, DesktopMetadataText.Cover.label(language), Modifier.size(size), contentScale = ContentScale.Fit)
+        Image(bitmap, DesktopMetadataText.Cover.label(language), modifier, contentScale = ContentScale.Fit)
     } else {
-        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
-            Box(Modifier.size(size).semantics { contentDescription = DesktopMetadataText.NoCover.label(language) },
-                contentAlignment = Alignment.Center) { Text("♫", style = MaterialTheme.typography.headlineMedium) }
-        }
+        AutPlayArtworkPlaceholder(seed, modifier.semantics { contentDescription = DesktopMetadataText.NoCover.label(language) })
     }
 }

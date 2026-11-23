@@ -1,0 +1,224 @@
+package app.autplay.desktop.presentation
+
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.autplay.application.desktop.account.AccountLease
+import app.autplay.application.desktop.account.AccountUuid
+import app.autplay.application.server.InternetMetadataDiscoveryPage
+import app.autplay.ui.desktop.DesktopLanguage
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.prefs.Preferences
+
+internal enum class MusicSource(val ru: String, val en: String) {
+    Vault("Vault", "Vault"), Artists("Исполнители", "Artists"), Albums("Альбомы", "Albums")
+}
+
+@Composable
+internal fun OnlineWave(service: DesktopOnlineMusic, lease: AccountLease, language: DesktopLanguage) {
+    val ru = language == DesktopLanguage.Russian
+    var busy by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(if (ru) "Моя волна · Sona" else "My wave · Sona", style = MaterialTheme.typography.titleLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((mode, label) in listOf("GENERAL" to (if (ru) "Для меня" else "For me"),
+                "WORK" to (if (ru) "Фокус" else "Focus"), "SLEEP" to (if (ru) "Сон" else "Sleep"))) {
+                FilledTonalButton(enabled = !busy, onClick = {
+                    if (!busy) {
+                        busy = true
+                        failed = false
+                        scope.launch {
+                            try { service.wave(lease, mode) }
+                            catch (e: CancellationException) { throw e }
+                            catch (_: Exception) { failed = true }
+                            finally { busy = false }
+                        }
+                    }
+                }) { Text(label) }
+            }
+        }
+        if (busy) LinearProgressIndicator()
+        if (failed) Text(if (ru) "Не удалось запустить волну Sona. Проверьте подключение и синхронизацию."
+            else "Could not start the Sona mix. Check your connection and sync.")
+    }
+}
+
+@Composable
+internal fun OnlineMusicSearch(service: DesktopOnlineMusic, lease: AccountLease, language: DesktopLanguage) {
+    val ru = language == DesktopLanguage.Russian
+    var source by remember { mutableStateOf(MusicSource.Vault) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            MusicSource.entries.forEach { choice ->
+                FilterChip(selected = choice == source, onClick = { source = choice },
+                    label = { Text(if (ru) choice.ru else choice.en) })
+            }
+        }
+        key(source) { OnlineMusicResults(service, lease, source, ru) }
+    }
+}
+
+@Composable
+private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: AccountLease, source: MusicSource, ru: Boolean) {
+    val scope = rememberCoroutineScope()
+    var input by remember { mutableStateOf("") }
+    var target by remember { mutableStateOf<MusicBrowse?>(null) }
+    var vault by remember { mutableStateOf<VaultPage?>(null) }
+    var discovery by remember { mutableStateOf<InternetMetadataDiscoveryPage?>(null) }
+    var stack by remember { mutableStateOf<List<MusicBrowse>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf(false) }
+    var playing by remember { mutableStateOf<AccountUuid?>(null) }
+    var download by remember { mutableStateOf<Pair<String, AccountUuid>?>(null) }
+    var offset by remember { mutableIntStateOf(0) }
+    var previous by remember { mutableStateOf<List<String?>>(emptyList()) }
+    var cursor by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableIntStateOf(0) }
+    fun open(value: MusicBrowse) {
+        target = value; vault = null; discovery = null; offset = 0; cursor = null; previous = emptyList(); error = false
+        refresh++
+    }
+    LaunchedEffect(target, cursor, offset, refresh) {
+        val value = target ?: return@LaunchedEffect
+        busy = true; error = false; vault = null; discovery = null
+        try {
+            if (source == MusicSource.Vault) vault = service.vault(lease, value.query, cursor)
+            else discovery = service.discover(lease, value, offset)
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { error = true }
+        finally { busy = false }
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(value = input, onValueChange = { if (it.length <= 200) input = it }, singleLine = true,
+            modifier = Modifier.weight(1f), label = { Text(if (ru) "Поиск на сервере" else "Search server") })
+        Button(enabled = input.isNotBlank() && playing == null, onClick = {
+            stack = emptyList()
+            open(MusicBrowse(input.trim(), if (source == MusicSource.Artists) "artist" else "album"))
+        }) { Text(if (ru) "Найти" else "Search") }
+    }
+    if (stack.isNotEmpty()) TextButton(onClick = { val last = stack.last(); stack = stack.dropLast(1); open(last) }) {
+        Text(if (ru) "Назад" else "Back")
+    }
+    if (busy || playing != null) LinearProgressIndicator()
+    if (error) TextButton(onClick = { refresh++ }) { Text(if (ru) "Не удалось выполнить действие. Повторить поиск" else "Action failed. Retry search") }
+    val page = vault
+    val cards = discovery
+    if (page?.items?.isEmpty() == true || cards?.items?.isEmpty() == true) Text(if (ru) "Ничего не найдено" else "No results")
+    Column(Modifier.fillMaxWidth().weight(1f, false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        page?.items?.forEach { hit -> key(hit.publication, hit.ref) {
+            ListItem(headlineContent = { Text(hit.title) }, supportingContent = { Text(hit.artist) },
+                trailingContent = { TextButton(enabled = playing == null, onClick = {
+                    if (playing == null) {
+                        playing = hit.ref
+                        scope.launch {
+                            try { service.stream(lease, hit) }
+                            catch (e: CancellationException) { throw e }
+                            catch (_: Exception) { error = true }
+                            finally { playing = null }
+                        }
+                    }
+                }) { Text(if (ru) "Слушать" else "Play") } })
+        } }
+        cards?.items?.forEach { card -> key(card.id) {
+            val browse = card.browseTarget
+            val actionsAllowed = cards.knownActionsAllowed && (browse != null || card.trackLookup != null)
+            ListItem(headlineContent = { Text(card.title) },
+                supportingContent = { Text(listOfNotNull(card.artist, card.disambiguation, card.releaseDate).joinToString(" · ")) },
+                trailingContent = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        if (browse != null) {
+                            val artist = card.entityType == "artist"
+                            fun drill(releases: Boolean) {
+                                target?.let { stack = stack + it }
+                                open(MusicBrowse(card.title, if (artist) "artist" else "album", AccountUuid(card.entityId), releases))
+                            }
+                            if (artist) TextButton(onClick = { drill(true) }) { Text(if (ru) "Альбомы" else "Albums") }
+                            TextButton(onClick = { drill(false) }) { Text(if (ru) "Треки" else "Tracks") }
+                        }
+                        if (actionsAllowed) TextButton(onClick = { download = card.entityType to AccountUuid(card.entityId) }) {
+                            Text(if (ru) "Загрузить" else "Download")
+                        }
+                    }
+                })
+        } }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (previous.isNotEmpty() || offset > 0) TextButton(onClick = {
+            if (source == MusicSource.Vault) { cursor = previous.last(); previous = previous.dropLast(1) }
+            else offset = (offset - 30).coerceAtLeast(0)
+        }) { Text(if (ru) "Предыдущая страница" else "Previous page") }
+        if (page?.next != null || cards?.nextOffset != null) TextButton(onClick = {
+            if (source == MusicSource.Vault) { previous = previous + listOf(cursor); cursor = page?.next }
+            else cards?.nextOffset?.let { offset = it }
+        }) { Text(if (ru) "Далее" else "Next page") }
+    }
+    download?.let { (kind, id) -> CatalogDownloadDialog(service, lease, kind, id, ru) { download = null } }
+}
+
+@Composable
+private fun CatalogDownloadDialog(service: DesktopOnlineMusic, lease: AccountLease, kind: String,
+    id: AccountUuid, ru: Boolean, close: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var alternatives by remember { mutableStateOf(false) }
+    val prefs = remember(lease.scopeId, id, kind) { Preferences.userRoot().node("app/autplay/catalog/${lease.scopeId.value}/$kind/${id.value}") }
+    val slot = if (alternatives) "all" else "standard"
+    var state by remember(slot) { mutableStateOf<CatalogJob?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember(slot) { mutableStateOf(false) }
+    fun run(start: Boolean) {
+        if (busy) return
+        busy = true; error = false
+        scope.launch {
+            try {
+                val saved = prefs.get(slot, null)?.let(::AccountUuid)
+                val op = saved ?: AccountUuid.random().also { prefs.put(slot, it.value); prefs.flush() }
+                var job = if (saved == null || state == null) service.downloadPreview(lease, op, kind, id, alternatives)
+                    else service.downloadAction(lease, op, "status")
+                state = job
+                if (start && job.phase == "preview") job = service.downloadAction(lease, op, "start")
+                state = job
+                var steps = 0
+                while (job.phase == "downloading" && steps++ < 45) {
+                    if (job.counts["available"] == 0) delay(4000)
+                    job = service.downloadAction(lease, op, "advance")
+                    state = job
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { error = true }
+            finally { busy = false }
+        }
+    }
+    AlertDialog(onDismissRequest = close, title = { Text(if (ru) "Загрузка в Vault" else "Download to Vault") },
+        text = {
+            Column {
+                if (kind == "artist") Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(alternatives, onCheckedChange = { alternatives = it }, enabled = !busy)
+                    Text(if (ru) "Включая альтернативные версии" else "Include alternate versions")
+                }
+                state?.let { job ->
+                    val counts = job.counts
+                    Text(if (ru) "В Vault: ${counts["vault"]} · В очереди: ${counts["queued"]} · Доступно: ${counts["available"]}"
+                        else "In Vault: ${counts["vault"]} · Queued: ${counts["queued"]} · Available: ${counts["available"]}")
+                    Text(if (ru) "Отсутствуют или не загружены: ${counts.getValue("missing") + counts.getValue("failed")}"
+                        else "Missing or failed: ${counts.getValue("missing") + counts.getValue("failed")}")
+                }
+                if (busy) LinearProgressIndicator()
+                if (error) Text(if (ru) "Не удалось обновить загрузку" else "Could not update download")
+            }
+        }, confirmButton = {
+            val start = state?.phase == "preview"
+            TextButton(enabled = !busy && state?.phase != "complete", onClick = { run(start) }) {
+                Text(if (start) (if (ru) "Начать" else "Start") else (if (ru) "Проверить" else "Check"))
+            }
+        }, dismissButton = { TextButton(onClick = close) { Text(if (ru) "Закрыть" else "Close") } })
+}

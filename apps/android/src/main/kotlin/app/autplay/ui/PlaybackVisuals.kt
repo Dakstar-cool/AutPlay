@@ -11,9 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import app.autplay.ui.theme.Twilight
 
 @Composable
 internal fun rememberSystemAnimationsEnabled(): Boolean {
@@ -35,13 +33,4 @@ internal fun rememberSystemAnimationsEnabled(): Boolean {
         onDispose { resolver.unregisterContentObserver(observer) }
     }
     return enabled
-}
-
-internal fun playbackVisualPalette(seed: String): List<Color> {
-    val print = when (seed.hashCode().ushr(3) % 4) {
-        0 -> Twilight.copper
-        1 -> AutPlayAccent.Blue.controlFill
-        else -> Twilight.steel
-    }
-    return listOf(Twilight.steel, print, Twilight.graphite, Twilight.beige)
 }

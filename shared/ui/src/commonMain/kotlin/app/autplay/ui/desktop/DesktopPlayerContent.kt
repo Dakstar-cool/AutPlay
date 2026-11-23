@@ -1,5 +1,26 @@
 package app.autplay.ui.desktop
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.Interaction
@@ -130,20 +151,56 @@ internal fun DesktopTransportButtons(input: DesktopTransportInput, language: Des
     val modifier = if (scrollable) Modifier.horizontalScroll(rememberScrollState()) else Modifier
     Row(modifier, verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = { send(DesktopTransportAction.PREVIOUS) }, enabled = controls.previous) {
-            Text(DesktopText.Previous.inLanguage(language))
+        IconButton(onClick = { send(DesktopTransportAction.PREVIOUS) }, enabled = controls.previous) {
+            DesktopIcon(DesktopGlyph.Previous, DesktopText.Previous.inLanguage(language))
         }
-        val action = if (input.playback.isPlaying) DesktopTransportAction.PAUSE else DesktopTransportAction.PLAY
-        Button(onClick = { send(action) }, enabled = controls.playPause,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primaryFixedDim,
-                contentColor = MaterialTheme.colorScheme.onPrimaryFixed,
-            )) {
-            Text((if (input.playback.isPlaying) DesktopText.Pause else DesktopText.Play).inLanguage(language))
+        val playing = input.playback.isPlaying
+        val colors = MaterialTheme.colorScheme
+        Surface(onClick = { send(if (playing) DesktopTransportAction.PAUSE else DesktopTransportAction.PLAY) },
+            enabled = controls.playPause, shape = CircleShape, modifier = Modifier.size(44.dp),
+            color = colors.primaryFixedDim, contentColor = colors.onPrimaryFixed) {
+            Box(contentAlignment = Alignment.Center) {
+                DesktopIcon(if (playing) DesktopGlyph.Pause else DesktopGlyph.Play,
+                    (if (playing) DesktopText.Pause else DesktopText.Play).inLanguage(language))
+            }
         }
-        OutlinedButton(onClick = { send(DesktopTransportAction.NEXT) }, enabled = controls.next) {
-            Text(DesktopText.Next.inLanguage(language))
+        IconButton(onClick = { send(DesktopTransportAction.NEXT) }, enabled = controls.next) {
+            DesktopIcon(DesktopGlyph.Next, DesktopText.Next.inLanguage(language))
         }
+    }
+}
+
+@Composable
+internal fun DesktopLikeButton(track: DesktopTrack, language: DesktopLanguage, enabled: Boolean, change: (String) -> Unit) {
+    val liked = track.preference == "LIKED"
+    IconButton(enabled = enabled, onClick = { change(if (liked) "NEUTRAL" else "LIKED") }) {
+        DesktopIcon(if (liked) DesktopGlyph.Liked else DesktopGlyph.Like,
+            if (language == DesktopLanguage.Russian) (if (liked) "Убрать из избранного" else "В избранное")
+            else (if (liked) "Remove from favorites" else "Add to favorites"))
+    }
+}
+
+@Composable
+internal fun Modifier.desktopSkipGesture(input: DesktopTransportInput, callbacks: DesktopTransportCallbacks,
+    legacy: DesktopPlaybackCallbacks, allowLegacy: Boolean, navigation: () -> Boolean): Modifier {
+    val latest by rememberUpdatedState(input)
+    val latestNavigation by rememberUpdatedState(navigation)
+    val latestCallbacks by rememberUpdatedState(callbacks)
+    val latestLegacy by rememberUpdatedState(legacy)
+    return pointerInput(input.playback.mediaId, input.target, input.navigationRevision) {
+        var distance = 0f
+        var captured = latest
+        detectHorizontalDragGestures(onDragStart = { distance = 0f; captured = latest },
+            onDragCancel = { distance = 0f }, onDragEnd = {
+                val threshold = 48.dp.toPx()
+                val action = when {
+                    distance < -threshold -> DesktopTransportAction.NEXT
+                    distance > threshold -> DesktopTransportAction.PREVIOUS
+                    else -> null
+                }
+                if (action != null) dispatchDesktopTransport(captured, latest, action, null, latestNavigation(),
+                    allowLegacy, latestCallbacks, latestLegacy)
+            }) { change, dx -> change.consume(); distance += dx }
     }
 }
 
@@ -220,7 +277,8 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
     metadata: DesktopMetadataState, sleepTimer: DesktopSleepTimerState, sleepTimerCallbacks: DesktopSleepTimerCallbacks,
     tasteInput: DesktopTasteInput, tasteCallbacks: DesktopTasteCallbacks, isNavigationCurrent: () -> Boolean,
     isTasteNavigationCurrent: () -> Boolean, onTrackDetails: (String) -> Unit, onQueue: () -> Unit,
-    modifier: Modifier = Modifier, smoothTrackTransitions: Boolean = false) {
+    modifier: Modifier = Modifier, smoothTrackTransitions: Boolean = false,
+    libraryCallbacks: DesktopLibraryCallbacks = DesktopLibraryCallbacks()) {
     val preparation = DesktopPlayerInput(library, input.playback, input.target, input.navigationRevision)
     val currentPreparation by rememberUpdatedState(preparation)
     val currentNavigation by rememberUpdatedState(isNavigationCurrent)
@@ -237,13 +295,76 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
     val fresh = desktopPlayerViewIsCurrent(preparation, prepared, isNavigationCurrent())
     val current = prepared.current.takeIf { fresh }
     val playback = input.playback
-    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        DesktopPlayerArtworkCarousel(input, prepared, fresh, metadata, language, isNavigationCurrent(),
-            smoothTrackTransitions)
+    val ru = language == DesktopLanguage.Russian
+    val track = current?.track
+    val id = playback.localTrackRefId
+    val bitmap = rememberDesktopArtworkBitmap(id, metadata.artworks[id])
+    val base = MaterialTheme.colorScheme.background
+    val tint by produceState(base, bitmap, base) {
+        value = base
+        if (bitmap != null) value = withContext(Dispatchers.Default) {
+            val pixels = bitmap.toPixelMap()
+            var red = 0f
+            var green = 0f
+            var blue = 0f
+            var weight = 0f
+            for (y in 0 until 16) for (x in 0 until 16) {
+                val c = pixels[x * bitmap.width / 16, y * bitmap.height / 16]
+                red += c.red * c.alpha
+                green += c.green * c.alpha
+                blue += c.blue * c.alpha
+                weight += c.alpha
+            }
+            if (weight == 0f) base else lerp(base, Color(red / weight, green / weight, blue / weight), if (base.luminance() < .5f) .35f else .18f)
+        }
+    }
+    var fullscreen by remember(playback.mediaId) { mutableStateOf(false) }
+    val currentOwner by rememberUpdatedState(libraryCallbacks)
+    fun changePreference(value: String) {
+        if (track != null && currentView === prepared && libraryCallbacks === currentOwner &&
+            input.commandsEnabled && desktopPlayerViewIsCurrent(currentPreparation, prepared, currentNavigation())) {
+            currentOwner.onSetTrackPreference(track.id, value)
+        }
+    }
+    if (fullscreen && playback.mediaId != null) {
+        Dialog(onDismissRequest = { fullscreen = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black).clickable(role = Role.Button,
+                onClickLabel = if (ru) "Закрыть обложку" else "Close artwork") { fullscreen = false },
+                contentAlignment = Alignment.Center) {
+                DesktopArtworkImage(bitmap, language, minOf(maxWidth, maxHeight), playback.title.orEmpty())
+            }
+        }
+    }
+    Column(modifier.background(Brush.verticalGradient(listOf(tint, base))).verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.fillMaxWidth().desktopSkipGesture(input, callbacks, legacy, false, isNavigationCurrent)
+            .clickable(enabled = playback.mediaId != null, role = Role.Button,
+                onClickLabel = if (ru) "Развернуть обложку" else "Expand artwork") { fullscreen = true }) {
+            DesktopPlayerArtworkCarousel(input, prepared, fresh, metadata, language, isNavigationCurrent(),
+                smoothTrackTransitions)
+        }
         if (playback.mediaId == null) Text(DesktopText.PlayerEmpty.inLanguage(language))
         if (!input.controls(allowLegacy = false).playPause) Text(DesktopText.PlayerReadOnly.inLanguage(language))
-        DesktopTransportButtons(input, language, callbacks, legacy, false, isNavigationCurrent)
         DesktopTransportSeek(input, language, callbacks, legacy, false, isNavigationCurrent)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            val queue = library?.queue
+            val modeEnabled = fresh && queue?.id == input.target?.queueId && input.commandsEnabled && isNavigationCurrent()
+            IconButton(enabled = modeEnabled && playback.shuffleEnabled, onClick = {
+                if (currentView === prepared && currentNavigation() && libraryCallbacks === currentOwner)
+                    currentOwner.onShuffle(queue?.shuffleEnabled != true)
+            }) { DesktopIcon(DesktopGlyph.Shuffle, DesktopText.Shuffle.inLanguage(language)) }
+            DesktopTransportButtons(input, language, callbacks, legacy, false, isNavigationCurrent, scrollable = false)
+            IconButton(enabled = modeEnabled && playback.repeatEnabled, onClick = {
+                if (currentView === prepared && currentNavigation() && libraryCallbacks === currentOwner)
+                    currentOwner.onRepeat(when (queue?.repeatMode) { "OFF" -> "ALL"; "ALL" -> "ONE"; else -> "OFF" })
+            }) { DesktopIcon(DesktopGlyph.Repeat, (if (ru) "Повтор" else "Repeat") + " · " + queue?.repeatMode.orEmpty()) }
+            if (track != null) {
+                DesktopLikeButton(track, language, input.commandsEnabled, ::changePreference)
+                IconButton(enabled = input.commandsEnabled, onClick = { changePreference(if (track.preference == "DISLIKED") "NEUTRAL" else "DISLIKED") }) {
+                    DesktopIcon(DesktopGlyph.Dislike, DesktopText.TrackPreferenceDisliked.inLanguage(language))
+                }
+            }
+        }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = {
                 if (currentView === prepared && desktopPlayerViewIsCurrent(currentPreparation, prepared, currentNavigation())) {
@@ -256,6 +377,8 @@ internal fun DesktopPlayerContent(library: DesktopLibrarySnapshot?, input: Deskt
         }
         if (!fresh) Text(DesktopText.UpdatingLibrary.inLanguage(language))
         DesktopSleepTimerControls(sleepTimer, !input.commandsEnabled, language, sleepTimerCallbacks)
-        DesktopTasteControls(tasteInput, isTasteNavigationCurrent, language, tasteCallbacks)
+        var tasteExpanded by remember { mutableStateOf(false) }
+        TextButton(onClick = { tasteExpanded = !tasteExpanded }) { Text(if (ru) "Учёт прослушивания" else "Listening preferences") }
+        if (tasteExpanded) DesktopTasteControls(tasteInput, isTasteNavigationCurrent, language, tasteCallbacks)
     }
 }

@@ -39,6 +39,28 @@ internal sealed class DomainRoute(val method: String, val path: String, val requ
     }
     class PortableWrite : DomainRoute("POST", "/portable-accounts/records", 524_288, 65_536)
     class PortableCurrent : DomainRoute("GET", "/portable-accounts/current", 0, 16_384)
+    class VaultSearch(query: String, cursor: String?) : DomainRoute("GET", "/library/search", 0, 1_048_576,
+        mapOf("q" to query, "kind" to "all", "limit" to "50", "include_catalog" to "true", "paged" to "true") +
+            (cursor?.let { mapOf("cursor" to it) } ?: emptyMap())) {
+        init { require(query.isNotBlank() && query.length <= 200 && (cursor == null || cursor.length in 1..2048)) }
+    }
+    class PreparePlayback : DomainRoute("POST", "/library/search/playback", 8192, 8192)
+    class Recommendations : DomainRoute("POST", "/recommendations", 4096, 1_048_576)
+    class SharePlaylist : DomainRoute("POST", "/playlist-shares", 8_388_608, 16_384)
+    class Discover(kind: String, query: String, offset: Int) : DomainRoute("GET", "/music/discovery/search", 0, 1_048_576,
+        mapOf("q" to query, "kind" to kind, "limit" to "30", "offset" to offset.toString())) {
+        init { require(kind in setOf("artist", "album") && query.isNotBlank() && query.length <= 200 && offset in 0..1000) }
+    }
+    class Discography(artist: Boolean, id: AccountUuid, releases: Boolean, offset: Int) : DomainRoute("GET",
+        "/music/discovery/${if (artist) "artists" else "releases"}/${id.value}/${if (releases) "releases" else "tracks"}",
+        0, 1_048_576, mapOf("limit" to "30", "offset" to offset.toString())) {
+        init { require((artist || !releases) && offset in 0..1_000_000) }
+    }
+    class DownloadPreview : DomainRoute("POST", "/music/discovery/downloads/preview", 2048, 262_144)
+    class CatalogDownload(id: AccountUuid, action: String) : DomainRoute(if (action == "status") "GET" else "POST",
+        "/music/discovery/downloads/${id.value}" + if (action == "status") "" else "/$action", 2048, 262_144) {
+        init { require(action in setOf("start", "status", "advance")) }
+    }
     class Statistics : DomainRoute("GET", "/social/profile-statistics/owner", 0, 65_536)
     class CatalogView(query: CanonicalQuery) : DomainRoute("GET", query.path, 0, 262_144, query.parameters())
     class ImportReport(job: AccountUuid, after: String?) : DomainRoute("GET", "/imports/${job.value}", 0, 524_288,

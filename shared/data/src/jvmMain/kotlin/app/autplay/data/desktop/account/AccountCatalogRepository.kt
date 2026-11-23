@@ -164,6 +164,21 @@ internal class AccountCatalogRepository(private val owner:AccountRepositoryOwner
     override suspend fun readPlaylist(lease:AccountLease,playlistId:AccountUuid):AccountLocalDomainRow? = owner.read(lease){sql,_->
         AccountLocalDomainReader.read(sql,lease.scopeId,AccountProjectionKind.PLAYLIST,null,1,playlistId).singleOrNull()
     }
+    override suspend fun resolveMusicTargets(lease: AccountLease, ids: List<AccountUuid>, recording: Boolean): Map<AccountUuid, AccountUuid> =
+        owner.read(lease) { sql, _ ->
+            require(ids.size <= 200)
+            if (ids.isEmpty()) return@read emptyMap()
+            val field = if (recording) "d.recording_id" else "p.server_id"
+            val slots = ids.joinToString(",") { "?" }
+            val rows = sql.query("""SELECT $field,p.local_id FROM j_account_projection_visibility p
+                JOIN j_track_detail d ON d.scope_id=p.scope_id AND d.track_ref_id=p.local_id
+                WHERE p.scope_id=? AND p.aggregate_type='USER_TRACK_REF' AND p.effective_deleted=0
+                AND $field IN ($slots) ORDER BY p.local_id""", lease.scopeId, *ids.toTypedArray()) {
+                AccountUuid(it.getText(0)) to AccountUuid(it.getText(1))
+            }
+            buildMap { for ((remote, local) in rows) if (remote !in this) put(remote, local) }
+        }
+
     override suspend fun readTrackContext(lease:AccountLease,trackId:AccountUuid):AccountCatalogTrackContext? = owner.read(lease){sql,_->
         val track=AccountLocalDomainReader.read(sql,lease.scopeId,AccountProjectionKind.TRACK,null,1,trackId).singleOrNull()
             ?:return@read null

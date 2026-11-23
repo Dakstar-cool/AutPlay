@@ -2,20 +2,6 @@ package app.autplay.data.local.dao
 
 data class VariationOutcomeRow(val refId: String, val kind: String?, val surface: String?, val plays: Long, val skips: Long)
 
-data class WaveRecordingRow(
-    val refId: String,
-    val title: String?,
-    val artist: String?,
-    val recordingKind: String?,
-    val versionText: String?,
-    val recordingMbid: String? = null,
-    val workMbid: String? = null,
-    val performanceRole: String? = null,
-    val originalRecordingMbid: String? = null,
-    val catalogRecordingId: String? = null,
-    val livePerformance: Boolean = false,
-)
-
 internal const val WAVE_RECORDINGS = """
     SELECT u.local_user_track_ref_id AS refId,
            CASE json_type(m.payload_json, '$.fields.title')

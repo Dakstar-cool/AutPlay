@@ -1,5 +1,17 @@
 package app.autplay.ui.desktop
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import app.autplay.application.desktop.DesktopMetadataState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -40,6 +52,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
+internal expect fun desktopWaveTracks(library: DesktopLibrarySnapshot): List<String>
+
 internal class DesktopHomeInput(val library: DesktopLibrarySnapshot?) {
     override fun equals(other: Any?): Boolean = other is DesktopHomeInput && library === other.library
     override fun hashCode(): Int = 0
@@ -53,6 +67,7 @@ internal class DesktopHomeView(
     val currentTrack: DesktopTrack? = null,
     val hasActiveTracks: Boolean = false,
     val recent: List<DesktopHomeRecent> = emptyList(),
+    val waveIds: List<String> = emptyList(),
 )
 
 /** No playback-position input: preparation runs only for a newly published snapshot reference. */
@@ -77,7 +92,7 @@ internal fun prepareDesktopHomeView(input: DesktopHomeInput, checkpoint: () -> U
         if (recent.size < 6 && ids.add(event.id)) recent += DesktopHomeRecent(event, tracks[event.trackId])
     }
     checkpoint()
-    return DesktopHomeView(input, entry, entry?.trackId?.let { tracks[it] }, hasActive, recent)
+    return DesktopHomeView(input, entry, entry?.trackId?.let { tracks[it] }, hasActive, recent, input.library?.let(::desktopWaveTracks).orEmpty())
 }
 
 /** Resume an existing retained queue, including removed tracks, without selecting a new queue. */
@@ -145,6 +160,7 @@ internal fun DesktopHomeContent(
     importActionLabel: String? = null,
     importCancelEnabled: Boolean = importing,
     accountContent: (@Composable () -> Unit)? = null,
+    metadata: DesktopMetadataState = DesktopMetadataState(),
 ) {
     val input = DesktopHomeInput(library)
     val currentInput by rememberUpdatedState(input)
@@ -169,24 +185,51 @@ internal fun DesktopHomeContent(
     val canContinue = desktopHomeCanContinue(input, prepared, playback, adapterAvailable, reopenRequired)
     val continuation = DesktopHomeContinuation(input, prepared, playback)
     Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(DesktopText.HomeLocalRoutes.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(DesktopSection.Library, DesktopSection.Playlists, DesktopSection.History, DesktopSection.Queue).forEach { destination ->
-                OutlinedButton(onClick = { if (isNavigationCurrent()) onNavigate(destination) }) { Text(destination.label(language)) }
+        val ru = language == DesktopLanguage.Russian
+        val colors = MaterialTheme.colorScheme
+        val enabled = fresh && prepared.waveIds.isNotEmpty() && !reopenRequired && adapterAvailable &&
+            playback.connection == PlaybackConnectionState.Connected
+        Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.surface) {
+            Column(Modifier.fillMaxWidth().background(Brush.radialGradient(listOf(
+                Color(0xFFD26539).copy(alpha = if (colors.background.luminance() < .5f) .48f else .24f),
+                colors.background))).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (ru) "На устройстве" else "On this device", style = MaterialTheme.typography.labelMedium)
+                Text(if (ru) "Моя волна" else "My wave", style = MaterialTheme.typography.headlineLarge)
+                Surface(onClick = {
+                    if (isViewCurrent() && !currentReopen && currentAdapter &&
+                        currentPlayback.connection == PlaybackConnectionState.Connected && prepared.waveIds.isNotEmpty()) {
+                        currentCallbacks.onPlayTracks(prepared.waveIds, "USER")
+                    }
+                }, enabled = enabled, shape = CircleShape, color = colors.primaryFixedDim,
+                    contentColor = colors.onPrimaryFixed, modifier = Modifier.size(64.dp)) {
+                    Box(contentAlignment = Alignment.Center) { DesktopIcon(DesktopGlyph.Play, if (ru) "Включить мою волну" else "Start my wave") }
+                }
+                if (fresh && prepared.waveIds.isEmpty()) Text(if (ru) "Нет подходящих локальных треков" else "No eligible local tracks",
+                    style = MaterialTheme.typography.bodySmall)
             }
         }
         if (!fresh) Text(DesktopText.UpdatingLibrary.inLanguage(language), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         if (fresh && prepared.currentTrack != null) {
             val track = prepared.currentTrack
-            Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
-            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Button(onClick = {
-                continuation.continueQueue(currentInput, currentPrepared, currentPlayback, currentAdapter, currentReopen,
-                    isNavigationCurrent(), currentCallbacks)
-            }, enabled = canContinue) { Text(DesktopText.ContinueListening.inLanguage(language)) }
-            OutlinedButton(onClick = { if (isViewCurrent()) onTrackDetails(track.id) }) { Text(DesktopText.TrackDetails.inLanguage(language)) }
-            if (!canContinue) Text(DesktopText.ControlsUnavailable.inLanguage(language), style = MaterialTheme.typography.bodySmall)
-        } else if (fresh) Text(DesktopText.HomeNoContinuation.inLanguage(language))
+            Text(DesktopText.ContinueListening.inLanguage(language), style = MaterialTheme.typography.titleLarge)
+            Surface(shape = MaterialTheme.shapes.medium, color = colors.surfaceContainer) {
+                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DesktopArtworkView(track.id, metadata.artworks[track.id], language, 64.dp)
+                    Column(Modifier.weight(1f).clickable { if (isViewCurrent()) onTrackDetails(track.id) }) {
+                        Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                        Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (playback.isPlaying) {
+                        OutlinedButton(onClick = { if (isViewCurrent()) onNavigate(DesktopSection.Player) }) { Text(DesktopText.OpenPlayer.inLanguage(language)) }
+                    } else Button(onClick = {
+                        continuation.continueQueue(currentInput, currentPrepared, currentPlayback, currentAdapter, currentReopen,
+                            isNavigationCurrent(), currentCallbacks)
+                    }, enabled = canContinue) { Text(DesktopText.Play.inLanguage(language)) }
+                }
+            }
+        }
         HorizontalDivider()
         if (fresh && library != null && !prepared.hasActiveTracks) {
             Text(DesktopText.HomeWelcome.inLanguage(language), style = MaterialTheme.typography.titleLarge)
@@ -218,9 +261,7 @@ internal fun DesktopHomeContent(
             }
         }
         if (accountContent != null) accountContent()
-        Text(if (accountContent == null) DesktopText.HomeServerUnavailable.inLanguage(language)
-            else if (language == DesktopLanguage.Russian) "Рекомендации пока недоступны."
-            else "Recommendations are currently unavailable.", style = MaterialTheme.typography.bodySmall)
+        else Text(DesktopText.HomeServerUnavailable.inLanguage(language), style = MaterialTheme.typography.bodySmall)
         if (fresh && prepared.recent.isNotEmpty()) {
             Text(DesktopText.HomeRecent.inLanguage(language), style = MaterialTheme.typography.titleMedium)
             Text(DesktopText.HistoryPlayHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)

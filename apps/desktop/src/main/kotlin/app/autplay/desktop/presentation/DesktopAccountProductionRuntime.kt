@@ -198,7 +198,8 @@ internal class DesktopAccountProductionRuntime private constructor(
                     }
                 }
             }, setHomeVisible = ::setHomeVisible, setCatalogVisible = ::setCatalogVisible,
-            settleNavigation = ::settleNavigation, contextSettlement = settlementMutable, accountOwner = issued::get)
+            settleNavigation = ::settleNavigation, contextSettlement = settlementMutable, accountOwner = issued::get,
+            music = DesktopOnlineMusic(serviceOwner, issued::get, ::prepareNetworkMediaLease, mediaAdapter::playSelection))
         controller.accounts.reload().hostAwait()
         accountObserver = work.launch {
             controller.accounts.state.drop(1).collect { state ->

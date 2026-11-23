@@ -82,6 +82,16 @@ internal class DesktopAccountProductionMedia(
             queueType = if (target.occurrenceId == null) "LIBRARY" else "PLAYLIST")
     }
 
+    internal suspend fun playSelection(lease: AccountLease, ids: List<AccountUuid>, queueType: String): Unit = serial.withLock {
+        require(ids.size in 1..200 && queueType in setOf("USER", "SEARCH"))
+        requireLease(lease)
+        if (prepareNetworkLease(lease) != lease) changed()
+        select(lease)
+        for (id in ids.distinct()) runtime.library.includeTarget(lease, id, null, retainQueue = false)
+        requireLease(lease)
+        controller.playTracks(ids.map { it.value }, queueType)
+    }
+
     override suspend fun download(target: DesktopAccountTrackTarget): Unit = serial.withLock {
         requireLease(target.lease)
         if (prepareNetworkLease(target.lease) != target.lease) changed()

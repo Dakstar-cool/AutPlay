@@ -90,7 +90,7 @@ private fun DesktopTrackVisualScene(
     if (compact) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            DesktopArtworkImage(scene.bitmap, language, artworkSize)
+            DesktopArtworkImage(scene.bitmap, language, artworkSize, scene.title)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(scene.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium)
@@ -101,7 +101,7 @@ private fun DesktopTrackVisualScene(
     } else {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DesktopArtworkImage(scene.bitmap, language, artworkSize)
+            DesktopArtworkImage(scene.bitmap, language, artworkSize, scene.title)
             Text(scene.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.headlineMedium)
             Text(scene.artist, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -117,8 +117,8 @@ internal fun DesktopPlayerArtworkCarousel(
     language: DesktopLanguage, navigationCurrent: Boolean, smoothTrackTransitions: Boolean,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val neighborSize = minOf(80.dp, maxWidth * 0.18f)
-        val currentSize = minOf(192.dp, maxWidth * 0.48f)
+        val neighborSize = minOf(96.dp, maxWidth * 0.18f)
+        val currentSize = minOf(300.dp, maxWidth * 0.48f)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             DesktopTrackVisualNeighbor(view.previous.takeIf { fresh }, DesktopText.PlayerPrevious,

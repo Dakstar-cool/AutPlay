@@ -2,10 +2,11 @@ package app.autplay.ui.desktop
 
 public enum class DesktopLanguage { Russian, English }
 
-public enum class DesktopSection { Home, Library, Playlists, Player, Queue, History, Settings }
+public enum class DesktopSection { Home, Search, Library, Playlists, Player, Queue, History, Settings }
 
 internal enum class DesktopText(public val russian: String, public val english: String) {
     Home("Главная", "Home"),
+    SearchDestination("Поиск", "Search"),
     Player("Плеер", "Player"),
     PlayerEmpty("Выберите музыку в медиатеке или очереди.", "Choose music in Library or Queue."),
     PlayerReadOnly("Управление этим воспроизведением сейчас недоступно.", "Controls for this playback are currently unavailable."),
@@ -43,7 +44,7 @@ internal enum class DesktopText(public val russian: String, public val english: 
     HistoryWindow("Показано до 1000 прослушиваний. Более ранние загружаются по 100; обновление возвращает к последним.", "Showing up to 1,000 listens. Older listens load 100 at a time; refresh returns to the latest."),
     HistoryNewerHidden("Более новые записи скрыты. Обновите историю, чтобы вернуться к последним.", "Newer listens are hidden. Refresh history to return to the latest."),
     LocalCollection("Локальная коллекция", "Local collection"),
-    Library("Библиотека", "Library"),
+    Library("Моя музыка", "My music"),
     Playlists("Плейлисты", "Playlists"),
     Queue("Очередь", "Queue"),
     History("История", "History"),
@@ -312,6 +313,7 @@ internal fun DesktopText.inLanguage(language: DesktopLanguage): String = when (l
 
 internal fun DesktopSection.label(language: DesktopLanguage): String = when (this) {
     DesktopSection.Home -> DesktopText.Home
+    DesktopSection.Search -> DesktopText.SearchDestination
     DesktopSection.Player -> DesktopText.Player
     DesktopSection.Library -> DesktopText.Library
     DesktopSection.Playlists -> DesktopText.Playlists

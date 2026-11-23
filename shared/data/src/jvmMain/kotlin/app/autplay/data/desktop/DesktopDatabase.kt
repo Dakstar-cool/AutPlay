@@ -676,6 +676,13 @@ internal abstract class DesktopDao {
     }
 
     @Transaction
+    open suspend fun importPlaylist(row: PlaylistRow, description: String?, entries: List<PlaylistEntryRow>) {
+        addPlaylist(row)
+        if (description != null) updatePlaylistDescription(row.id, null, description)
+        entries.chunked(DesktopLocalLimits.MAX_QUEUE_ENTRIES).forEach { appendEntries(row.id, it) }
+    }
+
+    @Transaction
     open suspend fun addPlaylist(row: PlaylistRow): Unit {
         val fact = DesktopLocalIntent.playlistCreated(row)
         insertPlaylist(row)

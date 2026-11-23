@@ -72,3 +72,12 @@ internal fun AutPlayArtworkPlaceholder(seed: String, modifier: Modifier = Modifi
         drawRect(paper, Offset(unit * 0.158f, unit * 0.880f), Size(unit * 0.095f, unit * 0.040f))
     }
 }
+
+internal fun playbackVisualPalette(seed: String): List<Color> {
+    val print = when (seed.hashCode().ushr(3) % 4) {
+        0 -> Twilight.copper
+        1 -> app.autplay.ui.theme.AutPlayAccent.Blue.controlFill
+        else -> Twilight.steel
+    }
+    return listOf(Twilight.steel, print, Twilight.graphite, Twilight.beige)
+}

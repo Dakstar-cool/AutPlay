@@ -107,6 +107,8 @@ android {
     // Compile the shared theme against AndroidX Compose on Android and JetBrains Compose on desktop.
     sourceSets.named("main") {
         kotlin.directories += "../../shared/ui/src/commonMain/kotlin/app/autplay/ui/theme"
+        kotlin.directories += "../../shared/ui/src/jvmMain/kotlin/app/autplay/wave"
+        kotlin.directories += "../../shared/application/src/jvmMain/kotlin/app/autplay/music"
     }
 
     buildFeatures {

@@ -141,6 +141,8 @@ interface DesktopLibraryStore {
     ): DesktopQueue?
     /** Applies to the unfinished current listen and future listens within this queue ID only. */
     suspend fun setQueueSessionTasteExcluded(expectedQueueId: String, excluded: Boolean): DesktopQueue?
+    suspend fun importPlaylist(id: String, name: String, description: String?, tracks: List<String>): Unit =
+        throw UnsupportedOperationException("desktop_playlist_import_unavailable")
     suspend fun createPlaylist(name: String): DesktopPlaylist
     /** Preserves the playlist/entry identities; an unchanged name creates no intent. */
     suspend fun renamePlaylist(playlistId: String, name: String): Unit

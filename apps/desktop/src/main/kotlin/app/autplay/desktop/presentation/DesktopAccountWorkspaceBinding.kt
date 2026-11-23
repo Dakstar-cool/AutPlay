@@ -34,6 +34,7 @@ internal class DesktopAccountWorkspaceBinding(
     val contextSettlement: StateFlow<DesktopContextSettlement> = MutableStateFlow(DesktopContextSettlement.Ready),
     /** Actual issued K/J owner, for process-only navigation comparisons. */
     val accountOwner: () -> AccountLease? = { null },
+    val music: DesktopOnlineMusic? = null,
 ) {
     companion object {
         fun unavailable(reason: DesktopAccountAvailability): DesktopAccountWorkspaceBinding = DesktopAccountWorkspaceBinding(

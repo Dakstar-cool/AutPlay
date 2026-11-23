@@ -20,6 +20,9 @@ data class AccountCatalogAppearancePage(val items:List<AccountCatalogAppearance>
 data class AccountCatalogTrackContext(val track: AccountLocalDomainRow,
     val library: List<AccountLocalDomainRow>, val libraryHasMore: Boolean)
 interface DesktopAccountCatalog {
+    suspend fun resolveMusicTargets(lease: AccountLease, ids: List<AccountUuid>, recording: Boolean): Map<AccountUuid, AccountUuid> =
+        throw AccountStoreException(AccountFailure.ACCOUNT_UNSUPPORTED_OPERATION)
+
     /** Entire admitted current J set or an explicit refusal; never a first-page snapshot. */
     suspend fun captureSearch(lease: AccountLease, kind: AccountCatalogSearchKind): AccountCatalogSearchSnapshot =
         throw AccountStoreException(AccountFailure.ACCOUNT_UNSUPPORTED_OPERATION)

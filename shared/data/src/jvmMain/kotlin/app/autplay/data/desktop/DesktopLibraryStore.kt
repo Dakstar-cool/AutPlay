@@ -432,6 +432,16 @@ private class PersistentDesktopLibraryStore(
         dao.updateTrackCollectionState(trackId, "ACTIVE")
     }
 
+    override suspend fun importPlaylist(id: String, name: String, description: String?, tracks: List<String>) {
+        validId(id)
+        requireCode(name.isNotBlank() && validText(name), "desktop_playlist_name_invalid")
+        requirePlaylistDescription(description)
+        val ids = tracks.take(10_001)
+        requireCode(ids.size <= 10_000, "desktop_playlist_batch_limit")
+        val rows = ids.map { track -> validId(track); PlaylistEntryRow(newId(), id, track, 0) }
+        mutate { dao.importPlaylist(PlaylistRow(id, name), description, rows) }
+    }
+
     override suspend fun createPlaylist(name: String): DesktopPlaylist = mutate {
         requireCode(name.isNotBlank() && validText(name), "desktop_playlist_name_invalid")
         val row = PlaylistRow(newId(), name)

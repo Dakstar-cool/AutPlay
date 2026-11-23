@@ -1303,7 +1303,7 @@ public class DesktopShellPolicyTest {
             DesktopTrackPreferenceFilter.entries.forEach { filter -> assertTrue(filter.label(language).isNotBlank()) }
             DesktopTrackCollectionFilter.entries.forEach { filter -> assertTrue(filter.label(language).isNotBlank()) }
         }
-        assertEquals("Библиотека", DesktopSection.Library.label(DesktopLanguage.Russian))
+        assertEquals("Моя музыка", DesktopSection.Library.label(DesktopLanguage.Russian))
         assertEquals("Settings", DesktopSection.Settings.label(DesktopLanguage.English))
         assertEquals("Переименовать плейлист", DesktopText.RenamePlaylist.inLanguage(DesktopLanguage.Russian))
         assertEquals("Apply", DesktopText.ApplyPlaylistName.inLanguage(DesktopLanguage.English))

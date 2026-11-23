@@ -12,6 +12,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
+import app.autplay.desktop.presentation.OnlineWave
+import app.autplay.desktop.presentation.OnlineMusicSearch
+import app.autplay.desktop.presentation.DesktopPlaylistTransfer
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -405,6 +409,7 @@ public class DesktopRuntime private constructor(
     public val lastImportProgress: StateFlow<DesktopImportProgress?> = mutableLastImportProgress
     private val mutableError: MutableStateFlow<String?> = MutableStateFlow(null)
     public val error: StateFlow<String?> = mutableError
+    internal val playbackLibrary get() = productionAccounts?.libraryState ?: store.state
     public val playerState: StateFlow<DesktopPlayerState> = controller.playerState
     public val history: DesktopHistoryController = DesktopHistoryController(
         store, scope, onSnapshotUnavailable = { reportError("desktop_snapshot_unavailable") },
@@ -1177,6 +1182,10 @@ public fun DesktopApp(
     val currentWindowVisible by rememberUpdatedState(windowVisible)
     val accountHomeAvailable = accountWorkspace?.availability?.collectAsState()?.value == DesktopAccountAvailability.Available
     val accountHomeVisible = contextReady && windowVisible && !accountsVisible && section == DesktopSection.Home && accountHomeAvailable && !lifecycleState.closing
+    val displayedScope = accountWorkspace?.state?.collectAsState()?.value?.scope
+    val music = accountWorkspace?.music
+    val musicLease = if (displayedScope != null && accountHomeAvailable && contextReady && windowVisible && !lifecycleState.closing)
+        accountWorkspace.accountOwner()?.takeIf { it.sessionFamily != null } else null
     val accountHomeState = if (accountHomeVisible) accountWorkspace?.state?.collectAsState()?.value else null
     val catalogKind = when (libraryKind) {
         DesktopLibraryKind.Artist -> DesktopCatalogKind.Artist
@@ -1218,7 +1227,7 @@ public fun DesktopApp(
         // Retire every old UI callback before the retained owner starts any suspendable drain.
         navigationRevision += 1
         val owner = accountWorkspace?.accountOwner?.invoke()
-        val local = !nextAccounts && (nextSection != DesktopSection.Library ||
+        val local = !nextAccounts && nextSection !in setOf(DesktopSection.Player, DesktopSection.Queue) && (nextSection != DesktopSection.Library ||
             nextKind == DesktopLibraryKind.Track || nextKind == DesktopLibraryKind.Playlist)
         val settled = accountWorkspace?.settleNavigation?.invoke(local) ?: CompletableFuture.completedFuture(Unit)
         navigationFailed = false
@@ -1605,7 +1614,15 @@ public fun DesktopApp(
         sourceAccessActions = host?.sources?.actions,
         onResumeSourceAccess = { expected -> command { it.resumeRememberedSources(expected) } },
         onOpenAccount = if (accountWorkspace != null) ({ openAccounts() }) else null,
+        playbackLibrary = host?.playbackLibrary?.collectAsState()?.value ?: library,
+        serverSearch = if (music != null && musicLease != null) ({
+            key(music, musicLease) { OnlineMusicSearch(music, musicLease, language) }
+        }) else null,
+        playlistTransfer = if (host != null && library != null) ({ playlist ->
+            key(host, musicLease) { DesktopPlaylistTransfer(chooserOwner, host.store, library, playlist, music, musicLease, language) }
+        }) else null,
         homeAccountContent = if (accountHomeState != null) ({
+            if (music != null && musicLease != null) key(music, musicLease) { OnlineWave(music, musicLease, language) }
             DesktopAccountHomePreview(accountHomeState, language, ::openAccounts)
         }) else null,
         libraryKind = libraryKind,

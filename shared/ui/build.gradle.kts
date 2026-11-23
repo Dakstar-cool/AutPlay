@@ -22,3 +22,15 @@ kotlin {
         }
     }
 }
+
+val desktopGlyphs = tasks.register<Sync>("prepareDesktopGlyphs") {
+    from(rootProject.layout.projectDirectory.dir("apps/android/src/main/res/drawable")) {
+        include("ic_autplay_*.xml")
+        into("autplay/glyphs")
+    }
+    into(layout.buildDirectory.dir("generated/desktopGlyphs"))
+}
+
+kotlin.sourceSets.named("jvmMain") {
+    resources.srcDir(desktopGlyphs)
+}
