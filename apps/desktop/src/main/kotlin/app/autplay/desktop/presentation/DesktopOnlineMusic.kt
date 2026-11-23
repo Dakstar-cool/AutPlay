@@ -1,8 +1,12 @@
 package app.autplay.desktop.presentation
 
 import app.autplay.application.desktop.DesktopLibrarySnapshot
+import app.autplay.application.desktop.DesktopWaveTrack
+import app.autplay.application.desktop.DesktopWaveRecommendation
 import app.autplay.application.desktop.DesktopPlaylist
 import app.autplay.application.desktop.account.*
+import app.autplay.application.server.MusicCatalogueContextRequest
+import app.autplay.application.server.MusicCatalogueContextCodec
 import app.autplay.application.server.InternetMetadataDiscoveryCodec
 import app.autplay.application.server.InternetMetadataDiscoveryPage
 import app.autplay.desktop.sync.*
@@ -19,6 +23,8 @@ import kotlinx.serialization.json.*
 
 internal data class VaultHit(val ref: AccountUuid, val publication: AccountUuid?, val title: String, val artist: String, val available: Boolean)
 internal data class VaultPage(val items: List<VaultHit>, val next: String?)
+internal data class WaveCalendar(val id: AccountUuid = AccountUuid.random(), val start: LocalDateTime = LocalDateTime.now())
+internal data class ArtistCatalogue(val mbid: AccountUuid, val counts: Map<String, Long>)
 internal data class MusicBrowse(val query: String, val kind: String, val entity: AccountUuid? = null, val releases: Boolean = false)
 internal data class CatalogJob(val id: AccountUuid, val phase: String, val counts: Map<String, Int>)
 
@@ -27,6 +33,7 @@ internal class DesktopOnlineMusic(
     private val current: () -> AccountLease?,
     private val renew: suspend (AccountLease) -> AccountLease,
     private val play: suspend (AccountLease, List<AccountUuid>, String) -> Unit,
+    private val startWave: suspend (AccountLease, List<DesktopWaveTrack>, suspend () -> List<DesktopWaveTrack>) -> Unit,
     private val download: suspend (AccountLease, AccountUuid) -> Unit,
 ) {
     private fun requireOwner(lease: AccountLease) = check(current() == lease) { "ACCOUNT_SCOPE_CHANGED" }
@@ -182,24 +189,76 @@ internal class DesktopOnlineMusic(
             check(refs.size == 1)
             AccountUuid(refs.single().jsonPrimitive.content)
         } ?: hit.ref
-        var id = resolve(lease, listOf(expected), recording = false).singleOrNull()
-        if (id == null) {
-            services.sync.runPass(lease)
-            id = resolve(lease, listOf(expected), recording = false).singleOrNull()
-        }
-        requireOwner(lease)
-        play(lease, listOf(checkNotNull(id) { "SYNC_REQUIRED" }), "SEARCH")
+        play(lease, listOf(trackByReference(lease, expected)), "SEARCH")
     }
 
-    suspend fun rankedWave(lease: AccountLease, context: String): List<AccountUuid> {
+    private suspend fun trackByReference(lease: AccountLease, expected: AccountUuid): AccountUuid {
+        val local = resolve(lease, listOf(expected), recording = false).singleOrNull() ?: run {
+            services.sync.runPass(lease)
+            resolve(lease, listOf(expected), recording = false).singleOrNull()
+        }
+        requireOwner(lease)
+        return checkNotNull(local) { "SYNC_REQUIRED" }
+    }
+
+    private fun editable(row: AccountLocalDomainRow) = !row.header.hasConflict && !row.header.removed &&
+        row.header.snapshotConfirmed != false && row.header.rawProjectionState.let { it == null || it == "COMPLETE" }
+
+    suspend fun playlists(lease: AccountLease, after: AccountUuid?): Pair<List<AccountLocalDomainRow>, AccountUuid?> {
+        requireOwner(lease)
+        val rows = checkNotNull(services.store.domain).readProjectionPage(lease, AccountProjectionKind.PLAYLIST, after, 25)
+        return rows.filter { editable(it) && (it.detail as? AccountLocalDomainDetail.Playlist)?.rawType == "MANUAL" } to
+            rows.lastOrNull()?.header?.localId?.takeIf { rows.size == 25 }
+    }
+
+    suspend fun appendCatalogueTrack(lease: AccountLease, selection: MusicCatalogueContextRequest, playlist: AccountLocalDomainRow,
+        operation: AccountUuid, entry: AccountUuid, timestamp: Long) {
+        requireOwner(lease)
+        check(editable(playlist) && (playlist.detail as? AccountLocalDomainDetail.Playlist)?.rawType == "MANUAL")
+        val receipt = MusicCatalogueContextCodec.decode(request(lease, DomainRoute.CatalogueContext(), selection.document()))
+        check(receipt.matches(selection))
+        val admitted = AccountUuid(checkNotNull(receipt.admissionContextId(java.time.Instant.now())))
+        val ref = AccountUuid(DomainJson.text(request(lease, DomainRoute.CatalogueTrack(admitted)), "user_track_ref_id", 36))
+        val trackId = trackByReference(lease, ref)
+        val domain = checkNotNull(services.store.domain)
+        val track = checkNotNull(domain.readExact(lease, AccountProjectionKind.TRACK, trackId))
+        check(editable(track))
+        val change = AccountDomainChange(operation, timestamp, AccountDomainCommand.Entry(entry, playlist.header.localId,
+            trackId, "0", false, serverOrdering = true))
+        val review = AccountDomainReview(listOf(AccountDomainExpected(AccountProjectionKind.TRACK, trackId, track.header),
+            AccountDomainExpected(AccountProjectionKind.PLAYLIST, playlist.header.localId, playlist.header),
+            AccountDomainExpected(AccountProjectionKind.PLAYLIST_ENTRY, entry, null)))
+        requireOwner(lease)
+        val saved = domain.readMutationOutcome(lease, change, review) ?: domain.mutateReviewed(lease, change, review)
+        check(saved.operationId == operation && saved.aggregateId == entry)
+    }
+
+    suspend fun credits(lease: AccountLease, id: AccountUuid): List<AccountCatalogCreditMember> {
+        requireOwner(lease)
+        val catalog = checkNotNull(services.store.catalog)
+        val data = catalog.readTrackContext(lease, id)?.track?.detail as? AccountLocalDomainDetail.Track
+        val recording = data?.recordingId ?: return emptyList()
+        return catalog.readSubject(lease, AccountCatalogSubjectCursor(recording, "RECORDING_ARTIST_CREDIT"))
+            ?.members.orEmpty().sortedBy { it.position }.distinctBy { it.artistId }
+    }
+
+    suspend fun artistCatalogue(lease: AccountLease, artist: AccountUuid): ArtistCatalogue? {
+        val row = request(lease, DomainRoute.ArtistRanking(artist))
+        val mbid = row["artist_mbid"]?.jsonPrimitive?.contentOrNull?.let(::AccountUuid) ?: return null
+        val counts = row["recording_counts"]?.jsonObject.orEmpty().mapValues { (_, count) ->
+            count.jsonPrimitive.long.also { require(it >= 0) }
+        }
+        return ArtistCatalogue(mbid, counts)
+    }
+
+    suspend fun rankedWave(lease: AccountLease, context: String, session: WaveCalendar = WaveCalendar()): List<DesktopWaveTrack> {
         require(context in setOf("GENERAL", "WORK", "SLEEP"))
-        val session = AccountUuid.random()
-        val now = LocalDateTime.now()
+        val now = session.start
         val query = buildJsonObject {
-            put("context", context); put("limit", 50); put("exploration", 0.2); put("seed", session.value.hashCode())
+            put("context", context); put("limit", 50); put("exploration", 0.2); put("seed", AccountUuid.random().value.hashCode())
             put("pipeline_key", "cpu-baseline"); put("pipeline_version", JsonNull); put("shadow", false)
             putJsonObject("wave_session") {
-                put("version", 1); put("session_id", session.value); put("local_date", now.toLocalDate().toString()); put("local_hour", now.hour)
+                put("version", 1); put("session_id", session.id.value); put("local_date", now.toLocalDate().toString()); put("local_hour", now.hour)
             }
         }
         val result = try { request(lease, DomainRoute.Recommendations(), query) }
@@ -211,39 +270,65 @@ internal class DesktopOnlineMusic(
         val ranked = items.map { item ->
             val row = item.jsonObject
             require(AccountUuid(DomainJson.text(row, "recommendation_request_id", 36)) == requestId)
-            DomainJson.number(row, "source_rank") to AccountUuid(DomainJson.text(row, "recording_id", 36))
-        }.sortedBy { it.first }.map { it.second }.distinct()
-        var selected = resolve(lease, ranked, recording = true)
+            val recording = AccountUuid(DomainJson.text(row, "recording_id", 36))
+            val rank = DomainJson.number(row, "source_rank").also { require(it in 1..1000) }.toInt()
+            val section = row["section"]?.jsonPrimitive?.contentOrNull?.also { require(it.matches(Regex("[a-z][a-z0-9_]{0,99}"))) }
+            DesktopWaveRecommendation(requestId.value, recording.value, rank, section, context)
+        }.sortedBy { it.sourceRank }.distinctBy { it.recordingId }
+        val recordingIds = ranked.map { AccountUuid(it.recordingId) }
+        val catalog = checkNotNull(services.store.catalog)
+        var selected = catalog.resolveMusicTargets(lease, recordingIds, true)
         if (selected.isEmpty() && ranked.isNotEmpty()) {
             services.sync.runPass(lease)
-            selected = resolve(lease, ranked, recording = true)
+            selected = catalog.resolveMusicTargets(lease, recordingIds, true)
         }
         requireOwner(lease)
         check(selected.isNotEmpty()) { "NO_PLAYABLE_RECOMMENDATIONS" }
         val domain = checkNotNull(services.store.domain)
-        return selected.filter { id ->
-            domain.readTrackPreferences(lease, id).none {
-                val pref = it.detail as? AccountLocalDomainDetail.Preference
-                return@none !it.header.removed && (pref?.rawPreference == "DISLIKED" || pref?.excludedFromTaste == true)
+        return ranked.mapNotNull { recommendation ->
+            val id = selected[AccountUuid(recommendation.recordingId)] ?: return@mapNotNull null
+            val excluded = domain.readTrackPreferences(lease, id).any { row ->
+                val pref = row.detail as? AccountLocalDomainDetail.Preference
+                return@any !row.header.removed && (pref?.rawPreference == "DISLIKED" || pref?.excludedFromTaste == true)
             }
+            if (excluded) null else DesktopWaveTrack(id.value, recommendation)
         }
     }
 
-    suspend fun wheelMix(lease: AccountLease, genre: String): List<AccountUuid> {
+    private suspend fun trackGenres(lease: AccountLease, id: AccountUuid): Set<String> {
         val catalog = checkNotNull(services.store.catalog)
-        val ids = rankedWave(lease, "GENERAL")
-        return ids.filter { id ->
-            val values = catalog.readMetadata(lease, id)?.fields?.get("genres") as? JsonArray
-            values != null && values.size <= 12 && values.any { value ->
-                (value as? JsonPrimitive)?.contentOrNull?.let(app.autplay.application.recommendation.WaveWheel::genre) == genre
-            }
-        }.takeIf { it.size >= 2 }.orEmpty()
+        val tags = catalog.readMetadata(lease, id)?.fields?.get("genres") as? JsonArray ?: return emptySet()
+        if (tags.size > 12) return emptySet()
+        return tags.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(app.autplay.application.recommendation.WaveWheel::genre) }.toSet()
     }
 
-    suspend fun playMix(lease: AccountLease, ids: List<AccountUuid>) {
+    suspend fun wheelWeights(lease: AccountLease, ordered: List<DesktopWaveTrack>): Map<String, Double> {
         requireOwner(lease)
-        check(ids.isNotEmpty()) { "NO_PLAYABLE_RECOMMENDATIONS" }
-        play(lease, ids, "USER")
+        val preferences = checkNotNull(services.store.domain).readProjectionPage(lease, AccountProjectionKind.PREFERENCE, null, 100)
+            .filter(::editable).mapNotNull { it.detail as? AccountLocalDomainDetail.Preference }
+        val excluded = preferences.filter { it.excludedFromTaste || it.rawPreference == "DISLIKED" }.mapTo(hashSetOf()) { it.trackId }
+        val liked = preferences.filter { it.rawPreference == "LIKED" }.mapTo(hashSetOf()) { it.trackId }
+        val ranks = ordered.associate { AccountUuid(it.trackId) to requireNotNull(it.recommendation).sourceRank }
+        val result = mutableMapOf<String, Double>()
+        for (id in (liked + ranks.keys) - excluded) {
+            val weight = (if (id in liked) 2.0 else 0.0) + (ranks[id]?.let { 1.5 / it } ?: 0.0)
+            for (genre in trackGenres(lease, id)) result[genre] = (result[genre] ?: 0.0) + weight
+        }
+        requireOwner(lease)
+        return result
+    }
+
+    suspend fun wheelMix(lease: AccountLease, genre: String, ranked: List<DesktopWaveTrack>): List<DesktopWaveTrack> =
+        ranked.filter { genre in trackGenres(lease, AccountUuid(it.trackId)) }.takeIf { it.size >= 2 }.orEmpty()
+
+    suspend fun playMix(lease: AccountLease, tracks: List<DesktopWaveTrack>, genre: String? = null,
+        session: WaveCalendar = WaveCalendar()) {
+        requireOwner(lease)
+        val context = checkNotNull(tracks.firstOrNull()?.recommendation) { "NO_PLAYABLE_RECOMMENDATIONS" }.context
+        startWave(lease, tracks) {
+            val ranked = rankedWave(lease, context, session)
+            if (genre == null) ranked else wheelMix(lease, genre, ranked)
+        }
     }
 
     suspend fun downloadCurrent(lease: AccountLease, track: String) {
@@ -252,7 +337,8 @@ internal class DesktopOnlineMusic(
     }
 
     suspend fun wave(lease: AccountLease, context: String) {
-        playMix(lease, rankedWave(lease, context))
+        val session = WaveCalendar()
+        playMix(lease, rankedWave(lease, context, session), session = session)
     }
 
     private suspend fun resolve(lease: AccountLease, ids: List<AccountUuid>, recording: Boolean): List<AccountUuid> {

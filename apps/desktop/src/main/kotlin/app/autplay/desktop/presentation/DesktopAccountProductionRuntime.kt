@@ -207,7 +207,7 @@ internal class DesktopAccountProductionRuntime private constructor(
                 }
             }, setHomeVisible = ::setHomeVisible, setCatalogVisible = ::setCatalogVisible,
             settleNavigation = ::settleNavigation, contextSettlement = settlementMutable, accountOwner = issued::get,
-            music = DesktopOnlineMusic(serviceOwner, issued::get, ::prepareNetworkMediaLease, mediaAdapter::playSelection) { lease, id ->
+            music = DesktopOnlineMusic(serviceOwner, issued::get, ::prepareNetworkMediaLease, mediaAdapter::playSelection, mediaAdapter::playWave) { lease, id ->
                 check(mediaOwner.admission.selectedLeaseOrNull() == lease && mediaOwner.library.state.value.queue?.let { queue ->
                     queue.entries.any { it.id == queue.currentEntryId && it.trackId == id.value }
                 } == true)

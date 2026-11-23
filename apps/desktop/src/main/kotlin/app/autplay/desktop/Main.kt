@@ -911,8 +911,12 @@ public class DesktopRuntime private constructor(
     public fun playLocalTracks(ids: List<String>, type: String) {
         val account = productionAccounts
         val selected = account?.selectedMediaLease()
-        if (selected == null) controller.playTracks(ids, type)
-        else mutate { account.selectLocalForPlayback(selected); controller.playTracks(ids, type) }
+        fun start() {
+            if (type == "WAVE") controller.playWave(ids.map { app.autplay.application.desktop.DesktopWaveTrack(it) }) {
+                app.autplay.ui.desktop.selectDesktopWaveTracks(store.state.value).map { app.autplay.application.desktop.DesktopWaveTrack(it) }
+            } else controller.playTracks(ids, type)
+        }
+        if (selected == null) start() else mutate { account.selectLocalForPlayback(selected); start() }
     }
 
     internal fun playerPreference(track: String, value: String) {
@@ -1672,7 +1676,10 @@ public fun DesktopApp(
             }
         }) else null,
         playerDownload = if (music != null && musicLease != null && host?.selectedPlayerLease == musicLease) ({ id ->
-            key(musicLease, id) { app.autplay.desktop.presentation.PlayerDownload(music, musicLease, id, language) }
+            key(musicLease, id) {
+                app.autplay.desktop.presentation.PlayerArtistPicker(music, musicLease, id, host.musicCacheRoot, language)
+                app.autplay.desktop.presentation.PlayerDownload(music, musicLease, id, language)
+            }
         }) else null,
         homeWheel = { key(music, musicLease) { DesktopWaveWheel(music, musicLease, language) } },
         homeAccountContent = if (accountHomeState != null) ({
@@ -1697,6 +1704,12 @@ public fun DesktopApp(
                 }
             }
             if (accountTab && accountCatalogState != null && accountWorkspace != null) {
+                val detail = accountCatalogState.catalog.detail
+                if (music != null && musicLease != null && detail?.key?.kind == DesktopCatalogKind.Artist &&
+                    accountCatalogState.catalog.currentAccountScopeId == musicLease.scopeId.value) key(musicLease, detail.key) {
+                    app.autplay.desktop.presentation.ArtistDiscographyButton(music, musicLease, detail.key.id, detail.title.orEmpty(),
+                        host.musicCacheRoot, language)
+                }
                 DesktopLibraryCatalogBrowser(accountCatalogState, accountWorkspace.actions, catalogKind, language,
                     isNavigationCurrent = { navigationCurrent() && accountCatalogVisible && !lifecycleState.closing })
             } else DesktopLocalCollectionBrowser(localIndex, catalogKind, initialAlbum.takeIf { catalogKind == DesktopCatalogKind.Album }, language) { ids ->

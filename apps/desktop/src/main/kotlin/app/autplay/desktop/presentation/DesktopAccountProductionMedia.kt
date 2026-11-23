@@ -4,6 +4,7 @@ import app.autplay.application.desktop.account.*
 import app.autplay.desktop.media.DesktopMediaRuntime
 import app.autplay.desktop.playback.DesktopPlaybackController
 import app.autplay.ui.desktop.*
+import app.autplay.application.desktop.DesktopWaveTrack
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -90,6 +91,30 @@ internal class DesktopAccountProductionMedia(
         for (id in ids.distinct()) runtime.library.includeTarget(lease, id, null, retainQueue = false, serverSelection = true)
         requireLease(lease)
         controller.playTracks(ids.map { it.value }, queueType)
+    }
+
+    internal suspend fun playWave(lease: AccountLease, tracks: List<DesktopWaveTrack>,
+        next: suspend () -> List<DesktopWaveTrack>): Unit = serial.withLock {
+        require(tracks.size in 1..200)
+        requireLease(lease)
+        if (prepareNetworkLease(lease) != lease) changed()
+        select(lease)
+        suspend fun include(rows: List<DesktopWaveTrack>, retain: Boolean) {
+            for (track in rows.distinctBy { it.trackId })
+                runtime.library.includeTarget(lease, AccountUuid(track.trackId), null, retainQueue = retain, serverSelection = true)
+            requireLease(lease)
+        }
+        include(tracks, false)
+        controller.playWave(tracks) {
+            requireLease(lease)
+            val rows = next()
+            serial.withLock {
+                requireLease(lease)
+                if (runtime.admission.selectedLeaseOrNull() != lease) changed()
+                include(rows, true)
+            }
+            rows
+        }
     }
 
     suspend fun setPlayerPreference(lease: AccountLease, id: AccountUuid, value: String): Unit = serial.withLock {

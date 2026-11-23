@@ -195,7 +195,12 @@ internal class AccountDomainRepository(private val owner: AccountRepositoryOwner
             put("queue_id", queue.queueId.value); put("revision", queue.revision); put("repeat_mode", queue.repeat)
             put("shuffle", queue.shuffle); put("session_id", queue.sessionId?.value?.let(::JsonPrimitive) ?: JsonNull)
             put("current_entry_id", queue.currentEntryId?.value?.let(::JsonPrimitive) ?: JsonNull)
-            put("entries", JsonArray(queue.entries.map { buildJsonObject { put("entry_id", it.entryId.value); put("track_id", it.trackId.value); put("position", it.position) } }))
+            putJsonArray("entries") {
+                for (entry in queue.entries) add(buildJsonObject {
+                    put("entry_id", entry.entryId.value); put("track_id", entry.trackId.value); put("position", entry.position)
+                    entry.recommendation?.let { put("recommendation", it.queueDocument()) }
+                })
+            }
         })
         owner.write(lease, operationId, "QUEUE", input) { sql, _, replay ->
             if (!replay) {
@@ -206,9 +211,15 @@ internal class AccountDomainRepository(private val owner: AccountRepositoryOwner
                     ON CONFLICT(scope_id,queue_id) DO UPDATE SET revision=excluded.revision,repeat_mode=excluded.repeat_mode,
                     shuffle=excluded.shuffle,session_id=excluded.session_id,current_entry_id=excluded.current_entry_id""",
                     lease.scopeId, queue.queueId, queue.revision, queue.repeat, if (queue.shuffle) 1 else 0, queue.sessionId, queue.currentEntryId)
-                for (entry in queue.entries) sql.mutate("j_queue_entry", listOf(lease.scopeId, queue.queueId, queue.revision, entry.entryId),
-                    "INSERT INTO j_queue_entry(scope_id,queue_id,revision,entry_id,track_id,position) VALUES(?,?,?,?,?,?)",
-                    lease.scopeId, queue.queueId, queue.revision, entry.entryId, entry.trackId, entry.position)
+                for (entry in queue.entries) {
+                    entry.recommendation?.let { wave ->
+                        AccountCatalogProjectionWriter.attribution(sql, lease.scopeId, entry.entryId, "PLAYBACK_QUEUE_ENTRY",
+                            entry.trackId, wave.queueDocument(), "LOCAL")
+                    }
+                    sql.mutate("j_queue_entry", listOf(lease.scopeId, queue.queueId, queue.revision, entry.entryId),
+                        "INSERT INTO j_queue_entry(scope_id,queue_id,revision,entry_id,track_id,position) VALUES(?,?,?,?,?,?)",
+                        lease.scopeId, queue.queueId, queue.revision, entry.entryId, entry.trackId, entry.position)
+                }
             }
         }
     }
@@ -216,9 +227,12 @@ internal class AccountDomainRepository(private val owner: AccountRepositoryOwner
         sql.query("SELECT revision,repeat_mode,shuffle,session_id,current_entry_id FROM j_queue WHERE scope_id=? AND queue_id=?", lease.scopeId, queueId) {
             AccountQueueSnapshot(queueId, it.getLong(0), emptyList(), it.getText(1), it.getLong(2) == 1L,
                 sql.nullable(it, 3)?.let(::AccountUuid), sql.nullable(it, 4)?.let(::AccountUuid))
-        }.singleOrNull()?.let { queue -> queue.copy(entries = sql.query("""SELECT entry_id,track_id,position FROM j_queue_entry
-            WHERE scope_id=? AND queue_id=? AND revision=? ORDER BY position LIMIT 1000""", lease.scopeId, queueId, queue.revision) {
-            AccountQueueEntry(AccountUuid(it.getText(0)), AccountUuid(it.getText(1)), it.getLong(2).toInt())
+        }.singleOrNull()?.let { queue -> queue.copy(entries = sql.query("""SELECT e.entry_id,e.track_id,e.position,a.exact_document FROM j_queue_entry e
+            LEFT JOIN j_attribution a ON a.scope_id=e.scope_id AND a.source_id=e.entry_id AND a.aggregate_type='PLAYBACK_QUEUE_ENTRY'
+                AND a.aggregate_id=e.track_id AND a.observation_kind='LOCAL'
+            WHERE e.scope_id=? AND e.queue_id=? AND e.revision=? ORDER BY e.position LIMIT 1000""", lease.scopeId, queueId, queue.revision) {
+            AccountQueueEntry(AccountUuid(it.getText(0)), AccountUuid(it.getText(1)), it.getLong(2).toInt(),
+                if (it.isNull(3)) null else restoredWaveRecommendation(AccountSyncWireV1.document(it.getBlob(3))))
         }) }
     }
     override suspend fun checkpoint(lease: AccountLease, operationId: AccountUuid, expectedRevision: Long,

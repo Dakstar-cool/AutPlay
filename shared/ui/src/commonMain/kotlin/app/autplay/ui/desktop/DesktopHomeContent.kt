@@ -210,7 +210,7 @@ internal fun DesktopHomeContent(
         val startWave = {
             if (isViewCurrent() && !currentReopen && currentAdapter &&
                 currentPlayback.connection == PlaybackConnectionState.Connected && prepared.waveIds.isNotEmpty()) {
-                currentCallbacks.onPlayTracks(prepared.waveIds, "USER")
+                currentCallbacks.onPlayTracks(prepared.waveIds, "WAVE")
             }
         }
         Column(Modifier.fillMaxWidth().waveGlow(

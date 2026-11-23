@@ -1,5 +1,6 @@
 package app.autplay.desktop.acceptance
 
+import app.autplay.application.desktop.DesktopWaveTrack
 import app.autplay.application.desktop.DesktopAudioEngine
 import app.autplay.application.desktop.DesktopAudioEvent
 import app.autplay.application.desktop.DesktopArtwork
@@ -85,6 +86,32 @@ import org.junit.rules.Timeout
 
 class DesktopQueueAcceptanceTest {
     @get:Rule val deadline: Timeout = Timeout.seconds(90)
+
+    @Test fun waveRefillsTheCurrentQueueAndRetiresWhenAnotherQueueStarts(): Unit = runBlocking {
+        DesktopAcceptanceFixture().use { fixture ->
+            fixture.openStore()
+            val first = fixture.importWav("First.wav", 260)
+            val second = fixture.importWav("Second.wav", 310)
+            val controller = fixture.start(PolicyEngine())
+            controller.playWave(listOf(DesktopWaveTrack(first))) { listOf(DesktopWaveTrack(first), DesktopWaveTrack(second)) }
+            eventually("wave appends only the next eligible track") {
+                fixture.store.state.value.queue?.entries?.map { it.trackId } == listOf(first, second)
+            }
+
+            val started = CompletableDeferred<Unit>()
+            val cancelled = CompletableDeferred<Unit>()
+            controller.playWave(listOf(DesktopWaveTrack(second))) {
+                started.complete(Unit)
+                try { kotlinx.coroutines.awaitCancellation() } finally { cancelled.complete(Unit) }
+            }
+            withTimeout(5_000) { started.await() }
+            controller.playTracks(listOf(first), "PLAYLIST")
+            withTimeout(5_000) { cancelled.await() }
+            eventually("manual playlist owns playback") {
+                fixture.store.state.value.queue?.let { it.queueType == "PLAYLIST" && it.entries.map { row -> row.trackId } == listOf(first) } == true
+            }
+        }
+    }
 
     @Test fun realQueueKeepsDuplicateEntriesRepeatShuffleAndRestartSessionWhileRejectingStaleEof(): Unit = runBlocking {
         withTimeout(75_000) {

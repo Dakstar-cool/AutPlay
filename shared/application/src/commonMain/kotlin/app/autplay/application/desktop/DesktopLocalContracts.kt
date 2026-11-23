@@ -28,7 +28,10 @@ data class DesktopPlaylist(
     val entries: List<DesktopPlaylistEntry>,
     val description: String? = null,
 )
-data class DesktopQueueEntry(val id: String, val trackId: String)
+data class DesktopWaveRecommendation(val requestId: String, val recordingId: String, val sourceRank: Int,
+    val section: String?, val context: String)
+data class DesktopWaveTrack(val trackId: String, val recommendation: DesktopWaveRecommendation? = null)
+data class DesktopQueueEntry(val id: String, val trackId: String, val recommendation: DesktopWaveRecommendation? = null)
 
 /** Unknown persisted modes must survive reads; the playback owner rejects unsupported modes. */
 data class DesktopQueue(

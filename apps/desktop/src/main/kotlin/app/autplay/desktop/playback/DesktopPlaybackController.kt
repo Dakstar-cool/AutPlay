@@ -10,6 +10,7 @@ import app.autplay.application.desktop.DesktopPlaybackTarget
 import app.autplay.application.desktop.DesktopPlayerState
 import app.autplay.application.desktop.DesktopQueue
 import app.autplay.application.desktop.DesktopQueueEntry
+import app.autplay.application.desktop.DesktopWaveTrack
 import app.autplay.application.desktop.DesktopQueueEditTarget
 import app.autplay.application.desktop.DesktopQueueEditorState
 import app.autplay.application.desktop.DesktopQueueGroupAction
@@ -114,6 +115,13 @@ public class DesktopPlaybackController(
     private var mediaTimerRevision: Long = 0
     private var mediaWantsPlay: Boolean = false
     private var mediaCopyQueue: Pair<String, DesktopMediaCopySelection>? = null
+    private class ActiveWave(val queueId: String, val next: suspend () -> List<DesktopWaveTrack>) {
+        var lastRequestEntry: String? = null
+        var pending: Job? = null
+    }
+    private var activeWave: ActiveWave? = null
+    private fun clearWave() { activeWave?.pending?.cancel(); activeWave = null }
+
     private var endedGeneration: Long? = null
     private var facts: DesktopAudioEvent = DesktopAudioEvent(0, "IDLE")
     private var sourceAvailable: Boolean = false
@@ -217,6 +225,7 @@ public class DesktopPlaybackController(
         val fence = synchronized(contextGate) { beginContextFence(); contextEpoch.get() }
         mutex.withLock {
             if (closed || contextCheckpointed) return@withLock
+            clearWave()
             timerPlan.clear()
             accumulate()
             try { if (media != null) publishMediaIntent(false) else engine.pause(generation) }
@@ -396,12 +405,49 @@ public class DesktopPlaybackController(
         dispatch { replaceQueue(selectedIds, queueType) }
     }
 
+    internal fun playWave(rows: List<DesktopWaveTrack>, next: suspend () -> List<DesktopWaveTrack>) {
+        val batch = rows.take(200)
+        dispatch { replaceQueue(batch.map { it.trackId }, "USER", wave = batch, nextWave = next) }
+    }
+
+    private fun refillWave() {
+        val current = queue ?: return
+        val wave = activeWave?.takeIf { it.queueId == current.id } ?: return
+        val entry = current.currentEntryId ?: return
+        val order = order()
+        val position = order.indexOf(entry)
+        if (position < 0 || order.lastIndex - position > 2 || wave.pending?.isActive == true || wave.lastRequestEntry == entry) return
+        wave.lastRequestEntry = entry
+        val epoch = contextEpoch.get()
+        wave.pending = scope.launch(Dispatchers.IO) {
+            val rows = try { wave.next().take(200) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { return@launch }
+            dispatch(Command(ownerRevision = epoch) {
+                val target = queue
+                if (activeWave !== wave || target?.id != wave.queueId || rows.isEmpty()) return@Command
+                val order = order()
+                val index = order.indexOf(target.currentEntryId)
+                if (index < 0) return@Command
+                val pendingEntries = order.drop(index).toSet()
+                val remaining = target.entries.filter { it.id in pendingEntries }.mapTo(hashSetOf()) { it.trackId }
+                val fresh = rows.filter { it.trackId !in remaining }.take(DesktopLocalLimits.MAX_QUEUE_ENTRIES - pendingEntries.size)
+                if (fresh.isEmpty()) return@Command
+                val overflow = (target.entries.size + fresh.size - DesktopLocalLimits.MAX_QUEUE_ENTRIES).coerceAtLeast(0)
+                val expired = order.take(overflow).toSet()
+                if (admitInsertion(fresh.size - expired.size, false))
+                    insertTracks(fresh.map { it.trackId }, libraryState.value, false, "USER", fresh, expired)
+            })
+        }
+    }
+
     public fun playAccountCopy(localTrackId: String, copyId: String, acquisitionScopeId: String): Unit = dispatch {
         if (media == null) return@dispatch
         replaceQueue(listOf(localTrackId), "LIBRARY", DesktopMediaCopySelection(copyId, acquisitionScopeId))
     }
 
-    private suspend fun replaceQueue(trackIds: List<String>, queueType: String, copy: DesktopMediaCopySelection? = null): Unit {
+    private suspend fun replaceQueue(trackIds: List<String>, queueType: String, copy: DesktopMediaCopySelection? = null,
+        wave: List<DesktopWaveTrack>? = null, nextWave: (suspend () -> List<DesktopWaveTrack>)? = null): Unit {
         if (trackIds.size > DesktopLocalLimits.MAX_QUEUE_ENTRIES) {
             setError("QUEUE_LIMIT")
             return
@@ -411,7 +457,7 @@ public class DesktopPlaybackController(
             return
         }
         if (trackIds.isEmpty() || copy == null && !admitCollectionTracks(trackIds, libraryState.value)) return
-        val entries = trackIds.map { DesktopQueueEntry(newId(), it) }
+        val entries = trackIds.mapIndexed { index, id -> DesktopQueueEntry(newId(), id, wave?.get(index)?.recommendation) }
         val previous = queue
         val candidate = newSession(DesktopQueue(newId(), entries, entries.first().id, queueType))
         mediaCopyQueue = copy?.let { candidate.id to it }
@@ -425,6 +471,8 @@ public class DesktopPlaybackController(
             current = previous?.let { accumulatedQueue(it, System.nanoTime()) })
         invalidateEngine()
         queue = candidate
+        clearWave()
+        if (nextWave != null) activeWave = ActiveWave(candidate.id, nextWave)
         timerPlan.clear()
         // Admission and finalization are separate commits. Interruption can leave the
         // admitted candidate with an unfinished old checkpoint; never guess rollback/end.
@@ -509,10 +557,12 @@ public class DesktopPlaybackController(
         snapshot: DesktopLibrarySnapshot,
         afterCurrent: Boolean,
         queueType: String,
+        wave: List<DesktopWaveTrack>? = null,
+        expired: Set<String> = emptySet(),
     ): Unit {
         if (!admitCollectionTracks(trackIds, snapshot)) return
         val current = queue
-        val additions = trackIds.map { DesktopQueueEntry(newId(), it) }
+        val additions = trackIds.mapIndexed { index, id -> DesktopQueueEntry(newId(), id, wave?.get(index)?.recommendation) }
         if (current == null || current.entries.isEmpty()) {
             val candidate = newSession(DesktopQueue(newId(), additions, additions.first().id, queueType))
             if (!persistInsertion(candidate)) return
@@ -523,8 +573,8 @@ public class DesktopPlaybackController(
             clearQueueLimitError()
             openCurrent(autoplay = false, clearError = false)
         } else {
-            val entries = current.entries.toMutableList()
-            val activeOrder = order().toMutableList()
+            val entries = current.entries.filterNot { it.id in expired }.toMutableList()
+            val activeOrder = order().filterNot { it in expired }.toMutableList()
             val originalIndex = if (afterCurrent) entries.indexOfFirst { it.id == current.currentEntryId } + 1 else entries.size
             val activeIndex = if (afterCurrent) activeOrder.indexOf(current.currentEntryId) + 1 else activeOrder.size
             entries.addAll(originalIndex, additions)
@@ -706,6 +756,7 @@ public class DesktopPlaybackController(
                     } finally { checkpoint() }
                 } finally {
                     closed = true
+                    clearWave()
                     if (!alreadyRetired) invalidateEngine()
                     project()
                 }
@@ -928,6 +979,7 @@ public class DesktopPlaybackController(
     }
 
     private suspend fun openCurrent(autoplay: Boolean, clearError: Boolean = true): Unit {
+        if (autoplay) refillWave()
         if (snapshotUnavailable.get()) return
         val entry = currentEntry() ?: return
         if (!validModes()) return

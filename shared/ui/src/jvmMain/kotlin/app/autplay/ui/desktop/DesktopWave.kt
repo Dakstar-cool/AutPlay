@@ -5,8 +5,8 @@ import app.autplay.application.recommendation.selectSongs
 import app.autplay.application.recommendation.waveVersion
 import app.autplay.data.local.dao.WaveRecordingRow
 
-internal actual fun desktopWaveTracks(library: DesktopLibrarySnapshot): List<String> {
-    val active = library.tracks.filter { desktopTrackIsActive(it) && it.preference != "DISLIKED" }
+public fun selectDesktopWaveTracks(library: DesktopLibrarySnapshot): List<String> {
+    val active = library.tracks.filter { it.collectionState == "ACTIVE" && it.preference != "DISLIKED" }
     val rows = active.associate { it.id to WaveRecordingRow(it.id, it.title, it.artist, null, null) }
     val originals = active.filter { it.preference == "LIKED" }.mapNotNull { rows[it.id] }
         .filterNot { waveVersion(it).alternate }
@@ -19,3 +19,5 @@ internal actual fun desktopWaveTracks(library: DesktopLibrarySnapshot): List<Str
     }.shuffled()
     return selectSongs(candidates, recent, wave = true, sources = originals).take(200)
 }
+
+internal actual fun desktopWaveTracks(library: DesktopLibrarySnapshot): List<String> = selectDesktopWaveTracks(library)

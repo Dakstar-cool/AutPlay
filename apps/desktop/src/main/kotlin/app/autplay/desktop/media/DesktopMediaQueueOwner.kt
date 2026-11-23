@@ -133,7 +133,7 @@ internal class DesktopMediaQueueOwner(
             effect.queue.entries.single { it.id == entry }
         } else effect.queue.entries
         val next = AccountQueueSnapshot(id, DesktopMediaLimits.next(previous?.revision ?: 0),
-            ordered.mapIndexed { position, entry -> AccountQueueEntry(AccountUuid(entry.id), AccountUuid(entry.trackId), position) },
+            ordered.mapIndexed { position, entry -> AccountQueueEntry(AccountUuid(entry.id), AccountUuid(entry.trackId), position, entry.recommendation) },
             effect.queue.repeatMode, effect.queue.shuffleEnabled, effect.queue.sessionId?.let(::AccountUuid),
             effect.queue.currentEntryId?.let(::AccountUuid))
         domain.saveQueue(lease, AccountUuid.random(), previous?.revision ?: 0, next)
@@ -151,18 +151,23 @@ internal class DesktopMediaQueueOwner(
                 old.excludedFromTaste == excluded, MediaCode.INTENT_STALE, MediaStage.RESOLVE)
             return
         }
+        val wave = queue.entries.firstOrNull { it.id == event.queueEntryId && it.trackId == event.trackId }?.recommendation
         val checkpoint = AccountListeningCheckpoint(id, AccountUuid(queue.id), AccountUuid(event.queueEntryId), id,
             AccountUuid(event.trackId), event.startedAtMs, event.playedMs, event.positionMs,
-            DesktopMediaLimits.next(old?.revision ?: 0), old?.origin ?: if (queue.queueType == "PLAYLIST") "PLAYLIST" else "ORGANIC",
-            old?.context ?: "GENERAL", excluded, event.finalized)
+            DesktopMediaLimits.next(old?.revision ?: 0), old?.origin ?: when {
+                wave != null -> "RECOMMENDED"
+                queue.queueType == "SEARCH" -> "SEARCH"
+                queue.queueType == "PLAYLIST" -> "PLAYLIST"
+                else -> "ORGANIC"
+            }, old?.context ?: wave?.context ?: "GENERAL", excluded, event.finalized)
         // A mutable/final-time Recording projection must never relabel the earlier listen.
         // The existing v1 language explicitly permits absent remote/Recording observations.
         val final = if (!event.finalized) null else buildJsonObject {
             put("interaction_type", "LISTENING_EVENT_RECORDED"); put("local_user_track_ref_id", event.trackId)
-            put("server_user_track_ref_id", JsonNull); put("recording_id", JsonNull)
+            put("server_user_track_ref_id", JsonNull); put("recording_id", wave?.recordingId?.let(::JsonPrimitive) ?: JsonNull)
             put("played_ms", event.playedMs); put("track_duration_ms", JsonNull); put("completion_ratio", JsonNull)
             put("event_origin", checkpoint.origin); put("context", checkpoint.context)
-            put("explicit_feedback", "NONE"); put("excluded_from_taste", excluded); put("recommendation", JsonNull)
+            put("explicit_feedback", "NONE"); put("excluded_from_taste", excluded); put("recommendation", wave?.attribution() ?: JsonNull)
         }
         domain.checkpoint(lease, if (event.finalized) id else AccountUuid.random(), old?.revision ?: 0, checkpoint, final)
     }

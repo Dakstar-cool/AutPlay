@@ -57,6 +57,9 @@ internal sealed class DomainRoute(val method: String, val path: String, val requ
         init { require((artist || !releases) && offset in 0..1_000_000) }
     }
     class ReleaseCover(id: AccountUuid) : DomainRoute("GET", "/music/discovery/releases/${id.value}/cover", 0, 1_048_576)
+    class CatalogueContext : DomainRoute("POST", "/music/discovery/contexts", 2048, 131_072)
+    class CatalogueTrack(id: AccountUuid) : DomainRoute("POST", "/music/discovery/contexts/${id.value}/track-reference", 0, 65_536)
+    class ArtistRanking(id: AccountUuid) : DomainRoute("GET", "/music/discovery/library-artists/${id.value}/ranking", 0, 1_048_576)
     class DownloadPreview : DomainRoute("POST", "/music/discovery/downloads/preview", 2048, 262_144)
     class CatalogDownload(id: AccountUuid, action: String) : DomainRoute(if (action == "status") "GET" else "POST",
         "/music/discovery/downloads/${id.value}" + if (action == "status") "" else "/$action", 2048, 262_144) {
