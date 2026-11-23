@@ -661,7 +661,6 @@
     <string name="variation_skips_count">%1$d / %2$d</string>
     <string name="detail_collection_listen">Слушать</string>
     <string name="detail_artist_popular">Вы часто слушаете</string>
-    <string name="detail_artist_more_tracks">Другие треки</string>
     <string name="detail_finish_edit">Готово</string>
     <string name="detail_open_artist">Открыть исполнителя</string>
     <string name="detail_artist_info">Об исполнителе</string>

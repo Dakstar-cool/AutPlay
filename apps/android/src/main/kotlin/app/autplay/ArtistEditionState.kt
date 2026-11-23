@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,7 +29,7 @@ internal fun rememberArtistCatalogPages(
     editions: Boolean,
 ): ArtistCatalogPages {
     var snapshot by remember(binding, artistMbid, editions) { mutableStateOf(ArtistCatalogPages(loading = binding != null && artistMbid != null)) }
-    var attempt by remember(binding, artistMbid, editions) { mutableStateOf(0) }
+    var attempt by remember(binding, artistMbid, editions) { mutableIntStateOf(0) }
     LaunchedEffect(binding, artistMbid, editions, attempt) {
         if (binding == null || artistMbid == null) return@LaunchedEffect
         val profile = binding.serverProfileId.value

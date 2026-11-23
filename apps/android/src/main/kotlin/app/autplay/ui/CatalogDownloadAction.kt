@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
 import app.autplay.AutPlayRuntime
 import app.autplay.R
 import app.autplay.application.sync.ClientEventBinding
@@ -44,7 +45,7 @@ internal fun CatalogDownloadAction(kind: String, id: String) {
     val phase = state?.get("phase")?.jsonPrimitive?.content
     fun run(start: Boolean, fresh: Boolean = false) {
         val op = operation?.takeUnless { fresh } ?: UUID.randomUUID().toString()
-        prefs.edit().putString(key, op).apply()
+        prefs.edit { putString(key, op) }
         operation = op
         error = false
         CatalogDownloadWorker.enqueue(context, profile.value, user.value, op, kind, id, alternatives, start)

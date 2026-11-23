@@ -639,7 +639,6 @@
     <string name="variation_skips_count">%1$d / %2$d</string>
     <string name="detail_collection_listen">Listen</string>
     <string name="detail_artist_popular">Your most played</string>
-    <string name="detail_artist_more_tracks">More tracks</string>
     <string name="detail_finish_edit">Done</string>
     <string name="detail_open_artist">Open artist</string>
     <string name="detail_artist_info">About the artist</string>

@@ -34,7 +34,6 @@
     <string name="music_device_paused">In Vault · Device download paused</string>
     <string name="music_device_failed">In Vault · Device download failed</string>
     <string name="playlist_create_and_add">Create and add</string>
-    <string name="catalog_artist_all_recordings">Browse all catalogue recordings</string>
     <string name="catalog_edition_tracks">Full edition tracklist</string>
     <string name="catalog_current_track_artists">Artists on the current track</string>
     <string name="catalog_latest_release">Latest release</string>

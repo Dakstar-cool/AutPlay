@@ -34,7 +34,6 @@
     <string name="music_device_paused">В Vault · Скачивание на паузе</string>
     <string name="music_device_failed">В Vault · Не удалось скачать на телефон</string>
     <string name="playlist_create_and_add">Создать и добавить</string>
-    <string name="catalog_artist_all_recordings">Все записи артиста в каталоге</string>
     <string name="catalog_edition_tracks">Полный трек-лист издания</string>
     <string name="catalog_current_track_artists">Исполнители текущего трека</string>
     <string name="catalog_latest_release">Новый релиз</string>
