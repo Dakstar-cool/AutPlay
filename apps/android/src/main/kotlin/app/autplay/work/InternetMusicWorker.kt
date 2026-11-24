@@ -47,10 +47,10 @@ class InternetMusicWorker(context: Context, parameters: WorkerParameters) : Coro
                         track = database.libraryDao().trackRefByServerId(profile.value, serverRef)
                     }
                     track ?: return retryOrFail()
-                    if (inputData.getBoolean("download", false)) DownloadIntentRepository(applicationContext, database).requestVaultDownload(
+                    val download = if (inputData.getBoolean("download", false)) DownloadIntentRepository(applicationContext, database).requestVaultDownload(
                         LocalId(track.localUserTrackRefId), profile, checkNotNull(status.variantId), DownloadStorageClass.USER_DOWNLOAD, System.currentTimeMillis(),
-                    )
-                    Result.success(workDataOf("ref" to track.localUserTrackRefId))
+                    ) else null
+                    Result.success(workDataOf("ref" to track.localUserTrackRefId, "download_intent" to download?.downloadIntentId))
                 }
                 else -> retryOrFail()
             }

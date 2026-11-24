@@ -24,6 +24,10 @@ on:
         type: choice
         default: macos-26
         options: [macos-26, macos-15]
+      capture_ui:
+        description: Capture the packaged application window with a fresh Russian profile
+        type: boolean
+        default: false
       account_acceptance:
         description: Run isolated real server, account and sync acceptance
         type: boolean
@@ -108,6 +112,11 @@ jobs:
             :shared:ui:jvmTest :apps:desktop:test :apps:desktop:createDistributable :apps:desktop:accountAcceptanceJar
       - name: Sign, test real Keychain and package DMG
         run: '"$AUTPLAY_PYTHON" scripts/macos_community.py package'
+      - name: Capture the community app window
+        if: inputs.capture_ui == true
+        continue-on-error: true
+        timeout-minutes: 2
+        run: swift scripts/macos_preview.swift apps/desktop/build/compose/binaries/main/app/AutPlay.app/Contents/MacOS/AutPlay build/macos-community/home-macos.png
       - name: Test real production account and sync graph on isolated PostgreSQL
         if: inputs.account_acceptance == true
         run: '"$AUTPLAY_PYTHON" scripts/macos_account_acceptance.py run'
@@ -149,6 +158,7 @@ jobs:
           if-no-files-found: warn
           path: |
             build/macos-community/*.json
+            build/macos-community/home-macos.png
             build/macos-community/account-http-evidence.jsonl
             build/macos-audio-spike/desktop-startup.json
             shared/*/build/test-results/jvmTest/

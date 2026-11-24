@@ -4,7 +4,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from autplay.application.internet_music import InternetMusicService
@@ -73,16 +73,20 @@ def create_music_router(
         }
 
     @router.post("/internet/search")
-    def search(body: SearchBody, request: Request) -> dict[str, Any]:
+    def search(
+        body: SearchBody, request: Request, limit: int = Query(5, ge=1, le=25)
+    ) -> dict[str, Any]:
         if not internet_enabled:
             raise ApiError(
                 "music_search_disabled", "Internet search is unavailable on this server.", 503
             )
         if body.catalogue_context_id is None:
-            return service.search(request.state.principal, body.query, body.operation_id)
-        return service.search(
-            request.state.principal, body.query, body.operation_id, body.catalogue_context_id
-        )
+            result = service.search(request.state.principal, body.query, body.operation_id)
+        else:
+            result = service.search(
+                request.state.principal, body.query, body.operation_id, body.catalogue_context_id
+            )
+        return {**result, "candidates": result["candidates"][:limit]}
 
     @router.post("/internet/acquisitions")
     def select(body: SelectBody, request: Request) -> dict[str, Any]:

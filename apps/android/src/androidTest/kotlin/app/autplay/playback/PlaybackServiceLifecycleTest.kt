@@ -316,6 +316,11 @@ class PlaybackServiceLifecycleTest {
         try {
             fixture.start(listOf("readable"), smooth = true)
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+            fixture.await("initial listening session persisted") {
+                fixture.database.queueDao().activeSnapshotOnce()?.let {
+                    it.currentEntryId == fixture.entries[0].value && it.activeListeningEventId != null
+                } == true
+            }
             fixture.main { fixture.controller?.pause(); fixture.controller?.repeatMode = Player.REPEAT_MODE_ONE }
             fixture.owner.dispatch(PlaybackCommand.SeekTo(39_800))
             fixture.await { fixture.main { fixture.controller?.duration == 40_000L && fixture.controller?.currentPosition == 39_800L } }
@@ -572,7 +577,21 @@ class PlaybackServiceLifecycleTest {
 
         suspend fun vaultServer(dispatcher: Dispatcher) {
             original = settings.settings.first()
-            val mock = MockWebServer().also { it.dispatcher = dispatcher; it.start() }
+            val audioPaths = audioIds.map { "/api/v1/stream/audio-variants/$it" }.toSet()
+            val variantPath = "/api/v1/vault/user-tracks/${ids[9]}/playback-variant"
+            val mock = MockWebServer()
+            // The same origin receives background API traffic while this profile is active.
+            mock.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.requestUrl?.encodedPath.orEmpty()
+                    val audio = path in audioPaths && (request.method == "GET" || request.method == "HEAD")
+                    if (audio || (path == variantPath && request.method == "GET")) {
+                        return dispatcher.dispatch(request)
+                    }
+                    return MockResponse().setResponseCode(404)
+                }
+            }
+            mock.start()
             server = mock
             val origin = mock.url("/").toString().trimEnd('/')
             settings.update(NonSecretSettings(activeServerProfileId = profile,
@@ -585,7 +604,8 @@ class PlaybackServiceLifecycleTest {
             settings.mutate { it.copy(activeServerProfileId = null, activeUserId = null, deviceId = null) }
         }
 
-        suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER", startPositionMs: Long = 0) {
+        suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER", startPositionMs: Long = 0,
+            sourceContextId: String? = null, beforePlayback: suspend () -> Unit = {}) {
             if (original == null) { original = settings.settings.first(); settings.update(NonSecretSettings()) }
             smoothTransitions(smooth)
             main { context.stopService(Intent(context, AutPlayPlaybackService::class.java)) }
@@ -613,21 +633,22 @@ class PlaybackServiceLifecycleTest {
                         "AVAILABLE", "USER_IMPORT", 640_044, null, null, 1, 1))
                 }
             }
-            val snapshot = activate(sources.indices.toList(), queueType)
+            val snapshot = activate(sources.indices.toList(), queueType, sourceContextId)
             if (startPositionMs > 0) PlaybackPersistenceRepository(database).selectIdleEntry(
                 snapshot, entries[0], startPositionMs, "OFF", "OFF", null, System.currentTimeMillis(),
             )
+            beforePlayback()
             owner.dispatch(PlaybackCommand.StartQueue(snapshot))
             connect()
         }
 
-        suspend fun activate(indices: List<Int>, queueType: String = "USER"): LocalId {
+        suspend fun activate(indices: List<Int>, queueType: String = "USER", sourceContextId: String? = null): LocalId {
             val snapshot = LocalId.random()
             if (snapshots.isNotEmpty()) indices.forEach { entries[it] = LocalId.random() }
             snapshots += snapshot.value
             PlaybackPersistenceRepository(database).activateQueue(snapshot,
                 indices.map { NewPlaybackQueueEntry(entries[it], LocalId(tracks[it]), "ORGANIC", "LOCAL_THEN_VAULT") },
-                queueType, null, null, "GENERAL", System.currentTimeMillis())
+                queueType, sourceContextId, null, "GENERAL", System.currentTimeMillis())
             return snapshot
         }
 

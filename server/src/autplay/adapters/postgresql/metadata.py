@@ -63,6 +63,8 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "account.self_pairing_command",
     "account.self_pairing_rate",
     "discovery.internet_search",
+    "catalog.browse_page",
+    "discovery.catalog_download",
     "discovery.internet_catalogue_context",
     "discovery.internet_search_context",
     "discovery.internet_acquisition",
@@ -150,6 +152,8 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "library.library_entry",
     "library.user_track_preference",
     "playlist.playlist",
+    "playlist.shared_snapshot",
+    "playlist.imported_track_reference",
     "playlist.playlist_entry",
     "playlist.smart_playlist_rule",
     "vault.vault_object",
@@ -335,6 +339,10 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "library.library_entry": 10,
     "library.user_track_preference": 8,
     "playlist.playlist": 10,
+    "playlist.shared_snapshot": 3,
+    "playlist.imported_track_reference": 2,
+    "catalog.browse_page": 3,
+    "discovery.catalog_download": 4,
     "playlist.playlist_entry": 11,
     "playlist.smart_playlist_rule": 5,
     "vault.vault_object": 11,
@@ -436,6 +444,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_quota_receipt_created",
         "internet_search_owner_time",
         "internet_catalogue_context_owner_time",
+        "catalog_download_owner_idx",
         "ix_device_user_active",
         "ix_user_session_user_active",
         "ix_enrollment_invitation_user_active",
@@ -569,7 +578,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 2103
+EXPECTED_COLUMN_COUNT = 2115
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

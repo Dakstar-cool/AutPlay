@@ -2,13 +2,11 @@ package app.autplay.playback
 
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
-import app.autplay.AutPlayRuntime
 import app.autplay.application.download.DownloadIntentRepository
 import app.autplay.application.wave.WavePrefetchExecutor
 import app.autplay.application.wave.WaveSnapshot
 import app.autplay.application.wave.WaveSourceProbe
 import app.autplay.data.local.AutPlayDatabase
-import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.domain.LocalId
 import app.autplay.domain.ServerProfileId
 import app.autplay.domain.wave.WaveAvailability
@@ -19,17 +17,7 @@ import app.autplay.download.DownloadStorageClass
 /** Reuses the P08 source policy; it never invents a room-scoped media grant. */
 @UnstableApi
 class AndroidWaveSourceProbe(context: Context, database: AutPlayDatabase) : WaveSourceProbe {
-    private val resolver = AndroidPlaybackSourceResolver(
-        context.applicationContext,
-        database,
-        applicationNonSecretSettingsStore(context.applicationContext),
-    ) { profileId, serverUserTrackRefId ->
-        AutPlayRuntime.serverPlaybackVariantId(
-            context.applicationContext,
-            profileId,
-            serverUserTrackRefId,
-        )
-    }
+    private val resolver = AndroidPlaybackSourceResolver.production(context.applicationContext, database)
 
     override suspend fun resolve(localTrackRefId: String): WaveAvailability =
         when (val result = resolver.resolve(LocalId(localTrackRefId), System.currentTimeMillis())) {

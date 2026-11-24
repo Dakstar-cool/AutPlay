@@ -99,7 +99,7 @@ class AdaptiveShellTest {
         composeRule.onNodeWithText("route:search").assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.nav_library)).performClick()
         composeRule.onNodeWithText("route:library").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_open_settings)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_open_profile_settings)).performClick()
         composeRule.onNodeWithText("route:settings").assertIsDisplayed()
     }
 
@@ -130,8 +130,7 @@ class AdaptiveShellTest {
         composeRule.onNodeWithTag("player-cover").performTouchInput { swipeDown() }
         composeRule.onNodeWithText("route:home").assertIsDisplayed()
         composeRule.onNodeWithTag("compact-navigation").assertIsDisplayed()
-        composeRule.onNodeWithTag("persistent-mini-player").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_pause)).assertIsDisplayed()
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
         val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
         java.io.File(context.cacheDir, "player-layout-compact-navigation.png").outputStream().use {
             check(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
@@ -140,6 +139,8 @@ class AdaptiveShellTest {
 
     @Test
     fun currentTrackFeedbackRemainsReachableAt320Dp() {
+        var likes = 0
+        var dislikes = 0
         composeRule.setContent {
             Box(Modifier.width(320.dp)) {
                 NowPlayingScreen(
@@ -154,16 +155,20 @@ class AdaptiveShellTest {
                     onSeekBegin = {},
                     onSeekUpdate = {},
                     onSeekCommit = {},
-                    onLike = {},
-                    onDislike = {},
+                    onLike = { likes++ },
+                    onDislike = { dislikes++ },
                     feedbackEnabled = true,
                     onObservingChanged = {},
                 )
             }
         }
 
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithContentDescription(context.getString(R.string.action_dislike)).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_like)).assertIsDisplayed().performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.action_dislike)).assertIsDisplayed().performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, likes)
+            assertEquals(1, dislikes)
+        }
     }
 
     @Test
@@ -197,25 +202,23 @@ class AdaptiveShellTest {
         composeRule.onNodeWithTag("home-product-list")
             .performScrollToNode(hasText(context.getString(R.string.state_error_title)))
         composeRule.onNodeWithText(context.getString(R.string.state_error_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.action_retry)).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.action_retry)).performScrollTo().assertIsDisplayed().performClick()
         composeRule.onNodeWithText("retry-requested").assertIsDisplayed()
     }
 
     @Test
-    fun activeHomePlaybackRemainsReachableAfterHeroScrollsAway() {
+    fun scrollingHomeDoesNotRevealTheMiniPlayer() {
         renderHomeWithPersistentPlayer(PlaybackPresentationState(mediaId = "active-entry", title = "Active track", artist = "Artist"))
         scrollHomeWithUserGestures()
-        // The clickable player merges its text; inspect the child to verify its visible bounds.
-        composeRule.onNode(hasText("Active track") and hasAnyAncestor(hasTestTag("persistent-mini-player")), useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
     }
 
     @Test
-    fun bottomHomePlaybackAppearsWhenPlaybackStartsAfterScrolling() {
+    fun startingPlaybackAfterScrollingKeepsHomeFreeOfMiniPlayer() {
         val startPlayback = renderHomeWithPersistentPlayer(PlaybackPresentationState())
         scrollHomeWithUserGestures()
         composeRule.runOnIdle { startPlayback(PlaybackPresentationState(mediaId = "late-entry", title = "Late playback", artist = "Artist")) }
-        composeRule.onNodeWithTag("persistent-mini-player").assertIsDisplayed()
-        composeRule.onNode(hasText("Late playback") and hasAnyAncestor(hasTestTag("persistent-mini-player")), useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
     }
 
     private fun renderHomeWithPersistentPlayer(initial: PlaybackPresentationState): (PlaybackPresentationState) -> Unit {
@@ -370,7 +373,7 @@ class AdaptiveShellTest {
         composeRule.onNodeWithTag("search-product-list")
             .performScrollToNode(hasTestTag("vault-result-remote-only"))
         composeRule.onNodeWithTag("vault-result-remote-only").assertHasNoClickAction()
-        composeRule.onNodeWithText(context.getString(R.string.search_vault_playback_unavailable)).assertIsDisplayed()
+        composeRule.onNodeWithText(context.getString(R.string.search_source_server_unavailable)).assertIsDisplayed()
     }
 
     @Test
@@ -426,7 +429,7 @@ class AdaptiveShellTest {
 
     @Test
     fun searchRestoresStableRowAnchorAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
         val searchState = mutableStateOf(SearchScreenUiState("query", emptyList(), searched = true))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -458,7 +461,7 @@ class AdaptiveShellTest {
 
     @Test
     fun searchRestoresStableRowAnchorWithNonzeroOffsetAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Track $index", "Artist") }
         val searchState = mutableStateOf(SearchScreenUiState("query", emptyList(), searched = true))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -490,7 +493,7 @@ class AdaptiveShellTest {
 
     @Test
     fun libraryRestoresStableRowAnchorAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
         val libraryState = mutableStateOf(LibraryScreenUiState(localMode = true, tracks = emptyList()))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -527,7 +530,7 @@ class AdaptiveShellTest {
 
     @Test
     fun libraryRestoresStableRowAnchorWithNonzeroOffsetAfterRowsReload() {
-        val rows = (0 until 30).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
+        val rows = (0 until 80).map { index -> CoreTrackUiItem("track-$index", "Library track $index", "Artist") }
         val libraryState = mutableStateOf(LibraryScreenUiState(localMode = true, tracks = emptyList()))
         val restoredAnchor = java.util.concurrent.atomic.AtomicReference<ListAnchor?>()
         composeRule.setContent {
@@ -714,16 +717,23 @@ class AdaptiveShellTest {
             }
         }
 
+        val list = composeRule.onNodeWithTag("collection-details")
+        composeRule.onNodeWithText("Canonical member").assertDoesNotExist()
+        composeRule.onNodeWithText(context.getString(R.string.detail_artist_info)).performClick()
+        list.performScrollToNode(hasText("Canonical member"))
         composeRule.onNodeWithText("Canonical member").performClick()
         composeRule.runOnIdle {
             assertEquals(DetailTarget(DetailKind.Artist, ARTIST_TWO), opened)
         }
+        list.performScrollToNode(hasText(context.getString(R.string.detail_artist_credit_unresolved)))
         composeRule.onNodeWithText(context.getString(R.string.detail_artist_credit_unresolved))
             .performScrollTo().assertIsDisplayed().assertHasNoClickAction()
-        composeRule.onNodeWithText("Owned release").performScrollTo().performClick()
+        list.performScrollToNode(hasText("Owned release"))
+        composeRule.onNodeWithText("Owned release").performClick()
         composeRule.runOnIdle {
             assertEquals(DetailTarget(DetailKind.Release, "local-release"), opened)
         }
+        list.performScrollToNode(hasText("Unknown relation"))
         composeRule.onNodeWithText("Unknown relation").performScrollTo()
             .assertIsDisplayed().assertHasNoClickAction()
     }

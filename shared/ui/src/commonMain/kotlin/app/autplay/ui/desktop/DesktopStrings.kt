@@ -2,10 +2,11 @@ package app.autplay.ui.desktop
 
 public enum class DesktopLanguage { Russian, English }
 
-public enum class DesktopSection { Home, Library, Playlists, Player, Queue, History, Settings }
+public enum class DesktopSection { Home, Search, Library, Playlists, Player, Queue, History, Settings }
 
 internal enum class DesktopText(public val russian: String, public val english: String) {
     Home("Главная", "Home"),
+    SearchDestination("Поиск", "Search"),
     Player("Плеер", "Player"),
     PlayerEmpty("Выберите музыку в медиатеке или очереди.", "Choose music in Library or Queue."),
     PlayerReadOnly("Управление этим воспроизведением сейчас недоступно.", "Controls for this playback are currently unavailable."),
@@ -43,7 +44,7 @@ internal enum class DesktopText(public val russian: String, public val english: 
     HistoryWindow("Показано до 1000 прослушиваний. Более ранние загружаются по 100; обновление возвращает к последним.", "Showing up to 1,000 listens. Older listens load 100 at a time; refresh returns to the latest."),
     HistoryNewerHidden("Более новые записи скрыты. Обновите историю, чтобы вернуться к последним.", "Newer listens are hidden. Refresh history to return to the latest."),
     LocalCollection("Локальная коллекция", "Local collection"),
-    Library("Библиотека", "Library"),
+    Library("Моя музыка", "My music"),
     Playlists("Плейлисты", "Playlists"),
     Queue("Очередь", "Queue"),
     History("История", "History"),
@@ -71,7 +72,7 @@ internal enum class DesktopText(public val russian: String, public val english: 
     Dark("Тёмная", "Dark"),
     SystemAppearance("Системная", "System"),
     AccentPalette("Акцентный цвет", "Accent color"),
-    CoralAccent("Коралловый", "Coral"),
+    CoralAccent("Медный", "Copper"),
     VioletAccent("Фиолетовый", "Violet"),
     GreenAccent("Зелёный", "Green"),
     BlueAccent("Синий", "Blue"),
@@ -147,7 +148,7 @@ internal enum class DesktopText(public val russian: String, public val english: 
     TasteNoCurrentListen("Нет текущего прослушивания", "No current listen"),
     TasteUnsupportedWarning("Неподдерживаемая отметка сохранена", "Unsupported mark preserved"),
     TasteUnsupportedHint("Сохранённая отметка не поддерживается. Явный выбор «Включить» или «Исключить» заменит её после подтверждённого сохранения. При ошибке проверьте текущие отметки.", "A saved mark is unsupported. Explicit Include or Exclude replaces it after confirmed saving. If it fails, review the current marks."),
-    TasteLocalOnly("На устройстве сохраняется только локальная отметка вкуса. Вывод о вкусе и рекомендации на Mac пока не работают; сервер не получает эту отметку.", "Only a local taste mark is saved on this device. Taste inference and recommendations do not yet run on Mac; the server does not receive this mark."),
+    TasteLocalOnly("Локальная «Моя волна» учитывает прослушивания с отметкой «Включено».", "My wave on this device uses listening history marked Included."),
     TasteListenScope("Только это незавершённое прослушивание. При новом прослушивании, смене записи или повторе известная отметка сбрасывается; неподдерживаемая сохраняется.", "Only this unfinished listen. A new listen, entry change or replay resets a known mark; an unsupported mark is preserved."),
     TasteQueueScope("Действует на текущее незавершённое и будущие прослушивания этой очереди, в том числе после перезапуска. Смена трека, повторы и редактирование следующих записей сохраняют её; новая очередь сбрасывает. Любое из двух исключений даёт итог «Исключено».", "Applies to the current unfinished and future listens in this queue, including after restart. Next, repeat and upcoming entry edits retain it; a new queue resets it. Either exclusion makes the effective mark Excluded."),
     TasteHistoryMark("Локальная отметка вкуса", "Local taste mark"),
@@ -312,6 +313,7 @@ internal fun DesktopText.inLanguage(language: DesktopLanguage): String = when (l
 
 internal fun DesktopSection.label(language: DesktopLanguage): String = when (this) {
     DesktopSection.Home -> DesktopText.Home
+    DesktopSection.Search -> DesktopText.SearchDestination
     DesktopSection.Player -> DesktopText.Player
     DesktopSection.Library -> DesktopText.Library
     DesktopSection.Playlists -> DesktopText.Playlists

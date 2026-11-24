@@ -35,7 +35,7 @@ internal val LocalPlayerCollapseTargetTop = staticCompositionLocalOf<Dp?> { null
 
 internal fun shouldCompletePlayerCollapse(offset: Float, travel: Float, velocity: Float, density: Float): Boolean =
     travel > 0f && velocity > -1000f * density &&
-        (offset >= (travel * 0.18f).coerceIn(56f * density, 96f * density) ||
+        (offset >= minOf(travel, (travel * 0.18f).coerceIn(56f * density, 96f * density)) ||
             (offset >= 40f * density && velocity >= 800f * density))
 
 /** Drag writes directly to the graphics layer; only release uses a settling animation. */

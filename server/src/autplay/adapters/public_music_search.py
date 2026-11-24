@@ -6,7 +6,9 @@ from typing import Any
 from urllib.parse import urlencode
 from uuid import UUID
 
+from autplay.adapters.public_track_metadata import _credit_members
 from autplay.domain.music_discovery import (
+    MAX_BROWSE_OFFSET,
     MAX_RELEASE_TRACKS,
     MusicDiscoveryCard,
     MusicDiscoveryEntity,
@@ -162,8 +164,53 @@ class MusicBrainzDiscoveryProvider:
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_response_invalid", retryable=False) from error
 
+    def artist_releases(self, artist_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage:
+        discovery_page_bounds(limit, offset, MAX_BROWSE_OFFSET)
+        params = urlencode(
+            {
+                "artist": str(artist_id),
+                "status": "official",
+                "inc": "artist-credits+release-groups",
+                "limit": limit,
+                "offset": offset,
+                "fmt": "json",
+            }
+        )
+        try:
+            document = self.http.json(_BASE + "release?" + params)
+            if not document:
+                raise MetadataProviderError("metadata_artist_missing", retryable=False)
+            rows = _rows(document.get("releases"), limit)
+            count = _count(document.get("release-count"))
+            _source_progress(document, "release-offset", offset, count, len(rows))
+            items = []
+            for row in rows:
+                if str(row.get("status", "")).lower() != "official":
+                    continue
+                identity = UUID(row["id"])
+                group = row.get("release-group") or {}
+                items.append(
+                    MusicDiscoveryCard(
+                        MusicDiscoveryEntity.RELEASE,
+                        identity,
+                        _title(row.get("title")),
+                        artist=_credit(row.get("artist-credit")),
+                        release_id=identity,
+                        release_date=_partial_date(row.get("date")),
+                        country=_text(row.get("country")),
+                        disambiguation=_text(row.get("disambiguation")),
+                        release_group_id=UUID(group["id"]) if group.get("id") else None,
+                        release_type=_text(group.get("primary-type")),
+                    )
+                )
+            return MusicDiscoveryPage(
+                _deduplicate(items), limit, offset, count, len(rows), max_offset=MAX_BROWSE_OFFSET
+            )
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            raise MetadataProviderError("metadata_response_invalid", retryable=False) from error
+
     def artist_tracks(self, artist_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage:
-        discovery_page_bounds(limit, offset)
+        discovery_page_bounds(limit, offset, MAX_BROWSE_OFFSET)
         try:
             artist_id = UUID(str(artist_id))
             params = urlencode(
@@ -191,6 +238,11 @@ class MusicBrainzDiscoveryProvider:
                         _title(row.get("title")),
                         artist=_credit(row.get("artist-credit")),
                         recording_id=identity,
+                        guest_artist_ids=tuple(
+                            UUID(member["mbid"])
+                            for member in _credit_members(row.get("artist-credit"))
+                            if member["role"] == "FEATURED"
+                        ),
                         duration_ms=_duration(row.get("length")),
                         disambiguation=_text(row.get("disambiguation")),
                         release_date=_partial_date(row.get("first-release-date")),
@@ -202,12 +254,13 @@ class MusicBrainzDiscoveryProvider:
                 offset,
                 count,
                 len(rows),
+                max_offset=MAX_BROWSE_OFFSET,
             )
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_response_invalid", retryable=False) from error
 
     def release_tracks(self, release_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage:
-        discovery_page_bounds(limit, offset)
+        discovery_page_bounds(limit, offset, MAX_BROWSE_OFFSET)
         try:
             release_id = UUID(str(release_id))
             document = self.http.json(
@@ -261,6 +314,14 @@ class MusicBrainzDiscoveryProvider:
                     )
             ordered.sort(key=lambda item: (item[0], item[1]))
             page = [item[2] for item in ordered[offset : offset + limit]]
-            return MusicDiscoveryPage(_deduplicate(page), limit, offset, len(ordered), len(page))
+            return MusicDiscoveryPage(
+                _deduplicate(page),
+                limit,
+                offset,
+                len(ordered),
+                len(page),
+                edition_items=tuple(item[2] for item in ordered),
+                max_offset=MAX_BROWSE_OFFSET,
+            )
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_response_invalid", retryable=False) from error

@@ -7,6 +7,8 @@ import math
 import subprocess
 from pathlib import Path
 
+from .acquisition_policy import MAX_TRACK_SECONDS
+
 
 def audio_duration(path: Path, *, expected_seconds: float | None = None) -> float:
     """Reject unknown short clips and transfers inconsistent with source duration."""
@@ -17,7 +19,7 @@ def audio_duration(path: Path, *, expected_seconds: float | None = None) -> floa
                 "-v",
                 "error",
                 "-show_entries",
-                "format=duration:stream=codec_type",
+                "format=duration:stream=codec_type:stream_disposition=attached_pic",
                 "-of",
                 "json",
                 str(path),
@@ -29,8 +31,17 @@ def audio_duration(path: Path, *, expected_seconds: float | None = None) -> floa
         )
         document = json.loads(result.stdout)
         duration = float(document["format"]["duration"])
-        has_audio = any(stream.get("codec_type") == "audio" for stream in document["streams"])
-        if not has_audio or not math.isfinite(duration) or duration <= 0:
+        streams = document["streams"]
+        audio_count = sum(stream.get("codec_type") == "audio" for stream in streams)
+        has_extra = any(
+            stream.get("codec_type") != "audio"
+            and not (
+                stream.get("codec_type") == "video"
+                and stream.get("disposition", {}).get("attached_pic") == 1
+            )
+            for stream in streams
+        )
+        if audio_count != 1 or has_extra or not 0 < duration <= MAX_TRACK_SECONDS:
             raise ValueError
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as error:
         raise ValueError("audio_duration_invalid") from error

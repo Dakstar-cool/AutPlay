@@ -5,15 +5,12 @@
     <string name="settings_phone_music">Music on this phone</string>
     <string name="settings_downloads_network">Downloads and network</string>
     <string name="settings_appearance_language">Appearance and language</string>
-    <string name="settings_account_local_summary">Recovery, devices and personal server</string>
-    <string name="settings_account_connected_summary">Connected · recovery, devices and sync</string>
+    <string name="settings_account_local_summary">Local mode</string>
     <string name="settings_sound_summary">Transitions, volume and equalizer</string>
-    <string name="settings_music_summary">Add audio files or choose a folder</string>
-    <string name="settings_downloads_summary">Mobile data and preparing tracks</string>
+    <string name="settings_music_summary">Files, folders and track downloads</string>
     <string name="settings_appearance_summary">%1$s · %2$s</string>
-    <string name="settings_data_summary">Listening statistics and recommendations</string>
-    <string name="settings_about_summary">Version, settings transfer and diagnostics</string>
-    <string name="settings_room_downloads">Prepare tracks for shared listening</string>
+    <string name="settings_data_summary">Listening stats and recommendations</string>
+    <string name="settings_room_downloads">Prepare tracks for My Wave and shared listening</string>
     <string name="settings_transfer_scope">This transfers app preferences. Save your account recovery file separately in Account and devices.</string>
     <string name="settings_diagnostics_summary">Technical details and developer access</string>
     <string name="admission_account_conflict">The administrator approved a different account. Your account on this phone has been preserved. Cancel this request, then connect your account with its password or sign out before using the server account.</string>
@@ -23,4 +20,10 @@
     <string name="account_session_failed">Could not complete the action. Check your password and finish or cancel any pending connection. An account with data cannot be removed here.</string>
     <string name="account_remove_empty_local">Remove empty local account</string>
     <string name="account_remove_empty_explanation">Permanently remove this newly created account from this phone. This is available only if it has never connected to a server and has no music, playlists or history. Enter its password to confirm.</string>
+    <string name="nav_profile_settings">Profile and settings</string>
+    <string name="action_open_profile_settings">Open profile and settings</string>
+    <string name="settings_profile_summary">Listening stats and friends</string>
+    <string name="settings_music_downloads">Music and downloads</string>
+    <string name="settings_account_attention">Action required</string>
+    <string name="settings_account_offline">Server unavailable</string>
 </resources>

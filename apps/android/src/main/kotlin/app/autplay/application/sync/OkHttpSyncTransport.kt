@@ -90,7 +90,7 @@ class OkHttpSyncTransport(
             .addQueryParameter("server_profile_id", binding.serverProfileId.value).addQueryParameter("journal_epoch", binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED"))
             .addQueryParameter("limit", "100")
             .addQueryParameter("catalog_projection_version", "1")
-            .addQueryParameter("capabilities", CATALOG_ARTIST_ID_CAPABILITY)
+            .addQueryParameter("capabilities", "$CATALOG_ARTIST_ID_CAPABILITY,CATALOG_EDITION_V1")
             .apply { cursor?.let { addQueryParameter("cursor", it) } }.build()
         val root = execute(binding.serverProfileId, url.toString(), null).jsonObject
         return PullPage(root["next_cursor"]!!.jsonPrimitive.content, root["has_more"]!!.jsonPrimitive.boolean, events(root["events"]!!.jsonArray))
@@ -98,7 +98,7 @@ class OkHttpSyncTransport(
 
     override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage {
         require(pendingCount in 0..100_000)
-        val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\"]}"
+        val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\",\"CATALOG_EDITION_V1\"]}"
         val root = execute(
             binding.serverProfileId,
             "/sync/bootstrap",
@@ -181,6 +181,7 @@ class OkHttpSyncTransport(
         "LIBRARY_ENTRY" -> "LIBRARY_ENTRY_UPSERTED"
         "PLAYLIST" -> "PLAYLIST_CREATED"
         "PLAYLIST_ENTRY" -> "PLAYLIST_ENTRY_UPSERTED"
+        "EDITION_TRACK" -> "CATALOG_EDITION_TRACK_UPSERTED"
         "ARTIST" -> "CATALOG_ARTIST_UPSERTED"
         "ARTIST_CREDIT" -> "CATALOG_ARTIST_CREDIT_UPSERTED"
         "RECORDING_ARTIST_CREDIT" -> "CATALOG_RECORDING_CREDIT_LINK_UPSERTED"

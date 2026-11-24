@@ -50,7 +50,15 @@ data class SyncStatus(
     val lastSuccessAtMs: Long?,
     val bootstrapState: String,
     val lastErrorCode: String? = null,
-)
+    val lastAttemptAtMs: Long? = null,
+) {
+    val serverUnavailable: Boolean get() {
+        val code = lastErrorCode ?: return false
+        if (code == "NETWORK_UNAVAILABLE" || code == "SESSION_REQUIRED") return true
+        val httpStatus = code.removePrefix("SYNC_HTTP_").toIntOrNull() ?: return false
+        return httpStatus == 401 || httpStatus == 403 || httpStatus == 408 || httpStatus in 500..599
+    }
+}
 
 /** Transport values deliberately retain unknown event strings for safe deferred persistence. */
 data class SyncAck(val eventId: String, val outcome: String, val errorCode: String? = null, val retryAfterMs: Long? = null, val retryable: Boolean = false, val originalOutcome: String? = null, val aggregateType: String? = null, val aggregateLocalId: String? = null, val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val redirectAliasServerId: String? = null, val redirectCanonicalServerId: String? = null)
@@ -86,7 +94,6 @@ class SyncCoordinator(
 
     suspend fun runForWorker(binding: ClientEventBinding): SyncRunOutcome {
         val cursor = requireCursor(binding)
-        database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, null, nowMs(), null))
         try {
             transport.bind(binding)
             database.withWriteTransaction {
@@ -131,6 +138,9 @@ class SyncCoordinator(
             afterSync(binding)
             return SyncRunOutcome.COMPLETE
         } catch (error: CancellationException) {
+            throw error
+        } catch (error: java.io.IOException) {
+            database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, "NETWORK_UNAVAILABLE", nowMs(), null))
             throw error
         } catch (error: IllegalStateException) {
             database.syncDao().upsertRuntimeStatus(SyncRuntimeStatusEntity(binding.serverProfileId.value, error.message?.take(100), nowMs(), null))
@@ -259,7 +269,8 @@ class SyncCoordinator(
             }
             return DrainOutcome(false, false)
         }
-        database.withWriteTransaction {
+        val applied = database.withWriteTransaction {
+            if (awaitsCreateAck(cursor, page.events)) return@withWriteTransaction false
             applyEvents(binding, page.events)
             database.syncDao().upsertBootstrapState(SyncBootstrapStateEntity(
                 binding.serverProfileId.value, page.snapshotId, page.nextPageToken, page.snapshotCursor,
@@ -273,8 +284,9 @@ class SyncCoordinator(
                 lastSyncAtMs = if (page.hasMore) cursor.lastSyncAtMs else nowMs(),
                 updatedAtMs = nowMs(),
             ))
+            true
         }
-        return DrainOutcome(true, page.hasMore)
+        return DrainOutcome(applied, applied && page.hasMore)
     }
 
     private suspend fun applyPage(binding: ClientEventBinding, cursor: SyncCursorEntity, page: PullPage): Boolean {
@@ -289,15 +301,31 @@ class SyncCoordinator(
             }
             return false
         }
-        database.withWriteTransaction {
+        return database.withWriteTransaction {
+            if (awaitsCreateAck(cursor, page.events)) return@withWriteTransaction false
             applyEvents(binding, page.events)
             database.syncDao().upsertCursor(cursor.copy(
                 opaqueCursor = page.nextCursor,
                 lastPulledServerSequence = maxOf(cursor.lastPulledServerSequence, page.events.maxOfOrNull { it.sequence } ?: cursor.lastPulledServerSequence),
                 lastSyncAtMs = nowMs(), updatedAtMs = nowMs(),
             ))
+            true
         }
-        return true
+    }
+
+    // A push may have committed while its ACK is still in flight. Only defer a page that
+    // would adopt that same aggregate (or its parent) under a second local identity.
+    private suspend fun awaitsCreateAck(cursor: SyncCursorEntity, events: List<RemoteEvent>): Boolean {
+        val ids = buildSet {
+            events.forEach { event ->
+                event.aggregateServerId?.let(::add)
+                if (event.aggregateType == "PLAYLIST_ENTRY" || event.aggregateType == "LIBRARY_ENTRY") {
+                    payloadId(event, "server_user_track_ref_id")?.let(::add)
+                    payloadId(event, "server_playlist_id")?.let(::add)
+                }
+            }
+        }
+        return ids.isNotEmpty() && database.journalDao().hasUnacknowledgedCreate(cursor.journalLineageId, ids.toList())
     }
 
     /** Unknown schema/type survives as deferred evidence; known event application is idempotent. */
@@ -376,12 +404,38 @@ class SyncCoordinator(
             root["deleted_at"]?.jsonPrimitive?.contentOrNull?.let { java.time.Instant.parse(it).toEpochMilli() }
         }.getOrElse { return false }
         return when (event.eventType) {
+            "CATALOG_EDITION_TRACK_UPSERTED" -> applyEditionTrack(event, root, profile, version, deletedAtMs != null)
             "CATALOG_ARTIST_UPSERTED" -> applyArtistProjection(event, root, profile, version, deletedAtMs)
             "CATALOG_ARTIST_CREDIT_UPSERTED" -> applyArtistCreditProjection(event, root, profile, version, deletedAtMs)
             "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", "CATALOG_RELEASE_CREDIT_LINK_UPSERTED" ->
                 applyArtistCreditLinkProjection(event, root, profile, version, deletedAtMs)
             else -> false
         }
+    }
+
+    private suspend fun applyEditionTrack(
+        event: RemoteEvent, root: JsonObject, profile: String, version: Long, deleted: Boolean,
+    ): Boolean {
+        fun field(key: String) = (root[key] as? JsonPrimitive)?.contentOrNull
+        fun id(key: String) = field(key)?.let(::canonicalUuid)
+        val trackId = id("release_track_id") ?: return false
+        if (event.aggregateType != "EDITION_TRACK" || event.aggregateServerId != trackId) return false
+        val dao = database.catalogProjectionDao()
+        val existing = dao.editionPosition(profile, trackId)
+        if (existing != null && (existing.version > version ||
+                (event.sequence > 0 && existing.sequence >= event.sequence))) return true
+        val track = app.autplay.data.local.entity.CatalogEditionTrack(
+            profile, trackId, id("release_id") ?: return false, id("recording_id") ?: return false,
+            id("release_group_id") ?: return false, id("release_mbid"),
+            field("album") ?: return false, field("album_artist") ?: return false,
+            field("primary_type") ?: return false, field("release_date"),
+            field("disc")?.toIntOrNull()?.takeIf { it > 0 } ?: return false,
+            field("sequence_no")?.toIntOrNull()?.takeIf { it > 0 } ?: return false,
+            field("number_text"), field("title") ?: return false, field("track_artist") ?: return false,
+            field("duration_ms")?.toLongOrNull(), deleted, version, event.sequence, field("release_status"),
+        )
+        dao.putEditionTrack(track)
+        return true
     }
 
     private suspend fun applyArtistProjection(
@@ -564,7 +618,20 @@ class SyncCoordinator(
                 if (existing != null && existing.serverLibraryEntryId != serverId) return idCollision(binding, event)
                 val parentServerId = payloadId(event, "server_user_track_ref_id") ?: return null
                 val trackId = localIdFor(profile, "USER_TRACK_REF", parentServerId) ?: adoptServerAggregate(binding, RemoteEvent("$serverId-parent", event.sequence, "USER_TRACK_REF_CREATED", 1, "{}", "USER_TRACK_REF", parentServerId, 1)) ?: return null
-                database.libraryDao().upsertEntry(app.autplay.data.local.entity.LibraryEntryEntity(localId, serverId, trackId, nowMs(), "SYNC", "AVAILABLE", "CLEAN", event.serverRowVersion, 0, null, nowMs(), profile))
+                // Import creates the nested server entry with the original local entry ID.
+                // Keep its Room identity and any edits made after the parent import.
+                val library = database.libraryDao()
+                library.entryForTrack(trackId)?.let { imported ->
+                    if (imported.localLibraryEntryId != serverId || imported.serverProfileId != profile ||
+                        imported.serverLibraryEntryId != null) return idCollision(binding, event)
+                    val track = library.trackRef(trackId) ?: return null
+                    val importAcknowledged = track.syncState == "CLEAN" &&
+                        track.lastLocalSequence == imported.lastLocalSequence
+                    library.upsertEntry(imported.copy(serverLibraryEntryId = serverId,
+                        syncState = if (importAcknowledged) "CLEAN" else imported.syncState))
+                    return imported.localLibraryEntryId
+                }
+                library.upsertEntry(app.autplay.data.local.entity.LibraryEntryEntity(localId, serverId, trackId, nowMs(), "SYNC", "AVAILABLE", "CLEAN", event.serverRowVersion, 0, null, nowMs(), profile))
             }
             "PLAYLIST_ENTRY" -> {
                 val existing = database.playlistDao().entry(localId)
@@ -592,7 +659,7 @@ class SyncCoordinator(
         Json.parseToJsonElement(payload).jsonObject[key]?.jsonPrimitive?.takeIf { it.isString }?.contentOrNull
     }.getOrNull()
     private fun conflictId(profile: String, eventId: String): String = UUID.nameUUIDFromBytes("$profile:$eventId".toByteArray()).toString()
-    private fun remoteLocalId(profile: String, serverId: String): String = UUID.nameUUIDFromBytes("$profile:$serverId".toByteArray()).toString()
+
     private fun payloadLong(payload: String, key: String): Long? = runCatching { Json.parseToJsonElement(payload).jsonObject[key]?.jsonPrimitive?.longOrNull }.getOrNull()
     private fun payloadBoolean(payload: String, key: String): Boolean? = runCatching { Json.parseToJsonElement(payload).jsonObject[key]?.jsonPrimitive?.booleanOrNull }.getOrNull()
     private suspend fun isDirty(type: String, local: String): Boolean = when (type) {
@@ -613,6 +680,19 @@ class SyncCoordinator(
     private suspend fun applyPayloadProjection(type: String, local: String, payload: String): Boolean {
         val root = runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: return false
         when (type) {
+            "LIBRARY_ENTRY" -> {
+                val row = database.libraryDao().entry(local) ?: return false
+                val removed = when (val value = root["removed_at_ms"]) {
+                    null -> row.removedAtMs
+                    kotlinx.serialization.json.JsonNull -> null
+                    else -> (value as? JsonPrimitive)?.longOrNull ?: return false
+                }
+                database.libraryDao().upsertEntry(row.copy(
+                    source = root.projectRequiredText("source", row.source),
+                    availabilityStatus = root.projectRequiredText("availability_status", row.availabilityStatus),
+                    removedAtMs = removed,
+                ))
+            }
             "USER_TRACK_REF" -> {
                 val row = database.libraryDao().trackRef(local) ?: return false
                 if (root.containsKey("metadata_v1")) {
@@ -726,7 +806,7 @@ class SyncCoordinator(
         const val MAX_ARTIST_CREDIT_NAMES = 1_000
         const val MAX_OWNER_RECORDING_PAGE = 100
         val OWNER_SCOPE_PATTERN = Regex("^[a-f0-9]{64}$")
-        val CATALOG_ARTIST_EVENT_TYPES = setOf("CATALOG_ARTIST_UPSERTED", "CATALOG_ARTIST_CREDIT_UPSERTED", "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", "CATALOG_RELEASE_CREDIT_LINK_UPSERTED")
+        val CATALOG_ARTIST_EVENT_TYPES = setOf("CATALOG_EDITION_TRACK_UPSERTED", "CATALOG_ARTIST_UPSERTED", "CATALOG_ARTIST_CREDIT_UPSERTED", "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", "CATALOG_RELEASE_CREDIT_LINK_UPSERTED")
         val KNOWN_EVENT_TYPES = setOf("USER_TRACK_REF_CREATED", "USER_TRACK_REF_PATCHED", "LIBRARY_ENTRY_UPSERTED", "USER_TRACK_PREFERENCE_SET", "PLAYLIST_CREATED", "PLAYLIST_METADATA_PATCHED", "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED", "AGGREGATE_DELETED", "AGGREGATE_REDIRECT", "LISTENING_EVENT_RECORDED", "RECOMMENDATION_IMPRESSION_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED") + CATALOG_ARTIST_EVENT_TYPES
     }
 }
@@ -759,7 +839,10 @@ class SyncStatusRepository(private val database: AutPlayDatabase) {
                 database.syncDao().observeRuntimeStatus(binding.serverProfileId.value),
             ) { pending, dead, conflicts, runtime ->
                 SyncStatus(pending, dead, conflicts, runtime?.lastSuccessAtMs ?: cursor.lastSyncAtMs,
-                    cursor.bootstrapState, runtime?.lastErrorCode)
+                    cursor.bootstrapState, runtime?.lastErrorCode, runtime?.lastAttemptAtMs)
             }
         }
 }
+
+internal fun remoteLocalId(profile: String, serverId: String): String =
+    UUID.nameUUIDFromBytes("$profile:$serverId".toByteArray()).toString()

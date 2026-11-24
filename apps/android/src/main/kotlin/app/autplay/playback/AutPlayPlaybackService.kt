@@ -88,6 +88,7 @@ class AutPlayPlaybackService : MediaSessionService() {
     private val metadataTrack = MutableStateFlow<String?>(null)
     private val notificationTarget = MutableStateFlow<Pair<String?, String?>>(null to null)
     private var smoothTrackTransitions = false
+    private var personalWavePreload = false
     private val sourceTimelines = mutableMapOf<String, PlaybackSourceTimeline>()
     private val recovery = PlaybackRecoveryPolicy()
     private var activePlaybackProfileId: String? = null
@@ -106,17 +107,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                 syncScheduler = AutPlayRuntime.syncScheduler(applicationContext),
             ),
         )
-        sourceResolver = AndroidPlaybackSourceResolver(
-            applicationContext,
-            database,
-            applicationNonSecretSettingsStore(applicationContext),
-        ) { profileId, serverUserTrackRefId ->
-            AutPlayRuntime.serverPlaybackVariantId(
-                applicationContext,
-                profileId,
-                serverUserTrackRefId,
-            )
-        }
+        sourceResolver = AndroidPlaybackSourceResolver.production(applicationContext, database)
         player = ExoPlayer.Builder(this, PlaybackRenderersFactory(this, audioPreferences))
             .setMediaSourceFactory(PlaybackMediaSourceFactory.create(this, ::onSourceTimeline))
             .setLoadControl(PlaybackTransitions.loadControl())
@@ -172,8 +163,10 @@ class AutPlayPlaybackService : MediaSessionService() {
                     if (activePlaybackProfileId != profileId) recovery.cancel()
                     activePlaybackProfileId = profileId
                     audioPreferences.value = settings.playbackAudio
-                    if (smoothTrackTransitions != settings.smoothTrackTransitions) {
+                    val preload = settings.wavePrefetchMode != "OFF"
+                    if (smoothTrackTransitions != settings.smoothTrackTransitions || personalWavePreload != preload) {
                         smoothTrackTransitions = settings.smoothTrackTransitions
+                        personalWavePreload = preload
                         updatePreloadConfiguration()
                     }
                 }
@@ -367,7 +360,14 @@ class AutPlayPlaybackService : MediaSessionService() {
             ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
             ACTION_RESUME -> {
                 recovery.cancel()
-                settleCurrentSource(allowRetry = true)
+                val queue = restored
+                val entry = player.currentMediaItem?.mediaId
+                if (currentUnavailableReason() == PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE.name &&
+                    queue != null && entry != null) {
+                    resolvedQueueEntryIds.remove(entry)
+                    player.replaceMediaItem(player.currentMediaItemIndex, placeholder(entry))
+                    scheduleQueueResolution(queue, queueGeneration)
+                } else settleCurrentSource(allowRetry = true)
                 player.play()
             }
             ACTION_PAUSE -> {
@@ -638,8 +638,9 @@ class AutPlayPlaybackService : MediaSessionService() {
     }
 
     private fun updatePreloadConfiguration() {
+        val personal = app.autplay.application.recommendation.PersonalWaveSession.isPersonalQueue(restored?.snapshot?.sourceContextId)
         player.setPreloadConfiguration(ExoPlayer.PreloadConfiguration(
-            PlaybackTransitions.preloadDurationUs(smoothTrackTransitions, restored?.snapshot?.queueType),
+            PlaybackTransitions.preloadDurationUs(smoothTrackTransitions || (personal && personalWavePreload), restored?.snapshot?.queueType),
         ))
     }
 
@@ -677,7 +678,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         val job = scope.launch {
             try {
                 val startedAt = SystemClock.elapsedRealtime()
-                val resolution = resolveQueueItem(queue, index)
+                val resolution = resolveForPlayback(queue, index, generation)
                 if (app.autplay.BuildConfig.DEBUG) android.util.Log.d("AutPlayPlayback",
                     "source_resolved elapsedMs=${SystemClock.elapsedRealtime() - startedAt} source=${resolution.source}")
                 stateMutex.withLock {
@@ -688,6 +689,9 @@ class AutPlayPlaybackService : MediaSessionService() {
                     ) {
                         return@withLock
                     }
+                    // A failed speculative lookup must be tried again when its track becomes current.
+                    if (index != player.currentMediaItemIndex &&
+                        resolution.unavailableReason == PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE.name) return@withLock
                     val currentPositionMs = if (index == player.currentMediaItemIndex) {
                         sourcePositionMs()
                     } else null
@@ -718,6 +722,22 @@ class AutPlayPlaybackService : MediaSessionService() {
                 resolutionJobs.remove(entry.queueEntryId)
             }
         }
+    }
+
+    private suspend fun resolveForPlayback(queue: RestoredPlaybackQueue, index: Int, generation: Long): QueueItemResolution {
+        val profile = activePlaybackProfileId
+        val first = resolveQueueItem(queue, index)
+        fun stillWanted() = generation == queueGeneration && index == player.currentMediaItemIndex &&
+            profile != null && profile == activePlaybackProfileId && accountSignedOut != true && player.playWhenReady &&
+            queue.snapshot.queueType in ORDINARY_QUEUE_TYPES
+        if (first.unavailableReason != PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE.name || !stillWanted()) return first
+        // Preserve this occurrence while the server restarts or Android restores a network route.
+        delay(1_500)
+        val manager = getSystemService(android.net.ConnectivityManager::class.java)
+        if (manager.activeNetwork == null && stillWanted()) {
+            kotlinx.coroutines.withTimeoutOrNull(20_000) { app.autplay.networkAvailability(manager).first { it } }
+        }
+        return if (stillWanted() && manager.activeNetwork != null) resolveQueueItem(queue, index) else first
     }
 
     private fun settleCurrentSource(allowRetry: Boolean = false) {

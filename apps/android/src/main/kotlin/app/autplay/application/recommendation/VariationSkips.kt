@@ -3,7 +3,6 @@ package app.autplay.application.recommendation
 import app.autplay.data.local.dao.LibraryDao
 import java.security.MessageDigest
 
-internal val variationKinds = setOf("COVER", "REMIX", "LIVE")
 internal const val SKIP_WINDOW_MS = 30L * 86_400_000L
 
 internal fun currentSkipHints(snapshotMs: Long, now: Long) = now - snapshotMs in 0L until 86_400_000L

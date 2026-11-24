@@ -41,6 +41,10 @@ class Provider:
             (MusicDiscoveryCard(entity, uuid4(), "Title"),), limit, offset, offset + 1, 1
         )
 
+    def artist_releases(self, artist_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage:
+        self.calls.append(("artist", artist_id, limit, offset))
+        return MusicDiscoveryPage((), limit, offset, 0, 0)
+
     def artist_tracks(self, artist_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage:
         self.calls.append(("artist", artist_id, limit, offset))
         return MusicDiscoveryPage((), limit, offset, 0, 0)

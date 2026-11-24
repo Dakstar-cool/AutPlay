@@ -28,6 +28,8 @@ dependencies = [
     "yt-dlp[default]==2026.8.19",
     "httpx2[socks]==2.12.0",
     "webauthn==3.0.0",
+    "ytmusicapi==1.12.4",
+    "requests[socks]==2.34.2",
 ]
 
 [project.scripts]

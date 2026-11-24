@@ -675,6 +675,22 @@ internal abstract class DesktopDao {
         insertFact(fact)
     }
 
+    @Query("SELECT trackId FROM desktop_playlist_entry WHERE playlistId = :id ORDER BY ordinal, id LIMIT 10001")
+    abstract suspend fun importedPlaylistOrder(id: String): List<String>
+
+    @Transaction
+    open suspend fun importPlaylist(row: PlaylistRow, description: String?, entries: List<PlaylistEntryRow>) {
+        val existing = playlist(row.id)
+        if (existing != null) {
+            check(existing.name == row.name && existing.description == description &&
+                importedPlaylistOrder(row.id) == entries.map { it.trackId }) { "desktop_playlist_import_conflict" }
+            return
+        }
+        addPlaylist(row)
+        if (description != null) updatePlaylistDescription(row.id, null, description)
+        entries.chunked(DesktopLocalLimits.MAX_QUEUE_ENTRIES).forEach { appendEntries(row.id, it) }
+    }
+
     @Transaction
     open suspend fun addPlaylist(row: PlaylistRow): Unit {
         val fact = DesktopLocalIntent.playlistCreated(row)

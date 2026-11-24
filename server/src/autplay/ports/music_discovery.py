@@ -15,6 +15,10 @@ class MusicDiscoveryProvider(Protocol):
         self, query: str, kind: MusicDiscoveryKind, *, limit: int, offset: int
     ) -> MusicDiscoveryPage: ...
 
+    def artist_releases(
+        self, artist_id: UUID, *, limit: int, offset: int
+    ) -> MusicDiscoveryPage: ...
+
     def artist_tracks(self, artist_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage: ...
 
     def release_tracks(

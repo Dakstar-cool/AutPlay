@@ -1553,7 +1553,10 @@ def test_cross_device_same_base_patch_has_one_applied_writer(database_url: str) 
         engine.dispose()
 
 
-def test_playlist_move_rebalances_and_publishes_exact_remote_order(database_url: str) -> None:
+@pytest.mark.parametrize("move_before_ack", [False, True])
+def test_playlist_move_rebalances_and_publishes_exact_remote_order(
+    database_url: str, move_before_ack: bool
+) -> None:
     """Moving UUID3 before UUID1 produces 3,1,2 in storage and incremental sync."""
 
     engine = create_engine(database_url)
@@ -1616,10 +1619,10 @@ def test_playlist_move_rebalances_and_publishes_exact_remote_order(database_url:
                 "local_playlist_id": str(playlist_id),
                 "before_local_playlist_entry_id": str(entry_ids[0]),
             },
-            base=1,
+            base=None if move_before_ack else 1,
         )
         moved["aggregate_local_id"] = str(entry_ids[2])
-        moved["aggregate_server_id"] = str(entry_ids[2])
+        moved["aggregate_server_id"] = None if move_before_ack else str(entry_ids[2])
         _rehash(moved)
         moved_ack = service.push(owner, {**body, "events": [moved]}, uuid4())["acks"][0]
         assert moved_ack["outcome"] == "APPLIED"
@@ -1657,6 +1660,30 @@ def test_playlist_move_rebalances_and_publishes_exact_remote_order(database_url:
                 key=lambda item: item[1],
             )
         ] == [entry_ids[2], entry_ids[0], entry_ids[1]]
+
+        def move_to_end(
+            actor: Principal, binding: dict[str, Any], sequence: int, base: int | None
+        ) -> str:
+            edit = _event(
+                actor,
+                uuid4(),
+                sequence,
+                "PLAYLIST_ENTRY_MOVED",
+                "PLAYLIST_ENTRY",
+                {"before_local_playlist_entry_id": None},
+                base=base,
+            )
+            edit["aggregate_local_id"] = str(entry_ids[2])
+            _rehash(edit)
+            outcome = service.push(actor, {**binding, "events": [edit]}, uuid4())["acks"][0][
+                "outcome"
+            ]
+            assert isinstance(outcome, str)
+            return outcome
+
+        assert move_to_end(receiver, receiver_body, 1, None) == "CONFLICT"
+        assert move_to_end(receiver, receiver_body, 2, 3) == "APPLIED"
+        assert move_to_end(owner, body, 7, None) == "CONFLICT"
     finally:
         engine.dispose()
 

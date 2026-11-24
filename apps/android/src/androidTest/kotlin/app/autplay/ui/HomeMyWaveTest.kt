@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
@@ -41,7 +44,7 @@ class HomeMyWaveTest {
             }
         }
         compose.onNodeWithTag("home-add-first-track").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("home-my-wave").assertDoesNotExist()
+        compose.onNodeWithTag("home-my-wave").assertIsNotEnabled()
         compose.runOnIdle { assertEquals(1, imports); assertEquals(0, starts) }
     }
 
@@ -65,7 +68,7 @@ class HomeMyWaveTest {
         compose.runOnIdle { assertEquals(0, starts) }
     }
 
-    @Test fun waveAndSavedQueueHaveDistinctActionsBeforeAndAfterPlaybackStarts() {
+    @Test fun waveStartsItsOwnQueueAndDisplayedTrackCanBeResumedSeparately() {
         var waveStarts = 0
         var resumes = 0
         var toggles = 0
@@ -82,9 +85,10 @@ class HomeMyWaveTest {
                 )
             }
         }
-        compose.onNodeWithTag("home-my-wave").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Artist — Saved track").assertIsDisplayed()
         compose.onNodeWithTag("home-track-carousel").assertDoesNotExist()
-        compose.onNodeWithText(saved.title).assertIsDisplayed().performClick()
+        compose.onNodeWithTag("home-my-wave").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription(context.getString(R.string.action_continue)).performClick()
         compose.runOnIdle {
             assertEquals(1, waveStarts)
             assertEquals(1, resumes)
@@ -98,12 +102,35 @@ class HomeMyWaveTest {
         compose.onNodeWithContentDescription(context.getString(R.string.action_pause)).performScrollTo().performClick()
         compose.runOnIdle { player.value = player.value.copy(isPlaying = false) }
         compose.onNodeWithContentDescription(context.getString(R.string.action_play)).performScrollTo().assertIsDisplayed()
-        compose.onNode(hasTestTag("home-my-wave") and hero).performScrollTo().performClick()
+        compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-my-wave"))
+        compose.onNodeWithTag("home-my-wave").performClick()
         compose.runOnIdle {
             assertEquals(2, waveStarts)
             assertEquals(1, resumes)
             assertEquals(1, toggles)
         }
+    }
+
+    @Test fun wheelMixesCardsAndOnlyExplicitPlayStartsAMix() {
+        val order = mutableStateOf(listOf("rock", "focus", "sleep", "pop", "energy"))
+        val rock = app.autplay.application.recommendation.HomeWheelMix("rock", "pack", setOf("a", "b"))
+        val played = mutableListOf<app.autplay.application.recommendation.HomeWheelMix>()
+        compose.setContent {
+            AutPlayTheme { HomeWaveWheel(order.value, mapOf("rock" to rock), true, false) { played.add(it) } }
+        }
+        val label = context.getString(R.string.home_wheel_rock)
+        compose.onNodeWithText(label).assertIsSelected()
+        compose.onNodeWithText(context.getString(R.string.home_wheel_play, label)).performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(rock), played)
+            order.value = order.value.reversed()
+        }
+        val focus = context.getString(R.string.home_context_focus)
+        compose.onNodeWithText(focus).performClick()
+        compose.onNodeWithText(focus).assertIsSelected()
+        compose.onNodeWithText(context.getString(R.string.home_wheel_preview)).assertIsDisplayed()
+        compose.onNodeWithTag("home-wave-wheel").performTouchInput { swipeLeft() }
+        compose.runOnIdle { assertEquals(1, played.size) }
     }
 
     private fun render(allowed: Boolean, start: () -> Unit, together: () -> Unit) {

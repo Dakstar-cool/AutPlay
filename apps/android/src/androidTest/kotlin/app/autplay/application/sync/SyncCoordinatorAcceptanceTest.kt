@@ -44,6 +44,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -250,6 +251,21 @@ class SyncCoordinatorAcceptanceTest {
         } finally { job.cancelAndJoin() }
     }
 
+    @Test fun serverAvailabilityTracksConnectionFailureAndRecoveryWithNetworkStillPresent() = runBlocking {
+        seed(profile, "cursor-a")
+        val transport = object : SyncTransport by FakeTransport() {
+            override suspend fun pull(binding: ClientEventBinding, cursor: String?): PullPage {
+                throw java.net.ConnectException()
+            }
+        }
+        val status = SyncStatusRepository(db).observe(binding)
+        val failed = runCatching { SyncCoordinator(db, transport).run(binding) }.exceptionOrNull()
+        org.junit.Assert.assertTrue(failed is java.net.ConnectException)
+        org.junit.Assert.assertTrue(status.first().serverUnavailable)
+        SyncCoordinator(db, FakeTransport()).run(binding)
+        assertFalse(status.first().serverUnavailable)
+    }
+
     @Test fun sessionRequiredReleasesJournalWithoutConsumingRetryBudget() = runBlocking {
         seed(profile, "cursor-a")
         val event = pending(1)
@@ -261,6 +277,17 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals("PENDING", preserved.state)
         assertEquals(0, preserved.attemptCount)
         assertEquals("SESSION_REQUIRED", preserved.lastErrorCode)
+    }
+
+    @Test fun unacknowledgedImportIsNotAdoptedUnderAnotherLocalId() = runBlocking {
+        seed(profile, "before-create")
+        val create = pending(1).copy(state = "SENDING", attemptCount = 1, leaseToken = "sender", leaseExpiresAtMs = 10_000)
+        db.journalDao().insert(create)
+        val event = RemoteEvent(create.eventId, 1, create.eventType, 1, "{}", create.aggregateType, create.aggregateLocalId, 1)
+        val transport = FakeTransport(pull = PullPage("after-create", false, listOf(event)))
+        assertFalse(SyncCoordinator(db, transport, nowMs = { 1_000 }).run(binding))
+        assertEquals("before-create", db.syncDao().cursor(profile.value)?.opaqueCursor)
+        assertNull(db.libraryDao().trackRefByServerId(profile.value, create.aggregateLocalId))
     }
 
     @Test fun dirtyRemoteDeleteCreatesConflictWithoutOverwrite() = runBlocking {
@@ -387,7 +414,11 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals("New Name", db.catalogProjectionDao().artist(profile.value, artistId)?.name)
     }
 
-    @Test fun serverFormatArtistBootstrapAndPullReachTypedOwnedPort() = runBlocking {
+    @Test fun serverFormatArtistBootstrapAndPullReachTypedOwnedPort() = runBlocking { exerciseJointEdition(false) }
+
+    @Test fun jointEditionFromEitherArtistCreatesFirstPrivatePlaylist() = runBlocking { exerciseJointEdition(true) }
+
+    private suspend fun exerciseJointEdition(addFirstPlaylist: Boolean) {
         seed(profile, "before-bootstrap")
         db.syncDao().upsertCursor(db.syncDao().cursor(profile.value)!!.copy(bootstrapState = "NOT_STARTED"))
         val trackRefId = "15151515-1515-4515-8515-151515151515"
@@ -397,16 +428,21 @@ class SyncCoordinatorAcceptanceTest {
         val artistTwo = "19191919-1919-4919-8919-191919191919"
         val creditId = "20202020-2020-4020-8020-202020202020"
         val unresolvedCreditId = "21212121-2121-4121-8121-212121212121"
+        val positionId = "45454545-4545-4545-8545-454545454545"
         val ownerIds = """["$recordingId"]"""
         val ownerScope = "a".repeat(64)
         val bootstrapEvents = listOf(
-            RemoteEvent(trackRefId, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$recordingId","title":"Owned","artist":"Same","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", trackRefId, 2),
-            RemoteEvent(artistOne, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistOne","name":"Same Name","sort_name":"Same Name","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""", "ARTIST", artistOne, 1),
-            RemoteEvent(artistTwo, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistTwo","name":"Same Name","sort_name":"Same Name","artist_type":"FUTURE_TYPE","disambiguation":"Other","country_code":null,"identity_status":"FUTURE_STATUS","deleted_at":null}""", "ARTIST", artistTwo, 1),
-            RemoteEvent(creditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$creditId","display_name":"Lead feat. Guest","names":[{"artist_id":"$artistOne","position":0,"credited_name":"Lead","join_phrase":" feat. ","role":"PRIMARY"},{"artist_id":"$artistTwo","position":1,"credited_name":"Guest","join_phrase":"","role":"FUTURE_ROLE"}],"deleted_at":null}""", "ARTIST_CREDIT", creditId, 3),
+            RemoteEvent(positionId, 0, "CATALOG_EDITION_TRACK_UPSERTED", 1,
+                """{"release_track_id":"$positionId","release_id":"$releaseId","release_group_id":"$releaseId","recording_id":"$recordingId","album":"Joint edition","album_artist":"SVRGN & RAGETRAIN","primary_type":"SINGLE","disc":1,"sequence_no":2,"title":"BASS PESADÃO","track_artist":"SVRGN & RAGETRAIN"}""",
+                "EDITION_TRACK", positionId, 1),
+            RemoteEvent(trackRefId, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$recordingId","title":"BASS PESADÃO","artist":"SVRGN","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", trackRefId, 2),
+            RemoteEvent("10101010-1010-4010-8010-101010101010", 0, "LIBRARY_ENTRY_UPSERTED", 1, """{"server_user_track_ref_id":"$trackRefId","source":"SEARCH","availability_status":"VAULT"}""", "LIBRARY_ENTRY", "10101010-1010-4010-8010-101010101010", 1),
+            RemoteEvent(artistOne, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistOne","name":"SVRGN","sort_name":"SVRGN","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""", "ARTIST", artistOne, 1),
+            RemoteEvent(artistTwo, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistTwo","name":"RAGETRAIN","sort_name":"RAGETRAIN","artist_type":"FUTURE_TYPE","disambiguation":"Other","country_code":null,"identity_status":"FUTURE_STATUS","deleted_at":null}""", "ARTIST", artistTwo, 1),
+            RemoteEvent(creditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$creditId","display_name":"Lead feat. Guest","names":[{"artist_id":"$artistOne","position":0,"credited_name":"SVRGN","join_phrase":" feat. ","role":"PRIMARY"},{"artist_id":"$artistTwo","position":1,"credited_name":"RAGETRAIN","join_phrase":"","role":"PRIMARY"}],"deleted_at":null}""", "ARTIST_CREDIT", creditId, 3),
             RemoteEvent(unresolvedCreditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$unresolvedCreditId","display_name":"Unresolved","names":[],"deleted_at":null}""", "ARTIST_CREDIT", unresolvedCreditId, 1),
             RemoteEvent(recordingId, 0, "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", 1, """{"recording_id":"$recordingId","artist_credit_id":"$creditId","owner_scope_id":"$ownerScope","owner_recording_page":0,"owner_recording_page_count":1,"owner_recording_ids":$ownerIds,"deleted_at":null}""", "RECORDING_ARTIST_CREDIT", recordingId, 2),
-            RemoteEvent(releaseId, 0, "CATALOG_RELEASE_CREDIT_LINK_UPSERTED", 1, """{"release_id":"$releaseId","artist_credit_id":"$unresolvedCreditId","owner_scope_id":"$ownerScope","owner_recording_page":0,"owner_recording_page_count":1,"owner_recording_ids":$ownerIds,"deleted_at":null}""", "RELEASE_ARTIST_CREDIT", releaseId, 1),
+            RemoteEvent(releaseId, 0, "CATALOG_RELEASE_CREDIT_LINK_UPSERTED", 1, """{"release_id":"$releaseId","artist_credit_id":"$creditId","owner_scope_id":"$ownerScope","owner_recording_page":0,"owner_recording_page_count":1,"owner_recording_ids":$ownerIds,"deleted_at":null}""", "RELEASE_ARTIST_CREDIT", releaseId, 1),
         )
         val snapshot = BootstrapPage("22222222-3333-4333-8333-222222222222", null, "artist-cursor", false, bootstrapEvents)
         assertEquals(true, SyncCoordinator(db, FakeTransport(bootstrapPages = listOf(snapshot))).run(binding))
@@ -415,12 +451,34 @@ class SyncCoordinatorAcceptanceTest {
         assertEquals(listOf(artistOne, artistTwo), port.browse(profile, 10).map { it.key.artistId.value }.sorted())
         val detail = port.detail(ArtistKey(profile, ArtistId(artistOne)), 10, 10)!!
         assertEquals(listOf(0, 1), detail.credits.single().members.map { it.position })
-        assertEquals("FUTURE_ROLE", detail.credits.single().members[1].role)
-        assertEquals(0, port.credit(profile, ArtistCreditId(unresolvedCreditId), 10)!!.members.size)
+        assertEquals("PRIMARY", detail.credits.single().members[1].role)
+        assertNull(port.credit(profile, ArtistCreditId(unresolvedCreditId), 10))
         assertEquals(creditId, port.subjectCredits(profile, "RECORDING", ServerId(recordingId), 10).single().creditId.value)
-        assertEquals(unresolvedCreditId, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).single().creditId.value)
+        assertEquals(creditId, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).single().creditId.value)
         assertEquals(0, port.browse(otherProfile, 10).size)
         assertEquals(recordingId, db.libraryDao().trackRefByServerId(profile.value, trackRefId)?.serverRecordingId)
+
+        val product = app.autplay.application.library.CoreProductRepository(db)
+        val edition = product.releases(profile.value).first().single()
+        val release = requireNotNull(product.releaseDetail(edition.stableId, profile.value))
+        val row = release.tracks.single()
+        assertEquals(2, row.sequenceNo)
+        assertNull(product.releaseDetail(edition.stableId, otherProfile.value))
+        for ((id, label) in listOf(artistOne to "SVRGN", artistTwo to "RAGETRAIN")) {
+            val appearance = port.appearances(ArtistKey(profile, ArtistId(id)), 10).single { it.subjectType == "RELEASE" }
+            assertEquals(app.autplay.application.artist.ArtistLocalTarget.Release(edition.stableId), appearance.localTarget)
+            val hit = app.autplay.application.search.LocalTrackSearchRepository(db)
+                .search(label, profile.value, kind = app.autplay.application.search.LibrarySearchKind.Artist).single()
+            assertEquals(row.localUserTrackRefId, hit.localUserTrackRefId)
+        }
+        if (addFirstPlaylist) {
+            val playlists = app.autplay.application.library.LibraryVerticalSliceRepository(db)
+            val playlist = app.autplay.domain.LocalId.random()
+            playlists.createPlaylistWithTrack(binding, playlist, "First", null, app.autplay.domain.LocalId(requireNotNull(row.localUserTrackRefId)), 1000)
+            assertEquals(row.localUserTrackRefId, product.playlistDetail(playlist.value, profile.value)?.entries?.single()?.localUserTrackRefId)
+            assertNull(product.playlistDetail(playlist.value, otherProfile.value))
+            return
+        }
 
         val rename = RemoteEvent(
             "23232323-2323-4323-8323-232323232323", 10, "CATALOG_ARTIST_UPSERTED", 1,
@@ -437,6 +495,8 @@ class SyncCoordinatorAcceptanceTest {
         )
         assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("artist-pruned", false, listOf(removedOwner)))).run(binding))
         assertEquals(0, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).size)
+
+
     }
 
     @Test fun artistCreditMemberBoundaryAcceptsOneThousandAndRejectsOverflowAtomically() = runBlocking {
@@ -491,6 +551,7 @@ class SyncCoordinatorAcceptanceTest {
             "37373737-3737-4737-8737-373737373737", null, "paged-owner-mid", false,
             listOf(
                 RemoteEvent(refOne, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$ownerOne","title":"One","artist":"Paged","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", refOne, 1),
+                RemoteEvent("39393939-3939-4939-8939-393939393939", 0, "LIBRARY_ENTRY_UPSERTED", 1, """{"server_user_track_ref_id":"$refOne","source":"SEARCH","availability_status":"VAULT"}""", "LIBRARY_ENTRY", "39393939-3939-4939-8939-393939393939", 1),
                 RemoteEvent(refTwo, 0, "USER_TRACK_REF_PATCHED", 1, """{"recording_id":"$ownerTwo","title":"Two","artist":"Paged","album":null,"duration_ms":1,"resolution_status":"RESOLVED"}""", "USER_TRACK_REF", refTwo, 1),
                 RemoteEvent(artistId, 0, "CATALOG_ARTIST_UPSERTED", 1, """{"artist_id":"$artistId","name":"Paged","sort_name":"Paged","artist_type":"PERSON","disambiguation":null,"country_code":null,"identity_status":"ACTIVE","deleted_at":null}""", "ARTIST", artistId, 1),
                 RemoteEvent(creditId, 0, "CATALOG_ARTIST_CREDIT_UPSERTED", 1, """{"artist_credit_id":"$creditId","display_name":"Paged","names":[{"artist_id":"$artistId","position":0,"credited_name":"Paged","join_phrase":"","role":"PRIMARY"}],"deleted_at":null}""", "ARTIST_CREDIT", creditId, 1),
@@ -499,7 +560,7 @@ class SyncCoordinatorAcceptanceTest {
         )
         assertEquals(true, SyncCoordinator(db, FakeTransport(bootstrapPages = listOf(bootstrap))).run(binding))
         val port = RoomArtistCatalogPort(db)
-        assertEquals(0, port.browse(profile, 10).size)
+        assertFalse(port.browse(profile, 10).any { it.key.artistId.value == artistId })
 
         val pageOne = pageZero.copy(
             eventId = "38383838-3838-4838-8838-383838383838",
@@ -507,7 +568,10 @@ class SyncCoordinatorAcceptanceTest {
             payloadJson = """{"release_id":"$releaseId","artist_credit_id":"$creditId","owner_scope_id":"$scope","owner_recording_page":1,"owner_recording_page_count":2,"owner_recording_ids":["$ownerTwo"],"deleted_at":null}""",
         )
         assertEquals(true, SyncCoordinator(db, FakeTransport(pull = PullPage("paged-owner-done", false, listOf(pageOne)))).run(binding))
-        assertEquals(listOf(artistId), port.browse(profile, 10).map { it.key.artistId.value })
+        val artists = port.browse(profile, 10)
+        assertEquals(listOf(artistId), artists.filter { it.identityStatus == "ACTIVE" }.map { it.key.artistId.value })
+        // A release credit alone does not identify the performer of an uncredited recording.
+        assertEquals(listOf("Paged"), artists.filter { it.identityStatus == null }.map { it.name })
         assertEquals(creditId, port.subjectCredits(profile, "RELEASE", ServerId(releaseId), 10).single().creditId.value)
     }
 

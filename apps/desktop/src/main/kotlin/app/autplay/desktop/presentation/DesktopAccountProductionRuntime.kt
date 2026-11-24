@@ -35,6 +35,7 @@ internal class DesktopAccountProductionRuntime private constructor(
     val signedBundle: DesktopSignedBundle,
     private val standalone: DesktopLibraryStore,
     private val parentScope: CoroutineScope,
+    private val dataRoot: java.nio.file.Path,
     private val language: () -> DesktopLanguage,
     private val fenceHostSources: () -> Unit,
     private val drainHostSources: suspend () -> Unit,
@@ -88,6 +89,14 @@ internal class DesktopAccountProductionRuntime private constructor(
     var playbackController: DesktopPlaybackController? = null
         private set
     val libraryState: StateFlow<DesktopLibrarySnapshot>? get() = media?.library?.state
+    fun selectedMediaLease() = media?.admission?.selectedLeaseOrNull()
+    suspend fun playerPreference(lease: AccountLease, track: String, value: String) =
+        checkNotNull(hostMedia).setPlayerPreference(lease, AccountUuid(track), value)
+
+    suspend fun selectLocalForPlayback(expected: AccountLease) {
+        checkNotNull(hostMedia).selectStandalone { !closing.get() && issued.get() == expected }
+    }
+
     var binding: DesktopAccountWorkspaceBinding = DesktopAccountWorkspaceBinding.unavailable(DesktopAccountAvailability.Opening)
         private set
 
@@ -198,7 +207,13 @@ internal class DesktopAccountProductionRuntime private constructor(
                     }
                 }
             }, setHomeVisible = ::setHomeVisible, setCatalogVisible = ::setCatalogVisible,
-            settleNavigation = ::settleNavigation, contextSettlement = settlementMutable, accountOwner = issued::get)
+            settleNavigation = ::settleNavigation, contextSettlement = settlementMutable, accountOwner = issued::get,
+            music = DesktopOnlineMusic(serviceOwner, DesktopRecommendationPacks(dataRoot), work, issued::get, ::prepareNetworkMediaLease, mediaAdapter::playSelection, mediaAdapter::playWave) { lease, id ->
+                check(mediaOwner.admission.selectedLeaseOrNull() == lease && mediaOwner.library.state.value.queue?.let { queue ->
+                    queue.entries.any { it.id == queue.currentEntryId && it.trackId == id.value }
+                } == true)
+                mediaAdapter.download(DesktopAccountTrackTarget(lease, id, null))
+            })
         controller.accounts.reload().hostAwait()
         accountObserver = work.launch {
             controller.accounts.state.drop(1).collect { state ->
@@ -770,12 +785,12 @@ internal class DesktopAccountProductionRuntime private constructor(
             DesktopAccountAction.LogoutCurrent, DesktopAccountAction.LogoutAll, DesktopAccountAction.RevokeDevice,
             DesktopAccountAction.Disconnect, DesktopAccountAction.ResumeOperation,
         )
-        suspend fun open(bundle: DesktopSignedBundle, standalone: DesktopLibraryStore, scope: CoroutineScope,
+        suspend fun open(bundle: DesktopSignedBundle, standalone: DesktopLibraryStore, scope: CoroutineScope, dataRoot: java.nio.file.Path,
             initialLocal: DesktopAudioEngine, createLocal: () -> DesktopAudioEngine, allowMetered: Boolean,
             initializeVirgin: Boolean, language: () -> DesktopLanguage, fenceSources: () -> Unit,
             drainSources: suspend () -> Unit, readMeteredPreference: () -> Boolean,
             saveMeteredPreference: suspend (Boolean) -> Unit): DesktopAccountProductionRuntime {
-            val owner = DesktopAccountProductionRuntime(bundle, standalone, scope, language, fenceSources, drainSources,
+            val owner = DesktopAccountProductionRuntime(bundle, standalone, scope, dataRoot, language, fenceSources, drainSources,
                 readMeteredPreference, saveMeteredPreference)
             try { owner.start(initialLocal, createLocal, allowMetered, initializeVirgin) }
             catch (failure: Throwable) {

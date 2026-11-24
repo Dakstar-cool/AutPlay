@@ -35,6 +35,27 @@ class InternetMetadataDiscoveryUiTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun confirmedEditionOpensByIdFromTheArtistPageWithoutAnAudioOperation() {
+        val port = FakePort()
+        val work = FakeWork()
+        port.releaseTracks = { id, offset ->
+            assertEquals(RELEASE, id)
+            page(listOf(track(TRACK_ONE, 1)), offset)
+        }
+        val card = page(listOf(release()), 0).items.single()
+        val album = artistAlbums(emptyList(), listOf(card)).single()
+        assertEquals(RELEASE, album.target?.stableId)
+        compose.setContent {
+            AutPlayTheme {
+                InternetMetadataDiscoverySection(RELEASE, LibrarySearchKind.Album, 1,
+                    InternetMusicUiSession(BINDING, port, work), initialTarget = card.browseTarget)
+            }
+        }
+        waitTag("catalogue-card-musicbrainz:release_track:$TRACK_ONE")
+        compose.onNodeWithTag("catalogue-back").assertDoesNotExist()
+        assertTrue(port.pages.isEmpty() && port.searches.isEmpty() && work.requests.isEmpty())
+    }
+
     @Test fun pickerSelectsEveryKindWithoutStartingInternetWork() {
         val chosen = CopyOnWriteArrayList<LibrarySearchKind>()
         val kind = mutableStateOf(LibrarySearchKind.All)
@@ -78,8 +99,10 @@ class InternetMetadataDiscoveryUiTest {
         assertNotEquals(port.searches[0].operationId, port.searches[1].operationId)
         assertTrue(port.searches.all { it.query == "Performer Song (Live)" })
         assertTrue(work.requests.isEmpty())
-        compose.onNodeWithText(context.getString(R.string.music_add_vault)).performScrollTo().performClick()
-        compose.onNodeWithText(context.getString(R.string.music_add_download)).performScrollTo().performClick()
+        click("source-actions-source-candidate")
+        compose.onNodeWithText(context.getString(R.string.music_add_vault)).performClick()
+        click("source-actions-source-candidate")
+        compose.onNodeWithText(context.getString(R.string.music_add_download)).performClick()
         assertEquals(listOf(WorkRequest(BINDING.serverProfileId.value, "source-search", "source-candidate", false),
             WorkRequest(BINDING.serverProfileId.value, "source-search", "source-candidate", true)), work.requests.toList())
     }
@@ -88,7 +111,7 @@ class InternetMetadataDiscoveryUiTest {
         val port = FakePort()
         val work = FakeWork()
         val terminalResponse = CompletableDeferred<InternetMusicSearch>()
-        work.values["first-source"] = MutableStateFlow(listOf(WorkInfo.State.FAILED))
+        work.values["first-source"] = MutableStateFlow(InternetMusicWorkStatus(listOf(WorkInfo.State.FAILED)))
         port.source = { _, _, _ -> when (port.searches.size) {
             1 -> throw IOException("lost response")
             2 -> InternetMusicSearch("first-source", listOf(InternetMusicCandidate("candidate", "Failed source", "Performer", "YouTube", 180000)))
@@ -98,11 +121,14 @@ class InternetMetadataDiscoveryUiTest {
             InternetMusicSearchSection("Performer Song", 1, LibrarySearchKind.Track, CONTEXT_ONE, InternetMusicUiSession(BINDING, port, work))
         } } }
         click("source-http-retry")
+        val failureText = context.getString(R.string.music_internet_add_failed)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(failureText, substring = true).fetchSemanticsNodes().isNotEmpty() }
+        click("source-actions-candidate")
         waitTag("source-acquisition-retry")
         compose.onNodeWithText(context.getString(R.string.music_add_vault)).assertIsNotEnabled()
         compose.onNodeWithText(context.getString(R.string.music_add_download)).assertIsNotEnabled()
         assertEquals(port.searches[0], port.searches[1])
-        click("source-acquisition-retry")
+        compose.onNodeWithTag("source-acquisition-retry").performClick()
         compose.waitUntil(5_000) { port.searches.size == 3 }
         compose.onNodeWithText("Failed source").assertDoesNotExist()
         assertNotEquals(port.searches[1].operationId, port.searches[2].operationId)
@@ -111,6 +137,28 @@ class InternetMetadataDiscoveryUiTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Fresh source").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Failed source").assertDoesNotExist()
         assertTrue(work.requests.isEmpty())
+    }
+
+    @Test fun completionIndicatorFollowsVaultAndDeviceDownload() {
+        val port = FakePort()
+        val work = FakeWork()
+        val status = MutableStateFlow(InternetMusicWorkStatus(listOf(WorkInfo.State.RUNNING)))
+        work.values["search"] = status
+        port.source = { _, _, _ -> InternetMusicSearch("search", listOf(InternetMusicCandidate("song", "Song", "Artist", "YouTube", 180000))) }
+        compose.setContent { AutPlayTheme {
+            InternetMusicSearchSection("Song", 1, session = InternetMusicUiSession(BINDING, port, work))
+        } }
+        waitTag("source-progress-song")
+        compose.onNodeWithTag("source-ready-song").assertDoesNotExist()
+        status.value = InternetMusicWorkStatus(listOf(WorkInfo.State.SUCCEEDED))
+        waitTag("source-ready-song")
+        compose.onNodeWithText(context.getString(R.string.music_internet_added), substring = true).assertIsDisplayed()
+        status.value = status.value.copy(downloadState = "DOWNLOADING")
+        waitTag("source-progress-song")
+        compose.onNodeWithTag("source-ready-song").assertDoesNotExist()
+        status.value = status.value.copy(downloadState = "COMPLETED")
+        waitTag("source-ready-song")
+        compose.onNodeWithText(context.getString(R.string.music_device_ready), substring = true).assertIsDisplayed()
     }
 
     @Test fun artistNavigationAdmitsRecordingWithoutInventingReleaseMembership() {
@@ -130,7 +178,8 @@ class InternetMetadataDiscoveryUiTest {
         assertEquals(buildJsonObject { put("entity_type", "recording"); put("entity_id", RECORDING); put("release_id", JsonNull) }, port.selections.single())
         assertEquals(CONTEXT_ONE, port.searches.single().contextId)
         assertEquals("Performer Song (Live)", port.searches.single().query)
-        compose.onNodeWithText(context.getString(R.string.music_add_download)).performScrollTo().performClick()
+        click("source-actions-actual-candidate")
+        compose.onNodeWithText(context.getString(R.string.music_add_download)).performClick()
         assertEquals(listOf(WorkRequest(BINDING.serverProfileId.value, "artist-source", "actual-candidate", true)), work.requests.toList())
     }
 
@@ -228,11 +277,12 @@ class InternetMetadataDiscoveryUiTest {
     private data class WorkRequest(val profile: String, val search: String, val candidate: String, val download: Boolean)
     private class FakeWork : InternetMusicUiWork {
         val requests = CopyOnWriteArrayList<WorkRequest>()
-        val values = mutableMapOf<String, MutableStateFlow<List<WorkInfo.State>>>()
-        override fun states(searchId: String, candidateId: String): Flow<List<WorkInfo.State>> = values.getOrPut(searchId) { MutableStateFlow(emptyList()) }
+        val values = mutableMapOf<String, MutableStateFlow<InternetMusicWorkStatus>>()
+        override fun states(searchId: String, candidateId: String): Flow<InternetMusicWorkStatus> = values.getOrPut(searchId) { MutableStateFlow(InternetMusicWorkStatus()) }
         override fun enqueue(profileId: String, searchId: String, candidateId: String, download: Boolean) { requests += WorkRequest(profileId, searchId, candidateId, download) }
     }
     private class FakePort : InternetMetadataDiscoveryPort {
+        override suspend fun catalogueTrackReference(contextId: String): CatalogueTrackReference = error("unexpected materialization")
         val selections = CopyOnWriteArrayList<JsonObject>()
         val searches = CopyOnWriteArrayList<SourceRequest>()
         val pages = CopyOnWriteArrayList<String>()
@@ -245,6 +295,9 @@ class InternetMetadataDiscoveryUiTest {
         override suspend fun discoverMusic(query: String, kind: InternetMetadataDiscoveryKind, limit: Int, offset: Int): InternetMetadataDiscoveryPage {
             assertEquals(25, limit); pages += query; return discovery(query, kind, offset)
         }
+        override suspend fun discoveryArtistReleases(id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage =
+            discoveryArtistTracks(id, limit, offset)
+
         override suspend fun discoveryArtistTracks(id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage {
             assertEquals(25, limit); return artistTracks(id, offset)
         }

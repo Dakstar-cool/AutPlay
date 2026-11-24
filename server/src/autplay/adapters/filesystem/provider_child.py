@@ -21,6 +21,8 @@ from typing import BinaryIO, Literal, cast
 from uuid import UUID, uuid4
 
 from autplay.adapters.child_process import provider_child_launch
+from autplay.adapters.media.tools import FfprobeInspector
+from autplay.domain.acquisition_policy import MAX_TRACK_SECONDS
 from autplay.domain.track_metadata import (
     MAX_SOURCE_METADATA_BYTES,
     sanitize_source_metadata,
@@ -172,7 +174,7 @@ def youtube_arguments(candidate: str) -> list[str]:
 def download_youtube(candidate: str, workspace: Path, maximum: int) -> Path:
     """Only this bounded writer creates media files; the helper streams to stdout."""
     _, environment = provider_child_launch()
-    proxy = environment.pop("AUTPLAY_MUSIC_PROXY", None)
+    proxy = environment.get("AUTPLAY_MUSIC_PROXY")
     if proxy:
         environment["ALL_PROXY"] = proxy
     for name in ("TMP", "TEMP", "TMPDIR"):
@@ -189,6 +191,9 @@ def download_youtube(candidate: str, workspace: Path, maximum: int) -> Path:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert process.stdout is not None
+    watchdog = threading.Timer(PROVIDER_COMMAND_SECONDS, process.kill)
+    watchdog.daemon = True
+    watchdog.start()
     try:
         source = workspace / "audio.media"
         with source.open("xb") as output:
@@ -214,8 +219,15 @@ def download_youtube(candidate: str, workspace: Path, maximum: int) -> Path:
             raise ProviderChildError(code)
         if written == 0:
             raise ProviderChildError()
+        try:
+            audio = FfprobeInspector("ffprobe").inspect(source, single_audio=True)
+        except VaultError as error:
+            raise ProviderChildError("provider_format_unsupported") from error
+        if audio.duration_ms > MAX_TRACK_SECONDS * 1000:
+            raise ProviderChildError("provider_track_policy_rejected")
         return source
     finally:
+        watchdog.cancel()
         process.stdout.close()
         if process.poll() is None:
             with suppress(OSError):

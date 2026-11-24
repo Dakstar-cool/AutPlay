@@ -1,5 +1,7 @@
 package app.autplay.ui
 
+import app.autplay.application.recommendation.HomeWheelMix
+
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import app.autplay.playback.presentation.PlaybackPresentationState
@@ -27,7 +29,9 @@ internal data class CoreProductRouteActions(
     val openProblems: () -> Unit,
     val changeQuery: (String) -> Unit,
     val submitSearch: () -> Unit,
+    val moreVaultResults: () -> Unit = {},
     val playSearchResult: (String) -> Unit,
+    val playlistVaultTarget: suspend (String) -> String? = { null },
     val playVaultSearchResult: (String) -> Unit = {},
     val changeVaultScope: (Boolean) -> Unit,
     val changeSearchAnchor: (ListAnchor) -> Unit,
@@ -51,8 +55,10 @@ internal data class CoreProductRouteActions(
     val manualPlaylists: List<ManualPlaylistUi> = emptyList(),
     val manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
     val changeSearchKind: (LibrarySearchKind) -> Unit = {},
+    val playWheelMix: (HomeWheelMix) -> Unit = {},
     val startMyWave: () -> Unit = {},
     val myWaveAllowed: Boolean = true,
+    val playReleaseEntry: ((String) -> Unit)? = null,
 )
 
 @Composable
@@ -91,6 +97,7 @@ internal fun CoreProductRouteRenderer(
             onPlayTrack = actions.resumeHomeQueue,
             onContinueListening = actions.continueHomeQueue,
             onStartMyWave = actions.startMyWave,
+            onPlayWheelMix = actions.playWheelMix,
             myWaveAllowed = actions.myWaveAllowed,
             onAddLocal = actions.addLocal,
             importingLocalTrack = libraryState.importingLocalTrack,
@@ -116,6 +123,11 @@ internal fun CoreProductRouteRenderer(
             onSearch = actions.submitSearch,
             onPlay = actions.playSearchResult,
             onPlayVault = actions.playVaultSearchResult,
+            playlistVaultTarget = actions.playlistVaultTarget,
+            onMoreVault = actions.moreVaultResults,
+            manualPlaylists = actions.manualPlaylists,
+            manualPlaylistActions = actions.manualPlaylistActions,
+            onPlayAcquired = actions.playTrack,
             onRetry = actions.submitSearch,
             onVaultScopeChange = actions.changeVaultScope,
             listAnchor = searchListAnchor,
@@ -129,6 +141,7 @@ internal fun CoreProductRouteRenderer(
                 contentPadding = contentPadding,
                 onPlayTrack = actions.playTrack,
                 onPlayPlaylistEntry = actions.playPlaylistEntry,
+                onPlayReleaseEntry = actions.playReleaseEntry,
                 onPlayNext = actions.playNext,
                 onAddToQueue = actions.addToQueue,
                 manualPlaylists = actions.manualPlaylists,

@@ -1,6 +1,8 @@
 package app.autplay
 
 import android.content.Context
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.work.WorkManager
@@ -215,7 +217,18 @@ object AutPlayRuntime {
         ) { errorCode }
     }
 
-    /** Resolves a server-only Track to a stable Vault Variant without persisting a URL or token. */
+    private data class VariantKey(
+        val binding: ClientEventBinding, val commit: String, val api: String?,
+        val stream: String?, val track: String,
+    )
+    private class VariantEntry {
+        val mutex = Mutex()
+        var id: String? = null
+        var resolvedAt = 0L
+    }
+    private val recentVariants = android.util.LruCache<VariantKey, VariantEntry>(32)
+
+    /** Only stable IDs are reusable within the same established binding and origins. */
     suspend fun serverPlaybackVariantId(
         context: Context,
         profileId: app.autplay.domain.ServerProfileId,
@@ -227,10 +240,29 @@ object AutPlayRuntime {
                 settings.activeUserId != null &&
                 settings.deviceId != null,
         ) { "SERVER_PROFILE_NOT_ACTIVE" }
-        return serverFeatures(
-            context,
-            ClientEventBinding(settings.activeUserId, settings.deviceId, profileId),
-        ).playbackVariantId(serverUserTrackRefId)
+        val owner = ClientEventBinding(settings.activeUserId, settings.deviceId, profileId)
+        val key = settings.m5Binding?.bindingCommitId?.let {
+            VariantKey(owner, it, settings.serverBaseUrl, settings.streamBaseUrl, serverUserTrackRefId)
+        }
+        suspend fun fetch(): String? {
+            val id = serverFeatures(context, owner).playbackVariantId(serverUserTrackRefId)
+            checkActiveRequestBinding(context, owner, settings, "SERVER_PROFILE_NOT_ACTIVE")
+            return id
+        }
+        if (key == null) return fetch()
+        val entry = synchronized(recentVariants) {
+            recentVariants.get(key) ?: VariantEntry().also { recentVariants.put(key, it) }
+        }
+        return entry.mutex.withLock {
+            val id = entry.id
+            if (id != null && android.os.SystemClock.elapsedRealtime() - entry.resolvedAt < 120_000) {
+                checkActiveRequestBinding(context, owner, settings, "SERVER_PROFILE_NOT_ACTIVE")
+                id
+            } else fetch().also {
+                entry.id = it
+                entry.resolvedAt = android.os.SystemClock.elapsedRealtime()
+            }
+        }
     }
 
     /** Creates volatile S1C social state for the active profile; PostgreSQL remains authoritative. */

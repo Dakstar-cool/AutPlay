@@ -13,6 +13,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from autplay.adapters.postgresql.confirmed_edition import (
+    confirmed_credit,
+    current_snapshot,
+    project_edition,
+)
 from autplay.adapters.postgresql.identity_decisions import (
     CreateRecordingReviewCommand,
     execute_create_recording_review,
@@ -31,6 +36,7 @@ from autplay.adapters.postgresql.models import (
     UploadSessionRow,
     UserTrackRefRow,
 )
+from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
 from autplay.application.identity_evidence import (
     candidate_aggregate_sha256,
     canonical_query_snapshot,
@@ -91,31 +97,36 @@ class MusicLibraryService:
             session.flush()
         if predecessor.owner_user_id != owner_user_id or predecessor.user_track_ref_id != ref_id:
             raise MusicError("music_identity_conflict", "The track needs identity review.", 409)
-        artist_name = ref.raw_artist or "Unknown artist"
-        artist = ArtistRow(
-            name=artist_name,
-            sort_name=artist_name,
-            normalized_name=normalize_text(artist_name),
-            identity_status="PROVISIONAL",
-        )
-        credit = ArtistCreditRow(
-            display_name=artist_name, normalized_name=normalize_text(artist_name)
-        )
-        session.add_all([artist, credit])
-        session.flush()
-        session.add(
-            ArtistCreditNameRow(
-                artist_credit_id=credit.artist_credit_id,
-                position=0,
-                artist_id=artist.artist_id,
-                credited_name=artist_name,
-                join_phrase="",
-                role="PRIMARY",
+        snapshot = current_snapshot(session.get(TrackMetadataRow, ref_id))
+        if snapshot:
+            credit_id = confirmed_credit(session, snapshot)
+        else:
+            artist_name = ref.raw_artist or "Unknown artist"
+            artist = ArtistRow(
+                name=artist_name,
+                sort_name=artist_name,
+                normalized_name=normalize_text(artist_name),
+                identity_status="PROVISIONAL",
             )
-        )
+            credit = ArtistCreditRow(
+                display_name=artist_name, normalized_name=normalize_text(artist_name)
+            )
+            session.add_all([artist, credit])
+            session.flush()
+            session.add(
+                ArtistCreditNameRow(
+                    artist_credit_id=credit.artist_credit_id,
+                    position=0,
+                    artist_id=artist.artist_id,
+                    credited_name=artist_name,
+                    join_phrase="",
+                    role="PRIMARY",
+                )
+            )
+            credit_id = credit.artist_credit_id
         title = ref.raw_title or "Audio"
         recording = RecordingRow(
-            artist_credit_id=credit.artist_credit_id,
+            artist_credit_id=credit_id,
             title=title,
             normalized_title=normalize_text(title),
             duration_ms=ref.raw_duration_ms,
@@ -174,6 +185,9 @@ class MusicLibraryService:
             session, CreateRecordingReviewCommand(recording, review, evidence, project)
         )
         session.flush()
+        if snapshot:
+            project_edition(session, ref, snapshot)
+            session.flush()
         CatalogArtistSyncPublisher().publish(session, owner_user_id, ref_ids=(ref_id,))
         return recording.recording_id
 

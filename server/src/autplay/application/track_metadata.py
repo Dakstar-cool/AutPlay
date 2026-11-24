@@ -51,6 +51,7 @@ from autplay.domain.jobs import JobKey, RetryableJobError
 from autplay.domain.resource_admission import AcquisitionClaim, ResourceAdmissionError
 from autplay.domain.track_metadata import (
     FieldEvidence,
+    MetadataCandidate,
     MetadataDocument,
     MetadataFields,
     sanitize_source_metadata,
@@ -524,6 +525,58 @@ class TrackMetadataService:
             self._publish(session, ref, row, operation_id=operation_id, digest=digest)
             return metadata_view(row)
 
+    @staticmethod
+    def catalog_backfill_page(
+        session: Session, owner_id: UUID, *, after: UUID | None, limit: int, apply: bool = False
+    ) -> dict[str, object]:
+        """Report or enqueue one stable page of previously confirmed, unprojected editions."""
+        from autplay.adapters.postgresql.confirmed_edition import current_snapshot
+
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        if apply:
+            _acquire_sync_owner_publish_lock(session, owner_id)
+        query = (
+            select(UserTrackRefRow, TrackMetadataRow)
+            .join(
+                TrackMetadataRow,
+                TrackMetadataRow.user_track_ref_id == UserTrackRefRow.user_track_ref_id,
+            )
+            .where(UserTrackRefRow.user_id == owner_id, UserTrackRefRow.deleted_at.is_(None))
+            .order_by(UserTrackRefRow.user_track_ref_id)
+            .limit(limit + 1)
+        )
+        if after is not None:
+            query = query.where(UserTrackRefRow.user_track_ref_id > after)
+        rows = session.execute(query.with_for_update() if apply else query).all()
+        counts = {"already_processed": 0, "awaiting_review": 0, "eligible": 0, "queued": 0}
+        for ref, metadata in rows[:limit]:
+            if current_snapshot(metadata) or metadata.document.get("catalog_backfill_version") == 1:
+                counts["already_processed"] += 1
+                continue
+            group = coherent_album_group(metadata.document)
+            if (
+                not group
+                or group["provider"] != "MUSICBRAINZ"
+                or metadata.state != "READY"
+                or not (metadata.document.get("fields") or {}).get("mb_recording_id")
+            ):
+                counts["awaiting_review"] += 1
+                continue
+            counts["eligible"] += 1
+            if apply:
+                metadata.document = {**metadata.document, "catalog_backfill_version": 1}
+                TrackMetadataService._enqueue(
+                    session, ref, metadata, metadata.document.get("selection")
+                )
+                TrackMetadataService._publish(session, ref, metadata)
+                counts["queued"] += 1
+        return {
+            **counts,
+            "scanned": min(len(rows), limit),
+            "next_cursor": str(rows[limit - 1][0].user_track_ref_id) if len(rows) > limit else None,
+        }
+
     def enqueue_missing(self, owner_id: UUID | None = None, *, limit: int = 30) -> int:
         # Repeated bounded sweep also observes imports from older acquisition workers.
         self.reconcile_finished(owner_id)
@@ -844,6 +897,7 @@ class TrackMetadataService:
         album_group: dict[str, object] | None = None,
         expected_acquisition_sha256: str | None = None,
         clear_album_group: bool = False,
+        catalog_candidate: MetadataCandidate | None = None,
     ) -> None:
         with self.sessions.begin() as session:
             ref, row = self.locked_job(session, ref_id, generation, context)
@@ -999,6 +1053,17 @@ class TrackMetadataService:
                     actual_fields.get(key) != fields.get(key) for key in ("album", "mb_release_id")
                 ):
                     artwork = None
+            if (
+                catalog_candidate is not None
+                and catalog_candidate.recording_members
+                and album_group is not None
+                and coherent_album_group(row.document) == album_group
+                and evidence is not None
+                and evidence.source == "MUSICBRAINZ"
+            ):
+                from autplay.adapters.postgresql.confirmed_edition import store_confirmed_edition
+
+                store_confirmed_edition(session, ref, row, catalog_candidate)
             if artwork is not None and evidence is not None:
                 sha = hashlib.sha256(artwork).hexdigest()
                 session.execute(

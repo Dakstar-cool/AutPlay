@@ -15,7 +15,7 @@ object PairingReducer {
         if (capabilities.userId != snapshot.expectedUserId || capabilities.deviceId != snapshot.expectedDeviceId) return PairingState.Blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
         if (capabilities.expiresAtEpochMs <= nowMs) return PairingState.Blocked(PairingFailure.AUTH_ATTENTION_REQUIRED)
         if (priorHighWater != null && capabilities.revision < priorHighWater) return PairingState.Blocked(PairingFailure.CAPABILITY_ROLLBACK_DETECTED)
-        return PairingState.Connected(snapshot, capabilities)
+        return PairingState.Connected(snapshot, capabilities, verifiedAtMs = nowMs)
     }
 
     private fun matches(state: PairingState, snapshot: PairingFlowSnapshot): Boolean = when (state) {

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any, cast
+from unittest.mock import Mock, create_autospec
 from uuid import UUID, uuid4
 
 import pytest
+from autplay.adapters.postgresql import catalog_pages
 from autplay.adapters.postgresql.readiness import ReadinessResult
 from autplay.adapters.postgresql.runtime_database import create_runtime_engine
 from autplay.adapters.public_catalogue_context import MusicBrainzCatalogueContextProvider
@@ -38,6 +41,21 @@ def ready_deletion_owner(monkeypatch: pytest.MonkeyPatch) -> None:
 
 OWNER = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
 ARTIST_ID, RELEASE_ID, RECORDING_ID, TRACK_ID = (uuid4() for _ in range(4))
+COVER = bytes.fromhex("ffd8ffe0")
+
+
+@pytest.fixture
+def page_cache(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    factory = create_autospec(catalog_pages.CatalogPageCache, spec_set=True)
+    monkeypatch.setattr(catalog_pages, "CatalogPageCache", factory)
+
+    def cold_read(key: str, refresh: Callable[[], dict[str, object]]) -> dict[str, object]:
+        return refresh()
+
+    cache = factory.return_value
+    cache.read.side_effect = cold_read
+    cache.available_recordings.return_value = {}
+    return cast(Mock, cache)
 
 
 class Auth:
@@ -103,10 +121,15 @@ class Coordinator:
     def __init__(self) -> None:
         self.transport = Http()
         self.owners: list[Principal] = []
+        self.public_reads: list[tuple[Principal, str]] = []
 
     def http(self, principal: Principal) -> Http:
         self.owners.append(principal)
         return self.transport
+
+    def get(self, principal: Principal, url: str) -> bytes:
+        self.public_reads.append((principal, url))
+        return COVER
 
 
 class Runtime:
@@ -138,6 +161,7 @@ def settings(*, enabled: bool = True) -> ApiSettings:
 
 def test_actual_api_uses_one_catalog_runtime_with_owner_transport_and_contained_shutdown(
     monkeypatch: pytest.MonkeyPatch,
+    page_cache: Mock,
 ) -> None:
     events: list[str] = []
     runtime = Runtime(events)
@@ -171,6 +195,15 @@ def test_actual_api_uses_one_catalog_runtime_with_owner_transport_and_contained_
             assert response.json()["acquisition_allowed"] is False
         assert response.json()["items"][0]["disc_number"] == 2
         assert response.json()["items"][0]["track_number"] == 3
+        page_cache.available_recordings.assert_called_once_with(OWNER.user_id, [str(RECORDING_ID)])
+        cover_path = f"/api/v1/music/discovery/releases/{RELEASE_ID}/cover"
+        assert client.get(cover_path).status_code == 401
+        assert not runtime.work.public_reads
+        cover = client.get(cover_path, headers={"Authorization": "Bearer owner"})
+        assert cover.status_code == 200 and cover.content == COVER
+        assert runtime.work.public_reads == [
+            (OWNER, f"https://coverartarchive.org/release/{RELEASE_ID}/front-250")
+        ]
         assert constructions == [app.state.settings]
         assert runtime.work.owners == [OWNER, OWNER, OWNER]
         assert len(runtime.work.transport.calls) == 3
@@ -273,6 +306,7 @@ def test_catalog_shutdown_also_runs_after_startup_guard_failure(
     assert app.state.unconfirmed_catalog_io == runtime.pending
 
 
+@pytest.mark.usefixtures("page_cache")
 def test_context_route_shares_the_browse_coordinator_and_accepts_only_entity_identities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

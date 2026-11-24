@@ -59,6 +59,20 @@ def _response(*, allowed: bool, download_url: str = "") -> bytes:
     ).encode()
 
 
+def test_live_album_is_not_downloadable_on_search_or_fresh_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = json.loads(_response(allowed=True, download_url=_candidate().download_url or ""))
+    raw["results"][0]["album_name"] = "Live at Wembley"
+    monkeypatch.setattr(
+        jamendo.JamendoProvider, "_request_json", lambda *a: json.dumps(raw).encode()
+    )
+    provider = jamendo.JamendoProvider("test_client")
+    assert provider.search("Morning Light", limit=5) == ()
+    candidate = provider.lookup("10")
+    assert not candidate.acquisition_allowed and candidate.download_url is None
+
+
 def test_parser_keeps_discovery_but_separates_playable_permission() -> None:
     metadata_only = jamendo._parse_candidates(_response(allowed=False), limit=1)
     playable = jamendo._parse_candidates(

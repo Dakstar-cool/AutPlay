@@ -415,6 +415,9 @@ class MetadataCandidate:
     recording_disambiguation: str | None = None
     recording_title: str | None = None
     mb_release_track_id: str | None = None
+    recording_members: tuple[dict[str, str], ...] = ()
+    release_members: tuple[dict[str, str], ...] = ()
+    track_members: tuple[dict[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         # JSON snapshots represent tuples as arrays; old snapshots omit all new fields.

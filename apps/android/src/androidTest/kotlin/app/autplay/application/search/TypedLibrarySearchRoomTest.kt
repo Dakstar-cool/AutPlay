@@ -7,6 +7,8 @@ import app.autplay.application.library.projectMetadata
 import app.autplay.application.server.RemoteLibraryEntry
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.UserTrackRefEntity
+import app.autplay.data.local.entity.DownloadIntentEntity
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.After
@@ -105,6 +107,45 @@ class TypedLibrarySearchRoomTest {
         assertNull(rows[0].title); assertNull(rows[0].artist)
         assertEquals("owned", rows[0].localUserTrackRefId)
         assertNull(rows[1].localUserTrackRefId)
+    }
+
+    @Test fun offlineSearchRequiresCompletedDownloadForTheSameProfile() = runBlocking {
+        val ids = listOf("download", "queued", "other-owner", "no-media")
+        for (id in ids) {
+            val owner = if (id == "other-owner") "foreign" else "owner"
+            seed(id, owner, "Signal", "Artist", null)
+            db.localAudioDao().upsertDownloadIntent(DownloadIntentEntity(
+                downloadIntentId = "intent-$id", localUserTrackRefId = id, serverAudioVariantId = null,
+                media3DownloadId = if (id == "no-media") null else "media-$id",
+                desiredStorageClass = "USER_DOWNLOAD", qualityPolicy = "BEST_AVAILABLE", sourcePolicy = "VAULT_ONLY",
+                state = if (id == "queued") "QUEUED" else "COMPLETED", failureCode = null,
+                createdAtMs = 1, updatedAtMs = 1, completedAtMs = null, serverProfileId = owner,
+            ))
+        }
+        val repository = LocalTrackSearchRepository(db)
+        assertEquals(listOf("download"), repository.offlineTrackIds("owner", ids).first())
+        assertEquals(emptyList<String>(), repository.offlineTrackIds(null, ids).first())
+        assertEquals(emptyList<String>(), repository.offlineTrackIds("owner", emptyList()).first())
+    }
+
+    @Test fun unsyncedVaultResultPlaysWithoutCreatingMembershipOrDownload() = runBlocking {
+        val track = RemoteLibraryEntry("publication", "remote-ref", "SERVER_CATALOG", "VAULT", 1,
+            catalogId = "publication", recordingId = "recording", title = "Server song", artist = "Singer", durationMs = 180000)
+        val projector = VaultSearchProjector(db)
+        val hits = projector.project("owner", listOf(track))
+        assertTrue(hits.single().playable)
+        assertEquals("Server song", hits.single().title)
+        assertNull(hits.single().localUserTrackRefId)
+        assertTrue(projector.playbackRows("owner", hits, emptySet()).isEmpty())
+        val queue = projector.playbackRows("owner", hits, setOf("remote-ref"))
+        val localId = queue.single().second
+        assertEquals("remote-ref", db.libraryDao().trackRef(localId)?.serverUserTrackRefId)
+        assertEquals(180000L, db.libraryDao().trackRef(localId)?.rawDurationMs)
+        assertEquals(queue, projector.playbackRows("owner", hits, setOf("remote-ref")))
+        assertTrue(LocalTrackSearchRepository(db).offlineTrackIds("owner", listOf(localId)).first().isEmpty())
+        assertNull(db.libraryDao().trackRefByServerId("other", "remote-ref"))
+        db.libraryDao().upsertTrackRef(db.libraryDao().trackRef(localId)!!.copy(deletedAtMs = 1))
+        assertTrue(projector.playbackRows("owner", hits, setOf("remote-ref")).isEmpty())
     }
 
     private suspend fun seed(id: String, owner: String = "owner", title: String, artist: String?, album: String?,

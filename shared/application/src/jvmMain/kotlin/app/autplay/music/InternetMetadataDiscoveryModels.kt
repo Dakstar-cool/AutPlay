@@ -26,8 +26,7 @@ enum class InternetMetadataDiscoveryEntity(val wireValue: String) {
     }
 }
 
-@ConsistentCopyVisibility
-data class InternetMetadataBrowseTarget internal constructor(
+data class InternetMetadataBrowseTarget(
     val entity: InternetMetadataDiscoveryEntity,
     val entityId: String,
 )
@@ -144,9 +143,9 @@ object InternetMetadataDiscoveryCodec {
             MetadataDiscoveryJson.optionalBoolean(capabilities, "direct_acquisition") == false &&
             MetadataDiscoveryJson.optionalBoolean(capabilities, "track_source_search") == true
         val limit = MetadataDiscoveryJson.requiredInt(root, "limit", 1, 50)
-        val offset = MetadataDiscoveryJson.requiredInt(root, "offset", 0, 1000)
+        val offset = MetadataDiscoveryJson.requiredInt(root, "offset", 0, 1_000_000)
         val total = MetadataDiscoveryJson.requiredInt(root, "total_count", 0, 1_000_000)
-        val next = MetadataDiscoveryJson.optionalInt(root, "next_offset", 0, 1000)
+        val next = MetadataDiscoveryJson.optionalInt(root, "next_offset", 0, 1_000_000)
         val truncated = MetadataDiscoveryJson.requiredBoolean(root, "truncated")
         val rows = root["items"] as? JsonArray ?: MetadataDiscoveryJson.invalid()
         MetadataDiscoveryJson.check(rows.size <= limit && rows.size <= total)
@@ -209,6 +208,8 @@ object InternetMetadataDiscoveryCodec {
         )
     }
 }
+
+fun catalogueUuid(value: String): String = MetadataDiscoveryJson.uuid(value)
 
 /** Shared strict primitives keep decoder failures stable and never include personal payloads. */
 internal object MetadataDiscoveryJson {

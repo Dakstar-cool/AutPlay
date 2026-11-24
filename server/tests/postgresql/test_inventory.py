@@ -500,7 +500,13 @@ def test_migrated_database_has_exact_named_inventory(
         | S1D_TABLES
         | PA2_TABLES
         | R1B_TABLES
-        | {("ml", "sona_collection_window")}
+        | {
+            ("ml", "sona_collection_window"),
+            ("catalog", "browse_page"),
+            ("discovery", "catalog_download"),
+            ("playlist", "shared_snapshot"),
+            ("playlist", "imported_track_reference"),
+        }
         | POST_0030_TABLES
         | PORTABLE_TABLES
         | NATIVE_CAPTURE_TABLES
@@ -518,7 +524,7 @@ def test_migrated_database_has_exact_named_inventory(
         | POST_0030_INDEXES
         | PORTABLE_INDEXES
         | NATIVE_CAPTURE_INDEXES
-        | {"self_pairing_v2_binding_commit", "ix_deletion_proof_user"}
+        | {"self_pairing_v2_binding_commit", "ix_deletion_proof_user", "catalog_download_owner_idx"}
     )
     assert function_names == (
         expected.functions

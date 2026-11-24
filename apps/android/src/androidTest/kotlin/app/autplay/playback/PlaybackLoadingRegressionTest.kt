@@ -11,6 +11,8 @@ import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.extractor.DefaultExtractorInput
@@ -347,25 +349,53 @@ class PlaybackLoadingRegressionTest {
         }
     }
 
-    @Test fun playbackMissWritesOnlyStreamCacheAndReplaysWithoutUpstream() {
+    @Test fun playbackMissWritesOnlyStreamCacheAndReplaysWithoutUpstream() = runBlocking {
         val root = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
             "playback-cache-test-${UUID.randomUUID()}")
         val downloads = SimpleCache(File(root, "downloads"), NoOpCacheEvictor())
         val streams = SimpleCache(File(root, "streams"), LeastRecentlyUsedCacheEvictor(1_048_576))
-        val payload = ByteArray(65_536) { (it % 251).toByte() }
-        var upstreamOpens = 0
+        val payload = ByteArray(417 * 1_000)
+        for (offset in payload.indices step 417) ByteBuffer.wrap(payload, offset, 4).putInt(0xfffb9000.toInt())
+        val upstreamOffsets = mutableListOf<Long>()
+        var headRequests = 0
+        var offline = false
         val upstream = DataSource.Factory {
             val bytes = ByteArrayDataSource(payload)
             object : DataSource by bytes {
+                private var range: String? = null
                 override fun open(dataSpec: DataSpec): Long {
-                    upstreamOpens++
+                    if (dataSpec.httpMethod == DataSpec.HTTP_METHOD_HEAD) headRequests++ else upstreamOffsets.add(dataSpec.position)
+                    if (offline) throw java.io.IOException("Offline")
+                    if (dataSpec.length > 0) {
+                        range = "bytes ${dataSpec.position}-${dataSpec.position + dataSpec.length - 1}/${payload.size}"
+                    }
                     return bytes.open(dataSpec)
                 }
+                override fun getResponseHeaders(): Map<String, List<String>> =
+                    range?.let { mapOf("content-range" to listOf(it)) } ?: emptyMap()
             }
         }
         val factory = cachedVaultDataSourceFactory(downloads, streams, upstream)
         val uri = Uri.parse("autplay-vault://test-profile/audio-variants/test-variant")
         try {
+            warmStreamPrefix(factory, uri)
+            assertEquals(256L * 1024, streams.cacheSpace)
+            assertEquals(0L, downloads.cacheSpace)
+            assertEquals(listOf(0L), upstreamOffsets)
+            val extractor = playbackExtractorsFactory().createExtractors().filterIsInstance<Mp3Extractor>().single()
+            val map = readSeekMap(factory.createDataSource(), uri, extractor).first
+            assertTrue(map.durationUs in 25_000_000L..27_000_000L && map.isSeekable)
+            assertEquals(0, headRequests)
+
+            // A prefix cached by the previous APK has no total. Offline playback can still
+            // start from those bytes, then an online open repairs the length without a body read.
+            streams.applyContentMetadataMutations(uri.toString(), ContentMetadataMutations().remove(ContentMetadata.KEY_CONTENT_LENGTH))
+            val legacy = factory.createDataSource()
+            offline = true
+            try {
+                assertEquals(C.LENGTH_UNSET.toLong(), legacy.open(DataSpec(uri)))
+                assertEquals(4, legacy.read(ByteArray(4), 0, 4))
+            } finally { legacy.close(); offline = false }
             repeat(2) {
                 val source = factory.createDataSource()
                 try {
@@ -380,7 +410,8 @@ class PlaybackLoadingRegressionTest {
                     assertTrue(payload.contentEquals(actual.toByteArray()))
                 } finally { source.close() }
             }
-            assertEquals(1, upstreamOpens)
+            assertEquals(listOf(0L, 256L * 1024), upstreamOffsets)
+            assertEquals(2, headRequests)
             assertEquals(0L, downloads.cacheSpace)
             assertEquals(payload.size.toLong(), streams.cacheSpace)
         } finally {
@@ -400,23 +431,8 @@ class PlaybackLoadingRegressionTest {
             ByteBuffer.wrap(bytes, offset, 4).putInt(0xfffb9000.toInt())
         }
         ByteBuffer.wrap(bytes, 36, 12).putInt(0x58696e67).putInt(1).putInt(audioFrames)
-        fun readSeekMap(extractor: Mp3Extractor): Pair<SeekMap, Long> {
-            val source = ByteArrayDataSource(bytes)
-            val length = source.open(DataSpec(Uri.parse("memory://fixture.mp3")))
-            val input = DefaultExtractorInput(source, 0, length)
-            var map: SeekMap? = null
-            extractor.init(object : ExtractorOutput {
-                override fun track(id: Int, type: Int): TrackOutput = DiscardingTrackOutput()
-                override fun endTracks() = Unit
-                override fun seekMap(seekMap: SeekMap) { map = seekMap }
-            })
-            try {
-                repeat(16) {
-                    if (map == null) assertTrue(extractor.read(input, PositionHolder()) != Extractor.RESULT_END_OF_INPUT)
-                }
-                return checkNotNull(map) to input.position
-            } finally { source.close(); extractor.release() }
-        }
+        fun readSeekMap(extractor: Mp3Extractor) =
+            readSeekMap(ByteArrayDataSource(bytes), Uri.parse("memory://fixture.mp3"), extractor)
         assertFalse(readSeekMap(Mp3Extractor()).first.isSeekable)
         val (map, consumed) = readSeekMap(playbackExtractorsFactory().createExtractors()
             .filterIsInstance<Mp3Extractor>().single())
@@ -427,5 +443,21 @@ class PlaybackLoadingRegressionTest {
         // incorrectly diagnose all MP3 files without Xing/VBRI as unseekable.
         bytes.fill(0, 36, 48)
         assertTrue(readSeekMap(Mp3Extractor()).first.isSeekable)
+    }
+
+    private fun readSeekMap(source: DataSource, uri: Uri, extractor: Mp3Extractor): Pair<SeekMap, Long> {
+        var map: SeekMap? = null
+        try {
+            val input = DefaultExtractorInput(source, 0, source.open(DataSpec(uri)))
+            extractor.init(object : ExtractorOutput {
+                override fun track(id: Int, type: Int): TrackOutput = DiscardingTrackOutput()
+                override fun endTracks() = Unit
+                override fun seekMap(seekMap: SeekMap) { map = seekMap }
+            })
+            repeat(16) {
+                if (map == null) assertTrue(extractor.read(input, PositionHolder()) != Extractor.RESULT_END_OF_INPUT)
+            }
+            return checkNotNull(map) to input.position
+        } finally { source.close(); extractor.release() }
     }
 }

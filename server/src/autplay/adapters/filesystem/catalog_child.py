@@ -9,7 +9,7 @@ from typing import BinaryIO
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from autplay.adapters.public_track_metadata import PublicMetadataHttp
+from autplay.adapters.public_track_metadata import PublicMetadataHttp, is_cover_url
 from autplay.ports.track_metadata import MetadataProviderError
 
 from .metadata_protocol import write_packet
@@ -38,14 +38,16 @@ def execute(command: dict[str, object], destination: BinaryIO) -> None:
     if not isinstance(url, str) or not 1 <= len(url) <= 8192:
         raise ChildProtocolError()
     parsed = urlsplit(url)
-    if (
-        parsed.hostname != "musicbrainz.org"
-        or re.fullmatch(
-            r"/ws/2/(?:artist|recording|release|release/[0-9a-fA-F-]{36})",
-            parsed.path,
-        )
-        is None
-    ):
+    artist_ranking = (
+        parsed.hostname == "api.listenbrainz.org"
+        and not parsed.query
+        and re.fullmatch(r"/1/popularity/top-recordings-for-artist/[0-9a-f-]{36}", parsed.path)
+    )
+    metadata = parsed.hostname == "musicbrainz.org" and re.fullmatch(
+        r"/ws/2/(?:artist|recording|release|(?:recording|release)/[0-9a-fA-F-]{36})", parsed.path
+    )
+    cover = is_cover_url(url)
+    if not (metadata or artist_ranking or cover):
         raise MetadataProviderError("metadata_url_rejected", retryable=False)
     sent = False
 
@@ -59,7 +61,7 @@ def execute(command: dict[str, object], destination: BinaryIO) -> None:
 
     http = PublicMetadataHttp(single_grant, proxy=os.environ.get("AUTPLAY_METADATA_PROXY"))
     try:
-        payload = http.get(url)
+        payload = http.cover_hop(url) if cover else http.get(url)
         write_packet(destination, b"R", {}, payload)
     finally:
         http.client.close()

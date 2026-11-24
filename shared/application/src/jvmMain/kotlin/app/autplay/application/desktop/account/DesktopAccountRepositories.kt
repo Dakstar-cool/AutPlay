@@ -1,5 +1,6 @@
 package app.autplay.application.desktop.account
 
+import app.autplay.application.desktop.DesktopWaveRecommendation
 import kotlinx.serialization.json.JsonObject
 
 /** Account-mode commands only; descriptive IDs are never inferred from names or byte hashes. */
@@ -29,7 +30,7 @@ data class AccountDomainReview(val expected: List<AccountDomainExpected>,
 data class AccountDomainReceipt(val operationId: AccountUuid, val aggregateId: AccountUuid,
     val eventId: AccountUuid?, val localIntentId: AccountUuid?)
 
-data class AccountQueueEntry(val entryId: AccountUuid, val trackId: AccountUuid, val position: Int)
+data class AccountQueueEntry(val entryId: AccountUuid, val trackId: AccountUuid, val position: Int, val recommendation: DesktopWaveRecommendation? = null)
 data class AccountQueueSnapshot(val queueId: AccountUuid, val revision: Long, val entries: List<AccountQueueEntry>,
     val repeat: String, val shuffle: Boolean, val sessionId: AccountUuid?, val currentEntryId: AccountUuid?)
 data class AccountListeningCheckpoint(val listeningId: AccountUuid, val queueId: AccountUuid,

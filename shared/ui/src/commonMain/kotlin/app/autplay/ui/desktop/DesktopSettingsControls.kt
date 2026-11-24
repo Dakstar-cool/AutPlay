@@ -199,6 +199,7 @@ internal fun DesktopSettingsControls(
     onSessionLanguage: (DesktopLanguage) -> Unit,
     onSessionTheme: (DesktopThemeMode) -> Unit,
     modifier: Modifier = Modifier,
+    transferOnly: Boolean = false,
 ): Unit {
     val currentPreferences by rememberUpdatedState(preferences)
     val currentTransfer by rememberUpdatedState(transfer)
@@ -227,49 +228,53 @@ internal fun DesktopSettingsControls(
             if (stored != null && desktopSettingsHaveUnsupportedValues(stored)) {
                 SettingsStatus(DesktopText.SettingsUnsupportedValues, language, error = false)
             }
-            Text(DesktopText.Appearance.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-            SettingsOptions {
-                DesktopThemeMode.entries.forEach { mode ->
-                    FilterChip(selected = if (stored == null) themeMode == mode else stored.appearanceMode == mode.settingsValue,
-                        enabled = writeEnabled, onClick = {
-                            if (canWrite()) {
-                                if (currentPreferences == null) currentSessionTheme(mode)
-                                else currentCallbacks.onAppearance(mode.settingsValue)
-                            }
-                        }, label = { Text(mode.settingsLabel(language)) })
-                }
-            }
-            Text(DesktopText.AccentPalette.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-            SettingsOptions {
-                DesktopAccentPalette.entries.forEach { accent ->
-                    FilterChip(selected = if (stored == null) accentPalette == accent else stored.accentPalette == accent.settingsValue,
-                        enabled = writeEnabled, onClick = { if (canWrite()) currentCallbacks.onAccent(accent.settingsValue) },
-                        label = { Text(accent.settingsLabel(language)) })
-                }
-            }
-            Text(DesktopText.Language.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-            SettingsOptions {
-                listOf("RU" to DesktopLanguage.Russian, "EN" to DesktopLanguage.English).forEach { (value, option) ->
-                    FilterChip(selected = if (stored == null) language == option else stored.appLanguage == value,
-                        enabled = writeEnabled, onClick = {
-                            if (canWrite()) {
-                                if (currentPreferences == null) currentSessionLanguage(option)
-                                else currentCallbacks.onLanguage(value)
-                            }
-                        }, label = { Text(if (option == DesktopLanguage.Russian) "Русский" else "English") })
-                }
-            }
-            if (stored != null) {
-                Row(Modifier.fillMaxWidth().toggleable(value = stored.smoothTrackTransitions, enabled = writeEnabled,
-                    role = Role.Switch, onValueChange = changeSmoothTransitions).padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(DesktopText.SmoothTransitions.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-                        Text(DesktopText.SmoothTransitionsHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+            if (!transferOnly) {
+                Text(DesktopText.Appearance.inLanguage(language), style = MaterialTheme.typography.titleMedium)
+                SettingsOptions {
+                    DesktopThemeMode.entries.forEach { mode ->
+                        FilterChip(selected = if (stored == null) themeMode == mode else stored.appearanceMode == mode.settingsValue,
+                            enabled = writeEnabled, onClick = {
+                                if (canWrite()) {
+                                    if (currentPreferences == null) currentSessionTheme(mode)
+                                    else currentCallbacks.onAppearance(mode.settingsValue)
+                                }
+                            }, label = { Text(mode.settingsLabel(language)) })
                     }
-                    Switch(checked = stored.smoothTrackTransitions, onCheckedChange = null, enabled = writeEnabled)
                 }
-                HorizontalDivider()
+                Text(DesktopText.AccentPalette.inLanguage(language), style = MaterialTheme.typography.titleMedium)
+                SettingsOptions {
+                    DesktopAccentPalette.entries.forEach { accent ->
+                        FilterChip(selected = if (stored == null) accentPalette == accent else stored.accentPalette == accent.settingsValue,
+                            enabled = writeEnabled, onClick = { if (canWrite()) currentCallbacks.onAccent(accent.settingsValue) },
+                            label = { Text(accent.settingsLabel(language)) })
+                    }
+                }
+                Text(DesktopText.Language.inLanguage(language), style = MaterialTheme.typography.titleMedium)
+                SettingsOptions {
+                    listOf("RU" to DesktopLanguage.Russian, "EN" to DesktopLanguage.English).forEach { (value, option) ->
+                        FilterChip(selected = if (stored == null) language == option else stored.appLanguage == value,
+                            enabled = writeEnabled, onClick = {
+                                if (canWrite()) {
+                                    if (currentPreferences == null) currentSessionLanguage(option)
+                                    else currentCallbacks.onLanguage(value)
+                                }
+                            }, label = { Text(if (option == DesktopLanguage.Russian) "Русский" else "English") })
+                    }
+                }
+                if (stored != null) {
+                    Row(Modifier.fillMaxWidth().toggleable(value = stored.smoothTrackTransitions, enabled = writeEnabled,
+                        role = Role.Switch, onValueChange = changeSmoothTransitions).padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(DesktopText.SmoothTransitions.inLanguage(language), style = MaterialTheme.typography.titleMedium)
+                            Text(DesktopText.SmoothTransitionsHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = stored.smoothTrackTransitions, onCheckedChange = null, enabled = writeEnabled)
+                    }
+                    HorizontalDivider()
+                }
+            }
+            if (transferOnly && stored != null) {
                 Text(DesktopText.RetainedSettings.inLanguage(language))
                 desktopRetainedSettings(stored, language).forEach { (field, value) -> Text("${field.inLanguage(language)}: $value") }
                 SettingsOptions {

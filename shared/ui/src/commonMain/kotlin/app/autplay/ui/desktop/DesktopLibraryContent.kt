@@ -20,6 +20,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import app.autplay.application.desktop.DesktopMetadataState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -124,6 +127,11 @@ internal fun DesktopLibraryContent(
     queueEditorOwner: DesktopLibraryCallbacks = callbacks,
     queueEditor: DesktopQueueEditorState = DesktopQueueEditorState(),
     textSearch: DesktopTextSearchPort? = null,
+    searchScreen: Boolean = false,
+    savedImports: (@Composable () -> Unit)? = null,
+    onOpenDownloads: (() -> Unit)? = null,
+    playlistTransfer: (@Composable (app.autplay.application.desktop.DesktopPlaylist?) -> Unit)? = null,
+    metadata: DesktopMetadataState = DesktopMetadataState(),
 ) {
     val browseLifetime = remember(section, DesktopSearchOwnerKey(textSearch)) { DesktopBrowseLifetime() }
     val currentCallbacks by rememberDesktopBrowseReference(callbacks)
@@ -424,20 +432,19 @@ internal fun DesktopLibraryContent(
         if (section == DesktopSection.Library) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { if (isInputCurrent() && !currentImporting && !currentReopenRequired) callbacks.onImport() }, enabled = !importing && !reopenRequired) {
-                        Text(importActionLabel ?: (if (importing) DesktopText.Importing else DesktopText.Import).inLanguage(language))
-                    }
-                    if (importing) {
-                        OutlinedButton(onClick = { if (isInputCurrent() && currentImporting && currentImportCancelEnabled) callbacks.onCancelImport() },
-                            enabled = importing && importCancelEnabled) {
-                            Text(DesktopText.CancelImport.inLanguage(language))
+                if (!searchScreen) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = { if (isInputCurrent() && !currentImporting && !currentReopenRequired) callbacks.onImport() }, enabled = !importing && !reopenRequired) {
+                            Text(importActionLabel ?: (if (importing) DesktopText.Importing else DesktopText.Import).inLanguage(language))
+                        }
+                        if (importing) {
+                            OutlinedButton(onClick = { if (isInputCurrent() && currentImporting && currentImportCancelEnabled) callbacks.onCancelImport() },
+                                enabled = importing && importCancelEnabled) {
+                                Text(DesktopText.CancelImport.inLanguage(language))
+                            }
                         }
                     }
-                    Text(DesktopText.LibrarySubtitle.inLanguage(language), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(DesktopText.DropFiles.inLanguage(language), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 importResult?.let {
                     if (!importing && (!reopenRequired || desktopImportWasCancelled(it, errorCode))) {
                         Text(desktopImportResultSummary(it, errorCode, language),
@@ -450,6 +457,8 @@ internal fun DesktopLibraryContent(
                     }
                 }
                 if (library.tracks.isEmpty()) Text(DesktopText.EmptyLibraryBody.inLanguage(language))
+                val focus = remember { FocusRequester() }
+                androidx.compose.runtime.LaunchedEffect(searchScreen) { if (searchScreen) focus.requestFocus() }
                 OutlinedTextField(value = search, onValueChange = {
                     val next = desktopSearchQuery(it)
                     // Accept consecutive input events before recomposition; retire this field closure afterwards.
@@ -458,8 +467,8 @@ internal fun DesktopLibraryContent(
                         clearMultiSelectionForFilter()
                     }
                 }, singleLine = true,
-                    label = { Text(DesktopText.Search.inLanguage(language)) }, modifier = Modifier.fillMaxWidth())
-                Text(DesktopText.LocalSearchHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                    leadingIcon = { DesktopIcon(DesktopGlyph.Search, null) },
+                    label = { Text(DesktopText.Search.inLanguage(language)) }, modifier = Modifier.fillMaxWidth().focusRequester(focus))
                 DesktopSearchFailure(prepared.searchError.takeIf { fresh }, language, enabled = !reopenRequired,
                     onRetry = { if (isViewCurrent() && !currentReopenRequired) viewRevision += 1 },
                     onReset = {
@@ -468,135 +477,161 @@ internal fun DesktopLibraryContent(
                             clearMultiSelectionForFilter()
                         }
                     })
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(DesktopText.CollectionFilter.inLanguage(language), style = MaterialTheme.typography.labelMedium)
-                    DesktopTrackCollectionFilter.entries.forEach { filter ->
-                        val label = filter.label(language)
-                        FilterChip(selected = collectionFilter == filter, onClick = {
-                            if (isInputCurrent() && collectionFilter != filter) {
-                                collectionFilter = filter; trackPage = 0; viewRevision += 1
-                                clearMultiSelectionForFilter()
-                            }
-                        }, modifier = Modifier.semantics {
-                            contentDescription = "${DesktopText.CollectionFilter.inLanguage(language)}: $label"
-                        }, label = { Text(label) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(DesktopText.TrackPreferenceFilter.inLanguage(language), style = MaterialTheme.typography.labelMedium)
-                    DesktopTrackPreferenceFilter.entries.forEach { filter ->
-                        val label = filter.label(language)
-                        FilterChip(selected = preferenceFilter == filter, onClick = {
-                            if (isInputCurrent() && preferenceFilter != filter) {
-                                preferenceFilter = filter; trackPage = 0; viewRevision += 1
-                                clearMultiSelectionForFilter()
-                            }
-                        }, modifier = Modifier.semantics {
-                            contentDescription = "${DesktopText.TrackPreferenceFilter.inLanguage(language)}: $label"
-                        }, label = { Text(label) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(DesktopText.SortBy.inLanguage(language), style = MaterialTheme.typography.labelMedium)
-                    DesktopLibrarySort.entries.forEach { criterion ->
-                        val label = criterion.label(language)
-                        FilterChip(selected = sort == criterion, onClick = {
-                            if (isInputCurrent() && sort != criterion) { sort = criterion; trackPage = 0; viewRevision += 1 }
-                        },
-                            modifier = Modifier.semantics { contentDescription = "${DesktopText.SortBy.inLanguage(language)}: $label" },
-                            label = { Text(label) })
-                    }
-                    DesktopSortDirection.entries.forEach { order ->
-                        val label = order.label(language)
-                        FilterChip(selected = direction == order, onClick = {
-                            if (isInputCurrent() && direction != order) { direction = order; trackPage = 0; viewRevision += 1 }
-                        },
-                            modifier = Modifier.semantics { contentDescription = "${sort.label(language)}: $label" },
-                            label = { Text(label) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(DesktopCopyText.Observation.label(language), style = MaterialTheme.typography.labelMedium)
-                    DesktopCopyAvailabilityFilter.entries.forEach { filter ->
-                        val label = filter.label(language)
-                        FilterChip(selected = copyFilter == filter, onClick = {
-                            if (isInputCurrent() && copyFilter != filter) {
-                                copyFilter = filter; trackPage = 0; viewRevision += 1
-                                clearMultiSelectionForFilter()
-                            }
-                        }, modifier = Modifier.semantics {
-                            contentDescription = "${DesktopCopyText.Observation.label(language)}: $label"
-                        }, label = { Text(label) })
-                    }
-                }
-                Text(DesktopCopyText.Hint.label(language), style = MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick = {
-                    if (!inspectionSubmitted && isViewCurrent() && desktopCopyCanInspect(currentCopyState, true,
-                            currentReopenRequired, prepared.inspectionIds.isNotEmpty())) {
-                        inspectionSubmitted = true
-                        copyInspectionCallbacks.onInspect(prepared.inspectionIds)
-                    }
-                }, enabled = !inspectionSubmitted && desktopCopyCanInspect(copyInspectionState, fresh,
-                    reopenRequired, prepared.inspectionIds.isNotEmpty())) {
-                    Text(DesktopCopyText.InspectShown.label(language)
-                        .replace("{limit}", DesktopCopyInspectionLimits.MAX_REQUEST_TRACKS.toString()))
-                }
-                DesktopCopyInspectionProgress(copyInspectionState, copyInspectionCallbacks, language, isViewCurrent)
                 val visible = if (fresh) prepared.matches else emptyList()
                 val queueType = if (input.query.isBlank()) "LIBRARY" else "SEARCH"
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = {
-                        if (currentSelectionPlayEnabled && !prepared.allPlayOverflow && prepared.allPlayIds.isNotEmpty()) {
-                            actOnView { callbacks.onPlayTracks(prepared.allPlayIds, queueType) }
+                var filtersExpanded by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = preferenceFilter == DesktopTrackPreferenceFilter.LIKED, onClick = {
+                    if (isInputCurrent()) {
+                        preferenceFilter = if (preferenceFilter == DesktopTrackPreferenceFilter.LIKED)
+                            DesktopTrackPreferenceFilter.ALL else DesktopTrackPreferenceFilter.LIKED
+                        trackPage = 0; viewRevision += 1; clearMultiSelectionForFilter()
+                    }
+                }, leadingIcon = { DesktopIcon(DesktopGlyph.Like, null) },
+                    label = { Text(if (language == DesktopLanguage.Russian) "Избранное" else "Favorites") })
+                if (!searchScreen && onOpenDownloads != null) OutlinedButton(onClick = {
+                    if (isInputCurrent()) onOpenDownloads()
+                }) { Text(if (language == DesktopLanguage.Russian) "Загрузки" else "Downloads") }
+                TextButton(onClick = { filtersExpanded = !filtersExpanded }) {
+                    DesktopIcon(DesktopGlyph.Settings, null)
+                    Text(if (language == DesktopLanguage.Russian) "Фильтры и действия" else "Filters and actions")
+                }
+                }
+                if (filtersExpanded) {
+                    if (!searchScreen) {
+                        savedImports?.invoke()
+                        Text(DesktopText.DropFiles.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(DesktopText.LocalSearchHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(DesktopText.CollectionFilter.inLanguage(language), style = MaterialTheme.typography.labelMedium)
+                        DesktopTrackCollectionFilter.entries.forEach { filter ->
+                            val label = filter.label(language)
+                            FilterChip(selected = collectionFilter == filter, onClick = {
+                                if (isInputCurrent() && collectionFilter != filter) {
+                                    collectionFilter = filter; trackPage = 0; viewRevision += 1
+                                    clearMultiSelectionForFilter()
+                                }
+                            }, modifier = Modifier.semantics {
+                                contentDescription = "${DesktopText.CollectionFilter.inLanguage(language)}: $label"
+                            }, label = { Text(label) })
                         }
-                    }, enabled = prepared.allPlayIds.isNotEmpty() && !prepared.allPlayOverflow && selectionPlayEnabled) {
-                        Text(DesktopText.PlayAll.inLanguage(language))
                     }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(DesktopText.TrackPreferenceFilter.inLanguage(language), style = MaterialTheme.typography.labelMedium)
+                        DesktopTrackPreferenceFilter.entries.forEach { filter ->
+                            val label = filter.label(language)
+                            FilterChip(selected = preferenceFilter == filter, onClick = {
+                                if (isInputCurrent() && preferenceFilter != filter) {
+                                    preferenceFilter = filter; trackPage = 0; viewRevision += 1
+                                    clearMultiSelectionForFilter()
+                                }
+                            }, modifier = Modifier.semantics {
+                                contentDescription = "${DesktopText.TrackPreferenceFilter.inLanguage(language)}: $label"
+                            }, label = { Text(label) })
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(DesktopText.SortBy.inLanguage(language), style = MaterialTheme.typography.labelMedium)
+                        DesktopLibrarySort.entries.forEach { criterion ->
+                            val label = criterion.label(language)
+                            FilterChip(selected = sort == criterion, onClick = {
+                                if (isInputCurrent() && sort != criterion) { sort = criterion; trackPage = 0; viewRevision += 1 }
+                            },
+                                modifier = Modifier.semantics { contentDescription = "${DesktopText.SortBy.inLanguage(language)}: $label" },
+                                label = { Text(label) })
+                        }
+                        DesktopSortDirection.entries.forEach { order ->
+                            val label = order.label(language)
+                            FilterChip(selected = direction == order, onClick = {
+                                if (isInputCurrent() && direction != order) { direction = order; trackPage = 0; viewRevision += 1 }
+                            },
+                                modifier = Modifier.semantics { contentDescription = "${sort.label(language)}: $label" },
+                                label = { Text(label) })
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(DesktopCopyText.Observation.label(language), style = MaterialTheme.typography.labelMedium)
+                        DesktopCopyAvailabilityFilter.entries.forEach { filter ->
+                            val label = filter.label(language)
+                            FilterChip(selected = copyFilter == filter, onClick = {
+                                if (isInputCurrent() && copyFilter != filter) {
+                                    copyFilter = filter; trackPage = 0; viewRevision += 1
+                                    clearMultiSelectionForFilter()
+                                }
+                            }, modifier = Modifier.semantics {
+                                contentDescription = "${DesktopCopyText.Observation.label(language)}: $label"
+                            }, label = { Text(label) })
+                        }
+                    }
+                    Text(DesktopCopyText.Hint.label(language), style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = {
-                        if (currentSelectionPlayEnabled && prepared.playIds.isNotEmpty()) actOnView { callbacks.onPlayTracks(prepared.playIds, queueType) }
-                    }, enabled = prepared.playIds.isNotEmpty() && selectionPlayEnabled) { Text(DesktopText.PlayPage.inLanguage(language)) }
-                    selectedPlaylist?.let { Text("${DesktopText.AddToPlaylist.inLanguage(language)}: ${it.name}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                }
-                PlaylistSelector(if (fresh) prepared.playlist?.choices.orEmpty() else emptyList(), selectedPlaylist?.id, language, selectPlaylist)
-                prepared.playlist?.let { playlistView ->
-                    DesktopBrowsePager(playlistView.choicePage, DesktopText.SelectPlaylist.inLanguage(language), language, fresh) { next ->
-                        if (isViewCurrent() && next != choicePage) { choicePage = next; browseRevision += 1 }
+                        if (!inspectionSubmitted && isViewCurrent() && desktopCopyCanInspect(currentCopyState, true,
+                                currentReopenRequired, prepared.inspectionIds.isNotEmpty())) {
+                            inspectionSubmitted = true
+                            copyInspectionCallbacks.onInspect(prepared.inspectionIds)
+                        }
+                    }, enabled = !inspectionSubmitted && desktopCopyCanInspect(copyInspectionState, fresh,
+                        reopenRequired, prepared.inspectionIds.isNotEmpty())) {
+                        Text(DesktopCopyText.InspectShown.label(language)
+                            .replace("{limit}", DesktopCopyInspectionLimits.MAX_REQUEST_TRACKS.toString()))
                     }
-                }
-                DesktopMultiSelectionControls(trackSelection, multiPrepared.takeIf { multiFresh }, multiAdmission,
-                    language, fresh, multiNotice,
-                    selectPage = {
-                        if (isViewCurrent() && lastSelectionFilter == selectionFilter) {
-                            val activeIds = multiPrepared?.activePageIds.orEmpty()
-                            if (trackSelection.pageFits(activeIds)) {
-                                trackSelection = trackSelection.selectPage(activeIds)
+                    DesktopCopyInspectionProgress(copyInspectionState, copyInspectionCallbacks, language, isViewCurrent)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = {
+                            if (currentSelectionPlayEnabled && !prepared.allPlayOverflow && prepared.allPlayIds.isNotEmpty()) {
+                                actOnView { callbacks.onPlayTracks(prepared.allPlayIds, queueType) }
+                            }
+                        }, enabled = prepared.allPlayIds.isNotEmpty() && !prepared.allPlayOverflow && selectionPlayEnabled) {
+                            Text(DesktopText.PlayAll.inLanguage(language))
+                        }
+                        OutlinedButton(onClick = {
+                            if (currentSelectionPlayEnabled && prepared.playIds.isNotEmpty()) actOnView { callbacks.onPlayTracks(prepared.playIds, queueType) }
+                        }, enabled = prepared.playIds.isNotEmpty() && selectionPlayEnabled) { Text(DesktopText.PlayPage.inLanguage(language)) }
+                        selectedPlaylist?.let { Text("${DesktopText.AddToPlaylist.inLanguage(language)}: ${it.name}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+                    PlaylistSelector(if (fresh) prepared.playlist?.choices.orEmpty() else emptyList(), selectedPlaylist?.id, language, selectPlaylist)
+                    prepared.playlist?.let { playlistView ->
+                        DesktopBrowsePager(playlistView.choicePage, DesktopText.SelectPlaylist.inLanguage(language), language, fresh) { next ->
+                            if (isViewCurrent() && next != choicePage) { choicePage = next; browseRevision += 1 }
+                        }
+                    }
+                    DesktopMultiSelectionControls(trackSelection, multiPrepared.takeIf { multiFresh }, multiAdmission,
+                        language, fresh, multiNotice,
+                        selectPage = {
+                            if (isViewCurrent() && lastSelectionFilter == selectionFilter) {
+                                val activeIds = multiPrepared?.activePageIds.orEmpty()
+                                if (trackSelection.pageFits(activeIds)) {
+                                    trackSelection = trackSelection.selectPage(activeIds)
+                                    multiNotice = null
+                                } else multiNotice = DesktopMultiSelectionNotice.LIMIT_REJECTED
+                            }
+                        }, deselectPage = {
+                            if (isViewCurrent()) {
+                                trackSelection = trackSelection.deselectPage(multiPrepared?.shownIds.orEmpty())
                                 multiNotice = null
-                            } else multiNotice = DesktopMultiSelectionNotice.LIMIT_REJECTED
-                        }
-                    }, deselectPage = {
-                        if (isViewCurrent()) {
-                            trackSelection = trackSelection.deselectPage(multiPrepared?.shownIds.orEmpty())
-                            multiNotice = null
-                        }
-                    }, clear = {
-                        if (isInputCurrent()) { trackSelection = trackSelection.clear(); multiNotice = null }
-                    }, deselectInvalid = { id ->
-                        if (isViewCurrent()) {
-                            trackSelection = trackSelection.setSelected(id, false, false)
-                            multiNotice = null
-                        }
-                    }, play = multiCommand(DesktopMultiSelectionCommand.PLAY),
-                    enqueue = multiCommand(DesktopMultiSelectionCommand.ENQUEUE),
-                    playNext = multiCommand(DesktopMultiSelectionCommand.PLAY_NEXT),
-                    append = multiCommand(DesktopMultiSelectionCommand.APPEND))
+                            }
+                        }, clear = {
+                            if (isInputCurrent()) { trackSelection = trackSelection.clear(); multiNotice = null }
+                        }, deselectInvalid = { id ->
+                            if (isViewCurrent()) {
+                                trackSelection = trackSelection.setSelected(id, false, false)
+                                multiNotice = null
+                            }
+                        }, play = multiCommand(DesktopMultiSelectionCommand.PLAY),
+                        enqueue = multiCommand(DesktopMultiSelectionCommand.ENQUEUE),
+                        playNext = multiCommand(DesktopMultiSelectionCommand.PLAY_NEXT),
+                        append = multiCommand(DesktopMultiSelectionCommand.APPEND))
+                }
                 if (fresh && prepared.allPlayOverflow) Text(DesktopText.WholeResultQueueLimit.inLanguage(language)
                     .replace("{limit}", DesktopLocalLimits.MAX_QUEUE_ENTRIES.toString()))
-                Text(DesktopText.PagePlaybackBoundary.inLanguage(language), style = MaterialTheme.typography.bodySmall)
-                DesktopBrowsePager(prepared.page, DesktopText.Library.inLanguage(language), language, fresh) { next ->
+                if (prepared.page.pages > 1) Text(DesktopText.PagePlaybackBoundary.inLanguage(language), style = MaterialTheme.typography.bodySmall)
+                if (prepared.page.pages > 1) DesktopBrowsePager(prepared.page, DesktopText.Library.inLanguage(language), language, fresh) { next ->
                     if (isViewCurrent() && next != trackPage) { trackPage = next; browseRevision += 1 }
                 }
                 if (fresh && prepared.searchError == null && visible.isEmpty() && library.tracks.isNotEmpty()) Text(DesktopText.NoResults.inLanguage(language))
@@ -608,7 +643,7 @@ internal fun DesktopLibraryContent(
                                     callbacks.onPlayTracks(prepared.playIds.subList(position, prepared.playIds.size), queueType)
                                 }
                             }
-                        }, copyInspectionState = copyInspectionState) {
+                        }, copyInspectionState = copyInspectionState, metadata = metadata) {
                             Checkbox(checked = multiPrepared?.selectedIds?.contains(track.id) == true,
                                 onCheckedChange = desktopMultiSelectionCheckbox(track.id, desktopTrackIsActive(track),
                                     isPageCurrent = { isViewCurrent() && lastSelectionFilter == selectionFilter },
@@ -649,6 +684,7 @@ internal fun DesktopLibraryContent(
                         Text(DesktopText.CreatePlaylist.inLanguage(language))
                     }
                 }
+                if (!reopenRequired) playlistTransfer?.invoke(selectedPlaylist)
                 OutlinedTextField(playlistSearch, {
                     val next = desktopSearchQuery(it)
                     if (isOwnerCurrent() && input == currentInput && browseAtInput == browseRevision && playlistSearch != next) {
@@ -865,7 +901,9 @@ internal fun DesktopLibraryContent(
                             .clickable(enabled = queueActionsEnabled, role = Role.Button,
                                 onClickLabel = DesktopText.Play.inLanguage(language)) { actOnView { callbacks.onSelectEntry(entry.id) } }.padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (entry.id == queue?.currentEntryId) "▶" else "♫", color = MaterialTheme.colorScheme.primary)
+                            val current = entry.id == queue?.currentEntryId
+                            Text(if (current) "▶" else "♫",
+                                color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             Column(Modifier.weight(1f)) {
                                 Text(track?.title ?: DesktopText.SourceMissing.inLanguage(language), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(track?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -916,28 +954,30 @@ private fun TrackCollectionBadge(track: DesktopTrack, language: DesktopLanguage)
 
 @Composable
 private fun TrackRow(track: DesktopTrack, language: DesktopLanguage, enabled: Boolean, onPlay: () -> Unit,
-    playModifier: Modifier = Modifier, copyInspectionState: DesktopCopyInspectionState? = null, actions: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(playModifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button,
-            onClickLabel = DesktopText.PlayPage.inLanguage(language) + ": " + DesktopText.PagePlaybackBoundary.inLanguage(language),
-            onClick = onPlay).padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TrackCollectionBadge(track, language)
-                copyInspectionState?.let { state ->
-                    Text("${DesktopCopyText.Observation.label(language)}: ${desktopCopyStatus(track, state.results, language)}",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    playModifier: Modifier = Modifier, copyInspectionState: DesktopCopyInspectionState? = null, metadata: DesktopMetadataState? = null, actions: @Composable () -> Unit) {
+    var expanded by remember(track.id) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(playModifier.weight(1f).clickable(enabled = enabled, role = Role.Button,
+                onClickLabel = DesktopText.Play.inLanguage(language), onClick = onPlay).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                DesktopArtworkView(track.id, metadata?.artworks?.get(track.id), language, 44.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                    Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text("${DesktopText.TrackPreference.inLanguage(language)}: ${desktopTrackPreferenceStatus(track.preference, language)}",
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(track.durationMs?.let(::formatPlaybackTime) ?: "--:--", style = MaterialTheme.typography.labelMedium)
+                DesktopIcon(DesktopGlyph.Play, null)
             }
-            Text(track.durationMs?.let(::formatPlaybackTime) ?: "--:--", style = MaterialTheme.typography.labelMedium)
+            androidx.compose.material3.IconButton(onClick = { expanded = !expanded }) {
+                DesktopIcon(DesktopGlyph.List, DesktopText.TrackDetails.inLanguage(language))
+            }
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            actions()
+        if (expanded) {
+            TrackCollectionBadge(track, language)
+            copyInspectionState?.let { Text(desktopCopyStatus(track, it.results, language)) }
+            Text(desktopTrackPreferenceStatus(track.preference, language))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
         }
     }
     HorizontalDivider()

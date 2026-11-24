@@ -226,7 +226,7 @@ internal fun ProfilePairingScreen(
         state.accountRecovery?.let { AccountRecoveryCard(it, actions.accountRecovery) }
         state.accountDeletion?.let { AccountDeletionCard(it, actions.accountDeletion) }
         if (!publicFirstBindReserved) app.autplay.ui.PreferenceSection(
-            title = stringResource(if (state.pairing is PairingState.Connected) R.string.profile_account_devices else R.string.profile_connect_optional),
+            title = stringResource(if (state.pairing is PairingState.Connected) R.string.profile_personal_server else R.string.profile_connect_optional),
             icon = AutPlayIcon.Server,
             summary = stringResource(if (state.pairing is PairingState.Connected) R.string.profile_account_devices_summary else R.string.profile_connect_optional_summary),
             initiallyExpanded = showHero || state.pairing !in listOf(PairingState.NotConnected, PairingState.Cancelled),

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -51,6 +51,7 @@ from autplay.adapters.postgresql.resource_limits import lock_resource_admission
 from autplay.adapters.postgresql.resource_upload_guard import (
     require_upload_writer,
 )
+from autplay.adapters.postgresql.shared_catalog import ACCOUNT_CATALOG, PUBLISHED_AUDIO
 from autplay.adapters.postgresql.upload_cleanup import queue_upload_cleanup
 from autplay.application.job_worker import JobLeaseLost
 from autplay.application.music_library import MusicLibraryService
@@ -735,10 +736,10 @@ class PostgresVaultRuntime(UploadRepository):
             self._session.flush()
 
     def resolve_stream(self, principal: VaultPrincipal, audio_variant_id: UUID) -> AuthorizedStream:
-        return self._resolve_owner_stream(principal.user_id, audio_variant_id)
+        return self._resolve_owner_stream(principal.user_id, audio_variant_id, include_catalog=True)
 
     def _resolve_owner_stream(
-        self, owner_user_id: UUID, audio_variant_id: UUID
+        self, owner_user_id: UUID, audio_variant_id: UUID, *, include_catalog: bool = False
     ) -> AuthorizedStream:
         """Authorize by owner projection before returning a filesystem replica."""
 
@@ -781,6 +782,23 @@ class PostgresVaultRuntime(UploadRepository):
             .limit(1)
         )
         row = self._session.execute(statement).one_or_none()
+        if row is None and include_catalog:
+            row = self._session.execute(
+                text(f"""
+                SELECT replica.storage_key, obj.sha256, obj.byte_size, obj.detected_mime_type,
+                       replica.verified_at
+                FROM ({PUBLISHED_AUDIO}) published
+                JOIN vault.audio_variant variant USING(audio_variant_id)
+                JOIN vault.vault_object obj USING(vault_object_id)
+                JOIN vault.vault_replica replica USING(vault_object_id)
+                JOIN account.user_account actor ON actor.user_id=:owner
+                  AND actor.status='ACTIVE' AND actor.deleted_at IS NULL
+                WHERE published.audio_variant_id=:variant AND replica.replica_status='AVAILABLE'
+                  AND replica.storage_backend='LOCAL_FILESYSTEM' AND replica.verified_at IS NOT NULL
+                LIMIT 1
+            """),
+                {"owner": owner_user_id, "variant": audio_variant_id},
+            ).one_or_none()
         if row is None:
             raise VaultNotFoundError()
         return AuthorizedStream(
@@ -788,9 +806,13 @@ class PostgresVaultRuntime(UploadRepository):
         )
 
     def resolve_playback_variant(self, principal: VaultPrincipal, user_track_ref_id: UUID) -> UUID:
-        return self.resolve_owner_playback_variant(principal.user_id, user_track_ref_id)
+        return self.resolve_owner_playback_variant(
+            principal.user_id, user_track_ref_id, include_catalog=True
+        )
 
-    def resolve_owner_playback_variant(self, owner_user_id: UUID, user_track_ref_id: UUID) -> UUID:
+    def resolve_owner_playback_variant(
+        self, owner_user_id: UUID, user_track_ref_id: UUID, *, include_catalog: bool = False
+    ) -> UUID:
         """Return the canonical servable Variant for one owned active library Track."""
 
         audio_variant_id = self._session.scalar(
@@ -813,11 +835,19 @@ class PostgresVaultRuntime(UploadRepository):
             )
             .limit(1)
         )
+        if audio_variant_id is None and include_catalog:
+            audio_variant_id = self._session.scalar(
+                text(f"""
+                SELECT audio_variant_id FROM ({ACCOUNT_CATALOG}) catalog
+                WHERE catalog.user_id=:owner AND catalog.user_track_ref_id=:ref
+            """),
+                {"owner": owner_user_id, "ref": user_track_ref_id},
+            )
         if audio_variant_id is None:
             raise VaultNotFoundError()
         # Reuse the exact stream authorization predicate so discovery never advertises
         # a corrupt, unverified, redirected, deleted, or otherwise unservable Variant.
-        self._resolve_owner_stream(owner_user_id, audio_variant_id)
+        self._resolve_owner_stream(owner_user_id, audio_variant_id, include_catalog=include_catalog)
         return audio_variant_id
 
     def _lock_publication_object(self, object_id: UUID) -> None:

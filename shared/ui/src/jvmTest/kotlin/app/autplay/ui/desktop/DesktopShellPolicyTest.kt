@@ -1303,7 +1303,7 @@ public class DesktopShellPolicyTest {
             DesktopTrackPreferenceFilter.entries.forEach { filter -> assertTrue(filter.label(language).isNotBlank()) }
             DesktopTrackCollectionFilter.entries.forEach { filter -> assertTrue(filter.label(language).isNotBlank()) }
         }
-        assertEquals("Библиотека", DesktopSection.Library.label(DesktopLanguage.Russian))
+        assertEquals("Моя музыка", DesktopSection.Library.label(DesktopLanguage.Russian))
         assertEquals("Settings", DesktopSection.Settings.label(DesktopLanguage.English))
         assertEquals("Переименовать плейлист", DesktopText.RenamePlaylist.inLanguage(DesktopLanguage.Russian))
         assertEquals("Apply", DesktopText.ApplyPlaylistName.inLanguage(DesktopLanguage.English))
@@ -2384,10 +2384,10 @@ public class DesktopShellPolicyTest {
     }
 
     private fun assertTasteCopyAndErrors(): Unit {
-        assertTrue(DesktopText.TasteLocalOnly.russian.contains("сервер не получает"))
-        assertTrue(DesktopText.TasteLocalOnly.english.contains("server does not receive"))
-        assertTrue(DesktopText.TasteLocalOnly.russian.contains("пока не работают"))
-        assertTrue(DesktopText.TasteLocalOnly.english.contains("do not yet run on Mac"))
+        assertTrue(DesktopText.TasteLocalOnly.russian.contains("Моя волна"))
+        assertTrue(DesktopText.TasteLocalOnly.russian.contains("Включено"))
+        assertTrue(DesktopText.TasteLocalOnly.english.contains("My wave on this device"))
+        assertTrue(DesktopText.TasteLocalOnly.english.contains("Included"))
         assertTrue(DesktopText.TasteListenScope.russian.contains("неподдерживаемая сохраняется"))
         assertTrue(DesktopText.TasteListenScope.english.contains("unsupported mark is preserved"))
         assertTrue(DesktopText.TasteQueueScope.russian.contains("после перезапуска"))

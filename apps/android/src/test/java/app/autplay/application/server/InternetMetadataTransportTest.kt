@@ -173,7 +173,7 @@ class InternetMetadataTransportTest {
             server.enqueue(success(internetSearchResponse(SEARCH)))
             server.enqueue(success(contextResponse(contextId = OTHER_CONTEXT).toString()))
             server.enqueue(success(internetSearchResponse(OTHER_SEARCH)))
-            server.enqueue(success(internetSearchResponse(LEGACY_SEARCH, candidate = true)))
+            server.enqueue(success(internetSearchResponse(LEGACY_SEARCH, candidateCount = 25)))
             val selection = MusicCatalogueContextRequest.releaseTrack(RELEASE_TRACK, RELEASE)
             val first = repository.createMusicCatalogueContext(selection)
             assertPost(take(server), "/api/v1/music/discovery/contexts")
@@ -201,9 +201,10 @@ class InternetMetadataTransportTest {
             val legacyResult = repository.searchInternetMusic(LOOKUP_QUERY, LEGACY_OPERATION)
             val legacyRequest = take(server)
             assertPost(legacyRequest, "/api/v1/music/internet/search")
+            assertQuery(legacyRequest, mapOf("limit" to "25"))
             assertEquals(buildJsonObject { put("query", LOOKUP_QUERY); put("operation_id", LEGACY_OPERATION) }, body(legacyRequest))
-            assertEquals("abcdefghijk", legacyResult.candidates.single().id)
-            assertEquals("YouTube", legacyResult.candidates.single().provider)
+            assertEquals((1..25).map { "candidate%02d".format(java.util.Locale.ROOT, it) }, legacyResult.candidates.map { it.id })
+            assertTrue(legacyResult.candidates.all { it.provider == "YouTube" })
             assertEquals(5, server.requestCount)
         }
     }
@@ -423,12 +424,15 @@ class InternetMetadataTransportTest {
     private fun JsonObject.withLookup(changes: Map<String, JsonElement>): JsonObject =
         JsonObject(this + ("lookup_metadata" to JsonObject(getValue("lookup_metadata").jsonObject + changes)))
 
-    private fun internetSearchResponse(id: String, candidate: Boolean = false): String = buildJsonObject {
+    private fun internetSearchResponse(id: String, candidateCount: Int = 0): String = buildJsonObject {
         put("contract_version", "internet-music-v1"); put("search_id", id)
-        put("candidates", if (candidate) JsonArray(listOf(buildJsonObject {
-            put("candidate_id", "abcdefghijk"); put("title", "Song (Live)"); put("artist", "Example Artist")
-            put("provider", "YouTube"); put("duration_ms", 180000)
-        })) else JsonArray(emptyList()))
+        put("candidates", JsonArray((1..candidateCount).map { number ->
+            buildJsonObject {
+                put("candidate_id", "candidate%02d".format(java.util.Locale.ROOT, number))
+                put("title", "Song $number"); put("artist", "Example Artist")
+                put("provider", "YouTube"); put("duration_ms", 180000)
+            }
+        }))
     }.toString()
 
     private class Store(initial: ByteArray) : CredentialStore {

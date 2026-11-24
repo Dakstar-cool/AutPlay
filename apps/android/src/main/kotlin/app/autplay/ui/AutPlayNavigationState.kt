@@ -24,6 +24,9 @@ public class AutPlayNavigationState internal constructor(
 
     private val stack: MutableList<UiDestination> = backStack.toMutableList()
 
+    internal val previousDestination: UiDestination?
+        get() = stack.lastOrNull()
+
     public val canNavigateBack: Boolean
         get() = stack.isNotEmpty()
 
@@ -36,6 +39,13 @@ public class AutPlayNavigationState internal constructor(
             stack.add(current)
         }
         current = destination
+    }
+
+    internal fun openLibraryDetail() {
+        if (current == UiDestination.NowPlaying) {
+            stack.add(current)
+            current = UiDestination.Library
+        } else navigate(UiDestination.Library)
     }
 
     public fun navigateBack(): Boolean {
@@ -65,4 +75,7 @@ public fun rememberAutPlayNavigationState(
     initialDestination: UiDestination = UiDestination.Home,
 ): AutPlayNavigationState = rememberSaveable(
     saver = AutPlayNavigationState.Saver,
-) { AutPlayNavigationState(initialDestination, emptyList()) }
+) {
+    val backStack = if (initialDestination == UiDestination.SettingsAccount) listOf(UiDestination.Home) else emptyList()
+    AutPlayNavigationState(initialDestination, backStack)
+}

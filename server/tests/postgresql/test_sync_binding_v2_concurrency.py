@@ -57,6 +57,10 @@ class Workers:
     ready: Event
     sessions: sessionmaker[Session]
     identity: Any
+    deadline: float
+
+    def remaining_seconds(self) -> float:
+        return max(0.0, self.deadline - monotonic())
 
 
 @contextmanager
@@ -123,9 +127,10 @@ def private_workers(
     )
     pool = ThreadPoolExecutor(max_workers=max(2, contenders))
     futures: list[Future[object]] = []
+    workers = Workers(service, pool, futures, pids, ready, sessions, identity, end)
     try:
-        yield Workers(service, pool, futures, pids, ready, sessions, identity)
-        _, pending = wait(futures, timeout=max(0, end - monotonic()))
+        yield workers
+        _, pending = wait(futures, timeout=workers.remaining_seconds())
         assert not pending, "B1 fixture workers exceeded deadline"
     finally:
         gate.abort()
@@ -464,13 +469,13 @@ def test_actual_unbound_bootstrap_overlaps_prior_use_read_without_publishing_bou
     )
 
     h = qualified
-    body, reached, release = h.request(), Event(), Event()
+    body, reached_or_done, release = h.request(), Event(), Event()
     original = Repository.has_prior_use
 
     def coordinated(self: Any, device: UUID) -> bool:
         result = False if bootstrap_before_read else original(self, device)
-        reached.set()
-        assert release.wait(timeout=3)
+        reached_or_done.set()
+        assert release.wait(w.remaining_seconds()), "bootstrap did not release the binding worker"
         return original(self, device) if bootstrap_before_read else result
 
     monkeypatch.setattr(Repository, "has_prior_use", coordinated)
@@ -478,9 +483,17 @@ def test_actual_unbound_bootstrap_overlaps_prior_use_read_without_publishing_bou
         sync = SyncService(
             w.sessions.kw["bind"], cursor_secret=b"b1-bootstrap-fixture-cursor-secret-32bytes"
         )
-        w.futures.append(w.pool.submit(result_or_code, w.service, h, body))
+        binding = w.pool.submit(result_or_code, w.service, h, body)
+        w.futures.append(binding)
+        binding.add_done_callback(lambda _: reached_or_done.set())
         try:
-            assert reached.wait(timeout=3)
+            assert reached_or_done.wait(w.remaining_seconds()), (
+                "binding did not reach its prior-use read"
+            )
+            if binding.done():
+                outcome = binding.result()
+                status = outcome if isinstance(outcome, tuple) else "bound"
+                pytest.fail(f"binding ended before bootstrap: {status}")
             snapshot = sync.bootstrap(
                 h.actor,
                 {
@@ -497,7 +510,7 @@ def test_actual_unbound_bootstrap_overlaps_prior_use_read_without_publishing_bou
             assert snapshot["snapshot_id"] and not cursors(database_connection)
         finally:
             release.set()
-        result = w.futures[0].result(timeout=7)
+        result = binding.result(timeout=w.remaining_seconds())
         if bootstrap_before_read:
             assert result == ("DEVICE_RESET_REQUIRED", 409) and not cursors(database_connection)
         else:

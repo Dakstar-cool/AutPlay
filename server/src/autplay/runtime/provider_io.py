@@ -30,6 +30,7 @@ _RETRYABLE_PROVIDER_ERRORS = {
     "provider_token_unavailable",
 }
 _TERMINAL_PROVIDER_ERRORS = {
+    "provider_track_policy_rejected",
     "provider_format_unsupported",
     "provider_runtime_unsupported",
     "provider_source_unavailable",

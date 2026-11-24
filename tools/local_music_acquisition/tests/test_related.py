@@ -69,6 +69,7 @@ def test_dedup_before_cap_and_versions_remain_distinct():
         RelatedCandidate("one", "Artist", "The Song (Acoustic)"),
     ]
     selected = select_candidates(item, candidates)
+    assert all("(live)" not in c.title.casefold() for c in selected)
     assert len(selected) == 3
     assert len({c.title.casefold() for c in selected}) == 3
     assert select_candidates(PlaylistItem(1, "Artist", "The Song"), candidates) == [candidates[-2]]

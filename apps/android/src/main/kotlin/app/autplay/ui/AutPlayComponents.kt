@@ -219,6 +219,8 @@ private fun platformIconResource(icon: AutPlayIcon): Int = when (icon) {
     AutPlayIcon.Sync -> R.drawable.ic_autplay_sync
     AutPlayIcon.Server, AutPlayIcon.Settings -> R.drawable.ic_autplay_settings
     AutPlayIcon.Profile -> R.drawable.ic_autplay_profile
+    AutPlayIcon.Devices -> R.drawable.ic_autplay_devices
+    AutPlayIcon.Info -> R.drawable.ic_autplay_info
     AutPlayIcon.Privacy -> R.drawable.ic_autplay_lock
     AutPlayIcon.Back -> R.drawable.ic_autplay_back
     AutPlayIcon.Pause -> R.drawable.ic_autplay_pause
@@ -229,6 +231,7 @@ private fun platformIconResource(icon: AutPlayIcon): Int = when (icon) {
     AutPlayIcon.Check -> R.drawable.ic_autplay_check
     AutPlayIcon.Favorite -> R.drawable.ic_autplay_favorite
     AutPlayIcon.FavoriteFilled -> R.drawable.ic_autplay_favorite_filled
+    AutPlayIcon.HeartOff -> R.drawable.ic_autplay_heart_off
     AutPlayIcon.ThumbUp -> R.drawable.ic_autplay_thumb_up
     AutPlayIcon.ThumbDown -> R.drawable.ic_autplay_thumb_down
     AutPlayIcon.Timer -> R.drawable.ic_autplay_timer

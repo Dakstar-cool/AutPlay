@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any
 
+from .acquisition_policy import track_review_reasons
 from .matching import recording_identity
 from .models import PlaylistItem
 from .normalization import normalize_artist, normalize_query, normalize_text
@@ -126,6 +127,8 @@ def select_candidates(
         raise ValueError("candidate_limit_invalid")
     unique: dict[tuple[frozenset[str], str], RelatedCandidate] = {}
     for candidate in candidates:
+        if track_review_reasons(candidate.duration_seconds or 1, candidate.title):
+            continue
         identity = recording_identity(candidate.artist, candidate.title)
         previous = unique.get(identity)
         if previous is None or candidate_score(item, candidate) > candidate_score(item, previous):

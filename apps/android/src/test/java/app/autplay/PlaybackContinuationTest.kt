@@ -21,6 +21,16 @@ class PlaybackContinuationTest {
         }
     }
 
+    @Test fun oversizedFavoritesKeepTheSelectedTrackAndItsSuccessorsPlayable() {
+        val library = (0..10_001).map { entry(it.toString()) }
+        val queue = continuationTrackIds("10000", "LIBRARY", library)
+        assertEquals(10_000, queue.size)
+        assertEquals(listOf("10000", "10001"), queue.takeLast(2))
+        val outside = continuationTrackIds("other", "USER", library)
+        assertEquals(10_000, outside.size)
+        assertEquals("other", outside.first())
+    }
+
     private fun entry(id: String, removed: Boolean = false) =
         CoreLibraryEntrySummary(id, id, id, null, 0, "AVAILABLE", removed, false)
 }

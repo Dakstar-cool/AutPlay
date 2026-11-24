@@ -45,4 +45,10 @@ def create_catalogue_context_router(
             request.state.principal, body.entity_type, body.entity_id, body.release_id
         )
 
+    @router.post("/contexts/{context_id}/track-reference")
+    def track_reference(context_id: UUID, request: Request) -> dict[str, object]:
+        if not enabled or service is None:
+            raise ApiError("music_catalogue_disabled", "The catalogue is unavailable.", 503)
+        return service.track_reference(request.state.principal, context_id)
+
     return router

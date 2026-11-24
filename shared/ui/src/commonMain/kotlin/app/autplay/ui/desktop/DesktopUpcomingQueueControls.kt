@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.application.desktop.DesktopQueue
@@ -162,6 +163,7 @@ internal fun DesktopUpcomingQueueEditor(
             items(rows, key = { it.entry.id }) { row ->
                 val entry = row.entry
                 val track = tracksById[entry.trackId]
+                val current = entry.id == editor.currentEntryId
                 val title = desktopUpcomingTrackTitle(track, metadataUpdating, language)
                 val positionLabel = DesktopText.QueueEntryPosition.inLanguage(language)
                     .replace("{position}", (row.position + 1).toString())
@@ -174,13 +176,15 @@ internal fun DesktopUpcomingQueueEditor(
                                 { selection }, { selection = it }),
                             enabled = enabled && !reopenRequired,
                             modifier = Modifier.semantics { contentDescription = "${DesktopUpcomingText.Select.label(language)}: $label" })
-                        Column(Modifier.weight(1f).semantics { selected = entry.id == editor.currentEntryId }
+                        Column(Modifier.weight(1f).semantics { selected = current }
                             .clickable(enabled = legacyEnabled && view.legacyAligned, role = Role.Button,
                                 onClickLabel = DesktopText.Play.inLanguage(language),
                                 onClick = desktopUpcomingSelectionAction(canUseLegacy) {
                                     actOnLegacyView { callbacks.onSelectEntry(entry.id) }
                                 }).padding(vertical = 8.dp)) {
-                            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                fontWeight = if (current) FontWeight.Bold else null)
                             Text(track?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(positionLabel, style = MaterialTheme.typography.labelSmall)

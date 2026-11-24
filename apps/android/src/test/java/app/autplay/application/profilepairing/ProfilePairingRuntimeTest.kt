@@ -884,6 +884,23 @@ class ProfilePairingRuntimeTest {
         REFRESH_TOKEN.copyOf(),
     )
 
+    @Test fun trustedStartupRecoversFromOneUnavailableCapabilityProbe() = runBlocking {
+        val fixture = Fixture()
+        fixture.runtime.startDiscovery(API_ORIGIN).join()
+        fixture.runtime.confirmTrust()
+        fixture.runtime.exchangeInvitation(invitation()).join()
+        fixture.runtime.chooseLocalData(review = false).join()
+        assertTrue(fixture.runtime.state.value.pairing is PairingState.Connected)
+        val restarted = Fixture(port = FakePort(initialCapabilitiesFailure = "server_unavailable"),
+            initialSettings = fixture.settings.value, credentials = fixture.credentials)
+        restarted.runtime.recoverAndRefresh()
+        assertTrue(restarted.runtime.state.value.pairing is PairingState.Connected)
+        assertEquals(2, restarted.port.capabilityCalls)
+        assertEquals(0, restarted.port.exchangeCalls)
+        assertEquals(0, restarted.port.rotateCalls)
+        assertEquals(fixture.settings.value.m5Binding, restarted.settings.value.m5Binding)
+    }
+
     private class Fixture(
         val port: FakePort = FakePort(),
         initialSettings: NonSecretSettings = NonSecretSettings(),
@@ -1019,6 +1036,7 @@ class ProfilePairingRuntimeTest {
         private val rotationSession: EnrollmentSession? = null,
     ) : ProfilePairingPort {
         var exchangeCalls = 0
+        var capabilityCalls = 0
         var discoveryCalls = 0
         var rotateCalls = 0
         var lastExchange: EnrollmentExchangeCommand? = null
@@ -1046,6 +1064,7 @@ class ProfilePairingRuntimeTest {
             )
         }
         override suspend fun capabilities(profileId: ServerProfileId, snapshot: PairingFlowSnapshot): PairingNetworkResult<CapabilityDocument> {
+            capabilityCalls++
             capabilitiesStarted.complete(Unit)
             capabilitiesGate?.await()
             capabilitiesFailure?.let { code ->

@@ -6,6 +6,7 @@ import androidx.core.net.toUri
 import androidx.media3.common.util.UnstableApi
 import app.autplay.application.importing.ContentUriInspector
 import app.autplay.application.importing.ContentUriStatus
+import app.autplay.application.server.ServerFeatureHttpException
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.LocalAudioStateEntity
 import app.autplay.data.settings.NonSecretSettingsStore
@@ -106,11 +107,16 @@ class AndroidPlaybackSourceResolver(
             // A re-paired device can retain a track's former profile namespace. Resolve only
             // through the active authenticated server; that endpoint still enforces ownership.
             try {
-                remoteVariantLookup(profile, serverTrackRefId)
+                // A slow successful response and all transport retries share one deadline.
+                val result = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                    Result.success(lookupVariant(profile, serverTrackRefId))
+                } ?: throw java.net.SocketTimeoutException()
+                result.getOrThrow()
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 return AndroidSourceResolution.Unavailable(
-                    localFailure ?: PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE,
+                    if (temporaryLookupFailure(error)) PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE
+                    else localFailure ?: PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE,
                 )
             }
         } else {
@@ -134,6 +140,25 @@ class AndroidPlaybackSourceResolver(
         )
     }
 
+    private suspend fun lookupVariant(profile: ServerProfileId, track: String): String? {
+        for (backoffMs in listOf(250L, 750L)) {
+            try {
+                return remoteVariantLookup(profile, track)
+            } catch (error: Exception) {
+                if (!temporaryLookupFailure(error)) throw error
+                kotlinx.coroutines.delay(backoffMs)
+            }
+        }
+        return remoteVariantLookup(profile, track)
+    }
+
+    private fun temporaryLookupFailure(error: Exception) = when (error) {
+        is ServerFeatureHttpException -> error.status in setOf(408, 500, 502, 503, 504)
+        is java.io.IOException -> error !is javax.net.ssl.SSLException &&
+            error !is java.net.ProtocolException && error !is java.io.FileNotFoundException
+        else -> false
+    }
+
     private suspend fun markInspected(state: LocalAudioStateEntity, status: String, nowMs: Long) {
         if (state.status != status || state.lastVerifiedAtMs != nowMs) {
             database.localAudioDao().upsertState(
@@ -143,6 +168,10 @@ class AndroidPlaybackSourceResolver(
     }
 
     companion object {
+        internal fun production(context: Context, database: AutPlayDatabase) = AndroidPlaybackSourceResolver(
+            context, database, app.autplay.data.settings.applicationNonSecretSettingsStore(context),
+        ) { profile, track -> app.autplay.AutPlayRuntime.serverPlaybackVariantId(context, profile, track) }
+
         const val VAULT_SCHEME = "autplay-vault"
         private const val MAX_SOURCES = 32
     }

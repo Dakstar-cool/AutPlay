@@ -39,6 +39,33 @@ internal sealed class DomainRoute(val method: String, val path: String, val requ
     }
     class PortableWrite : DomainRoute("POST", "/portable-accounts/records", 524_288, 65_536)
     class PortableCurrent : DomainRoute("GET", "/portable-accounts/current", 0, 16_384)
+    class VaultSearch(query: String, cursor: String?) : DomainRoute("GET", "/library/search", 0, 1_048_576,
+        mapOf("q" to query, "kind" to "all", "limit" to "50", "include_catalog" to "true", "paged" to "true") +
+            (cursor?.let { mapOf("cursor" to it) } ?: emptyMap())) {
+        init { require(query.isNotBlank() && query.length <= 200 && (cursor == null || cursor.length in 1..2048)) }
+    }
+    class PreparePlayback : DomainRoute("POST", "/library/search/playback", 8192, 8192)
+    class RecommendationPack : DomainRoute("POST", "/recommendation-packs", 4096, 720_896)
+    class Recommendations : DomainRoute("POST", "/recommendations", 4096, 1_048_576)
+    class SharePlaylist : DomainRoute("POST", "/playlist-shares", 8_388_608, 16_384)
+    class Discover(kind: String, query: String, offset: Int) : DomainRoute("GET", "/music/discovery/search", 0, 1_048_576,
+        mapOf("q" to query, "kind" to kind, "limit" to "30", "offset" to offset.toString())) {
+        init { require(kind in setOf("artist", "album") && query.isNotBlank() && query.length <= 200 && offset in 0..1000) }
+    }
+    class Discography(artist: Boolean, id: AccountUuid, releases: Boolean, offset: Int) : DomainRoute("GET",
+        "/music/discovery/${if (artist) "artists" else "releases"}/${id.value}/${if (releases) "releases" else "tracks"}",
+        0, 1_048_576, mapOf("limit" to "30", "offset" to offset.toString())) {
+        init { require((artist || !releases) && offset in 0..1_000_000) }
+    }
+    class ReleaseCover(id: AccountUuid) : DomainRoute("GET", "/music/discovery/releases/${id.value}/cover", 0, 1_048_576)
+    class CatalogueContext : DomainRoute("POST", "/music/discovery/contexts", 2048, 131_072)
+    class CatalogueTrack(id: AccountUuid) : DomainRoute("POST", "/music/discovery/contexts/${id.value}/track-reference", 0, 65_536)
+    class ArtistRanking(id: AccountUuid) : DomainRoute("GET", "/music/discovery/library-artists/${id.value}/ranking", 0, 1_048_576)
+    class DownloadPreview : DomainRoute("POST", "/music/discovery/downloads/preview", 2048, 262_144)
+    class CatalogDownload(id: AccountUuid, action: String) : DomainRoute(if (action == "status") "GET" else "POST",
+        "/music/discovery/downloads/${id.value}" + if (action == "status") "" else "/$action", 2048, 262_144) {
+        init { require(action in setOf("start", "status", "advance")) }
+    }
     class Statistics : DomainRoute("GET", "/social/profile-statistics/owner", 0, 65_536)
     class CatalogView(query: CanonicalQuery) : DomainRoute("GET", query.path, 0, 262_144, query.parameters())
     class ImportReport(job: AccountUuid, after: String?) : DomainRoute("GET", "/imports/${job.value}", 0, 524_288,
@@ -123,7 +150,7 @@ public class DesktopDomainHttp : AutoCloseable {
                     wire.requestMethod = route.method; wire.connectTimeout = remaining(); wire.readTimeout = remaining()
                     wire.sslSocketFactory = DomainTls.factory(trust.apiTrust, requireNotNull(destination.host))
                     // JSSE's HTTPS endpoint identification also runs for explicitly confirmed SPKI.
-                    wire.setRequestProperty("Accept", "application/json"); wire.setRequestProperty("Accept-Encoding", "identity")
+                    wire.setRequestProperty("Accept", if (route is DomainRoute.ReleaseCover) "image/jpeg, image/png" else "application/json"); wire.setRequestProperty("Accept-Encoding", "identity")
                     wire.setRequestProperty("Cache-Control", "no-store"); wire.setRequestProperty("Pragma", "no-cache")
                     current(); beforeSend()
                     wire.setRequestProperty("Authorization", "Bearer " + access.toString(Charsets.US_ASCII))
@@ -138,7 +165,9 @@ public class DesktopDomainHttp : AutoCloseable {
                     check(headers.size <= 64 && headers.entries.sumOf { it.key.length + it.value.sumOf(String::length) } <= 16_384)
                     fun header(name: String): String? = headers.entries.filter { it.key.equals(name, true) }
                         .flatMap { it.value }.also { check(it.size <= 1 && it.all { value -> value.length <= 2048 && value.none { c -> c.code < 32 || c.code == 127 } }) }.singleOrNull()
-                    check(header("Content-Type")?.substringBefore(';')?.trim()?.lowercase() == "application/json")
+                    val contentType = header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
+                    if (route is DomainRoute.ReleaseCover && status == 200) check(contentType in setOf("image/jpeg", "image/png"))
+                    else check(contentType == "application/json")
                     check(header("Content-Encoding").let { it == null || it.equals("identity", true) })
                     if (route is DomainRoute.Binding || route is DomainRoute.ImportReviewContext) {
                         check(header("Cache-Control")?.split(',')?.any { it.trim().equals("no-store", true) } == true)

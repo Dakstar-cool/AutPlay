@@ -373,7 +373,7 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             packageName = "AutPlay"
             // The community workflow signs this package with the retained project certificate.
-            packageVersion = "1.0.11"
+            packageVersion = "1.0.14"
             description = "AutPlay music player for macOS"
             vendor = "AutPlay"
             includeAllModules = true

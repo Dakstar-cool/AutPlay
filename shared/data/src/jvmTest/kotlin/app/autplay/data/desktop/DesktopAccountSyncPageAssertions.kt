@@ -318,6 +318,34 @@ internal suspend fun desktopAccountSyncPageAssertions(): Unit {
         }
         ackReplayAndAtomicCases()
 
+        suspend fun waveQueueSurvivesAccountReopen() {
+            val owner = fixture()
+            ready(owner)
+            val track = change()
+            owner.store.createTrack(owner.lease, track)
+            val recommendation = app.autplay.application.desktop.DesktopWaveRecommendation(
+                uuid().value, uuid().value, 3, "discovery", "WORK", uuid().value, "home")
+            val entries = listOf(AccountQueueEntry(uuid(), track.trackRefId, 0, recommendation),
+                AccountQueueEntry(uuid(), track.trackRefId, 1))
+            val queue = AccountQueueSnapshot(uuid(), 1, entries, "OFF", false, uuid(), entries.first().entryId)
+            val op = uuid()
+            val domain = checkNotNull(owner.store.domain)
+            domain.saveQueue(owner.lease, op, 0, queue)
+            domain.saveQueue(owner.lease, op, 0, queue)
+            assertEquals(queue, domain.readQueue(owner.lease, queue.queueId))
+            val catalog = checkNotNull(owner.store.catalog)
+            assertTrue(catalog.waveListens(owner.lease, 0, 10_000).isEmpty())
+            val checkpoint = AccountListeningCheckpoint(uuid(), queue.queueId, entries.first().entryId, checkNotNull(queue.sessionId),
+                track.trackRefId, 1000, 1500, 1500, 1, "RECOMMENDED", "WORK", false, false)
+            domain.checkpoint(owner.lease, uuid(), 0, checkpoint)
+            assertEquals(track.trackRefId, catalog.waveListens(owner.lease, 0, 10_000).single().track)
+            assertTrue(catalog.waveListens(owner.lease, 1000, 10_000).isEmpty())
+            val opened = reopen(owner)
+            assertEquals(queue, checkNotNull(opened.store.domain).readQueue(opened.lease, queue.queueId))
+        }
+        waveQueueSurvivesAccountReopen()
+
+
         suspend fun bootstrapAndFactCases(): Unit {
             // Multiple bootstrap pages, dependencies before parents, explicit null, dirty adopted create.
             val multi = fixture(); val localChange = change(); multi.store.createTrack(multi.lease, localChange)

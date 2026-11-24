@@ -4,6 +4,7 @@ import app.autplay.application.desktop.account.*
 import app.autplay.desktop.media.DesktopMediaRuntime
 import app.autplay.desktop.playback.DesktopPlaybackController
 import app.autplay.ui.desktop.*
+import app.autplay.application.desktop.DesktopWaveTrack
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -80,6 +81,61 @@ internal class DesktopAccountProductionMedia(
         // The controller validates collection membership and owns every queue/listen identity.
         if (enqueue) controller.enqueue(target.trackId.value) else controller.playTracks(listOf(target.trackId.value),
             queueType = if (target.occurrenceId == null) "LIBRARY" else "PLAYLIST")
+    }
+
+    internal suspend fun playSelection(lease: AccountLease, ids: List<AccountUuid>, queueType: String, startIndex: Int): Unit = serial.withLock {
+        require(ids.size in 1..200 && startIndex in ids.indices && queueType in setOf("USER", "SEARCH", "LIBRARY"))
+        requireLease(lease)
+        if (ids.any { journal.readTrackCopies(lease, it, null, 1).isEmpty() } && prepareNetworkLease(lease) != lease) changed()
+        select(lease)
+        for (id in ids.distinct()) runtime.library.includeTarget(lease, id, null, retainQueue = false, serverSelection = true)
+        requireLease(lease)
+        controller.playTracks(ids.map { it.value }, queueType, startIndex)
+    }
+
+    internal suspend fun playWave(lease: AccountLease, tracks: List<DesktopWaveTrack>, startIndex: Int,
+        next: suspend () -> List<DesktopWaveTrack>): Unit = serial.withLock {
+        require(tracks.size in 1..200)
+        requireLease(lease)
+        if (tracks.any { it.recommendation?.offlinePackId == null } && prepareNetworkLease(lease) != lease) changed()
+        select(lease)
+        suspend fun include(rows: List<DesktopWaveTrack>, retain: Boolean) {
+            for (track in rows.distinctBy { it.trackId })
+                runtime.library.includeTarget(lease, AccountUuid(track.trackId), null, retainQueue = retain, serverSelection = true)
+            requireLease(lease)
+        }
+        include(tracks, false)
+        controller.playWave(tracks, startIndex) {
+            requireLease(lease)
+            val rows = next()
+            serial.withLock {
+                requireLease(lease)
+                if (runtime.admission.selectedLeaseOrNull() != lease) changed()
+                include(rows, true)
+            }
+            rows
+        }
+    }
+
+    suspend fun setPlayerPreference(lease: AccountLease, id: AccountUuid, value: String): Unit = serial.withLock {
+        require(value in setOf("NEUTRAL", "LIKED", "DISLIKED"))
+        requireLease(lease)
+        check(runtime.admission.selectedLeaseOrNull() == lease && !runtime.admission.isRetired())
+        val domain = checkNotNull(account.domain)
+        val track = checkNotNull(domain.readExact(lease, AccountProjectionKind.TRACK, id))
+        val choices = domain.readTrackPreferences(lease, id)
+        val old = choices.singleOrNull()
+        check(choices.size <= 1 && listOfNotNull(track, old).all {
+            !it.header.removed && !it.header.hasConflict && it.header.snapshotConfirmed != false &&
+                (it.header.rawProjectionState == null || it.header.rawProjectionState == "COMPLETE")
+        })
+        val prior = old?.detail as? AccountLocalDomainDetail.Preference
+        val prefId = old?.header?.localId ?: AccountUuid.random()
+        domain.mutateReviewed(lease, AccountDomainChange(AccountUuid.random(), System.currentTimeMillis(),
+            AccountDomainCommand.Preference(prefId, id, value, prior?.excludedFromTaste ?: false)),
+            AccountDomainReview(listOf(AccountDomainExpected(AccountProjectionKind.TRACK, id, track.header),
+                AccountDomainExpected(AccountProjectionKind.PREFERENCE, prefId, old?.header))))
+        runtime.library.includeTarget(lease, id, null, retainQueue = true, serverSelection = true)
     }
 
     override suspend fun download(target: DesktopAccountTrackTarget): Unit = serial.withLock {

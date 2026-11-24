@@ -119,7 +119,7 @@ private fun QueueEntryRow(
         modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("queue-entry-${entry.queueEntryId}"),
         shape = MaterialTheme.shapes.large,
         color = if (entry.isCurrent) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f)
+            MaterialTheme.colorScheme.primaryContainer
         } else {
             AutPlayTokens.colors.glassSurface
         },

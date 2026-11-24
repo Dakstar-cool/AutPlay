@@ -30,7 +30,7 @@ import app.autplay.application.desktop.DesktopMetadataState
 private const val DESKTOP_TRACK_VISUAL_DURATION_MS: Int = 180
 
 /** Decoded pixels and labels only; no callbacks, playback state or asynchronous work in a scene. */
-private data class DesktopTrackVisualPresentation(val title: String, val artist: String, val bitmap: ImageBitmap?)
+private data class DesktopTrackVisualPresentation(val title: String, val artist: String, val bitmap: ImageBitmap?, val artworkSeed: String)
 
 /** Shared full/mini-player surface. Navigation and the setting are reset inputs, never commands. */
 @Composable
@@ -45,7 +45,7 @@ internal fun DesktopTrackVisuals(
     val latest = DesktopTrackVisualPresentation(
         if (playback.mediaId != null) playback.title ?: DesktopText.NothingPlaying.inLanguage(language)
         else DesktopText.NothingPlaying.inLanguage(language),
-        playback.artist.orEmpty().takeIf { playback.mediaId != null }.orEmpty(), bitmap,
+        playback.artist.orEmpty().takeIf { playback.mediaId != null }.orEmpty(), bitmap, trackId.orEmpty(),
     )
     val retained = remember { mutableStateOf<DesktopTrackVisualFrames<DesktopTrackVisualPresentation>?>(null) }
     val frames = advanceDesktopTrackVisualFrames(retained.value,
@@ -90,7 +90,7 @@ private fun DesktopTrackVisualScene(
     if (compact) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            DesktopArtworkImage(scene.bitmap, language, artworkSize)
+            DesktopArtworkImage(scene.bitmap, language, artworkSize, scene.artworkSeed)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(scene.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium)
@@ -101,7 +101,7 @@ private fun DesktopTrackVisualScene(
     } else {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DesktopArtworkImage(scene.bitmap, language, artworkSize)
+            DesktopArtworkImage(scene.bitmap, language, artworkSize, scene.artworkSeed)
             Text(scene.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.headlineMedium)
             Text(scene.artist, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -117,8 +117,8 @@ internal fun DesktopPlayerArtworkCarousel(
     language: DesktopLanguage, navigationCurrent: Boolean, smoothTrackTransitions: Boolean,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val neighborSize = minOf(80.dp, maxWidth * 0.18f)
-        val currentSize = minOf(192.dp, maxWidth * 0.48f)
+        val neighborSize = minOf(96.dp, maxWidth * 0.18f)
+        val currentSize = minOf(360.dp, maxWidth * 0.50f)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             DesktopTrackVisualNeighbor(view.previous.takeIf { fresh }, DesktopText.PlayerPrevious,
@@ -136,12 +136,13 @@ private fun DesktopTrackVisualNeighbor(
     entry: DesktopPlayerEntry?, label: DesktopText, metadata: DesktopMetadataState,
     language: DesktopLanguage, size: Dp, modifier: Modifier,
 ) {
-    val track = entry?.track
+    if (entry == null) { androidx.compose.foundation.layout.Spacer(modifier); return }
+    val track = entry.track
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label.inLanguage(language), style = MaterialTheme.typography.labelLarge)
         DesktopArtworkView(track?.id, track?.id?.let { metadata.artworks[it] }, language, size)
-        Text(track?.title ?: (if (entry == null) DesktopText.PlayerNoNeighbor else DesktopText.PlayerEntryMissing)
+        Text(track?.title ?: (DesktopText.PlayerEntryMissing)
             .inLanguage(language), maxLines = 2, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodySmall)
         track?.artist?.takeIf { it.isNotBlank() }?.let {

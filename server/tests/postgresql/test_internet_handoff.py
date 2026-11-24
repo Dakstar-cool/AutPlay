@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.filesystem.provider_staging import FilesystemProviderStorage
@@ -108,6 +108,39 @@ def assert_unbound(harness: AdmissionHarness, owned: Writer) -> None:
             )
             == 0
         )
+
+
+def test_new_search_reuses_audio_while_vault_ingests_and_can_retry_failed_ingest(
+    admission: AdmissionHarness, tmp_path: Path
+) -> None:
+    from autplay.application.internet_music import InternetMusicService
+
+    from .test_acquisition_authority import Provider
+
+    repository, owned, target, verified = ready(admission, tmp_path)
+    receipt = repository.handoff(owned.claim, target, owned.ticket.execution_id, verified)
+    with admission.sessions.begin() as session:
+        PostgresJobRepository(session).complete(owned.claim.fence)
+        upload = session.get_one(UploadSessionRow, receipt.upload_id)
+        ingest_job_id = upload.job_id
+        assert ingest_job_id is not None
+    # A different phone belonging to the same listener selects the same source.
+    actor = admission.actor(user_id=target.user_id)
+    service = InternetMusicService(admission.sessions, object(), Provider())
+    search = UUID(service.search(actor, "second search", uuid4())["search_id"])
+    repeated = service.select(actor, search, target.candidate_id)
+    assert (repeated["state"], repeated["acquisition_id"]) == (
+        "PROCESSING",
+        str(target.acquisition_id),
+    )
+    with admission.sessions.begin() as session:
+        assert session.scalar(select(func.count()).select_from(InternetAcquisitionRow)) == 1
+        PostgresJobRepository(session).request_cancel_for_owner(
+            job_id=ingest_job_id, owner_user_id=actor.user_id
+        )
+    assert service.status(actor, target.acquisition_id)["state"] == "FAILED"
+    retried = service.select(actor, search, target.candidate_id)
+    assert retried["state"] == "QUEUED" and retried["acquisition_id"] != repeated["acquisition_id"]
 
 
 def test_handoff_is_single_atomic_and_replay_precedes_revoked_authority(

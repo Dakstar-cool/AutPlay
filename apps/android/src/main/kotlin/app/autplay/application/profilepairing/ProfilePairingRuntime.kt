@@ -447,7 +447,7 @@ class ProfilePairingRuntime(
                     pairing = PairingState.ExchangingInvitation(activeSnapshot),
                     serverLabel = evidence.serverLabelHint,
                 )
-                refreshCapabilities(activeSnapshot, renewedCheckpoint.sessionId, false)
+                refreshCapabilities(activeSnapshot, renewedCheckpoint.sessionId, false, retryEstablishedTransport = true)
                 if (
                     pendingMaterialization != null &&
                     mutableState.value.pairing is PairingState.Connected
@@ -1111,10 +1111,18 @@ class ProfilePairingRuntime(
         sessionId: String,
         requireLocalDataChoice: Boolean = true,
         allowRejectedSessionRotation: Boolean = true,
+        retryEstablishedTransport: Boolean = false,
     ) {
         registerOrigin(snapshot.serverProfileId, snapshot.apiOrigin)
         if (!prepareSession(snapshot)) return
-        when (val response = port.capabilities(snapshot.serverProfileId, snapshot)) {
+        var response = port.capabilities(snapshot.serverProfileId, snapshot)
+        if (retryEstablishedTransport && response is PairingNetworkResult.Failure &&
+            response.code == "server_unavailable" && (response.retryAfterMs ?: 0) <= 2_000) {
+            kotlinx.coroutines.delay(maxOf(500, response.retryAfterMs ?: 0))
+            if (!stillRecoveringBinding(snapshot)) return
+            response = port.capabilities(snapshot.serverProfileId, snapshot)
+        }
+        when (response) {
             is PairingNetworkResult.Failure -> {
                 if (response.code == "authentication_required" && allowRejectedSessionRotation) {
                     rotateRejectedSession(snapshot, sessionId)?.let { rotated ->
@@ -1251,6 +1259,12 @@ class ProfilePairingRuntime(
                 material.fill(0)
             }
         }
+
+    private suspend fun stillRecoveringBinding(snapshot: PairingFlowSnapshot): Boolean {
+        val current = settings.settings.first()
+        return isCurrentExchange(snapshot) && current.activeServerProfileId == snapshot.serverProfileId &&
+            current.m5Binding?.bindingCommitId == snapshot.bindingCommitId
+    }
 
     private suspend fun prepareSession(snapshot: PairingFlowSnapshot): Boolean = try {
         sessionCredentials(snapshot).access(snapshot.serverProfileId).close()

@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
 from typing import Any
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,6 +15,7 @@ from autplay.adapters.postgresql.catalogue_context import PostgresCatalogueConte
 from autplay.adapters.postgresql.models import (
     AudioVariantRow,
     ListeningEventRow,
+    RecordingCanonicalVariantRow,
     RecordingRow,
     UserSessionRow,
     UserTrackRefRow,
@@ -69,6 +71,253 @@ def context(admission: AdmissionHarness, actor: Principal, *, expired: bool = Fa
     with admission.sessions.begin() as session:
         PostgresCatalogueContextRepository(session).create(actor.user_id, identity, card(), now)
     return identity
+
+
+def test_private_catalogue_handle_without_audio_is_idempotent(admission: AdmissionHarness) -> None:
+    actor = admission.actor()
+    other = admission.actor()
+    receipt = context(admission, actor)
+    service = CatalogueContextService(
+        admission.sessions, lambda _: pytest.fail("Unexpected catalogue HTTP request")
+    )
+    first = service.track_reference(actor, receipt)
+    assert first == service.track_reference(actor, receipt)
+    assert first["recording_id"] is None and first["title"] == "Song"
+    with pytest.raises(MusicError, match="music_catalogue_context_not_found"):
+        service.track_reference(other, receipt)
+    with admission.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(InternetAcquisitionRow)) == 0
+        assert (
+            session.get_one(UserTrackRefRow, UUID(str(first["user_track_ref_id"]))).user_id
+            == actor.user_id
+        )
+
+
+@pytest.mark.parametrize("explicit_download", [False, True])
+def test_saved_catalogue_target_changes_with_owner_audio_and_stays_private(
+    admission: AdmissionHarness,
+    explicit_download: bool,
+) -> None:
+    from autplay.adapters.postgresql.catalog_pages import CatalogPageCache
+    from autplay.adapters.postgresql.confirmed_edition import musicbrainz_reference
+    from autplay.adapters.postgresql.shared_catalog import (
+        playlist_catalog_handles,
+        refresh_playlist_catalog_handles,
+    )
+    from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
+    from autplay.application.vault_uploads import VaultNotFoundError
+
+    actor, other = admission.actor(), admission.actor()
+    selection = card()
+    receipts = []
+    private_refs = []
+    service = CatalogueContextService(
+        admission.sessions, lambda _: pytest.fail("Unexpected catalogue HTTP request")
+    )
+    for principal in (actor, other):
+        receipt = uuid4()
+        receipts.append(receipt)
+        with admission.sessions.begin() as session:
+            PostgresCatalogueContextRepository(session).create(
+                principal.user_id, receipt, selection, datetime.now(UTC)
+            )
+        ref = service.track_reference(principal, receipt)
+        assert ref["resolution_status"] == "CATALOG_ONLY"
+        private_refs.append(UUID(str(ref["user_track_ref_id"])))
+    variant_id = admission.variant(actor)
+    with admission.sessions.begin() as session:
+        variant = session.get_one(AudioVariantRow, variant_id)
+        variant.validation_status = "VALID"
+        session.add(
+            RecordingCanonicalVariantRow(
+                recording_id=variant.recording_id,
+                audio_variant_id=variant_id,
+                policy_version="owner-verified-upload-v1",
+                reason={"test": "catalog"},
+            )
+        )
+        if not explicit_download:
+            musicbrainz_reference(
+                session, "RECORDING", str(selection.recording_mbid)
+            ).recording_id = variant.recording_id
+    if explicit_download:
+        from autplay.adapters.postgresql.models import CatalogDownloadRow
+
+        sources = InternetMusicService(admission.sessions, object(), Provider())
+        lookup = sources.search(actor, "Artist Song", uuid4(), receipts[0])
+        selected = sources.select(actor, UUID(lookup["search_id"]), "candidate00")
+        acq_id = UUID(selected["acquisition_id"])
+        with admission.sessions.begin() as session:
+            acquired = session.get_one(InternetAcquisitionRow, acq_id)
+            variant = session.get_one(AudioVariantRow, variant_id)
+            acquired.user_track_ref_id = session.scalars(
+                select(UserTrackRefRow.user_track_ref_id).where(
+                    UserTrackRefRow.user_id == actor.user_id,
+                    UserTrackRefRow.recording_id == variant.recording_id,
+                )
+            ).one()
+            acquired.audio_variant_id = variant_id
+            acquired.state = "READY"
+        mbid = str(selection.recording_mbid)
+        assert not CatalogPageCache(admission.sessions).available_recordings(actor.user_id, [mbid])
+        with admission.sessions.begin() as session:
+            session.add(
+                CatalogDownloadRow(
+                    operation_id=uuid4(),
+                    user_id=actor.user_id,
+                    document={"recordings": {mbid: {"acquisition": str(acq_id)}}},
+                )
+            )
+    with admission.sessions.begin() as session:
+        refresh_playlist_catalog_handles(session, actor.user_id)
+        refresh_playlist_catalog_handles(session, actor.user_id)
+        assert (
+            playlist_catalog_handles(session, actor.user_id)[private_refs[0]]["resolution_status"]
+            == "RESOLVED"
+        )
+        assert (
+            playlist_catalog_handles(session, other.user_id)[private_refs[1]]["resolution_status"]
+            == "CATALOG_ONLY"
+        )
+        vault = PostgresVaultRuntime(session)
+        assert (
+            vault.resolve_owner_playback_variant(
+                actor.user_id, private_refs[0], include_catalog=True
+            )
+            == variant_id
+        )
+        with pytest.raises(VaultNotFoundError):
+            vault.resolve_owner_playback_variant(
+                other.user_id, private_refs[1], include_catalog=True
+            )
+    pages = CatalogPageCache(admission.sessions)
+    assert pages.available_recordings(actor.user_id, [str(selection.recording_mbid)])
+    assert not pages.available_recordings(other.user_id, [str(selection.recording_mbid)])
+    with admission.sessions.begin() as session:
+        session.get_one(AudioVariantRow, variant_id).deleted_at = datetime.now(UTC)
+    with admission.sessions.begin() as session:
+        refresh_playlist_catalog_handles(session, actor.user_id)
+        assert (
+            playlist_catalog_handles(session, actor.user_id)[private_refs[0]]["resolution_status"]
+            == "CATALOG_ONLY"
+        )
+
+
+def test_artist_download_previews_full_editions_and_guest_tracks_before_idempotent_start(
+    admission: AdmissionHarness,
+) -> None:
+    from autplay.application.catalog_downloads import CatalogDownloads
+    from autplay.application.music_discovery import MusicDiscoveryService
+
+    actor = admission.actor()
+    other = admission.actor()
+    artist, shared, guest, edition, deluxe, group = (uuid4() for _ in range(6))
+    missing = [uuid4() for _ in range(15)]
+    release_calls = []
+
+    def page(items: list[dict[str, object]], next_offset: int | None = None) -> dict[str, object]:
+        return {"items": items, "next_offset": next_offset, "truncated": False}
+
+    def track(identity: UUID, name: str, duration: int | None = None) -> dict[str, object]:
+        return {
+            "recording_id": str(identity),
+            "artist": "Artist",
+            "title": name,
+            "duration_ms": duration,
+            "download_search_query": f"Artist {name}",
+        }
+
+    class Discography:
+        def artist_releases(
+            self, owner: Principal, identity: UUID, *, limit: int, offset: int
+        ) -> dict[str, object]:
+            assert owner == actor and identity == artist
+            if offset == 0:
+                return page(
+                    [
+                        {
+                            "entity_id": str(deluxe),
+                            "release_group_id": str(group),
+                            "release_date": "2023",
+                        }
+                    ],
+                    1,
+                )
+            return page(
+                [
+                    {
+                        "entity_id": str(edition),
+                        "release_group_id": str(group),
+                        "release_date": "2020",
+                    }
+                ]
+            )
+
+        def artist_tracks(
+            self, owner: Principal, identity: UUID, *, limit: int, offset: int
+        ) -> dict[str, object]:
+            return page(
+                [
+                    {**track(guest, "Track 1", 150000), "guest_artist_ids": [str(artist)]},
+                    track(uuid4(), "Different edition", 180000),
+                ]
+            )
+
+        def release_tracks(
+            self, owner: Principal, identity: UUID, *, limit: int, offset: int
+        ) -> dict[str, object]:
+            release_calls.append(identity)
+            if offset == 0:
+                return page(
+                    [track(shared, "Track 0", 150000)] + [track(i, "Missing") for i in missing], 16
+                )
+            return page([track(shared, "Track 0", 150000)])
+
+    def service() -> CatalogDownloads:
+        fixture = Discography()
+        discovery = Mock(spec_set=MusicDiscoveryService(lambda _: pytest.fail("Unexpected HTTP")))
+        discovery.page_cache = None
+        discovery.artist_releases.side_effect = fixture.artist_releases
+        discovery.artist_tracks.side_effect = fixture.artist_tracks
+        discovery.release_tracks.side_effect = fixture.release_tracks
+        return CatalogDownloads(
+            admission.sessions,
+            discovery,
+            CatalogueContextService(admission.sessions, lambda _: pytest.fail("Unexpected HTTP")),
+            InternetMusicService(admission.sessions, object(), Provider()),
+        )
+
+    operation = uuid4()
+    service().preview(actor, operation, "artist", artist, False)
+    with pytest.raises(MusicError, match="catalog_preview_incomplete"):
+        service().command(actor, operation, "start")
+    with pytest.raises(MusicError, match="catalog_download_missing"):
+        service().command(other, operation, "status")
+    for _ in range(30):
+        state = service().command(actor, operation, "advance")
+        if state["phase"] == "preview":
+            break
+    assert (
+        state["total"] == 17
+        and state["counts"]["available"] == 2
+        and state["counts"]["missing"] == 15
+    )
+    assert release_calls == [edition, edition]
+    with admission.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(InternetAcquisitionRow)) == 0
+    for _ in range(2):
+        assert service().command(actor, operation, "start")["phase"] == "downloading"
+    service().command(actor, operation, "advance")
+    assert service().command(actor, operation, "advance")["counts"]["queued"] == 2
+    repeated = uuid4()
+    service().preview(actor, repeated, "release", edition, False)
+    for _ in range(28):
+        state = service().command(actor, repeated, "advance")
+        if state["phase"] == "preview":
+            break
+    assert state["counts"]["queued"] == 1 and state["counts"]["available"] == 0
+    with admission.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(InternetAcquisitionRow)) == 2
 
 
 @pytest.mark.parametrize("revoked", [False, True])
@@ -272,6 +521,15 @@ def test_ready_reuse_keeps_original_context_and_source_snapshot(
     variant_id = admission.variant(actor)
     with admission.sessions.begin() as session:
         variant = present(session.get(AudioVariantRow, variant_id))
+        variant.validation_status = "VALID"
+        session.add(
+            RecordingCanonicalVariantRow(
+                recording_id=variant.recording_id,
+                audio_variant_id=variant_id,
+                policy_version="owner-verified-upload-v1",
+                reason={"test": "ready"},
+            )
+        )
         ref = present(
             session.scalar(
                 select(UserTrackRefRow).where(
@@ -433,7 +691,7 @@ def test_migration_preserves_old_snapshot_and_refuses_receipt_loss(
             (search_id, owner, b"r" * 32),
         )
         head_before = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head_before == ("0075_sona_collection_window",)
+        assert head_before == ("0078_playlist_snapshots",)
         purge_before = conn.execute(
             "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
         ).fetchone()

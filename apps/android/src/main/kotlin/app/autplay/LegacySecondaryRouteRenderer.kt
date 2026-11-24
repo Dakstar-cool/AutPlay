@@ -55,6 +55,7 @@ internal data class LegacySecondaryRouteState(
     val importState: LegacyImportRouteState,
     val downloads: List<DownloadIntentPresentation>,
     val isProfileBound: Boolean,
+    val serverAvailable: Boolean,
     val syncStatus: SyncStatus,
     val waveCoordinator: WaveCoordinator?,
     val serverUiState: ServerFeaturesUiState,
@@ -181,7 +182,7 @@ internal fun LegacySecondaryRouteRenderer(
                 onError = actions.reportError,
                 settings = state.settings,
                 libraryEntries = state.libraryEntries,
-                onOpenProfile = { actions.navigate(UiDestination.Profile) },
+                onOpenProfile = { actions.navigate(UiDestination.SettingsAccount) },
             )
             "Server" -> ServerFeaturesScreen(
                 isBound = state.isProfileBound,
@@ -195,6 +196,14 @@ internal fun LegacySecondaryRouteRenderer(
             "SettingsAccount" -> ProfileFrontendScreen(state.profilePairing, actions.profilePairing, showHero = false)
             "Settings" -> SettingsFrontendScreen(
                 page = state.destination,
+                profileName = state.profilePairing.accountLabel ?: state.profilePairing.portableAccount?.status?.publicId
+                    ?: state.settings.pendingPublicId,
+                accountSummary = stringResource(when {
+                    profileRequiresConnectionAttention(state.profilePairing) -> R.string.settings_account_attention
+                    !state.isProfileBound -> R.string.settings_account_local_summary
+                    !state.serverAvailable -> R.string.settings_account_offline
+                    else -> R.string.profile_connection_connected
+                }),
                 onChooseAudio = actions.importActions.chooseAudio,
                 settings = state.settings,
                 onUpdate = actions.updateSettings,

@@ -202,8 +202,8 @@ def test_manifest_binds_apk_source_certificate_and_latest_tracked_room_schema() 
 def test_android_gradle_production_flag_fails_closed() -> None:
     build = ANDROID_BUILD_PATH.read_text(encoding="utf-8")
 
-    assert "versionCode = 29" in build
-    assert 'versionName = "1.0.11"' in build
+    assert "versionCode = 37" in build
+    assert 'versionName = "1.0.14"' in build
     assert 'gradleProperty("autplay.productionRelease")' in build
     assert "productionRelease && qaSideBySide" in build
     assert "Production release requires explicit versionCode and versionName" in build

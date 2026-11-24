@@ -28,7 +28,10 @@ data class DesktopPlaylist(
     val entries: List<DesktopPlaylistEntry>,
     val description: String? = null,
 )
-data class DesktopQueueEntry(val id: String, val trackId: String)
+data class DesktopWaveRecommendation(val requestId: String, val recordingId: String, val sourceRank: Int,
+    val section: String?, val context: String, val offlinePackId: String? = null, val surface: String = "personal_wave")
+data class DesktopWaveTrack(val trackId: String, val recommendation: DesktopWaveRecommendation? = null)
+data class DesktopQueueEntry(val id: String, val trackId: String, val recommendation: DesktopWaveRecommendation? = null)
 
 /** Unknown persisted modes must survive reads; the playback owner rejects unsupported modes. */
 data class DesktopQueue(
@@ -141,6 +144,8 @@ interface DesktopLibraryStore {
     ): DesktopQueue?
     /** Applies to the unfinished current listen and future listens within this queue ID only. */
     suspend fun setQueueSessionTasteExcluded(expectedQueueId: String, excluded: Boolean): DesktopQueue?
+    suspend fun importPlaylist(id: String, name: String, description: String?, tracks: List<String>): Unit =
+        throw UnsupportedOperationException("desktop_playlist_import_unavailable")
     suspend fun createPlaylist(name: String): DesktopPlaylist
     /** Preserves the playlist/entry identities; an unchanged name creates no intent. */
     suspend fun renamePlaylist(playlistId: String, name: String): Unit

@@ -47,11 +47,6 @@ public fun DesktopLibraryCatalogBrowser(
             Text(if (ru) "Нет подтверждённой текущей области аккаунта. Выберите или разблокируйте аккаунт в разделе «Аккаунты»."
                 else "No confirmed current account scope. Select or unlock an account in Accounts.")
         } else {
-            Text((if (ru) "Область аккаунта: " else "Account scope: ") + scope)
-            Text(if (ru) "В общих списках исполнителей и альбомов поиск охватывает всю доступную текущую проекцию аккаунта. Страницы содержат совпадения в порядке устойчивых ключей. Сортировка по названию относится к текущей странице; общий счётчик и ранжирование не вычисляются."
-                else "Top-level Artist and Album search covers the entire admitted current account projection. Pages contain matches in stable key order. Title sorting applies to the current page; no global count or ranking is computed.")
-            Text(if (ru) "Исполнители: имя и уточнение; альбомы: название и исполнитель по подтверждённым метаданным. Локальные аудиотеги не создают сущности каталога."
-                else "Artists: name and disambiguation; albums: title and artist from validated metadata. Local audio tags do not create catalog entities.")
             if (catalog.navigationRequested && latestNavigation.value())
                 DesktopAccountCatalogContent(owner, language, includeHome = false)
             else Text(if (ru) "Открытие выбранного вида каталога…" else "Opening the selected catalog kind…")

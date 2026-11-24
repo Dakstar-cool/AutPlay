@@ -7,10 +7,9 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -20,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import app.autplay.ui.theme.autPlayColorScheme
 
 /** User-selectable appearance values that can be persisted by the settings layer. */
 public enum class AutPlayThemeMode {
@@ -27,17 +27,7 @@ public enum class AutPlayThemeMode {
     Dark,
 }
 
-public enum class AutPlayAccent(
-    public val lightPrimary: Color,
-    public val darkPrimary: Color,
-    public val lightContainer: Color,
-    public val darkContainer: Color,
-) {
-    Coral(Color(0xFFB73819), Color(0xFFFF7854), Color(0xFFFFE2D7), Color(0xFF47271F)),
-    Violet(Color(0xFF6246A8), Color(0xFFDCCEFF), Color(0xFFE8DEFF), Color(0xFF4B3A73)),
-    Green(Color(0xFF176B3A), Color(0xFF83F8A6), Color(0xFFC2F8D1), Color(0xFF19562D)),
-    Blue(Color(0xFF00639B), Color(0xFFA8D8FF), Color(0xFFCDE5FF), Color(0xFF174A68)),
-}
+public typealias AutPlayAccent = app.autplay.ui.theme.AutPlayAccent
 
 public data class AutPlayAppearance(
     public val mode: AutPlayThemeMode = AutPlayThemeMode.Dark,
@@ -52,8 +42,8 @@ public data class AutPlaySemanticColors(
     public val softAccent: Color,
     public val glassSurface: Color,
     public val glassBorder: Color,
-    public val miniPlayerSurface: Color,
-    public val onMiniPlayer: Color,
+    public val miniPlayerScheme: ColorScheme,
+    public val timerAccent: Color,
     public val success: Color,
     public val info: Color,
 )
@@ -75,7 +65,8 @@ public object AutPlayTokens {
 }
 
 private val LocalAutPlaySemanticColors = staticCompositionLocalOf {
-    semanticColors(dark = false, accent = AutPlayAccent.Coral)
+    val scheme = autPlayColorScheme(true, AutPlayAccent.Coral)
+    semanticColors(scheme, true, AutPlayAccent.Coral)
 }
 private val LocalAutPlayDimensions = staticCompositionLocalOf { AutPlayDimensions() }
 
@@ -91,16 +82,18 @@ public fun AutPlayTheme(
         AutPlayThemeMode.Light -> false
         AutPlayThemeMode.Dark -> true
     }
+    val scheme = remember(dark, appearance.accent) { autPlayColorScheme(dark, appearance.accent) }
+    val semantic = remember(scheme) { semanticColors(scheme, dark, appearance.accent) }
     AutPlaySystemBarIconAppearance(
         useDarkStatusBarIcons = !dark,
         useDarkNavigationBarIcons = !dark,
     )
     androidx.compose.runtime.CompositionLocalProvider(
-        LocalAutPlaySemanticColors provides semanticColors(dark, appearance.accent),
+        LocalAutPlaySemanticColors provides semantic,
         LocalAutPlayDimensions provides AutPlayDimensions(),
     ) {
         MaterialTheme(
-            colorScheme = autPlayColorScheme(appearance.accent, dark),
+            colorScheme = scheme,
             typography = AutPlayTypography,
             shapes = AutPlayShapes,
             content = content,
@@ -132,92 +125,18 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-private fun autPlayColorScheme(accent: AutPlayAccent, dark: Boolean): ColorScheme = if (dark) {
-    darkColorScheme(
-        primary = accent.darkPrimary,
-        onPrimary = Color(0xFF17120F),
-        primaryContainer = accent.darkContainer,
-        onPrimaryContainer = Color.White,
-        secondary = Color(0xFFC4C6CD),
-        onSecondary = Color(0xFF191B20),
-        secondaryContainer = Color(0xFF30333A),
-        onSecondaryContainer = Color(0xFFF1F1F4),
-        tertiary = Color(0xFFBBDD82),
-        background = Color(0xFF111215),
-        onBackground = Color(0xFFF4F3EF),
-        surface = Color(0xFF181A1F),
-        onSurface = Color(0xFFF4F3EF),
-        surfaceVariant = Color(0xFF24272E),
-        onSurfaceVariant = Color(0xFFB2B4BD),
-        surfaceDim = Color(0xFF111215),
-        surfaceBright = Color(0xFF363941),
-        surfaceContainerLowest = Color(0xFF0C0D10),
-        surfaceContainerLow = Color(0xFF17191E),
-        surfaceContainer = Color(0xFF1D1F25),
-        surfaceContainerHigh = Color(0xFF272A31),
-        surfaceContainerHighest = Color(0xFF33363E),
-        surfaceTint = Color.Transparent,
-        outline = Color(0xFF737780),
-        outlineVariant = Color(0xFF32353C),
-        error = Color(0xFFFFB4AB),
-    )
-} else {
-    lightColorScheme(
-        primary = accent.lightPrimary,
-        onPrimary = Color.White,
-        primaryContainer = accent.lightContainer,
-        onPrimaryContainer = Color.Black,
-        secondary = Color(0xFF706D68),
-        onSecondary = Color.White,
-        secondaryContainer = Color(0xFFEAE6DE),
-        onSecondaryContainer = Color(0xFF181818),
-        tertiary = Color(0xFF247447),
-        background = Color(0xFFF6F3ED),
-        onBackground = Color(0xFF181818),
-        surface = Color(0xFFFFFFFF),
-        onSurface = Color(0xFF181818),
-        surfaceVariant = Color(0xFFFAF8F4),
-        onSurfaceVariant = Color(0xFF706D68),
-        surfaceContainerLowest = Color(0xFFFFFFFF),
-        surfaceContainerLow = Color(0xFFFAF8F4),
-        surfaceContainer = Color(0xFFF1EEE8),
-        surfaceContainerHigh = Color(0xFFEAE6DE),
-        surfaceContainerHighest = Color(0xFFE2DED6),
-        surfaceTint = Color.Transparent,
-        outline = Color(0xFF817D76),
-        outlineVariant = Color(0xFFE5E0D8),
-        error = Color(0xFFB3261E),
-    )
-}
-
-private fun semanticColors(dark: Boolean, accent: AutPlayAccent): AutPlaySemanticColors =
-    if (dark) {
-        AutPlaySemanticColors(
-            raisedSurface = Color(0xFF202229),
-            border = Color(0xFF32353C),
-            mutedText = Color(0xFFB2B4BD),
-            softAccent = accent.darkContainer,
-            glassSurface = Color(0xF024272E),
-            glassBorder = Color(0x24FFFFFF),
-            miniPlayerSurface = Color(0xFF292C34),
-            onMiniPlayer = Color(0xFFF4F3EF),
-            success = Color(0xFF78D79A),
-            info = Color(0xFF8FCBFF),
-        )
-    } else {
-        AutPlaySemanticColors(
-            raisedSurface = Color(0xFFFAF8F4),
-            border = Color(0xFFE5E0D8),
-            mutedText = Color(0xFF706D68),
-            softAccent = accent.lightContainer,
-            glassSurface = Color(0xD9FFFFFF),
-            glassBorder = Color(0x33000000),
-            miniPlayerSurface = Color(0xF224211F),
-            onMiniPlayer = Color(0xFFF5F2EC),
-            success = Color(0xFF247447),
-            info = Color(0xFF21618C),
-        )
-    }
+private fun semanticColors(scheme: ColorScheme, dark: Boolean, accent: AutPlayAccent) = AutPlaySemanticColors(
+    raisedSurface = scheme.surfaceContainer,
+    border = scheme.outlineVariant,
+    mutedText = scheme.onSurfaceVariant,
+    softAccent = scheme.primaryContainer,
+    glassSurface = scheme.surfaceContainerHigh,
+    glassBorder = scheme.outlineVariant,
+    miniPlayerScheme = if (dark) scheme else autPlayColorScheme(true, accent),
+    timerAccent = if (dark) AutPlayAccent.Violet.darkPrimary else AutPlayAccent.Violet.lightPrimary,
+    success = scheme.tertiary,
+    info = scheme.secondary,
+)
 
 private val AutPlayShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),

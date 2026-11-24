@@ -102,10 +102,20 @@ internal class DesktopAcceptanceFixture(unicodeDataRoot: Boolean = false) {
         if (cleanupFailure == null) release {
             check(!Files.isSymbolicLink(sandbox) && sandbox.toRealPath() == sandbox) { "Unsafe fixture root" }
             // Close all traversal handles BEFORE deletion, especially on Windows. No symlinks followed.
-            val ownedPaths = Files.walk(sandbox).use { paths -> paths.sorted(Comparator.reverseOrder()).toList() }
-            check(ownedPaths.all { it.toAbsolutePath().normalize().startsWith(sandbox) }) { "Unsafe fixture entry" }
-            // SQLite can remove a transient sidecar after the snapshot. Other IO errors still fail.
-            ownedPaths.forEach { Files.deleteIfExists(it) }
+            suspend fun deleteOwnedTree() {
+                val ownedPaths = Files.walk(sandbox).use { paths -> paths.sorted(Comparator.reverseOrder()).toList() }
+                check(ownedPaths.all { it.toAbsolutePath().normalize().startsWith(sandbox) }) { "Unsafe fixture entry" }
+                // SQLite can remove a transient sidecar after the snapshot. Other IO errors still fail.
+                ownedPaths.forEach { Files.deleteIfExists(it) }
+            }
+            // A pending Windows delete may leave an empty directory visible until its final handle closes.
+            for (attempt in 0..6) {
+                try { deleteOwnedTree(); break }
+                catch (pending: java.nio.file.DirectoryNotEmptyException) {
+                    if (attempt == 6 || !System.getProperty("os.name").startsWith("Windows")) throw pending
+                    delay(50L * (attempt + 1))
+                }
+            }
             check(!Files.exists(sandbox)) { "Fixture cleanup did not remove owned root" }
         }
         cleanupFailure?.let { failure ->

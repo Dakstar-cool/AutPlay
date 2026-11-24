@@ -65,12 +65,12 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0075_sona_collection_window"]
+    assert heads == ["0078_playlist_snapshots"]
     assert heads == [EXPECTED_MIGRATION_HEAD]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 183
+    assert _object_count(database_harness, empty_database_name) == 187
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -78,7 +78,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 183
+    assert _object_count(database_harness, empty_database_name) == 187
 
 
 def test_sona_upgrade_imports_legacy_window_and_preserves_operator_stop(
@@ -221,6 +221,9 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0073_device_recovery_v2",
         "0074_device_deletion_v2",
         "0075_sona_collection_window",
+        "0076_internet_search_25",
+        "0077_catalog_browse_pages",
+        "0078_playlist_snapshots",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 

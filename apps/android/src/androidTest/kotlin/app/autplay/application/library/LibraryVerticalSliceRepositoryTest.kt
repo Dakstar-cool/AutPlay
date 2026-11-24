@@ -252,6 +252,98 @@ class LibraryVerticalSliceRepositoryTest {
         assertEquals(1, historyCount)
     }
 
+    @Test fun libraryIncludesPersistedLikesBeyondRecentEntriesAndWithoutMembership() = runBlocking {
+        val owner = binding(900)
+        val profile = owner.serverProfileId.value
+        val old = ids(910)
+        val recent = ids(920)
+        val withoutEntry = id(930)
+        val other = binding(940)
+        val foreignTrack = id(950)
+        val commands = LocalLibraryCommandRepository(database)
+        commands.add(AddLocalTrackCommand(owner, old.track, old.entry, old.change, "Old", "Artist", 1))
+        commands.add(AddLocalTrackCommand(owner, recent.track, recent.entry, recent.change, "Recent", "Artist", 2))
+        val ref = requireNotNull(database.libraryDao().trackRef(old.track.value))
+        database.libraryDao().upsertTrackRef(ref.copy(localUserTrackRefId = withoutEntry.value, rawTitle = "From player"))
+        database.libraryDao().upsertTrackRef(ref.copy(localUserTrackRefId = foreignTrack.value, serverProfileId = other.serverProfileId.value))
+        val slice = LibraryVerticalSliceRepository(database)
+        slice.setPlaybackPreference(owner, old.track, id(961), "LIKED", null, 3)
+        slice.setPlaybackPreference(owner, withoutEntry, id(962), "LIKED", null, 4)
+        slice.setPlaybackPreference(other, foreignTrack, id(963), "LIKED", null, 5)
+        slice.setPlaybackPreference(owner, recent.track, id(964), "DISLIKED", null, 6)
+
+        database.close()
+        database = AutPlayDatabase.open(context, name)
+        val product = CoreProductRepository(database)
+        val library = product.libraryEntries(profile, limit = 1).first()
+        assertEquals(listOf(withoutEntry.value, recent.track.value, old.track.value), library.map { it.localUserTrackRefId })
+        assertEquals(listOf("From player", "Old"), library.filter { it.loved }.map { it.title })
+        assertNull(library.first().localLibraryEntryId)
+        assertEquals("LIKED", product.trackPreference(profile, old.track.value).first())
+        assertNull(product.trackPreference(other.serverProfileId.value, old.track.value).first())
+
+        val reopened = LibraryVerticalSliceRepository(database)
+        reopened.setPlaybackPreference(owner, withoutEntry, id(965), "NEUTRAL", null, 7)
+        reopened.setPlaybackPreference(owner, recent.track, id(966), "LIKED", null, 8)
+        assertEquals(listOf(recent.track.value, old.track.value),
+            product.libraryEntries(profile, limit = 1).first().filter { it.loved }.map { it.localUserTrackRefId })
+        reopened.setPlaybackPreference(owner, recent.track, id(967), "NEUTRAL", null, 9)
+        val remaining = product.libraryEntries(profile, limit = 1).first()
+        assertEquals(2, remaining.size)
+        assertEquals(listOf(old.track.value), remaining.filter { it.loved }.map { it.localUserTrackRefId })
+    }
+
+    @Test fun myMusicKeepsEachIndependentSaveUntilItsLastReasonIsRemoved() = runBlocking {
+        val owner = binding(970)
+        val profile = owner.serverProfileId.value
+        val saved = ids(980)
+        val other = id(990)
+        val commands = LocalLibraryCommandRepository(database)
+        commands.add(AddLocalTrackCommand(owner, saved.track, saved.entry, saved.change, "Saved", "Vault artist", 1))
+        val dao = database.libraryDao()
+        val libraryEntry = requireNotNull(dao.entry(saved.entry.value))
+        dao.upsertEntry(libraryEntry.copy(source = "SEARCH", availabilityStatus = "VAULT"))
+        val ref = requireNotNull(dao.trackRef(saved.track.value))
+        dao.upsertTrackRef(ref.copy(localUserTrackRefId = other.value, rawTitle = "Wave", rawArtist = "Playlist artist"))
+
+        val library = CoreProductRepository(database)
+        val slice = LibraryVerticalSliceRepository(database)
+        val artists = app.autplay.application.artist.RoomArtistCatalogPort(database)
+        suspend fun tracks() = library.libraryEntries(profile).first().map { it.localUserTrackRefId }.toSet()
+        suspend fun names() = artists.browse(owner.serverProfileId, 20).map { it.name }.toSet()
+        assertEquals(setOf(saved.track.value), tracks())
+        slice.setPlaybackPreference(owner, other, id(991), "LIKED", null, 2)
+        assertEquals(setOf(saved.track.value, other.value), tracks())
+        slice.setPlaybackPreference(owner, other, id(992), "NEUTRAL", null, 3)
+        assertEquals(setOf(saved.track.value), tracks())
+        assertEquals(setOf("Vault artist"), names())
+
+        val lists = listOf(id(993), id(994))
+        val entries = listOf(id(995), id(996))
+        lists.forEachIndexed { index, playlist ->
+            slice.createPlaylist(owner, playlist, LocalId.random(), "Manual $index", null, 4)
+            slice.addPlaylistEntry(owner, playlist, entries[index], other, LocalId.random(), null, null, 5)
+        }
+        slice.setPlaybackPreference(owner, other, LocalId.random(), "LIKED", null, 6)
+        slice.setPlaybackPreference(owner, other, LocalId.random(), "NEUTRAL", null, 7)
+        slice.setPlaybackPreference(owner, saved.track, LocalId.random(), "LIKED", null, 8)
+        slice.setPlaybackPreference(owner, saved.track, LocalId.random(), "NEUTRAL", null, 9)
+        assertEquals(setOf(saved.track.value, other.value), tracks())
+        assertEquals(2, library.libraryEntries(profile).first().size)
+        assertEquals(setOf("Vault artist", "Playlist artist"), names())
+        slice.removePlaylistEntry(owner, entries.first(), LocalId.random(), 10)
+        assertTrue(other.value in tracks())
+        slice.deletePlaylist(owner, lists.last(), LocalId.random(), 11)
+        assertEquals(setOf(saved.track.value), tracks())
+        assertEquals(setOf("Vault artist"), names())
+
+        slice.setPlaybackPreference(owner, saved.track, LocalId.random(), "LIKED", null, 12)
+        slice.removeLibrary(owner, saved.entry, LocalId.random(), 13)
+        assertEquals(setOf(saved.track.value), tracks())
+        slice.setPlaybackPreference(owner, saved.track, LocalId.random(), "NEUTRAL", null, 14)
+        assertTrue(tracks().isEmpty())
+    }
+
     @Test fun coreProductDetailsRejectForeignProfileTargets() = runBlocking {
         val ownerA = binding(340)
         val ownerB = binding(350)
@@ -347,6 +439,29 @@ class LibraryVerticalSliceRepositoryTest {
             "content://$testPackageName.revoked/audio/1",
         )
         assertEquals(ContentUriStatus.PERMISSION_REVOKED, inspection.status)
+    }
+
+    @Test fun firstPlaylistAndTrackCommitTogetherAndReplayAfterReopen() = runBlocking {
+        val ids = ids(50)
+        val playlist = id(54)
+        val owner = binding()
+        LocalLibraryCommandRepository(database).add(AddLocalTrackCommand(owner, ids.track, ids.entry, ids.change, "BASS PESADÃO", "SVRGN & RAGETRAIN", 1))
+        var writes = 0
+        val failing = LibraryVerticalSliceRepository(database, SliceFailureInjector {
+            if (++writes == 2) error("interrupted")
+        })
+        assertTrue(runCatching { failing.createPlaylistWithTrack(owner, playlist, "First", null, ids.track, 2) }.isFailure)
+        assertNull(database.playlistDao().playlist(playlist.value))
+        LibraryVerticalSliceRepository(database).createPlaylistWithTrack(owner, playlist, "First", null, ids.track, 3)
+        database.close()
+        database = AutPlayDatabase.open(context, name)
+        val repository = LibraryVerticalSliceRepository(database)
+        repository.createPlaylistWithTrack(owner, playlist, "First", null, ids.track, 4)
+        val first = database.playlistDao().activeEntryList(playlist.value, 10).single()
+        repository.addPlaylistEntry(owner, playlist, id(58), ids.track, id(59), null, null, 5)
+        val rows = database.playlistDao().activeEntryList(playlist.value, 10)
+        assertEquals(listOf(first.localPlaylistEntryId, id(58).value), rows.map { it.localPlaylistEntryId })
+        assertEquals("PRIVATE", database.playlistDao().playlist(playlist.value)?.visibility)
     }
 
     @Test fun duplicatePlaylistEntriesRemainDistinctAcrossReorder() = runBlocking {

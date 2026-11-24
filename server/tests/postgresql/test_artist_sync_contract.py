@@ -268,6 +268,76 @@ def _catalog_world(
     )
 
 
+def test_joint_recording_and_edition_keep_both_primary_artists(
+    database_url: str, database_connection: Connection[Any]
+) -> None:
+    principal, credit, lead, partner, release, _ = _catalog_world(database_connection)
+    for artist, name in ((lead, "SVRGN"), (partner, "RAGETRAIN")):
+        database_connection.execute(
+            "UPDATE catalog.artist SET name=%s, normalized_name=lower(%s) WHERE artist_id=%s",
+            (name, name, artist),
+        )
+        database_connection.execute(
+            "UPDATE catalog.artist_credit_name SET credited_name=%s, role='PRIMARY' "
+            "WHERE artist_credit_id=%s AND artist_id=%s",
+            (name, credit, artist),
+        )
+    recording = _required_value(
+        database_connection.execute(
+            "SELECT recording_id FROM catalog.release_track JOIN catalog.medium USING(medium_id) "
+            "WHERE release_id=%s",
+            (release,),
+        )
+    )
+    database_connection.execute(
+        "UPDATE catalog.recording SET title='BASS PESADÃO' WHERE recording_id=%s",
+        (recording,),
+    )
+    database_connection.commit()
+    engine = create_engine(database_url)
+    try:
+        sync = SyncService(engine, cursor_secret=b"artist-contract-cursor-secret-32bytes")
+        snapshot = sync.bootstrap(
+            principal,
+            {
+                **_bind(sync, principal),
+                "reason": "FIRST_SYNC",
+                "snapshot_id": None,
+                "page_token": None,
+                "pending_local_event_count": 0,
+                "catalog_projection_version": 1,
+                "capabilities": [CATALOG_ARTIST_ID_V1, "CATALOG_EDITION_V1"],
+            },
+        )
+        payloads = {
+            (row["aggregate_type"], row["aggregate_server_id"]): row["payload"]
+            for row in snapshot["aggregates"]
+        }
+        track = next(
+            payload
+            for (kind, _), payload in payloads.items()
+            if kind == "EDITION_TRACK" and payload["release_id"] == str(release)
+        )
+        assert (track["recording_id"], track["disc"], track["sequence_no"]) == (
+            str(recording),
+            1,
+            1,
+        )
+        for kind, subject in (("RECORDING", recording), ("RELEASE", release)):
+            assert payloads[(f"{kind}_ARTIST_CREDIT", str(subject))]["artist_credit_id"] == str(
+                credit
+            )
+        assert [
+            (row["artist_id"], row["credited_name"], row["role"])
+            for row in payloads[("ARTIST_CREDIT", str(credit))]["names"]
+        ] == [
+            (str(lead), "SVRGN", "PRIMARY"),
+            (str(partner), "RAGETRAIN", "PRIMARY"),
+        ]
+    finally:
+        engine.dispose()
+
+
 def test_artist_bootstrap_incremental_owner_scope_and_atomicity(
     database_url: str, database_connection: Connection[Any]
 ) -> None:

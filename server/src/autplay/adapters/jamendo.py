@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from autplay.domain.acquisition_policy import track_review_reasons
 from autplay.domain.discovery import (
     DiscoveryCandidate,
     DiscoveryError,
@@ -111,7 +112,11 @@ class JamendoProvider:
                 "type": "single albumtrack",
             },
         )
-        return _parse_candidates(payload, limit=limit)
+        return tuple(
+            c
+            for c in _parse_candidates(payload, limit=limit)
+            if not track_review_reasons(c.duration_seconds, c.title, c.album)
+        )
 
     def lookup(self, provider_track_id: str) -> DiscoveryCandidate:
         if re.fullmatch(r"\d{1,20}", provider_track_id) is None:
@@ -239,7 +244,11 @@ class JamendoProvider:
         max_bytes: int,
         preserve_partial: bool = False,
     ) -> int:
-        if not candidate.acquisition_allowed or candidate.download_url is None:
+        if (
+            not candidate.acquisition_allowed
+            or candidate.download_url is None
+            or track_review_reasons(candidate.duration_seconds, candidate.title, candidate.album)
+        ):
             raise DiscoveryError("discovery_not_eligible")
         if not 1_024 <= max_bytes <= 1024 * 1024 * 1024:
             raise ValueError("Jamendo acquisition limit is invalid")
@@ -450,16 +459,21 @@ def _parse_candidate(value: Mapping[str, object]) -> DiscoveryCandidate:
     if not isinstance(allowed, bool):
         raise DiscoveryError("discovery_provider_response_invalid")
     download_url = _optional_text(value, "audiodownload", 2_048)
+    title = _text(value, "name", 500)
+    album = _optional_text(value, "album_name", 500)
+    seconds = _integer(value, "duration", 24 * 60 * 60)
+    if track_review_reasons(seconds, title, album):
+        allowed = False
     if not allowed:
         download_url = None
     try:
         return DiscoveryCandidate(
             provider_track_id=track_id,
             provider_artist_id=_digits(value, "artist_id"),
-            title=_text(value, "name", 500),
+            title=title,
             artist=_text(value, "artist_name", 500),
-            album=_optional_text(value, "album_name", 500),
-            duration_seconds=_integer(value, "duration", 24 * 60 * 60),
+            album=album,
+            duration_seconds=seconds,
             license_url=_text(value, "license_ccurl", 1_000),
             share_url=_text(value, "shareurl", 1_000),
             acquisition_allowed=allowed,

@@ -22,6 +22,7 @@ from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.application.track_metadata import TrackMetadataService
 from autplay.domain.discovery import DiscoveryError
 from autplay.domain.jobs import JobKey, RetryableJobError, TerminalJobError
+from autplay.domain.music_search import SEARCH_POLICY
 from autplay.domain.resource_admission import AcquisitionClaim, ResourceAdmissionError
 from autplay.domain.track_metadata import sanitize_source_metadata, source_metadata_document
 from autplay.domain.vault import Sha256Digest, VaultLimits, VerifiedStagedFile
@@ -182,6 +183,8 @@ class PostgresInternetAcquisitionRepository:
             if existing is not None:
                 return existing
             self._authorize(session, source)
+            if source.selected_snapshot.get("policy") != SEARCH_POLICY:
+                raise TerminalJobError("provider_track_policy_rejected")
             if source.state not in {"QUEUED", "DOWNLOADING"}:
                 raise TerminalJobError("music_acquisition_unavailable")
             if source.user_track_ref_id is None:

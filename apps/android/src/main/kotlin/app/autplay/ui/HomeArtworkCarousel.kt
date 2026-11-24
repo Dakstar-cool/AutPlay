@@ -46,6 +46,8 @@ internal fun HomeArtworkCarousel(
     onNext: () -> Unit,
     animations: Boolean = rememberSystemAnimationsEnabled(),
     trackId: String? = null,
+    compactCover: Boolean = false,
+    artworkPainter: androidx.compose.ui.graphics.painter.Painter? = null,
 ) {
     val visibleTargets = motion.frozenTargets ?: targets
     LaunchedEffect(enabled, targets.previous?.key, targets.next?.key) {
@@ -54,7 +56,7 @@ internal fun HomeArtworkCarousel(
     val openLabel = stringResource(R.string.home_hero_open_player)
     val unknownTitle = stringResource(R.string.player_nothing_playing)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val artworkSize = (maxWidth * 0.62f).coerceAtMost(208.dp)
+        val artworkSize = if (compactCover) (maxWidth * 0.30f).coerceIn(88.dp, 132.dp) else (maxWidth * 0.62f).coerceAtMost(208.dp)
         val widthPixels = with(LocalDensity.current) { maxWidth.toPx() }
         SideEffect { motion.width = widthPixels }
         Box(
@@ -75,6 +77,7 @@ internal fun HomeArtworkCarousel(
                     AutPlayArtwork(
                         title = if (side == 0) title else neighbor?.title ?: unknownTitle,
                         size = artworkSize,
+                        painter = if (side == 0) artworkPainter else null,
                         trackId = if (side == 0) trackId else neighbor?.trackRefId,
                         modifier = if (side == 0) Modifier.clickable(
                             enabled = canOpen && !motion.busy,

@@ -10,12 +10,18 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.platform.app.InstrumentationRegistry
@@ -33,7 +39,26 @@ class LibrarySearchRefreshTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun shortTrackTitleFitsAt375DpAndPlayAffordanceStartsThatTrack() {
+    fun addActionRemainsAccessibleAtNarrowWidthAndDisablesDuringImport() {
+        var imports = 0
+        val importing = mutableStateOf(false)
+        compose.setContent {
+            AutPlayTheme {
+                Box(Modifier.width(320.dp)) {
+                    LibraryProductScreen(LibraryScreenUiState(true, emptyList(), importingLocalTrack = importing.value),
+                        PaddingValues(), onAddLocal = { imports++ }, onSelect = {}, onRemoveOrRestore = {}, onLike = {})
+                }
+            }
+        }
+        compose.onNodeWithTag("library-add").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("library-favorites").assertIsDisplayed()
+        compose.onNodeWithTag("library-downloads").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, imports); importing.value = true }
+        compose.onNodeWithTag("library-add").assertIsNotEnabled()
+    }
+
+    @Test
+    fun shortTrackTitleFitsAt375DpAndTappingTitleStartsThatTrack() {
         val played = mutableListOf<String>()
         val title = "First Light.wav"
         compose.setContent {
@@ -61,8 +86,31 @@ class LibrarySearchRefreshTest {
                 assertEquals(detail, title.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
                 for (line in 0 until layout.lineCount) assertFalse(detail, layout.isLineEllipsized(line))
             }
-        compose.onNodeWithContentDescription(context.getString(R.string.library_play_track, title)).performClick()
+        compose.onNodeWithText(title).performClick()
         compose.runOnIdle { assertEquals(listOf("first"), played) }
+    }
+
+    @Test
+    fun reachingEndOfVaultLoadsMoreAndKeepsEarlierMatches() {
+        val initial = (1..100).map { VaultSearchUiItem("id-$it", "Track $it", "Artist", "VAULT", "VAULT", true) }
+        val state = mutableStateOf(SearchScreenUiState("Track", emptyList(), searched = true, vaultAvailable = true,
+            vaultSearched = true, vaultResults = initial, vaultNextCursor = "next"))
+        compose.setContent {
+            AutPlayTheme {
+                SearchProductScreen(state.value, PaddingValues(), {}, {}, {}, onMoreVault = {
+                    state.value = state.value.copy(vaultNextCursor = null, vaultResults = initial +
+                        VaultSearchUiItem("last", "Last track", "Artist", "VAULT", "VAULT", true))
+                })
+            }
+        }
+        val list = compose.onNodeWithTag("search-product-list")
+        list.performScrollToNode(hasTestTag("vault-result-id-100"))
+        list.performTouchInput { swipeUp() }
+        compose.waitUntil(8000) { state.value.vaultNextCursor == null }
+        list.performScrollToNode(hasTestTag("vault-result-last"))
+        compose.onNodeWithTag("vault-result-last").assertIsDisplayed()
+        list.performScrollToNode(hasTestTag("vault-result-id-1"))
+        compose.onNodeWithTag("vault-result-id-1").assertIsDisplayed()
     }
 
     @Test
@@ -88,6 +136,57 @@ class LibrarySearchRefreshTest {
         assertTrue(compose.onAllNodesWithText(context.getString(R.string.search_vault_scope)).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("search-product-list").performScrollToNode(hasTestTag("vault-result-vault-a"))
         compose.onNodeWithTag("vault-result-vault-a").assertIsDisplayed()
+    }
+
+    @Test
+    fun mixedSearchShowsSourceOfflineStatusAndOneRowPerLinkedRecording() {
+        val localPlays = mutableListOf<String>()
+        val serverPlays = mutableListOf<String>()
+        val localized = app.autplay.localizedAppContext(context, AppLanguage.Russian)
+        val state = SearchScreenUiState(
+            query = "Тихий свет",
+            results = listOf(
+                CoreTrackUiItem("shared", "Тихий свет", "Маяк"),
+                CoreTrackUiItem("phone", "Тихий свет (демо)", "Маяк"),
+            ),
+            searched = true, vaultAvailable = true, vaultSearched = true,
+            offlineTrackIds = setOf("shared", "phone"),
+            vaultResults = listOf(
+                VaultSearchUiItem("overlap", "Тихий свет", "Маяк", "VAULT", "VAULT", true, "shared"),
+                VaultSearchUiItem("live", "Тихий свет", "Маяк", "VAULT", "VAULT", true, "other-recording"),
+                VaultSearchUiItem("archive", "Тихий свет (архив)", "Маяк", "IMPORT", "PENDING", false),
+            ),
+        )
+        compose.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalContext provides localized,
+                androidx.compose.ui.platform.LocalResources provides localized.resources,
+                androidx.compose.ui.platform.LocalConfiguration provides localized.resources.configuration,
+            ) {
+                AutPlayTheme {
+                    AutPlayAdaptiveShell(selectedDestination = UiDestination.Search, onDestinationSelected = {}) { _, padding, _ ->
+                        SearchProductScreen(state, padding, {}, {}, { localPlays += it }, { serverPlays += it })
+                    }
+                }
+            }
+        }
+        val list = compose.onNodeWithTag("search-product-list")
+        fun row(tag: String) = compose.onNodeWithTag(tag).also { list.performScrollToNode(hasTestTag(tag)) }
+        compose.waitForIdle()
+        app.autplay.saveUiScreenshot("search-mixed")
+        row("local-result-shared").assertTextContains(localized.getString(R.string.search_source_both_offline)).performClick()
+        row("local-result-phone").assertTextContains(localized.getString(R.string.search_source_phone_offline))
+        row("vault-result-live").assertTextContains(localized.getString(R.string.search_source_server_online)).performClick()
+        row("vault-result-archive").assertHasNoClickAction()
+        compose.onNodeWithText(localized.getString(R.string.search_source_server_unavailable), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("vault-result-overlap").assertDoesNotExist()
+        val count = localized.resources.getQuantityString(R.plurals.ui_library_refresh_search_count, 4, 4)
+        list.performScrollToNode(androidx.compose.ui.test.hasText(count))
+        compose.onAllNodesWithText(count).assertCountEquals(1)
+        compose.runOnIdle {
+            assertEquals(listOf("shared"), localPlays)
+            assertEquals(listOf("live"), serverPlays)
+        }
     }
 
     @Test

@@ -28,7 +28,7 @@ class InternetSearchRow(Base):
         UniqueConstraint("user_id", "search_id", name="internet_search_user_id_search_id_key"),
         CheckConstraint("length(query) BETWEEN 1 AND 200", name="internet_search_query_check"),
         CheckConstraint(
-            "jsonb_typeof(candidates)='array' AND jsonb_array_length(candidates)<=5",
+            "jsonb_typeof(candidates)='array' AND jsonb_array_length(candidates)<=25",
             name="internet_search_candidates_check",
         ),
         CheckConstraint(

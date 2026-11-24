@@ -9,6 +9,7 @@ from .music_search import normalize_music_query
 from .track_metadata import version_markers
 
 MAX_DISCOVERY_OFFSET = 1000
+MAX_BROWSE_OFFSET = 1_000_000
 MAX_RELEASE_TRACKS = 5000
 
 
@@ -35,10 +36,10 @@ def discovery_query(query: str) -> str:
         raise MusicDiscoveryValidationError("music_discovery_query_invalid") from None
 
 
-def discovery_page_bounds(limit: int, offset: int) -> None:
+def discovery_page_bounds(limit: int, offset: int, maximum: int = MAX_DISCOVERY_OFFSET) -> None:
     if type(limit) is not int or not 1 <= limit <= 50:
         raise MusicDiscoveryValidationError("music_discovery_limit_invalid")
-    if type(offset) is not int or not 0 <= offset <= MAX_DISCOVERY_OFFSET:
+    if type(offset) is not int or not 0 <= offset <= maximum:
         raise MusicDiscoveryValidationError("music_discovery_offset_invalid")
 
 
@@ -57,6 +58,9 @@ class MusicDiscoveryCard:
     disc_number: int | None = None
     track_number: int | None = None
     recording_title: str | None = None
+    release_group_id: UUID | None = None
+    release_type: str | None = None
+    guest_artist_ids: tuple[UUID, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.title.strip() or len(self.title) > 500:
@@ -104,6 +108,13 @@ class MusicDiscoveryCard:
     def view(self) -> dict[str, object]:
         return {
             "id": self.namespaced_id,
+            **(
+                {"guest_artist_ids": [str(item) for item in self.guest_artist_ids]}
+                if self.guest_artist_ids
+                else {}
+            ),
+            **({"release_group_id": str(self.release_group_id)} if self.release_group_id else {}),
+            **({"release_type": self.release_type} if self.release_type else {}),
             "entity_type": self.entity_type.value,
             "entity_id": str(self.entity_id),
             "title": self.title,
@@ -133,9 +144,11 @@ class MusicDiscoveryPage:
     offset: int
     total_count: int
     source_page_count: int
+    edition_items: tuple[MusicDiscoveryCard, ...] | None = None
+    max_offset: int = MAX_DISCOVERY_OFFSET
 
     def __post_init__(self) -> None:
-        discovery_page_bounds(self.limit, self.offset)
+        discovery_page_bounds(self.limit, self.offset, self.max_offset)
         if (
             type(self.total_count) is not int
             or not 0 <= self.total_count <= 1000000
@@ -149,9 +162,7 @@ class MusicDiscoveryPage:
         following = self.offset + self.source_page_count
         more = following < self.total_count
         next_offset = (
-            following
-            if more and self.source_page_count and following <= MAX_DISCOVERY_OFFSET
-            else None
+            following if more and self.source_page_count and following <= self.max_offset else None
         )
         return {
             "contract_version": "music-discovery-v1",

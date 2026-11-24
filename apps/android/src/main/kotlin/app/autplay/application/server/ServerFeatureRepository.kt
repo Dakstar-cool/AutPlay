@@ -42,12 +42,19 @@ data class ServerHealth(
     val streamLive: Boolean,
 )
 
+data class RemoteLibrarySearchPage(val items: List<RemoteLibraryEntry>, val nextCursor: String?)
+
 data class RemoteLibraryEntry(
     val libraryEntryId: String,
     val userTrackRefId: String,
     val source: String,
     val availabilityStatus: String,
     val rowVersion: Long,
+    val catalogId: String? = null,
+    val recordingId: String? = null,
+    val title: String? = null,
+    val artist: String? = null,
+    val durationMs: Long? = null,
 )
 
 data class RemotePlaylist(
@@ -179,9 +186,7 @@ class ServerFeatureRepository(
     streamBaseUrl: String,
     private val profileId: ServerProfileId,
     private val credentials: CredentialStore,
-    client: OkHttpClient = OkHttpClient.Builder()
-        .callTimeout(Duration.ofSeconds(45))
-        .build(),
+    client: OkHttpClient = sharedClient,
     private val m5Rotation: M5SessionRotationClient? = null,
     private val beforeRequest: suspend () -> Unit = {},
 ) : InternetMetadataDiscoveryPort {
@@ -215,6 +220,12 @@ class ServerFeatureRepository(
 
     suspend fun metadataBackfill(): Int = musicPost("/music/metadata/backfill", JsonObject(emptyMap())).requiredInt("queued")
 
+    suspend fun catalogCover(id: String): ByteArray {
+        catalogueUuid(id)
+        return checkNotNull(authorizedRaw(Request.Builder().url("$apiBaseUrl/music/discovery/releases/$id/cover").get().build(),
+            expectBody = true, binary = true).bytes)
+    }
+
     suspend fun metadataArtwork(refId: String, sha: String): ByteArray {
         requireUuidLike(refId)
         require(SHA256_REGEX.matches(sha))
@@ -230,13 +241,13 @@ class ServerFeatureRepository(
     }
 
     override suspend fun searchInternetMusic(query: String, operationId: String, catalogueContextId: String?): InternetMusicSearch {
-        catalogueContextId?.let(MetadataDiscoveryJson::uuid)
-        val root = musicPost("/music/internet/search", buildJsonObject {
+        catalogueContextId?.let(::catalogueUuid)
+        val root = musicPost("/music/internet/search?limit=25", buildJsonObject {
             put("query", query); put("operation_id", operationId)
             catalogueContextId?.let { put("catalogue_context_id", it) }
         })
         check(root.requiredString("contract_version", 40) == "internet-music-v1")
-        return InternetMusicSearch(root.requiredString("search_id", UUID_TEXT_LENGTH), root.requiredArray("candidates", 5).map {
+        return InternetMusicSearch(root.requiredString("search_id", UUID_TEXT_LENGTH), root.requiredArray("candidates", 25).map {
             InternetMusicCandidate(it.requiredString("candidate_id", 40), it.requiredString("title", 500),
                 it.requiredString("artist", 500), it.requiredString("provider", 40), it.requiredLong("duration_ms"))
         })
@@ -257,6 +268,12 @@ class ServerFeatureRepository(
             root.optionalString("user_track_ref_id", UUID_TEXT_LENGTH), root.optionalString("audio_variant_id", UUID_TEXT_LENGTH))
     }
 
+    suspend fun publishPlaylist(snapshot: JsonObject): String {
+        val result = musicPost("/playlist-shares", snapshot)
+        val token = java.util.UUID.fromString(result.getValue("token").jsonPrimitive.content)
+        return "$apiBaseUrl/playlist-shares/$token"
+    }
+
     private suspend fun musicPost(path: String, body: JsonObject): JsonObject = authorized(Request.Builder()
         .url(apiBaseUrl + path).post(body.toString().toRequestBody(JSON_MEDIA_TYPE)).build()).jsonObject
 
@@ -271,22 +288,59 @@ class ServerFeatureRepository(
         return discoveryPage(Request.Builder().url(url).get().build())
     }
 
+    override suspend fun discoveryArtistReleases(id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage =
+        discoveryTracks("artists", id, limit, offset, "releases")
+
     override suspend fun discoveryArtistTracks(id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage =
         discoveryTracks("artists", id, limit, offset)
 
     override suspend fun discoveryReleaseTracks(id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage =
         discoveryTracks("releases", id, limit, offset)
 
-    private suspend fun discoveryTracks(collection: String, id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage {
-        MetadataDiscoveryJson.uuid(id)
-        require(limit in 1..50 && offset in 0..1000)
-        val url = "$apiBaseUrl/music/discovery/$collection/$id/tracks".toHttpUrl().newBuilder()
+    private suspend fun discoveryTracks(collection: String, id: String, limit: Int, offset: Int, resource: String = "tracks"): InternetMetadataDiscoveryPage {
+        catalogueUuid(id)
+        require(limit in 1..50 && offset in 0..1_000_000)
+        val url = "$apiBaseUrl/music/discovery/$collection/$id/$resource".toHttpUrl().newBuilder()
             .addQueryParameter("limit", limit.toString()).addQueryParameter("offset", offset.toString()).build()
         return discoveryPage(Request.Builder().url(url).get().build())
     }
 
     private suspend fun discoveryPage(request: Request): InternetMetadataDiscoveryPage =
         InternetMetadataDiscoveryCodec.decode(authorizedRaw(request, expectBody = true).body ?: error("SERVER_RESPONSE_INVALID"))
+
+    suspend fun catalogDownloadPreview(operation: String, kind: String, id: String, alternatives: Boolean): JsonObject {
+        catalogueUuid(operation)
+        catalogueUuid(id)
+        return musicPost("/music/discovery/downloads/preview", buildJsonObject {
+            put("operation_id", operation); put("target_kind", kind); put("entity_id", id); put("alternatives", alternatives)
+        })
+    }
+
+    suspend fun catalogDownload(operation: String, action: String): JsonObject {
+        catalogueUuid(operation)
+        val path = "/music/discovery/downloads/$operation"
+        return when (action) {
+            "status" -> authorized(Request.Builder().url(apiBaseUrl + path).get().build()).jsonObject
+            "start", "advance" -> musicPost("$path/$action", buildJsonObject {})
+            else -> error("Unknown catalogue operation")
+        }
+    }
+
+    suspend fun artistRanking(artistId: String): JsonObject {
+        catalogueUuid(artistId)
+        val result = authorized(Request.Builder().url("$apiBaseUrl/music/discovery/library-artists/$artistId/ranking").get().build()).jsonObject
+        check(result.requiredString("source", 30) == "ListenBrainz")
+        return result
+    }
+
+    override suspend fun catalogueTrackReference(contextId: String): CatalogueTrackReference {
+        catalogueUuid(contextId)
+        val root = musicPost("/music/discovery/contexts/$contextId/track-reference", buildJsonObject {})
+        return CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
+            root.requiredLong("row_version"), root.optionalString("recording_id", UUID_TEXT_LENGTH)?.let(::catalogueUuid),
+            root.requiredString("title", 2000), root.optionalString("artist", 2000), root.optionalString("album", 2000),
+            root["duration_ms"]?.jsonPrimitive?.longOrNull, root.requiredString("resolution_status", 80))
+    }
 
     override suspend fun createMusicCatalogueContext(selection: MusicCatalogueContextRequest): MusicCatalogueContext {
         val request = Request.Builder().url("$apiBaseUrl/music/discovery/contexts")
@@ -327,26 +381,53 @@ class ServerFeatureRepository(
         return RemoteLibrarySnapshot(entries, playlists, history)
     }
 
-    suspend fun searchLibrary(query: String, limit: Int = 50, kind: LibrarySearchKind = LibrarySearchKind.All): List<RemoteLibraryEntry> {
+    suspend fun searchLibrary(query: String, limit: Int = 50, kind: LibrarySearchKind = LibrarySearchKind.All, includeCatalog: Boolean = false): List<RemoteLibraryEntry> =
+        searchLibraryPage(query, limit, kind, includeCatalog).items
+
+    suspend fun searchLibraryPage(query: String, limit: Int, kind: LibrarySearchKind,
+        includeCatalog: Boolean, cursor: String? = null): RemoteLibrarySearchPage {
         val normalized = query.trim()
         require(normalized.isNotEmpty() && normalized.length <= 200)
         require(limit in 1..100)
         val url = "$apiBaseUrl/library/search".toHttpUrl().newBuilder()
             .addQueryParameter("q", normalized)
             .addQueryParameter("kind", kind.wireValue)
+            .apply {
+                if (includeCatalog) {
+                    addQueryParameter("include_catalog", "true")
+                    addQueryParameter("paged", "true")
+                    if (cursor != null) addQueryParameter("cursor", cursor)
+                }
+            }
             .addQueryParameter("limit", limit.toString())
             .build()
-        return authorized(Request.Builder().url(url).get().build()).jsonObject
-            .requiredArray("items", limit)
+        val response = authorized(Request.Builder().url(url).get().build()).jsonObject
+        val items = response.requiredArray("items", limit)
             .map { value ->
+                val catalogId = value.optionalString("catalog_id", UUID_TEXT_LENGTH)
                 RemoteLibraryEntry(
-                    libraryEntryId = value.requiredString("library_entry_id", UUID_TEXT_LENGTH),
+                    libraryEntryId = catalogId ?: value.requiredString("library_entry_id", UUID_TEXT_LENGTH),
+                    catalogId = catalogId,
+                    recordingId = value.optionalString("recording_id", UUID_TEXT_LENGTH),
+                    title = value.optionalString("title", MAX_DISPLAY_TEXT),
+                    artist = value.optionalString("artist", MAX_DISPLAY_TEXT),
+                    durationMs = (value["duration_ms"] as? JsonPrimitive)?.longOrNull,
                     userTrackRefId = value.requiredString("user_track_ref_id", UUID_TEXT_LENGTH),
                     source = value.requiredString("source", MAX_SHORT_TEXT),
                     availabilityStatus = value.requiredString("availability_status", MAX_SHORT_TEXT),
                     rowVersion = value.requiredLong("row_version"),
                 )
             }
+        return RemoteLibrarySearchPage(items, response.optionalString("next_cursor", 2048))
+    }
+
+    suspend fun prepareCatalogPlayback(ids: List<String>): Set<String> {
+        require(ids.size in 1..100)
+        val response = musicPost("/library/search/playback", buildJsonObject {
+            put("publications", JsonArray(ids.map(::JsonPrimitive)))
+        })
+        return response.getValue("refs").jsonArray.also { require(it.size <= ids.size) }
+            .mapTo(mutableSetOf()) { it.jsonPrimitive.content }
     }
 
     /** Reads the Web-admin decision for the authenticated device; the app cannot mutate it. */
@@ -946,6 +1027,8 @@ class ServerFeatureRepository(
     private data class HttpResult(val status: Int, val body: String?, val headers: Map<String, String>, val bytes: ByteArray? = null)
 
     private companion object {
+        // Per-request credentials stay on the request. Connections can span repository instances.
+        val sharedClient = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(45)).build()
         val JSON_MEDIA_TYPE = "application/json".toMediaType()
         val OFFSET_MEDIA_TYPE = "application/offset+octet-stream".toMediaType()
         val UUID_REGEX = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")

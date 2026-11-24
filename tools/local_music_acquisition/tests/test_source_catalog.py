@@ -157,7 +157,15 @@ def test_manual_url_avoids_search_but_still_checks_original_and_drm():
 
 
 def test_youtube_manual_link_requires_correct_id_and_version():
-    detail = {"id": "abcdefghijk", "extractor_key": "Youtube", "artist": "Artist", "track": "Song"}
+    detail = {
+        "id": "abcdefghijk",
+        "extractor_key": "Youtube",
+        "artist": "Artist",
+        "track": "Song",
+        "categories": ["Music"],
+        "album": "Studio album",
+        "duration": 180,
+    }
     calls = []
 
     def extract(url, **kwargs):

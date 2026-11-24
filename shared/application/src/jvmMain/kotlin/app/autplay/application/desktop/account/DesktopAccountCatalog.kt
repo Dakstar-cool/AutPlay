@@ -19,7 +19,18 @@ data class AccountCatalogArtistPage(val items:List<AccountCatalogArtist>,val sca
 data class AccountCatalogAppearancePage(val items:List<AccountCatalogAppearance>,val scannedThrough:AccountCatalogSubjectCursor?,val exhausted:Boolean)
 data class AccountCatalogTrackContext(val track: AccountLocalDomainRow,
     val library: List<AccountLocalDomainRow>, val libraryHasMore: Boolean)
+data class AccountWaveListen(val track: AccountUuid, val startedAtMs: Long, val playedMs: Long, val ratio: Double?,
+    val surface: String?)
+
 interface DesktopAccountCatalog {
+    suspend fun recordingRefs(lease: AccountLease, recording: AccountUuid, after: AccountUuid?, limit: Int = 100): List<AccountUuid> =
+        throw AccountStoreException(AccountFailure.ACCOUNT_UNSUPPORTED_OPERATION)
+    suspend fun waveListens(lease: AccountLease, since: Long, through: Long): List<AccountWaveListen> =
+        throw AccountStoreException(AccountFailure.ACCOUNT_UNSUPPORTED_OPERATION)
+
+    suspend fun resolveMusicTargets(lease: AccountLease, ids: List<AccountUuid>, recording: Boolean): Map<AccountUuid, AccountUuid> =
+        throw AccountStoreException(AccountFailure.ACCOUNT_UNSUPPORTED_OPERATION)
+
     /** Entire admitted current J set or an explicit refusal; never a first-page snapshot. */
     suspend fun captureSearch(lease: AccountLease, kind: AccountCatalogSearchKind): AccountCatalogSearchSnapshot =
         throw AccountStoreException(AccountFailure.ACCOUNT_UNSUPPORTED_OPERATION)

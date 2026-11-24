@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from .library import LibraryCommandError
 
+SEARCH_POLICY = "studio-track-v1"
+
 
 class MusicSearchKind(StrEnum):
     ALL = "all"

@@ -1,5 +1,13 @@
 package app.autplay.ui.desktop
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import app.autplay.ui.AutPlayArtworkPlaceholder
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -105,7 +113,33 @@ internal fun DesktopAccountCatalogContent(owner: DesktopAccountUiOwner, language
             val ordered = if (pageSort == DesktopCatalogPageSort.Source) page.entries else page.entries.sortedWith(
                 compareBy<DesktopCatalogEntry> { value(it) == null }.thenBy { value(it).orEmpty().lowercase() }
                     .thenBy { it.key.id }.thenBy { it.occurrenceId.orEmpty() })
-            ordered.forEach { entry -> key(entry.key, entry.occurrenceId) { AccountCatalogEntry(owner, entry, language) } }
+            if (state.relation == null && state.selectedKind in setOf(DesktopCatalogKind.Artist, DesktopCatalogKind.Album)) {
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val columns = (maxWidth / 158.dp).toInt().coerceIn(1, 6)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ordered.chunked(columns).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                row.forEach { entry -> key(entry.key) {
+                                    val action = if (entry.key.kind == DesktopCatalogKind.Artist) DesktopAccountAction.OpenArtist else DesktopAccountAction.OpenAlbum
+                                    val target = entry.openTargetId ?: entry.actionTargetId
+                                    Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
+                                        Column(Modifier.clickable(enabled = target != null && owner.available(action, target), role = Role.Button) {
+                                            if (target != null) owner.send(DesktopAccountCommand.Invoke(action, target))
+                                        }) {
+                                            AutPlayArtworkPlaceholder(entry.key.id, Modifier.fillMaxWidth().aspectRatio(1f))
+                                            Text(entry.title ?: DesktopCatalogText.NoTitle.text(language), Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                            entry.subtitle?.let { Text(it, Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) }
+                                        }
+                                    }
+                                } }
+                                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
+                    }
+                }
+            } else ordered.forEach { entry -> key(entry.key, entry.occurrenceId) { AccountCatalogEntry(owner, entry, language) } }
             page.previousTarget?.let { AccountButton(owner, DesktopAccountAction.CatalogPage, language, it,
                 label = DesktopCatalogText.First.text(language)) }
             page.nextTarget?.let { AccountButton(owner, DesktopAccountAction.CatalogPage, language, it,
