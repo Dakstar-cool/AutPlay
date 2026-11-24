@@ -1855,6 +1855,7 @@ def _server_event(
         catalog_only is not None
         and row.aggregate_type == "LIBRARY_ENTRY"
         and row.operation == "UPSERT"
+        and isinstance(row.payload, dict)
     ):
         event["payload"] = {**row.payload, "personal_save": row.aggregate_id not in catalog_only}
     if tombstone is not None:
@@ -2011,7 +2012,7 @@ def _bootstrap_projections(
                 },
             )
         )
-    entries = session.scalars(
+    playlist_entries = session.scalars(
         select(PlaylistEntryRow)
         .join(PlaylistRow)
         .where(
@@ -2020,7 +2021,7 @@ def _bootstrap_projections(
             PlaylistEntryRow.removed_at.is_(None),
         )
     )
-    for playlist_entry_row in entries:
+    for playlist_entry_row in playlist_entries:
         values.append(
             (
                 "PLAYLIST_ENTRY",
