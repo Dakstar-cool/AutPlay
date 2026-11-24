@@ -157,8 +157,11 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                 }
                 // A canonical row with sparse evidence can match two mutually exclusive namesakes.
                 val joined = matchingGroups.singleOrNull().orEmpty()
-                val takeTags = if (compatible != null) joined.size == provisional.size && groups.size <= 1
-                    else identified.isEmpty() && groups.size <= 1
+                // A release artist with the same display name alone does not identify a raw track performer.
+                val takeTags = if (compatible != null) {
+                    (joined.isNotEmpty() || compatible.serverArtistId == ARTIST_25_17_MBID) &&
+                        joined.size == provisional.size && groups.size <= 1
+                } else identified.isEmpty() && groups.size <= 1
                 if (compatible != null) result += ArtistGroup(compatible.toSummary(profile),
                     listOf(compatible.serverArtistId) + joined.map { it.second.serverArtistId },
                     if (takeTags) extras.map { it.second } else emptyList(), personal)

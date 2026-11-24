@@ -18,6 +18,7 @@ import kotlinx.serialization.json.doubleOrNull
 
 internal data class ServerLoudness(val gainDb: Double, val truePeak: Double)
 
+@androidx.annotation.OptIn(UnstableApi::class)
 internal fun serverLoudness(payload: JsonObject?, source: ResolvedPlaybackSource, profile: String?): ServerLoudness? {
     val measurement = payload?.get("loudness_v1") as? JsonObject ?: return null
     val uri = source.runtimeUri

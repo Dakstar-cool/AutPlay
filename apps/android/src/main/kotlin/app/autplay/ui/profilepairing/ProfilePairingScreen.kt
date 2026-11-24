@@ -417,6 +417,7 @@ internal fun requiresSecureProfileWindow(
 ): Boolean =
     (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) ||
         state.accountRecovery?.recipient?.let { it != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
+        accountDeletionBlocksFirstBind(state.accountDeletion) ||
         state.accountDeletion?.cancellation?.recipient?.let { it != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
         state.pairing is PairingState.AwaitingConfirmation ||
         state.pairing is PairingState.ExchangingInvitation ||
