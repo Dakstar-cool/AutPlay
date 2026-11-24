@@ -23,7 +23,7 @@ from autplay.adapters.public_catalogue_context import MusicBrainzCatalogueContex
 from autplay.application.music_library import MusicError
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.domain.auth import Principal
-from autplay.domain.catalogue_context import CatalogueContextEntity
+from autplay.domain.catalogue_context import CatalogueContextEntity, CatalogueTrackCard
 from autplay.domain.resource_admission import ResourceAdmissionError
 from autplay.ports.music_discovery import MusicDiscoveryHttp
 from autplay.ports.track_metadata import MetadataProviderError
@@ -135,58 +135,7 @@ class CatalogueContextService:
                 principal.user_id, context_id, admission=True
             )
             card = context.card
-            external = musicbrainz_reference(session, "RECORDING", str(card.recording_mbid))
-            linked = select(UserTrackRefExternalReferenceRow.user_track_ref_id).where(
-                UserTrackRefExternalReferenceRow.external_reference_id
-                == external.external_reference_id
-            )
-            identity: ColumnElement[bool] = UserTrackRefRow.user_track_ref_id.in_(linked)
-            if external.recording_id is not None:
-                identity = or_(identity, UserTrackRefRow.recording_id == external.recording_id)
-            ref = session.scalar(
-                select(UserTrackRefRow)
-                .where(
-                    UserTrackRefRow.user_id == principal.user_id,
-                    UserTrackRefRow.deleted_at.is_(None),
-                    identity,
-                )
-                .order_by(UserTrackRefRow.user_track_ref_id)
-                .limit(1)
-            )
-            if ref is None:
-                ref = UserTrackRefRow(
-                    user_id=principal.user_id,
-                    raw_title=card.recording_title or card.title,
-                    raw_artist=card.artist,
-                    raw_album=card.album,
-                    raw_duration_ms=card.duration_ms,
-                )
-                session.add(ref)
-                session.flush()
-                session.add(
-                    UserTrackRefExternalReferenceRow(
-                        user_track_ref_id=ref.user_track_ref_id,
-                        external_reference_id=external.external_reference_id,
-                        relation_role="IMPORT_EVIDENCE",
-                    )
-                )
-                session.add(
-                    SyncEventRow(
-                        user_id=principal.user_id,
-                        event_type="USER_TRACK_REF_PATCHED",
-                        aggregate_type="USER_TRACK_REF",
-                        aggregate_id=ref.user_track_ref_id,
-                        schema_version=1,
-                        server_row_version=ref.row_version,
-                        payload={
-                            "title": ref.raw_title,
-                            "artist": ref.raw_artist,
-                            "album": ref.raw_album,
-                            "duration_ms": ref.raw_duration_ms,
-                            "resolution_status": ref.resolution_status,
-                        },
-                    )
-                )
+            ref = catalogue_track_ref(session, principal.user_id, card)
             from autplay.adapters.postgresql.shared_catalog import playlist_catalog_handles
 
             session.flush()
@@ -211,3 +160,60 @@ class CatalogueContextService:
         if not isinstance(now, datetime):
             raise MusicError("music_catalogue_unavailable", "The catalogue is unavailable.", 503)
         return now.astimezone(UTC)
+
+
+def catalogue_track_ref(session: Session, owner: UUID, card: CatalogueTrackCard) -> UserTrackRefRow:
+    """Resolve the exact recording under the caller's owner publication lock."""
+    external = musicbrainz_reference(session, "RECORDING", str(card.recording_mbid))
+    linked = select(UserTrackRefExternalReferenceRow.user_track_ref_id).where(
+        UserTrackRefExternalReferenceRow.external_reference_id == external.external_reference_id
+    )
+    identity: ColumnElement[bool] = UserTrackRefRow.user_track_ref_id.in_(linked)
+    if external.recording_id is not None:
+        identity = or_(identity, UserTrackRefRow.recording_id == external.recording_id)
+    ref = session.scalar(
+        select(UserTrackRefRow)
+        .where(
+            UserTrackRefRow.user_id == owner,
+            UserTrackRefRow.deleted_at.is_(None),
+            identity,
+        )
+        .order_by(UserTrackRefRow.user_track_ref_id)
+        .limit(1)
+    )
+    if ref is None:
+        ref = UserTrackRefRow(
+            user_id=owner,
+            raw_title=card.recording_title or card.title,
+            raw_artist=card.artist,
+            raw_album=card.album,
+            raw_duration_ms=card.duration_ms,
+        )
+        session.add(ref)
+        session.flush()
+        session.add(
+            UserTrackRefExternalReferenceRow(
+                user_track_ref_id=ref.user_track_ref_id,
+                external_reference_id=external.external_reference_id,
+                relation_role="IMPORT_EVIDENCE",
+            )
+        )
+        session.add(
+            SyncEventRow(
+                user_id=owner,
+                event_type="USER_TRACK_REF_PATCHED",
+                aggregate_type="USER_TRACK_REF",
+                aggregate_id=ref.user_track_ref_id,
+                schema_version=1,
+                server_row_version=ref.row_version,
+                payload={
+                    "title": ref.raw_title,
+                    "artist": ref.raw_artist,
+                    "album": ref.raw_album,
+                    "duration_ms": ref.raw_duration_ms,
+                    "resolution_status": ref.resolution_status,
+                },
+            )
+        )
+    session.flush()
+    return ref

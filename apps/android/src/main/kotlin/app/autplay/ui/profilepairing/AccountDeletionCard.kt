@@ -73,6 +73,7 @@ internal fun AccountDeletionCard(state: AccountDeletionUiState, actions: Account
         }
     }
     AccountRecoveryCard(state.cancellation, actions.cancellation)
+    app.autplay.ui.SecureAccountWindow(confirm)
     if (confirm) AutPlayDialog(onDismissRequest = { confirm = false; account = ""; code = "" },
         title = { Text(stringResource(R.string.deletion_request)) }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

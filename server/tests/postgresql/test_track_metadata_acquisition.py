@@ -68,7 +68,7 @@ from autplay.domain.vault import (
     Sha256Digest,
     VerifiedStagedFile,
 )
-from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError
+from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError, TrackLoudness
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -586,7 +586,12 @@ def test_worker_uses_measured_audio_duration_and_preserves_embedded_priority(
 
     class EmbeddedWork(Work):
         def read_audio(self) -> EmbeddedMetadata:
-            return EmbeddedMetadata({"album": "Embedded", "release_date": "1990"}, None, 180000)
+            return EmbeddedMetadata(
+                {"album": "Embedded", "release_date": "1990"},
+                None,
+                180000,
+                TrackLoudness(4.25, 0.12),
+            )
 
     provider = Provider()
     audio = MetadataAudioTarget(
@@ -604,6 +609,16 @@ def test_worker_uses_measured_audio_duration_and_preserves_embedded_priority(
     view = service.get(principal, ref_id)
     assert view["fields"]["album"] == "Embedded" and view["album_group_v1"] is None
     assert view["provenance"]["album"]["source"] == "EMBEDDED"
+    assert view["loudness_v1"] == {
+        "gain_db": 4.25,
+        "true_peak": 0.12,
+        "audio_variant_id": str(variant),
+        "sha256": (b"x" * 32).hex(),
+    }
+    generation = lease.payload["generation"]
+    assert type(generation) is int
+    service.apply_worker(ref_id, generation, context, audio_variant_id=uuid4())
+    assert "loudness_v1" not in service.get(principal, ref_id)
     engine.dispose()
 
 

@@ -27,10 +27,11 @@ internal fun rememberArtistCatalogPages(
     binding: ClientEventBinding?,
     artistMbid: String?,
     editions: Boolean,
+    firstPageOnly: Boolean = false,
 ): ArtistCatalogPages {
-    var snapshot by remember(binding, artistMbid, editions) { mutableStateOf(ArtistCatalogPages(loading = binding != null && artistMbid != null)) }
-    var attempt by remember(binding, artistMbid, editions) { mutableIntStateOf(0) }
-    LaunchedEffect(binding, artistMbid, editions, attempt) {
+    var snapshot by remember(binding, artistMbid, editions, firstPageOnly) { mutableStateOf(ArtistCatalogPages(loading = binding != null && artistMbid != null)) }
+    var attempt by remember(binding, artistMbid, editions, firstPageOnly) { mutableIntStateOf(0) }
+    LaunchedEffect(binding, artistMbid, editions, firstPageOnly, attempt) {
         if (binding == null || artistMbid == null) return@LaunchedEffect
         val profile = binding.serverProfileId.value
         val dao = AutPlayRuntime.database(context).catalogProjectionDao()
@@ -38,7 +39,7 @@ internal fun rememberArtistCatalogPages(
         val results = linkedMapOf<String, InternetMetadataDiscoveryCard>()
         var offset = 0
         while (true) {
-            val key = "${binding.userId.value}:ARTIST:$artistMbid:$editions:$offset"
+            val key = "${binding.userId.value}:ARTIST-CREDITS-2:$artistMbid:$editions:$offset"
             val saved = dao.catalogPage(profile, key)
             val cached = saved?.let { runCatching { InternetMetadataDiscoveryCodec.decode(it.document) }.getOrNull() }
             val page = if (cached != null && System.currentTimeMillis() - saved.observedAtMs in 0 until 3_600_000L) {
@@ -63,11 +64,11 @@ internal fun rememberArtistCatalogPages(
             }
             page.items.forEach { results.putIfAbsent(it.id, it) }
             val next = page.nextOffset
-            if (next == null) {
+            if (next == null || firstPageOnly) {
                 snapshot = ArtistCatalogPages(results.values.toList(), page.truncated, retry = { attempt++ })
                 break
             }
-            if (editions) snapshot = ArtistCatalogPages(results.values.toList())
+            snapshot = ArtistCatalogPages(results.values.toList(), loading = true)
             offset = next
         }
     }

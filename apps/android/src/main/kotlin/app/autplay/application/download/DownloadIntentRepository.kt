@@ -38,6 +38,8 @@ import app.autplay.download.StoragePolicy
 import app.autplay.playback.AndroidPlaybackSourceResolver
 import java.io.IOException
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -55,15 +57,13 @@ class DownloadIntentRepository(
     fun observeIntents(limit: Int = 100): Flow<List<DownloadIntentEntity>> =
         database.localAudioDao().observeDownloadIntents(limit.coerceIn(1, 100))
 
-    fun observePresentation(profileId: String?, limit: Int = 100): Flow<List<DownloadIntentPresentation>> {
-        val bounded = limit.coerceIn(1, 100)
+    fun observePresentation(profileId: String?, limit: Int = Int.MAX_VALUE): Flow<List<DownloadIntentPresentation>> {
+        val bounded = limit.coerceAtLeast(1)
         val rows = profileId?.let { database.localAudioDao().observeDownloadIntentsForProfile(it, bounded) }
             ?: database.localAudioDao().observeStandaloneDownloadIntents(bounded)
         return rows.map { intents ->
-            val tracks = database.libraryDao().trackRefs(
-                intents.map(DownloadIntentEntity::localUserTrackRefId).distinct(),
-                bounded,
-            ).associateBy { it.localUserTrackRefId }
+            val tracks = intents.map(DownloadIntentEntity::localUserTrackRefId).distinct().chunked(500)
+                .flatMap { ids -> database.libraryDao().trackRefs(ids, ids.size) }.associateBy { it.localUserTrackRefId }
             intents.map { intent ->
                 val track = tracks[intent.localUserTrackRefId]
                 DownloadIntentPresentation(
@@ -161,7 +161,7 @@ class DownloadIntentRepository(
         storageClass: DownloadStorageClass,
         nowMs: Long,
         requestedBytes: Long? = null,
-    ): DownloadIntentEntity {
+    ): DownloadIntentEntity = requestMutex.withLock {
         require(storageClass != DownloadStorageClass.STREAM_CACHE)
         database.localAudioDao().downloadIntentsForTrack(trackRefId.value, MAX_TRACK_INTENTS)
             .firstOrNull { existing ->
@@ -170,7 +170,10 @@ class DownloadIntentRepository(
                     existing.desiredStorageClass == storageClass.name &&
                     existing.state !in setOf("FAILED", "CANCELLED")
             }
-            ?.let { return it }
+            ?.let { existing ->
+                if (existing.state == "REQUESTED") enqueue(existing)
+                return@withLock existing
+            }
         val intentId = LocalId.random().value
         val row = DownloadIntentEntity(
             downloadIntentId = intentId,
@@ -192,7 +195,7 @@ class DownloadIntentRepository(
         if (admission is StorageAdmission.Rejected) {
             val rejected = row.copy(state = "FAILED", failureCode = admission.failureCode.name)
             database.localAudioDao().upsertDownloadIntent(rejected)
-            return rejected
+            return@withLock rejected
         }
         if (admission is StorageAdmission.Evict) {
             admission.entries.forEach { entry ->
@@ -205,13 +208,13 @@ class DownloadIntentRepository(
             }
         }
         database.localAudioDao().upsertDownloadIntent(row)
-        DownloadService.sendAddDownload(
-            applicationContext,
-            AutPlayDownloadService::class.java,
-            row.toDownloadRequest(),
-            false,
-        )
-        return row
+        enqueue(row)
+        row
+    }
+
+    private fun enqueue(row: DownloadIntentEntity) {
+        DownloadService.sendAddDownload(applicationContext, AutPlayDownloadService::class.java,
+            row.toDownloadRequest(), false)
     }
 
     private suspend fun applyStorageAdmission(
@@ -380,6 +383,7 @@ class DownloadIntentRepository(
         if (this == DownloadIntentState.CANCELED) "CANCELLED" else name
 
     private companion object {
+        val requestMutex = Mutex()
         val CANCELLABLE_STATES = setOf("REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED")
         const val MAX_TRACK_INTENTS = 32
         const val MAX_RECONCILE_INTENTS = 10_000

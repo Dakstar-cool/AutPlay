@@ -8,7 +8,7 @@ from autplay.adapters.public_track_metadata import PublicMetadataHttp
 from autplay.domain.metadata_execution import MetadataExecutionTicket
 from autplay.domain.track_metadata import validate_fields
 from autplay.domain.vault import ChromaprintEvidence
-from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError
+from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError, TrackLoudness
 
 from .ingest_protocol import IngestChildSettings
 from .vault_child import ChildProtocolError, decode_document
@@ -87,13 +87,26 @@ class ProcessMetadataWork:
         raw = document.get("fields")
         duration = document.get("duration_ms")
         if (
-            set(document) not in ({"fields"}, {"fields", "duration_ms"})
+            set(document) - {"fields", "duration_ms", "loudness"}
             or not isinstance(raw, dict)
             or (artwork is not None and len(artwork) > 2 * 1024 * 1024)
             or (duration is not None and (type(duration) is not int or not 0 < duration <= 3600000))
         ):
             raise ChildProtocolError()
-        return EmbeddedMetadata(validate_fields(raw), artwork, duration)
+        loudness = None
+        if "loudness" in document:
+            values = document["loudness"]
+            if (
+                not isinstance(values, dict)
+                or set(values) != {"gain_db", "true_peak"}
+                or any(type(v) not in (int, float) for v in values.values())
+            ):
+                raise ChildProtocolError()
+            try:
+                loudness = TrackLoudness(values["gain_db"], values["true_peak"])
+            except ValueError as exc:
+                raise ChildProtocolError() from exc
+        return EmbeddedMetadata(validate_fields(raw), artwork, duration, loudness)
 
     def fingerprint(self) -> ChromaprintEvidence:
         document, payload = self.exchange({"action": "FINGERPRINT"})

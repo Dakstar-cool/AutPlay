@@ -63,8 +63,8 @@ data class SyncStatus(
 /** Transport values deliberately retain unknown event strings for safe deferred persistence. */
 data class SyncAck(val eventId: String, val outcome: String, val errorCode: String? = null, val retryAfterMs: Long? = null, val retryable: Boolean = false, val originalOutcome: String? = null, val aggregateType: String? = null, val aggregateLocalId: String? = null, val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val redirectAliasServerId: String? = null, val redirectCanonicalServerId: String? = null)
 data class RemoteEvent(val eventId: String, val sequence: Long, val eventType: String, val schemaVersion: Int, val payloadJson: String, val aggregateType: String = "UNKNOWN", val aggregateServerId: String? = null, val serverRowVersion: Long? = null, val operation: String = "UPSERT", val tombstoneId: String? = null, val retainUntilMs: Long? = null, val redirectServerId: String? = null, val publishedAtMs: Long? = null)
-data class PullPage(val nextCursor: String, val hasMore: Boolean, val events: List<RemoteEvent>)
-data class BootstrapPage(val snapshotId: String, val nextPageToken: String?, val snapshotCursor: String?, val hasMore: Boolean, val events: List<RemoteEvent>)
+data class PullPage(val nextCursor: String, val hasMore: Boolean, val events: List<RemoteEvent>, val personalLibraryVersion: Int = 0)
+data class BootstrapPage(val snapshotId: String, val nextPageToken: String?, val snapshotCursor: String?, val hasMore: Boolean, val events: List<RemoteEvent>, val personalLibraryVersion: Int = 0)
 
 enum class SyncRunOutcome { COMPLETE, CONTINUE, RETRY }
 
@@ -233,7 +233,11 @@ class SyncCoordinator(
     }
 
     private suspend fun pull(binding: ClientEventBinding, cursor: SyncCursorEntity): DrainOutcome {
-        val page = try { transport.pull(binding, cursor.opaqueCursor) } catch (_: InvalidCursorException) {
+        val page = try {
+            transport.pull(binding, cursor.opaqueCursor).also {
+                if (it.personalLibraryVersion >= 1 && cursor.personalLibraryVersion < 1) throw InvalidCursorException()
+            }
+        } catch (_: InvalidCursorException) {
             database.withWriteTransaction {
                 database.syncDao().upsertCursor(cursor.copy(bootstrapState = "RESET_REQUIRED", updatedAtMs = nowMs()))
                 database.syncDao().upsertBootstrapState(SyncBootstrapStateEntity(binding.serverProfileId.value, null, null, null, "RESET_REQUIRED", nowMs()))
@@ -277,6 +281,7 @@ class SyncCoordinator(
                 if (page.hasMore) "BOOTSTRAPPING" else "READY", nowMs(),
             ))
             database.syncDao().upsertCursor(cursor.copy(
+                personalLibraryVersion = if (page.hasMore) cursor.personalLibraryVersion else minOf(1, page.personalLibraryVersion),
                 // Incremental cursor is untouched until the final snapshot cutover.
                 opaqueCursor = if (page.hasMore) cursor.opaqueCursor else page.snapshotCursor,
                 bootstrapSnapshotId = page.snapshotId,
@@ -337,6 +342,11 @@ class SyncCoordinator(
                 // Server sequences are global; events filtered for this owner may legitimately gap.
                 require(event.sequence > previous) { "SERVER_SEQUENCE_NOT_ASCENDING" }
                 previous = event.sequence
+            }
+            if (event.sequence == 0L && event.aggregateType == "LIBRARY_ENTRY" && event.aggregateServerId != null) {
+                payloadBoolean(event.payloadJson, "personal_save")?.let {
+                    database.libraryDao().setPersonalSave(binding.serverProfileId.value, event.aggregateServerId, it)
+                }
             }
             if (database.syncDao().isServerEventKnown(binding.serverProfileId.value, event.eventId)) return@forEach
             if (isProjectionSupported(event)) {
@@ -689,6 +699,7 @@ class SyncCoordinator(
                 }
                 database.libraryDao().upsertEntry(row.copy(
                     source = root.projectRequiredText("source", row.source),
+                    personalSave = root["personal_save"]?.jsonPrimitive?.booleanOrNull ?: row.personalSave,
                     availabilityStatus = root.projectRequiredText("availability_status", row.availabilityStatus),
                     removedAtMs = removed,
                 ))

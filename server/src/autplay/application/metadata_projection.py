@@ -62,6 +62,7 @@ def metadata_view(row: TrackMetadataRow) -> dict[str, Any]:
         "fields": row.document.get("fields", {}),
         "provenance": row.document.get("provenance", {}),
         "artwork_sha256": row.artwork_sha256,
+        **({"loudness_v1": row.document["loudness_v1"]} if row.document.get("loudness_v1") else {}),
         "artwork_source": row.document.get("artwork_source"),
         "candidates": row.candidates,
         "updated_at": row.updated_at.isoformat(),

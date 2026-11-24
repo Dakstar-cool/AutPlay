@@ -167,6 +167,8 @@ class OfflineLibraryScreenTest {
         val queueId = requireNotNull(PlaybackRuntimeState.state.value.queueSnapshotId)
         val hero = hasAnyAncestor(hasTestTag("home-playback-hero"))
         val pause = hasContentDescription(strings.getString(R.string.action_pause)) and hero
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(pause).fetchSemanticsNodes().isNotEmpty() }
+        saveUiScreenshot("home-artist-glow")
         composeRule.onNode(pause).performClick()
         composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
@@ -174,12 +176,15 @@ class OfflineLibraryScreenTest {
         runBlocking { stopPlaybackService() }
         scenario = ActivityScenario.launch(MainActivity::class.java)
         composeRule.waitUntil(15_000) { composeRule.onAllNodes(start).fetchSemanticsNodes().isNotEmpty() }
-        composeRule.onNodeWithText("Линия моря — $title").assertIsDisplayed()
+        val resumedSong = hasText("Линия моря — $title")
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(resumedSong).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(resumedSong)
+        composeRule.onNode(resumedSong).assertIsDisplayed()
         composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
         composeRule.onNodeWithTag("home-track-carousel").assertDoesNotExist()
         composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
         saveUiScreenshot("home-review-ready")
-        composeRule.onNode(start).performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.action_continue)).performClick()
         composeRule.waitUntil(15_000) { PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNode(pause).assertIsDisplayed()
         composeRule.onNodeWithTag("home-track-carousel").assertIsDisplayed()
@@ -1106,12 +1111,11 @@ class OfflineLibraryScreenTest {
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
         openLibrary()
-        val reviewTab = hasTestTag("library-tab-Review")
-        composeRule.onNodeWithTag("library-sections").assertIsDisplayed().performScrollToNode(reviewTab)
-        composeRule.onNode(reviewTab).performClick()
-        val openReview = hasText(defaultStrings.getString(R.string.nav_import_review)) and hasClickAction()
-        scrollLibraryTo(openReview)
-        composeRule.onNode(openReview).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("library-tab-Review").assertDoesNotExist()
+        waitForNavigation(defaultStrings.getString(R.string.nav_home)).performClick()
+        val openReview = hasText(defaultStrings.getString(R.string.home_problems_open)) and hasClickAction()
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(openReview)
+        composeRule.onNode(openReview).performClick()
         composeRule.onNodeWithTag("library-product-list").assertDoesNotExist()
         val importSummary = defaultStrings.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {

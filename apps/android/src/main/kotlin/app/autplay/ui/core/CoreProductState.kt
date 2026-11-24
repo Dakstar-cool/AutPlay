@@ -112,6 +112,7 @@ public enum class DetailKind {
     Track,
     Artist,
     ArtistTracks,
+    ArtistCollaborations,
     ArtistAlbums,
     CatalogRelease,
     CatalogArtistTracks,
@@ -120,7 +121,7 @@ public enum class DetailKind {
 }
 
 /** The id must be an identifier owned by an existing application projection, never display text. */
-public data class DetailTarget(public val kind: DetailKind, public val stableId: String)
+public data class DetailTarget(public val kind: DetailKind, public val stableId: String, public val label: String? = null)
 
 /** Stable row identity and viewport offset used to restore a list after its data reloads. */
 public data class ListAnchor(

@@ -140,9 +140,10 @@ def test_saved_catalogue_target_changes_with_owner_audio_and_stays_private(
             musicbrainz_reference(
                 session, "RECORDING", str(selection.recording_mbid)
             ).recording_id = variant.recording_id
-    if explicit_download:
-        from autplay.adapters.postgresql.models import CatalogDownloadRow
+    from autplay.adapters.postgresql.models import CatalogDownloadRow
 
+    acq_id = None
+    if explicit_download:
         sources = InternetMusicService(admission.sessions, object(), Provider())
         lookup = sources.search(actor, "Artist Song", uuid4(), receipts[0])
         selected = sources.select(actor, UUID(lookup["search_id"]), "candidate00")
@@ -190,11 +191,48 @@ def test_saved_catalogue_target_changes_with_owner_audio_and_stays_private(
             vault.resolve_owner_playback_variant(
                 other.user_id, private_refs[1], include_catalog=True
             )
+    from autplay.application.catalog_downloads import CatalogDownloads
+    from autplay.application.music_discovery import MusicDiscoveryService
+
+    operation = uuid4()
+    selected_item = {
+        "state": "vault",
+        "title": selection.title,
+        "artist": selection.artist,
+        "duration_ms": selection.duration_ms,
+    }
+    if acq_id is not None:
+        selected_item["acquisition"] = str(acq_id)
+    with admission.sessions.begin() as session:
+        session.add(
+            CatalogDownloadRow(
+                operation_id=operation,
+                user_id=actor.user_id,
+                document={
+                    "phase": "complete",
+                    "recordings": {str(selection.recording_mbid): selected_item},
+                },
+            )
+        )
+    downloads = CatalogDownloads(
+        admission.sessions,
+        Mock(spec=MusicDiscoveryService),
+        service,
+        InternetMusicService(admission.sessions, object(), Provider()),
+    )
+    files = downloads.device_files(actor, operation, 0)
+    assert files["files"][0]["audio_variant_id"] == str(variant_id)
+    assert files["next_offset"] is None and files["unavailable"] == []
+    assert files == downloads.device_files(actor, operation, 0)
+    assert downloads.device_files(actor, operation, 50)["files"] == []
+    with pytest.raises(MusicError, match="catalog_download_missing"):
+        downloads.device_files(other, operation, 0)
     pages = CatalogPageCache(admission.sessions)
     assert pages.available_recordings(actor.user_id, [str(selection.recording_mbid)])
     assert not pages.available_recordings(other.user_id, [str(selection.recording_mbid)])
     with admission.sessions.begin() as session:
         session.get_one(AudioVariantRow, variant_id).deleted_at = datetime.now(UTC)
+    assert downloads.device_files(actor, operation, 0)["unavailable"] == [selection.title]
     with admission.sessions.begin() as session:
         refresh_playlist_catalog_handles(session, actor.user_id)
         assert (
@@ -203,7 +241,7 @@ def test_saved_catalogue_target_changes_with_owner_audio_and_stays_private(
         )
 
 
-def test_artist_download_previews_full_editions_and_guest_tracks_before_idempotent_start(
+def test_artist_download_pages_studio_recordings_before_idempotent_start(
     admission: AdmissionHarness,
 ) -> None:
     from autplay.application.catalog_downloads import CatalogDownloads
@@ -211,7 +249,7 @@ def test_artist_download_previews_full_editions_and_guest_tracks_before_idempote
 
     actor = admission.actor()
     other = admission.actor()
-    artist, shared, guest, edition, deluxe, group = (uuid4() for _ in range(6))
+    artist, shared, guest, edition = (uuid4() for _ in range(4))
     missing = [uuid4() for _ in range(15)]
     release_calls = []
 
@@ -228,38 +266,27 @@ def test_artist_download_previews_full_editions_and_guest_tracks_before_idempote
         }
 
     class Discography:
-        def artist_releases(
+        def artist_tracks(
             self, owner: Principal, identity: UUID, *, limit: int, offset: int
         ) -> dict[str, object]:
             assert owner == actor and identity == artist
             if offset == 0:
                 return page(
                     [
-                        {
-                            "entity_id": str(deluxe),
-                            "release_group_id": str(group),
-                            "release_date": "2023",
-                        }
+                        track(shared, "Track 0", 150000),
+                        {**track(uuid4(), "Cover without suffix"), "performance_types": ["cover"]},
+                        {**track(uuid4(), "Unmarked title"), "disambiguation": "live at Brixton"},
+                        track(uuid4(), "Song (Лайв)"),
+                        track(uuid4(), "Song — кавер"),
                     ],
-                    1,
+                    5,
                 )
+            assert offset == 5
             return page(
                 [
-                    {
-                        "entity_id": str(edition),
-                        "release_group_id": str(group),
-                        "release_date": "2020",
-                    }
-                ]
-            )
-
-        def artist_tracks(
-            self, owner: Principal, identity: UUID, *, limit: int, offset: int
-        ) -> dict[str, object]:
-            return page(
-                [
+                    track(shared, "Track 0", 150000),
                     {**track(guest, "Track 1", 150000), "guest_artist_ids": [str(artist)]},
-                    track(uuid4(), "Different edition", 180000),
+                    *[track(i, "Live Forever") for i in missing],
                 ]
             )
 
@@ -277,7 +304,6 @@ def test_artist_download_previews_full_editions_and_guest_tracks_before_idempote
         fixture = Discography()
         discovery = Mock(spec_set=MusicDiscoveryService(lambda _: pytest.fail("Unexpected HTTP")))
         discovery.page_cache = None
-        discovery.artist_releases.side_effect = fixture.artist_releases
         discovery.artist_tracks.side_effect = fixture.artist_tracks
         discovery.release_tracks.side_effect = fixture.release_tracks
         return CatalogDownloads(
@@ -302,7 +328,7 @@ def test_artist_download_previews_full_editions_and_guest_tracks_before_idempote
         and state["counts"]["available"] == 2
         and state["counts"]["missing"] == 15
     )
-    assert release_calls == [edition, edition]
+    assert release_calls == []
     with admission.sessions() as session:
         assert session.scalar(select(func.count()).select_from(InternetAcquisitionRow)) == 0
     for _ in range(2):

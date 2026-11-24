@@ -39,6 +39,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -93,6 +94,7 @@ public data class CoreCollectionUiItem(
     public val subtitle: String?,
     public val itemCount: Int? = null,
     public val artworkTrackId: String? = null,
+    public val releaseMbid: String? = null,
 )
 
 public data class CoreArtistUiItem(
@@ -115,6 +117,7 @@ public data class HomeReleaseUiItem(
     public val dateText: String?,
     public val artworkTrackId: String? = null,
     public val inLibrary: Boolean = false,
+    public val releaseMbid: String? = null,
 )
 
 public data class HomeRecommendationUiItem(
@@ -179,6 +182,7 @@ public data class SearchScreenUiState(
     public val kind: LibrarySearchKind = LibrarySearchKind.All,
     public val offlineTrackIds: Set<String> = emptySet(),
     public val serverLinkedTrackIds: Set<String> = emptySet(),
+    public val artistMatches: List<CoreArtistUiItem> = emptyList(),
     public val vaultNextCursor: String? = null,
     public val vaultPageError: Boolean = false,
 ) {
@@ -241,6 +245,7 @@ public fun HomeProductScreen(
     onOpenPlayer: () -> Unit = {},
     onTogglePlayPause: () -> Unit = {},
     onLikeHeroTrack: (String) -> Unit = {},
+    onOpenHeroArtist: (() -> Unit)? = null,
     onPreviousTrack: () -> Unit = {},
     onNextTrack: () -> Unit = {},
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
@@ -291,6 +296,7 @@ public fun HomeProductScreen(
                         state = heroState,
                         localMode = state.localMode,
                         onOpenPlayer = onOpenPlayer,
+                        onOpenArtist = onOpenHeroArtist,
                         onPlayTrack = onPlayTrack,
                         onTogglePlayPause = onTogglePlayPause,
                         onLike = onLikeHeroTrack,
@@ -307,6 +313,7 @@ public fun HomeProductScreen(
                         enabled = myWaveAllowed && !showFirstTrack,
                         emptyLibrary = showFirstTrack,
                         onStart = onStartMyWave,
+                        onOpenArtist = onOpenHeroArtist,
                         onResume = if (heroState.hasActivePlayback) onTogglePlayPause else onContinueListening,
                         onLike = onLikeHeroTrack,
                         onOpenListenTogether = onOpenListenTogether,
@@ -444,6 +451,8 @@ public fun SearchProductScreen(
     listAnchor: ListAnchor? = null,
     onListAnchorChange: (ListAnchor) -> Unit = {},
     onSearchKindChange: (LibrarySearchKind) -> Unit = {},
+    onOpenArtist: (String) -> Unit = {},
+    onOpenCatalog: ((app.autplay.ui.core.DetailTarget) -> Unit)? = null,
     onPlayAcquired: ((String) -> Unit)? = null,
     onMoreVault: () -> Unit = {},
     manualPlaylists: List<ManualPlaylistUi> = emptyList(),
@@ -500,6 +509,24 @@ public fun SearchProductScreen(
             )
         }
         item(key = "search:kind") { LibrarySearchKindPicker(state.kind, onSearchKindChange) }
+        if (state.kind == LibrarySearchKind.Artist) {
+            if (state.query.isNotBlank() && (state.searched || state.vaultSearched)) {
+                items(state.artistMatches, key = { "artist:${it.id}" }) { artist ->
+                    AutPlayCard(onClick = { onOpenArtist(artist.id) }) { Text(artist.name) }
+                }
+                if (state.artistMatches.isEmpty()) item { Text(stringResource(R.string.search_empty)) }
+                if (state.vaultAvailable) item {
+                    OutlinedButton(onClick = { internetQuery = state.query; internetRequest++ }) {
+                        Text(stringResource(R.string.music_search_internet))
+                    }
+                }
+                if (internetRequest > 0 && internetQuery == state.query) item {
+                    InternetMusicSearchSection(internetQuery, internetRequest, state.kind,
+                        onPlaylistTrack = { playlistTrackId = it }, onOpenCatalog = onOpenCatalog)
+                }
+            }
+            return@LazyColumn
+        }
         if (state.loading || (state.vaultAvailable && state.vaultLoading)) {
             item(key = "search:loading") {
                 AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.search_loading))
@@ -558,7 +585,7 @@ public fun SearchProductScreen(
         if (internetRequest > 0 && internetQuery == state.query) {
             item(key = "search:internet") { InternetMusicSearchSection(internetQuery, internetRequest, state.kind,
                 vaultTracks = state.vaultResults, onPlayVault = onPlayVault, onPlayAcquired = onPlayAcquired,
-                onPlaylistTrack = { playlistTrackId = it }) }
+                onPlaylistTrack = { playlistTrackId = it }, onOpenCatalog = onOpenCatalog) }
         }
         items(state.results, key = { "$SEARCH_RESULT_PREFIX${it.id}" }) { track ->
             val offline = track.id in state.offlineTrackIds
@@ -626,7 +653,10 @@ public fun LibraryProductScreen(
     onRepairAccess: () -> Unit = {},
     manualPlaylists: List<ManualPlaylistUi> = emptyList(),
     manualPlaylistActions: ManualPlaylistActions = ManualPlaylistActions(),
+    searchPersonal: ((LibrarySection, LibraryFilter, String) -> kotlinx.coroutines.flow.Flow<LibraryScreenUiState>)? = null,
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val search = query.trim()
     val displayState = state.copy(section = state.section.browseSection(), filter = state.filter.browseFilter())
     var addTrackToPlaylistId by rememberSaveable { mutableStateOf<String?>(null) }
     val listContextKey = "library:${displayState.section}:${displayState.sort}:${displayState.filter}"
@@ -641,7 +671,26 @@ public fun LibraryProductScreen(
         }
     }
     Column(Modifier.fillMaxSize().padding(top = contentPadding.calculateTopPadding() + 4.dp)) {
+        androidx.compose.material3.OutlinedTextField(
+            value = query, onValueChange = { query = it.take(200) }, singleLine = true,
+            label = { Text(stringResource(R.string.personal_library_search)) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = AutPlayTokens.dimensions.screenPadding)
+                .testTag("personal-library-search"),
+            trailingIcon = if (query.isEmpty()) null else { {
+                androidx.compose.material3.TextButton(onClick = { query = "" }) { Text(stringResource(R.string.personal_search_clear)) }
+            } },
+        )
         LibraryBrowseControls(displayState, onSectionChange, onFilterChange, onSortChange, onOpenDownloads, onAddLocal)
+        if (search.isNotEmpty()) {
+            val matches = searchPersonal?.let { find ->
+                androidx.compose.runtime.key(find, displayState.section, displayState.filter, search) {
+                    remember { find(displayState.section, displayState.filter, search) }
+                        .collectAsState(initial = null).value
+                }
+            }
+            PersonalLibraryMatches(search, matches ?: displayState, contentPadding, onSelect, onOpenCollection)
+            return@Column
+        }
         if (displayState.section == LibrarySection.Playlists) ImportPlaylistAction()
         val collections = displayState.section == LibrarySection.Albums || displayState.section == LibrarySection.Playlists
         LazyVerticalGrid(
@@ -768,6 +817,39 @@ public fun LibraryProductScreen(
 }
 
 
+@Composable
+private fun PersonalLibraryMatches(query: String, state: LibraryScreenUiState, padding: PaddingValues,
+    play: (String) -> Unit, open: (LibrarySection, String) -> Unit) {
+    fun matches(value: String?) = value?.contains(query, ignoreCase = true) == true
+    val tracks = state.tracks.filter { state.section == LibrarySection.Tracks && (matches(it.title) || matches(it.artist)) }
+    val artists = state.artists.filter { state.section == LibrarySection.Artists && app.autplay.application.artist.artistNameMatches(it.name, query) }
+    val albums = state.albums.filter { state.section == LibrarySection.Albums && (matches(it.title) || matches(it.subtitle)) }
+    val playlists = state.playlists.filter { state.section == LibrarySection.Playlists && matches(it.title) }
+    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = padding.calculateBottomPadding())) {
+        if (tracks.isNotEmpty()) {
+            items(tracks, key = { "track:${it.id}" }) { track ->
+                AutPlayTrackRow(track.title, track.artist, track.id, { play(track.id) })
+            }
+        }
+        if (artists.isNotEmpty()) {
+            items(artists, key = { "artist:${it.id}" }) { artist ->
+                AutPlayCard(onClick = { open(LibrarySection.Artists, artist.id) }) { Text(artist.name) }
+            }
+        }
+        for ((section, rows) in listOf(LibrarySection.Albums to albums, LibrarySection.Playlists to playlists)) {
+            if (rows.isEmpty()) continue
+            items(rows, key = { "${section.name}:${it.id}" }) { row ->
+                AutPlayCard(onClick = { open(section, row.id) }) { Column {
+                    Text(row.title)
+                    row.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                } }
+            }
+        }
+        if (tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() && playlists.isEmpty())
+            item { Text(stringResource(R.string.search_empty)) }
+    }
+}
+
 private fun LazyGridScope.fullWidthItem(key: String, content: @Composable () -> Unit) {
     item(key = key, span = { GridItemSpan(maxLineSpan) }) { content() }
 }
@@ -786,7 +868,7 @@ private fun LazyGridScope.collectionItems(
     gridItems(collections, key = { "$keyPrefix${it.id}" }) { collection ->
         val count = collection.itemCount?.let { pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, it, it) }
         val subtitle = listOfNotNull(collection.subtitle?.takeIf { it.isNotBlank() }, count).joinToString(" В· ")
-        CollectionCoverTile(collection.title, collection.artworkTrackId, subtitle, Modifier.testTag("$keyPrefix${collection.id}")) {
+        CollectionCoverTile(collection.title, collection.artworkTrackId, subtitle, Modifier.testTag("$keyPrefix${collection.id}"), catalogCoverId = collection.releaseMbid) {
             onOpenCollection(section, collection.id)
         }
     }

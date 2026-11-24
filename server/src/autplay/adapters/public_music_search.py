@@ -218,7 +218,7 @@ class MusicBrainzDiscoveryProvider:
                     "artist": str(artist_id),
                     "limit": limit,
                     "offset": offset,
-                    "inc": "artist-credits",
+                    "inc": "artist-credits work-rels",
                     "fmt": "json",
                 }
             )
@@ -230,6 +230,9 @@ class MusicBrainzDiscoveryProvider:
             _source_progress(document, "recording-offset", offset, count, len(rows))
             items: list[MusicDiscoveryCard] = []
             for row in rows:
+                members = _credit_members(row.get("artist-credit"))
+                if members and not any(member["mbid"] == str(artist_id) for member in members):
+                    continue
                 identity = UUID(row["id"])
                 items.append(
                     MusicDiscoveryCard(
@@ -238,9 +241,22 @@ class MusicBrainzDiscoveryProvider:
                         _title(row.get("title")),
                         artist=_credit(row.get("artist-credit")),
                         recording_id=identity,
+                        performance_types=tuple(
+                            sorted(
+                                {
+                                    attr
+                                    for relation in _rows(row.get("relations", []), 1000)
+                                    if relation.get("target-type") == "work"
+                                    and relation.get("type") == "performance"
+                                    for attr in relation.get("attributes", [])
+                                    if attr in ("cover", "live")
+                                }
+                            )
+                        ),
+                        artist_members=members,
                         guest_artist_ids=tuple(
                             UUID(member["mbid"])
-                            for member in _credit_members(row.get("artist-credit"))
+                            for member in members
                             if member["role"] == "FEATURED"
                         ),
                         duration_ms=_duration(row.get("length")),

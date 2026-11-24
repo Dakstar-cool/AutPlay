@@ -58,6 +58,8 @@ internal data class CoreProductRouteActions(
     val playWheelMix: (HomeWheelMix) -> Unit = {},
     val startMyWave: () -> Unit = {},
     val myWaveAllowed: Boolean = true,
+    val searchPersonal: ((LibrarySection, LibraryFilter, String) -> kotlinx.coroutines.flow.Flow<LibraryScreenUiState>)? = null,
+    val openHeroArtist: (() -> Unit)? = null,
     val playReleaseEntry: ((String) -> Unit)? = null,
 )
 
@@ -108,6 +110,7 @@ internal fun CoreProductRouteRenderer(
             currentTrackRefId = currentTrackRefId,
             currentTrackLiked = currentTrackLiked,
             onOpenPlayer = onOpenNowPlaying,
+            onOpenHeroArtist = actions.openHeroArtist,
             onTogglePlayPause = onTogglePlayPause,
             onLikeHeroTrack = actions.likeTrack,
             onPreviousTrack = onPreviousTrack,
@@ -120,6 +123,8 @@ internal fun CoreProductRouteRenderer(
             contentPadding = contentPadding,
             onQueryChange = actions.changeQuery,
             onSearchKindChange = actions.changeSearchKind,
+            onOpenCatalog = actions.openDetail,
+            onOpenArtist = { actions.openDetail(DetailTarget(DetailKind.Artist, it)) },
             onSearch = actions.submitSearch,
             onPlay = actions.playSearchResult,
             onPlayVault = actions.playVaultSearchResult,
@@ -158,6 +163,7 @@ internal fun CoreProductRouteRenderer(
             )
         } else {
             LibraryProductScreen(
+                searchPersonal = actions.searchPersonal,
                 state = libraryState.copy(tracks = libraryState.tracks.map { track ->
                     track.copy(selected = track.id == currentTrackRefId)
                 }),

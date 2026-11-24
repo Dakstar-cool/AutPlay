@@ -1617,6 +1617,11 @@ private fun OfflineLibraryScreen(
         navigation.openLibraryDetail()
     }
     fun openCoreCollection(section: LibrarySection, stableId: String) {
+        if (stableId.startsWith("mb:") && section in setOf(LibrarySection.Albums, LibrarySection.Artists)) {
+            val kind = if (section == LibrarySection.Artists) DetailKind.CatalogArtistTracks else DetailKind.CatalogRelease
+            openCoreDetail(DetailTarget(kind, stableId.removePrefix("mb:")))
+            return
+        }
         when (section) {
             LibrarySection.Albums -> openCoreDetail(DetailTarget(DetailKind.Release, stableId))
             LibrarySection.Artists -> openCoreDetail(DetailTarget(DetailKind.Artist, stableId))
@@ -1669,8 +1674,7 @@ private fun OfflineLibraryScreen(
     )
     fun openHomeProblems() {
         if (homeProblemCounts.reviewRequired > 0) {
-            coreProductState.librarySection = LibrarySection.Review
-            navigation.navigate(UiDestination.Library)
+            navigation.navigate(UiDestination.ImportReview)
         } else if (homeProblemCounts.permissionRevoked > 0) {
             coreProductState.librarySection = LibrarySection.Tracks
             navigation.navigate(UiDestination.Library)
@@ -1707,6 +1711,11 @@ private fun OfflineLibraryScreen(
         unknownArtist = stringResource(R.string.library_unknown_artist),
     ).copy(wheelOrder = wheelOrder, wheelOwner = wheelOwner,
         wheelMixes = wheelSuggestions.mixes)
+    val preferenceOwner = binding?.userId?.value ?: settings.portableAccountId ?: "legacy-unscoped"
+    val preferences = remember(context) { AutPlayRuntime.database(context).collectionPreferences() }
+    val favorites = key(preferenceOwner) {
+        remember { preferences.observeFavorites(preferenceOwner) }.collectAsState(initial = emptyList()).value
+    }
     val libraryScreenState = buildLibraryScreenUiState(
         localMode = binding == null,
         tracks = allLibraryTrackSummaries,
@@ -1727,7 +1736,7 @@ private fun OfflineLibraryScreen(
         importingLocalTrack = libraryImportInProgress,
         lastImportedTitle = lastImportedTitle,
         error = libraryError,
-    )
+    ).withSavedCollections(favorites)
     val detailRequestIsCurrent = coreDetailState.matches(detailContextKey, coreProductState.selectedDetail)
     val presentedTrackDetail = coreDetailState.track.takeIf { detailRequestIsCurrent }
     val presentedReleaseDetail = coreDetailState.release.takeIf { detailRequestIsCurrent }
@@ -1740,7 +1749,11 @@ private fun OfflineLibraryScreen(
     val presentedDetailError = coreDetailState.error && detailRequestIsCurrent
     val presentedDetailLoading = coreProductState.selectedDetail != null &&
         (coreDetailState.loading || !detailRequestIsCurrent) && !presentedDetailError
+    val artistMatches = if (coreProductState.searchKind == app.autplay.application.search.LibrarySearchKind.Artist && coreProductState.query.isNotBlank())
+        key(activeProfileId, coreProductState.query) { remember { artistCatalogPort.search(app.autplay.application.artist.artistScope(activeProfileId), coreProductState.query) }
+            .collectAsState(initial = emptyList()).value } else emptyList()
     val searchScreenState = SearchScreenUiState(
+        artistMatches = artistMatches.map { app.autplay.ui.CoreArtistUiItem(it.key.artistId.value, it.name, it.disambiguation) },
         kind = coreProductState.searchKind,
         query = coreProductState.query,
         offlineTrackIds = offlineSearchIds.toSet(),
@@ -1776,11 +1789,45 @@ private fun OfflineLibraryScreen(
         vaultError = vaultSearchError && searchContextIsCurrent,
     )
     val artistId = coreProductState.selectedDetail?.takeIf {
-        it.kind in setOf(DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistAlbums)
+        it.kind in setOf(DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums)
     }?.stableId
     val artistRanking = rememberArtistRanking(context, binding, artistId)
-    val publicRecordings = rememberArtistCatalogPages(context, binding, artistRanking.artistMbid, editions = false)
+    // Curated catalogue alias for the band whose legacy imports use several spellings.
+    val publicArtistId = artistRanking.artistMbid ?: app.autplay.application.artist.ARTIST_25_17_MBID.takeIf {
+        presentedArtistDetail?.summary?.let { artist -> artist.name == "25/17" &&
+            artist.preferenceByName && artist.disambiguation.isNullOrBlank() &&
+                artist.countryCode in setOf(null, "RU") && artist.artistType in setOf(null, "GROUP", "UNKNOWN") } == true
+    }
+    val publicEditions = rememberArtistCatalogPages(context, binding, publicArtistId, editions = true)
+    val publicRecordings = rememberArtistCatalogPages(context, binding, publicArtistId, editions = false)
+    val collectionPreference = when (val target = coreProductState.selectedDetail) {
+        null -> null
+        else -> when (target.kind) {
+            DetailKind.Artist -> presentedArtistDetail?.summary?.let { artist ->
+                "artist" to (favorites.firstOrNull { it.kind == "artist" && it.route == target.stableId }?.target
+                    ?: publicArtistId?.let { "mb:$it" } ?: app.autplay.data.local.artistPreferenceTarget(artist))
+            }
+            DetailKind.Release -> presentedReleaseDetail?.let { "album" to (it.releaseMbid?.let { id -> "mb:$id" } ?: target.stableId) }
+            DetailKind.CatalogRelease -> "album" to "mb:${target.stableId}"
+            DetailKind.CatalogArtistTracks -> "artist" to "mb:${target.stableId}"
+            else -> null
+        }
+    }
+    val collectionLiked = collectionPreference?.let { (kind, target) -> key(preferenceOwner, kind, target) {
+        remember { preferences.observe(preferenceOwner, kind, target) }.collectAsState(initial = null).value ?: false
+    } }
+    val selectedCollection = coreProductState.selectedDetail
     val coreDetailUiState = CoreProductDetailUiState(
+        collectionLiked = collectionLiked,
+        setCollectionLiked = { liked -> collectionPreference?.let { (kind, target) -> scope.launch {
+            try { preferences.record(app.autplay.data.local.CollectionPreferenceEvent(owner = preferenceOwner,
+                kind = kind, target = target, liked = liked,
+                route = if (selectedCollection?.kind in setOf(DetailKind.CatalogRelease, DetailKind.CatalogArtistTracks)) target else selectedCollection?.stableId,
+                label = presentedArtistDetail?.summary?.name ?: presentedReleaseDetail?.title ?: selectedCollection?.label
+                    ?: favorites.firstOrNull { it.kind == kind && it.target == target }?.label)) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { stableError = "PREFERENCE_UNAVAILABLE" }
+        } } },
         target = coreProductState.selectedDetail,
         loading = presentedDetailLoading,
         error = presentedDetailError,
@@ -1790,8 +1837,11 @@ private fun OfflineLibraryScreen(
         artist = presentedArtistDetail,
         artistAppearances = presentedArtistAppearances,
         ranking = artistRanking.counts,
-        artistMbid = artistRanking.artistMbid,
-        publicEditions = rememberArtistCatalogPages(context, binding, artistRanking.artistMbid, editions = true).items,
+        artistMbid = publicArtistId,
+        localArtistAlbums = coreDetailState.artistAlbums.takeIf { detailRequestIsCurrent }.orEmpty(),
+        publicEditions = publicEditions.items,
+        albumsIncomplete = publicEditions.incomplete,
+        retryAlbums = publicEditions.retry,
         publicRecordings = publicRecordings.items,
         publicCounts = artistRanking.publicCounts,
         libraryRecordings = artistRanking.libraryRecordings,
@@ -1801,8 +1851,26 @@ private fun OfflineLibraryScreen(
         albumArtwork = if (presentedArtistDetail == null) emptyMap() else libraryReleases.associate { it.stableId to it.artworkTrackId },
         subjectArtistCredits = presentedSubjectArtistCredits,
     )
+    val playingTrackId = if (playerState.mediaId != null) playerState.localTrackRefId
+        else homeScreenState.continueListening?.trackId ?: homeScreenState.recentlyPlayed.firstOrNull()?.id
+    val playingArtists = if (playingTrackId != null) {
+        key(artistCatalogPort, activeProfileId, playingTrackId) {
+            remember { artistCatalogPort.observeTrackArtists(app.autplay.application.artist.artistScope(activeProfileId), playingTrackId) }
+                .collectAsState(initial = emptyList()).value
+        }
+    } else emptyList()
+    var artistPickerOpen by rememberSaveable(coreBindingKey, playingTrackId) { mutableStateOf(false) }
+    val searchPersonal = remember(context, activeProfileId, preferenceOwner, coreProductRepository, artistCatalogPort) {
+        PersonalLibrarySearch(AutPlayRuntime.database(context), coreProductRepository, artistCatalogPort, activeProfileId, preferenceOwner)::find
+    }
     val coreRouteActions = CoreProductRouteActions(
+        searchPersonal = searchPersonal,
         playReleaseEntry = { id -> presentedReleaseDetail?.let { coreCommandActions.startReleaseEntry(it, id) } },
+        openHeroArtist = when (playingArtists.size) {
+            0 -> null
+            1 -> { { openCoreDetail(DetailTarget(DetailKind.Artist, playingArtists.single().key.artistId.value)) } }
+            else -> { { artistPickerOpen = true } }
+        },
         openListenTogether = { navigation.navigate(UiDestination.WaveRooms) },
         recommendationVisible = coreCommandActions.recordRecommendationVisibility,
         playRecommendation = coreCommandActions.startRecommendation,
@@ -1871,14 +1939,6 @@ private fun OfflineLibraryScreen(
         manualPlaylists = playlists.map { ManualPlaylistUi(it.stableId, it.title, it.description) },
         manualPlaylistActions = manualPlaylistActions,
     )
-    val playingTrackId = playerState.localTrackRefId
-    val playingArtists = if (activeProfileId != null && playingTrackId != null) {
-        key(artistCatalogPort, activeProfileId, playingTrackId) {
-            remember { artistCatalogPort.observeTrackArtists(app.autplay.domain.ServerProfileId(activeProfileId), playingTrackId) }
-                .collectAsState(initial = emptyList()).value
-        }
-    } else emptyList()
-    var artistPickerOpen by rememberSaveable(coreBindingKey, playingTrackId) { mutableStateOf(false) }
     val nowPlayingRouteActions = buildNowPlayingRouteActions(
         playbackActions = playbackActions,
         playerAdapter = playerAdapter,

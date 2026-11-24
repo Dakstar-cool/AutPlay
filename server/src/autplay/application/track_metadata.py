@@ -59,9 +59,10 @@ from autplay.domain.track_metadata import (
     validate_fields,
 )
 from autplay.ports.jobs import EnqueueJob
+from autplay.ports.track_metadata import TrackLoudness
 
 METADATA_JOB = JobKey("music.metadata.enrich", 1)
-METADATA_ENRICHMENT_VERSION = 2
+METADATA_ENRICHMENT_VERSION = 3
 
 
 def acquisition_sha256(document: dict[str, Any]) -> str:
@@ -894,6 +895,7 @@ class TrackMetadataService:
         error_code: str | None = None,
         explicit_selection: bool = False,
         audio_variant_id: UUID | None = None,
+        loudness: TrackLoudness | None = None,
         album_group: dict[str, object] | None = None,
         expected_acquisition_sha256: str | None = None,
         clear_album_group: bool = False,
@@ -912,7 +914,18 @@ class TrackMetadataService:
                     "worker_acquisition_sha256": expected_acquisition_sha256,
                 }
             if audio_variant_id is not None:
-                row.document = {**row.document, "audio_variant_id": str(audio_variant_id)}
+                document = dict(row.document)
+                if document.get("audio_variant_id") != str(audio_variant_id):
+                    document.pop("loudness_v1", None)
+                document["audio_variant_id"] = str(audio_variant_id)
+                if loudness is not None and evidence is not None:
+                    document["loudness_v1"] = {
+                        "audio_variant_id": str(audio_variant_id),
+                        "sha256": evidence.source_id.removeprefix("sha256:"),
+                        "gain_db": loudness.gain_db,
+                        "true_peak": loudness.true_peak,
+                    }
+                row.document = document
             native_changed = False
             if fields is not None and evidence is not None:
                 previous = document_from(row)

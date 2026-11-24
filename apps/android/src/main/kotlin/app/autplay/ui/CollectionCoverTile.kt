@@ -27,7 +27,7 @@ internal fun CollectionCoverTile(
     Surface(onClick = onClick, enabled = enabled, modifier = modifier, shape = MaterialTheme.shapes.medium, color = AutPlayTokens.colors.raisedSurface) {
         Column {
             AutPlayArtwork(title, Modifier.fillMaxWidth().aspectRatio(1f).clearAndSetSemantics {}, trackId = artworkTrackId,
-                painter = if (artworkTrackId == null) rememberCatalogCover(catalogCoverId) else null)
+                catalogCoverId = catalogCoverId)
             Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,

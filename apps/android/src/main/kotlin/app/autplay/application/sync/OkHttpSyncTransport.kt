@@ -90,15 +90,15 @@ class OkHttpSyncTransport(
             .addQueryParameter("server_profile_id", binding.serverProfileId.value).addQueryParameter("journal_epoch", binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED"))
             .addQueryParameter("limit", "100")
             .addQueryParameter("catalog_projection_version", "1")
-            .addQueryParameter("capabilities", "$CATALOG_ARTIST_ID_CAPABILITY,CATALOG_EDITION_V1")
+            .addQueryParameter("capabilities", "$CATALOG_ARTIST_ID_CAPABILITY,CATALOG_EDITION_V1,PERSONAL_LIBRARY_V1")
             .apply { cursor?.let { addQueryParameter("cursor", it) } }.build()
         val root = execute(binding.serverProfileId, url.toString(), null).jsonObject
-        return PullPage(root["next_cursor"]!!.jsonPrimitive.content, root["has_more"]!!.jsonPrimitive.boolean, events(root["events"]!!.jsonArray))
+        return PullPage(root["next_cursor"]!!.jsonPrimitive.content, root["has_more"]!!.jsonPrimitive.boolean, events(root["events"]!!.jsonArray), root["personal_library_version"]?.jsonPrimitive?.int ?: 0)
     }
 
     override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage {
         require(pendingCount in 0..100_000)
-        val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\",\"CATALOG_EDITION_V1\"]}"
+        val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\",\"CATALOG_EDITION_V1\",\"PERSONAL_LIBRARY_V1\"]}"
         val root = execute(
             binding.serverProfileId,
             "/sync/bootstrap",
@@ -119,7 +119,7 @@ class OkHttpSyncTransport(
             RemoteEvent(alias, 0, "AGGREGATE_REDIRECT", 1, "{}", type, alias, null, "REDIRECT", null, null, value["canonical_server_id"]!!.jsonPrimitive.content)
         } }
         val items = aggregates + tombstones + redirects
-        return BootstrapPage(snapshot, root["next_page_token"]?.jsonPrimitive?.contentOrNull, root["snapshot_cursor"]?.jsonPrimitive?.contentOrNull, root["has_more"]!!.jsonPrimitive.boolean, items)
+        return BootstrapPage(snapshot, root["next_page_token"]?.jsonPrimitive?.contentOrNull, root["snapshot_cursor"]?.jsonPrimitive?.contentOrNull, root["has_more"]!!.jsonPrimitive.boolean, items, root["personal_library_version"]?.jsonPrimitive?.int ?: 0)
     }
 
     private suspend fun execute(

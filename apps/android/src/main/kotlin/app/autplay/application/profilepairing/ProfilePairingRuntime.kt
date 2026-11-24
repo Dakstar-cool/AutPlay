@@ -1,5 +1,6 @@
 package app.autplay.application.profilepairing
 
+import app.autplay.domain.DeviceId
 import app.autplay.application.accountrecovery.hasAccountRecoveryPendingRecipient
 import app.autplay.application.accountrecovery.hasAccountDeletionPendingRecipient
 import app.autplay.application.accountrecovery.hasOrdinaryAccountRecoveryPendingRecipient
@@ -541,12 +542,14 @@ class ProfilePairingRuntime(
 
     fun performLifecycle(action: RuntimeLifecycleAction) = scope.launch { performConfirmedLifecycle(action, null, null) }
 
-    suspend fun performConfirmedLifecycle(action: RuntimeLifecycleAction, operationId: String?, authorization: String?): Boolean {
+    suspend fun performConfirmedLifecycle(action: RuntimeLifecycleAction, operationId: String?, authorization: String?, otherDevice: DeviceId? = null): Boolean {
         if (firstBindGate.isReservedBy(FirstBindCeremonyOwner.PORTABLE_ACCOUNT)) {
             reportSafeError("ACCOUNT_CONNECTION_OUTCOME_PENDING")
             return false
         }
         val connected = mutableState.value.pairing as? PairingState.Connected ?: return false
+        if (otherDevice != null && (action != RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE ||
+            otherDevice == connected.snapshot.expectedDeviceId || mutableState.value.devices.none { it.deviceId == otherDevice })) return false
         val current = settings.settings.first()
         val capturedCommit = current.m5Binding?.bindingCommitId
         if (current.activeServerProfileId != connected.snapshot.serverProfileId || capturedCommit != connected.snapshot.bindingCommitId) return false
@@ -560,7 +563,7 @@ class ProfilePairingRuntime(
             if (authorization == null || operationId == null) { reportSafeError("ACCOUNT_REAUTHENTICATION_REQUIRED"); return false }
             val document = root ?: return false
             try {
-                app.autplay.application.portableaccount.verifyLifecycleAuthorization(document, current, action, operationId, authorization)
+                app.autplay.application.portableaccount.verifyLifecycleAuthorization(document, current, action, operationId, authorization, otherDevice)
             } catch (_: Exception) {
                 reportSafeError("ACCOUNT_REAUTHENTICATION_REQUIRED")
                 return false
@@ -578,15 +581,23 @@ class ProfilePairingRuntime(
                 RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE -> LifecycleAction.REVOKE_DEVICE
                 RuntimeLifecycleAction.DISCONNECT_LOCAL -> error("unreachable")
             }
+        val target = if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) otherDevice ?: connected.snapshot.expectedDeviceId else null
         val command = (mutableState.value.lastUnknownLifecycle
-            ?.takeIf { it.action == requestedAction }
+            ?.takeIf { it.action == requestedAction && it.targetDeviceId == target }
             ?: LifecycleCommand(
                 action = requestedAction,
                 operationId = operationId ?: uuid(),
-                targetDeviceId = if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) connected.snapshot.expectedDeviceId else null,
+                targetDeviceId = target,
             )).let { if (authorization != null) it.copy(portableAuthorization = authorization) else it }
         when (val result = port.lifecycle(connected.snapshot.serverProfileId, command)) {
             is PairingNetworkResult.Success -> {
+                if (otherDevice != null) {
+                    if ((mutableState.value.pairing as? PairingState.Connected)?.snapshot != connected.snapshot) return false
+                    mutableState.value = mutableState.value.copy(pendingLifecycle = null, lastUnknownLifecycle = null,
+                        devices = mutableState.value.devices.filterNot { it.deviceId == otherDevice })
+                    refreshCapabilities(connected.snapshot, requireNotNull(current.m5Binding).sessionId, false)
+                    return true
+                }
                 if (!clearLocal(connected.snapshot.serverProfileId, capturedCommit, root?.keyThumbprint)) return false
                 mutableState.value = ProfilePairingRuntimeState()
                 return true
@@ -1158,7 +1169,7 @@ class ProfilePairingRuntime(
                 val accountLabel = mutableState.value.accountLabel
                 mutableState.value = ProfilePairingRuntimeState(
                     pairing = next,
-                    devices = devices.map { it.label },
+                    devices = devices.distinctBy { it.deviceId }.map { it.copy(current = it.deviceId == snapshot.expectedDeviceId) },
                     sessions = sessions.mapNotNull { deviceLabels[it.deviceId] },
                     localDataChoiceRequired = requireLocalDataChoice,
                     canCreateInvitation = "createEnrollmentInvitation" in response.value.state.supportedOperations,
@@ -1715,7 +1726,7 @@ class ProfilePairingRuntime(
 
 data class ProfilePairingRuntimeState(
     val pairing: PairingState = PairingState.NotConnected,
-    val devices: List<String> = emptyList(),
+    val devices: List<DeviceSummary> = emptyList(),
     val sessions: List<String> = emptyList(),
     val localDataChoiceRequired: Boolean = false,
     val pendingLifecycle: RuntimeLifecycleAction? = null,

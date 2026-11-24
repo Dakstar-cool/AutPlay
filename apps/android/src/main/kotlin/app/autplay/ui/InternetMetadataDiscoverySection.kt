@@ -9,6 +9,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.autplay.AutPlayRuntime
+import app.autplay.ui.core.DetailKind
+import app.autplay.ui.core.DetailTarget
 import app.autplay.R
 import app.autplay.application.search.LibrarySearchKind
 import app.autplay.application.server.*
@@ -28,7 +30,8 @@ private data class AdmittedCatalogueLookup(val query: String, val contextId: Str
 @Composable
 internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearchKind, request: Int,
     session: InternetMusicUiSession? = null, onPlaylistTrack: ((String) -> Unit)? = null,
-    initialTarget: InternetMetadataBrowseTarget? = null, initialCard: InternetMetadataDiscoveryCard? = null) {
+    initialTarget: InternetMetadataBrowseTarget? = null, initialCard: InternetMetadataDiscoveryCard? = null,
+    onOpenCatalog: ((DetailTarget) -> Unit)? = null) {
     val context = LocalContext.current
     val settings by remember { applicationNonSecretSettingsStore(context).settings }.collectAsState(initial = null)
     val profile = if (session != null) session.binding?.serverProfileId else settings?.activeServerProfileId
@@ -80,7 +83,10 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
         val key = user.value + ":" + if (expectedTarget != null) "${expectedTarget.entity}:${expectedTarget.entityId}:$releases:$expectedOffset"
                   else "search:${discoveryKind.wireValue}:$expectedOffset:${scope.query}"
         fun show(response: InternetMetadataDiscoveryPage) {
-            cards = (if (expectedOffset == 0) response.items else cards + response.items).distinctBy { it.id }
+            val matches = if (target == null && kind == LibrarySearchKind.Artist) response.items.filter {
+                it.entityType == "artist" && app.autplay.application.artist.artistNameMatches(it.title, scope.query)
+            } else response.items
+            cards = (if (expectedOffset == 0) matches else cards + matches).distinctBy { it.id }
             page = response
         }
         loading = true
@@ -177,6 +183,16 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
             val count = page?.rawPayload?.get("vault_count")?.jsonPrimitive?.intOrNull
             if (count != null) Text(stringResource(R.string.catalogue_vault_count, count, page?.totalCount ?: 0))
         }
+        if (initialTarget?.entity == InternetMetadataDiscoveryEntity.ARTIST && target == initialTarget) {
+            TextButton(onClick = {
+                releases = !releases
+                offset = 0
+                cards = emptyList()
+                page = null
+                selected = null
+                admitted = null
+            }) { Text(stringResource(if (releases) R.string.catalog_popular_tracks else R.string.library_section_albums)) }
+        }
         if (target?.entity == InternetMetadataDiscoveryEntity.RELEASE && session == null) {
             val cover = rememberCatalogCover(target?.entityId)
             if (cover != null) AutPlayArtwork(scope.query, size = 124.dp, painter = cover)
@@ -189,7 +205,14 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
                         AutPlayArtwork(card.title, size = 72.dp, painter = rememberCatalogCover(card.entityId))
                     }
                     Text(card.title, style = MaterialTheme.typography.titleMedium)
-                    card.artist?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                    val partners = card.performerLinks().distinctBy { it.first }
+                    if (partners.size > 1 && onOpenCatalog != null) {
+                        androidx.compose.foundation.layout.FlowRow {
+                            partners.forEach { (id, name) ->
+                                TextButton(onClick = { onOpenCatalog(DetailTarget(DetailKind.CatalogArtistTracks, id, name)) }) { Text(name) }
+                            }
+                        }
+                    } else card.artist?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                     listOfNotNull(card.releaseDate, card.country, card.disambiguation).takeIf { it.isNotEmpty() }
                         ?.let { Text(it.joinToString(" · "), style = MaterialTheme.typography.bodySmall) }
                     card.discNumber?.let { Text(stringResource(R.string.music_catalogue_disc, it), style = MaterialTheme.typography.bodySmall) }
@@ -201,6 +224,11 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
                     card.recordingTitle?.takeIf { it != card.title }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     card.browseTarget?.let { browse ->
                         TextButton(modifier = Modifier.testTag("catalogue-browse-${card.id}"), enabled = !loading, onClick = {
+                            if (onOpenCatalog != null) {
+                                onOpenCatalog(DetailTarget(if (browse.entity == InternetMetadataDiscoveryEntity.ARTIST)
+                                    DetailKind.CatalogArtistTracks else DetailKind.CatalogRelease, browse.entityId, card.title))
+                                return@TextButton
+                            }
                             parentArtist = target?.takeIf { it.entity == InternetMetadataDiscoveryEntity.ARTIST }; releases = false
                             target = browse; offset = 0; cards = emptyList(); page = null; selected = null; admitted = null
                         }) { Text(stringResource(R.string.music_catalogue_browse)) }

@@ -22,7 +22,7 @@ internal fun CollectionDetailHeader(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AutPlayArtwork(title, Modifier.testTag("collection-artwork"), size = 124.dp, trackId = artworkTrackId, painter = if (artworkTrackId == null) rememberCatalogCover(catalogCoverId) else null)
+            AutPlayArtwork(title, Modifier.testTag("collection-artwork"), size = 124.dp, trackId = artworkTrackId, catalogCoverId = catalogCoverId)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
                 if (!subtitle.isNullOrBlank()) {

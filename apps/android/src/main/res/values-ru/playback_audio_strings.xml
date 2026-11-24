@@ -4,7 +4,7 @@
     <string name="settings_gain_off">Выкл.</string>
     <string name="settings_gain_track">Трек</string>
     <string name="settings_gain_album">Альбом</string>
-    <string name="settings_gain_tags_help">Используются теги ReplayGain в аудиофайле. Если нет данных альбома, применяется усиление трека. Без тегов уровень не меняется. Предусиление применяется к трекам с тегами.</string>
+    <string name="settings_gain_tags_help">Для треков используются теги ReplayGain или измерение сервера. В режиме альбома приоритет у альбомного тега, затем применяется поправка трека.</string>
     <string name="settings_gain_preamp">Предусиление</string>
     <string name="settings_gain_protection">Защита от перегрузки</string>
     <string name="settings_equalizer">Эквалайзер</string>

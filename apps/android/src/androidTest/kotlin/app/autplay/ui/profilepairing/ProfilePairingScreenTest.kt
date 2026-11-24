@@ -73,7 +73,7 @@ class ProfilePairingScreenTest {
             ),
             ProfilePairingActions(admission = AdmissionActions(confirmAccount = confirmations::incrementAndGet)),
         )
-        compose.onNodeWithText("Approved for Owner (66666666-6666-4666-8666-666666666666). Confirm this account before connecting.").assertIsDisplayed()
+        compose.onNodeWithText("Approved for Owner (66666666-6666-4666-8666-666666666666). Confirm this account before connecting.").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Confirm account").performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, confirmations.get()) }
     }
@@ -138,6 +138,24 @@ class ProfilePairingScreenTest {
         compose.onNodeWithText(context.getString(R.string.profile_local_data_choice_title)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_keep_on_phone)).performClick()
         compose.runOnIdle { assertEquals(ExistingLocalDataChoice.KEEP_ON_PHONE, chosen.get()) }
+    }
+
+    @Test
+    fun signedInAccountShowsSignOutAndDistinguishesReinstallFromCurrentPhone() {
+        val current = app.autplay.application.profilepairing.DeviceSummary(
+            app.autplay.domain.DeviceId("01000000-0000-4000-8000-000000000001"), "My phone", true)
+        val previous = app.autplay.application.profilepairing.DeviceSummary(
+            app.autplay.domain.DeviceId("01000000-0000-4000-8000-000000000002"), "My phone", false, "2026-11-21")
+        render(ProfilePairingUiState(pairing = connectedState(), devices = listOf(current, previous),
+            portableAccount = PortableAccountUiState(app.autplay.application.portableaccount.PortableAccountStatus(
+                publicId = "listener"), true, true, null)))
+        compose.onNodeWithText(context.getString(R.string.portable_account_create)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.account_sign_out)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.device_this_phone, "My phone")).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.device_disconnect)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.device_other_installations, 1)).performScrollTo().performClick()
+        compose.onNodeWithText("My phone · 2026-11-21 · 000002").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.device_disconnect)).assertExists()
     }
 
     @Test

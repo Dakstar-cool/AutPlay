@@ -31,7 +31,7 @@ internal fun LibraryBrowseControls(
     onDownloads: () -> Unit,
     onAdd: () -> Unit,
 ) {
-    val sections = listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists, LibrarySection.Review)
+    val sections = listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists)
     LazyRow(
         Modifier.fillMaxWidth().testTag("library-sections"),
         contentPadding = PaddingValues(horizontal = AutPlayTokens.dimensions.screenPadding),

@@ -7,6 +7,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performTextReplacement
+import app.autplay.ui.core.LibrarySection
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,34 @@ import org.junit.Test
 class LibrarySearchRefreshTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test fun personalSearchKeepsEachTabScopedAndOpensMatchingPlaylist() {
+        val state = mutableStateOf(LibraryScreenUiState(false, listOf(CoreTrackUiItem("s", "Solo", "25/17")),
+            section = LibrarySection.Artists, artists = listOf(CoreArtistUiItem("a", "25/17", null)),
+            albums = listOf(CoreCollectionUiItem("r", "Альбом 25/17", null)),
+            playlists = listOf(CoreCollectionUiItem("p", "Для дороги", null), CoreCollectionUiItem("hidden", "Дома", null))))
+        var opened: String? = null
+        compose.setContent { AutPlayTheme {
+            LibraryProductScreen(state.value, PaddingValues(), {}, {}, {}, {},
+                onSectionChange = { state.value = state.value.copy(section = it) },
+                onOpenCollection = { _, id -> opened = id })
+        } }
+        val input = compose.onNodeWithTag("personal-library-search")
+        input.performTextReplacement("25-17")
+        compose.onNodeWithText("25/17").assertIsDisplayed()
+        compose.onNodeWithText("Solo").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(section = LibrarySection.Albums) }
+        input.performTextReplacement("Альбом")
+        compose.onNodeWithText("Альбом 25/17").assertIsDisplayed()
+        compose.runOnIdle { state.value = state.value.copy(section = LibrarySection.Tracks) }
+        input.performTextReplacement("Sol")
+        compose.onNodeWithText("Solo").assertIsDisplayed()
+        compose.runOnIdle { state.value = state.value.copy(section = LibrarySection.Playlists) }
+        input.performTextReplacement("дороги")
+        compose.onNodeWithText("Дома").assertDoesNotExist()
+        compose.onNodeWithText("Для дороги").performClick()
+        compose.runOnIdle { assertEquals("p", opened) }
+    }
 
     @Test
     fun addActionRemainsAccessibleAtNarrowWidthAndDisablesDuringImport() {

@@ -6,7 +6,7 @@ public fun automaticSearchScopes(bindingKey: String?): Set<SearchScope> =
 
 /** Keep old enum values readable while retiring their user-facing library controls. */
 public fun LibrarySection.browseSection(): LibrarySection = when (this) {
-    LibrarySection.Offline, LibrarySection.Unavailable -> LibrarySection.Tracks
+    LibrarySection.Offline, LibrarySection.Unavailable, LibrarySection.Review -> LibrarySection.Tracks
     else -> this
 }
 

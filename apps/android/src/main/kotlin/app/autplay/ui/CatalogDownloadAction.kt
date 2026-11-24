@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import androidx.core.content.edit
 import app.autplay.AutPlayRuntime
 import app.autplay.R
@@ -25,19 +27,27 @@ import kotlinx.serialization.json.*
 internal fun CatalogDownloadAction(kind: String, id: String) {
     val context = LocalContext.current
     val settings by remember(context) { applicationNonSecretSettingsStore(context).settings }.collectAsState(initial = null)
-    val profile = settings?.activeServerProfileId ?: return
-    val user = settings?.activeUserId ?: return
-    val device = settings?.deviceId ?: return
     val title = stringResource(when (kind) {
         "artist" -> R.string.catalog_download_artist
         "release" -> R.string.catalog_download_release
         else -> R.string.catalog_download_track
     })
-    var open by rememberSaveable(profile.value, user.value, id) { mutableStateOf(false) }
-    var alternatives by rememberSaveable(id) { mutableStateOf(false) }
+    val active = settings ?: return
+    val profile = active.activeServerProfileId
+    val user = active.activeUserId
+    if (profile == null || user == null || active.deviceId == null) {
+        if (kind == "artist") {
+            OutlinedButton(onClick = {}, enabled = false) { Text(title) }
+            Text(stringResource(R.string.music_need_server), style = MaterialTheme.typography.bodySmall)
+        }
+        return
+    }
+    val device = active.deviceId
+    var open by rememberSaveable(profile.value, user.value, kind, id) { mutableStateOf(false) }
     OutlinedButton(onClick = { open = true }) { Text(title) }
     if (!open) return
-    val key = "${profile.value}:${user.value}:$kind:$id:$alternatives"
+    val scope = if (kind == "artist") "studio-discography" else kind
+    val key = "${profile.value}:${user.value}:$scope:$id:false"
     val prefs = remember(context) { context.getSharedPreferences("catalog-download-operations", 0) }
     var operation by remember(key) { mutableStateOf(prefs.getString(key, null)) }
     var state by remember(operation) { mutableStateOf<JsonObject?>(null) }
@@ -48,9 +58,18 @@ internal fun CatalogDownloadAction(kind: String, id: String) {
         prefs.edit { putString(key, op) }
         operation = op
         error = false
-        CatalogDownloadWorker.enqueue(context, profile.value, user.value, op, kind, id, alternatives, start)
+        CatalogDownloadWorker.enqueue(context, profile.value, user.value, op, kind, id, false, start)
     }
     var refresh by remember(operation) { mutableIntStateOf(0) }
+    val workManager = remember(context) { WorkManager.getInstance(context) }
+    @Composable fun worker(start: Boolean): WorkInfo? = operation?.let { op ->
+        key(op, start) {
+            remember { workManager.getWorkInfosForUniqueWorkFlow("catalog-download:$op:$start") }
+                .collectAsState(initial = emptyList()).value.firstOrNull()
+        }
+    }
+    val startWork = worker(true)
+    val previewWork = worker(false)
     LaunchedEffect(operation, refresh) {
         val op = operation ?: return@LaunchedEffect
         val binding = ClientEventBinding(user, device, profile)
@@ -68,8 +87,6 @@ internal fun CatalogDownloadAction(kind: String, id: String) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (kind == "artist") {
                 Text(stringResource(R.string.catalog_download_scope))
-                Row { Checkbox(checked = alternatives, onCheckedChange = { alternatives = it })
-                    Text(stringResource(R.string.catalog_download_alternatives)) }
             }
             val counts = state?.get("counts")?.jsonObject
             if (counts != null) {
@@ -84,11 +101,19 @@ internal fun CatalogDownloadAction(kind: String, id: String) {
                         }, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            if (operation != null && phase !in setOf("preview", "complete")) LinearProgressIndicator()
-            if (error) Text(stringResource(R.string.music_catalogue_unavailable))
+            if (kind == "artist" && phase == "complete") Text(stringResource(R.string.catalog_download_vault_complete))
+            if (kind != "artist" && startWork?.state == WorkInfo.State.SUCCEEDED) {
+                Text(stringResource(R.string.catalog_download_device_result,
+                    startWork.outputData.getInt("submitted", 0), startWork.outputData.getInt("unavailable", 0)))
+            }
+            if (listOfNotNull(startWork, previewWork).any { !it.state.isFinished }) LinearProgressIndicator()
+            if (error || startWork?.state == WorkInfo.State.FAILED || previewWork?.state == WorkInfo.State.FAILED) Text(stringResource(R.string.music_catalogue_unavailable))
         }
     }, confirmButton = {
         when {
+            startWork?.state == WorkInfo.State.FAILED -> TextButton(onClick = { run(true) }) { Text(stringResource(R.string.music_retry)) }
+            startWork?.state?.isFinished == false -> Unit
+            previewWork?.state == WorkInfo.State.FAILED -> TextButton(onClick = { run(false); refresh++ }) { Text(stringResource(R.string.music_retry)) }
             phase == "preview" -> TextButton(onClick = { run(true); refresh++ }) { Text(stringResource(R.string.catalog_download_start)) }
             operation == null || phase == "complete" -> TextButton(onClick = { run(false, true) }) { Text(stringResource(R.string.catalog_download_preview)) }
             error -> TextButton(onClick = { run(phase == "downloading"); refresh++ }) { Text(stringResource(R.string.music_retry)) }

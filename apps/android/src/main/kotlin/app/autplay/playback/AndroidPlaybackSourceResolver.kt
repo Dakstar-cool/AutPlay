@@ -26,6 +26,7 @@ data class ResolvedPlaybackSource(
     val runtimeUri: Uri,
     val source: SelectedAudioSource,
     val unavailableLocalReason: PlaybackUnavailableReason? = null,
+    val localSha256: String? = null,
 )
 
 sealed interface AndroidSourceResolution {
@@ -56,7 +57,8 @@ class AndroidPlaybackSourceResolver(
             if (inspection.status == ContentUriStatus.AVAILABLE) {
                 markInspected(state, "AVAILABLE", nowMs)
                 return AndroidSourceResolution.Available(
-                    ResolvedPlaybackSource(trackRefId, state.contentUri.toUri(), SelectedAudioSource.LOCAL_URI),
+                    ResolvedPlaybackSource(trackRefId, state.contentUri.toUri(), SelectedAudioSource.LOCAL_URI,
+                        localSha256 = state.localSha256?.takeIf { state.byteSize != null && state.byteSize == inspection.byteSize }?.toHexString()),
                 )
             }
             val status = when (inspection.status) {

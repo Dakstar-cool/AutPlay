@@ -131,7 +131,7 @@ class OkHttpProfilePairingPort(
         root.array("devices")
             .map { it.jsonObject }
             .filter { it["revoked_at"] == JsonNull && it.string("platform") == "ANDROID" }
-            .map { DeviceSummary(DeviceId(it.string("device_id")), it.string("device_name"), false) }
+            .map { DeviceSummary(DeviceId(it.string("device_id")), it.string("device_name"), false, it["created_at"]?.jsonPrimitive?.contentOrNull?.take(10)) }
     }
     override suspend fun sessions(profileId: ServerProfileId) = authenticated(profileId, "/account/sessions", null, MAX_LIST_BYTES) { root ->
         val now = Instant.now()

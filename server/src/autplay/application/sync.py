@@ -60,6 +60,7 @@ _EVENT_INSERT_BATCH: Final = 500
 _BOOTSTRAP_INSERT_BATCH: Final = 1_000
 _OWNER_RECORDING_PAGE_SIZE: Final = 100
 CATALOG_EDITION_V1: Final = "CATALOG_EDITION_V1"
+PERSONAL_LIBRARY_V1: Final = "PERSONAL_LIBRARY_V1"
 CATALOG_ARTIST_ID_V1: Final = "CATALOG_ARTIST_ID_V1"
 _CATALOG_AGGREGATES: Final = frozenset(
     {"ARTIST", "ARTIST_CREDIT", "RECORDING_ARTIST_CREDIT", "RELEASE_ARTIST_CREDIT"}
@@ -1114,6 +1115,17 @@ class SyncService:
                 )
             )
             page, more = rows[:limit], len(rows) > limit
+            library_ids = [
+                row.aggregate_id
+                for row in page
+                if row.aggregate_type == "LIBRARY_ENTRY" and row.operation == "UPSERT"
+            ]
+            personal_library = PERSONAL_LIBRARY_V1 in _capabilities(body)
+            catalog_only = (
+                _catalog_only_entries(session, principal.user_id, library_ids)
+                if personal_library
+                else None
+            )
             delete_ids = [row.event_id for row in page if row.operation == "DELETE"]
             tombstones = {
                 row.deleted_by_event_id: row
@@ -1136,9 +1148,10 @@ class SyncService:
             "journal_epoch": str(epoch),
             "from_cursor": token,
             "next_cursor": next_cursor,
+            **({"personal_library_version": 1} if personal_library else {}),
             "has_more": more,
             "events": [
-                _server_event(row, tombstones.get(row.event_id))
+                _server_event(row, tombstones.get(row.event_id), catalog_only=catalog_only)
                 for row in page
                 if (_catalog_enabled(body) or row.aggregate_type not in _CATALOG_AGGREGATES)
                 and (
@@ -1179,6 +1192,7 @@ class SyncService:
                     principal.user_id,
                     include_catalog_artist=_catalog_enabled(body),
                     include_editions=CATALOG_EDITION_V1 in _capabilities(body),
+                    personal_library=PERSONAL_LIBRARY_V1 in _capabilities(body),
                 )
                 snapshot_rows = [
                     {
@@ -1258,6 +1272,11 @@ class SyncService:
             "server_profile_id": str(body["server_profile_id"]),
             "journal_epoch": str(epoch),
             "snapshot_id": str(snapshot_id),
+            **(
+                {"personal_library_version": 1}
+                if PERSONAL_LIBRARY_V1 in snapshot.capabilities
+                else {}
+            ),
             "snapshot_high_water_server_sequence": snapshot.high_water_server_sequence,
             "aggregates": aggregates,
             "tombstones": [
@@ -1813,7 +1832,12 @@ def _duplicate(ack: Any, event: dict[str, Any]) -> dict[str, Any]:
     return duplicate
 
 
-def _server_event(row: SyncEventRow, tombstone: TombstoneRow | None = None) -> dict[str, Any]:
+def _server_event(
+    row: SyncEventRow,
+    tombstone: TombstoneRow | None = None,
+    *,
+    catalog_only: set[UUID] | None = None,
+) -> dict[str, Any]:
     event = {
         "server_sequence": row.server_sequence,
         "event_id": str(row.event_id),
@@ -1827,6 +1851,12 @@ def _server_event(row: SyncEventRow, tombstone: TombstoneRow | None = None) -> d
         "payload": row.payload,
         "created_at": _iso(row.created_at),
     }
+    if (
+        catalog_only is not None
+        and row.aggregate_type == "LIBRARY_ENTRY"
+        and row.operation == "UPSERT"
+    ):
+        event["payload"] = {**row.payload, "personal_save": row.aggregate_id not in catalog_only}
     if tombstone is not None:
         event["tombstone"] = {
             "tombstone_id": str(tombstone.tombstone_id),
@@ -1846,12 +1876,50 @@ def _aggregate(row: SyncEventRow) -> dict[str, Any]:
     }
 
 
+def _catalog_only_entries(session: Session, owner: UUID, ids: list[UUID]) -> set[UUID]:
+    """Identify automatic acquisitions without treating ordinary imports as catalogue stock."""
+    if not ids:
+        return set()
+    rows = session.execute(
+        text("""
+            WITH candidates AS (
+                SELECT l.library_entry_id, e.raw_external_id, false AS automatic
+                FROM library.library_entry l
+                JOIN importing.import_entry e ON e.user_track_ref_id=l.user_track_ref_id
+                JOIN importing.import_job j ON j.import_job_id=e.import_job_id
+                    AND j.user_id=l.user_id
+                WHERE l.user_id=:owner AND l.library_entry_id=ANY(:ids) AND l.source='IMPORT'
+                  AND e.raw_external_id LIKE 'acquisition:%'
+                UNION ALL
+                SELECT l.library_entry_id, NULL, true FROM library.library_entry l
+                JOIN discovery.candidate c ON c.library_entry_id=l.library_entry_id
+                    AND c.user_id=l.user_id
+                WHERE l.user_id=:owner AND l.library_entry_id=ANY(:ids) AND l.source='SEARCH'
+                  AND c.selection_origin='AUTOMATIC'
+            )
+            SELECT library_entry_id, raw_external_id, automatic FROM candidates c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM sync.sync_event s
+                WHERE s.user_id=:owner AND s.aggregate_id=c.library_entry_id
+                  AND s.event_type='LIBRARY_ENTRY_UPSERTED' AND s.origin_device_id IS NOT NULL
+            )
+            """),
+        {"owner": owner, "ids": ids},
+    )
+    return {
+        identity
+        for identity, external, automatic in rows
+        if automatic or uuid5(owner, external.removeprefix("acquisition:")) == identity
+    }
+
+
 def _bootstrap_projections(
     session: Session,
     user_id: UUID,
     *,
     include_catalog_artist: bool = False,
     include_editions: bool = False,
+    personal_library: bool = False,
 ) -> list[tuple[str, UUID, int, Any]]:
     """Materialize live owner projections, never replaying patch event payloads."""
     values: list[tuple[str, UUID, int, Any]] = []
@@ -1897,11 +1965,17 @@ def _bootstrap_projections(
                 },
             )
         )
-    for entry_row in session.scalars(
+    entries = session.scalars(
         select(LibraryEntryRow).where(
             LibraryEntryRow.user_id == user_id, LibraryEntryRow.removed_at.is_(None)
         )
-    ):
+    ).all()
+    catalog_only = (
+        _catalog_only_entries(session, user_id, [entry.library_entry_id for entry in entries])
+        if personal_library
+        else set()
+    )
+    for entry_row in entries:
         values.append(
             (
                 "LIBRARY_ENTRY",
@@ -1910,6 +1984,11 @@ def _bootstrap_projections(
                 {
                     "server_user_track_ref_id": str(entry_row.user_track_ref_id),
                     "source": entry_row.source,
+                    **(
+                        {"personal_save": entry_row.library_entry_id not in catalog_only}
+                        if personal_library
+                        else {}
+                    ),
                     "availability_status": entry_row.availability_status,
                 },
             )
@@ -2098,7 +2177,11 @@ def _capabilities(body: dict[str, Any]) -> set[str]:
     values = body.get("capabilities", [])
     if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
         return set()
-    return {item for item in values if item in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1)}
+    return {
+        item
+        for item in values
+        if item in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1, PERSONAL_LIBRARY_V1)
+    }
 
 
 def _catalog_enabled(body: dict[str, Any]) -> bool:

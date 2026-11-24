@@ -206,6 +206,54 @@ class ArtistIdProjectionTest {
         }
     }
 
+    @Test fun aliasesHaveOnePageAndSharedTracksLinkOnlyTheirActualPartners() = runBlocking {
+        val db = AutPlayDatabase.open(ApplicationProvider.getApplicationContext(), "artist-aliases-" + System.nanoTime() + ".db")
+        try {
+            val library = db.libraryDao()
+            val profile = ServerProfileId(PROFILE_ONE)
+            val raw = listOf("25 17", "25-17", "25/17/Грязь", "25/17, Хаски, HASH TAG", "Другой")
+            raw.forEachIndexed { index, credit ->
+                val id = "song-" + index
+                library.upsertTrackRef(track(id, "local-" + index, RECORDING_ONE, PROFILE_ONE)
+                    .copy(localRecordingId = null, serverRecordingId = null, rawArtist = credit, rawTitle = id))
+                library.upsertPreference(app.autplay.data.local.entity.UserTrackPreferenceEntity(
+                    id, "LIKED", null, false, "SYNCED", 0, 10, PROFILE_ONE))
+            }
+            val fromServer = track("server-only", "local-server-only", RECORDING_TWO, PROFILE_ONE)
+                .copy(localRecordingId = null, rawArtist = "Другой", rawTitle = "Склад")
+            library.upsertTrackRef(fromServer)
+            val entry = app.autplay.data.local.entity.LibraryEntryEntity("server-entry", null, "server-only", 1,
+                "IMPORT", "VAULT", "CLEAN", 1, 0, null, 1, PROFILE_ONE, personalSave = false)
+            library.upsertEntry(entry)
+            assertTrue(library.browseLibrary(PROFILE_ONE, 50).first().none { it.localUserTrackRefId == "server-only" })
+            library.upsertEntry(entry.copy(personalSave = true))
+            assertTrue(library.browseLibrary(PROFILE_ONE, 50).first().any { it.localUserTrackRefId == "server-only" })
+            val port = RoomArtistCatalogPort(db)
+            val artist = port.search(profile, "25-17", personal = true).first().single()
+            assertEquals("25/17", artist.name)
+            val songs = port.allAppearances(artist.key)
+            assertEquals(setOf("song-0", "song-1", "song-2", "song-3"), songs.map { it.title }.toSet())
+            val duet = songs.single { it.title == "song-2" }
+            assertTrue(duet.guest)
+            val partner = duet.performers.single { it.name == "Грязь" }
+            assertEquals(listOf("song-2"), port.allAppearances(partner.key).map { it.title })
+            assertEquals(duet.performers.map { it.key }.toSet(), port.observeTrackArtists(profile, "song-2").first().map { it.key }.toSet())
+            assertTrue(port.search(profile, "Хакси").first().any { it.name == "Хаски" })
+            val query = app.autplay.PersonalLibrarySearch(db, app.autplay.application.library.CoreProductRepository(db), port, PROFILE_ONE)
+            assertEquals(listOf("25/17"), query.find(app.autplay.ui.core.LibrarySection.Artists,
+                app.autplay.ui.core.LibraryFilter.All, "25 17").first().artists.map { it.name })
+            assertEquals(listOf("25/17", "Хаски", "HASH TAG"), songs.single { it.title == "song-3" }.performers.map { it.name })
+            assertEquals(4, query.find(app.autplay.ui.core.LibrarySection.Tracks,
+                app.autplay.ui.core.LibraryFilter.All, "25 17").first().tracks.size)
+            db.collectionPreferences().record(CollectionPreferenceEvent(owner = "my-account", kind = "artist", target = artistPreferenceTarget(partner), liked = true))
+            val queue = listOf("song-4", "song-1", "song-2")
+            assertEquals("song-2", db.preferCollections("my-account", PROFILE_ONE, queue)[1])
+            assertEquals(queue, db.preferCollections("other-account", PROFILE_ONE, queue))
+        } finally {
+            db.close()
+        }
+    }
+
     @Test fun likedTrackWithoutCatalogCreditCreatesAnArtistAndPlayableTrack() = runBlocking {
         val db = AutPlayDatabase.open(ApplicationProvider.getApplicationContext(), "liked-artist-${System.nanoTime()}.db")
         try {

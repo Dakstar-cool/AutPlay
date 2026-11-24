@@ -173,7 +173,7 @@ class MusicDiscoveryService:
             limit,
             offset,
             lambda provider: provider.artist_tracks(artist_id, limit=limit, offset=offset),
-            key=f"artist_tracks:{artist_id}",
+            key=f"artist_tracks_v2:{artist_id}",
         )
 
     def release_tracks(

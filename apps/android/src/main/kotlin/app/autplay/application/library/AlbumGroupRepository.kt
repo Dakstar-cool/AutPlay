@@ -15,7 +15,9 @@ public data class MetadataAlbum(
     public val group: MetadataAlbumGroup,
     public val members: List<MetadataAlbumMember>,
     public val addedAtMs: Long,
-)
+) {
+    public val artworkTrackId: String? get() = members.firstOrNull { it.hasArtwork }?.localUserTrackRefId
+}
 
 public data class MetadataAlbumMember(
     public val localUserTrackRefId: String,
@@ -25,6 +27,7 @@ public data class MetadataAlbumMember(
     public val durationMs: Long?,
     public val discNumber: Int?,
     public val trackNumber: Int?,
+    public val hasArtwork: Boolean = false,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -36,12 +39,12 @@ public class AlbumGroupRepository(private val database: AutPlayDatabase) {
             .mapLatest { snapshot(profileId) }.distinctUntilChanged()
 
     /** Full membership is independent of the bounded UI track list. Each SQL batch is bounded. */
-    public suspend fun snapshot(profileId: String?): List<MetadataAlbum> = database.withReadTransaction {
+    public suspend fun snapshot(profileId: String?, personal: Boolean = true): List<MetadataAlbum> = database.withReadTransaction {
         val projector = MetadataAlbumProjector()
         val profile = profileId ?: "legacy-unscoped"
         var after = ""
         do {
-            val page = database.trackMetadataDao().albumSourcesPage(profile, after, PAGE_SIZE)
+            val page = database.trackMetadataDao().albumSourcesPage(profile, after, PAGE_SIZE, personal)
             page.forEach(projector::add)
             page.lastOrNull()?.let {
                 check(it.localUserTrackRefId > after) { "ALBUM_PAGE_INVALID" }
@@ -72,7 +75,7 @@ internal class MetadataAlbumProjector {
                 group.copy(payload = kotlinx.serialization.json.JsonObject(emptyMap())),
                 MetadataAlbumMember(row.localUserTrackRefId, row.localRecordingId,
                     metadata.text("title", row.rawTitle), metadata.text("artist", row.rawArtist),
-                    row.rawDurationMs, group.discNumber, group.trackNumber))
+                    row.rawDurationMs, group.discNumber, group.trackNumber, metadata.artworkSha256 != null))
         }
     }
 

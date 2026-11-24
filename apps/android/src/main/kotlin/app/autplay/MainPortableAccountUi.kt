@@ -66,7 +66,7 @@ internal fun rememberPortableAccountUi(runtime: PortableAccountRuntime, settings
     return MainPortableAccountUi(PortableAccountUiState(status, settings.activeServerProfileId != null,
         pairing.pairing is PairingState.AwaitingTrust && pairing.trustConfirmed, status.serverPublicId ?: settings.pendingPublicId,
         recoveryFileReady = recoveryFile != null),
-        PortableAccountActions(create = runtime::create, connect = runtime::connect, signOut = runtime::signOut,
+        PortableAccountActions(create = runtime::create, connect = runtime::connect, signOut = runtime::signOut, revokeOtherDevice = runtime::revokeOtherDevice,
             exportRecovery = { export.launch("autplay-recovery.json") }, retry = { scope.launch { runtime.resume() } },
             importRecovery = { importFile.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
             clearRecoveryFile = { recoveryFile?.fill(0); recoveryFile = null },

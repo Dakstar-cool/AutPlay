@@ -14,6 +14,30 @@ import kotlinx.coroutines.runBlocking
 
 @RunWith(AndroidJUnit4::class)
 class ArtistIdRoomMigrationTest {
+    @Test fun personalCollectionMigrationPreservesExistingLibraryAndStartsWithNoCollectionLikes() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(),
+            context.getDatabasePath("personal-library-" + System.nanoTime() + ".db"), BundledSQLiteDriver(), AutPlayDatabase::class)
+        helper.createDatabase(20).use { db ->
+            db.execSQL("""INSERT INTO user_track_ref(local_user_track_ref_id, server_profile_id,
+                raw_title, resolution_status, sync_state, last_local_sequence, created_at_ms, updated_at_ms)
+                VALUES('track','profile','My track','UNRESOLVED','DIRTY',1,1,1)""")
+            db.execSQL("""INSERT INTO library_entry(local_library_entry_id, local_user_track_ref_id,
+                added_at_ms, source, availability_status, sync_state, last_local_sequence, updated_at_ms, server_profile_id)
+                VALUES('entry','track',1,'LOCAL','LOCAL','DIRTY',1,1,'profile')""")
+        }
+        helper.runMigrationsAndValidate(21, listOf(AutPlayDatabase.MIGRATION_20_21)).use { db ->
+            db.prepare("SELECT personal_save FROM library_entry WHERE local_library_entry_id='entry'").use {
+                assertTrue(it.step())
+                assertEquals(1L, it.getLong(0))
+            }
+            db.prepare("SELECT count(*) FROM collection_preference_event").use {
+                assertTrue(it.step())
+                assertEquals(0L, it.getLong(0))
+            }
+        }
+    }
+
     @Test fun editionPagesPreserveExistingOwnerReferences() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val file = context.getDatabasePath("artist-editions-${System.nanoTime()}.db")

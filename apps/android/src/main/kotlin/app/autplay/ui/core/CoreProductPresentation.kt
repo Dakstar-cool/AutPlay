@@ -109,7 +109,7 @@ internal fun buildHomeScreenUiState(
     offlineFallback = offlineFallback,
     releases = releases.map {
         HomeReleaseUiItem(it.stableId, it.title, it.artistName ?: unknownArtist, it.releaseDateText,
-            artworkTrackId = it.artworkTrackId, inLibrary = (it.ownedTrackCount ?: 0) > 0)
+            releaseMbid = it.mbid, artworkTrackId = it.artworkTrackId, inLibrary = (it.ownedTrackCount ?: 0) > 0)
     },
     recommendations = recommendations,
     continueListening = continueListening?.takeIf { it.localUserTrackRefId in playableTrackIds }?.let { queue ->
@@ -177,7 +177,7 @@ internal fun buildLibraryScreenUiState(
         },
         artistBrowseState = artistBrowseState,
         playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description, artworkTrackId = it.artworkTrackId) },
-        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId) },
+        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId, it.mbid) },
         reviewCount = reviewCount,
         importingLocalTrack = importingLocalTrack,
         lastImportedTitle = lastImportedTitle,

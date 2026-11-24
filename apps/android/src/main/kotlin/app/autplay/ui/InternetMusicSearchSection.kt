@@ -34,9 +34,10 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
     vaultTracks: List<VaultSearchUiItem> = emptyList(),
     onPlayVault: ((String) -> Unit)? = null,
     onPlayAcquired: ((String) -> Unit)? = null,
-    onPlaylistTrack: ((String) -> Unit)? = null) {
+    onPlaylistTrack: ((String) -> Unit)? = null,
+    onOpenCatalog: ((app.autplay.ui.core.DetailTarget) -> Unit)? = null) {
     if (kind == LibrarySearchKind.Artist || kind == LibrarySearchKind.Album) {
-        InternetMetadataDiscoverySection(query, kind, request, session, onPlaylistTrack)
+        InternetMetadataDiscoverySection(query, kind, request, session, onPlaylistTrack, onOpenCatalog = onOpenCatalog)
         return
     }
     val context = LocalContext.current

@@ -1,5 +1,8 @@
 package app.autplay.ui.player
 
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -61,6 +64,42 @@ class PlaybackPlayerSurfacesTest {
     @get:Rule
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test fun seekThumbSharesTrackCenterAtDifferentPositions() {
+        val position = androidx.compose.runtime.mutableLongStateOf(42_000L)
+        composeRule.setContent { AutPlayTheme {
+            NowPlayingScreen(ordinaryState().copy(positionMs = position.longValue), {}, {}, {}, {}, {}, {}, {}, {}, true, {})
+        } }
+        val slider = composeRule.onNodeWithContentDescription(context.getString(R.string.player_seek_description))
+        for (fraction in listOf(.25f, .5f, .75f)) {
+            composeRule.runOnIdle { position.longValue = (180_000 * fraction).toLong() }
+            slider.performScrollTo()
+            val frame = slider.captureToImage().asAndroidBitmap()
+            if (InstrumentationRegistry.getArguments().getString("capturePlayer") == "true") {
+                context.openFileOutput("verified-player.png", 0).use {
+                    composeRule.onRoot().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+                context.openFileOutput("verified-timeline.png", 0).use {
+                    frame.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+            }
+            val railX = (frame.width * .10f).toInt()
+            val ink = frame.getPixel(railX, frame.height / 2)
+            fun span(column: Int) = (0 until frame.height).filter { frame.getPixel(column, it) == ink }
+            val rail = span(railX)
+            val spans = (0 until frame.width).map(::span)
+            val diameter = spans.maxOf { it.size }
+            val middle = spans.indices.filter { spans[it].size == diameter }.average().toInt()
+            val thumb = spans[middle]
+            org.junit.Assert.assertTrue("thumb=$thumb rail=$rail", thumb.size > rail.size * 2)
+            assertEquals((rail.first() + rail.last()) / 2f, (thumb.first() + thumb.last()) / 2f, 1f)
+            // The accessible Slider bounds include padding beyond the ends of the drawn rail.
+            val midY = (rail.first() + rail.last()) / 2
+            val background = frame.getPixel(0, midY)
+            val line = (0 until frame.width).filter { frame.getPixel(it, midY) != background }
+            assertEquals(line.first() + (line.last() - line.first()) * fraction, middle.toFloat(), 2f)
+        }
+    }
 
     @Test fun restoringQueueShowsPreparationBeforeCurrentItemArrives() {
         val state = androidx.compose.runtime.mutableStateOf(ordinaryState().copy(mediaId = null,
