@@ -45,7 +45,8 @@ def execute(command: dict[str, object], destination: BinaryIO) -> None:
         and re.fullmatch(r"/1/popularity/top-recordings-for-artist/[0-9a-f-]{36}", parsed.path)
     )
     metadata = parsed.hostname == "musicbrainz.org" and re.fullmatch(
-        r"/ws/2/(?:artist|recording|release|(?:artist|recording|release)/[0-9a-fA-F-]{36})", parsed.path
+        r"/ws/2/(?:artist|recording|release|(?:artist|recording|release)/[0-9a-fA-F-]{36})",
+        parsed.path,
     )
     cover = is_cover_url(url)
     if not (metadata or artist_ranking or cover or catalogue_api_url(url)):

@@ -139,11 +139,26 @@ def test_provider_version_disambiguation_is_a_hard_conflict(marker: str) -> None
     assert not candidate.exact_for(MetadataQuery("Song", "Artist", duration_ms=180000))
 
 
-@pytest.mark.parametrize(("artist", "raw", "base", "edition", "duration"), [
-    ("Chinawoman", "Left You At The Farm @16 тонн", "Left You At The Farm", "Live at 16 тонн", 304000),
-    ("Moto Boy", "Life is wasted on the living | Monitor Sessions", "Life is wasted on the living", "Monitor Sessions", 223000),
-    ("Максим Свобода", "По разные стороны (Mood Video)", "По разные стороны", None, 191000),
-])
+@pytest.mark.parametrize(
+    ("artist", "raw", "base", "edition", "duration"),
+    [
+        (
+            "Chinawoman",
+            "Left You At The Farm @16 тонн",
+            "Left You At The Farm",
+            "Live at 16 тонн",
+            304000,
+        ),
+        (
+            "Moto Boy",
+            "Life is wasted on the living | Monitor Sessions",
+            "Life is wasted on the living",
+            "Monitor Sessions",
+            223000,
+        ),
+        ("Максим Свобода", "По разные стороны (Mood Video)", "По разные стороны", None, 191000),
+    ],
+)
 def test_source_performance_editions_and_video_wrappers(artist, raw, base, edition, duration):
     from autplay.domain.catalog_artwork import artwork_search_title, recording_labels_match
     from autplay.domain.track_metadata import metadata_search_terms
@@ -158,12 +173,16 @@ def test_source_performance_editions_and_video_wrappers(artist, raw, base, editi
     terms = metadata_search_terms(raw, artist)
     assert terms[0] == (raw, artist) and (base, artist) in terms
     assert artwork_search_title(raw, artist) == base
-    candidate = MetadataCandidate("hit", {"title": base, "artist": artist}, duration, 100, "release")
+    candidate = MetadataCandidate(
+        "hit", {"title": base, "artist": artist}, duration, 100, "release"
+    )
     assert candidate.exact_for(query) == (edition is None)
     assert recording_labels_match(artist, raw, artist, base) == (edition is None)
     assert recording_labels_match(artist, raw, artist, display)
     assert replace(candidate, recording_disambiguation=edition).exact_for(query)
-    assert not replace(candidate, fields={"title": display, "artist": "Other artist"}).exact_for(query)
+    assert not replace(candidate, fields={"title": display, "artist": "Other artist"}).exact_for(
+        query
+    )
     assert not replace(candidate, recording_disambiguation="Other Sessions").exact_for(query)
     if edition:
         assert not replace(candidate, recording_disambiguation=edition).exact_for(

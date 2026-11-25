@@ -88,7 +88,9 @@ def create_music_discovery_router(
     @router.get("/artists/{artist_id}/portrait")
     def artist_portrait(request: Request, artist_id: UUID) -> Response:
         data = available().artist_portrait(principal(request), artist_id)
-        return Response(data, media_type="image/png" if data.startswith(b"\x89PNG") else "image/jpeg")
+        return Response(
+            data, media_type="image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
+        )
 
     @router.get("/library-artists/{artist_id}/ranking")
     def artist_ranking(artist_id: UUID, request: Request) -> dict[str, object]:

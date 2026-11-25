@@ -569,24 +569,34 @@ def test_occurrence_lookup_needs_recording_and_edition_context() -> None:
 def test_search_abbreviations_never_become_identity_evidence():
     from autplay.domain.track_metadata import MetadataCandidate, metadata_search_terms
 
-    query = MetadataQuery("A Very Long Composition Title (Official Video)", "Alice Cooper", duration_ms=180000)
+    query = MetadataQuery(
+        "A Very Long Composition Title (Official Video)", "Alice Cooper", duration_ms=180000
+    )
     terms = metadata_search_terms(query.title, query.artist)
     assert terms[0] == (query.title, query.artist)
-    assert terms[-2:] == (("A Very Long Composition", "Alice Cooper"), ("A Very Long Composition", "Alice"))
-    candidate = MetadataCandidate("test", {"title": "A Very Long Composition", "artist": "Alice"},
-                                  180000, 100, "test")
+    assert terms[-2:] == (
+        ("A Very Long Composition", "Alice Cooper"),
+        ("A Very Long Composition", "Alice"),
+    )
+    candidate = MetadataCandidate(
+        "test", {"title": "A Very Long Composition", "artist": "Alice"}, 180000, 100, "test"
+    )
     assert not candidate.exact_for(query)
 
 
 def test_search_continues_past_studio_hit_to_matching_session():
-    query = MetadataQuery("Life is wasted on the living | Monitor Sessions", "Moto Boy", duration_ms=223000)
+    query = MetadataQuery(
+        "Life is wasted on the living | Monitor Sessions", "Moto Boy", duration_ms=223000
+    )
 
     class SessionHttp(Http):
         def json(self, url, *, post=None):
             self.urls.append(url)
             expression = parse_qs(urlsplit(url).query)["query"][0]
             item = recording(1, 223000, [10])
-            item.update(title="Life is wasted on the living", **{"artist-credit": [{"name": "Moto Boy"}]})
+            item.update(
+                title="Life is wasted on the living", **{"artist-credit": [{"name": "Moto Boy"}]}
+            )
             if "Sessions" not in expression:
                 item.update(id=str(UUID(int=2)), disambiguation="Monitor Sessions")
             return {"count": 1, "recordings": [item]}

@@ -19,15 +19,33 @@ from uuid import UUID
 
 import httpx2
 
-from autplay.domain.catalog_artwork import ArtMatch, catalogue_api_url, image_url, label, match_artwork, native_image_host, search_url
-from autplay.domain.musicbrainz_performances import cover_original, recording_work, remix_sources
-from autplay.domain.music_variations import variation_kind
-from autplay.domain.original_artwork import catalog_original, credited_original, linked_original, variation_title
-from autplay.domain.web_artwork import (
-    BANDCAMP_SEARCH, bandcamp_query, indexed_publisher_cover, publisher_candidates, publisher_match, publisher_track_url,
-    release_lookup_url, yandex_editions, yandex_match, yandex_search_url,
+from autplay.domain.catalog_artwork import (
+    ArtMatch,
+    catalogue_api_url,
+    image_url,
+    label,
+    match_artwork,
+    native_image_host,
+    search_url,
 )
-from autplay.domain.recovery_artwork import archive_cover, archive_image_url, archive_items, archive_search, listenbrainz_cover, listenbrainz_url, mbid, metadata_url_allowed
+from autplay.domain.music_variations import variation_kind
+from autplay.domain.musicbrainz_performances import cover_original, recording_work, remix_sources
+from autplay.domain.original_artwork import (
+    catalog_original,
+    credited_original,
+    linked_original,
+    variation_title,
+)
+from autplay.domain.recovery_artwork import (
+    archive_cover,
+    archive_image_url,
+    archive_items,
+    archive_search,
+    listenbrainz_cover,
+    listenbrainz_url,
+    mbid,
+    metadata_url_allowed,
+)
 from autplay.domain.track_metadata import (
     MetadataCandidate,
     MetadataFields,
@@ -37,6 +55,18 @@ from autplay.domain.track_metadata import (
     metadata_search_terms,
     normalized,
     validate_fields,
+)
+from autplay.domain.web_artwork import (
+    BANDCAMP_SEARCH,
+    bandcamp_query,
+    indexed_publisher_cover,
+    publisher_candidates,
+    publisher_match,
+    publisher_track_url,
+    release_lookup_url,
+    yandex_editions,
+    yandex_match,
+    yandex_search_url,
 )
 from autplay.ports.track_metadata import MetadataProviderError
 
@@ -60,7 +90,9 @@ def is_cover_url(url: str) -> bool:
     if image_url(url, "artist"):
         return True
     if host == "coverartarchive.org":
-        return bool(re.fullmatch(r"/(?:release|release-group)/[0-9a-f-]{36}/front-(?:250|500)", parsed.path))
+        return bool(
+            re.fullmatch(r"/(?:release|release-group)/[0-9a-f-]{36}/front-(?:250|500)", parsed.path)
+        )
     return (host == "archive.org" or host.endswith(".archive.org")) and bool(
         re.fullmatch(r"/(?:download|[0-9]+/items)/mbid-[0-9a-f-]{36}/[a-zA-Z0-9._%-]+", parsed.path)
     )
@@ -73,7 +105,9 @@ def validate_public_url(url: str, *, artwork: bool = False) -> None:
     except ValueError as error:
         raise MetadataProviderError("metadata_url_rejected", retryable=False) from error
     allowed = host in {"musicbrainz.org", "coverartarchive.org", "api.acoustid.org"}
-    allowed = allowed or catalogue_api_url(url) or release_lookup_url(url) or metadata_url_allowed(url)
+    allowed = (
+        allowed or catalogue_api_url(url) or release_lookup_url(url) or metadata_url_allowed(url)
+    )
     if host == "api.listenbrainz.org" and not metadata_url_allowed(url):
         allowed = (
             bool(
@@ -82,8 +116,12 @@ def validate_public_url(url: str, *, artwork: bool = False) -> None:
             and not parsed.query
         )
     if artwork:
-        allowed = (allowed or host == "archive.org" or host.endswith(".archive.org")
-                   or bool(image_url(url, "cover") or image_url(url, "artist") or native_image_host(url)))
+        allowed = (
+            allowed
+            or host == "archive.org"
+            or host.endswith(".archive.org")
+            or bool(image_url(url, "cover") or image_url(url, "artist") or native_image_host(url))
+        )
     if (
         not allowed
         or parsed.scheme != "https"
@@ -157,12 +195,16 @@ class PublicMetadataHttp:
             raise MetadataProviderError("metadata_network_unavailable") from exc
 
     def get(self, url: str, *, artwork: bool = False, post: bytes | None = None) -> bytes | None:
-        if post is not None and (artwork or url not in {BANDCAMP_SEARCH, "https://api.acoustid.org/v2/lookup"}):
+        if post is not None and (
+            artwork or url not in {BANDCAMP_SEARCH, "https://api.acoustid.org/v2/lookup"}
+        ):
             raise MetadataProviderError("metadata_url_rejected", retryable=False)
         ranking = url.startswith("https://api.listenbrainz.org/")
         native_host = native_image_host(url) if artwork else None
         archive_file = urlsplit(url).path if artwork and archive_image_url(url) else None
-        catalog_kind = next((kind for kind in ("cover", "artist") if artwork and image_url(url, kind)), None)
+        catalog_kind = next(
+            (kind for kind in ("cover", "artist") if artwork and image_url(url, kind)), None
+        )
         limit = 4_194_304 if artwork or ranking else 1_048_576
         for _ in range(5):
             validate_public_url(url, artwork=artwork)
@@ -170,7 +212,11 @@ class PublicMetadataHttp:
             if publisher_track_url(url):
                 headers["Accept"] = "text/html"
             if post is not None:
-                headers["Content-Type"] = "application/json" if url == BANDCAMP_SEARCH else "application/x-www-form-urlencoded"
+                headers["Content-Type"] = (
+                    "application/json"
+                    if url == BANDCAMP_SEARCH
+                    else "application/x-www-form-urlencoded"
+                )
             try:
                 with (
                     self.gate(),
@@ -192,11 +238,24 @@ class PublicMetadataHttp:
                                 redirected = urlsplit(url)
                                 suffix = archive_file.removeprefix("/download")
                                 from urllib.parse import unquote
-                                if (redirected.scheme != "https" or not (redirected.netloc == "archive.org" or redirected.netloc.endswith(".archive.org"))
-                                        or not unquote(redirected.path).endswith(unquote(suffix))):
-                                    raise MetadataProviderError("metadata_url_rejected", retryable=False)
-                            if (native_host and native_image_host(url) != native_host) or (catalog_kind and not image_url(url, catalog_kind)):
-                                raise MetadataProviderError("metadata_url_rejected", retryable=False)
+
+                                if (
+                                    redirected.scheme != "https"
+                                    or not (
+                                        redirected.netloc == "archive.org"
+                                        or redirected.netloc.endswith(".archive.org")
+                                    )
+                                    or not unquote(redirected.path).endswith(unquote(suffix))
+                                ):
+                                    raise MetadataProviderError(
+                                        "metadata_url_rejected", retryable=False
+                                    )
+                            if (native_host and native_image_host(url) != native_host) or (
+                                catalog_kind and not image_url(url, catalog_kind)
+                            ):
+                                raise MetadataProviderError(
+                                    "metadata_url_rejected", retryable=False
+                                )
                             continue
                     if response.status_code != 200:
                         retry_after = retry_after_seconds(response.headers.get("Retry-After"))
@@ -286,8 +345,10 @@ def _credit_members(value: Any) -> tuple[dict[str, str], ...]:
         )
         aliases = artist.get("aliases")
         if isinstance(aliases, list) and any(
-            isinstance(alias, dict) and alias.get("type") == "Legal name"
-            and alias.get("name") == credited for alias in aliases[:100]
+            isinstance(alias, dict)
+            and alias.get("type") == "Legal name"
+            and alias.get("name") == credited
+            for alias in aliases[:100]
         ):
             members[-1]["legal_name"] = credited
         prior_join = join
@@ -405,9 +466,15 @@ class MusicBrainzMetadataProvider:
                 if not recordings:
                     recordings = found
                 if expression.startswith("isrc:") or any(
-                    isinstance(row, dict) and normalized(_credit(row.get("artist-credit")) or "") == normalized(query.artist)
-                    and catalogue_title_matches(expected_title, [lookup_title(row.get("title") or "", query.artist)],
-                                                _optional_text(row.get("disambiguation"))) for row in found
+                    isinstance(row, dict)
+                    and normalized(_credit(row.get("artist-credit")) or "")
+                    == normalized(query.artist)
+                    and catalogue_title_matches(
+                        expected_title,
+                        [lookup_title(row.get("title") or "", query.artist)],
+                        _optional_text(row.get("disambiguation")),
+                    )
+                    for row in found
                 ):
                     recordings = found
                     break
@@ -628,7 +695,10 @@ class MusicBrainzMetadataProvider:
         rows = []
         match = None
         for title, artist in metadata_search_terms(query.title, query.artist):
-            result = self.http.json(yandex_search_url(artist, title, clean_title=False)).get("result") or {}
+            result = (
+                self.http.json(yandex_search_url(artist, title, clean_title=False)).get("result")
+                or {}
+            )
             tracks = result.get("tracks") if isinstance(result, dict) else None
             if isinstance(tracks, dict):
                 rows.extend(tracks.get("results") or [])
@@ -636,12 +706,22 @@ class MusicBrainzMetadataProvider:
             if match and match.cover:
                 break
         if (not match or not match.cover) and self._last_deezer and self._last_deezer[0] == query:
-            editions = yandex_editions(rows, query.title, query.artist, query.album, query.duration_ms)
+            editions = yandex_editions(
+                rows, query.title, query.artist, query.album, query.duration_ms
+            )
             if editions:
-                corroborated = match_artwork(self._last_deezer[1], query.title, query.artist, query.album,
-                                              query.duration_ms, confirmed_albums=editions)
+                corroborated = match_artwork(
+                    self._last_deezer[1],
+                    query.title,
+                    query.artist,
+                    query.album,
+                    query.duration_ms,
+                    confirmed_albums=editions,
+                )
                 if corroborated and corroborated.cover:
-                    same_edition = yandex_match(rows, query.title, query.artist, corroborated.album, query.duration_ms)
+                    same_edition = yandex_match(
+                        rows, query.title, query.artist, corroborated.album, query.duration_ms
+                    )
                     return same_edition if same_edition and same_edition.cover else corroborated
         return match
 
@@ -653,25 +733,46 @@ class MusicBrainzMetadataProvider:
             try:
                 payload = self.http.get(url)
             except MetadataProviderError:
-                if result := indexed_publisher_cover(candidates, query.title, query.artist, query.album):
+                if result := indexed_publisher_cover(
+                    candidates, query.title, query.artist, query.album
+                ):
                     return result
                 raise
-            match = publisher_match(payload, row, url, query.title, query.artist, query.album, query.duration_ms)
+            match = publisher_match(
+                payload, row, url, query.title, query.artist, query.album, query.duration_ms
+            )
             if match:
                 matches.append(match)
             elif not payload or b"data-tralbum" not in payload:
-                if result := indexed_publisher_cover(candidates, query.title, query.artist, query.album):
+                if result := indexed_publisher_cover(
+                    candidates, query.title, query.artist, query.album
+                ):
                     return result
         return matches[0] if len({(m.artist_id, m.cover) for m in matches}) == 1 else None
 
     def find_listenbrainz_cover(self, query: MetadataQuery, review=()) -> ArtMatch | None:
         recording = mbid(query.recording_mbid)
-        ids = [recording] if recording else sorted({value for candidate in review
-            if (value := mbid(candidate.fields.get("mb_recording_id")))})
+        ids = (
+            [recording]
+            if recording
+            else sorted(
+                {
+                    value
+                    for candidate in review
+                    if (value := mbid(candidate.fields.get("mb_recording_id")))
+                }
+            )
+        )
         if not ids:
             return None
-        return listenbrainz_cover(self.http.json(listenbrainz_url(ids[:5])), query.title, query.artist,
-                                  query.album, query.duration_ms, selected_release=query.release_mbid)
+        return listenbrainz_cover(
+            self.http.json(listenbrainz_url(ids[:5])),
+            query.title,
+            query.artist,
+            query.album,
+            query.duration_ms,
+            selected_release=query.release_mbid,
+        )
 
     def _original_by_credit(self, query, kind, credit) -> ArtMatch | None:
         rows = self._deezer_json(search_url(*credit, clean_title=False)).get("data")
@@ -679,10 +780,15 @@ class MusicBrainzMetadataProvider:
         if match:
             album = self._deezer_json(f"https://api.deezer.com/album/{match.album_id}")
             owner = album.get("artist")
-            if (album.get("id") == match.album_id and album.get("record_type") in {"album", "single", "ep"}
-                    and isinstance(owner, dict) and owner.get("id") == match.artist_id
-                    and isinstance(album.get("title"), str) and label(album["title"]) == label(match.album)
-                    and album.get("cover_big") == match.cover):
+            if (
+                album.get("id") == match.album_id
+                and album.get("record_type") in {"album", "single", "ep"}
+                and isinstance(owner, dict)
+                and owner.get("id") == match.artist_id
+                and isinstance(album.get("title"), str)
+                and label(album["title"]) == label(match.album)
+                and album.get("cover_big") == match.cover
+            ):
                 return match
         return None
 
@@ -692,7 +798,9 @@ class MusicBrainzMetadataProvider:
             return None
         base, _ = variation_title(query, "COVER", version)
         expression = f'artist:"{_lucene(query.artist)}" AND recording:"{_lucene(base)}"'
-        url = "https://musicbrainz.org/ws/2/recording/?" + urlencode({"query": expression, "limit": 25, "fmt": "json"})
+        url = "https://musicbrainz.org/ws/2/recording/?" + urlencode(
+            {"query": expression, "limit": 25, "fmt": "json"}
+        )
         page = self.http.json(url)
         rows = page.get("recordings")
         if not isinstance(rows, list) or page.get("count") != len(rows):
@@ -702,18 +810,34 @@ class MusicBrainzMetadataProvider:
             if not isinstance(row, dict) or not isinstance(row.get("title"), str):
                 continue
             length, recording = _duration(row.get("length")), mbid(row.get("id"))
-            if (length and recording and abs(length - query.duration_ms) <= 2000
-                    and normalized(row["title"]) == normalized(base)
-                    and normalized(_credit(row.get("artist-credit"))) == normalized(query.artist)):
+            if (
+                length
+                and recording
+                and abs(length - query.duration_ms) <= 2000
+                and normalized(row["title"]) == normalized(base)
+                and normalized(_credit(row.get("artist-credit"))) == normalized(query.artist)
+            ):
                 ids.add(recording)
         return ids.pop() if len(ids) == 1 else None
 
-    def find_original_artwork(self, query: MetadataQuery, performance=None, recording_kind=None,
-                              version=None) -> ArtMatch | None:
+    def find_original_artwork(
+        self, query: MetadataQuery, performance=None, recording_kind=None, version=None
+    ) -> ArtMatch | None:
         recording = mbid(query.recording_mbid)
-        link = performance if recording and isinstance(performance, dict) and performance.get("recording_id") == recording else {}
-        kind = variation_kind(link.get("role"), bool(link.get("live")), recording_kind, version,
-                              lookup_title(query.title, query.artist))
+        link = (
+            performance
+            if recording
+            and isinstance(performance, dict)
+            and performance.get("recording_id") == recording
+            else {}
+        )
+        kind = variation_kind(
+            link.get("role"),
+            bool(link.get("live")),
+            recording_kind,
+            version,
+            lookup_title(query.title, query.artist),
+        )
         if kind not in {"COVER", "REMIX"}:
             return None
         if not recording:
@@ -726,7 +850,9 @@ class MusicBrainzMetadataProvider:
 
         original = mbid(link.get("original_recording_id")) if link.get("role") == kind else None
         if not original:
-            detail = self.http.json(f"https://musicbrainz.org/ws/2/recording/{recording}?inc=work-rels+recording-rels&fmt=json")
+            detail = self.http.json(
+                f"https://musicbrainz.org/ws/2/recording/{recording}?inc=work-rels+recording-rels&fmt=json"
+            )
             if detail.get("id") != recording:
                 return None
             role, work_id = recording_work(detail)
@@ -734,18 +860,28 @@ class MusicBrainzMetadataProvider:
             if kind == "REMIX" and role != "COVER" and len(sources) == 1:
                 original = sources.pop()
             elif kind == "COVER" and role == "COVER" and work_id and not sources:
-                work = self.http.json(f"https://musicbrainz.org/ws/2/work/{work_id}?inc=recording-rels&fmt=json")
+                work = self.http.json(
+                    f"https://musicbrainz.org/ws/2/work/{work_id}?inc=recording-rels&fmt=json"
+                )
                 original = cover_original(work, work_id, recording)
         if original and original != recording:
-            match = linked_original(self.http.json(listenbrainz_url([original])), query, kind, original)
+            match = linked_original(
+                self.http.json(listenbrainz_url([original])), query, kind, original
+            )
             if match:
                 # A recording can also appear on unrelated various-artists compilations.
-                release = self.http.json(f"https://musicbrainz.org/ws/2/release/{match.album_id}?inc=artist-credits+release-groups&fmt=json")
+                release = self.http.json(
+                    f"https://musicbrainz.org/ws/2/release/{match.album_id}?inc=artist-credits+release-groups&fmt=json"
+                )
                 group = release.get("release-group")
-                if (release.get("id") == match.album_id and release.get("status") == "Official"
-                        and isinstance(group, dict) and group.get("primary-type") in {"Album", "EP", "Single"}
-                        and group.get("secondary-types") == []
-                        and label(_credit(release.get("artist-credit"))) == label(match.artist)):
+                if (
+                    release.get("id") == match.album_id
+                    and release.get("status") == "Official"
+                    and isinstance(group, dict)
+                    and group.get("primary-type") in {"Album", "EP", "Single"}
+                    and group.get("secondary-types") == []
+                    and label(_credit(release.get("artist-credit"))) == label(match.artist)
+                ):
                     return match
         return None
 
@@ -756,18 +892,28 @@ class MusicBrainzMetadataProvider:
         ids = archive_items(self.http.json(archive_search(query.artist)))
         for identifier in ids[:6]:
             item = self.http.json("https://archive.org/metadata/" + identifier)
-            if match := archive_cover(item, identifier, query.title, query.artist, query.album, query.duration_ms):
+            if match := archive_cover(
+                item, identifier, query.title, query.artist, query.album, query.duration_ms
+            ):
                 choices.append(match)
         return choices[0] if len({m.cover for m in choices}) == 1 else None
 
     def public_image(self, url: str) -> bytes | None:
         archive = url.startswith("https://coverartarchive.org/") and is_cover_url(url)
-        if not (archive or archive_image_url(url) or image_url(url, "cover") or image_url(url, "artist") or native_image_host(url)):
+        if not (
+            archive
+            or archive_image_url(url)
+            or image_url(url, "cover")
+            or image_url(url, "artist")
+            or native_image_host(url)
+        ):
             return None
         return self.http.get(url, artwork=True)
 
     def group_cover(self, group_id: str) -> bytes | None:
-        return self.http.get(f"https://coverartarchive.org/release-group/{UUID(group_id)}/front-500", artwork=True)
+        return self.http.get(
+            f"https://coverartarchive.org/release-group/{UUID(group_id)}/front-500", artwork=True
+        )
 
     def cover(self, release_id: str) -> bytes | None:
         identity = str(UUID(release_id))

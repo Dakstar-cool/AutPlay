@@ -809,7 +809,9 @@ def test_exited_app_handoff_stages_until_real_ingest_then_sweep_groups(
     )(ingest_context, ingest_lease)
     with admission.sessions() as session:
         row = session.get(TrackMetadataRow, target.ref_id)
-        assert row is not None and row.document.get("published_acquisition_id") == str(target.acquisition_id)
+        assert row is not None and row.document.get("published_acquisition_id") == str(
+            target.acquisition_id
+        )
         if old_cover is None:
             native_names = evidence["fields"]
             assert isinstance(native_names, dict)

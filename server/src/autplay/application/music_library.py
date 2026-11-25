@@ -43,7 +43,6 @@ from autplay.application.identity_evidence import (
 )
 from autplay.application.sync import CatalogArtistSyncPublisher, _acquire_sync_owner_publish_lock
 from autplay.application.vault_names import project_owner_names
-from autplay.domain.track_names import track_names
 from autplay.domain.auth import Principal
 from autplay.domain.import_identity import (
     CANDIDATE_GENERATION_VERSION,
@@ -52,6 +51,7 @@ from autplay.domain.import_identity import (
     NORMALIZATION_VERSION,
     normalize_text,
 )
+from autplay.domain.track_names import track_names
 
 
 class MusicError(RuntimeError):

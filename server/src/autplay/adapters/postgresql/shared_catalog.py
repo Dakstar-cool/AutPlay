@@ -258,22 +258,51 @@ def ensure_catalog_refs(session: Session, user_id: UUID, picks: Sequence[RowMapp
     from autplay.application.metadata_publication import save_name_revision
     from autplay.domain.track_names import project_names
 
-    owned = {ref.user_track_ref_id: ref for ref in session.scalars(select(UserTrackRefRow).where(
-        UserTrackRefRow.user_track_ref_id.in_(refs), UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None)))}
-    metadata = {row.user_track_ref_id: row for row in session.scalars(select(TrackMetadataRow).where(
-        TrackMetadataRow.user_track_ref_id.in_(list(owned))))}
-    targets = [(owned[ref], pick, metadata.get(ref)) for ref, pick in zip(refs, picks, strict=True) if ref in owned]
-    missing = [pick["recording_id"] for _, pick, row in targets if not row or not row.artwork_sha256
-               or not row.document.get("catalog_artist_image_v1")]
+    owned = {
+        ref.user_track_ref_id: ref
+        for ref in session.scalars(
+            select(UserTrackRefRow).where(
+                UserTrackRefRow.user_track_ref_id.in_(refs),
+                UserTrackRefRow.user_id == user_id,
+                UserTrackRefRow.deleted_at.is_(None),
+            )
+        )
+    }
+    metadata = {
+        row.user_track_ref_id: row
+        for row in session.scalars(
+            select(TrackMetadataRow).where(TrackMetadataRow.user_track_ref_id.in_(list(owned)))
+        )
+    }
+    targets = [
+        (owned[ref], pick, metadata.get(ref))
+        for ref, pick in zip(refs, picks, strict=True)
+        if ref in owned
+    ]
+    missing = [
+        pick["recording_id"]
+        for _, pick, row in targets
+        if not row or not row.artwork_sha256 or not row.document.get("catalog_artist_image_v1")
+    ]
     images = catalog_image_evidence(session, missing)
     for ref, pick, row in targets:
         document = row.document if row else {}
         if ref.user_track_ref_id not in present:
-            document = project_names(document, pick["title"], pick["artist"], recording_credit(pick.get("members")))
-        document, cover = inherit_catalog_images(images.get(pick["recording_id"], ()), document,
-                                                  row.artwork_sha256 if row else None, pick["artist"], pick["audio_variant_id"], pick["title"])
+            document = project_names(
+                document, pick["title"], pick["artist"], recording_credit(pick.get("members"))
+            )
+        document, cover = inherit_catalog_images(
+            images.get(pick["recording_id"], ()),
+            document,
+            row.artwork_sha256 if row else None,
+            pick["artist"],
+            pick["audio_variant_id"],
+            pick["title"],
+        )
         if cover or document != (row.document if row else {}):
-            save_name_revision(session, ref, row, document, pick["recording_id"], artwork_sha256=cover)
+            save_name_revision(
+                session, ref, row, document, pick["recording_id"], artwork_sha256=cover
+            )
     return refs
 
 

@@ -15,7 +15,9 @@ from .jobs_runtime import PostgresJobRepository
 class SqlAlchemyJobUnitOfWork:
     """Own one SQLAlchemy session and require an explicit application commit."""
 
-    def __init__(self, session_factory: sessionmaker[Session], *, claim_owner: UUID | None = None) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], *, claim_owner: UUID | None = None
+    ) -> None:
         self._session_factory = session_factory
         self._claim_owner = claim_owner
         self._session: Session | None = None
@@ -82,7 +84,9 @@ class SqlAlchemyJobUnitOfWork:
 class SqlAlchemyJobUnitOfWorkFactory:
     """Create independent job units of work from one configured session factory."""
 
-    def __init__(self, session_factory: sessionmaker[Session], *, claim_owner: UUID | None = None) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], *, claim_owner: UUID | None = None
+    ) -> None:
         self._session_factory = session_factory
         self._claim_owner = claim_owner
 

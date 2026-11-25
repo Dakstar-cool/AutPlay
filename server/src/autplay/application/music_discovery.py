@@ -58,7 +58,7 @@ class MusicDiscoveryService:
                 url = json.loads(data)["redirect"]
                 if not isinstance(url, str):
                     break
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 break
         raise MetadataProviderError("metadata_artwork_invalid", retryable=False)
 
@@ -81,17 +81,26 @@ class MusicDiscoveryService:
         try:
             saved = self.page_cache.read(key, refresh).get("image")
         except MetadataProviderError as exc:
-            raise MusicError("catalog_cover_unavailable", "Image temporarily unavailable.", 503,
-                             retryable=exc.retryable) from exc
+            raise MusicError(
+                "catalog_cover_unavailable",
+                "Image temporarily unavailable.",
+                503,
+                retryable=exc.retryable,
+            ) from exc
         if not isinstance(saved, str):
             raise MusicError("catalog_cover_missing", "Image unavailable.", 404)
         return base64.b64decode(saved, validate=True)
 
     def release_cover(self, principal: Principal, release: UUID) -> bytes:
         def refresh() -> dict[str, object]:
-            if image := self._image(principal, f"https://coverartarchive.org/release/{release}/front-500"):
+            if image := self._image(
+                principal, f"https://coverartarchive.org/release/{release}/front-500"
+            ):
                 return image
-            doc = self._public_document(principal, f"https://musicbrainz.org/ws/2/release/{release}?inc=release-groups&fmt=json")
+            doc = self._public_document(
+                principal,
+                f"https://musicbrainz.org/ws/2/release/{release}?inc=release-groups&fmt=json",
+            )
             group = doc.get("release-group")
             if doc.get("id") != str(release) or not isinstance(group, dict):
                 return {}
@@ -99,13 +108,17 @@ class MusicDiscoveryService:
                 identity = UUID(str(group.get("id")))
             except ValueError:
                 return {}
-            return self._image(principal, f"https://coverartarchive.org/release-group/{identity}/front-500")
+            return self._image(
+                principal, f"https://coverartarchive.org/release-group/{identity}/front-500"
+            )
 
         return self._cached_image(f"coverartarchive:front-500:{release}", refresh)
 
     def artist_portrait(self, principal: Principal, artist: UUID) -> bytes:
         def refresh() -> dict[str, object]:
-            doc = self._public_document(principal, f"https://musicbrainz.org/ws/2/artist/{artist}?inc=url-rels&fmt=json")
+            doc = self._public_document(
+                principal, f"https://musicbrainz.org/ws/2/artist/{artist}?inc=url-rels&fmt=json"
+            )
             if doc.get("id") != str(artist):
                 return {}
             ids = set()
@@ -113,14 +126,22 @@ class MusicDiscoveryService:
             if not isinstance(relations, list):
                 raise MetadataProviderError("metadata_response_invalid", retryable=False)
             for relation in relations:
-                if not isinstance(relation, dict) or not isinstance(relation.get("url"), dict) or relation.get("ended"):
+                if (
+                    not isinstance(relation, dict)
+                    or not isinstance(relation.get("url"), dict)
+                    or relation.get("ended")
+                ):
                     continue
                 try:
                     link = urlsplit(str(relation["url"].get("resource", "")))
                 except ValueError:
                     continue
                 match = re.fullmatch(r"/(?:[a-z]{2}/)?artist/([1-9][0-9]{0,16})/?", link.path)
-                if link.scheme in {"https", "http"} and link.netloc in {"deezer.com", "www.deezer.com"} and match:
+                if (
+                    link.scheme in {"https", "http"}
+                    and link.netloc in {"deezer.com", "www.deezer.com"}
+                    and match
+                ):
                     ids.add(match[1])
             if len(ids) != 1:
                 return {}
@@ -258,7 +279,9 @@ class MusicDiscoveryService:
                 **artist_overview_view(data, known_baseline),
                 "artist_mbid": str(artist),
                 "library_artist_id": (
-                    cache.library_artist_id(principal.user_id, artist) if cache is not None else None
+                    cache.library_artist_id(principal.user_id, artist)
+                    if cache is not None
+                    else None
                 ),
                 "refreshing": due and cache is not None,
             }

@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from .download_index import DownloadIndex
-from .models import AcquiredArtifact, PlaylistItem, ProviderFailure
 from .edge_silence import trim_download_edges
+from .models import AcquiredArtifact, PlaylistItem, ProviderFailure
 from .normalization import normalize_items
 from .orchestrator import DownloadSession, PlaylistDownloadError
 from .playlist import MAX_IMPORT_BYTES, normalize_numbered_collection, parse_playlist

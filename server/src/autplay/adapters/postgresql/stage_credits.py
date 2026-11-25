@@ -22,6 +22,11 @@ CATALOG_MEMBERS = """
 def credit_for_recording(session: Session, recording: UUID | None) -> RecordingCredit | None:
     if recording is None:
         return None
-    members = session.scalar(text(f"SELECT {CATALOG_MEMBERS} FROM catalog.recording r "
-                                  "WHERE r.recording_id=:id AND r.deleted_at IS NULL"), {"id": recording})
+    members = session.scalar(
+        text(
+            f"SELECT {CATALOG_MEMBERS} FROM catalog.recording r "
+            "WHERE r.recording_id=:id AND r.deleted_at IS NULL"
+        ),
+        {"id": recording},
+    )
     return recording_credit(members)

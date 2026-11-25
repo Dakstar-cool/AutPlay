@@ -16,8 +16,12 @@ from autplay.domain.track_names import performance_title, strip_video_credit
 
 MetadataValue = str | int | list[str] | None
 MetadataFields = dict[str, MetadataValue]
-MetadataSource = Literal["EMBEDDED", "SOURCE_NATIVE", "MUSICBRAINZ", "USER", "FILENAME", "SOURCE_LABEL"]
-TEXT_FIELDS = frozenset({"title", "artist", "album", "album_artist", "composer", "label", "country"})
+MetadataSource = Literal[
+    "EMBEDDED", "SOURCE_NATIVE", "MUSICBRAINZ", "USER", "FILENAME", "SOURCE_LABEL"
+]
+TEXT_FIELDS = frozenset(
+    {"title", "artist", "album", "album_artist", "composer", "label", "country"}
+)
 DATE_FIELDS = frozenset({"release_date", "original_release_date", "recording_date"})
 ID_FIELDS = frozenset({"mb_recording_id", "mb_release_id", "mb_release_group_id"})
 NUMBER_FIELDS = frozenset({"track_number", "disc_number"})
@@ -108,7 +112,11 @@ class MetadataDocument:
                 continue
             if evidence.source != "USER" and value is None:
                 continue
-            if fill_only and values.get(key) is not None and (old is None or old.source not in {"FILENAME", "SOURCE_LABEL"}):
+            if (
+                fill_only
+                and values.get(key) is not None
+                and (old is None or old.source not in {"FILENAME", "SOURCE_LABEL"})
+            ):
                 continue
             values[key] = value
             sources[key] = evidence
@@ -164,8 +172,14 @@ _VERSION_MARKERS = {
 def lookup_title(value: str, artist: str = "") -> str:
     """Remove only explicit presentation wrappers, never recording version qualifiers."""
     result = strip_video_credit(unicodedata.normalize("NFKC", value).strip())
-    result = re.sub(r"\s*[\[(](?:www\.)?(?:lightaudio\.ru|mp3on\.net)[\])]\s*$", "", result, flags=re.I) or result
-    result = re.sub(r"\s*\[(?:official )?music video\]\s*\|\s*GRM Daily\s*$", "", result, flags=re.I) or result
+    result = (
+        re.sub(r"\s*[\[(](?:www\.)?(?:lightaudio\.ru|mp3on\.net)[\])]\s*$", "", result, flags=re.I)
+        or result
+    )
+    result = (
+        re.sub(r"\s*\[(?:official )?music video\]\s*\|\s*GRM Daily\s*$", "", result, flags=re.I)
+        or result
+    )
     # A source may repeat its real credited artist before the title. Never infer
     # an artist from this separator or from an uploader name.
     pieces = re.split(r"\s+[-\u2013\u2014]\s+", result, maxsplit=1)
@@ -183,14 +197,18 @@ def lookup_title(value: str, artist: str = "") -> str:
     return " ".join(" - ".join(pieces).split()) or value.strip()
 
 
-_PERFORMANCE_SUFFIX = re.compile(r"\s+\((live at [^()\n]{1,80}|[^\W_][\w '&’.-]{0,60}\s+sessions)\)$", re.I)
+_PERFORMANCE_SUFFIX = re.compile(
+    r"\s+\((live at [^()\n]{1,80}|[^\W_][\w '&’.-]{0,60}\s+sessions)\)$", re.I
+)
 
 
 def performance_search_title(title: str) -> str:
     return _PERFORMANCE_SUFFIX.sub("", title) or title
 
 
-def catalogue_title_matches(query_title: str, titles: list[str], disambiguation: str | None) -> bool:
+def catalogue_title_matches(
+    query_title: str, titles: list[str], disambiguation: str | None
+) -> bool:
     query_edition = _PERFORMANCE_SUFFIX.search(query_title)
     expected = normalized(query_edition[1]) if query_edition else None
     evidence = [match[1] for title in titles if (match := _PERFORMANCE_SUFFIX.search(title))]
@@ -201,9 +219,14 @@ def catalogue_title_matches(query_title: str, titles: list[str], disambiguation:
         return False
     if any(normalized(title) == normalized(query_title) for title in titles):
         return True
-    return bool(expected and evidence and any(
-        normalized(title) == normalized(performance_search_title(query_title)) for title in titles
-    ))
+    return bool(
+        expected
+        and evidence
+        and any(
+            normalized(title) == normalized(performance_search_title(query_title))
+            for title in titles
+        )
+    )
 
 
 def metadata_search_terms(title: str, artist: str) -> tuple[tuple[str, str], ...]:
@@ -213,13 +236,29 @@ def metadata_search_terms(title: str, artist: str) -> tuple[tuple[str, str], ...
         return ()
     clean = lookup_title(title, artist) or title
     # Keep edition markers for verification but allow catalogue retrieval without a dated language suffix.
-    search = re.sub(r"\s+(?:\((?:19|20)[0-9]{2}\)\s*\[[A-Za-z]{2}\]|\((?:uncensored|censored|explicit|clean)\))$",
-                    "", clean, flags=re.I) or clean
+    search = (
+        re.sub(
+            r"\s+(?:\((?:19|20)[0-9]{2}\)\s*\[[A-Za-z]{2}\]|\((?:uncensored|censored|explicit|clean)\))$",
+            "",
+            clean,
+            flags=re.I,
+        )
+        or clean
+    )
     search = performance_search_title(search)
     words = re.findall(r"[^\W_]+", search)
     shorter = " ".join(words[:4]) if len(words) > 4 else search
-    return tuple(dict.fromkeys(((title, artist), (clean, artist), (search, artist), (shorter, artist),
-                                (shorter, artist.split()[0]))))
+    return tuple(
+        dict.fromkeys(
+            (
+                (title, artist),
+                (clean, artist),
+                (search, artist),
+                (shorter, artist),
+                (shorter, artist.split()[0]),
+            )
+        )
+    )
 
 
 def version_markers(value: str) -> frozenset[str]:

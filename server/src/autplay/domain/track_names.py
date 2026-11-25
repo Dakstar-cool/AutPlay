@@ -7,7 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from autplay.domain.artist_credits import (
-    RecordingCredit, declared_credit, display_credit, recording_credit, single_stage_credit, trim_repeated_credit,
+    RecordingCredit,
+    declared_credit,
+    display_credit,
+    recording_credit,
+    single_stage_credit,
+    trim_repeated_credit,
 )
 
 _AUDIO = re.compile(r"\.(?:mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|alac|wma|aifc)$", re.I)
@@ -19,16 +24,22 @@ _SNAKE_WORD = re.compile(r"[^\W_]+(?:[-’'][^\W_]+)*")
 _NOTICE = r"(?:official (?:music video|audio|video|lyrics? video|visualizer)|mood video|официальный клип|официальное видео)"
 _DETAIL = r"(?:19|20)\d{2}|remaster(?:ed)?(?: \d{4})?|hd|4k|with lyrics|feat\.? [^\[\]()]+"
 _GROUP_NOTICE = re.compile(
-    r"(?:\s+[|–—-]\s*)?([\[(])\s*" + _NOTICE
-    + r"(?:\s*[-–—/|:,]\s*([^\[\]()]+?)|\s+(" + _DETAIL + r"))?\s*!?\s*([\])])", re.I
+    r"(?:\s+[|–—-]\s*)?([\[(])\s*"
+    + _NOTICE
+    + r"(?:\s*[-–—/|:,]\s*([^\[\]()]+?)|\s+("
+    + _DETAIL
+    + r"))?\s*!?\s*([\])])",
+    re.I,
 )
 _GROUP_NOTICE_AFTER_DETAIL = re.compile(
     r"([\[(])\s*([^\[\]()]+?)\s*(?:[/|,]|\s[-–—]\s)\s*" + _NOTICE + r"\s*([\])])", re.I
 )
 _SEPARATE_NOTICE = re.compile(
-    r"""(?:\s+[-–—]\s*|\s*\|\s*|(?<=[)\]"”»])\s+)""" + _NOTICE
+    r"""(?:\s+[-–—]\s*|\s*\|\s*|(?<=[)\]"”»])\s+)"""
+    + _NOTICE
     + r"(?:\s+((?:19|20)\d{2}))?(?:\s+(?:HD|4K))?(?:\s*\|(?=\s*$))?"
-    + r"(?=\s*(?:$|[\[(|]|\s[-–—]\s))", re.I
+    + r"(?=\s*(?:$|[\[(|]|\s[-–—]\s))",
+    re.I,
 )
 _DERIVED = {"FILENAME", "SOURCE_LABEL"}
 _HCWW_VIDEO_CREDIT = re.compile(
@@ -48,8 +59,12 @@ def performance_title(title: str) -> str:
 
 def strip_video_credit(title: str) -> str:
     title = _HCWW_VIDEO_CREDIT.sub("", title) or title
-    return re.sub(r"([\[(])(uncensored|censored|explicit|clean)\s+official\s+(?:music\s+)?video([\])])",
-                  r"\1\2\3", title, flags=re.I)
+    return re.sub(
+        r"([\[(])(uncensored|censored|explicit|clean)\s+official\s+(?:music\s+)?video([\])])",
+        r"\1\2\3",
+        title,
+        flags=re.I,
+    )
 
 
 def display(value: str) -> str:
@@ -65,7 +80,9 @@ def _unpack_words(label: str) -> str:
     if "_" not in label:
         return label
     words = label.split("_")
-    if len(words) < 2 or not all(_SNAKE_WORD.fullmatch(word) or word.casefold() in {"ft.", "feat."} for word in words):
+    if len(words) < 2 or not all(
+        _SNAKE_WORD.fullmatch(word) or word.casefold() in {"ft.", "feat."} for word in words
+    ):
         return label
     if len(words) == 2 and any(len(w) < 2 or not w.isalpha() or w.isupper() for w in words):
         return label
@@ -85,34 +102,56 @@ def _remove_notice(match: re.Match[str]) -> str:
 
 
 def track_names(
-    title: str | None, artist: str | None, *, filename: bool = True, source_id: str | None = None,
+    title: str | None,
+    artist: str | None,
+    *,
+    filename: bool = True,
+    source_id: str | None = None,
     catalog: RecordingCredit | None = None,
 ) -> tuple[str | None, str | None]:
     """Clean provisional source labels; a verified catalog title keeps its published spelling."""
     name = display(title) if title else title
     label = display(artist) if artist else artist
     linked = catalog if catalog and label and catalog.matches(label) else None
-    credit = linked.preferred if linked else display_credit(_BAND.sub("25/17", label)) if label else label
+    credit = (
+        linked.preferred
+        if linked
+        else display_credit(_BAND.sub("25/17", label))
+        if label
+        else label
+    )
     if not filename or not name:
         return name, credit
     is_file = bool(_AUDIO.search(name))
-    stage = linked.single if linked else single_stage_credit(credit) or (declared_credit(label) if label else None)
+    stage = (
+        linked.single
+        if linked
+        else single_stage_credit(credit) or (declared_credit(label) if label else None)
+    )
     if not stage and not is_file and not _POSSIBLE_DECORATION.search(name):
         return name, credit
     stem = _AUDIO.sub("", name) if is_file else name
-    if (source_id and source_id.isascii() and source_id.isdecimal()
-            and stem.endswith("_" + source_id)):
+    if (
+        source_id
+        and source_id.isascii()
+        and source_id.isdecimal()
+        and stem.endswith("_" + source_id)
+    ):
         stem = stem[: -len(source_id) - 1] or stem
     if is_file:
         stem = display(stem.replace("_", " ")) or name
     elif re.search(r"_[-–—]_", stem):
         stem = " - ".join(_unpack_words(part) for part in re.split(r"_[-–—]_", stem))
     # First remove wrappers so 'Artist - Title - Official Video' retains the recording title.
-    groups = _GROUP_NOTICE_AFTER_DETAIL.sub(_remove_notice, _GROUP_NOTICE.sub(_remove_notice, strip_video_credit(stem)))
+    groups = _GROUP_NOTICE_AFTER_DETAIL.sub(
+        _remove_notice, _GROUP_NOTICE.sub(_remove_notice, strip_video_credit(stem))
+    )
     stem = display(_SEPARATE_NOTICE.sub(lambda m: f" ({m[1]}) " if m[1] else " ", groups)) or stem
-    known = search_label(credit) if credit and credit not in {"Unknown artist", "<unknown>"} else None
+    known = (
+        search_label(credit) if credit and credit not in {"Unknown artist", "<unknown>"} else None
+    )
     while (separator := _SEPARATOR.search(stem)) is not None:
-        prefix, rest = stem[:separator.start()], stem[separator.end():]
+        prefix, rest = stem[: separator.start()], stem[separator.end() :]
         matches = known and (
             (stage is not None and stage.key.fullmatch(prefix) is not None)
             or search_label(display_credit(prefix)) == known
@@ -136,7 +175,9 @@ def track_names(
 
 
 def project_names(
-    document: dict[str, Any], raw_title: str | None, raw_artist: str | None,
+    document: dict[str, Any],
+    raw_title: str | None,
+    raw_artist: str | None,
     catalog: RecordingCredit | None = None,
 ) -> dict[str, Any]:
     fields = dict(document.get("fields", {}))
@@ -169,16 +210,24 @@ def project_names(
         hint = canonical["artist"]
     originals = dict(document.get("name_originals_v1", {}))
     # A normalized embedded tag may be the only place the two roles were declared.
-    if (not canonical and isinstance(hint, str) and not artist_proof.get("locked")
-            and artist_proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}
-            and artist_proof.get("normalization_version") in {"display-v3", "display-v4", "display-v5", "display-v6", DISPLAY_VERSION}):
+    if (
+        not canonical
+        and isinstance(hint, str)
+        and not artist_proof.get("locked")
+        and artist_proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}
+        and artist_proof.get("normalization_version")
+        in {"display-v3", "display-v4", "display-v5", "display-v6", DISPLAY_VERSION}
+    ):
         original = (originals.get("artist") or {}).get("value")
         declared = declared_credit(original) if isinstance(original, str) else None
         if declared and declared.stage.casefold() == hint.casefold():
             hint = original
     native_id = (document.get("acquisition_evidence") or {}).get("source_id")
     title, artist = track_names(
-        raw_title, hint, source_id=native_id if isinstance(native_id, str) else None, catalog=catalog,
+        raw_title,
+        hint,
+        source_id=native_id if isinstance(native_id, str) else None,
+        catalog=catalog,
     )
     changed = False
     for key, fallback, raw in (("artist", artist, raw_artist), ("title", title, raw_title)):
@@ -196,7 +245,11 @@ def project_names(
                 continue
             value = display(old)
             if key == "artist":
-                value = catalog.preferred if catalog and catalog.matches(value) else display_credit(_BAND.sub("25/17", value))
+                value = (
+                    catalog.preferred
+                    if catalog and catalog.matches(value)
+                    else display_credit(_BAND.sub("25/17", value))
+                )
             if key == "title" and proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}:
                 value = fallback if old == raw_title else track_names(old, hint, catalog=catalog)[0]
             if not proof or value == old:
@@ -218,15 +271,22 @@ def project_names(
             proofs[key] = {
                 "source": source,
                 "source_id": source_id,
-                "observed_at": proof.get("observed_at") if proof.get("source") == source
+                "observed_at": proof.get("observed_at")
+                if proof.get("source") == source
                 else datetime.now(UTC).isoformat(),
                 "locked": False,
                 "normalization_version": DISPLAY_VERSION,
             }
         else:
             continue
-        originals.setdefault(key, {"present": key in document.get("fields", {}),
-                                   "value": old, "provenance": proof or None})
+        originals.setdefault(
+            key,
+            {
+                "present": key in document.get("fields", {}),
+                "value": old,
+                "provenance": proof or None,
+            },
+        )
         changed = True
     if not changed:
         return document

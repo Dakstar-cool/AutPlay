@@ -129,7 +129,9 @@ class ProcessMetadataWork:
         return ChromaprintEvidence("chromaprint", "1.6.1", duration, payload)
 
     def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
-        document, result = self.exchange({"action": "CATALOG_COVER" if catalog_cover else "ARTWORK"}, payload)
+        document, result = self.exchange(
+            {"action": "CATALOG_COVER" if catalog_cover else "ARTWORK"}, payload
+        )
         if (
             document
             or result is None

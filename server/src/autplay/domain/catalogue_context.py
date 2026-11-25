@@ -6,7 +6,14 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from .track_metadata import MetadataQuery, catalogue_title_matches, lookup_title, normalized, partial_date, version_markers
+from .track_metadata import (
+    MetadataQuery,
+    catalogue_title_matches,
+    lookup_title,
+    normalized,
+    partial_date,
+    version_markers,
+)
 
 MAX_CATALOGUE_CONTEXT_BYTES = 16384
 
@@ -115,9 +122,7 @@ class CatalogueTrackCard:
             or not catalogue_title_matches(actual_title, titles, self.disambiguation)
         ):
             return False
-        versions = version_markers(
-            " ".join(titles) + " " + (self.disambiguation or "")
-        )
+        versions = version_markers(" ".join(titles) + " " + (self.disambiguation or ""))
         return version_markers(actual_title) == versions
 
 

@@ -186,7 +186,9 @@ def test_receipt_replay_publishes_one_playable_entry(
             assert len(published) == 1
             assert published[0].payload["server_user_track_ref_id"] == checkpoint["ref_id"]
             assert published[0].payload["availability_status"] == "VAULT"
-            card = session.get(CatalogBrowsePageRow, "vault-display-v1:" + checkpoint["recording_id"])
+            card = session.get(
+                CatalogBrowsePageRow, "vault-display-v1:" + checkpoint["recording_id"]
+            )
             assert card is not None and card.document["title"] == "Quiet Song"
             assert card.document["source_title"] == "Artist_-_Quiet_Song.mp3"
             metadata = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))

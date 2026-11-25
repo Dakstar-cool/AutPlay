@@ -292,10 +292,16 @@ def test_release_track_keeps_recording_versions_without_inventing_performer() ->
 
 def test_recent_artist_release_search_uses_exact_artist_dates_and_raw_offsets() -> None:
     artist = uuid4()
-    http = Http({"count": 52, "offset": 50, "releases": [
-        {"id": str(uuid4()), "title": "Single", "status": "Official", "date": "2026-11-23"},
-        {"id": str(uuid4()), "title": "Demo", "status": "Bootleg"},
-    ]})
+    http = Http(
+        {
+            "count": 52,
+            "offset": 50,
+            "releases": [
+                {"id": str(uuid4()), "title": "Single", "status": "Official", "date": "2026-11-23"},
+                {"id": str(uuid4()), "title": "Demo", "status": "Bootleg"},
+            ],
+        }
+    )
     page = MusicBrainzDiscoveryProvider(http).recent_artist_releases(
         artist, date(2026, 11, 18), date(2026, 11, 25), limit=50, offset=50
     )

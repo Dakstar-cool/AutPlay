@@ -33,6 +33,7 @@ _PUBLISHED_DETAILS = f"""
     JOIN vault.audio_variant v USING (audio_variant_id)
 """
 
+
 def _search_pattern(value: str) -> str:
     escaped = search_label(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
@@ -99,7 +100,9 @@ def search_playback_page(
     if "title" in fields:
         original = _searchable("original_label")
         spaced = _searchable("replace(original_label, '_', ' ')")
-        own_match += f" OR (title IS NOT NULL AND original_label IS NOT NULL AND ({original} OR {spaced}))"
+        own_match += (
+            f" OR (title IS NOT NULL AND original_label IS NOT NULL AND ({original} OR {spaced}))"
+        )
     display_title = _searchable(f"concat_ws(' ',{PUBLIC_TITLE},nullif(r.version_text,''))")
     title = f"({display_title} OR {_searchable('r.title')})"
     artist = _searchable(PUBLIC_ARTIST)
@@ -127,7 +130,8 @@ def search_playback_page(
         MusicSearchKind.ALL: (
             f"{title} OR {artist} OR {_ALBUM_MATCH} OR "
             + _searchable(f"concat_ws(' ',{PUBLIC_ARTIST},{PUBLIC_TITLE},r.version_text)")
-            + " OR " + _searchable(f"concat_ws(' ',{PUBLIC_TITLE},r.version_text,{PUBLIC_ARTIST})")
+            + " OR "
+            + _searchable(f"concat_ws(' ',{PUBLIC_TITLE},r.version_text,{PUBLIC_ARTIST})")
         ),
     }[kind]
     rows = (
@@ -222,7 +226,9 @@ def search_playback_page(
                 "duration_ms",
             )
         }
-        fallback_title, fallback_artist = track_names(row["original_label"] or row["title"], row["artist"])
+        fallback_title, fallback_artist = track_names(
+            row["original_label"] or row["title"], row["artist"]
+        )
         if not row["has_title"]:
             result["title"] = fallback_title
         linked = recording_credit(row["members"])

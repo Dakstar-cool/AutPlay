@@ -8,7 +8,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.models import SyncEventRow, UserTrackRefRow
-from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRevisionRow, TrackMetadataRow
+from autplay.adapters.postgresql.models.track_metadata import (
+    TrackMetadataRevisionRow,
+    TrackMetadataRow,
+)
 from autplay.adapters.postgresql.shared_catalog import ACCOUNT_CATALOG
 from autplay.adapters.postgresql.stage_credits import credit_for_recording
 from autplay.application.metadata_projection import coherent_album_group, metadata_view
@@ -16,13 +19,21 @@ from autplay.domain.track_names import project_names
 
 
 def save_name_revision(
-    session: Session, ref: UserTrackRefRow, row: TrackMetadataRow | None, document: dict[str, Any], recording: UUID,
-    *, artwork_sha256: str | None = None,
+    session: Session,
+    ref: UserTrackRefRow,
+    row: TrackMetadataRow | None,
+    document: dict[str, Any],
+    recording: UUID,
+    *,
+    artwork_sha256: str | None = None,
 ) -> None:
     if row is None:
         row = TrackMetadataRow(
-            user_track_ref_id=ref.user_track_ref_id, revision=0, generation=1,
-            candidates=[], state="READY",
+            user_track_ref_id=ref.user_track_ref_id,
+            revision=0,
+            generation=1,
+            candidates=[],
+            state="READY",
         )
         session.add(row)
     row.document = document
@@ -41,19 +52,28 @@ def publish_metadata_revision(
 ) -> None:
     recording = ref.recording_id
     if recording is None:
-        recording = session.scalar(text(f"""
+        recording = session.scalar(
+            text(f"""
             SELECT recording_id FROM ({ACCOUNT_CATALOG}) linked
             WHERE user_id=:owner AND user_track_ref_id=:ref
             ORDER BY recording_id, audio_variant_id LIMIT 1
-            """), {"owner": ref.user_id, "ref": ref.user_track_ref_id})
-    row.document = project_names(row.document, ref.raw_title, ref.raw_artist,
-                                 credit_for_recording(session, recording))
+            """),
+            {"owner": ref.user_id, "ref": ref.user_track_ref_id},
+        )
+    row.document = project_names(
+        row.document, ref.raw_title, ref.raw_artist, credit_for_recording(session, recording)
+    )
     _write_metadata_revision(session, ref, row, recording, operation_id=operation_id, digest=digest)
 
 
 def _write_metadata_revision(
-    session: Session, ref: UserTrackRefRow, row: TrackMetadataRow, recording: UUID | None,
-    *, operation_id: UUID | None = None, digest: bytes | None = None,
+    session: Session,
+    ref: UserTrackRefRow,
+    row: TrackMetadataRow,
+    recording: UUID | None,
+    *,
+    operation_id: UUID | None = None,
+    digest: bytes | None = None,
 ) -> None:
     if row.document.get("album_group_v1") is not None:
         row.document = {**row.document, "album_group_v1": coherent_album_group(row.document)}
@@ -95,7 +115,9 @@ def _write_metadata_revision(
                 "artist": ref.raw_artist,
                 "album": ref.raw_album,
                 "duration_ms": ref.raw_duration_ms,
-                "resolution_status": "RESOLVED" if recording and not ref.recording_id else ref.resolution_status,
+                "resolution_status": "RESOLVED"
+                if recording and not ref.recording_id
+                else ref.resolution_status,
                 "metadata_v1": view,
             },
         )

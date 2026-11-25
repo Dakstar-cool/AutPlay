@@ -9,8 +9,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
-from autplay.application.music_preservation import reports, request_run
 from autplay.application.acquisition_control import MAX_PLAYLIST_BYTES, AcquisitionControlService
+from autplay.application.music_preservation import reports, request_run
 from autplay.domain.auth import AccountRole
 from autplay.domain.discovery import DiscoveryCandidate, DiscoveryError, ProviderArtistTracks
 from autplay.domain.web_admin import AuthenticatedWebSession, WebAdminError
@@ -173,8 +173,11 @@ def create_acquisition_control_router(
     @router.post("/preservation/scan")
     async def scan(request: Request) -> Response:
         try:
-            form = parse_urlencoded_form(request.headers.get("content-type"), await request.body(),
-                                         allowed_fields=frozenset({"csrf_token", "operation_id"}))
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id"}),
+            )
             actor = authorized(request, form["csrf_token"], form["operation_id"]).actor
             if actor.role != AccountRole.OWNER:
                 raise WebAdminError("forbidden")
@@ -182,8 +185,10 @@ def create_acquisition_control_router(
                 return problem(request, "preservation_unavailable", 503)
             with preservation_sessions.begin() as session:
                 request_run(session, actor.user_id, UUID(form["operation_id"]))
-            return apply_admin_security_headers(RedirectResponse("/admin/acquisition#preservation", status_code=303))
-        except (ValueError, KeyError, WebAdminError):
+            return apply_admin_security_headers(
+                RedirectResponse("/admin/acquisition#preservation", status_code=303)
+            )
+        except ValueError, KeyError, WebAdminError:
             return problem(request, "preservation_scan_rejected", 403)
 
     @router.post("/upload")

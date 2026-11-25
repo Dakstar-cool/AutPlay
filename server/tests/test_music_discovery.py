@@ -256,8 +256,12 @@ def test_artist_snapshot_updates_latest_without_rereading_tracks_or_replacing_ed
             calls.append((start, end, offset))
             identity = alternate if offset else edition
             card = MusicDiscoveryCard(
-                MusicDiscoveryEntity.RELEASE, identity, "Album", release_id=identity,
-                release_date="2026-11-25" if offset else "2026-11-24", release_group_id=group,
+                MusicDiscoveryEntity.RELEASE,
+                identity,
+                "Album",
+                release_id=identity,
+                release_date="2026-11-25" if offset else "2026-11-24",
+                release_group_id=group,
             )
             return MusicDiscoveryPage((card,), limit, offset, 2, 1)
 
@@ -272,10 +276,16 @@ def test_artist_snapshot_updates_latest_without_rereading_tracks_or_replacing_ed
     assert final["tracks"] == base["tracks"] and final["releases"] == base["releases"]
     patch = artist_overview_view(final, token)
     assert patch["latest_complete"] is True and "releases" not in patch and "tracks" not in patch
-    assert final["latest"] == [MusicDiscoveryCard(
-        MusicDiscoveryEntity.RELEASE, alternate, "Album", release_id=alternate,
-        release_date="2026-11-25", release_group_id=group,
-    ).view()]
+    assert final["latest"] == [
+        MusicDiscoveryCard(
+            MusicDiscoveryEntity.RELEASE,
+            alternate,
+            "Album",
+            release_id=alternate,
+            release_date="2026-11-25",
+            release_group_id=group,
+        ).view()
+    ]
     assert "tracks" in artist_overview_view(final, uuid4())
 
 
@@ -289,10 +299,15 @@ def test_saved_artist_overview_is_shared_and_stale_refresh_runs_after_the_read()
     service = MusicDiscoveryService(lambda _: pytest.fail("Unexpected provider read"), cache)
     tasks: list[Callable[[], None]] = []
     library_artist = str(uuid4())
-    cache.library_artist_id.side_effect = lambda who, mbid: library_artist if who == owner.user_id and mbid == artist else None
+    cache.library_artist_id.side_effect = lambda who, mbid: (
+        library_artist if who == owner.user_id and mbid == artist else None
+    )
     first = service.artist_overview(owner, artist, tasks.append)
     assert first["library_artist_id"] == library_artist
-    assert service.artist_overview(other, artist, tasks.append) == {**first, "library_artist_id": None}
+    assert service.artist_overview(other, artist, tasks.append) == {
+        **first,
+        "library_artist_id": None,
+    }
     assert not tasks and "tracks" in first and "library_recordings" not in first
     cache.saved.return_value = (doc, datetime.now(UTC) - timedelta(days=1))
     token = UUID(str(doc["baseline_id"]))
@@ -310,7 +325,7 @@ def test_artist_portrait_uses_linked_profile_and_rejects_ambiguous_links() -> No
     cache = Mock(spec_set=CatalogPageCache)
     cache.read.side_effect = lambda key, load: load()
     relations = [{"url": {"resource": "https://www.deezer.com/artist/42"}}]
-    cdn = "https://cdn-images.dzcdn.net/images/artist/" + "a"*32 + "/500x500-000000-80-0-0.jpg"
+    cdn = "https://cdn-images.dzcdn.net/images/artist/" + "a" * 32 + "/500x500-000000-80-0-0.jpg"
     jpeg = bytes.fromhex("ffd8ffe0")
     calls = []
 

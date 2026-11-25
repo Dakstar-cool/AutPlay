@@ -39,8 +39,6 @@ from autplay.adapters.postgresql.models.track_metadata import (
 )
 from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
 from autplay.application.catalog_artwork import attach_images
-from autplay.domain.catalog_artwork import ArtMatch
-from autplay.domain.original_artwork import original_artwork_source
 from autplay.application.internet_acquisition import InternetAcquisitionTarget
 from autplay.application.job_worker import JobExecutionContext, JobLeaseLost
 from autplay.application.metadata_projection import coherent_album_group, metadata_view
@@ -49,8 +47,10 @@ from autplay.application.music_library import MusicError, MusicLibraryService
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.application.vault_uploads import VaultNotFoundError
 from autplay.domain.auth import Principal
+from autplay.domain.catalog_artwork import ArtMatch
 from autplay.domain.catalogue_context import CatalogueLookupContext
 from autplay.domain.jobs import JobKey, RetryableJobError
+from autplay.domain.original_artwork import original_artwork_source
 from autplay.domain.resource_admission import AcquisitionClaim, ResourceAdmissionError
 from autplay.domain.track_metadata import (
     FieldEvidence,
@@ -157,13 +157,21 @@ class TrackMetadataService:
         }
         native = normalized.get("fields")
         if isinstance(native, dict):
-            names = validate_fields({key: native[key] for key in ("title", "artist", "composer") if key in native})
+            names = validate_fields(
+                {key: native[key] for key in ("title", "artist", "composer") if key in native}
+            )
             if names:
-                proof = FieldEvidence("SOURCE_NATIVE", f"{normalized['provider']}:{normalized['source_id']}",
-                                      datetime.now(UTC).isoformat())
+                proof = FieldEvidence(
+                    "SOURCE_NATIVE",
+                    f"{normalized['provider']}:{normalized['source_id']}",
+                    datetime.now(UTC).isoformat(),
+                )
                 doc = document_from(row).merge(names, proof, fill_only=True)
-                row.document = {**row.document, "fields": doc.fields,
-                                "provenance": {key: asdict(value) for key, value in doc.provenance.items()}}
+                row.document = {
+                    **row.document,
+                    "fields": doc.fields,
+                    "provenance": {key: asdict(value) for key, value in doc.provenance.items()},
+                }
         art = row.document.get("artwork_source") or {}
         stale_edition_art = selected_group is None and art.get("source") == "MUSICBRAINZ"
         if (stale_edition_art or original_artwork_source(art)) and not art.get("locked"):
@@ -531,14 +539,26 @@ class TrackMetadataService:
                     "fields": doc.fields,
                     "provenance": {key: asdict(value) for key, value in doc.provenance.items()},
                 }
-                original = {"title": ref.raw_title, "artist": ref.raw_artist, "album": ref.raw_album}
-                changed = {key for key in original if key in validated and
-                           prior_fields.get(key, original[key]) != validated[key]}
-                if changed and (row.document.get("artwork_source") or {}).get("source") == "PUBLIC_CATALOG":
+                original = {
+                    "title": ref.raw_title,
+                    "artist": ref.raw_artist,
+                    "album": ref.raw_album,
+                }
+                changed = {
+                    key
+                    for key in original
+                    if key in validated and prior_fields.get(key, original[key]) != validated[key]
+                }
+                if (
+                    changed
+                    and (row.document.get("artwork_source") or {}).get("source") == "PUBLIC_CATALOG"
+                ):
                     row.artwork_sha256 = None
                     row.document = {**row.document, "artwork_source": None}
                 if "artist" in changed:
-                    row.document = {k: v for k, v in row.document.items() if k != "catalog_artist_image_v1"}
+                    row.document = {
+                        k: v for k, v in row.document.items() if k != "catalog_artist_image_v1"
+                    }
                 row.generation = max(1, row.generation)
                 if row.job_id is None:
                     row.state = "READY"
@@ -823,7 +843,10 @@ class TrackMetadataService:
         with self.sessions.begin() as session:
             MusicLibraryService._owned_ref(session, principal.user_id, ref_id)
             row = session.get(TrackMetadataRow, ref_id)
-            if row is None or sha256 not in {row.artwork_sha256, (row.document.get("catalog_artist_image_v1") or {}).get("sha256")}:
+            if row is None or sha256 not in {
+                row.artwork_sha256,
+                (row.document.get("catalog_artist_image_v1") or {}).get("sha256"),
+            }:
                 raise MusicError("metadata_artwork_missing", "The artwork is unavailable.", 404)
             art = session.get(MetadataArtworkRow, sha256)
             if art is None:
@@ -982,7 +1005,11 @@ class TrackMetadataService:
                     for tag in ("genres", "composer"):
                         if tag in fields or tag not in old.fields:
                             continue
-                        if tag == "composer" and old.provenance[tag].source not in {"USER", "EMBEDDED", "SOURCE_NATIVE"}:
+                        if tag == "composer" and old.provenance[tag].source not in {
+                            "USER",
+                            "EMBEDDED",
+                            "SOURCE_NATIVE",
+                        }:
                             continue
                         previous = MetadataDocument(
                             {**previous.fields, tag: old.fields[tag]},
@@ -998,8 +1025,15 @@ class TrackMetadataService:
                 )
                 if original_artwork_source(row.document.get("artwork_source")):
                     prior = row.document.get("fields") or {}
-                    defaults = {"title": ref.raw_title, "artist": ref.raw_artist, "mb_recording_id": None}
-                    if any(prior.get(key, default) != doc.fields.get(key, default) for key, default in defaults.items()):
+                    defaults = {
+                        "title": ref.raw_title,
+                        "artist": ref.raw_artist,
+                        "mb_recording_id": None,
+                    }
+                    if any(
+                        prior.get(key, default) != doc.fields.get(key, default)
+                        for key, default in defaults.items()
+                    ):
                         row.artwork_sha256 = None
                         row.document = {**row.document, "artwork_source": None}
                 row.document = {
@@ -1077,8 +1111,13 @@ class TrackMetadataService:
                 )
                 # Embedded cover stays preferred over external art on background refresh.
                 previous = row.document.get("artwork_source") or {}
-                replace_fallback = previous.get("source") == "PUBLIC_CATALOG" and evidence.source in {"SOURCE_NATIVE", "MUSICBRAINZ"}
-                if row.artwork_sha256 is None or (not previous.get("locked") and (evidence.source == "EMBEDDED" or replace_fallback)):
+                replace_fallback = previous.get(
+                    "source"
+                ) == "PUBLIC_CATALOG" and evidence.source in {"SOURCE_NATIVE", "MUSICBRAINZ"}
+                if row.artwork_sha256 is None or (
+                    not previous.get("locked")
+                    and (evidence.source == "EMBEDDED" or replace_fallback)
+                ):
                     row.artwork_sha256 = sha
                     row.document = {**row.document, "artwork_source": asdict(evidence)}
             if public_images:

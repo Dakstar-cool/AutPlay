@@ -439,7 +439,8 @@ class PortableAccountDataService:
             preference = session.get(UserTrackPreferenceRow, track)
             previous = (
                 (preference.preference, preference.rating, preference.excluded_from_taste)
-                if preference is not None else None
+                if preference is not None
+                else None
             )
             if preference is None:
                 preference = UserTrackPreferenceRow(
@@ -467,32 +468,40 @@ class PortableAccountDataService:
                     effective_at,
                 )
                 preference.row_version += 1
-            if previous != (preference.preference, preference.rating, preference.excluded_from_taste):
+            if previous != (
+                preference.preference,
+                preference.rating,
+                preference.excluded_from_taste,
+            ):
                 # Other signed-in devices may have completed their initial library snapshot already.
                 session.flush()
                 reference = session.get(UserTrackRefRow, track)
                 assert reference is not None
-                session.add(SyncEventRow(
-                    user_id=actor.user_id,
-                    origin_device_id=actor.device_id,
-                    event_type="PORTABLE_TRACK_PREFERENCE_PROJECTED",
-                    schema_version=1,
-                    aggregate_type="USER_TRACK_PREFERENCE",
-                    aggregate_id=track,
-                    operation="UPSERT",
-                    server_row_version=preference.row_version,
-                    payload={
-                        "server_user_track_ref_id": str(track),
-                        "title": reference.raw_title,
-                        "artist": reference.raw_artist,
-                        "recording_id": str(reference.recording_id) if reference.recording_id else None,
-                        "resolution_status": reference.resolution_status,
-                        "preference": preference.preference,
-                        "rating": preference.rating,
-                        "excluded_from_taste": preference.excluded_from_taste,
-                        "updated_at_ms": int(effective_at.timestamp() * 1000),
-                    },
-                ))
+                session.add(
+                    SyncEventRow(
+                        user_id=actor.user_id,
+                        origin_device_id=actor.device_id,
+                        event_type="PORTABLE_TRACK_PREFERENCE_PROJECTED",
+                        schema_version=1,
+                        aggregate_type="USER_TRACK_PREFERENCE",
+                        aggregate_id=track,
+                        operation="UPSERT",
+                        server_row_version=preference.row_version,
+                        payload={
+                            "server_user_track_ref_id": str(track),
+                            "title": reference.raw_title,
+                            "artist": reference.raw_artist,
+                            "recording_id": str(reference.recording_id)
+                            if reference.recording_id
+                            else None,
+                            "resolution_status": reference.resolution_status,
+                            "preference": preference.preference,
+                            "rating": preference.rating,
+                            "excluded_from_taste": preference.excluded_from_taste,
+                            "updated_at_ms": int(effective_at.timestamp() * 1000),
+                        },
+                    )
+                )
         elif row.kind == "PLAYLIST":
             playlist = cls._playlist(session, actor, row.record_id, now)
             deleted_at = now if document["deleted"] else None

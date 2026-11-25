@@ -29,7 +29,7 @@ class StageCredit:
         match = self.tail.search(title)
         if not match or match.start() == 0:
             return title
-        rest = title[:match.start()].rstrip()
+        rest = title[: match.start()].rstrip()
         return title if _GUEST_END.search(rest) else rest
 
 
@@ -53,8 +53,12 @@ def single_stage_credit(artist: str | None) -> StageCredit | None:
     return next((credit for credit in _CREDITS if credit.key.fullmatch(artist)), None)
 
 
-_REAL = re.compile(r"(.+?)\s*\(\s*(?:настоящее имя|real name|legal name)\s*[:–—-]?\s+([^()]+)\)", re.I)
-_STAGE = re.compile(r"(.+?)\s*\(\s*(?:сценическое имя|псевдоним|stage name)\s*[:–—-]?\s+([^()]+)\)", re.I)
+_REAL = re.compile(
+    r"(.+?)\s*\(\s*(?:настоящее имя|real name|legal name)\s*[:–—-]?\s+([^()]+)\)", re.I
+)
+_STAGE = re.compile(
+    r"(.+?)\s*\(\s*(?:сценическое имя|псевдоним|stage name)\s*[:–—-]?\s+([^()]+)\)", re.I
+)
 _COLLABORATION = re.compile(r"[,;]|\s(?:feat\.?|ft\.?|featuring|/|&|\+)\s", re.I)
 
 
@@ -117,7 +121,9 @@ def recording_credit(members: object) -> RecordingCredit | None:
     for member in members:
         if not isinstance(member, dict):
             return None
-        identity, name, label, join = (member.get(k) for k in ("mbid", "name", "credited_name", "join_phrase"))
+        identity, name, label, join = (
+            member.get(k) for k in ("mbid", "name", "credited_name", "join_phrase")
+        )
         if not all(isinstance(v, str) and 0 < len(v) <= 1000 for v in (identity, name, label)):
             return None
         if not isinstance(join, str) or len(join) > 1000:
@@ -153,11 +159,15 @@ def recording_credit(members: object) -> RecordingCredit | None:
         if counts[project.casefold()] > 1:
             projects[identity] = first_labels[identity]
     last = next(reversed(names))
-    preferred = "".join(project + (joins[key] if key != last else "") for key, project in projects.items())
+    preferred = "".join(
+        project + (joins[key] if key != last else "") for key, project in projects.items()
+    )
     stage = None
     if len(names) == 1:
         project = projects[last]
-        aliases = tuple(sorted(label for label in alternatives[last] if label.casefold() != project.casefold()))
+        aliases = tuple(
+            sorted(label for label in alternatives[last] if label.casefold() != project.casefold())
+        )
         stage = _verified_rule(project, aliases) if aliases else single_stage_credit(project)
     return RecordingCredit(" ".join("".join(credited).split()), " ".join(preferred.split()), stage)
 
@@ -170,5 +180,5 @@ def trim_repeated_credit(title: str, credit: str) -> str:
     separator = re.search(r"\s+[-–—|]\s*$", title[:start])
     if separator is None:
         return title
-    rest = title[:separator.start()].rstrip()
+    rest = title[: separator.start()].rstrip()
     return rest if rest and not _GUEST_END.search(rest) else title

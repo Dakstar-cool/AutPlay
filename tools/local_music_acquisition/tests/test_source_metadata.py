@@ -194,6 +194,14 @@ def test_invalid_native_identity_is_omitted(source_id: object) -> None:
 def test_bandcamp_track_cover_requires_page_art_identity():
     from local_music_acquisition.source_metadata import yt_dlp_metadata
 
-    record = {"id": "9", "artist": "Artist", "track": "Song", "thumbnail": "https://f4.bcbits.com/img/a123_5.jpg"}
+    record = {
+        "id": "9",
+        "artist": "Artist",
+        "track": "Song",
+        "thumbnail": "https://f4.bcbits.com/img/a123_5.jpg",
+    }
     assert yt_dlp_metadata(record, provider="bandcamp")["artwork"][0]["kind"] == "thumbnail"
-    assert yt_dlp_metadata(dict(record, native_art_id=123), provider="bandcamp")["artwork"][0]["kind"] == "track"
+    assert (
+        yt_dlp_metadata(dict(record, native_art_id=123), provider="bandcamp")["artwork"][0]["kind"]
+        == "track"
+    )

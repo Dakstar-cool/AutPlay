@@ -123,8 +123,10 @@ class CatalogPageCache:
         with self.sessions.begin() as session:
             cutoff = datetime.now(UTC) - timedelta(hours=12)
             page = session.get(CatalogBrowsePageRow, key)
-            if page is not None and page.observed_at >= cutoff and not (
-                pending and pending(page.document)
+            if (
+                page is not None
+                and page.observed_at >= cutoff
+                and not (pending and pending(page.document))
             ):
                 return page.document
             # Serve stale data during refresh. Cold readers share the completed provider response.
@@ -146,8 +148,10 @@ class CatalogPageCache:
                         ) from exc
                     raise
             page = session.get(CatalogBrowsePageRow, key, populate_existing=True)
-            if page is not None and page.observed_at >= cutoff and not (
-                pending and pending(page.document)
+            if (
+                page is not None
+                and page.observed_at >= cutoff
+                and not (pending and pending(page.document))
             ):
                 return page.document
             try:

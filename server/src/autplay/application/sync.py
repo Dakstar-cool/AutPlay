@@ -1062,8 +1062,13 @@ class SyncService:
             if payload.get("playlist_import") is True:
                 from autplay.application.playlist_vault import enqueue_playlist_track
 
-                enqueue_playlist_track(session, principal.user_id, playlist_id, ref_id,
-                                       complete=payload.get("playlist_import_complete") is True)
+                enqueue_playlist_track(
+                    session,
+                    principal.user_id,
+                    playlist_id,
+                    ref_id,
+                    complete=payload.get("playlist_import_complete") is True,
+                )
         else:
             if entry.playlist_id != playlist.playlist_id:
                 raise _ProjectionConflict
@@ -1165,17 +1170,21 @@ class SyncService:
             "journal_epoch": str(epoch),
             "from_cursor": token,
             "next_cursor": next_cursor,
-            **({"personal_library_version": 2 if PERSONAL_LIBRARY_V2 in capabilities else 1} if personal_library else {}),
+            **(
+                {"personal_library_version": 2 if PERSONAL_LIBRARY_V2 in capabilities else 1}
+                if personal_library
+                else {}
+            ),
             "has_more": more,
             "events": [
                 _server_event(row, tombstones.get(row.event_id), catalog_only=catalog_only)
                 for row in page
-                if (row.event_type != "PORTABLE_TRACK_PREFERENCE_PROJECTED" or PERSONAL_LIBRARY_V2 in capabilities)
-                and (catalog_visible or row.aggregate_type not in _CATALOG_AGGREGATES)
-                and (
-                    row.aggregate_type != "EDITION_TRACK"
-                    or CATALOG_EDITION_V1 in capabilities
+                if (
+                    row.event_type != "PORTABLE_TRACK_PREFERENCE_PROJECTED"
+                    or PERSONAL_LIBRARY_V2 in capabilities
                 )
+                and (catalog_visible or row.aggregate_type not in _CATALOG_AGGREGATES)
+                and (row.aggregate_type != "EDITION_TRACK" or CATALOG_EDITION_V1 in capabilities)
             ],
             "server_time": _iso(_now()),
         }
@@ -1210,7 +1219,9 @@ class SyncService:
                     principal.user_id,
                     include_catalog_artist=_catalog_enabled(body),
                     include_editions=CATALOG_EDITION_V1 in _capabilities(body),
-                    personal_library=bool({PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2} & set(snapshot.capabilities)),
+                    personal_library=bool(
+                        {PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2} & set(snapshot.capabilities)
+                    ),
                     include_preferences=PERSONAL_LIBRARY_V2 in snapshot.capabilities,
                 )
                 snapshot_rows = [
@@ -1268,7 +1279,11 @@ class SyncService:
                     .limit(_MAX_PULL + 1)
                 )
             )
-        limit = _mobile_page_size(items, _MAX_PULL) if PERSONAL_LIBRARY_V2 in snapshot.capabilities else _MAX_PULL
+        limit = (
+            _mobile_page_size(items, _MAX_PULL)
+            if PERSONAL_LIBRARY_V2 in snapshot.capabilities
+            else _MAX_PULL
+        )
         page, has_more = items[:limit], len(items) > limit
         next_ordinal = page[-1].ordinal if page else start
         # The first page owns capability negotiation.  Continuations are bound to
@@ -1293,7 +1308,11 @@ class SyncService:
             "journal_epoch": str(epoch),
             "snapshot_id": str(snapshot_id),
             **(
-                {"personal_library_version": 2 if PERSONAL_LIBRARY_V2 in snapshot.capabilities else 1}
+                {
+                    "personal_library_version": 2
+                    if PERSONAL_LIBRARY_V2 in snapshot.capabilities
+                    else 1
+                }
                 if {PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2}.intersection(snapshot.capabilities)
                 else {}
             ),
@@ -2114,26 +2133,39 @@ def _bootstrap_projections(
     if include_preferences:
         preferences = session.scalars(
             select(UserTrackPreferenceRow)
-            .join(UserTrackRefRow, UserTrackRefRow.user_track_ref_id == UserTrackPreferenceRow.user_track_ref_id)
+            .join(
+                UserTrackRefRow,
+                UserTrackRefRow.user_track_ref_id == UserTrackPreferenceRow.user_track_ref_id,
+            )
             .where(UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None))
         )
         for pref in preferences:
-            values.append(("USER_TRACK_PREFERENCE", pref.user_track_ref_id, pref.row_version, {
-                "server_user_track_ref_id": str(pref.user_track_ref_id),
-                "preference": pref.preference,
-                "rating": pref.rating,
-                "excluded_from_taste": pref.excluded_from_taste,
-                "updated_at_ms": int(pref.updated_at.timestamp() * 1000),
-            }))
+            values.append(
+                (
+                    "USER_TRACK_PREFERENCE",
+                    pref.user_track_ref_id,
+                    pref.row_version,
+                    {
+                        "server_user_track_ref_id": str(pref.user_track_ref_id),
+                        "preference": pref.preference,
+                        "rating": pref.rating,
+                        "excluded_from_taste": pref.excluded_from_taste,
+                        "updated_at_ms": int(pref.updated_at.timestamp() * 1000),
+                    },
+                )
+            )
 
         # Deliver personal rows and their references before recommendation-only catalogue data.
         liked = {
-            payload["server_user_track_ref_id"] for kind, _, _, payload in values
+            payload["server_user_track_ref_id"]
+            for kind, _, _, payload in values
             if kind == "USER_TRACK_PREFERENCE" and payload["preference"] == "LIKED"
         }
         saved = {
-            payload["server_user_track_ref_id"] for kind, _, _, payload in values
-            if (kind == "LIBRARY_ENTRY" and payload.get("personal_save", True)) or kind == "PLAYLIST_ENTRY"
+            payload["server_user_track_ref_id"]
+            for kind, _, _, payload in values
+            if (kind == "LIBRARY_ENTRY" and payload.get("personal_save", True))
+            or kind == "PLAYLIST_ENTRY"
         }
 
         track_order = {"USER_TRACK_REF": 0, "LIBRARY_ENTRY": 1, "USER_TRACK_PREFERENCE": 2}
@@ -2141,7 +2173,11 @@ def _bootstrap_projections(
         def library_order(item: tuple[str, UUID, int, Any]) -> tuple[int, str, int, str]:
             kind, identity, _, payload = item
             if kind in track_order:
-                ref = str(identity) if kind == "USER_TRACK_REF" else payload["server_user_track_ref_id"]
+                ref = (
+                    str(identity)
+                    if kind == "USER_TRACK_REF"
+                    else payload["server_user_track_ref_id"]
+                )
                 priority = 0 if ref in liked else 1 if ref in saved else 2
                 return (priority, ref, track_order[kind], str(identity))
             return (3, kind, 0, str(identity))
@@ -2251,7 +2287,8 @@ def _capabilities(body: dict[str, Any]) -> set[str]:
     return {
         item
         for item in values
-        if item in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1, PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2)
+        if item
+        in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1, PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2)
     }
 
 

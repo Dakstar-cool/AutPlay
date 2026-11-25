@@ -7,7 +7,18 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import UUID
 
-from autplay.domain.catalog_artwork import ArtMatch, album_label, artwork_search_title, artwork_title, label, native_image_host, recording_labels_match, timing_basis, timing_limit, versioned_titles
+from autplay.domain.catalog_artwork import (
+    ArtMatch,
+    album_label,
+    artwork_search_title,
+    artwork_title,
+    label,
+    native_image_host,
+    recording_labels_match,
+    timing_basis,
+    timing_limit,
+    versioned_titles,
+)
 
 BANDCAMP_SEARCH = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic"
 
@@ -15,7 +26,9 @@ BANDCAMP_SEARCH = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_e
 def yandex_search_url(artist, title="", *, clean_title=True):
     if clean_title:
         title = artwork_search_title(title, artist)
-    return "https://api.music.yandex.net/search?" + urlencode({"text": (artist+" "+title).strip(), "type":"track", "page":0})
+    return "https://api.music.yandex.net/search?" + urlencode(
+        {"text": (artist + " " + title).strip(), "type": "track", "page": 0}
+    )
 
 
 def discography_url(artist_id, page):
@@ -25,7 +38,13 @@ def discography_url(artist_id, page):
 def publisher_track_url(value):
     if not isinstance(value, str) or len(value) > 1024:
         return None
-    return value if re.fullmatch(r"https://[a-z0-9][a-z0-9-]{0,61}\.bandcamp\.com/track/[a-zA-Z0-9%_-]+/?", value) else None
+    return (
+        value
+        if re.fullmatch(
+            r"https://[a-z0-9][a-z0-9-]{0,61}\.bandcamp\.com/track/[a-zA-Z0-9%_-]+/?", value
+        )
+        else None
+    )
 
 
 def release_lookup_url(url):
@@ -39,15 +58,28 @@ def release_lookup_url(url):
         return False
     q = parse_qs(parsed.query, keep_blank_values=True)
     if parsed.path == "/search":
-        return (set(q) == {"text","type","page"} and q["type"] == ["track"] and q["page"] == ["0"]
-                and len(q["text"]) == 1 and 0 < len(q["text"][0]) <= 1100)
-    return bool(re.fullmatch(r"/artists/[1-9][0-9]{0,16}/tracks", parsed.path) and
-                set(q) == {"page", "page-size"} and q["page-size"] == ["70"] and
-                len(q["page"]) == 1 and q["page"][0] in [str(p) for p in range(12)])
+        return (
+            set(q) == {"text", "type", "page"}
+            and q["type"] == ["track"]
+            and q["page"] == ["0"]
+            and len(q["text"]) == 1
+            and 0 < len(q["text"][0]) <= 1100
+        )
+    return bool(
+        re.fullmatch(r"/artists/[1-9][0-9]{0,16}/tracks", parsed.path)
+        and set(q) == {"page", "page-size"}
+        and q["page-size"] == ["70"]
+        and len(q["page"]) == 1
+        and q["page"][0] in [str(p) for p in range(12)]
+    )
 
 
 def _positive(value):
-    return int(value) if type(value) in (str, int) and re.fullmatch(r"[1-9][0-9]{0,16}", str(value)) else None
+    return (
+        int(value)
+        if type(value) in (str, int) and re.fullmatch(r"[1-9][0-9]{0,16}", str(value))
+        else None
+    )
 
 
 def _picture(template):
@@ -65,7 +97,10 @@ def _credit_matches(artist, title, performers, full_title):
         return recording_labels_match(label(artist), label(title), names[0], label(full_title))
     if label(artwork_title(title, artist)) != label(artwork_title(full_title, artist)):
         return False
-    return label(artist) in {sep.join(names) for sep in (", ", " & ", "/", " / ", " feat. ", " feat ", " ft. ", " x ", " и ")}
+    return label(artist) in {
+        sep.join(names)
+        for sep in (", ", " & ", "/", " / ", " feat. ", " feat ", " ft. ", " x ", " и ")
+    }
 
 
 def yandex_match(rows, title, artist, album, duration_ms):
@@ -76,13 +111,21 @@ def yandex_match(rows, title, artist, album, duration_ms):
         if not isinstance(row, dict) or type(row.get("durationMs")) is not int:
             continue
         known_album = album_label(album)
-        edition_agrees = bool(known_album and any(isinstance(rel, dict) and album_label(rel.get("title")) == known_album
-                                                   for rel in row.get("albums") or []))
+        edition_agrees = bool(
+            known_album
+            and any(
+                isinstance(rel, dict) and album_label(rel.get("title")) == known_album
+                for rel in row.get("albums") or []
+            )
+        )
         delta = abs(row["durationMs"] - duration_ms)
         if delta > timing_limit(duration_ms, corroborated=edition_agrees):
             continue
         performers = row.get("artists") or []
-        if not performers or not all(isinstance(p, dict) and isinstance(p.get("name"),str) and _positive(p.get("id")) for p in performers):
+        if not performers or not all(
+            isinstance(p, dict) and isinstance(p.get("name"), str) and _positive(p.get("id"))
+            for p in performers
+        ):
             continue
         track_id = _positive(row.get("id"))
         base = row.get("title")
@@ -93,18 +136,36 @@ def yandex_match(rows, title, artist, album, duration_ms):
             continue
         primary = performers[0]
         aid = int(primary["id"])
-        if primary.get("various") or label(primary["name"]) in {"<unknown>", "unknown artist", "various artists","разные исполнители","неизвестный исполнитель"}:
+        if primary.get("various") or label(primary["name"]) in {
+            "<unknown>",
+            "unknown artist",
+            "various artists",
+            "разные исполнители",
+            "неизвестный исполнитель",
+        }:
             continue
         photo = primary.get("cover") or {}
-        portrait = _picture(photo.get("uri")) if isinstance(photo, dict) and photo.get("type") == "from-artist-photos" else None
+        portrait = (
+            _picture(photo.get("uri"))
+            if isinstance(photo, dict) and photo.get("type") == "from-artist-photos"
+            else None
+        )
         matches.append((aid, primary["name"], track_id, portrait))
         for release in row.get("albums") or []:
-            if not isinstance(release,dict) or not (rid := _positive(release.get("id"))) or not isinstance(release.get("title"),str):
+            if (
+                not isinstance(release, dict)
+                or not (rid := _positive(release.get("id")))
+                or not isinstance(release.get("title"), str)
+            ):
                 continue
             cover = _picture(release.get("coverUri"))
             if not cover or (album_label(album) and label(release["title"]) != album_label(album)):
                 continue
-            owners = {str(p.get("id")) for p in release.get("artists") or [] if isinstance(p, dict) and not p.get("various")}
+            owners = {
+                str(p.get("id"))
+                for p in release.get("artists") or []
+                if isinstance(p, dict) and not p.get("various")
+            }
             own = str(aid) in owners
             if not album_label(album) and not own:
                 continue
@@ -112,7 +173,9 @@ def yandex_match(rows, title, artist, album, duration_ms):
                 released = date.fromisoformat(str(release.get("releaseDate"))[:10])
             except ValueError:
                 year = release.get("year")
-                released = date(year, 12, 31) if type(year) is int and 1800 <= year <= 9999 else date.max
+                released = (
+                    date(year, 12, 31) if type(year) is int and 1800 <= year <= 9999 else date.max
+                )
             albums.append((released, rid, aid, track_id, release["title"], cover, delta))
     if not matches:
         return None
@@ -129,8 +192,14 @@ def yandex_match(rows, title, artist, album, duration_ms):
     if choices and not (album_label(album) and len({a[5] for a in choices}) > 1):
         _, rid, _, track, album_name, cover, delta = choices[0]
         basis = timing_basis(delta)
-        return ArtMatch(aid, name, track, rid, cover, portrait, title, album_name, artist, "YANDEX", basis=basis)
-    return ArtMatch(aid, name, track, 0, None, portrait, title, "", artist, "YANDEX") if portrait else None
+        return ArtMatch(
+            aid, name, track, rid, cover, portrait, title, album_name, artist, "YANDEX", basis=basis
+        )
+    return (
+        ArtMatch(aid, name, track, 0, None, portrait, title, "", artist, "YANDEX")
+        if portrait
+        else None
+    )
 
 
 def yandex_editions(rows, title, artist, album, duration):
@@ -139,7 +208,9 @@ def yandex_editions(rows, title, artist, album, duration):
     editions = set()
     for row in rows or []:
         length = row.get("durationMs") if isinstance(row, dict) else None
-        if type(length) is int and abs(length - duration) <= timing_limit(duration, corroborated=True):
+        if type(length) is int and abs(length - duration) <= timing_limit(
+            duration, corroborated=True
+        ):
             hit = yandex_match([row], title, artist, album, length)
             if hit and hit.cover and hit.album:
                 editions.add(album_label(hit.album))
@@ -147,8 +218,15 @@ def yandex_editions(rows, title, artist, album, duration):
 
 
 def bandcamp_query(artist, title):
-    return json.dumps({"search_text": f"{artist} {artwork_search_title(title, artist)}", "search_filter": "t", "full_page": True},
-                      ensure_ascii=False, separators=(",", ":")).encode()
+    return json.dumps(
+        {
+            "search_text": f"{artist} {artwork_search_title(title, artist)}",
+            "search_filter": "t",
+            "full_page": True,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
 
 
 def publisher_candidates(page, artist, title, album):
@@ -156,13 +234,21 @@ def publisher_candidates(page, artist, title, album):
     rows = auto.get("results") or [] if isinstance(auto, dict) else []
     result = []
     for row in rows:
-        if (not isinstance(row, dict) or row.get("type") != "t" or
-            not all(isinstance(row.get(k), str) for k in ("name", "band_name", "item_url_path"))):
+        if (
+            not isinstance(row, dict)
+            or row.get("type") != "t"
+            or not all(isinstance(row.get(k), str) for k in ("name", "band_name", "item_url_path"))
+        ):
             continue
         url = publisher_track_url(row["item_url_path"].split("?", 1)[0])
-        if (url and recording_labels_match(label(artist), label(title), label(row["band_name"]), label(row["name"])) and
-            (not album_label(album) or album_label(row.get("album_name")) == album_label(album)) and
-            all(_positive(row.get(k)) for k in ("id", "band_id", "art_id"))):
+        if (
+            url
+            and recording_labels_match(
+                label(artist), label(title), label(row["band_name"]), label(row["name"])
+            )
+            and (not album_label(album) or album_label(row.get("album_name")) == album_label(album))
+            and all(_positive(row.get(k)) for k in ("id", "band_id", "art_id"))
+        ):
             result.append((url, row))
     return result
 
@@ -183,7 +269,7 @@ class _RecordingPage(HTMLParser):
         if "data-tralbum" in attributes:
             try:
                 self.native = json.loads(attributes["data-tralbum"])
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
 
     def handle_data(self, data):
@@ -212,18 +298,34 @@ def indexed_publisher_cover(candidates, title, artist, album):
         return None
     if album_label(album) and album_label(album) != album_label(album_name):
         return None
-    if not album_label(album) and (len(label(title)) < 4 or label(title) in {"intro","outro","interlude","untitled","скит","интро"}):
+    if not album_label(album) and (
+        len(label(title)) < 4
+        or label(title) in {"intro", "outro", "interlude", "untitled", "скит", "интро"}
+    ):
         return None
     supplied = row.get("img")
     art_id = _positive(row.get("art_id"))
-    if not isinstance(supplied,str) or not art_id:
+    if not isinstance(supplied, str) or not art_id:
         return None
-    path = re.fullmatch(r"(https://f[0-9]+\.bcbits\.com)/img/a?([0-9]{1,16})_[0-9]{1,2}\.jpg",supplied)
+    path = re.fullmatch(
+        r"(https://f[0-9]+\.bcbits\.com)/img/a?([0-9]{1,16})_[0-9]{1,2}\.jpg", supplied
+    )
     if not path or int(path[2]) != art_id:
         return None
     cover = f"{path[1]}/img/a{path[2]}_10.jpg"
-    return ArtMatch(int(row["band_id"]), row["band_name"], int(row["id"]), _positive(row.get("album_id")) or 0,
-                    cover,None,title,album_name,artist,"BANDCAMP",basis="publisher_index")
+    return ArtMatch(
+        int(row["band_id"]),
+        row["band_name"],
+        int(row["id"]),
+        _positive(row.get("album_id")) or 0,
+        cover,
+        None,
+        title,
+        album_name,
+        artist,
+        "BANDCAMP",
+        basis="publisher_index",
+    )
 
 
 def publisher_match(page, row, url, title, artist, album, duration_ms):
@@ -233,31 +335,60 @@ def publisher_match(page, row, url, title, artist, album, duration_ms):
     parsed.feed(page.decode("utf-8", errors="replace"))
     native = parsed.native if isinstance(parsed.native, dict) else {}
     current = native.get("current") or {}
-    if (not isinstance(current, dict) or current.get("type") != "track" or
-        _positive(current.get("id")) != _positive(row["id"])):
+    if (
+        not isinstance(current, dict)
+        or current.get("type") != "track"
+        or _positive(current.get("id")) != _positive(row["id"])
+    ):
         return None
     art_id = _positive(current.get("art_id") or native.get("art_id"))
     if not art_id or art_id != _positive(row.get("art_id")):
         return None
-    tracks = [t for t in native.get("trackinfo") or [] if isinstance(t, dict) and _positive(t.get("track_id")) == _positive(row["id"])]
-    if len(tracks) != 1 or type(tracks[0].get("duration")) not in (int, float) or abs(duration_ms - 1000 * tracks[0]["duration"]) > timing_limit(duration_ms, corroborated=bool(album_label(album) and album_label(album) == album_label(row.get("album_name")))):
+    tracks = [
+        t
+        for t in native.get("trackinfo") or []
+        if isinstance(t, dict) and _positive(t.get("track_id")) == _positive(row["id"])
+    ]
+    if (
+        len(tracks) != 1
+        or type(tracks[0].get("duration")) not in (int, float)
+        or abs(duration_ms - 1000 * tracks[0]["duration"])
+        > timing_limit(
+            duration_ms,
+            corroborated=bool(
+                album_label(album) and album_label(album) == album_label(row.get("album_name"))
+            ),
+        )
+    ):
         return None
     for music in parsed.recordings:
         credit, release = music.get("byArtist"), music.get("inAlbum") or {}
         if not isinstance(credit, dict) or not isinstance(release, dict) or music.get("@id") != url:
             continue
         name, who, art = music.get("name"), credit.get("name"), music.get("image")
-        if not isinstance(name,str) or not isinstance(who,str) or not isinstance(art,str):
+        if not isinstance(name, str) or not isinstance(who, str) or not isinstance(art, str):
             continue
         if not recording_labels_match(label(artist), label(title), label(who), label(name)):
             continue
         album_name = release.get("name") or row.get("album_name") or ""
         if album_label(album) and album_label(album_name) != album_label(album):
             continue
-        if native_image_host(art) != "BANDCAMP" or not re.search(rf"/a0*{art_id}_[0-9]+\.jpg$", art):
+        if native_image_host(art) != "BANDCAMP" or not re.search(
+            rf"/a0*{art_id}_[0-9]+\.jpg$", art
+        ):
             continue
-        return ArtMatch(int(row["band_id"]), who, int(row["id"]), _positive(current.get("album_id")) or 0,
-                        art,None,title,album_name,artist,"BANDCAMP")
+        return ArtMatch(
+            int(row["band_id"]),
+            who,
+            int(row["id"]),
+            _positive(current.get("album_id")) or 0,
+            art,
+            None,
+            title,
+            album_name,
+            artist,
+            "BANDCAMP",
+        )
     return None
 
 
@@ -272,15 +403,26 @@ def archived_editions(rows, title, artist, album, duration_ms):
             continue
         fields = row["fields"]
         duration = row.get("duration_ms")
-        if not recording_labels_match(label(artist), label(title), label(fields.get("artist") or ""), label(fields.get("title") or "")):
+        if not recording_labels_match(
+            label(artist),
+            label(title),
+            label(fields.get("artist") or ""),
+            label(fields.get("title") or ""),
+        ):
             continue
         name = fields.get("album")
         if not name or (album_label(album) and album_label(album) != album_label(name)):
             continue
         try:
-            rec, release = (str(UUID(str(fields.get(k)))) for k in ("mb_recording_id","mb_release_id"))
-            group = str(UUID(str(fields["mb_release_group_id"]))) if fields.get("mb_release_group_id") else None
-        except (ValueError, TypeError):
+            rec, release = (
+                str(UUID(str(fields.get(k)))) for k in ("mb_recording_id", "mb_release_id")
+            )
+            group = (
+                str(UUID(str(fields["mb_release_group_id"])))
+                if fields.get("mb_release_group_id")
+                else None
+            )
+        except ValueError, TypeError:
             continue
         if row.get("source_id") != f"musicbrainz:release:{release}":
             continue
@@ -302,7 +444,24 @@ def archived_editions(rows, title, artist, album, duration_ms):
     ordered = []
     for _, (rec, release, group, name) in sorted(eligible.items()):
         for kind, identifier in (("release", release), ("release-group", group)):
-            if identifier and not any(item.album_id == identifier and item.entity == kind for item in ordered):
+            if identifier and not any(
+                item.album_id == identifier and item.entity == kind for item in ordered
+            ):
                 url = f"https://coverartarchive.org/{kind}/{identifier}/front-500"
-                ordered.append(ArtMatch(None, artist, rec, identifier, url, None, title, name, artist, "COVER_ART_ARCHIVE", kind, basis))
+                ordered.append(
+                    ArtMatch(
+                        None,
+                        artist,
+                        rec,
+                        identifier,
+                        url,
+                        None,
+                        title,
+                        name,
+                        artist,
+                        "COVER_ART_ARCHIVE",
+                        kind,
+                        basis,
+                    )
+                )
     return ordered[:6]

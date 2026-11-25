@@ -7,7 +7,6 @@ from autplay.domain.music_variations import split_label, variation_kind
 from autplay.domain.recovery_artwork import mbid
 from autplay.domain.track_metadata import MetadataQuery
 
-
 ORIGINAL_BASES = {"original_cover", "original_remix"}
 
 

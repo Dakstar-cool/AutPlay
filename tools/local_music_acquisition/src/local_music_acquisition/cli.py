@@ -323,8 +323,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
             summary = download_playlist(
                 options.input,
                 options.output_dir,
-                providers=tuple(StandaloneDownloadProvider(provider, options.max_mib * 1024 * 1024)
-                                for provider in providers),
+                providers=tuple(
+                    StandaloneDownloadProvider(provider, options.max_mib * 1024 * 1024)
+                    for provider in providers
+                ),
                 rights_confirmed=frozenset(rights),
                 normalize_numbered=options.normalize_numbered,
                 normalization_catalog=catalog,

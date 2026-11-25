@@ -20,12 +20,11 @@ from autplay.application.track_metadata import (
     document_from,
 )
 from autplay.domain.catalog_artwork import label, native_image_host
-from autplay.domain.original_artwork import original_artwork_source
-from autplay.domain.web_artwork import archived_editions
-from autplay.domain.recovery_artwork import selected_group_art
 from autplay.domain.catalogue_context import CatalogueContextEntity
 from autplay.domain.jobs import JobLease, RetryableJobError, TerminalJobError
 from autplay.domain.metadata_execution import MetadataAudioTarget
+from autplay.domain.original_artwork import original_artwork_source
+from autplay.domain.recovery_artwork import selected_group_art
 from autplay.domain.track_metadata import (
     FieldEvidence,
     MetadataCandidate,
@@ -37,6 +36,7 @@ from autplay.domain.track_metadata import (
     parse_source_metadata,
 )
 from autplay.domain.vault import MediaValidationError
+from autplay.domain.web_artwork import archived_editions
 from autplay.ports.track_metadata import MetadataByteWork, MetadataProviderError
 
 
@@ -131,15 +131,27 @@ class TrackMetadataHandler:
                 str(doc.fields["mb_recording_id"]) if doc.fields.get("mb_recording_id") else None,
             )
             selection = row.document.get("selection")
-            edition_locked = any(doc.provenance[key].locked for key in ("album", "mb_release_id") if key in doc.provenance)
-            artwork_exists = row.artwork_sha256 is not None and (row.document.get("artwork_source") or {}).get("source") != "PUBLIC_CATALOG"
-            original_exists = bool(row.artwork_sha256 and original_artwork_source(row.document.get("artwork_source")))
+            edition_locked = any(
+                doc.provenance[key].locked
+                for key in ("album", "mb_release_id")
+                if key in doc.provenance
+            )
+            artwork_exists = (
+                row.artwork_sha256 is not None
+                and (row.document.get("artwork_source") or {}).get("source") != "PUBLIC_CATALOG"
+            )
+            original_exists = bool(
+                row.artwork_sha256 and original_artwork_source(row.document.get("artwork_source"))
+            )
             fallback_cover_exists = row.artwork_sha256 is not None and not original_exists
             performance = row.document.get("musicbrainz_performance_v1")
             version = None
             if ref.recording_id and not (selection or edition_locked or fallback_cover_exists):
-                version = session.execute(select(RecordingRow.recording_kind, RecordingRow.version_text)
-                                          .where(RecordingRow.recording_id == ref.recording_id)).one_or_none()
+                version = session.execute(
+                    select(RecordingRow.recording_kind, RecordingRow.version_text).where(
+                        RecordingRow.recording_id == ref.recording_id
+                    )
+                ).one_or_none()
             saved_portrait = row.document.get("catalog_artist_image_v1") or {}
         self.service.apply_worker(
             ref_id,
@@ -195,25 +207,42 @@ class TrackMetadataHandler:
                 album_group=native_group,
                 expected_acquisition_sha256=self._acquisition_sha256,
             )
-            if not artwork_exists and not selection and not edition_locked and isinstance(self.provider, MusicBrainzMetadataProvider):
+            if (
+                not artwork_exists
+                and not selection
+                and not edition_locked
+                and isinstance(self.provider, MusicBrainzMetadataProvider)
+            ):
                 album_id = native.external_ids.get("native_album_id")
                 for art in sorted(native.artwork, key=lambda item: item.kind != "album"):
-                    bound = (art.kind == "track" and art.source_id == native.source_id or
-                             art.kind == "album" and album_id is not None and art.source_id == f"album:{album_id}")
+                    bound = (art.kind == "track" and art.source_id == native.source_id) or (
+                        art.kind == "album"
+                        and album_id is not None
+                        and art.source_id == f"album:{album_id}"
+                    )
                     if not bound or native_image_host(art.url) != native.provider:
                         continue
                     try:
                         if payload := self.provider.public_image(art.url):
-                            self.service.apply_worker(ref_id, generation, context, evidence=native_evidence,
-                                artwork=self.work.normalize_artwork(payload), expected_acquisition_sha256=self._acquisition_sha256)
+                            self.service.apply_worker(
+                                ref_id,
+                                generation,
+                                context,
+                                evidence=native_evidence,
+                                artwork=self.work.normalize_artwork(payload),
+                                expected_acquisition_sha256=self._acquisition_sha256,
+                            )
                             artwork_exists = True
                             break
-                    except (MetadataProviderError, MediaValidationError):
+                    except MetadataProviderError, MediaValidationError:
                         continue
         with self.service.sessions.begin() as session:
             ref, current = self.service.locked_job(session, ref_id, generation, context)
             effective_document = document_from(current)
-            original_exists = bool(current.artwork_sha256 and original_artwork_source(current.document.get("artwork_source")))
+            original_exists = bool(
+                current.artwork_sha256
+                and original_artwork_source(current.document.get("artwork_source"))
+            )
             fallback_cover_exists = bool(current.artwork_sha256 and not original_exists)
             effective = effective_document.fields
             artist_proof = effective_document.provenance.get("artist")
@@ -270,10 +299,16 @@ class TrackMetadataHandler:
 
         def supplemental(need_cover: bool, art_query: MetadataQuery, review=()):
             need_cover = need_cover and not (fallback_cover_exists or edition_locked or selection)
-            portrait_exists = bool(saved_portrait) and label(saved_portrait.get("credit") or saved_portrait.get("name") or "") == label(art_query.artist)
-            if (not need_cover and portrait_exists) or not isinstance(self.provider, MusicBrainzMetadataProvider):
+            portrait_exists = bool(saved_portrait) and label(
+                saved_portrait.get("credit") or saved_portrait.get("name") or ""
+            ) == label(art_query.artist)
+            if (not need_cover and portrait_exists) or not isinstance(
+                self.provider, MusicBrainzMetadataProvider
+            ):
                 return None
-            if unproved_source_artist and not (artist_proof and artist_proof.source in {"EMBEDDED", "SOURCE_NATIVE", "USER"}):
+            if unproved_source_artist and not (
+                artist_proof and artist_proof.source in {"EMBEDDED", "SOURCE_NATIVE", "USER"}
+            ):
                 return None
             if not art_query.artist or not art_query.title or not art_query.duration_ms:
                 return None
@@ -283,8 +318,13 @@ class TrackMetadataHandler:
 
             def save_result():
                 if result:
-                    self.service.apply_worker(ref_id, generation, context, public_images=result,
-                                              expected_acquisition_sha256=self._acquisition_sha256)
+                    self.service.apply_worker(
+                        ref_id,
+                        generation,
+                        context,
+                        public_images=result,
+                        expected_acquisition_sha256=self._acquisition_sha256,
+                    )
 
             def image(url: str | None, *, is_cover=False) -> bytes | None:
                 nonlocal pending_error
@@ -304,23 +344,48 @@ class TrackMetadataHandler:
                 return None
 
             if need_cover and review:
-                archived = archived_editions([_review_document(candidate) for candidate in review], art_query.title,
-                                            art_query.artist, art_query.album, art_query.duration_ms)
+                archived = archived_editions(
+                    [_review_document(candidate) for candidate in review],
+                    art_query.title,
+                    art_query.artist,
+                    art_query.album,
+                    art_query.duration_ms,
+                )
                 for candidate in archived:
-                    if art_query.release_mbid and (candidate.entity != "release" or candidate.album_id != art_query.release_mbid):
+                    if art_query.release_mbid and (
+                        candidate.entity != "release"
+                        or candidate.album_id != art_query.release_mbid
+                    ):
                         continue
                     if cover := image(candidate.cover, is_cover=True):
                         result = (candidate, cover, None)
                         need_cover = False
                         break
 
-            for source in (self.provider.find_deezer_artwork, self.provider.find_yandex_artwork, self.provider.find_listenbrainz_cover,
-                           self.provider.find_publisher_cover, self.provider.find_archive_cover):
-                if not need_cover and (not need_portrait or source in (self.provider.find_listenbrainz_cover, self.provider.find_publisher_cover, self.provider.find_archive_cover)):
+            for source in (
+                self.provider.find_deezer_artwork,
+                self.provider.find_yandex_artwork,
+                self.provider.find_listenbrainz_cover,
+                self.provider.find_publisher_cover,
+                self.provider.find_archive_cover,
+            ):
+                if not need_cover and (
+                    not need_portrait
+                    or source
+                    in (
+                        self.provider.find_listenbrainz_cover,
+                        self.provider.find_publisher_cover,
+                        self.provider.find_archive_cover,
+                    )
+                ):
                     break
                 context.raise_if_cancelled()
                 try:
-                    match = source(art_query, review) if source == self.provider.find_listenbrainz_cover else source(art_query)
+                    match = (
+                        source(art_query, review)
+                        if source == self.provider.find_listenbrainz_cover
+                        else source(art_query)
+                    )
                 except MetadataProviderError as error:
                     if error.retryable:
                         pending_error = error
@@ -328,18 +393,29 @@ class TrackMetadataHandler:
                 if not match:
                     continue
                 correct_edition = not art_query.release_mbid or (
-                    match.provider == "COVER_ART_ARCHIVE" and match.entity == "release" and match.album_id == art_query.release_mbid)
-                cover = image(match.cover, is_cover=True) if need_cover and correct_edition else None
+                    match.provider == "COVER_ART_ARCHIVE"
+                    and match.entity == "release"
+                    and match.album_id == art_query.release_mbid
+                )
+                cover = (
+                    image(match.cover, is_cover=True) if need_cover and correct_edition else None
+                )
                 face = image(match.portrait) if need_portrait else None
                 if cover or face:
                     save_result()
                     result = (match, cover, face)
                     need_cover = need_cover and cover is None
                     need_portrait = need_portrait and face is None
-            if need_cover and not original_exists and (not pending_error or context.fence.attempt_no >= 3):
+            if (
+                need_cover
+                and not original_exists
+                and (not pending_error or context.fence.attempt_no >= 3)
+            ):
                 context.raise_if_cancelled()
                 try:
-                    match = self.provider.find_original_artwork(art_query, performance, *(version or (None, None)))
+                    match = self.provider.find_original_artwork(
+                        art_query, performance, *(version or (None, None))
+                    )
                     if match and (cover := image(match.cover, is_cover=True)):
                         save_result()
                         result = (match, cover, None)
@@ -381,8 +457,13 @@ class TrackMetadataHandler:
                 candidates = tuple(found.values())[:5]
             if not candidates and search_error is not None:
                 if images := supplemental(not artwork_exists, query):
-                    self.service.apply_worker(ref_id, generation, context, public_images=images,
-                                              expected_acquisition_sha256=self._acquisition_sha256)
+                    self.service.apply_worker(
+                        ref_id,
+                        generation,
+                        context,
+                        public_images=images,
+                        expected_acquisition_sha256=self._acquisition_sha256,
+                    )
                 raise search_error
             chosen = automatic_candidate(query, candidates)
         if chosen is None:
@@ -448,8 +529,12 @@ class TrackMetadataHandler:
         if selection or not artwork_exists:
             try:
                 cover = self.provider.cover(str(chosen.fields["mb_release_id"]))
-                if (cover is None and not selection and chosen.fields.get("mb_release_group_id")
-                        and isinstance(self.provider, MusicBrainzMetadataProvider)):
+                if (
+                    cover is None
+                    and not selection
+                    and chosen.fields.get("mb_release_group_id")
+                    and isinstance(self.provider, MusicBrainzMetadataProvider)
+                ):
                     cover = self.provider.group_cover(str(chosen.fields["mb_release_group_id"]))
                     group_artwork = cover is not None
                 if cover is not None:
@@ -464,18 +549,29 @@ class TrackMetadataHandler:
         with self.service.sessions.begin() as session:
             _, current = self.service.locked_job(session, ref_id, generation, context)
             fields = document_from(current).fields
-            original_exists = bool(current.artwork_sha256 and original_artwork_source(current.document.get("artwork_source")))
+            original_exists = bool(
+                current.artwork_sha256
+                and original_artwork_source(current.document.get("artwork_source"))
+            )
             fallback_cover_exists = bool(current.artwork_sha256 and not original_exists)
-            art_query = replace(query, title=str(fields.get("title") or query.title),
-                                artist=str(fields.get("artist") or query.artist),
-                                recording_mbid=str(fields.get("mb_recording_id") or "") or query.recording_mbid,
-                                release_mbid=str(fields.get("mb_release_id") or "") or query.release_mbid,
-                                album=str(fields.get("album") or query.album or "") or None)
+            art_query = replace(
+                query,
+                title=str(fields.get("title") or query.title),
+                artist=str(fields.get("artist") or query.artist),
+                recording_mbid=str(fields.get("mb_recording_id") or "") or query.recording_mbid,
+                release_mbid=str(fields.get("mb_release_id") or "") or query.release_mbid,
+                album=str(fields.get("album") or query.album or "") or None,
+            )
         if group_artwork and artwork:
             group_match = selected_group_art(chosen.fields, art_query.title, art_query.artist)
             if group_match:
-                self.service.apply_worker(ref_id, generation, context, public_images=(group_match, artwork, None),
-                                          expected_acquisition_sha256=self._acquisition_sha256)
+                self.service.apply_worker(
+                    ref_id,
+                    generation,
+                    context,
+                    public_images=(group_match, artwork, None),
+                    expected_acquisition_sha256=self._acquisition_sha256,
+                )
                 artwork_exists = True
             artwork = None
         images = supplemental(not (artwork_exists or artwork or selection), art_query)

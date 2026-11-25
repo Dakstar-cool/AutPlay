@@ -94,7 +94,9 @@ def _credit(session: Session, provider: UUID, members: list[dict[str, str]]) -> 
             dict(
                 position=len(names),
                 artist_id=ref.artist_id,
-                credited_name=item["name"] if item.get("legal_name") == item["credited_name"] else item["credited_name"],
+                credited_name=item["name"]
+                if item.get("legal_name") == item["credited_name"]
+                else item["credited_name"],
                 join_phrase=item["join_phrase"],
                 role=item["role"],
             )

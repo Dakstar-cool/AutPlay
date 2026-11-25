@@ -205,7 +205,11 @@ def yt_dlp_metadata(info: dict[str, object], *, provider: str) -> dict[str, obje
     """Use explicit music tags only: no uploader, series or upload-date fallbacks."""
     fields = {key: info.get(key) for key in _TEXT | _IDS | _NUMBERS | {"genres"}}
     fields["title"] = info.get("track")
-    for name, plural in (("artist", "artists"), ("album_artist", "album_artists"), ("composer", "composers")):
+    for name, plural in (
+        ("artist", "artists"),
+        ("album_artist", "album_artists"),
+        ("composer", "composers"),
+    ):
         if not fields.get(name):
             artists = info.get(plural)
             if (
@@ -235,7 +239,9 @@ def yt_dlp_metadata(info: dict[str, object], *, provider: str) -> dict[str, obje
     if thumbnail:
         kind = "thumbnail"
         if provider == "bandcamp" and isinstance(thumbnail, str):
-            published = re.fullmatch(r"https://f[0-9]+\.bcbits\.com/img/a([0-9]{1,16})_[0-9]{1,2}\.jpg", thumbnail)
+            published = re.fullmatch(
+                r"https://f[0-9]+\.bcbits\.com/img/a([0-9]{1,16})_[0-9]{1,2}\.jpg", thumbnail
+            )
             if published and str(info.get("native_art_id")) == str(int(published[1])):
                 kind = "track"
         images.append({"kind": kind, "url": thumbnail, "source_id": str(info.get("id"))})

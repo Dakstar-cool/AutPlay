@@ -2,7 +2,7 @@
 
 import re
 from pathlib import PurePosixPath
-from urllib.parse import urlencode, quote, urlsplit, unquote
+from urllib.parse import quote, unquote, urlencode, urlsplit
 from uuid import UUID
 
 from autplay.domain.catalog_artwork import (

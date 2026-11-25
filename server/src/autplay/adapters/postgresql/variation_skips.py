@@ -8,7 +8,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from autplay.domain.adaptive_recommendations import DEFAULT_ADAPTIVE_FEATURE_POLICY
-
 from autplay.domain.music_variations import KINDS, variation_kind
 
 

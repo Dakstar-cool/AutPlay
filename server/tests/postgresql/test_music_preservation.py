@@ -5,11 +5,10 @@ import wave
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-
 from autplay.adapters.preservation_sources import archive
 from autplay.application.music_preservation import PreservationWatcher, reports, request_run
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 from .identity_factory import insert_world
 
@@ -295,15 +294,14 @@ def test_authorized_source_through_real_queue_and_vault(
 
 
 def test_owner_manual_scan_and_report(database_url, tmp_path):
-    from fastapi import FastAPI
-    from starlette.testclient import TestClient
-
     from autplay.application.acquisition_control import AcquisitionControlService
     from autplay.domain.auth import AccountRole
     from autplay.domain.web_admin import AuthenticatedWebSession, WebActor
     from autplay.entrypoints.acquisition_control_http import create_acquisition_control_router
     from autplay.runtime.web_security import encode_request_integrity_token
     from autplay.web.renderer import AdminTemplateRenderer
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
 
     engine = create_engine(database_url)
     sessions = sessionmaker(engine)
