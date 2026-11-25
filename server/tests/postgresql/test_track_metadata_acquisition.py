@@ -161,7 +161,7 @@ class Work:
     def fingerprint(self) -> ChromaprintEvidence:
         raise AssertionError("fingerprint should not run")
 
-    def normalize_artwork(self, payload: bytes) -> bytes:
+    def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
         return payload
 
 
@@ -630,7 +630,7 @@ def test_optional_art_protocol_failure_retains_confirmed_edition(database_url: s
     lease, context = claim(sessions)
 
     class BrokenWork(Work):
-        def normalize_artwork(self, payload: bytes) -> bytes:
+        def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
             raise ChildProtocolError()
 
     chosen = candidate()

@@ -566,7 +566,7 @@ def test_occurrence_lookup_needs_recording_and_edition_context() -> None:
         )
 
 
-def test_search_abbreviations_never_become_identity_evidence():
+def test_search_abbreviations_never_become_identity_evidence() -> None:
     from autplay.domain.track_metadata import MetadataCandidate, metadata_search_terms
 
     query = MetadataQuery(
@@ -584,13 +584,13 @@ def test_search_abbreviations_never_become_identity_evidence():
     assert not candidate.exact_for(query)
 
 
-def test_search_continues_past_studio_hit_to_matching_session():
+def test_search_continues_past_studio_hit_to_matching_session() -> None:
     query = MetadataQuery(
         "Life is wasted on the living | Monitor Sessions", "Moto Boy", duration_ms=223000
     )
 
     class SessionHttp(Http):
-        def json(self, url, *, post=None):
+        def json(self, url: str, *, post: bytes | None = None) -> dict[str, Any]:
             self.urls.append(url)
             expression = parse_qs(urlsplit(url).query)["query"][0]
             item = recording(1, 223000, [10])

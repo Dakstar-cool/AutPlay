@@ -198,7 +198,7 @@ def lookup_title(value: str, artist: str = "") -> str:
 
 
 _PERFORMANCE_SUFFIX = re.compile(
-    r"\s+\((live at [^()\n]{1,80}|[^\W_][\w '&’.-]{0,60}\s+sessions)\)$", re.I
+    r"\s+\((live at [^()\n]{1,80}|[^\W_][\w '&\u2019.-]{0,60}\s+sessions)\)$", re.I
 )
 
 
@@ -235,7 +235,8 @@ def metadata_search_terms(title: str, artist: str) -> tuple[tuple[str, str], ...
     if not title or not artist:
         return ()
     clean = lookup_title(title, artist) or title
-    # Keep edition markers for verification but allow catalogue retrieval without a dated language suffix.
+    # Keep edition markers for verification but allow catalogue retrieval without a dated
+    # language suffix.
     search = (
         re.sub(
             r"\s+(?:\((?:19|20)[0-9]{2}\)\s*\[[A-Za-z]{2}\]|\((?:uncensored|censored|explicit|clean)\))$",

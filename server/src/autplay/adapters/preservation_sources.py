@@ -4,8 +4,10 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Callable, Iterable, Iterator
 from datetime import date
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -118,9 +120,9 @@ _ARCHIVE = (
 )
 
 
-def archive():
+def archive() -> Iterator[dict[str, Any]]:
     for event, kind, artist, title, version, scope, when, reason, url in _ARCHIVE:
-        row = dict(
+        row: dict[str, Any] = dict(
             event=event,
             kind=kind,
             artist=artist,
@@ -145,7 +147,7 @@ def archive():
         yield row
 
 
-def https(url):
+def https(url: object) -> str:
     if not isinstance(url, str) or len(url) > 2048:
         raise ValueError("invalid_source_url")
     parsed = urlsplit(url)
@@ -154,7 +156,7 @@ def https(url):
     return url
 
 
-def read_document(path: Path):
+def read_document(path: Path) -> object:
     with path.open("rb") as stream:
         value = stream.read(MAX_BYTES + 1)
     if len(value) > MAX_BYTES:
@@ -162,13 +164,13 @@ def read_document(path: Path):
     return json.loads(value)
 
 
-def fetch(url):
+def fetch(url: str) -> bytes:
     request = Request(https(url), headers={"User-Agent": "AutPlay-MPW/1.0"})
     for attempt in range(3):
         try:
             with urlopen(request, timeout=8) as response:
                 https(response.geturl())
-                data = response.read(MAX_BYTES + 1)
+                data: bytes = response.read(MAX_BYTES + 1)
             if len(data) > MAX_BYTES:
                 raise ValueError("source_too_large")
             return data
@@ -178,9 +180,10 @@ def fetch(url):
             ):
                 raise
             time.sleep(2**attempt)
+    raise RuntimeError("preservation_fetch_attempts_exhausted")
 
 
-def news(url=NEWS):
+def news(url: str = NEWS) -> Iterator[dict[str, Any]]:
     data = fetch(url)
     if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
         raise ValueError("invalid_news_xml")
@@ -211,7 +214,7 @@ def news(url=NEWS):
         )
 
 
-def withdrawn_releases():
+def withdrawn_releases() -> Iterator[dict[str, Any]]:
     from uuid import UUID
 
     data = json.loads(
@@ -239,7 +242,7 @@ def withdrawn_releases():
         )
 
 
-def apple_listings():
+def apple_listings() -> Iterator[dict[str, Any]]:
     ids = {
         "mb-65601948-c476-4c47-9424-fada811ac114": 1536234310,
         "mb-790bb9c1-dda3-483d-b5bb-06181c77d91f": 687591810,
@@ -260,7 +263,7 @@ def apple_listings():
         yield dict(row, listing="listed" if listed else "absent", listing_url=url)
 
 
-def validate(record):
+def validate(record: object) -> dict[str, str]:
     required = (
         "event",
         "kind",
@@ -303,7 +306,7 @@ def validate(record):
     return row
 
 
-def observations(record):
+def observations(record: dict[str, Any]) -> Iterator[dict[str, Any]]:
     row = validate(record)
     if "tracks" not in record:
         yield row
@@ -315,7 +318,7 @@ def observations(record):
         or len(tracks) > 10000
     ):
         raise ValueError("invalid_collection_tracklist")
-    members = {}
+    members: dict[str, dict[str, str]] = {}
     for track in tracks:
         if not isinstance(track, dict):
             raise ValueError("invalid_collection_track")
@@ -335,7 +338,7 @@ def observations(record):
         yield {**member, "collection_event": row["event"]}
 
 
-def adapters(root):
+def adapters(root: Path) -> Iterator[tuple[str, Callable[[], Iterable[dict[str, Any]]]]]:
     yield "archive", archive
     yield "guardian", news
     yield "musicbrainz", withdrawn_releases
@@ -344,7 +347,7 @@ def adapters(root):
     # Only explicitly configured curated sources can confirm a case or retract an earlier report.
     for path in sorted((root / "feeds").glob("*.json"))[:32]:
 
-        def records(path=path):
+        def records(path: Path = path) -> list[dict[str, Any]]:
             source = read_document(path)
             rows = json.loads(fetch(source["url"])) if isinstance(source, dict) else source
             if not isinstance(rows, list) or len(rows) > 500:

@@ -1,6 +1,7 @@
 """Evidence for borrowing an original recording's cover for a cover version or remix."""
 
 import re
+from typing import Any
 
 from autplay.domain.catalog_artwork import ArtMatch, artwork_title, image_url, label
 from autplay.domain.music_variations import split_label, variation_kind
@@ -10,7 +11,7 @@ from autplay.domain.track_metadata import MetadataQuery
 ORIGINAL_BASES = {"original_cover", "original_remix"}
 
 
-def original_artwork_source(source) -> bool:
+def original_artwork_source(source: dict[str, Any] | None) -> bool:
     return bool(
         source
         and source.get("source") == "PUBLIC_CATALOG"
@@ -43,7 +44,7 @@ def credited_original(
         remixer = re.fullmatch(r"(.+?)\s+(?:remix|ремикс)", suffix, re.I)
         if remixer and label(remixer[1]) == label(artist):
             # Uploads credited to the remixer sometimes name the original in the title.
-            pair = re.fullmatch(r"(.+?)\s+[-–—]\s+(.+)", base)
+            pair = re.fullmatch(r"(.+?)\s+[-\u2013—]\s+(.+)", base)
             if not pair:
                 return None
             artist, base = pair.groups()
@@ -63,7 +64,7 @@ def credited_original(
 
 
 def catalog_original(
-    rows, query: MetadataQuery, kind: str, credit: tuple[str, str]
+    rows: object, query: MetadataQuery, kind: str, credit: tuple[str, str]
 ) -> ArtMatch | None:
     artist, title = map(label, credit)
     matches = {}
@@ -81,19 +82,23 @@ def catalog_original(
             or row.get("title_version")
         ):
             continue
-        ids = performer.get("id"), row.get("id"), album.get("id")
-        if not all(type(v) is int and v > 0 for v in ids) or not isinstance(
-            album.get("title"), str
+        performer_id, track_id, album_id = performer.get("id"), row.get("id"), album.get("id")
+        if (
+            type(performer_id) is not int
+            or type(track_id) is not int
+            or type(album_id) is not int
+            or min(performer_id, track_id, album_id) <= 0
+            or not isinstance(album.get("title"), str)
         ):
             return None
         cover = image_url(album.get("cover_big"), "cover")
         if not cover:
             return None
-        matches[(*ids, cover)] = ArtMatch(
-            ids[0],
+        matches[(performer_id, track_id, album_id, cover)] = ArtMatch(
+            performer_id,
             performer["name"],
-            ids[1],
-            ids[2],
+            track_id,
+            album_id,
             cover,
             None,
             query.title,
@@ -104,12 +109,18 @@ def catalog_original(
     return next(iter(matches.values())) if len(matches) == 1 else None
 
 
-def linked_original(records, query: MetadataQuery, kind: str, original: str) -> ArtMatch | None:
+def linked_original(
+    records: dict[str, Any], query: MetadataQuery, kind: str, original: str
+) -> ArtMatch | None:
     item = records.get(original)
     if not isinstance(item, dict):
         return None
     artist, recording, release = (item.get(k) for k in ("artist", "recording", "release"))
-    if not all(isinstance(value, dict) for value in (artist, recording, release)):
+    if (
+        not isinstance(artist, dict)
+        or not isinstance(recording, dict)
+        or not isinstance(release, dict)
+    ):
         return None
     caa = mbid(release.get("caa_release_mbid"))
     if (

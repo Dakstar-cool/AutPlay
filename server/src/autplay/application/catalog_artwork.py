@@ -3,11 +3,14 @@
 import hashlib
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.models.track_metadata import MetadataArtworkRow, TrackMetadataRow
@@ -109,9 +112,11 @@ def attach_images(
     return changed
 
 
-def catalog_image_evidence(session: Session, recording_ids: list[UUID]) -> dict:
+def catalog_image_evidence(
+    session: Session, recording_ids: list[UUID]
+) -> dict[UUID, list[Row[Any]]]:
     """Use public provider images or art embedded in the exact published audio object."""
-    evidence = defaultdict(list)
+    evidence: defaultdict[UUID, list[Row[Any]]] = defaultdict(list)
     if not recording_ids:
         return evidence
     rows = session.execute(
@@ -123,7 +128,8 @@ def catalog_image_evidence(session: Session, recording_ids: list[UUID]) -> dict:
                'sha256:' || encode(o.sha256,'hex') AS audio_digest
         FROM library.user_track_ref u JOIN library.track_metadata m USING(user_track_ref_id)
         JOIN vault.recording_canonical_variant c USING(recording_id)
-        JOIN vault.audio_variant v USING(recording_id,audio_variant_id) JOIN vault.vault_object o USING(vault_object_id)
+        JOIN vault.audio_variant v USING(recording_id,audio_variant_id)
+        JOIN vault.vault_object o USING(vault_object_id)
         WHERE u.recording_id=ANY(:ids) AND u.deleted_at IS NULL AND
           (m.artwork_sha256 IS NOT NULL OR m.document ? 'catalog_artist_image_v1')
         """),
@@ -134,11 +140,29 @@ def catalog_image_evidence(session: Session, recording_ids: list[UUID]) -> dict:
     return evidence
 
 
-def inherit_catalog_images(evidence, document, existing_cover, raw_artist, variant, raw_title):
-    """An owner handle can inherit images proven for its recording while retaining manual edition choices."""
+class ImageEvidence(Protocol):
+    audio_variant_id: UUID
+    title: str
+    artist: str
+    audio_digest: str
+    artwork_sha256: str | None
+    source: dict[str, Any] | None
+    portrait: dict[str, Any] | None
+
+
+def inherit_catalog_images(
+    evidence: Iterable[ImageEvidence],
+    document: dict[str, Any],
+    existing_cover: str | None,
+    raw_artist: str | None,
+    variant: UUID,
+    raw_title: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    """Inherit verified recording images while preserving the manual edition choice."""
     if not evidence:
         return document, None
-    covers, portraits = {}, {}
+    covers: dict[str, dict[str, dict[str, Any]]] = {}
+    portraits: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
     fields = document.get("fields") or {}
     title, name = track_names(fields.get("title", raw_title), fields.get("artist", raw_artist))
     labels = label(title or ""), label(name or "")
@@ -151,7 +175,7 @@ def inherit_catalog_images(evidence, document, existing_cover, raw_artist, varia
         )
         source = item.source or {}
         kind, identity = source.get("source"), source.get("source_id") or ""
-        if (
+        if item.artwork_sha256 and (
             (kind == "EMBEDDED" and identity == item.audio_digest)
             or (
                 same_credit
@@ -168,36 +192,35 @@ def inherit_catalog_images(evidence, document, existing_cover, raw_artist, varia
                 and identity.startswith("musicbrainz:release:")
             )
         ):
-            if item.artwork_sha256:
-                inherited = {
-                    "source": kind,
-                    "source_id": identity,
-                    "observed_at": source.get("observed_at"),
-                    "locked": False,
-                }
-                if kind == "PUBLIC_CATALOG":
-                    for key in (
-                        "release_title",
-                        "match_basis",
-                        "source_page",
-                        "license_url",
-                        "credit",
-                        "original_track_id",
-                        "original_artist",
-                    ):
-                        if isinstance(source.get(key), str):
-                            inherited[key] = source[key]
-                tagged_album = album_label(fields.get("album"))
-                original = original_artwork_source(source)
-                if (
-                    original
-                    or kind != "PUBLIC_CATALOG"
-                    or not tagged_album
-                    or tagged_album == album_label(source.get("release_title"))
+            inherited = {
+                "source": kind,
+                "source_id": identity,
+                "observed_at": source.get("observed_at"),
+                "locked": False,
+            }
+            if kind == "PUBLIC_CATALOG":
+                for key in (
+                    "release_title",
+                    "match_basis",
+                    "source_page",
+                    "license_url",
+                    "credit",
+                    "original_track_id",
+                    "original_artist",
                 ):
-                    covers.setdefault("ORIGINAL" if original else kind, {})[item.artwork_sha256] = (
-                        inherited
-                    )
+                    if isinstance(source.get(key), str):
+                        inherited[key] = source[key]
+            tagged_album = album_label(fields.get("album"))
+            original = original_artwork_source(source)
+            if (
+                original
+                or kind != "PUBLIC_CATALOG"
+                or not tagged_album
+                or tagged_album == album_label(source.get("release_title"))
+            ):
+                covers.setdefault("ORIGINAL" if original else kind, {})[item.artwork_sha256] = (
+                    inherited
+                )
         photo = item.portrait or {}
         if (
             same_credit

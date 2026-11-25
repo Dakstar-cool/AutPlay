@@ -16,38 +16,41 @@ from autplay.domain.artist_credits import (
 )
 
 _AUDIO = re.compile(r"\.(?:mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|alac|wma|aifc)$", re.I)
-_BAND = re.compile(r"(?<![\w])25\s*(?:[/‐‑–—-]|\s)\s*17(?![\w])")
-_TYPOGRAPHY = str.maketrans("’‘‐‑–—", "''----")
+_BAND = re.compile(r"(?<![\w])25\s*(?:[/\u2010\u2011\u2013—-]|\s)\s*17(?![\w])")
+_TYPOGRAPHY = str.maketrans("\u2019\u2018\u2010\u2011\u2013—", "''----")
 
-_SEPARATOR = re.compile(r"\s+[-–—]\s+|_[-–—]_")
-_SNAKE_WORD = re.compile(r"[^\W_]+(?:[-’'][^\W_]+)*")
-_NOTICE = r"(?:official (?:music video|audio|video|lyrics? video|visualizer)|mood video|официальный клип|официальное видео)"
+_SEPARATOR = re.compile(r"\s+[-\u2013—]\s+|_[-\u2013—]_")
+_SNAKE_WORD = re.compile(r"[^\W_]+(?:[-\u2019'][^\W_]+)*")
+_NOTICE = (
+    r"(?:official (?:music video|audio|video|lyrics? video|visualizer)"
+    r"|mood video|официальный клип|официальное видео)"
+)
 _DETAIL = r"(?:19|20)\d{2}|remaster(?:ed)?(?: \d{4})?|hd|4k|with lyrics|feat\.? [^\[\]()]+"
 _GROUP_NOTICE = re.compile(
-    r"(?:\s+[|–—-]\s*)?([\[(])\s*"
+    r"(?:\s+[|\u2013—-]\s*)?([\[(])\s*"
     + _NOTICE
-    + r"(?:\s*[-–—/|:,]\s*([^\[\]()]+?)|\s+("
+    + r"(?:\s*[-\u2013—/|:,]\s*([^\[\]()]+?)|\s+("
     + _DETAIL
     + r"))?\s*!?\s*([\])])",
     re.I,
 )
 _GROUP_NOTICE_AFTER_DETAIL = re.compile(
-    r"([\[(])\s*([^\[\]()]+?)\s*(?:[/|,]|\s[-–—]\s)\s*" + _NOTICE + r"\s*([\])])", re.I
+    r"([\[(])\s*([^\[\]()]+?)\s*(?:[/|,]|\s[-\u2013—]\s)\s*" + _NOTICE + r"\s*([\])])", re.I
 )
 _SEPARATE_NOTICE = re.compile(
-    r"""(?:\s+[-–—]\s*|\s*\|\s*|(?<=[)\]"”»])\s+)"""
+    r"""(?:\s+[-\u2013—]\s*|\s*\|\s*|(?<=[)\]"”»])\s+)"""
     + _NOTICE
     + r"(?:\s+((?:19|20)\d{2}))?(?:\s+(?:HD|4K))?(?:\s*\|(?=\s*$))?"
-    + r"(?=\s*(?:$|[\[(|]|\s[-–—]\s))",
+    + r"(?=\s*(?:$|[\[(|]|\s[-\u2013—]\s))",
     re.I,
 )
 _DERIVED = {"FILENAME", "SOURCE_LABEL"}
 _HCWW_VIDEO_CREDIT = re.compile(
-    r"\s+[-–—|]\s*HC WORLDWIDE\s*\(OFFICIAL (?:FULL HD|HD|4K) VERSION HCWW\)\s*$", re.I
+    r"\s+[-\u2013—|]\s*HC WORLDWIDE\s*\(OFFICIAL (?:FULL HD|HD|4K) VERSION HCWW\)\s*$", re.I
 )
-_POSSIBLE_DECORATION = re.compile(r'[_@|–—\[\]()"”»-]')
+_POSSIBLE_DECORATION = re.compile(r'[_@|\u2013—\[\]()"”»-]')
 _VENUE_CREDIT = re.compile(r"\s+(?:live\s+@\s*([^@|()\[\]]{1,80})|@\s*(16\s+тонн))$", re.I)
-_SESSION_CREDIT = re.compile(r"\s+[|–—-]\s*([^\W_][\w '&’.-]{0,60}\s+sessions)$", re.I)
+_SESSION_CREDIT = re.compile(r"\s+[|\u2013—-]\s*([^\W_][\w '&\u2019.-]{0,60}\s+sessions)$", re.I)
 DISPLAY_VERSION = "display-v7"
 
 
@@ -140,8 +143,8 @@ def track_names(
         stem = stem[: -len(source_id) - 1] or stem
     if is_file:
         stem = display(stem.replace("_", " ")) or name
-    elif re.search(r"_[-–—]_", stem):
-        stem = " - ".join(_unpack_words(part) for part in re.split(r"_[-–—]_", stem))
+    elif re.search(r"_[-\u2013—]_", stem):
+        stem = " - ".join(_unpack_words(part) for part in re.split(r"_[-\u2013—]_", stem))
     # First remove wrappers so 'Artist - Title - Official Video' retains the recording title.
     groups = _GROUP_NOTICE_AFTER_DETAIL.sub(
         _remove_notice, _GROUP_NOTICE.sub(_remove_notice, strip_video_credit(stem))

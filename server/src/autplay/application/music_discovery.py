@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -62,7 +63,7 @@ class MusicDiscoveryService:
                 break
         raise MetadataProviderError("metadata_artwork_invalid", retryable=False)
 
-    def _public_document(self, principal: Principal, url: str) -> dict:
+    def _public_document(self, principal: Principal, url: str) -> dict[str, Any]:
         assert self.read_public is not None
         data = self.read_public(principal, url)
         if data is None:

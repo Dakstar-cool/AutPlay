@@ -94,7 +94,8 @@ def owned_match(
 def published_match(session: Session, candidate: Mapping[str, Any]) -> RowMapping | None:
     rows = session.execute(
         text(f"""
-        SELECT p.*, r.title, a.display_name AS artist, r.version_text, v.duration_ms, {CATALOG_MEMBERS} AS members
+        SELECT p.*, r.title, a.display_name AS artist, r.version_text, v.duration_ms,
+        {CATALOG_MEMBERS} AS members
         FROM ({PUBLISHED_AUDIO}) p
         JOIN catalog.recording r USING (recording_id)
         JOIN catalog.artist_credit a USING (artist_credit_id)

@@ -1,16 +1,21 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
+from unittest.mock import Mock
 from uuid import uuid4
 
-from autplay.adapters.public_track_metadata import MusicBrainzMetadataProvider
+import pytest
+from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
+from autplay.adapters.public_track_metadata import MusicBrainzMetadataProvider, PublicMetadataHttp
 from autplay.application.catalog_artwork import attach_images, inherit_catalog_images
 from autplay.domain.musicbrainz_performances import PERFORMANCE
 from autplay.domain.original_artwork import catalog_original, credited_original
 from autplay.domain.recovery_artwork import listenbrainz_url
 from autplay.domain.track_metadata import MetadataQuery
+from sqlalchemy.orm import Session
 
 
-def test_only_a_unique_unversioned_catalog_recording_supplies_art():
+def test_only_a_unique_unversioned_catalog_recording_supplies_art() -> None:
     query = MetadataQuery("Too Close (White Cliffs Remix)", "Alex Clare", "Remixes", 182000)
     credit = credited_original(query, "REMIX")
     assert credit == ("Alex Clare", "Too Close")
@@ -33,7 +38,7 @@ def test_only_a_unique_unversioned_catalog_recording_supplies_art():
     )
 
 
-def test_cover_without_ids_requires_a_unique_performance_and_reciprocal_work_link():
+def test_cover_without_ids_requires_a_unique_performance_and_reciprocal_work_link() -> None:
     derivative, work, parent, release = (str(uuid4()) for _ in range(4))
     query = MetadataQuery("Song (Cover)", "Second artist", duration_ms=201000)
     performance = {
@@ -44,7 +49,7 @@ def test_cover_without_ids_requires_a_unique_performance_and_reciprocal_work_lin
         "attributes": ["cover"],
     }
 
-    def recording_link(identity, attrs):
+    def recording_link(identity: str, attrs: list[str]) -> dict[str, Any]:
         return {
             "type-id": PERFORMANCE,
             "target-type": "recording",
@@ -61,7 +66,7 @@ def test_cover_without_ids_requires_a_unique_performance_and_reciprocal_work_lin
     }
     relations = [recording_link(derivative, ["cover"]), recording_link(parent, [])]
 
-    def lookup(url):
+    def lookup(url: str) -> dict[str, Any]:
         if "/recording/?query=" in url:
             return {"recordings": [result], "count": 1}
         if f"/recording/{derivative}?" in url:
@@ -89,7 +94,7 @@ def test_cover_without_ids_requires_a_unique_performance_and_reciprocal_work_lin
             }
         }
 
-    provider = MusicBrainzMetadataProvider(SimpleNamespace(json=lookup))
+    provider = MusicBrainzMetadataProvider(Mock(spec=PublicMetadataHttp, json=lookup))
     match = provider.find_original_artwork(query)
     assert match and (match.track_id, match.album_id, match.artist, match.credit) == (
         parent,
@@ -102,7 +107,7 @@ def test_cover_without_ids_requires_a_unique_performance_and_reciprocal_work_lin
     assert provider.find_original_artwork(replace(query, duration_ms=160000)) is None
 
 
-def test_original_artwork_yields_to_the_versions_own_cover(monkeypatch):
+def test_original_artwork_yields_to_the_versions_own_cover(monkeypatch: pytest.MonkeyPatch) -> None:
     from autplay.domain.catalog_artwork import ArtMatch
 
     monkeypatch.setattr(
@@ -121,14 +126,15 @@ def test_original_artwork_yields_to_the_versions_own_cover(monkeypatch):
         basis="original_cover",
     )
     fields = {"title": match.title, "artist": match.credit, "album": "Cover single"}
-    row = SimpleNamespace(document={"fields": dict(fields)}, artwork_sha256=None)
-    assert attach_images(None, row, match, b"original", b"wrong-portrait")
+    session = Session()
+    row = TrackMetadataRow(document={"fields": dict(fields)}, artwork_sha256=None)
+    assert attach_images(session, row, match, b"original", b"wrong-portrait")
     assert row.document["fields"] == fields and "catalog_artist_image_v1" not in row.document
     borrowed = dict(row.document)
     assert borrowed["artwork_source"]["original_track_id"] == "2"
     direct = replace(match, album="Cover single", basis="recording_duration", album_id=7)
-    assert attach_images(None, row, direct, b"own", None)
-    assert not attach_images(None, row, match, b"original", None)
+    assert attach_images(session, row, direct, b"own", None)
+    assert not attach_images(session, row, match, b"original", None)
     assert row.artwork_sha256 == "own"
     variant = uuid4()
     evidence = [
@@ -149,7 +155,7 @@ def test_original_artwork_yields_to_the_versions_own_cover(monkeypatch):
             ]
             == "own"
         )
-    locked = SimpleNamespace(
+    locked = TrackMetadataRow(
         document={"fields": fields, "provenance": {"album": {"locked": True}}}, artwork_sha256=None
     )
-    assert not attach_images(None, locked, match, b"original", None)
+    assert not attach_images(session, locked, match, b"original", None)

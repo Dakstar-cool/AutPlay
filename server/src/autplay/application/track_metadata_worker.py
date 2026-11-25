@@ -19,7 +19,7 @@ from autplay.application.track_metadata import (
     acquisition_sha256,
     document_from,
 )
-from autplay.domain.catalog_artwork import label, native_image_host
+from autplay.domain.catalog_artwork import ArtMatch, label, native_image_host
 from autplay.domain.catalogue_context import CatalogueContextEntity
 from autplay.domain.jobs import JobLease, RetryableJobError, TerminalJobError
 from autplay.domain.metadata_execution import MetadataAudioTarget
@@ -297,7 +297,9 @@ class TrackMetadataHandler:
                     ),
                 )
 
-        def supplemental(need_cover: bool, art_query: MetadataQuery, review=()):
+        def supplemental(
+            need_cover: bool, art_query: MetadataQuery, review: tuple[MetadataCandidate, ...] = ()
+        ) -> tuple[ArtMatch, bytes | None, bytes | None] | None:
             need_cover = need_cover and not (fallback_cover_exists or edition_locked or selection)
             portrait_exists = bool(saved_portrait) and label(
                 saved_portrait.get("credit") or saved_portrait.get("name") or ""
@@ -314,9 +316,9 @@ class TrackMetadataHandler:
                 return None
             need_portrait = not portrait_exists
             pending_error = None
-            result = None
+            result: tuple[ArtMatch, bytes | None, bytes | None] | None = None
 
-            def save_result():
+            def save_result() -> None:
                 if result:
                     self.service.apply_worker(
                         ref_id,
@@ -326,7 +328,7 @@ class TrackMetadataHandler:
                         expected_acquisition_sha256=self._acquisition_sha256,
                     )
 
-            def image(url: str | None, *, is_cover=False) -> bytes | None:
+            def image(url: str | None, *, is_cover: bool = False) -> bytes | None:
                 nonlocal pending_error
                 if not url:
                     return None

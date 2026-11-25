@@ -159,7 +159,9 @@ def test_provider_version_disambiguation_is_a_hard_conflict(marker: str) -> None
         ("Максим Свобода", "По разные стороны (Mood Video)", "По разные стороны", None, 191000),
     ],
 )
-def test_source_performance_editions_and_video_wrappers(artist, raw, base, edition, duration):
+def test_source_performance_editions_and_video_wrappers(
+    artist: str, raw: str, base: str, edition: str | None, duration: int
+) -> None:
     from autplay.domain.catalog_artwork import artwork_search_title, recording_labels_match
     from autplay.domain.track_metadata import metadata_search_terms
     from autplay.domain.track_names import project_names, track_names

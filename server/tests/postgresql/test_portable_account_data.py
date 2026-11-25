@@ -194,6 +194,7 @@ def test_legacy_account_moves_between_servers_with_stable_domain_copies(
                     SyncEventRow.event_type == "PORTABLE_TRACK_PREFERENCE_PROJECTED",
                 )
             ).one()
+            assert isinstance(update.payload, dict)
             assert update.payload["server_user_track_ref_id"] == str(
                 applied_track.user_track_ref_id
             )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -34,7 +35,7 @@ def create_acquisition_control_router(
     acquisition: AcquisitionControlService,
     renderer: Renderer,
     origin: str,
-    preservation_sessions=None,
+    preservation_sessions: sessionmaker[Session] | None = None,
     discovery_enabled: bool = False,
     discovery: ManualDiscoveryHttp | None = None,
 ) -> APIRouter:

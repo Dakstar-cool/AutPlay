@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 _GUEST_END = re.compile(r"(?:^|\s)(?:feat\.?|ft\.?|featuring|with|и|&)$", re.I)
-_JOIN = r"(?:\s*[,;/&+|–—-]\s*|\s+)"
+_JOIN = r"(?:\s*[,;/&+|\u2013—-]\s*|\s+)"
 _BRACKETED_GUEST = re.compile(r"(.+?)(\s*\(\s*(?:feat\.?|ft\.?|featuring)\s+)([^()]+)(\s*\))", re.I)
 _GUEST_JOIN = re.compile(r"(\s+(?:feat\.?|ft\.?|featuring)\s+)", re.I)
 
@@ -23,7 +23,7 @@ class StageCredit:
             rf"|{other}(?:{_JOIN}{public}|\s*\(\s*{public}\s*\)))"
         )
         self.key = re.compile(rf"(?:{pair}|{single})", re.I)
-        self.tail = re.compile(rf"(?:\s+[–—|-]\s*(?:{pair}|{single})|\s+{pair})$", re.I)
+        self.tail = re.compile(rf"(?:\s+[\u2013—|-]\s*(?:{pair}|{single})|\s+{pair})$", re.I)
 
     def trim_title(self, title: str) -> str:
         match = self.tail.search(title)
@@ -54,10 +54,10 @@ def single_stage_credit(artist: str | None) -> StageCredit | None:
 
 
 _REAL = re.compile(
-    r"(.+?)\s*\(\s*(?:настоящее имя|real name|legal name)\s*[:–—-]?\s+([^()]+)\)", re.I
+    r"(.+?)\s*\(\s*(?:настоящее имя|real name|legal name)\s*[:\u2013—-]?\s+([^()]+)\)", re.I
 )
 _STAGE = re.compile(
-    r"(.+?)\s*\(\s*(?:сценическое имя|псевдоним|stage name)\s*[:–—-]?\s+([^()]+)\)", re.I
+    r"(.+?)\s*\(\s*(?:сценическое имя|псевдоним|stage name)\s*[:\u2013—-]?\s+([^()]+)\)", re.I
 )
 _COLLABORATION = re.compile(r"[,;]|\s(?:feat\.?|ft\.?|featuring|/|&|\+)\s", re.I)
 
@@ -124,7 +124,12 @@ def recording_credit(members: object) -> RecordingCredit | None:
         identity, name, label, join = (
             member.get(k) for k in ("mbid", "name", "credited_name", "join_phrase")
         )
-        if not all(isinstance(v, str) and 0 < len(v) <= 1000 for v in (identity, name, label)):
+        if (
+            not isinstance(identity, str)
+            or not isinstance(name, str)
+            or not isinstance(label, str)
+            or not all(0 < len(v) <= 1000 for v in (identity, name, label))
+        ):
             return None
         if not isinstance(join, str) or len(join) > 1000:
             return None
@@ -177,7 +182,7 @@ def trim_repeated_credit(title: str, credit: str) -> str:
     start = len(title) - len(credit)
     if start <= 1 or title[start:].casefold() != credit.casefold():
         return title
-    separator = re.search(r"\s+[-–—|]\s*$", title[:start])
+    separator = re.search(r"\s+[-\u2013—|]\s*$", title[:start])
     if separator is None:
         return title
     rest = title[: separator.start()].rstrip()

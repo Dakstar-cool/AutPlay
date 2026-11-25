@@ -3,10 +3,11 @@
 import json
 import re
 from collections import Counter
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from http.client import HTTPException
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -14,7 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.preservation_sources import adapters, https, observations, read_document
-from autplay.domain.jobs import JobKey, RetryableJobError, TerminalJobError
+from autplay.application.job_worker import JobExecutionContext
+from autplay.domain.jobs import JobKey, JobLease, RetryableJobError, TerminalJobError
 from autplay.ports.jobs import EnqueueJob
 
 PRESERVE = JobKey("music.preservation.original", 1)
@@ -48,7 +50,7 @@ def read_grants(root: Path) -> dict[str, Any]:
     return grants
 
 
-def authorized_source(row, grants):
+def authorized_source(row: dict[str, Any], grants: dict[str, Any]) -> dict[str, Any] | None:
     entry = grants.get(row["event"])
     if not isinstance(entry, dict) or any(
         entry.get(k) != row[k] for k in ("artist", "title", "version")
@@ -61,7 +63,7 @@ def authorized_source(row, grants):
     return entry
 
 
-def may_acquire(row, entry):
+def may_acquire(row: dict[str, Any], entry: dict[str, Any] | None) -> bool:
     if (
         row["confidence"] != "confirmed"
         or row["kind"] != "track"
@@ -92,11 +94,24 @@ def request_run(session: Session, owner: UUID, run: UUID, *, weekly: bool = Fals
     )
 
 
+class PreservationPublisher(Protocol):
+    def acquire(
+        self,
+        candidate: dict[str, Any],
+        context: JobExecutionContext,
+        *,
+        supplemental: bool,
+        original_guard: Callable[[], None],
+    ) -> UUID | None: ...
+
+
 class PreservationWatcher:
     def __init__(self, sessions: sessionmaker[Session], owner: UUID, root: Path) -> None:
         self.sessions, self.owner, self.root = sessions, owner, root
 
-    def tick(self, sources=None):
+    def tick(
+        self, sources: Iterable[tuple[str, Callable[[], Iterable[dict[str, Any]]]]] | None = None
+    ) -> None:
         with self.sessions.begin() as session:
             request_run(session, self.owner, uuid4(), weekly=True)
         with self.sessions.begin() as session:
@@ -178,7 +193,7 @@ class PreservationWatcher:
                 {"sources": json.dumps(results), "owner": self.owner, "run": run},
             )
 
-    def collection_status(self, session, row):
+    def collection_status(self, session: Session, row: dict[str, Any]) -> str | None:
         if not row.get("collection_event"):
             return None
         parent = session.scalar(
@@ -196,7 +211,9 @@ class PreservationWatcher:
             return "historical"
         return "review" if parent["confidence"] == "review" else None
 
-    def check(self, session, row, grants, run):
+    def check(
+        self, session: Session, row: dict[str, Any], grants: dict[str, Any], run: UUID
+    ) -> tuple[str, UUID | None]:
         collection = self.collection_status(session, row)
         if collection:
             return collection, None
@@ -207,7 +224,7 @@ class PreservationWatcher:
         entry = authorized_source(row, grants)
         if original_in_vault(session, row.get("original_sha256") or (entry or {}).get("sha256")):
             return "present", None
-        if not may_acquire(row, entry):
+        if entry is None or not may_acquire(row, entry):
             return "unavailable", None
         active = session.scalar(
             text("""SELECT j.job_id FROM jobs.job j WHERE j.job_type=:kind AND j.user_id=:owner
@@ -233,8 +250,10 @@ class PreservationWatcher:
         )
         return "queued", job.job_id
 
-    def acquire(self, context, lease, publisher):
-        def authorized():
+    def acquire(
+        self, context: JobExecutionContext, lease: JobLease, publisher: PreservationPublisher
+    ) -> None:
+        def authorized() -> tuple[dict[str, Any], dict[str, Any]]:
             with self.sessions() as session:
                 row = session.scalar(
                     text(
@@ -249,6 +268,7 @@ class PreservationWatcher:
             if (
                 lease.user_id != self.owner
                 or not row
+                or entry is None
                 or not may_acquire(row, entry)
                 or lease.payload["sha256"] != entry["sha256"]
             ):
@@ -261,7 +281,7 @@ class PreservationWatcher:
                 return
         candidate = {**entry, "title": row["title"], "artist": row["artist"]}
 
-        def guard():
+        def guard() -> None:
             _, current = authorized()
             if (
                 current["candidate_id"] != entry["candidate_id"]
@@ -293,7 +313,7 @@ def reports(session: Session, owner: UUID) -> list[dict[str, Any]]:
             WHERE c.owner=:owner AND c.run_id=:run ORDER BY c.event"""),
             {"owner": owner, "run": run["run_id"]},
         ).mappings()
-        counts = Counter()
+        counts: Counter[str] = Counter()
         details = []
         for check in checks:
             counts["new"] += int(check["is_new"])

@@ -367,5 +367,5 @@ def test_repository_alembic_inventory_has_one_expected_head() -> None:
     identity = finalizer._alembic_identity()
 
     assert identity["head"] == "0079_music_preservation"
-    assert identity["revision_count"] == 79
+    assert identity["revision_count"] == 80
     assert identity["head_revision_path"].endswith("0079_music_preservation.py")

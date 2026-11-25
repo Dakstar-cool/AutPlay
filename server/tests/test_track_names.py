@@ -13,8 +13,8 @@ def test_filename_suffix_needs_independent_evidence() -> None:
 
 
 def test_display_style_and_search_equivalence() -> None:
-    assert track_names("CAN’T GET OVER YOU", "Joji") == ("CAN’T GET OVER YOU", "Joji")
-    assert search_label(" CAN’T　GET OVER YOU ") == search_label("can't get over you")
+    assert track_names("CAN’T GET OVER YOU", "Joji") == ("CAN’T GET OVER YOU", "Joji")  # noqa: RUF001
+    assert search_label(" CAN’T　GET OVER YOU ") == search_label("can't get over you")  # noqa: RUF001
     assert search_label("25—17") == search_label("25/17")
 
 
@@ -49,7 +49,7 @@ def test_only_matching_confirmed_identity_replaces_an_embedded_name() -> None:
 
 
 def test_provisional_titles_can_be_cleaned_without_an_audio_extension() -> None:
-    raw = "рай_открыт_для_всех_Е_Алехин_публика_выбирает_сама"
+    raw = "рай_открыт_для_всех_Е_Алехин_публика_выбирает_сама"  # noqa: RUF001
     assert track_names(raw, "Публика Выбирает Сама") == (
         "рай открыт для всех",
         "Публика Выбирает Сама",

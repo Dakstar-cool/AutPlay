@@ -19,7 +19,8 @@ from autplay.domain.artist_credits import recording_credit
 from autplay.domain.track_names import project_names, track_names
 
 _RECORDING_LABELS = f"""
-    SELECT r.recording_id, r.title, a.display_name AS artist, r.identity_status, {CATALOG_MEMBERS} AS members
+    SELECT r.recording_id, r.title, a.display_name AS artist, r.identity_status,
+    {CATALOG_MEMBERS} AS members
     FROM catalog.recording r
     JOIN catalog.artist_credit a USING (artist_credit_id)
 """
@@ -68,20 +69,24 @@ def targets(session: Session) -> Iterator[tuple[str, str, str, str]]:
     # Filter unchanged rows in a single streaming snapshot, without opening write transactions.
     rows = session.execute(
         text(f"""
-        SELECT 'recording', r.recording_id::text, '', r.title, r.artist, r.identity_status, p.document, r.members
+        SELECT 'recording', r.recording_id::text, '', r.title, r.artist, r.identity_status,
+        p.document, r.members
         FROM ({_RECORDINGS}) r LEFT JOIN catalog.browse_page p
           ON p.page_key='vault-display-v1:' || r.recording_id::text
         UNION ALL
         SELECT 'owner', u.user_track_ref_id::text, u.user_id::text, u.raw_title, u.raw_artist,
                NULL, m.document, {CATALOG_MEMBERS}
         FROM (
-            SELECT DISTINCT ON (user_id,user_track_ref_id) user_id,user_track_ref_id,recording_id FROM (
+            SELECT DISTINCT ON (user_id,user_track_ref_id) user_id,user_track_ref_id,recording_id
+            FROM (
                 SELECT user_id,user_track_ref_id,recording_id FROM ({_OWNER_REFS}) owned
-                UNION ALL SELECT user_id,user_track_ref_id,recording_id FROM ({ACCOUNT_CATALOG}) linked
+                UNION ALL SELECT user_id,user_track_ref_id,recording_id
+                FROM ({ACCOUNT_CATALOG}) linked
             ) sources ORDER BY user_id,user_track_ref_id,recording_id
         ) refs JOIN library.user_track_ref u USING(user_id,user_track_ref_id)
         LEFT JOIN library.track_metadata m USING(user_track_ref_id)
-        LEFT JOIN catalog.recording r ON r.recording_id=coalesce(u.recording_id,refs.recording_id) AND r.deleted_at IS NULL
+        LEFT JOIN catalog.recording r ON r.recording_id=coalesce(u.recording_id,refs.recording_id)
+        AND r.deleted_at IS NULL
     """).execution_options(yield_per=256)
     )
     for kind, target, owner, title, artist, status, doc, members in rows:

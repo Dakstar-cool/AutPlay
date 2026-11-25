@@ -416,7 +416,7 @@ def _expressions(query: MetadataQuery) -> tuple[str, ...]:
 class MusicBrainzMetadataProvider:
     def __init__(self, http: PublicMetadataHttp | None = None) -> None:
         self.http = http or PublicMetadataHttp()
-        self._last_deezer = None
+        self._last_deezer: tuple[MetadataQuery, list[dict[str, Any]]] | None = None
 
     def search(self, query: MetadataQuery) -> tuple[MetadataCandidate, ...]:
         try:
@@ -671,7 +671,7 @@ class MusicBrainzMetadataProvider:
             else (),
         )
 
-    def _deezer_json(self, url: str) -> dict:
+    def _deezer_json(self, url: str) -> dict[str, Any]:
         page = self.http.json(url)
         error = page.get("error")
         if isinstance(error, dict) and error.get("code") in (4, 700):
@@ -681,7 +681,7 @@ class MusicBrainzMetadataProvider:
     def find_deezer_artwork(self, query: MetadataQuery) -> ArtMatch | None:
         if not query.artist or not query.title or not query.duration_ms:
             return None
-        rows = []
+        rows: list[dict[str, Any]] = []
         for title, artist in metadata_search_terms(query.title, query.artist):
             page = self._deezer_json(search_url(artist, title, clean_title=False))
             rows.extend(page.get("data") or [])
@@ -692,7 +692,7 @@ class MusicBrainzMetadataProvider:
         return match_artwork(rows, query.title, query.artist, query.album, query.duration_ms)
 
     def find_yandex_artwork(self, query: MetadataQuery) -> ArtMatch | None:
-        rows = []
+        rows: list[dict[str, Any]] = []
         match = None
         for title, artist in metadata_search_terms(query.title, query.artist):
             result = (
@@ -743,14 +743,17 @@ class MusicBrainzMetadataProvider:
             )
             if match:
                 matches.append(match)
-            elif not payload or b"data-tralbum" not in payload:
-                if result := indexed_publisher_cover(
+            elif (not payload or b"data-tralbum" not in payload) and (
+                result := indexed_publisher_cover(
                     candidates, query.title, query.artist, query.album
-                ):
-                    return result
+                )
+            ):
+                return result
         return matches[0] if len({(m.artist_id, m.cover) for m in matches}) == 1 else None
 
-    def find_listenbrainz_cover(self, query: MetadataQuery, review=()) -> ArtMatch | None:
+    def find_listenbrainz_cover(
+        self, query: MetadataQuery, review: tuple[MetadataCandidate, ...] = ()
+    ) -> ArtMatch | None:
         recording = mbid(query.recording_mbid)
         ids = (
             [recording]
@@ -774,7 +777,9 @@ class MusicBrainzMetadataProvider:
             selected_release=query.release_mbid,
         )
 
-    def _original_by_credit(self, query, kind, credit) -> ArtMatch | None:
+    def _original_by_credit(
+        self, query: MetadataQuery, kind: str, credit: tuple[str, str]
+    ) -> ArtMatch | None:
         rows = self._deezer_json(search_url(*credit, clean_title=False)).get("data")
         match = catalog_original(rows, query, kind, credit)
         if match:
@@ -821,7 +826,11 @@ class MusicBrainzMetadataProvider:
         return ids.pop() if len(ids) == 1 else None
 
     def find_original_artwork(
-        self, query: MetadataQuery, performance=None, recording_kind=None, version=None
+        self,
+        query: MetadataQuery,
+        performance: object = None,
+        recording_kind: str | None = None,
+        version: str | None = None,
     ) -> ArtMatch | None:
         recording = mbid(query.recording_mbid)
         link = (

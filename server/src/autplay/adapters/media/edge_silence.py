@@ -51,7 +51,7 @@ def trim_download_edges(path: Path, max_bytes: int) -> bool:
         return False
     probe = ["ffprobe", "-v", "error", "-of", "default=nk=1:nw=1", "-show_entries"]
     container = (
-        subprocess.check_output(probe + ["format=format_name", str(path)], text=True, timeout=20)
+        subprocess.check_output([*probe, "format=format_name", str(path)], text=True, timeout=20)
         .strip()
         .split(",")[0]
     )
@@ -86,7 +86,7 @@ def trim_download_edges(path: Path, max_bytes: int) -> bool:
         ]
         subprocess.run(base + args, capture_output=True, timeout=120, check=True)
         measured = float(
-            subprocess.check_output(probe + ["format=duration", str(output)], text=True, timeout=20)
+            subprocess.check_output([*probe, "format=duration", str(output)], text=True, timeout=20)
         )
         if (
             not math.isfinite(measured)

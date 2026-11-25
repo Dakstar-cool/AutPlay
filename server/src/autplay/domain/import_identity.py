@@ -692,8 +692,10 @@ def _parse_txt(text: str) -> list[ParsedImportRow]:
         if len(tab_fields) in {2, 3}:
             artist, title = tab_fields[:2]
             album = tab_fields[2] if len(tab_fields) == 3 else ""
-        elif re.search(r"\s[-–—]\s", line):
-            artist, title = (value.strip() for value in re.split(r"\s[-–—]\s", line, maxsplit=1))
+        elif re.search(r"\s[-\u2013—]\s", line):
+            artist, title = (
+                value.strip() for value in re.split(r"\s[-\u2013—]\s", line, maxsplit=1)
+            )
             album = ""
         else:
             rows.append(

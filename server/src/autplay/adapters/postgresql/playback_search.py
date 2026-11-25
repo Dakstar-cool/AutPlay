@@ -26,7 +26,8 @@ from autplay.domain.music_search import MusicSearchKind, validate_music_search
 from autplay.domain.track_names import search_label, track_names
 
 _PUBLISHED_DETAILS = f"""
-    SELECT p.*, r.title, r.version_text, a.display_name AS artist, v.duration_ms, {CATALOG_MEMBERS} AS members
+    SELECT p.*, r.title, r.version_text, a.display_name AS artist, v.duration_ms,
+    {CATALOG_MEMBERS} AS members
     FROM ({PUBLISHED_AUDIO}) p
     JOIN catalog.recording r USING (recording_id)
     JOIN catalog.artist_credit a USING (artist_credit_id)
@@ -40,7 +41,8 @@ def _search_pattern(value: str) -> str:
 
 
 def _searchable(expression: str, parameter: str = "needle") -> str:
-    folded = f"translate(normalize({expression}, NFKC), '’‘‐‑–—', chr(39)||chr(39)||'----')"
+    punctuation = "\u2019\u2018\u2010\u2011\u2013\u2014"
+    folded = f"translate(normalize({expression}, NFKC), '{punctuation}', chr(39)||chr(39)||'----')"
     spaced = rf"regexp_replace({folded}, '\s+', ' ', 'g')"
     return (
         f"regexp_replace({spaced}, "
@@ -142,11 +144,14 @@ def search_playback_page(
                    l.source, l.availability_status, l.row_version, l.added_at,
                    coalesce((m.document->'fields') ? 'title',false) AS has_title,
                    coalesce((m.document->'fields') ? 'artist',false) AS has_artist,
-                   CASE WHEN u.raw_title ~* '[.](mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|alac|wma|aifc)$'
-                          OR m.document->'provenance'->'title'->>'normalization_version' LIKE 'display-%'
+                   CASE WHEN u.raw_title ~*
+                   '[.](mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|alac|wma|aifc)$'
+                          OR m.document->'provenance'->'title'->>'normalization_version'
+                          LIKE 'display-%'
                           OR (NOT coalesce((m.document->'fields') ? 'title',false)
-                              AND (strpos(u.raw_title,'_')>0 OR strpos(u.raw_title,'|')>0 OR strpos(u.raw_title,'(')>0
-                                   OR strpos(u.raw_title,'[')>0 OR u.raw_title ~ ' [-–—] '))
+                              AND (strpos(u.raw_title,'_')>0
+                              OR strpos(u.raw_title,'|')>0 OR strpos(u.raw_title,'(')>0
+                                   OR strpos(u.raw_title,'[')>0 OR u.raw_title ~ ' [-\u2013—] '))
                         THEN u.raw_title END AS original_label,
                    CASE WHEN (m.document->'fields') ? 'title' THEN m.document->'fields'->>'title'
                         ELSE u.raw_title END AS title,

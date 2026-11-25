@@ -39,8 +39,10 @@ PUBLISHED_AUDIO = """
 
 # Public label cards are valid only for the exact catalog inputs they describe.
 PUBLIC_LABEL_JOIN = """
-    LEFT JOIN catalog.browse_page label ON label.page_key='vault-display-v1:' || r.recording_id::text
-      AND label.document->>'source_title'=r.title AND label.document->>'source_artist'=a.display_name
+    LEFT JOIN catalog.browse_page label
+    ON label.page_key='vault-display-v1:' || r.recording_id::text
+      AND label.document->>'source_title'=r.title
+      AND label.document->>'source_artist'=a.display_name
       AND label.document->>'identity_status'=r.identity_status
 """
 PUBLIC_TITLE = "coalesce(label.document->>'title',r.title)"
@@ -187,7 +189,8 @@ def prepare_catalog_wave(session: Session, user_id: UUID) -> None:
     picks = (
         session.execute(
             text(f"""
-        SELECT published.*, r.title, ac.display_name AS artist, v.duration_ms, {CATALOG_MEMBERS} AS members
+        SELECT published.*, r.title, ac.display_name AS artist, v.duration_ms,
+        {CATALOG_MEMBERS} AS members
         FROM ({PUBLISHED_AUDIO}) published
         JOIN catalog.recording r USING(recording_id)
         JOIN catalog.artist_credit ac USING(artist_credit_id)
@@ -251,7 +254,8 @@ def ensure_catalog_refs(session: Session, user_id: UUID, picks: Sequence[RowMapp
         """),
             entries,
         )
-    # Preserve the raw import evidence on the handle and publish inferred labels as ordinary metadata.
+    # Preserve the raw import evidence on the handle and publish inferred labels as ordinary
+    # metadata.
     from autplay.adapters.postgresql.models import UserTrackRefRow
     from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
     from autplay.application.catalog_artwork import catalog_image_evidence, inherit_catalog_images
@@ -285,9 +289,9 @@ def ensure_catalog_refs(session: Session, user_id: UUID, picks: Sequence[RowMapp
         if not row or not row.artwork_sha256 or not row.document.get("catalog_artist_image_v1")
     ]
     images = catalog_image_evidence(session, missing)
-    for ref, pick, row in targets:
+    for handle, pick, row in targets:
         document = row.document if row else {}
-        if ref.user_track_ref_id not in present:
+        if handle.user_track_ref_id not in present:
             document = project_names(
                 document, pick["title"], pick["artist"], recording_credit(pick.get("members"))
             )
@@ -301,7 +305,7 @@ def ensure_catalog_refs(session: Session, user_id: UUID, picks: Sequence[RowMapp
         )
         if cover or document != (row.document if row else {}):
             save_name_revision(
-                session, ref, row, document, pick["recording_id"], artwork_sha256=cover
+                session, handle, row, document, pick["recording_id"], artwork_sha256=cover
             )
     return refs
 

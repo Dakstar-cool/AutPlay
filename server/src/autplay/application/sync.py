@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -2267,7 +2268,7 @@ def _edition_tracks(
     return projections
 
 
-def _mobile_page_size(rows: list[SyncEventRow] | list[BootstrapSnapshotItemRow], limit: int) -> int:
+def _mobile_page_size(rows: Sequence[SyncEventRow | BootstrapSnapshotItemRow], limit: int) -> int:
     # Android bounds the decoded response to 2 MiB. Reserve space for the envelope,
     # cursors and per-row identifiers even when a whole page carries rich metadata.
     remaining = 1_800_000

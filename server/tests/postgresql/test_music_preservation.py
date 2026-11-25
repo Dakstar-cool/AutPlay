@@ -2,11 +2,17 @@ import hashlib
 import io
 import json
 import wave
-from uuid import uuid4
+from pathlib import Path
+from typing import Any, Never
+from unittest.mock import Mock
+from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.preservation_sources import archive
 from autplay.application.music_preservation import PreservationWatcher, reports, request_run
+from autplay.domain.vault import AudioTechnicalMetadata, ChromaprintEvidence
+from autplay.domain.web_admin import AuthenticatedWebSession, WebActor
+from psycopg import Connection
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -14,17 +20,19 @@ from .identity_factory import insert_world
 
 
 def test_scan_deduplicates_jobs_and_requires_exact_original(
-    database_url, database_connection, tmp_path
-):
+    database_url: str, database_connection: Connection[Any], tmp_path: Path
+) -> None:
     world = insert_world(database_connection)
     database_connection.execute(
         "UPDATE vault.audio_variant SET validation_status='VALID' WHERE audio_variant_id=%s",
         (world.audio_variant_id,),
     )
-    digest = database_connection.execute(
+    digest_row = database_connection.execute(
         "SELECT encode(sha256,'hex') FROM vault.vault_object WHERE vault_object_id=%s",
         (world.vault_object_id,),
-    ).fetchone()[0]
+    ).fetchone()
+    assert digest_row is not None
+    digest = digest_row[0]
     database_connection.commit()
     engine = create_engine(database_url)
     sessions = sessionmaker(engine)
@@ -32,7 +40,7 @@ def test_scan_deduplicates_jobs_and_requires_exact_original(
     watcher = PreservationWatcher(sessions, owner, tmp_path)
     track = next(iter(archive()))
 
-    def case(key, **changes):
+    def case(key: str, **changes: object) -> dict[str, Any]:
         return dict(track, event=key, **changes)
 
     rows = [
@@ -62,7 +70,7 @@ def test_scan_deduplicates_jobs_and_requires_exact_original(
         )
     )
 
-    def broken():
+    def broken() -> Never:
         raise TimeoutError()
 
     sources = [("fixture", lambda: rows), ("broken", broken)]
@@ -102,8 +110,8 @@ def test_scan_deduplicates_jobs_and_requires_exact_original(
 @pytest.mark.usefixtures("internal_io_budget")
 @pytest.mark.parametrize("wrong_edition", [True, False])
 def test_authorized_source_through_real_queue_and_vault(
-    database_url, tmp_path, monkeypatch, wrong_edition
-):
+    database_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wrong_edition: bool
+) -> None:
     from autplay.adapters.filesystem.provider_media import SOURCE_METADATA_FILE
     from autplay.adapters.filesystem.vault import FilesystemVaultStorage
     from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
@@ -164,7 +172,7 @@ def test_authorized_source_through_real_queue_and_vault(
     watcher = PreservationWatcher(sessions, identity, tmp_path)
 
     class Provider:
-        def download(self, candidate_id, path):
+        def download(self, candidate_id: str, path: Path) -> Path:
             path.mkdir(parents=True)
             payload = audio[:-2] + b"xx" if wrong_edition else audio
             (path / "audio.media").write_bytes(payload)
@@ -185,12 +193,12 @@ def test_authorized_source_through_real_queue_and_vault(
             return path / "audio.media"
 
     class Media:
-        def inspect(self, path):
+        def inspect(self, path: Path) -> AudioTechnicalMetadata:
             assert path.read_bytes() == audio
             return AudioTechnicalMetadata("pcm_s16le", "wav", 8000, 1, 2000, None, 16)
 
     class Fingerprints:
-        def fingerprint(self, path):
+        def fingerprint(self, path: Path) -> ChromaprintEvidence:
             return ChromaprintEvidence("chromaprint", "1.6.1", 2000, b"fixture")
 
     uow = SqlAlchemyJobUnitOfWorkFactory(sessions)
@@ -212,10 +220,10 @@ def test_authorized_source_through_real_queue_and_vault(
     )
 
     class WorkerLoop:
-        def is_set(self):
+        def is_set(self) -> bool:
             return False
 
-        def wait(self, seconds):
+        def wait(self, seconds: float) -> None:
             imports.run_once()
 
     publisher = bridge.PlaylistCatalogPublisher(backend, tmp_path / "audio", WorkerLoop())
@@ -293,7 +301,7 @@ def test_authorized_source_through_real_queue_and_vault(
         engine.dispose()
 
 
-def test_owner_manual_scan_and_report(database_url, tmp_path):
+def test_owner_manual_scan_and_report(database_url: str, tmp_path: Path) -> None:
     from autplay.application.acquisition_control import AcquisitionControlService
     from autplay.domain.auth import AccountRole
     from autplay.domain.web_admin import AuthenticatedWebSession, WebActor
@@ -316,21 +324,23 @@ def test_owner_manual_scan_and_report(database_url, tmp_path):
     token = b"x" * 32
 
     class Web:
-        def authenticate_safe_get(self, bearer):
+        def authenticate_safe_get(
+            self, bearer: bytes, *, head: bool = False
+        ) -> AuthenticatedWebSession:
             return AuthenticatedWebSession(actor, token)
 
-        def authenticate(self, bearer, *, mutation):
+        def authenticate(self, bearer: bytes, *, mutation: bool) -> AuthenticatedWebSession:
             assert mutation
             return AuthenticatedWebSession(actor, token)
 
-        def validate_csrf(self, current, csrf, operation):
+        def validate_csrf(self, current: WebActor, csrf: bytes, operation: UUID) -> None:
             assert current == actor and csrf == token
 
     app = FastAPI()
     origin = "http://127.0.0.1:8787"
     app.include_router(
         create_acquisition_control_router(
-            web=Web(),
+            web=Mock(wraps=Web()),
             renderer=AdminTemplateRenderer(),
             acquisition=AcquisitionControlService(tmp_path / "spool"),
             origin=origin,

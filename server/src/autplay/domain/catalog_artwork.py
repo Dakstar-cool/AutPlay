@@ -2,12 +2,13 @@
 
 import re
 import unicodedata
+from collections.abc import Collection
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from autplay.domain.track_metadata import lookup_title, performance_search_title
 
-_PUNCTUATION = str.maketrans("’‘‐‑–—", "''----")
+_PUNCTUATION = str.maketrans("\u2019\u2018\u2010\u2011\u2013—", "''----")
 
 
 def label(value: str) -> str:
@@ -26,7 +27,9 @@ _CREDIT_JOIN = re.compile(r"^(?:\s+(?:feat(?:uring)?|ft)\.?\s+|\s+&\s+|,\s+)", r
 
 def artwork_title(title: str, artist: str) -> str:
     # Strip presentation labels from the search only; live/remix/cover credits stay in the title.
-    if not any(marker in title for marker in ("(", "[", " @", " - ", " | ", " – ", " — ", "*")):
+    if not any(
+        marker in title for marker in ("(", "[", " @", " - ", " | ", " \u2013 ", " — ", "*")
+    ):
         return title
     cleaned = lookup_title(title, artist)
     for token in (" (music video)", " [music video]", " - music video", " *video in description*"):
@@ -152,7 +155,7 @@ def match_artwork(
     album: str | None,
     duration_ms: int | None,
     *,
-    confirmed_albums=(),
+    confirmed_albums: Collection[str] = (),
 ) -> ArtMatch | None:
     if (
         not isinstance(rows, list)

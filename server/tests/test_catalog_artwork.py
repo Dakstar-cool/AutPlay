@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 from autplay.application.catalog_artwork import inherit_catalog_images
 from autplay.domain.catalog_artwork import (
+    ArtMatch,
     catalogue_api_url,
     image_url,
     match_artwork,
@@ -11,11 +13,18 @@ from autplay.domain.catalog_artwork import (
 )
 
 
-def cdn(kind, key):
+def require_match(match: ArtMatch | None) -> ArtMatch:
+    assert match is not None
+    return match
+
+
+def cdn(kind: str, key: str) -> str:
     return f"https://cdn-images.dzcdn.net/images/{kind}/{key * 32}/500x500-000000-80-0-0.jpg"
 
 
-def track(artist_id=1, album_id=2, album="Original", cover=None):
+def track(
+    artist_id: int = 1, album_id: int = 2, album: str = "Original", cover: str | None = None
+) -> dict[str, Any]:
     return {
         "id": 3,
         "title": "Song (Live)",
@@ -25,39 +34,45 @@ def track(artist_id=1, album_id=2, album="Original", cover=None):
     }
 
 
-def test_recording_artist_and_edition_must_agree():
+def test_recording_artist_and_edition_must_agree() -> None:
     first = track(cover=cdn("cover", "b"))
     reissue = track(album_id=4, album="Anniversary", cover=cdn("cover", "c"))
     assert match_artwork([first], "Song", "Artist", None, 200000) is None
-    assert match_artwork([first], "Song (Live)", "Artist", None, 205000).cover == cdn("cover", "b")
+    assert require_match(
+        match_artwork([first], "Song (Live)", "Artist", None, 205000)
+    ).cover == cdn("cover", "b")
     assert match_artwork([first], "Song (Live)", "Artist", None, 205001) is None
-    assert match_artwork([first], "Song (Live)", "Artist", "Original", 210000).cover == cdn(
-        "cover", "b"
-    )
-    assert match_artwork(
-        [first], "Song (Live)", "Artist", None, 207000, confirmed_albums={"original"}
+    assert require_match(
+        match_artwork([first], "Song (Live)", "Artist", "Original", 210000)
+    ).cover == cdn("cover", "b")
+    assert require_match(
+        match_artwork([first], "Song (Live)", "Artist", None, 207000, confirmed_albums={"original"})
     ).cover
     assert match_artwork([first], "Song (Live)", "Artist", "Original", 210001) is None
     assert match_artwork([first], "Song", "Artist", "Original", 207000) is None
     assert match_artwork([first, track(artist_id=7)], "Song (Live)", "Artist", None, 200000) is None
     ambiguous = match_artwork([first, reissue], "Song (Live)", "Artist", None, 200000)
+    assert ambiguous is not None
     assert ambiguous.cover is None and ambiguous.portrait == cdn("artist", "a")
     other_album = match_artwork([first], "Song (Live)", "Artist", "Other album", 200000)
+    assert other_album is not None
     assert other_album.cover is None and other_album.portrait == cdn("artist", "a")
     matched = match_artwork([first, reissue], "Song (Live)", "Artist", "Anniversary", 200000)
+    assert matched is not None
     assert matched.cover == cdn("cover", "c") and matched.album_id == 4
     only_cover = match_artwork([track(), reissue], "Song (Live)", "Artist", None, 200000)
+    assert only_cover is not None
     assert only_cover.cover is None and only_cover.portrait == cdn("artist", "a")
     versioned = dict(first, title="Song", title_version="(Acoustic)")
     assert match_artwork([versioned], "Song", "Artist", "Original", 200000) is None
     alive = dict(first, title="Alive", title_version="Live")
     assert match_artwork([alive], "Alive", "Artist", "Original", 200000) is None
-    assert match_artwork([alive], "Alive (Live)", "Artist", "Original", 200000).cover == cdn(
-        "cover", "b"
-    )
+    assert require_match(
+        match_artwork([alive], "Alive (Live)", "Artist", "Original", 200000)
+    ).cover == cdn("cover", "b")
 
 
-def test_featured_credit_may_move_between_artist_and_title_without_losing_versions():
+def test_featured_credit_may_move_between_artist_and_title_without_losing_versions() -> None:
     single = dict(track(cover=cdn("cover", "b")), title="Song (Live) (feat. Guest)")
     hit = match_artwork([single], "Song (Live)", "Artist feat. Guest", "Original", 200000)
     assert hit and hit.cover and hit.artist == "Artist" and hit.credit == "Artist feat. Guest"
@@ -66,7 +81,7 @@ def test_featured_credit_may_move_between_artist_and_title_without_losing_versio
     assert match_artwork([single], "Song (Live)", "Artist", "Original", 200000) is None
 
 
-def test_video_credit_and_dated_language_tag_in_artwork_queries():
+def test_video_credit_and_dated_language_tag_in_artwork_queries() -> None:
     from urllib.parse import parse_qs, urlsplit
 
     from autplay.domain.track_names import track_names
@@ -83,7 +98,7 @@ def test_video_credit_and_dated_language_tag_in_artwork_queries():
     assert parse_qs(urlsplit(search_url(artist, title)).query)["q"] == [
         artist + " THE COST OF DENIAL"
     ]
-    assert match_artwork([album_track], title, artist, None, 67000).cover
+    assert require_match(match_artwork([album_track], title, artist, None, 67000)).cover
     assert match_artwork([album_track], title, artist, None, 88362) is None
 
     dated = "The Clowns (2012) [EN]"
@@ -95,7 +110,7 @@ def test_video_credit_and_dated_language_tag_in_artwork_queries():
     assert match_artwork([russian], dated, "NUTEKI", None, 299816) is None
 
 
-def test_only_provider_image_paths_are_accepted():
+def test_only_provider_image_paths_are_accepted() -> None:
     assert catalogue_api_url(search_url("A & B", "Song"))
     assert image_url(cdn("artist", "a"), "cover") is None
     assert image_url(cdn("artist", "0"), "artist") is None
@@ -108,7 +123,7 @@ def test_only_provider_image_paths_are_accepted():
     assert not native_image_host("https://usercontent.jamendo.com/?type=album&id=123&token=")
 
 
-def test_published_handles_only_copy_art_in_their_audio_or_public_catalogue():
+def test_published_handles_only_copy_art_in_their_audio_or_public_catalogue() -> None:
     variant = uuid4()
     row = SimpleNamespace(
         audio_variant_id=variant,
@@ -129,7 +144,7 @@ def test_published_handles_only_copy_art_in_their_audio_or_public_catalogue():
     assert inherit_catalog_images([row], manual, None, "Artist", variant, "Song") == (manual, None)
 
 
-def test_yandex_uses_official_recording_version_album_and_performer_photo():
+def test_yandex_uses_official_recording_version_album_and_performer_photo() -> None:
     from autplay.domain.web_artwork import yandex_match
 
     artist = {
@@ -164,18 +179,26 @@ def test_yandex_uses_official_recording_version_album_and_performer_photo():
     }
     assert not yandex_match([row], "Song", "Artist", None, 200100)
     found = yandex_match([row], "Song (Live)", "Artist", None, 200100)
+    assert found is not None
+    assert found.portrait is not None
     assert found.album_id == 19 and found.portrait.endswith("/abc.p.8/600x600")
-    assert yandex_match([row], "Song (Live)", "Artist", "Reissue", 200100).album_id == 29
-    assert yandex_match([row], "Song (Live)", "Artist", "Another album", 200100).cover is None
     assert (
-        yandex_match([row], "Song (Live)", "Artist", "Original", 209000).basis
+        require_match(yandex_match([row], "Song (Live)", "Artist", "Reissue", 200100)).album_id
+        == 29
+    )
+    assert (
+        require_match(yandex_match([row], "Song (Live)", "Artist", "Another album", 200100)).cover
+        is None
+    )
+    assert (
+        require_match(yandex_match([row], "Song (Live)", "Artist", "Original", 209000)).basis
         == "edition_timing_offset"
     )
     assert yandex_match([row], "Song (Live)", "Artist", None, 209000) is None
     assert yandex_match([row], "Song (Live)", "Artist", "Another album", 209000) is None
 
 
-def test_publisher_requires_track_page_duration_and_exact_art_id():
+def test_publisher_requires_track_page_duration_and_exact_art_id() -> None:
     import html
     import json
 
@@ -204,12 +227,15 @@ def test_publisher_requires_track_page_duration_and_exact_art_id():
         + "</script>"
     ).encode()
     result = {"id": 31, "band_id": 2, "art_id": 22, "album_name": "Album"}
-    assert publisher_match(body, result, url, "Song", "Artist", "Album", 85100).album_id == 7
+    assert (
+        require_match(publisher_match(body, result, url, "Song", "Artist", "Album", 85100)).album_id
+        == 7
+    )
     assert not publisher_match(body, result, url, "Song", "Artist", "Album", 45100)
     assert not publisher_match(body, {**result, "art_id": 55}, url, "Song", "Artist", None, 85100)
 
 
-def test_review_art_does_not_mix_recordings_or_erase_version_labels():
+def test_review_art_does_not_mix_recordings_or_erase_version_labels() -> None:
     from autplay.domain.web_artwork import archived_editions
 
     rec, release, group = map(str, (uuid4(), uuid4(), uuid4()))
@@ -240,7 +266,7 @@ def test_review_art_does_not_mix_recordings_or_erase_version_labels():
     assert not archived_editions([candidate, other], "Song (Live)", "Artist", None, 126000)
 
 
-def test_publisher_index_requires_single_exact_result_and_consistent_thumbnail():
+def test_publisher_index_requires_single_exact_result_and_consistent_thumbnail() -> None:
     from autplay.domain.web_artwork import indexed_publisher_cover, publisher_candidates
 
     row = {
@@ -256,11 +282,11 @@ def test_publisher_index_requires_single_exact_result_and_consistent_thumbnail()
         "item_url_path": "https://artist.bandcamp.com/track/sundown",
     }
 
-    def lookup(rows, title="Sundown"):
+    def lookup(rows: list[dict[str, Any]], title: str = "Sundown") -> ArtMatch | None:
         hits = publisher_candidates({"auto": {"results": rows}}, "Artist", title, None)
         return indexed_publisher_cover(hits, title, "Artist", None)
 
-    result = lookup([row])
+    result = require_match(lookup([row]))
     assert (
         result.cover == "https://f4.bcbits.com/img/a12_10.jpg" and result.basis == "publisher_index"
     )
@@ -270,12 +296,12 @@ def test_publisher_index_requires_single_exact_result_and_consistent_thumbnail()
     assert lookup([dict(row, name="Intro")], title="Intro") is None
 
 
-def test_archive_requires_unanimous_release_group_for_small_duration_difference():
+def test_archive_requires_unanimous_release_group_for_small_duration_difference() -> None:
     from autplay.domain.web_artwork import archived_editions
 
     rec, group = map(str, (uuid4(), uuid4()))
 
-    def candidate(group_id):
+    def candidate(group_id: str) -> dict[str, Any]:
         release = str(uuid4())
         return {
             "fields": {
@@ -300,7 +326,7 @@ def test_archive_requires_unanimous_release_group_for_small_duration_difference(
     assert not archived_editions([first], "Song", "Artist", None, 190000)
 
 
-def test_listenbrainz_checks_credit_duration_release_and_homonyms():
+def test_listenbrainz_checks_credit_duration_release_and_homonyms() -> None:
     from autplay.domain.recovery_artwork import listenbrainz_cover
 
     recording, release, artist = (str(uuid4()) for _ in range(3))
@@ -310,7 +336,10 @@ def test_listenbrainz_checks_credit_duration_release_and_homonyms():
         "release": {"mbid": release, "name": "Album", "caa_id": 42, "caa_release_mbid": release},
     }
     records = {recording: entry}
-    assert listenbrainz_cover(records, "Song", "Artist", None, 204000).album_id == release
+    assert (
+        require_match(listenbrainz_cover(records, "Song", "Artist", None, 204000)).album_id
+        == release
+    )
     assert not listenbrainz_cover(records, "Song", "Artist", None, 209000)
     assert listenbrainz_cover(records, "Song", "Artist", None, 209000, isrcs=["GBABC0000001"])
     assert not listenbrainz_cover(records, "Song (Live)", "Artist", None, 200000)
@@ -323,10 +352,10 @@ def test_listenbrainz_checks_credit_duration_release_and_homonyms():
     )
 
 
-def test_archive_uses_only_the_release_front_and_original_audio():
+def test_archive_uses_only_the_release_front_and_original_audio() -> None:
     from autplay.domain.recovery_artwork import archive_cover, archive_image_url
 
-    item = {
+    item: dict[str, Any] = {
         "metadata": {
             "identifier": "sample-release",
             "title": "First",
@@ -348,6 +377,7 @@ def test_archive_uses_only_the_release_front_and_original_audio():
         ],
     }
     cover = archive_cover(item, "sample-release", "Song", "Artist", "First", 204500)
+    assert cover is not None and cover.cover is not None
     assert archive_image_url(cover.cover) and cover.cover.endswith("/sample-release.jpg")
     assert cover.license_url == item["metadata"]["licenseurl"]
     assert not archive_cover(item, "sample-release", "Song", "Artist", "Second", 200000)
@@ -356,7 +386,7 @@ def test_archive_uses_only_the_release_front_and_original_audio():
     assert not archive_image_url("https://archive.org/download/sample-release/%2e%2e%2fimage.jpg")
 
 
-def test_public_metadata_urls_accept_only_the_expected_catalog_endpoints():
+def test_public_metadata_urls_accept_only_the_expected_catalog_endpoints() -> None:
     from autplay.domain.recovery_artwork import (
         archive_batch_search,
         archive_search,
@@ -371,7 +401,7 @@ def test_public_metadata_urls_accept_only_the_expected_catalog_endpoints():
     assert not metadata_url_allowed(listenbrainz_url(["invalid"]))
 
 
-def test_selected_album_group_art_identifies_the_recording_and_group():
+def test_selected_album_group_art_identifies_the_recording_and_group() -> None:
     from autplay.domain.recovery_artwork import selected_group_art
 
     recording, release, group = (str(uuid4()) for _ in range(3))
@@ -382,6 +412,8 @@ def test_selected_album_group_art_identifies_the_recording_and_group():
         "album": "Original",
     }
     match = selected_group_art(fields, "Song", "Artist")
+    assert match is not None
     assert match.track_id == recording and match.album_id == group
+    assert match is not None
     assert match.entity == "release-group" and match.basis == "selected_release_group"
     assert not selected_group_art({**fields, "mb_release_id": None}, "Song", "Artist")

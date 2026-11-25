@@ -1,7 +1,9 @@
 """Public archive metadata used to corroborate the recording and the illustrated release."""
 
 import re
+from collections.abc import Iterable
 from pathlib import PurePosixPath
+from typing import Any
 from urllib.parse import quote, unquote, urlencode, urlsplit
 from uuid import UUID
 
@@ -18,14 +20,14 @@ ITEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 FILENAME = re.compile(r"[\w .()&,'+-]{1,190}\.(?:jpe?g|png)", re.I)
 
 
-def mbid(value):
+def mbid(value: object) -> str | None:
     try:
         return str(UUID(str(value)))
     except ValueError, TypeError:
         return None
 
 
-def selected_group_art(fields, title, artist):
+def selected_group_art(fields: dict[str, Any], title: str, artist: str) -> ArtMatch | None:
     recording = mbid(fields.get("mb_recording_id"))
     group = mbid(fields.get("mb_release_group_id"))
     if not (recording and group and mbid(fields.get("mb_release_id")) and title and artist):
@@ -46,13 +48,22 @@ def selected_group_art(fields, title, artist):
     )
 
 
-def listenbrainz_url(ids):
+def listenbrainz_url(ids: Iterable[str]) -> str:
     return "https://api.listenbrainz.org/1/metadata/recording/?" + urlencode(
         {"recording_mbids": ",".join(ids), "inc": "artist release"}
     )
 
 
-def listenbrainz_cover(records, title, artist, album, duration, *, selected_release=None, isrcs=()):
+def listenbrainz_cover(
+    records: dict[str, Any],
+    title: str,
+    artist: str,
+    album: str | None,
+    duration: int | None,
+    *,
+    selected_release: str | None = None,
+    isrcs: Iterable[str] = (),
+) -> ArtMatch | None:
     if not title or not artist or not duration:
         return None
     options = []
@@ -110,21 +121,23 @@ def listenbrainz_cover(records, title, artist, album, duration, *, selected_rele
     )
 
 
-def archive_search(artist):
+def archive_search(artist: str) -> str:
     # Solr quoted phrase; the collection constraint is controlled by the application.
     literal = artist.replace("\\", "\\\\").replace('"', '\\"')
-    q = f'mediatype:audio AND collection:(freemusicarchive OR jamendoalbums OR netlabels) AND creator:"{literal}" AND licenseurl:[* TO *]'
+    q = (
+        "mediatype:audio AND collection:(freemusicarchive OR jamendoalbums OR netlabels) "
+        f'AND creator:"{literal}" AND licenseurl:[* TO *]'
+    )
     return "https://archive.org/advancedsearch.php?" + urlencode(
         {"q": q, "output": "json", "fl[]": "identifier", "rows": 24, "sort[]": "downloads desc"}
     )
 
 
-def archive_batch_search(artists):
+def archive_batch_search(artists: Iterable[str]) -> str:
     terms = ['"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"' for name in artists]
     q = (
-        "mediatype:audio AND collection:(freemusicarchive OR jamendoalbums OR netlabels) AND creator:("
-        + " OR ".join(terms)
-        + ") AND licenseurl:[* TO *]"
+        "mediatype:audio AND collection:(freemusicarchive OR jamendoalbums OR netlabels) "
+        "AND creator:(" + " OR ".join(terms) + ") AND licenseurl:[* TO *]"
     )
     return "https://archive.org/advancedsearch.php?" + urlencode(
         [
@@ -138,7 +151,7 @@ def archive_batch_search(artists):
     )
 
 
-def archive_image_url(url):
+def archive_image_url(url: str) -> bool:
     p = urlsplit(url)
     if p.scheme != "https" or p.query or p.fragment or p.netloc != "archive.org":
         return False
@@ -150,7 +163,14 @@ def archive_image_url(url):
     )
 
 
-def archive_cover(item, identifier, title, artist, album, duration):
+def archive_cover(
+    item: dict[str, Any],
+    identifier: str,
+    title: str,
+    artist: str,
+    album: str | None,
+    duration: int | None,
+) -> ArtMatch | None:
     if not album_label(album) and label(title) in {
         "intro",
         "outro",
@@ -249,7 +269,7 @@ def archive_cover(item, identifier, title, artist, album, duration):
     )
 
 
-def archive_items(response):
+def archive_items(response: dict[str, Any]) -> list[str]:
     hits = (response.get("response") or {}).get("docs") or []
     return list(
         dict.fromkeys(
@@ -262,7 +282,7 @@ def archive_items(response):
     )[:24]
 
 
-def metadata_url_allowed(url):
+def metadata_url_allowed(url: str) -> bool:
     from urllib.parse import parse_qs
 
     p = urlsplit(url)

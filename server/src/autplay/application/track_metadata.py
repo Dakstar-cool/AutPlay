@@ -1110,12 +1110,12 @@ class TrackMetadataService:
                     .on_conflict_do_nothing()
                 )
                 # Embedded cover stays preferred over external art on background refresh.
-                previous = row.document.get("artwork_source") or {}
-                replace_fallback = previous.get(
+                previous_artwork = row.document.get("artwork_source") or {}
+                replace_fallback = previous_artwork.get(
                     "source"
                 ) == "PUBLIC_CATALOG" and evidence.source in {"SOURCE_NATIVE", "MUSICBRAINZ"}
                 if row.artwork_sha256 is None or (
-                    not previous.get("locked")
+                    not previous_artwork.get("locked")
                     and (evidence.source == "EMBEDDED" or replace_fallback)
                 ):
                     row.artwork_sha256 = sha

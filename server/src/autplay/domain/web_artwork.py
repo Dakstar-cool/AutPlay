@@ -1,9 +1,12 @@
 """Identify official release artwork in public catalogue responses and publisher pages."""
 
+import contextlib
 import json
 import re
+from collections.abc import Iterable, Sequence
 from datetime import date
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import UUID
 
@@ -23,7 +26,7 @@ from autplay.domain.catalog_artwork import (
 BANDCAMP_SEARCH = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic"
 
 
-def yandex_search_url(artist, title="", *, clean_title=True):
+def yandex_search_url(artist: str, title: str = "", *, clean_title: bool = True) -> str:
     if clean_title:
         title = artwork_search_title(title, artist)
     return "https://api.music.yandex.net/search?" + urlencode(
@@ -31,11 +34,11 @@ def yandex_search_url(artist, title="", *, clean_title=True):
     )
 
 
-def discography_url(artist_id, page):
+def discography_url(artist_id: int | str, page: int) -> str:
     return f"https://api.music.yandex.net/artists/{int(artist_id)}/tracks?page={int(page)}&page-size=70"
 
 
-def publisher_track_url(value):
+def publisher_track_url(value: object) -> str | None:
     if not isinstance(value, str) or len(value) > 1024:
         return None
     return (
@@ -47,7 +50,7 @@ def publisher_track_url(value):
     )
 
 
-def release_lookup_url(url):
+def release_lookup_url(url: str) -> bool:
     if url == BANDCAMP_SEARCH or publisher_track_url(url):
         return True
     try:
@@ -74,22 +77,24 @@ def release_lookup_url(url):
     )
 
 
-def _positive(value):
+def _positive(value: object) -> int | None:
     return (
-        int(value)
+        int(str(value))
         if type(value) in (str, int) and re.fullmatch(r"[1-9][0-9]{0,16}", str(value))
         else None
     )
 
 
-def _picture(template):
+def _picture(template: object) -> str | None:
     if not isinstance(template, str) or not template.endswith("/%%") or len(template) > 330:
         return None
     url = "https://" + template[:-2] + "600x600"
     return url if native_image_host(url) == "YANDEX" else None
 
 
-def _credit_matches(artist, title, performers, full_title):
+def _credit_matches(
+    artist: str, title: str, performers: Iterable[dict[str, Any]], full_title: str
+) -> bool:
     names = [label(p.get("name") or "") for p in performers]
     if not all(names):
         return False
@@ -103,7 +108,9 @@ def _credit_matches(artist, title, performers, full_title):
     }
 
 
-def yandex_match(rows, title, artist, album, duration_ms):
+def yandex_match(
+    rows: object, title: str, artist: str, album: str | None, duration_ms: int | None
+) -> ArtMatch | None:
     if not isinstance(rows, list) or not title or not artist or not duration_ms:
         return None
     albums, matches = [], []
@@ -202,7 +209,13 @@ def yandex_match(rows, title, artist, album, duration_ms):
     )
 
 
-def yandex_editions(rows, title, artist, album, duration):
+def yandex_editions(
+    rows: Iterable[dict[str, Any]] | None,
+    title: str,
+    artist: str,
+    album: str | None,
+    duration: int | None,
+) -> set[str]:
     if not duration:
         return set()
     editions = set()
@@ -212,12 +225,12 @@ def yandex_editions(rows, title, artist, album, duration):
             duration, corroborated=True
         ):
             hit = yandex_match([row], title, artist, album, length)
-            if hit and hit.cover and hit.album:
-                editions.add(album_label(hit.album))
+            if hit and hit.cover and (edition := album_label(hit.album)):
+                editions.add(edition)
     return editions
 
 
-def bandcamp_query(artist, title):
+def bandcamp_query(artist: str, title: str) -> bytes:
     return json.dumps(
         {
             "search_text": f"{artist} {artwork_search_title(title, artist)}",
@@ -229,7 +242,9 @@ def bandcamp_query(artist, title):
     ).encode()
 
 
-def publisher_candidates(page, artist, title, album):
+def publisher_candidates(
+    page: dict[str, Any], artist: str, title: str, album: str | None
+) -> list[tuple[str, dict[str, Any]]]:
     auto = page.get("auto") or {}
     rows = auto.get("results") or [] if isinstance(auto, dict) else []
     result = []
@@ -254,29 +269,27 @@ def publisher_candidates(page, artist, title, album):
 
 
 class _RecordingPage(HTMLParser):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.recordings = []
-        self.native = {}
+        self.recordings: list[dict[str, Any]] = []
+        self.native: dict[str, Any] = {}
         self.structured = False
-        self.parts = []
+        self.parts: list[str] = []
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
         if tag == "script":
             self.structured = (attributes.get("type") or "").lower() == "application/ld+json"
             self.parts = []
-        if "data-tralbum" in attributes:
-            try:
-                self.native = json.loads(attributes["data-tralbum"])
-            except TypeError, ValueError:
-                pass
+        if (native := attributes.get("data-tralbum")) is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                self.native = json.loads(native)
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self.structured:
             self.parts.append(data)
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if tag != "script" or not self.structured:
             return
         self.structured = False
@@ -288,8 +301,10 @@ class _RecordingPage(HTMLParser):
             self.recordings.append(item)
 
 
-def indexed_publisher_cover(candidates, title, artist, album):
-    """A unique result from the publisher index supplies its own art, even if no HTML is available."""
+def indexed_publisher_cover(
+    candidates: Sequence[tuple[str, dict[str, Any]]], title: str, artist: str, album: str | None
+) -> ArtMatch | None:
+    """Use artwork from a unique index result when the recording page is absent."""
     if len(candidates) != 1:
         return None
     _, row = candidates[0]
@@ -328,7 +343,15 @@ def indexed_publisher_cover(candidates, title, artist, album):
     )
 
 
-def publisher_match(page, row, url, title, artist, album, duration_ms):
+def publisher_match(
+    page: bytes | None,
+    row: dict[str, Any],
+    url: str,
+    title: str,
+    artist: str,
+    album: str | None,
+    duration_ms: int | None,
+) -> ArtMatch | None:
     if not page or len(page) > 1048576 or not duration_ms:
         return None
     parsed = _RecordingPage()
@@ -392,7 +415,13 @@ def publisher_match(page, row, url, title, artist, album, duration_ms):
     return None
 
 
-def archived_editions(rows, title, artist, album, duration_ms):
+def archived_editions(
+    rows: Iterable[dict[str, Any]],
+    title: str,
+    artist: str,
+    album: str | None,
+    duration_ms: int | None,
+) -> list[ArtMatch]:
     """Identify artwork-bearing editions without accepting a metadata review candidate."""
     if not title or not artist or not duration_ms:
         return []
@@ -441,7 +470,7 @@ def archived_editions(rows, title, artist, album, duration_ms):
         eligible, basis = corroborated, "recording_and_release_group"
     if len({entry[0] for entry in eligible.values()}) != 1:
         return []
-    ordered = []
+    ordered: list[ArtMatch] = []
     for _, (rec, release, group, name) in sorted(eligible.items()):
         for kind, identifier in (("release", release), ("release-group", group)):
             if identifier and not any(

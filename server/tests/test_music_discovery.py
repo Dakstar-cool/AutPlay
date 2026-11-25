@@ -329,7 +329,7 @@ def test_artist_portrait_uses_linked_profile_and_rejects_ambiguous_links() -> No
     jpeg = bytes.fromhex("ffd8ffe0")
     calls = []
 
-    def read(principal, url):
+    def read(principal: Principal, url: str) -> bytes:
         assert principal == owner
         calls.append(url)
         if url.startswith("https://musicbrainz.org/ws/2/artist/"):

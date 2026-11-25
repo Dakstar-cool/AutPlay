@@ -4,16 +4,20 @@ import hashlib
 import json
 import re
 import subprocess
+from collections.abc import Callable, Collection, Iterable
+from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.jobs_runtime import PostgresJobRepository
 from autplay.adapters.postgresql.models import UserTrackRefRow
 from autplay.adapters.postgresql.shared_catalog import OWNER_AUDIO, PUBLISHED_AUDIO
 from autplay.adapters.postgresql.stage_credits import CATALOG_MEMBERS
+from autplay.application.job_worker import JobExecutionContext
 from autplay.domain.import_identity import normalize_text
-from autplay.domain.jobs import JobKey, RetryableJobError
+from autplay.domain.jobs import JobKey, JobLease, JsonValue, RetryableJobError, TerminalJobError
 from autplay.ports.jobs import EnqueueJob
 
 PLAYLIST_TRACK = JobKey("music.playlist.track", 1)
@@ -22,7 +26,9 @@ PLAYLIST_PLAN = JobKey("music.playlist.plan", 1)
 ARTIST_LIMIT = 5
 
 
-def enqueue_playlist_track(session, owner, playlist, ref_id, *, complete):
+def enqueue_playlist_track(
+    session: Session, owner: UUID, playlist: UUID, ref_id: UUID, *, complete: bool
+) -> None:
     ref = session.get(UserTrackRefRow, ref_id)
     if ref is None or ref.user_id != owner:
         return
@@ -51,12 +57,20 @@ def enqueue_playlist_track(session, owner, playlist, ref_id, *, complete):
         )
 
 
-def catalog_match(session, artist, title, duration=None, *, owner=None):
+def catalog_match(
+    session: Session,
+    artist: str,
+    title: str,
+    duration: int | None = None,
+    *,
+    owner: UUID | None = None,
+) -> UUID | None:
     """Match a single authorized edition. A private library match stays with its owner."""
     audio = PUBLISHED_AUDIO
     if owner is not None:
         audio = f"""SELECT recording_id,audio_variant_id FROM ({PUBLISHED_AUDIO}) pub
-            UNION SELECT recording_id,audio_variant_id FROM ({OWNER_AUDIO}) own WHERE own.user_id=:owner"""
+            UNION SELECT recording_id,audio_variant_id
+            FROM ({OWNER_AUDIO}) own WHERE own.user_id=:owner"""
     rows = (
         session.execute(
             text(f"""
@@ -83,9 +97,10 @@ def catalog_match(session, artist, title, duration=None, *, owner=None):
     return rows[0] if len(rows) == 1 else None
 
 
-def in_vault(session, artist, title):
-    return session.scalar(
-        text("""
+def in_vault(session: Session, artist: str, title: str) -> bool:
+    return bool(
+        session.scalar(
+            text("""
         SELECT EXISTS(SELECT FROM catalog.recording r
           JOIN catalog.artist_credit a USING (artist_credit_id)
           JOIN vault.recording_canonical_variant c USING (recording_id)
@@ -95,11 +110,20 @@ def in_vault(session, artist, title):
             AND r.deleted_at IS NULL AND v.deleted_at IS NULL AND v.validation_status='VALID'
             AND o.commit_status='COMMITTED')
     """),
-        {"artist": normalize_text(artist), "title": normalize_text(title)},
+            {"artist": normalize_text(artist), "title": normalize_text(title)},
+        )
     )
 
 
-def choose_candidates(rows, artist, *, title=None, duration=None, excluded=(), present):
+def choose_candidates(
+    rows: Iterable[dict[str, Any]],
+    artist: str,
+    *,
+    title: str | None = None,
+    duration: int | None = None,
+    excluded: Collection[str] = (),
+    present: Callable[[str, str], bool],
+) -> list[dict[str, Any]]:
     chosen = []
     seen = set(excluded)
     for row in rows:
@@ -126,7 +150,8 @@ _MEMBERS = """
     SELECT u.user_track_ref_id AS ref,u.raw_artist AS artist,u.raw_title AS title,
            u.raw_duration_ms AS duration,coalesce(u.recording_id,i.source_recording_id) AS recording
     FROM playlist.playlist p JOIN playlist.playlist_entry e USING (playlist_id)
-    JOIN account.user_account owner ON owner.user_id=p.owner_user_id AND owner.status='ACTIVE' AND owner.deleted_at IS NULL
+    JOIN account.user_account owner ON owner.user_id=p.owner_user_id
+    AND owner.status='ACTIVE' AND owner.deleted_at IS NULL
     JOIN library.user_track_ref u USING (user_track_ref_id)
     LEFT JOIN playlist.imported_track_reference i USING (user_track_ref_id)
     WHERE p.playlist_id=:playlist AND p.owner_user_id=:owner AND u.user_id=:owner
@@ -134,7 +159,7 @@ _MEMBERS = """
 """
 
 
-def plan_artists(session, owner, playlist):
+def plan_artists(session: Session, owner: UUID, playlist: UUID) -> None:
     scope = f"playlist-vault:{playlist}"
     if session.scalar(
         text("""SELECT EXISTS(SELECT FROM jobs.job WHERE user_id=:owner
@@ -153,7 +178,7 @@ def plan_artists(session, owner, playlist):
     """),
         {"owner": owner, "playlist": playlist, "scope": scope},
     ).mappings()
-    artists = {}
+    artists: dict[str, tuple[str, set[str]]] = {}
     for member in members:
         names = [credit["name"] for credit in member["credits"] or ()]
         if not names:
@@ -170,7 +195,11 @@ def plan_artists(session, owner, playlist):
     for key, (artist, titles) in sorted(artists.items()):
         # Fall back to reading membership for a large discography rather than overflowing a job.
         excluded = sorted(titles)
-        payload = {"playlist": str(playlist), "artist": artist, "excluded": excluded}
+        payload: dict[str, JsonValue] = {
+            "playlist": str(playlist),
+            "artist": artist,
+            "excluded": [*excluded],
+        }
         if len(json.dumps(excluded).encode()) > 180_000:
             payload["excluded"] = None
         repo.enqueue(
@@ -185,18 +214,37 @@ def plan_artists(session, owner, playlist):
         )
 
 
+class AcquireCandidate(Protocol):
+    def __call__(
+        self, candidate: dict[str, Any], context: JobExecutionContext, *, supplemental: bool
+    ) -> UUID | None: ...
+
+
 class PlaylistVaultHandler:
-    def __init__(self, sessions, search, acquire):
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        search: Callable[[str], Iterable[dict[str, Any]]],
+        acquire: AcquireCandidate,
+    ) -> None:
         self.sessions, self.search, self.acquire = sessions, search, acquire
 
-    def __call__(self, context, lease):
+    def __call__(self, context: JobExecutionContext, lease: JobLease) -> None:
         owner = lease.user_id
-        params = {"playlist": UUID(lease.payload["playlist"]), "owner": owner}
+        playlist_id = lease.payload.get("playlist")
+        if owner is None or not isinstance(playlist_id, str):
+            raise TerminalJobError("playlist_catalog_invalid_job")
+        params = {"playlist": UUID(playlist_id), "owner": owner}
         if lease.key == PLAYLIST_PLAN:
             with self.sessions.begin() as session:
                 plan_artists(session, owner, params["playlist"])
             return
-        ref = UUID(lease.payload["ref"]) if lease.key == PLAYLIST_TRACK else None
+        ref = None
+        if lease.key == PLAYLIST_TRACK:
+            ref_id = lease.payload.get("ref")
+            if not isinstance(ref_id, str):
+                raise TerminalJobError("playlist_catalog_missing_ref")
+            ref = UUID(ref_id)
         with self.sessions() as session:
             if ref:
                 member = (
@@ -221,20 +269,32 @@ class PlaylistVaultHandler:
                         pass
                 artist, title, duration = member["artist"], member["title"], member["duration"]
                 recording = catalog_match(session, artist, title, duration, owner=owner)
-                excluded = ()
+                excluded: Collection[str] = ()
             else:
                 if not session.execute(text(_MEMBERS + " LIMIT 1"), params).first():
                     return
-                artist, title, duration, recording = lease.payload["artist"], None, None, None
-                excluded = lease.payload["excluded"]
-                if excluded is None:
+                artist = lease.payload.get("artist")
+                if not isinstance(artist, str):
+                    raise TerminalJobError("playlist_catalog_missing_artist")
+                title, duration, recording = None, None, None
+                saved_titles = lease.payload.get("excluded")
+                if isinstance(saved_titles, list) and all(isinstance(t, str) for t in saved_titles):
+                    excluded = [t for t in saved_titles if isinstance(t, str)]
+                elif saved_titles is not None:
+                    raise TerminalJobError("playlist_catalog_invalid_exclusions")
+                else:
                     excluded = {
                         normalize_text(m.title or "")
                         for m in session.execute(text(_MEMBERS), params)
                     }
         if not recording:
-            plan = (lease.checkpoint or {}).get("candidates")
-            if plan is None:
+            saved_plan = (lease.checkpoint or {}).get("candidates")
+            plan: list[dict[str, Any]]
+            if isinstance(saved_plan, list) and all(isinstance(c, dict) for c in saved_plan):
+                plan = [c for c in saved_plan if isinstance(c, dict)]
+            elif saved_plan is not None:
+                raise TerminalJobError("playlist_catalog_invalid_checkpoint")
+            else:
                 context.raise_if_cancelled()
                 try:
                     rows = self.search(" ".join(s for s in (artist, title) if s))
@@ -257,7 +317,7 @@ class PlaylistVaultHandler:
                         }
                     )
                     return
-                context.checkpoint({"candidates": plan})
+                context.checkpoint({"candidates": [*plan]})
             for candidate in plan:
                 context.raise_if_cancelled()
                 recording = self.acquire(candidate, context, supplemental=ref is None)
@@ -266,14 +326,16 @@ class PlaylistVaultHandler:
 
             with self.sessions.begin() as session:
                 _acquire_sync_owner_publish_lock(session, owner)
-                # Guard deletion/account changes during the download and keep verified share evidence.
-                member = session.execute(
+                # Guard deletion/account changes during the download and keep verified share
+                # evidence.
+                current_member = session.execute(
                     text(_MEMBERS + " AND u.user_track_ref_id=:ref"), dict(params, ref=ref)
                 ).first()
-                if member and member.recording is None:
+                if current_member and current_member.recording is None:
                     session.execute(
                         text("""
-                        INSERT INTO playlist.imported_track_reference(user_track_ref_id,source_recording_id)
+                        INSERT INTO playlist.imported_track_reference(
+                        user_track_ref_id,source_recording_id)
                         VALUES (:ref,:recording) ON CONFLICT (user_track_ref_id) DO UPDATE
                         SET source_recording_id=EXCLUDED.source_recording_id
                         WHERE playlist.imported_track_reference.source_recording_id IS NULL
@@ -282,7 +344,8 @@ class PlaylistVaultHandler:
                     )
                 elif member:
                     # Keep the original share evidence. An independently acquired public edition
-                    # can back an unresolved portable handle without granting access to private audio.
+                    # can back an unresolved portable handle without granting access to
+                    # private audio.
                     session.execute(
                         text(f"""
                         INSERT INTO library.user_track_ref_external_reference

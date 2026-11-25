@@ -70,7 +70,7 @@ def create_playlist_share_router(
             "max-width:46rem;padding:0 1rem;overflow-wrap:anywhere}li{padding:.3rem 0}</style>"
             f"<main><h1>{title}</h1><p>{escape(doc['description'] or '')}</p>"
             f'<a href="{token}/file" download>Скачать плейлист для AutPlay</a>'
-            "<p>В AutPlay выберите «Моя музыка → Плейлисты → Импортировать плейлист», "
+            "<p>В AutPlay выберите «Моя музыка → Плейлисты → Импортировать плейлист», "  # noqa: RUF001
             "вставьте эту ссылку или выберите скачанный файл и сохраните копию. "
             "Доступность аудио зависит от вашей библиотеки.</p>"
             f"<ol>{''.join(rows)}</ol></main></html>",
